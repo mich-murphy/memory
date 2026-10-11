@@ -22,23 +22,29 @@ def env(tmp_path, monkeypatch):
     """A fake home with Claude Code, Codex and Pi sessions for one git project."""
     home = tmp_path / "home"
     home.mkdir()
-    for var in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR", "MEMSYNC_DISABLE"):
+    for var in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR", "AGENT_SESSIONS_DISABLE"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("MEMSYNC_CONFIG", str(tmp_path / "config.env"))
-    monkeypatch.setenv("MEMSYNC_STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.setenv("MEMSYNC_LOCAL_STORE", str(tmp_path / "bucket"))
-    monkeypatch.setenv("MEMSYNC_MACHINE_ID", "testbox")
+    monkeypatch.setenv("AGENT_SESSIONS_CONFIG", str(tmp_path / "config.env"))
+    monkeypatch.setenv("AGENT_SESSIONS_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("AGENT_SESSIONS_LOCAL_STORE", str(tmp_path / "bucket"))
+    monkeypatch.setenv("AGENT_SESSIONS_MACHINE_ID", "testbox")
 
     project = home / "code" / "proj"
     (project / "src").mkdir(parents=True)
-    subprocess.run(["git", "init", "-q", str(project)], check=True)
-    (project / "CLAUDE.md").write_text("# proj rules\n")
+    subprocess.run(["git", "init", "-q", "-b", "main", str(project)], check=True)
+    (project / "CLAUDE.md").write_text("# proj rules\n@docs/conventions.md\n")
+    (project / "docs").mkdir()
+    (project / "docs" / "conventions.md").write_text("use tabs\n")
     (project / "AGENTS.md").write_text("# agents rules\n")
     (project / "src" / "CLAUDE.md").write_text("nested\n")
     (project / ".claude").mkdir()
     (project / ".claude" / "settings.json").write_text(json.dumps({"env": {"DB_PASSWORD": "hunter2"}}))
     (home / "code" / "CLAUDE.md").write_text("ancestor rules\n")
+    git = ["git", "-C", str(project), "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run([*git, "remote", "add", "origin", "https://user:ghp_token@github.com/me/proj.git"], check=True)
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "first"], check=True)
 
     # Claude Code
     claude = home / ".claude"
@@ -59,9 +65,33 @@ def env(tmp_path, monkeypatch):
     (claude / "plans").mkdir()
     (claude / "plans" / "brave-plan.md").write_text("# plan\n")
     (claude / "history.jsonl").write_text(jsonl({"display": "hi", "project": str(project)}))
-    (claude / "settings.json").write_text(json.dumps({"env": {"ANTHROPIC_API_KEY": "sk-ant-xxxxxxxxxxxxxxxxxxxxxxxx"}, "model": "opus"}))
+    (claude / "hooks").mkdir()
+    (claude / "hooks" / "guard.sh").write_text("#!/bin/sh\nexit 0\n")
+    (home / "bin").mkdir()
+    (home / "bin" / "status.py").write_text("print('status')\n")
+    (claude / "settings.json").write_text(json.dumps({
+        "env": {"ANTHROPIC_API_KEY": "sk-ant-xxxxxxxxxxxxxxxxxxxxxxxx"}, "model": "opus",
+        "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "~/.claude/hooks/guard.sh"}]}]},
+        "statusLine": {"type": "command", "command": f"python3 {home}/bin/status.py"},
+    }))
     (claude / "CLAUDE.md").write_text("user rules\n")
+    skill = claude / "skills" / "deploy"
+    (skill / "scripts").mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: deploy\n---\nRun scripts/go.sh\n")
+    (skill / "scripts" / "go.sh").write_text("echo go\n")
+    (claude / ".credentials.json").write_text('{"claudeAiOauth": {"accessToken": "secret-oauth"}}')
+    (claude / "sessions").mkdir()
+    (claude / "sessions" / "123.key").write_text("secret-key")
+    (claude / "sessions" / "123.json").write_text('{"pid": 123}')
+    (claude / "file-history" / CLAUDE_SID).mkdir(parents=True)
+    (claude / "file-history" / CLAUDE_SID / "abc@v1").write_text("old contents\n")
+    (claude / "teams" / "alpha" / "inboxes").mkdir(parents=True)
+    (claude / "teams" / "alpha" / "inboxes" / "lead.json").write_text("[]")
+    (claude / "shell-snapshots").mkdir()
+    (claude / "shell-snapshots" / "snap.sh").write_text("export X=1")
+    (claude / "mystery.dat").write_text("?")
     (home / ".claude.json").write_text(json.dumps({
+        "primaryApiKey": "sk-ant-api-secret",
         "oauthAccount": {"emailAddress": "me@example.com"},
         "mcpServers": {"gh": {"command": "npx", "env": {"GITHUB_TOKEN": "ghp_" + "a" * 36}}},
         "projects": {str(project): {"mcpServers": {"local": {"url": "http://x", "headers": {"Authorization": "Bearer abc"}}}, "history": ["x"]}},
@@ -81,6 +111,9 @@ def env(tmp_path, monkeypatch):
     (codex / "history.jsonl").write_text(jsonl({"session_id": CODEX_THREAD, "text": "hi"}))
     (codex / "config.toml").write_text('model = "gpt-5"\n[mcp_servers.gh.env]\nGITHUB_TOKEN = "ghp_secret"\n')
     (codex / "AGENTS.md").write_text("codex user rules\n")
+    (codex / "auth.json").write_text('{"OPENAI_API_KEY": "sk-secret"}')
+    (codex / "memories").mkdir()
+    (codex / "memories" / "notes.md").write_text("codex remembers\n")
 
     # Pi
     pi_sessions = home / ".pi" / "agent" / "sessions" / "--home-code-proj--"
@@ -91,6 +124,7 @@ def env(tmp_path, monkeypatch):
          "message": {"role": "user", "content": "hi", "timestamp": 1}},
     ))
     (home / ".pi" / "agent" / "AGENTS.md").write_text("pi user rules\n")
+    (home / ".pi" / "agent" / "auth.json").write_text('{"anthropic": {"key": "sk-secret"}}')
 
     # Make everything look settled (older than the partial-line window).
     old = time.time() - 3600
@@ -98,7 +132,7 @@ def env(tmp_path, monkeypatch):
         if p.is_file():
             os.utime(p, (old, old))
 
-    return {"home": home, "project": project, "bucket": tmp_path / "bucket", "state": tmp_path / "state",
+    return {"home": home, "project": project, "bucket": tmp_path / "bucket", "state": tmp_path / "state", "claude": claude,
             "claude_slug": slug, "codex_rollout": rollout, "pi_dir": pi_sessions, "tmp": tmp_path}
 
 

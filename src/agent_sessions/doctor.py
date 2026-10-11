@@ -1,4 +1,4 @@
-"""`memsync doctor`: check everything a silent hook can't report."""
+"""`agent-sessions doctor`: check everything a silent hook can't report."""
 
 from __future__ import annotations
 
@@ -23,19 +23,19 @@ def run() -> int:
         results.append((level, msg))
         print(f"[{level}] {msg}")
 
-    report(OK, f"machine id: {cfg.machine_id}")
+    report(OK, f"machine id: {cfg.machine_id} (hostname {cfg.hostname})")
 
     # Store
     if cfg.local_store:
         report(WARN, f"writing to a local directory, not R2: {cfg.local_store}")
     elif missing := cfg.missing_r2_settings():
-        report(FAIL, f"missing {', '.join(missing)} (set them in {install.DEFAULT_CONFIG_FILE})")
+        report(FAIL, f"missing {', '.join(missing)} (set them in {cfg.config_path})")
     else:
         try:
             from .store import open_store
 
             store = open_store(cfg)
-            key = f"_memsync/doctor/{cfg.machine_id}/{uuid.uuid4().hex}"
+            key = f"_agent-sessions/doctor/{cfg.machine_id}/{uuid.uuid4().hex}"
             store.put(key, b"ok")
             if not store.exists(key):
                 raise RuntimeError("test object not found after writing it")
@@ -59,7 +59,7 @@ def run() -> int:
         settings = _json(claude_root / "settings.json")
         n = _count_ours(settings)
         report(OK if n >= len(install.CLAUDE_EVENTS) else FAIL,
-               f"claude: {n}/{len(install.CLAUDE_EVENTS)} memsync hooks in {claude_root / 'settings.json'}")
+               f"claude: {n}/{len(install.CLAUDE_EVENTS)} agent-sessions hooks in {claude_root / 'settings.json'}")
         if settings.get("disableAllHooks"):
             report(FAIL, "claude: disableAllHooks is set, so no hooks run")
         days = settings.get("cleanupPeriodDays", 30)
@@ -73,10 +73,10 @@ def run() -> int:
     if codex_root.exists():
         configured, trusted = install.codex_trust_state(codex_root)
         report(OK if configured >= len(install.CODEX_EVENTS) else FAIL,
-               f"codex: {configured}/{len(install.CODEX_EVENTS)} memsync hooks in {codex_root / 'hooks.json'}")
+               f"codex: {configured}/{len(install.CODEX_EVENTS)} agent-sessions hooks in {codex_root / 'hooks.json'}")
         if configured:
             report(OK if trusted == configured else FAIL,
-                   f"codex: {trusted}/{configured} memsync hooks trusted"
+                   f"codex: {trusted}/{configured} agent-sessions hooks trusted"
                    + ("" if trusted == configured else " (open Codex and review them in /hooks)"))
         if _codex_hooks_disabled(codex_root / "config.toml"):
             report(FAIL, "codex: [features] hooks = false in config.toml, so no hooks run")
@@ -86,19 +86,19 @@ def run() -> int:
     # Pi
     pi_dir = adapters["pi"].agent_dir()
     if pi_dir.exists():
-        ext = pi_dir / "extensions" / "memsync.ts"
+        ext = pi_dir / "extensions" / "agent-sessions.ts"
         ok = ext.exists() and install.PI_MARKER in ext.read_text()
         report(OK if ok else FAIL, f"pi: extension {'installed' if ok else 'missing'} at {ext}")
     else:
         report(OK, f"pi: not used here ({pi_dir} missing)")
 
     # Hook command still points at an executable
-    cmd = install.memsync_command()
-    report(OK if shutil.which(cmd[0]) or Path(cmd[0]).exists() else FAIL, f"memsync command: {' '.join(cmd)}")
+    cmd = install.agent_sessions_command()
+    report(OK if shutil.which(cmd[0]) or Path(cmd[0]).exists() else FAIL, f"agent-sessions command: {' '.join(cmd)}")
 
     # Sweep timer and recent runs
     timer = install.timer_installed()
-    report(OK if timer else FAIL, f"sweep timer: {timer or 'not installed (run memsync install)'}")
+    report(OK if timer else FAIL, f"sweep timer: {timer or 'not installed (run agent-sessions install)'}")
     if timer == "systemd" and not install.linger_enabled():
         report(WARN, "systemd user timers stop when you log out; `sudo loginctl enable-linger $USER` keeps them running")
     try:
@@ -117,7 +117,7 @@ def run() -> int:
         report(WARN, "no sweep has run yet")
     errors = [m for r in runs for m in r.get("error_messages", [])]
     if errors:
-        report(WARN, f"recent errors (see {cfg.state_dir / 'memsync.log'}): {errors[0]}")
+        report(WARN, f"recent errors (see {cfg.state_dir / 'agent-sessions.log'}): {errors[0]}")
 
     return 1 if any(level == FAIL for level, _ in results) else 0
 

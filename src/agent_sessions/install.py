@@ -1,6 +1,6 @@
 """Install and remove the hooks, the Pi extension and the sweep timer.
 
-Every edit is idempotent: memsync's own entries are recognised by their command, removed and
+Every edit is idempotent: agent-sessions' own entries are recognised by their command, removed and
 re-added, and anything else in the file is left alone. A file is backed up before it changes
 and never rewritten if it can't be parsed.
 """
@@ -19,46 +19,58 @@ import time
 from pathlib import Path
 
 from .adapters import make_adapters
-from .config import DEFAULT_CONFIG_FILE
+from .config import config_file
 
-OURS = re.compile(r"memsync.*\bhook (claude|codex|pi)\b")
-PI_MARKER = "// memsync: managed by `memsync install`"
+# Also matches entries written by memsync, this tool's earlier name, so a reinstall replaces them.
+OURS = re.compile(r"(?:agent-sessions|agent_sessions|memsync).*\bhook (claude|codex|pi)\b")
+PI_MARKER = "// agent-sessions: managed by `agent-sessions install`"
 
 # Claude Code (https://code.claude.com/docs/en/hooks):
-#   Stop fires after every turn but not on a user interrupt; StopFailure covers turns that end
-#   on an API error; SubagentStop carries agent_transcript_path; SessionEnd covers /clear,
-#   /resume, exit and logout. `async` keeps even a slow interpreter start off Claude's path.
-#   SessionEnd stays synchronous (it runs during teardown) with a timeout above our ~0.1 s.
+#   SessionStart (startup, resume, clear, compact) records the launch and the harness before the
+#   first prompt. Stop fires after every turn but not on a user interrupt; StopFailure covers turns
+#   that end on an API error; SubagentStop carries agent_transcript_path; PreCompact catches the
+#   transcript before compaction; TaskCompleted and TeammateIdle catch task lists and agent-team
+#   mailboxes that Claude Code deletes when the team is done; SessionEnd covers /clear, /resume,
+#   exit and logout. `async` keeps even a slow interpreter start off Claude's path. SessionEnd
+#   stays synchronous (it runs during teardown) with a timeout above our ~0.1 s.
+_ASYNC = {"async": True, "timeout": 30}
 CLAUDE_EVENTS = {
-    "Stop": {"async": True, "timeout": 30},
-    "StopFailure": {"async": True, "timeout": 30},
-    "SubagentStop": {"async": True, "timeout": 30},
+    "SessionStart": _ASYNC,
+    "Stop": _ASYNC,
+    "StopFailure": _ASYNC,
+    "SubagentStop": _ASYNC,
+    "PreCompact": _ASYNC,
+    "TaskCompleted": _ASYNC,
+    "TeammateIdle": _ASYNC,
     "SessionEnd": {"timeout": 5},
 }
 # Codex (codex-rs/hooks, codex-rs/config/src/hook_config.rs):
-#   Stop after every turn, SubagentStop for subagent threads, Interrupt when the user cancels a
-#   turn, SessionEnd on exit (sync only, 1 s default, clamped to 3 s). Async hooks ignore stdout,
-#   which keeps a chatty login shell (Codex runs hooks with `$SHELL -lc`) from failing Stop.
+#   SessionStart on startup and resume, Stop after every turn, SubagentStop for subagent threads,
+#   PreCompact before compaction, Interrupt when the user cancels a turn, SessionEnd on exit (sync
+#   only, 1 s default, clamped to 3 s). Async hooks ignore stdout, which keeps a chatty login shell
+#   (Codex runs hooks with `$SHELL -lc`) from failing Stop.
 CODEX_EVENTS = {
-    "Stop": {"async": True, "timeout": 30},
-    "SubagentStop": {"async": True, "timeout": 30},
+    "SessionStart": _ASYNC,
+    "Stop": _ASYNC,
+    "SubagentStop": _ASYNC,
+    "PreCompact": _ASYNC,
     "Interrupt": {"async": True, "timeout": 3},
     "SessionEnd": {"timeout": 3},
 }
 
 PI_EXTENSION = """{marker}; edits are overwritten.
-// Ships this Pi session to the memsync store. memsync hands the upload to a detached process,
+// Ships this Pi session to the agent-sessions store. agent-sessions hands the upload to a detached process,
 // so these handlers return immediately. Docs: https://github.com/mich-murphy/memory
 import {{ spawn }} from "node:child_process";
 import type {{ ExtensionAPI }} from "@earendil-works/pi-coding-agent";
 
-const MEMSYNC: string[] = {command};
+const AGENT_SESSIONS: string[] = {command};
 
-function kick(file: string | undefined): void {{
+function kick(file: string | undefined, extra: string[] = []): void {{
 \t// No file for --no-session runs; Pi also creates the file only after the first message.
-\tif (!file || process.env.MEMSYNC_DISABLE) return;
+\tif (!file || process.env.AGENT_SESSIONS_DISABLE) return;
 \ttry {{
-\t\tconst child = spawn(MEMSYNC[0], [...MEMSYNC.slice(1), "hook", "pi", "--path", file], {{
+\t\tconst child = spawn(AGENT_SESSIONS[0], [...AGENT_SESSIONS.slice(1), "hook", "pi", "--path", file, ...extra], {{
 \t\t\tdetached: true,
 \t\t\tstdio: "ignore",
 \t\t}});
@@ -70,6 +82,13 @@ function kick(file: string | undefined): void {{
 }}
 
 export default function (pi: ExtensionAPI) {{
+\t// Startup, /new, /resume, /fork, /reload: record the launch and the harness before the first prompt.
+\t// Pi renames its process, which hides its arguments from the process table, so pass them along.
+\tpi.on("session_start", (event, ctx) =>
+\t\tkick(ctx.sessionManager.getSessionFile(), [
+\t\t\t"--event", "session_start", "--source", event.reason, "--cwd", ctx.cwd, "--argv", JSON.stringify(process.argv),
+\t\t]),
+\t);
 \t// A prompt has fully finished: no retries, compaction or queued follow-ups left.
 \tpi.on("agent_settled", (_event, ctx) => kick(ctx.sessionManager.getSessionFile()));
 \t// Quit (including SIGTERM/SIGHUP), /new, /resume, /fork and /reload: flush the session being left.
@@ -78,7 +97,7 @@ export default function (pi: ExtensionAPI) {{
 """
 
 SYSTEMD_SERVICE = """[Unit]
-Description=memsync sweep: upload new coding-agent session files
+Description=agent-sessions sweep: upload new coding-agent session files
 
 [Service]
 Type=oneshot
@@ -88,7 +107,7 @@ IOSchedulingClass=idle
 """
 
 SYSTEMD_TIMER = """[Unit]
-Description=Run the memsync sweep every {minutes} minutes
+Description=Run the agent-sessions sweep every {minutes} minutes
 
 [Timer]
 OnBootSec=2min
@@ -99,7 +118,7 @@ Persistent=true
 WantedBy=timers.target
 """
 
-LAUNCHD_LABEL = "tech.memsync.sweep"
+LAUNCHD_LABEL = "tech.agent-sessions.sweep"
 LAUNCHD_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -118,22 +137,22 @@ LAUNCHD_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 </dict>
 </plist>
 """
-CRON_MARKER = "# memsync sweep"
+CRON_MARKER = "# agent-sessions sweep"
 
 
-def memsync_command() -> list[str]:
-    """The command hooks should run. Prefer the installed `memsync` shim: its path survives
+def agent_sessions_command() -> list[str]:
+    """The command hooks should run. Prefer the installed `agent-sessions` shim: its path survives
     upgrades, which keeps Codex's trust hash for the hook valid."""
-    found = shutil.which("memsync")
+    found = shutil.which("agent-sessions")
     if found:
         return [str(Path(found).absolute())]
-    return [sys.executable, "-m", "memsync"]
+    return [sys.executable, "-m", "agent_sessions"]
 
 
 def _backup(path: Path) -> Path | None:
     if not path.exists():
         return None
-    backup = path.with_name(f"{path.name}.memsync-backup-{time.strftime('%Y%m%d-%H%M%S')}")
+    backup = path.with_name(f"{path.name}.agent-sessions-backup-{time.strftime('%Y%m%d-%H%M%S')}")
     shutil.copy2(path, backup)
     return backup
 
@@ -148,7 +167,7 @@ def _write(path: Path, text: str, dry_run: bool, log: list[str]) -> None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     backup = _backup(path)
-    tmp = path.with_name(path.name + ".memsync-tmp")
+    tmp = path.with_name(path.name + ".agent-sessions-tmp")
     tmp.write_text(text)
     if path.exists():
         shutil.copymode(path, tmp)
@@ -169,7 +188,7 @@ def _load_json(path: Path) -> dict:
 
 
 def merge_hooks(config: dict, events: dict[str, dict], command: str | None) -> dict:
-    """Remove memsync's handlers from every event, then add one group per event (unless command is None)."""
+    """Remove agent-sessions' handlers from every event, then add one group per event (unless command is None)."""
     hooks = config.get("hooks")
     if not isinstance(hooks, dict):
         hooks = {}
@@ -234,13 +253,13 @@ def install_codex(cmd: list[str], dry_run: bool, log: list[str], remove: bool = 
         return
     _write(hooks_path, json.dumps(config, indent=2) + "\n", dry_run, log)
     if not remove:
-        log.append("codex: open Codex and run /hooks once to trust the memsync hooks. Codex skips new hooks until they're trusted.")
+        log.append("codex: open Codex and run /hooks once to trust the agent-sessions hooks. Codex skips new hooks until they're trusted.")
         if _toml_has_hook_events(root / "config.toml"):
             log.append("codex: config.toml also defines [hooks]; Codex runs both but warns. Moving them into hooks.json silences it.")
 
 
 def codex_trust_state(root: Path) -> tuple[int, int]:
-    """(memsync hooks configured, of those with a trusted hash recorded in config.toml)."""
+    """(agent-sessions hooks configured, of those with a trusted hash recorded in config.toml)."""
     hooks_path = root / "hooks.json"
     try:
         config = _load_json(hooks_path)
@@ -284,9 +303,9 @@ def _codex_event_key(event: str) -> str:
 # Pi ---------------------------------------------------------------------------
 def install_pi(cmd: list[str], dry_run: bool, log: list[str], remove: bool = False) -> None:
     agent_dir = make_adapters(Path.home())["pi"].agent_dir()
-    path = agent_dir / "extensions" / "memsync.ts"
+    path = agent_dir / "extensions" / "agent-sessions.ts"
     if path.exists() and PI_MARKER not in path.read_text():
-        log.append(f"pi: {path} exists and isn't memsync's; leaving it alone")
+        log.append(f"pi: {path} exists and isn't agent-sessions'; leaving it alone")
         return
     if remove:
         if path.exists() and not dry_run:
@@ -333,10 +352,10 @@ def install_timer(cmd: list[str], minutes: int, dry_run: bool, log: list[str], r
 
     if _systemd_user_available():
         unit_dir = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "systemd" / "user"
-        service, timer = unit_dir / "memsync.service", unit_dir / "memsync.timer"
+        service, timer = unit_dir / "agent-sessions.service", unit_dir / "agent-sessions.timer"
         if remove:
             if not dry_run:
-                _run(["systemctl", "--user", "disable", "--now", "memsync.timer"])
+                _run(["systemctl", "--user", "disable", "--now", "agent-sessions.timer"])
                 for p in (service, timer):
                     if p.exists():
                         p.unlink()
@@ -347,8 +366,8 @@ def install_timer(cmd: list[str], minutes: int, dry_run: bool, log: list[str], r
         _write(timer, SYSTEMD_TIMER.format(minutes=minutes), dry_run, log)
         if not dry_run:
             _run(["systemctl", "--user", "daemon-reload"])
-            r = _run(["systemctl", "--user", "enable", "--now", "memsync.timer"])
-            log.append("systemd: memsync.timer enabled" if r.returncode == 0 else f"systemd: enable failed: {r.stderr.strip()}")
+            r = _run(["systemctl", "--user", "enable", "--now", "agent-sessions.timer"])
+            log.append("systemd: agent-sessions.timer enabled" if r.returncode == 0 else f"systemd: enable failed: {r.stderr.strip()}")
         if not linger_enabled():
             log.append(
                 "systemd: user timers stop when you log out. To keep sweeping while logged out "
@@ -357,7 +376,7 @@ def install_timer(cmd: list[str], minutes: int, dry_run: bool, log: list[str], r
         return
 
     if not shutil.which("crontab"):
-        log.append("timer: no systemd user session, launchd or crontab found; run `memsync sync` periodically yourself")
+        log.append("timer: no systemd user session, launchd or crontab found; run `agent-sessions sync` periodically yourself")
         return
     current = _run(["crontab", "-l"])
     lines = [l for l in (current.stdout.splitlines() if current.returncode == 0 else []) if CRON_MARKER not in l]
@@ -385,7 +404,7 @@ def timer_installed() -> str | None:
     if platform.system() == "Darwin":
         return "launchd" if (Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist").exists() else None
     if _systemd_user_available():
-        r = _run(["systemctl", "--user", "is-enabled", "memsync.timer"])
+        r = _run(["systemctl", "--user", "is-enabled", "agent-sessions.timer"])
         if r.returncode == 0:
             return "systemd"
     if shutil.which("crontab"):
@@ -396,24 +415,24 @@ def timer_installed() -> str | None:
 
 
 # Config -------------------------------------------------------------------------
-CONFIG_TEMPLATE = """# memsync settings. Hooks and timers don't load your shell profile, so they read this file.
+CONFIG_TEMPLATE = """# agent-sessions settings. Hooks and timers don't load your shell profile, so they read this file.
 # Real environment variables override it.
 R2_ENDPOINT={R2_ENDPOINT}
 R2_BUCKET={R2_BUCKET}
 R2_ACCESS_KEY_ID={R2_ACCESS_KEY_ID}
 R2_SECRET_ACCESS_KEY={R2_SECRET_ACCESS_KEY}
-# Name this machine in object keys (defaults to the hostname).
-MEMSYNC_MACHINE_ID={MEMSYNC_MACHINE_ID}
+# This machine's id in object keys is a UUID kept in machine-id next to this file.
+# Minimum minutes between uploads of a changed SQLite database (Codex's state and logs).
+# AGENT_SESSIONS_DB_INTERVAL_MINUTES=60
 """
 
 
-def write_config_template(machine_id: str, dry_run: bool, log: list[str]) -> Path:
-    path = Path(os.environ.get("MEMSYNC_CONFIG", DEFAULT_CONFIG_FILE))
+def write_config_template(dry_run: bool, log: list[str]) -> Path:
+    path = config_file()
     if path.exists():
         log.append(f"config: keeping {path}")
         return path
     values = {k: os.environ.get(k, "") for k in ("R2_ENDPOINT", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY")}
-    values["MEMSYNC_MACHINE_ID"] = machine_id
     if dry_run:
         log.append(f"would write: {path}")
         return path
