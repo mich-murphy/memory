@@ -54,6 +54,17 @@ CREATE TABLE IF NOT EXISTS raw_versions (
     versioned_at REAL NOT NULL,
     PRIMARY KEY (key, sha256)
 );
+-- Shadow categoriser labels for bytes [start, end) of a raw key, uploaded to `object`.
+CREATE TABLE IF NOT EXISTS label_sets (
+    key TEXT NOT NULL,
+    start INTEGER NOT NULL,
+    end INTEGER NOT NULL,
+    end_line INTEGER NOT NULL,
+    object TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    labelled_at REAL NOT NULL,
+    PRIMARY KEY (key, start)
+);
 CREATE TABLE IF NOT EXISTS sessions (
     agent TEXT NOT NULL,
     session_key TEXT NOT NULL,
@@ -174,6 +185,21 @@ class State:
 
     def last_version_at(self, key: str) -> float | None:
         return self.db.execute("SELECT MAX(versioned_at) FROM raw_versions WHERE key = ?", (key,)).fetchone()[0]
+
+    # labels -----------------------------------------------------------
+    def label_sets(self, key: str) -> list[dict]:
+        rows = self.db.execute(
+            "SELECT start, end, end_line, object, summary FROM label_sets WHERE key = ? ORDER BY start", (key,))
+        return [{"start": r[0], "end": r[1], "end_line": r[2], "object": r[3], "summary": json.loads(r[4])} for r in rows]
+
+    def add_label_set(self, key: str, start: int, end: int, end_line: int, obj: str, summary: dict) -> None:
+        if start == 0:  # labelled from the top: a new file, or a rewrite that replaced what was labelled
+            self.db.execute("DELETE FROM label_sets WHERE key = ?", (key,))
+        self.db.execute("INSERT OR REPLACE INTO label_sets VALUES (?,?,?,?,?,?,?)",
+                        (key, start, end, end_line, obj, json.dumps(summary, sort_keys=True), time.time()))
+
+    def all_label_summaries(self) -> list[dict]:
+        return [json.loads(r[0]) for r in self.db.execute("SELECT summary FROM label_sets")]
 
     # sessions ---------------------------------------------------------
     def get_session(self, agent: str, session_key: str) -> dict | None:

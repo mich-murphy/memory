@@ -24,7 +24,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import __version__, gitinfo, raw, snapshot
+from . import __version__, categorise, gitinfo, raw, snapshot
 from .adapters import Adapter, SessionFile
 from .adapters.base import is_within, read_head
 from .config import Config
@@ -54,6 +54,8 @@ MAX_SEGMENTS = 64
 # Database copies are refreshed hourly (AGENT_SESSIONS_DB_INTERVAL_MINUTES); the copy a refresh
 # replaces is kept as a version at most once a day.
 DB_VERSION_SECONDS = 24 * 3600
+# How far back to look for the record before a delta, which the categoriser gets as context.
+CONTEXT_BYTES = 256 * 1024
 
 
 @dataclass
@@ -67,6 +69,8 @@ class Summary:
     versions: int = 0
     segments: int = 0
     folded: int = 0
+    labelled: int = 0  # records the shadow categoriser labelled
+    label_errors: int = 0
     deleted: int = 0
     unknown: int = 0
     error_messages: list[str] = field(default_factory=list)
@@ -95,6 +99,7 @@ class _Upload:
     body_path: Path | None = None
     old_pieces: list[dict] = field(default_factory=list)  # what a whole upload replaces
     version: dict | None = None  # the replaced bytes of a rewrite, kept as blobs
+    label_set: dict | None = None  # shadow categoriser labels for the newly seen bytes
 
 
 def _clean_version(v: dict) -> dict:
@@ -291,7 +296,7 @@ class Syncer:
                     continue
                 if upload is None:
                     continue
-                if not upload.changed:
+                if not upload.changed and upload.label_set is None:
                     self._finish(upload)
                     continue
                 inflight[pool.submit(self._upload, upload)] = upload
@@ -411,7 +416,33 @@ class Syncer:
             upload.old_pieces = pieces
             if prev is not None and not append:
                 upload.version = self._version_plan(sf, key, prev, pieces)
+        upload.label_set = self._labels(sf, key, append, len(data), lambda a, b: data[a:b])
         return upload
+
+    def _labels(self, sf: SessionFile, key: str, append: bool, size: int, read) -> dict | None:
+        """Shadow categorisation of the bytes not labelled yet (see categorise.py). Nothing is dropped."""
+        if not self.cfg.categorise_cmd or sf.role not in categorise.ROLES or not sf.key.endswith(".jsonl"):
+            return None
+        sets = self.state.label_sets(key)
+        start, first_line = (sets[-1]["end"], sets[-1]["end_line"]) if sets and append else (0, 0)
+        if size <= start:
+            return None
+        if size - start > categorise.MAX_BYTES:
+            log.warning("%s: %d new bytes is too much to label at once; uploaded unlabelled", sf.path, size - start)
+            return None
+        data = read(start, size)
+        before = read(max(0, start - CONTEXT_BYTES), start).rstrip(b"\n").rsplit(b"\n", 1)[-1] if start else None
+        try:
+            labels = categorise.label(self.cfg.categorise_cmd, agent=sf.agent, role=sf.role, key=sf.key, data=data,
+                                      first_line=first_line, before=before, env=self.cfg.categorise_env)
+        except Exception as e:
+            self.summary.label_errors += 1
+            log.warning("%s: categoriser failed, uploading unlabelled: %s: %s", sf.path, type(e).__name__, e)
+            return None
+        body = raw.compress("".join(json.dumps(x, sort_keys=True) + "\n" for x in labels).encode())
+        obj = f"labels/agent={sf.agent}/machine={self.cfg.machine_id}/{sf.key}/{start:015d}-{size:015d}.jsonl.zst"
+        return {"start": start, "end": size, "end_line": first_line + len(labels), "object": obj, "body": body,
+                "summary": categorise.summarise(labels), "records": len(labels)}
 
     def _prepare_large(self, sf: SessionFile, root: Path, st: os.stat_result, key: str,
                        prev: tuple[str, int | None] | None, pieces: list[dict], active: bool, idle: bool) -> _Upload | None:
@@ -444,6 +475,13 @@ class Syncer:
         mode, start = self._plan(prev, pieces, sha, read, append, idle)
         upload = _Upload(sf, root, key, sha, read, st.st_mtime_ns if limit == st.st_size else -1, lines,
                          _prefix_sha(first), head, changed=mode is not None, start=start)
+
+        def read_range(a: int, b: int) -> bytes:
+            with sf.path.open("rb") as fh:
+                fh.seek(a)
+                return fh.read(b - a)
+
+        upload.label_set = self._labels(sf, key, append, read, read_range)
         if mode is None:
             return upload
         self.tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -471,6 +509,15 @@ class Syncer:
                                 u.sf.path, p["copy_from"])
                     u.version = None
                     break
+        if u.label_set is not None:
+            try:
+                self.store.put(u.label_set["object"], u.label_set["body"], {"start": str(u.label_set["start"]),
+                                                                           "end": str(u.label_set["end"])})
+            except Exception as e:  # labels are a shadow: never let them stop the raw upload
+                log.warning("%s: labels not uploaded: %s", u.sf.path, e)
+                u.label_set = None
+        if not u.changed:
+            return
         target = raw.segment_key(u.key, u.start, u.size) if u.start else u.key
         meta = {"sha256": u.piece_sha, "agent": u.sf.agent, "machine": self.cfg.machine_id, "role": u.sf.role,
                 "start": str(u.start), "end": str(u.size)}
@@ -513,7 +560,11 @@ class Syncer:
                 self.summary.unknown += 1
         else:
             self.summary.unchanged += 1
-        if sf.session_key and (u.changed or u.head is not None):
+        if u.label_set is not None:
+            ls = u.label_set
+            self.state.add_label_set(u.key, ls["start"], ls["end"], ls["end_line"], ls["object"], ls["summary"])
+            self.summary.labelled += ls["records"]
+        if sf.session_key and (u.changed or u.head is not None or u.label_set is not None):
             self._touched.add((sf.agent, sf.session_key))
         self.state.record_file(sf.path, sf.agent, u.root, sf.key, sf.session_key, sf.role, u.size, u.mtime_ns,
                                u.sha, u.line_count, u.prefix_sha, u.head)
@@ -573,15 +624,7 @@ class Syncer:
             "hostname": self.cfg.hostname,
             "session_key": session_key,
             "info": info,
-            "transcripts": [
-                {
-                    **{k: v for k, v in f.items() if k not in ("deleted_at", "mtime_ns")},
-                    "object": self.raw_key(SessionFile(agent, Path(), f["key"], None, f["role"])),
-                    "pieces": self.state.pieces(self.raw_key(SessionFile(agent, Path(), f["key"], None, f["role"]))),
-                    "versions": self.state.versions(self.raw_key(SessionFile(agent, Path(), f["key"], None, f["role"]))),
-                }
-                for f in files
-            ],
+            "transcripts": [self._transcript_entry(agent, f) for f in files],
             "launch": launches[0] if launches else None,
             "launches": launches,
             "git": git,
@@ -597,6 +640,16 @@ class Syncer:
         manifest["synced_at"] = now
         manifest["collector_version"] = __version__
         return key, json.dumps(manifest, indent=1, sort_keys=True).encode(), sha
+
+    def _transcript_entry(self, agent: str, f: dict) -> dict:
+        key = self.raw_key(SessionFile(agent, Path(), f["key"], None, f["role"]))
+        return {
+            **{k: v for k, v in f.items() if k not in ("deleted_at", "mtime_ns")},
+            "object": key,
+            "pieces": self.state.pieces(key),
+            "versions": self.state.versions(key),
+            "labels": [{k: v for k, v in ls.items() if k != "end_line"} for ls in self.state.label_sets(key)],
+        }
 
     def take_snapshot(self, agent: str, root: Path, cwd: str | None, session_key: str | None) -> tuple[str, str | None, dict]:
         cache_key = (agent, str(root), cwd, session_key if agent == "claude" else None)
