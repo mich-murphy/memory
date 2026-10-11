@@ -1,8 +1,10 @@
 """Upload new or changed files, then refresh each touched session's manifest.
 
 Object layout (see docs/storage-layout.md):
-  raw/agent=<agent>/machine=<machine>/<key>.gz                        file bytes, gzip, unmodified
-  raw-versions/agent=<agent>/machine=<machine>/<key>/<old sha256>.gz  what a rewrite replaced
+  raw/agent=<agent>/machine=<machine>/<key>.zst                       file bytes, zstd, unmodified
+  raw/agent=<agent>/machine=<machine>/<key>.zst.d/<start>-<end>.zst   bytes appended since, until folded
+  blobs/<sha256>.zst                                                  bytes a rewrite replaced, stored once
+  raw-versions/agent=<agent>/machine=<machine>/<key>.json             which blobs hold each earlier version
   manifests/agent=<agent>/machine=<machine>/<session>.json            files, launch, git, snapshots
   snapshots/blobs/<sha256>                                            harness and memory file bodies
   snapshots/sets/<set-id>.json                                        which files made up a set
@@ -11,7 +13,6 @@ Object layout (see docs/storage-layout.md):
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import json
 import logging
@@ -23,7 +24,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import __version__, gitinfo, snapshot
+from . import __version__, gitinfo, raw, snapshot
 from .adapters import Adapter, SessionFile
 from .adapters.base import is_within, read_head
 from .config import Config
@@ -45,6 +46,14 @@ LARGE_FILE_BYTES = 64 * 1024 * 1024
 CHUNK = 1024 * 1024
 PREFIX_LINES = 20
 TRANSCRIPT_ROLES = {"main", "subagent", "superseded"}
+# A file that grew by appending and was written to within this long is still in use: upload only
+# its new bytes, as a segment. Once it has been quiet this long, the next sync folds it back
+# into one object, which also compresses better.
+FOLD_AFTER_SECONDS = ACTIVE_SESSION_SECONDS
+MAX_SEGMENTS = 64
+# Database copies are refreshed hourly (AGENT_SESSIONS_DB_INTERVAL_MINUTES); the copy a refresh
+# replaces is kept as a version at most once a day.
+DB_VERSION_SECONDS = 24 * 3600
 
 
 @dataclass
@@ -56,6 +65,8 @@ class Summary:
     bytes_uploaded: int = 0
     manifests: int = 0
     versions: int = 0
+    segments: int = 0
+    folded: int = 0
     deleted: int = 0
     unknown: int = 0
     error_messages: list[str] = field(default_factory=list)
@@ -71,17 +82,24 @@ class _Upload:
     sf: SessionFile
     root: Path
     key: str
-    sha: str
+    sha: str  # sha256 of the whole file as uploaded
     size: int  # bytes uploaded (uncompressed), less than the file while a last line is held back
     mtime_ns: int
     line_count: int | None
     prefix_sha: str | None
     head: dict | None
     changed: bool  # False: the bucket already has these bytes, only local state needs updating
+    start: int = 0  # above 0: a segment holding only bytes [start, size)
+    piece_sha: str | None = None  # sha256 of the bytes in this object
     body: bytes | None = None
     body_path: Path | None = None
-    replaces: tuple[str, int | None] | None = None  # (sha, size) of a non-append rewrite's old bytes
-    version_key: str | None = None
+    old_pieces: list[dict] = field(default_factory=list)  # what a whole upload replaces
+    version: dict | None = None  # the replaced bytes of a rewrite, kept as blobs
+
+
+def _clean_version(v: dict) -> dict:
+    return {"sha256": v["sha256"], "size": v["size"], "versioned_at": v["versioned_at"],
+            "pieces": [{k: p[k] for k in ("start", "end", "sha256", "object")} for p in v["pieces"]]}
 
 
 def read_file(sf: SessionFile) -> bytes:
@@ -316,26 +334,56 @@ class Syncer:
         self._error(f"{sf.path}: {type(e).__name__}: {e}")
 
     def raw_key(self, sf: SessionFile) -> str:
-        return f"raw/agent={sf.agent}/machine={self.cfg.machine_id}/{sf.key}.gz"
+        return f"raw/agent={sf.agent}/machine={self.cfg.machine_id}/{sf.key}.zst"
 
-    def version_key(self, sf: SessionFile, old_sha: str) -> str:
-        return f"raw-versions/agent={sf.agent}/machine={self.cfg.machine_id}/{sf.key}/{old_sha}.gz"
+    def versions_key(self, sf: SessionFile) -> str:
+        return f"raw-versions/agent={sf.agent}/machine={self.cfg.machine_id}/{sf.key}.json"
 
     def manifest_key(self, agent: str, session_key: str) -> str:
         return f"manifests/agent={agent}/machine={self.cfg.machine_id}/{session_key}.json"
+
+    def _plan(self, prev: tuple[str, int | None] | None, pieces: list[dict], sha: str, size: int, append: bool,
+              idle: bool) -> tuple[str | None, int]:
+        """How to upload a file: None (the bucket has it), "segment" (only the bytes after
+        `start`), or "whole" (one object, replacing any segments)."""
+        if prev is not None and prev[0] == sha:
+            return ("whole" if idle and len(pieces) > 1 else None), 0  # fold once the file is quiet
+        if append and not idle and pieces and len(pieces) < MAX_SEGMENTS and size > prev[1]:
+            return "segment", prev[1]
+        return "whole", 0
+
+    def _version_plan(self, sf: SessionFile, key: str, prev: tuple[str, int | None], pieces: list[dict]) -> dict | None:
+        """Keep the bytes a rewrite replaces: each piece they were stored in is copied to
+        blobs/<sha>.zst, unless a blob with that content is already there."""
+        if sf.role == "db":
+            last = self.state.last_version_at(key)
+            if last is not None and time.time() - last < DB_VERSION_SECONDS:
+                return None
+        old = pieces or [{"start": 0, "end": prev[1], "sha256": prev[0], "object": key}]
+        out = []
+        for p in old:
+            blob = raw.blob_key(p["sha256"])
+            out.append({"start": p["start"], "end": p["end"], "sha256": p["sha256"], "object": blob,
+                        "copy_from": None if self.state.uploaded(blob) else p["object"]})
+        version = {"sha256": prev[0], "size": prev[1], "pieces": out, "versioned_at": time.time()}
+        index = [*self.state.versions(key), _clean_version(version)]
+        version["index"] = json.dumps({"key": sf.key, "versions": index}, indent=1, sort_keys=True).encode()
+        return version
 
     def _prepare(self, sf: SessionFile, root: Path) -> _Upload | None:
         st = sf.path.stat()
         if sf.session_key:
             self._roots.setdefault((sf.agent, sf.session_key), root)
-        if self.state.file_unchanged(sf.path, st.st_size, st.st_mtime_ns):
+        key = self.raw_key(sf)
+        pieces = self.state.pieces(key)
+        idle = time.time() - st.st_mtime >= FOLD_AFTER_SECONDS
+        if self.state.file_unchanged(sf.path, st.st_size, st.st_mtime_ns) and not (idle and len(pieces) > 1):
             self.summary.unchanged += 1
             return None
-        key = self.raw_key(sf)
         prev = self.state.uploaded(key)
         active = sf.path.suffix == ".jsonl" and time.time() - st.st_mtime < ACTIVE_WRITE_SECONDS
         if st.st_size > LARGE_FILE_BYTES and sf.compression is None:
-            return self._prepare_large(sf, root, st, key, prev, active)
+            return self._prepare_large(sf, root, st, key, prev, pieces, active, idle)
 
         data = read_file(sf)
         mtime_ns = st.st_mtime_ns
@@ -349,17 +397,25 @@ class Syncer:
         head = None
         if sf.role in TRANSCRIPT_ROLES and sf.path.name.endswith((".jsonl", ".jsonl.zst")):
             head = self.adapters[sf.agent].session_info(read_head(data))
+        append = prev is not None and prev[1] is not None and len(data) >= prev[1] \
+            and hashlib.sha256(data[: prev[1]]).hexdigest() == prev[0]
+        mode, start = self._plan(prev, pieces, sha, len(data), append, idle)
         upload = _Upload(sf, root, key, sha, len(data), mtime_ns, data.count(b"\n"), _prefix_sha(data), head,
-                         changed=prev is None or prev[0] != sha)
-        if upload.changed:
-            if prev is not None and not (prev[1] is not None and len(data) >= prev[1]
-                                         and hashlib.sha256(data[: prev[1]]).hexdigest() == prev[0]):
-                upload.replaces = prev
-            upload.body = gzip.compress(data, compresslevel=6, mtime=0)
+                         changed=mode is not None, start=start)
+        if mode == "segment":
+            upload.piece_sha = hashlib.sha256(data[start:]).hexdigest()
+            upload.body = raw.compress(data[start:])
+        elif mode == "whole":
+            upload.piece_sha = sha
+            upload.body = raw.compress(data)
+            upload.old_pieces = pieces
+            if prev is not None and not append:
+                upload.version = self._version_plan(sf, key, prev, pieces)
         return upload
 
     def _prepare_large(self, sf: SessionFile, root: Path, st: os.stat_result, key: str,
-                       prev: tuple[str, int | None] | None, active: bool) -> _Upload | None:
+                       prev: tuple[str, int | None] | None, pieces: list[dict], active: bool, idle: bool) -> _Upload | None:
+        """Hash the file in a stream, then compress only the bytes being uploaded to a temp file."""
         limit = _last_newline(sf.path, st.st_size) if active else st.st_size
         if limit == 0:
             self.summary.skipped += 1
@@ -368,58 +424,88 @@ class Syncer:
         old_size = prev[1] if prev else None
         lines = 0
         read = 0
-        self.tmp_dir.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=self.tmp_dir, suffix=".gz")
-        try:
-            with sf.path.open("rb") as src, os.fdopen(fd, "wb") as raw_out, \
-                    gzip.GzipFile(fileobj=raw_out, mode="wb", compresslevel=6, mtime=0) as out:
-                while read < limit:
-                    chunk = src.read(min(CHUNK, limit - read))
-                    if not chunk:
-                        break
-                    lines += chunk.count(b"\n")
-                    if old_size is not None and read < old_size:
-                        old_prefix.update(chunk[: old_size - read])
-                    whole.update(chunk)
-                    out.write(chunk)
-                    read += len(chunk)
-            sha = whole.hexdigest()
-            with sf.path.open("rb") as fh:
-                first = b"".join(fh.readline(16 * CHUNK) for _ in range(PREFIX_LINES))[:read]
-            head = None
-            if sf.role in TRANSCRIPT_ROLES and sf.path.suffix == ".jsonl":
-                head = self.adapters[sf.agent].session_info(read_head(first))
-            upload = _Upload(sf, root, key, sha, read, st.st_mtime_ns if limit == st.st_size else -1, lines,
-                             _prefix_sha(first), head, changed=prev is None or prev[0] != sha)
-            if upload.changed:
-                if prev is not None and not (old_size is not None and read >= old_size and old_prefix.hexdigest() == prev[0]):
-                    upload.replaces = prev
-                upload.body_path = Path(tmp)
-            else:
-                os.unlink(tmp)
+        with sf.path.open("rb") as src:
+            while read < limit:
+                chunk = src.read(min(CHUNK, limit - read))
+                if not chunk:
+                    break
+                lines += chunk.count(b"\n")
+                if old_size is not None and read < old_size:
+                    old_prefix.update(chunk[: old_size - read])
+                whole.update(chunk)
+                read += len(chunk)
+        sha = whole.hexdigest()
+        with sf.path.open("rb") as fh:
+            first = b"".join(fh.readline(16 * CHUNK) for _ in range(PREFIX_LINES))[:read]
+        head = None
+        if sf.role in TRANSCRIPT_ROLES and sf.path.suffix == ".jsonl":
+            head = self.adapters[sf.agent].session_info(read_head(first))
+        append = old_size is not None and read >= old_size and old_prefix.hexdigest() == prev[0]
+        mode, start = self._plan(prev, pieces, sha, read, append, idle)
+        upload = _Upload(sf, root, key, sha, read, st.st_mtime_ns if limit == st.st_size else -1, lines,
+                         _prefix_sha(first), head, changed=mode is not None, start=start)
+        if mode is None:
             return upload
+        self.tmp_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=self.tmp_dir, suffix=".zst")
+        try:
+            with sf.path.open("rb") as src, os.fdopen(fd, "wb") as out:
+                src.seek(start)
+                upload.piece_sha = raw.compress_stream(src, out, read - start, CHUNK)
         except BaseException:
             Path(tmp).unlink(missing_ok=True)
             raise
+        upload.body_path = Path(tmp)
+        if mode == "whole":
+            upload.old_pieces = pieces
+            if prev is not None and not append:
+                upload.version = self._version_plan(sf, key, prev, pieces)
+        return upload
 
     def _upload(self, u: _Upload) -> None:
-        """Runs on the pool. A rewrite first copies the bytes it replaces aside."""
-        if u.replaces is not None:
-            vkey = self.version_key(u.sf, u.replaces[0])
-            if self.store.copy(u.key, vkey):
-                u.version_key = vkey
-        meta = {"sha256": u.sha, "agent": u.sf.agent, "machine": self.cfg.machine_id, "role": u.sf.role}
+        """Runs on the pool. A rewrite first copies the bytes it replaces into blobs/."""
+        if u.version is not None:
+            for p in u.version["pieces"]:
+                if p["copy_from"] and not self.store.copy(p["copy_from"], p["object"]):
+                    log.warning("%s: %s is missing from the bucket; its earlier bytes can't be kept",
+                                u.sf.path, p["copy_from"])
+                    u.version = None
+                    break
+        target = raw.segment_key(u.key, u.start, u.size) if u.start else u.key
+        meta = {"sha256": u.piece_sha, "agent": u.sf.agent, "machine": self.cfg.machine_id, "role": u.sf.role,
+                "start": str(u.start), "end": str(u.size)}
         if u.body_path is not None:
-            self.store.put_file(u.key, u.body_path, meta)
+            self.store.put_file(target, u.body_path, meta)
         else:
-            self.store.put(u.key, u.body, meta)
+            self.store.put(target, u.body, meta)
+        if u.version is not None:
+            self.store.put(self.versions_key(u.sf), u.version["index"], {})
+        if not u.start:
+            for p in u.old_pieces:
+                if p["start"] > 0:  # segments the new whole object replaces
+                    try:
+                        self.store.delete(p["object"])
+                    except Exception as e:  # harmless: readers skip segments that start before the base ends
+                        log.warning("could not delete %s: %s", p["object"], e)
 
     def _finish(self, u: _Upload) -> None:
         sf = u.sf
         if u.changed:
             self.state.record_upload(u.key, u.sha, u.size)
-            if u.version_key and u.replaces:
-                self.state.record_version(u.key, u.version_key, u.replaces[0], u.replaces[1])
+            if u.start:
+                self.state.add_piece(u.key, {"start": u.start, "end": u.size, "sha256": u.piece_sha,
+                                             "object": raw.segment_key(u.key, u.start, u.size)})
+                self.summary.segments += 1
+            else:
+                self.state.set_pieces(u.key, [{"start": 0, "end": u.size, "sha256": u.sha, "object": u.key}])
+                if len(u.old_pieces) > 1:
+                    self.summary.folded += 1
+            if u.version is not None:
+                for p in u.version["pieces"]:
+                    if p["copy_from"]:
+                        self.state.record_upload(p["object"], p["sha256"], p["end"] - p["start"])
+                v = _clean_version(u.version)
+                self.state.record_version(u.key, v["sha256"], v["size"], v["pieces"])
                 self.summary.versions += 1
             self.summary.uploaded += 1
             self.summary.bytes_uploaded += len(u.body) if u.body is not None else u.body_path.stat().st_size
@@ -490,7 +576,8 @@ class Syncer:
             "transcripts": [
                 {
                     **{k: v for k, v in f.items() if k not in ("deleted_at", "mtime_ns")},
-                    "object": f"raw/agent={agent}/machine={self.cfg.machine_id}/{f['key']}.gz",
+                    "object": self.raw_key(SessionFile(agent, Path(), f["key"], None, f["role"])),
+                    "pieces": self.state.pieces(self.raw_key(SessionFile(agent, Path(), f["key"], None, f["role"]))),
                     "versions": self.state.versions(self.raw_key(SessionFile(agent, Path(), f["key"], None, f["role"]))),
                 }
                 for f in files

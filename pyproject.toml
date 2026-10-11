@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-sessions"
-version = "0.2.0"
+version = "0.3.0"
 description = "Collect coding-agent session transcripts (Claude Code, Codex, Pi) from every machine into one R2 bucket"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -3,8 +3,10 @@
 This is layers 0 and 1 of the session data contract (v2): raw files, and the collector's metadata about them. Everything one machine writes is under its machine id, a UUID that `agent-sessions install` creates and keeps in `~/.config/agent-sessions/machine-id`. Hostnames collide, so the hostname is only a label in manifests.
 
 ```
-raw/agent=<agent>/machine=<machine>/<key>.gz                        a local file, gzip, bytes unchanged
-raw-versions/agent=<agent>/machine=<machine>/<key>/<old sha256>.gz  bytes a rewrite replaced
+raw/agent=<agent>/machine=<machine>/<key>.zst                       a local file, zstd, bytes unchanged
+raw/agent=<agent>/machine=<machine>/<key>.zst.d/<start>-<end>.zst   bytes appended since, until folded
+blobs/<sha256>.zst                                                  bytes a rewrite replaced, stored once
+raw-versions/agent=<agent>/machine=<machine>/<key>.json             which blobs hold each earlier version
 manifests/agent=<agent>/machine=<machine>/<session>.json            one per session
 snapshots/blobs/<sha256>                                            a harness or memory file, stored once
 snapshots/sets/<set-id>.json                                        which files made up one set
@@ -33,11 +35,15 @@ Nothing is redacted. Files the collector doesn't recognise are uploaded with rol
 
 A second Claude Code or Codex directory (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) or Pi agent dir (`PI_CODING_AGENT_DIR`) is keyed under `roots/<hash of dir>/…`, so it can't overwrite the default one.
 
-Each object carries `sha256` (of the uncompressed bytes), `agent`, `machine` and `role` as metadata.
-
 **Databases.** Each sweep takes a SQLite backup-API copy of every database under an agent's directory (Codex's `state_*`, `logs_*`, `memories_*`, `goals_*`, `thread_history_*`, `queue_*`). That includes rows still in the `-wal` file, which a plain file copy would miss. A database that changed is copied again once its last copy is an hour old (`AGENT_SESSIONS_DB_INTERVAL_MINUTES`). The copies live in the state directory between sweeps.
 
-**Versions.** Transcripts only grow, so most changes are appends and simply replace the object. When a file changes in any other way (its first `old size` bytes no longer hash to what was uploaded), the old object is first copied to `raw-versions/…/<old sha256>.gz` and listed under the file's `versions` in the manifest. Database copies are versioned the same way.
+**Appends.** Transcripts and logs only grow. While a file is in use (written to in the last 15 minutes), a sync uploads only the bytes added since the last upload, as a segment `<key>.zst.d/<start>-<end>.zst` holding bytes `[start, end)`; start and end are zero-padded so the segments list in order. Once the file has been quiet for 15 minutes, or has 64 segments, the next sync uploads it whole as `<key>.zst` and deletes the segments. That fold happens once per session and compresses better than many small pieces.
+
+A file is its base object followed by its segments. The manifest lists them as `pieces`, each with `start`, `end`, `sha256` and `object`. Without a manifest, `<key>.zst` plus each segment that starts where the bytes so far end gives the same result; segments a fold failed to delete start earlier and are skipped. `agent-sessions cat <key>` prints a file rebuilt this way, and `agent_sessions.raw.join` / `read_key` do the same in Python.
+
+**Versions.** When a file changes in any way other than an append (its first `old size` bytes no longer hash to what was uploaded), each piece of its old contents is copied to `blobs/<sha256>.zst` before the new bytes are uploaded. A blob that is already there isn't copied again, so identical old contents from different files, sessions or machines are stored once. `raw-versions/…/<key>.json` lists the file's earlier versions, and the manifest lists them under `versions`; each has `sha256`, `size`, `versioned_at` and the `pieces` (in `blobs/`) that rebuild it. Database copies keep at most one version a day: an hourly refresh within a day of the last kept version replaces the copy without keeping it.
+
+Every object is zstd (level 10) with these metadata fields: `sha256` (of the uncompressed bytes the object holds), `start`, `end`, `agent`, `machine` and `role`.
 
 **Deletions.** When a sweep finds that an uploaded file is gone from disk, the file gets a `deleted_locally` date in its session's manifest. The object stays in the bucket.
 
@@ -58,7 +64,11 @@ There's one manifest per session: a Claude Code session (`<slug>/<session id>`),
            "entrypoint": "cli", "source_root": "/home/me/.claude"},
   "transcripts": [{"key": "projects/…/11111111-….jsonl", "role": "main", "size": 48213, "sha256": "…",
                    "line_count": 212, "prefix_sha256": "…", "head": {"session_id": "…", "cwd": "…"},
-                   "object": "raw/agent=claude/machine=…/projects/…/11111111-….jsonl.gz", "versions": []}],
+                   "object": "raw/agent=claude/machine=…/projects/…/11111111-….jsonl.zst",
+                   "pieces": [{"start": 0, "end": 40110, "sha256": "…", "object": "raw/…/11111111-….jsonl.zst"},
+                              {"start": 40110, "end": 48213, "sha256": "…",
+                               "object": "raw/…/11111111-….jsonl.zst.d/000000000040110-000000000048213.zst"}],
+                   "versions": []}],
   "launch": {"event": "SessionStart", "source": "startup", "cwd": "/home/me/code/proj", "permission_mode": "default",
              "process": {"argv": ["claude", "--model", "opus"], "pid": 4242, "ancestry": ["sh", "claude"]},
              "env": {"CLAUDE_CODE_ENTRYPOINT": "cli"}, "hook_input": {"…": "…"}, "recorded_at": 1791634550.2,
@@ -71,11 +81,11 @@ There's one manifest per session: a Claude Code session (`<slug>/<session id>`),
   "deleted_locally": [{"key": "…", "at": 1791700000.0}],
   "first_seen": 1791634550.4,
   "synced_at": 1791634560.1,
-  "collector_version": "0.2.0"
+  "collector_version": "0.3.0"
 }
 ```
 
-- **`transcripts`** lists every file of the session. `role` is `main`, `subagent`, `tool_result`, `superseded` (an earlier transcript Claude Code set aside), `file_history`, `todo`, `task`, `session_env`, `debug` or `aux`. `line_count` and `prefix_sha256` (the hash of the first 20 lines) let the normaliser pin an input and spot a rewritten file. `head` is what the file's first lines say about it, so a Claude subagent file carries its own `agent_id`.
+- **`transcripts`** lists every file of the session, with the `pieces` that make up its current bytes and its earlier `versions`. `role` is `main`, `subagent`, `tool_result`, `superseded` (an earlier transcript Claude Code set aside), `file_history`, `todo`, `task`, `session_env`, `debug` or `aux`. `line_count` and `prefix_sha256` (the hash of the first 20 lines) let the normaliser pin an input and spot a rewritten file. `head` is what the file's first lines say about it, so a Claude subagent file carries its own `agent_id`.
 - **`launch`** is recorded by the session-start hook:
   - `process.argv` is the agent's command line, found by walking up from the hook to the agent's process. Pi hides its arguments from the process table, so its extension passes `process.argv` (`via: "extension"`).
   - `env` keeps `CLAUDE_CODE_*`, `CODEX_*`, `PI_*`, `ANTHROPIC_MODEL`, `MAX_THINKING_TOKENS` and a few other variables, minus anything named like a token, key, secret or password.
