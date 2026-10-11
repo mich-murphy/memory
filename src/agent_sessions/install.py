@@ -424,11 +424,6 @@ R2_SECRET_ACCESS_KEY={R2_SECRET_ACCESS_KEY}
 # This machine's id in object keys is a UUID kept in machine-id next to this file.
 # Minimum minutes between uploads of a changed SQLite database (Codex's state and logs).
 # AGENT_SESSIONS_DB_INTERVAL_MINUTES=60
-# Shadow categoriser: labels each transcript delta before upload and drops nothing. Off unless set.
-# `agent-sessions labels` shows what it would have marked as waste. Jev needs the [jev] extra.
-# AGENT_SESSIONS_CATEGORISE_CMD=agent-sessions jev
-# TYPESAFE_API_KEY=
-# AGENT_SESSIONS_JEV_QUESTIONS=~/.config/agent-sessions/jev-questions.json
 """
 
 

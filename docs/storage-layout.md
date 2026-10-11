@@ -7,7 +7,6 @@ raw/agent=<agent>/machine=<machine>/<key>.zst                       a local file
 raw/agent=<agent>/machine=<machine>/<key>.zst.d/<start>-<end>.zst   bytes appended since, until folded
 blobs/<sha256>.zst                                                  bytes a rewrite replaced, stored once
 raw-versions/agent=<agent>/machine=<machine>/<key>.json             which blobs hold each earlier version
-labels/agent=<agent>/machine=<machine>/<key>/<start>-<end>.jsonl.zst shadow categoriser labels (opt-in)
 manifests/agent=<agent>/machine=<machine>/<session>.json            one per session
 snapshots/blobs/<sha256>                                            a harness or memory file, stored once
 snapshots/sets/<set-id>.json                                        which files made up one set
@@ -50,12 +49,6 @@ Every object is zstd (level 10) with these metadata fields: `sha256` (of the unc
 
 **Large files.** Files over 64 MB are hashed and compressed in a stream and uploaded from a temp file (multipart on R2).
 
-## Shadow labels
-
-With `AGENT_SESSIONS_CATEGORISE_CMD` set, each sync runs a categoriser over the transcript records (main and subagent files) it hasn't labelled yet, before uploading them. The labels go to `labels/…/<key>/<start>-<end>.jsonl.zst`, one JSON line per record: `line`, `bytes`, `category`, `waste`, plus whatever else the categoriser returned (Jev's answers and their probabilities). **Nothing is dropped**: every byte is uploaded whatever the label says. A failed categoriser leaves the bytes unlabelled and they are offered to it again next sync. The manifest lists each file's `labels` with a per-category summary, and `agent-sessions labels` totals them on a machine.
-
-The point is to measure first: label lines map to `event_uid = <transcript_uid>#<line>.<block>`, so a golden run's citations show whether anything marked as waste was ever needed (the recall check the video used before trusting a filter). `agent-sessions jev` is a categoriser backed by Jev; see `src/agent_sessions/jev.py` for its questions and how to replace them.
-
 ## Manifests
 
 There's one manifest per session: a Claude Code session (`<slug>/<session id>`), a Codex rollout, or a Pi session file. It's rewritten whenever one of the session's files changes.
@@ -92,7 +85,7 @@ There's one manifest per session: a Claude Code session (`<slug>/<session id>`),
 }
 ```
 
-- **`transcripts`** lists every file of the session, with the `pieces` that make up its current bytes, its earlier `versions` and, when the shadow categoriser is on, its `labels`. `role` is `main`, `subagent`, `tool_result`, `superseded` (an earlier transcript Claude Code set aside), `file_history`, `todo`, `task`, `session_env`, `debug` or `aux`. `line_count` and `prefix_sha256` (the hash of the first 20 lines) let the normaliser pin an input and spot a rewritten file. `head` is what the file's first lines say about it, so a Claude subagent file carries its own `agent_id`.
+- **`transcripts`** lists every file of the session, with the `pieces` that make up its current bytes and its earlier `versions`. `role` is `main`, `subagent`, `tool_result`, `superseded` (an earlier transcript Claude Code set aside), `file_history`, `todo`, `task`, `session_env`, `debug` or `aux`. `line_count` and `prefix_sha256` (the hash of the first 20 lines) let the normaliser pin an input and spot a rewritten file. `head` is what the file's first lines say about it, so a Claude subagent file carries its own `agent_id`.
 - **`launch`** is recorded by the session-start hook:
   - `process.argv` is the agent's command line, found by walking up from the hook to the agent's process. Pi hides its arguments from the process table, so its extension passes `process.argv` (`via: "extension"`).
   - `env` keeps `CLAUDE_CODE_*`, `CODEX_*`, `PI_*`, `ANTHROPIC_MODEL`, `MAX_THINKING_TOKENS` and a few other variables, minus anything named like a token, key, secret or password.

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 import re
-import shlex
 import socket
 import uuid
 from dataclasses import dataclass
@@ -83,10 +82,6 @@ class Config:
     local_store: Path | None = None
     # Minimum minutes between SQLite copies of one database (Codex rewrites them constantly).
     db_interval_minutes: int = 60
-    # Shadow categoriser run on each transcript delta before upload (see categorise.py). Off when unset.
-    categorise_cmd: list[str] | None = None
-    # TYPESAFE_* settings from config.env, passed to the categoriser (hooks don't load the shell profile).
-    categorise_env: dict[str, str] | None = None
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Config":
@@ -115,8 +110,6 @@ class Config:
             r2_bucket=get("R2_BUCKET"),
             local_store=Path(local_store) if local_store else None,
             db_interval_minutes=max(0, db_interval),
-            categorise_cmd=shlex.split(get("AGENT_SESSIONS_CATEGORISE_CMD") or "") or None,
-            categorise_env={k: v for k, v in file_values.items() if k.startswith(("TYPESAFE_", "AGENT_SESSIONS_JEV_"))},
         )
 
     def missing_r2_settings(self) -> list[str]:

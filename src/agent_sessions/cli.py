@@ -56,8 +56,6 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("doctor", help="check settings, bucket access, hooks and timer")
     sub.add_parser("status", help="what has been synced from this machine")
-    sub.add_parser("labels", help="shadow categoriser totals: bytes per category and what it marked as waste")
-    sub.add_parser("jev", help="categorise records on stdin with Jev (used as AGENT_SESSIONS_CATEGORISE_CMD)")
     p = sub.add_parser("cat", help="print a raw file rebuilt from the bucket (base object plus segments)")
     p.add_argument("key", help="raw/agent=<agent>/machine=<machine>/<key>.zst, or blobs/<sha256>.zst")
 
@@ -78,36 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         "doctor": _doctor,
         "status": _status,
         "cat": _cat,
-        "labels": _labels,
-        "jev": _jev,
     }[args.command](args)
-
-
-def _jev(args) -> int:
-    from . import jev
-
-    return jev.main()
-
-
-def _labels(args) -> int:
-    from . import categorise
-    from .config import Config
-    from .state import State
-
-    cfg = Config.load()
-    totals = categorise.merge(State(cfg.state_dir).all_label_summaries())
-    if not totals:
-        print("no labels yet" + ("" if cfg.categorise_cmd else ": set AGENT_SESSIONS_CATEGORISE_CMD to turn them on"))
-        return 0
-    mb = 1024 * 1024
-    print(f"{'category':<20} {'records':>9} {'MB':>9} {'waste MB':>9}")
-    for cat, t in sorted(totals.items(), key=lambda kv: -kv[1]["bytes"]):
-        print(f"{cat:<20} {t['records']:>9} {t['bytes'] / mb:>9.2f} {t['waste_bytes'] / mb:>9.2f}")
-    total = sum(t["bytes"] for t in totals.values())
-    waste = sum(t["waste_bytes"] for t in totals.values())
-    print(f"marked as waste: {waste / mb:.2f} of {total / mb:.2f} MB ({100 * waste / total:.1f}%), uncompressed; "
-          "nothing has been dropped")
-    return 0
 
 
 def _cat(args) -> int:

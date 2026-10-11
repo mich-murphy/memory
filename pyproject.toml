@@ -14,8 +14,6 @@ dependencies = ["boto3>=1.34", "zstandard>=0.22"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
-# The Jev shadow categoriser (`agent-sessions jev`); see src/agent_sessions/jev.py.
-jev = ["typesafe-sdk>=0.7"]
 
 [project.scripts]
 agent-sessions = "agent_sessions.cli:main"
