@@ -111,6 +111,7 @@ def test_jev_categoriser_maps_answers_and_cuts_the_middle(monkeypatch, capsys):
     out = [json.loads(x) for x in capsys.readouterr().out.splitlines()]
     assert [(o["category"], o["waste"]) for o in out] == [("human_message", False), ("tool_output", True)]
     assert out[1]["cut_for_categoriser"] and out[1]["answers"]["useful"]["probability"] == 0.9
+    assert out[0]["questions_sha"] == out[1]["questions_sha"]
     long_state = next(s for s, _ in seen if "characters cut" in s["record"])
     assert long_state["record"].startswith("x") and long_state["record"].endswith("x")
     assert "previous_record" in long_state

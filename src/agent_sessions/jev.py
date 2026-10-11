@@ -20,6 +20,7 @@ Needs the TypeSafe SDK: `uv tool install 'agent-sessions[jev] @ git+https://gith
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -83,6 +84,8 @@ def main() -> int:
         print("agent-sessions jev needs the TypeSafe SDK: install agent-sessions with the [jev] extra", file=sys.stderr)
         return 2
     spec = load_questions()
+    # Labels from different question wordings aren't comparable; this says which wording made each one.
+    questions_sha = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:16]
     questions = {name: Choice(instructions=q["instructions"], criteria={o: None for o in q["options"]})
                  for name, q in spec.items()}
     records = [json.loads(line) for line in sys.stdin if line.strip()]
@@ -93,7 +96,7 @@ def main() -> int:
             state = {"agent": rec["agent"], "role": rec["role"], "record": text}
             if rec.get("previous") is not None:
                 state["previous_record"] = middle_truncate(as_text(rec["previous"]), CONTEXT_CHARS)[0]
-            out: dict = {"line": rec["line"], "categoriser": "jev"}
+            out: dict = {"line": rec["line"], "categoriser": "jev", "questions_sha": questions_sha}
             if cut:
                 out["cut_for_categoriser"] = True
             try:
