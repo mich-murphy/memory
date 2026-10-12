@@ -6,10 +6,10 @@ The first piece is **agent-sessions**, a small collector that copies everything 
 
 ## Set up a machine
 
-You need [uv](https://docs.astral.sh/uv/) and an R2 API token scoped to the bucket with Object Read & Write. Use one token per machine so any machine can be revoked on its own.
+You need an R2 API token scoped to the bucket with Object Read & Write. Use one token per machine so any machine can be revoked on its own. Nothing else: agent-sessions is a single binary for Linux and macOS (13 or later) on amd64 or arm64.
 
 ```bash
-uv tool install git+https://github.com/mich-murphy/memory
+curl -fsSL https://raw.githubusercontent.com/mich-murphy/memory/main/install.sh | sh   # into ~/.local/bin
 agent-sessions install      # hooks, the Pi extension, a sweep every 10 minutes
 $EDITOR ~/.config/agent-sessions/config.env   # R2 endpoint, bucket and keys (written for you, mode 600)
 agent-sessions doctor       # checks the bucket, every hook and the timer
@@ -67,11 +67,15 @@ Logs are in `~/.local/state/agent-sessions/agent-sessions.log`.
 
 If a machine has memsync (this tool's earlier name) installed, run `memsync uninstall` first. A reinstall also replaces any memsync hook entries it finds.
 
+Rerun the install script to upgrade; it verifies each download against the release's `checksums.txt`. `VERSION=v0.1.0` picks a release. While the repo is private, the script downloads through `gh`, so log in with `gh auth login` first.
+
 ## Development
 
+Go 1.27 and [golangci-lint](https://golangci-lint.run) v2.14.0.
+
 ```bash
-uv venv && uv pip install -e '.[dev]'
-.venv/bin/pytest
+make hooks   # git hooks: format and lint on commit, tests on push
+make check   # every gate CI runs
 ```
 
-Linux and macOS only.
+[docs/quality-gates.md](docs/quality-gates.md) explains each gate and its settings, and [CLAUDE.md](CLAUDE.md) has the rules for coding agents. Linux and macOS only.

@@ -1,0 +1,22 @@
+# The hook returns at once and prints nothing; a detached sync uploads the session afterwards.
+age 3600 home/.pi/agent/sessions/--w--/2026-10-10T10-00-00-000Z_s1.jsonl
+exec agent-sessions hook pi --path $WORK/home/.pi/agent/sessions/--w--/2026-10-10T10-00-00-000Z_s1.jsonl
+! stdout .
+! stderr .
+waitfor bucket/raw/agent=pi/machine=testbox/sessions/--w--/2026-10-10T10-00-00-000Z_s1.jsonl.zst
+waitfor bucket/manifests/agent=pi/machine=testbox/2026-10-10T10-00-00-000Z_s1.json
+# The debounce marker is gone once the sync has started reading.
+! waitfor state/pending/[0-9a-f]*
+
+exec agent-sessions cat raw/agent=pi/machine=testbox/sessions/--w--/2026-10-10T10-00-00-000Z_s1.jsonl.zst
+cmp stdout home/.pi/agent/sessions/--w--/2026-10-10T10-00-00-000Z_s1.jsonl
+
+# Disabled: nothing happens.
+env AGENT_SESSIONS_DISABLE=1
+exec agent-sessions hook pi --path $WORK/home/.pi/agent/sessions/--w--/other.jsonl
+! stdout .
+! stderr .
+
+-- home/.pi/agent/sessions/--w--/2026-10-10T10-00-00-000Z_s1.jsonl --
+{"type":"session","version":3,"id":"s1","cwd":"/nowhere"}
+{"type":"message","id":"m1","message":{"role":"user","content":"hi"}}
