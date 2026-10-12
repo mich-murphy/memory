@@ -34,15 +34,26 @@ CREATE TABLE IF NOT EXISTS uploads (
     size INTEGER,
     uploaded_at REAL NOT NULL
 );
--- Earlier contents of a raw key, copied aside before a non-append rewrite replaced them.
-CREATE TABLE IF NOT EXISTS versions (
-    version_key TEXT PRIMARY KEY,
+-- The objects that make up a raw key's current bytes: the base object (start 0) and the
+-- append segments uploaded since, in order. A fold replaces them all with one base.
+CREATE TABLE IF NOT EXISTS pieces (
+    key TEXT NOT NULL,
+    start INTEGER NOT NULL,
+    end INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    object TEXT NOT NULL,
+    PRIMARY KEY (key, start)
+);
+-- Earlier contents of a raw key that a non-append rewrite replaced, kept as blobs/<sha>.zst
+-- pieces (one per object the old contents were made of).
+CREATE TABLE IF NOT EXISTS raw_versions (
     key TEXT NOT NULL,
     sha256 TEXT NOT NULL,
     size INTEGER,
-    versioned_at REAL NOT NULL
+    pieces TEXT NOT NULL,
+    versioned_at REAL NOT NULL,
+    PRIMARY KEY (key, sha256)
 );
-CREATE INDEX IF NOT EXISTS versions_key ON versions(key);
 CREATE TABLE IF NOT EXISTS sessions (
     agent TEXT NOT NULL,
     session_key TEXT NOT NULL,
@@ -139,14 +150,30 @@ class State:
     def record_upload(self, key: str, sha256: str, size: int | None = None) -> None:
         self.db.execute("INSERT OR REPLACE INTO uploads VALUES (?,?,?,?)", (key, sha256, size, time.time()))
 
-    def record_version(self, key: str, version_key: str, sha256: str, size: int | None) -> None:
-        self.db.execute("INSERT OR REPLACE INTO versions VALUES (?,?,?,?,?)", (version_key, key, sha256, size, time.time()))
+    def pieces(self, key: str) -> list[dict]:
+        rows = self.db.execute("SELECT start, end, sha256, object FROM pieces WHERE key = ? ORDER BY start", (key,))
+        return [{"start": r[0], "end": r[1], "sha256": r[2], "object": r[3]} for r in rows]
+
+    def set_pieces(self, key: str, pieces: list[dict]) -> None:
+        self.db.execute("DELETE FROM pieces WHERE key = ?", (key,))
+        for p in pieces:
+            self.add_piece(key, p)
+
+    def add_piece(self, key: str, p: dict) -> None:
+        self.db.execute("INSERT OR REPLACE INTO pieces VALUES (?,?,?,?,?)", (key, p["start"], p["end"], p["sha256"], p["object"]))
+
+    def record_version(self, key: str, sha256: str, size: int | None, pieces: list[dict]) -> None:
+        self.db.execute("INSERT OR IGNORE INTO raw_versions VALUES (?,?,?,?,?)",
+                        (key, sha256, size, json.dumps(pieces), time.time()))
 
     def versions(self, key: str) -> list[dict]:
         rows = self.db.execute(
-            "SELECT version_key, sha256, size, versioned_at FROM versions WHERE key = ? ORDER BY versioned_at", (key,)
+            "SELECT sha256, size, pieces, versioned_at FROM raw_versions WHERE key = ? ORDER BY versioned_at", (key,)
         ).fetchall()
-        return [{"object": r[0], "sha256": r[1], "size": r[2], "versioned_at": r[3]} for r in rows]
+        return [{"sha256": r[0], "size": r[1], "pieces": json.loads(r[2]), "versioned_at": r[3]} for r in rows]
+
+    def last_version_at(self, key: str) -> float | None:
+        return self.db.execute("SELECT MAX(versioned_at) FROM raw_versions WHERE key = ?", (key,)).fetchone()[0]
 
     # sessions ---------------------------------------------------------
     def get_session(self, agent: str, session_key: str) -> dict | None:
@@ -208,7 +235,8 @@ class State:
         ):
             out[f"{agent}/{role}"] = {"files": n, "bytes": total or 0}
         out["uploaded_objects"] = self.db.execute("SELECT COUNT(*) FROM uploads").fetchone()[0]
-        out["earlier_versions"] = self.db.execute("SELECT COUNT(*) FROM versions").fetchone()[0]
+        out["earlier_versions"] = self.db.execute("SELECT COUNT(*) FROM raw_versions").fetchone()[0]
+        out["unfolded_segments"] = self.db.execute("SELECT COUNT(*) FROM pieces WHERE start > 0").fetchone()[0]
         out["deleted_locally"] = self.db.execute("SELECT COUNT(*) FROM files WHERE deleted_at IS NOT NULL").fetchone()[0]
         return out
 

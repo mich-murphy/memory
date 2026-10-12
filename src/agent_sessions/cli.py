@@ -56,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("doctor", help="check settings, bucket access, hooks and timer")
     sub.add_parser("status", help="what has been synced from this machine")
+    p = sub.add_parser("cat", help="print a raw file rebuilt from the bucket (base object plus segments)")
+    p.add_argument("key", help="raw/agent=<agent>/machine=<machine>/<key>.zst, or blobs/<sha256>.zst")
 
     args = parser.parse_args(argv)
     if args.version:
@@ -73,7 +75,19 @@ def main(argv: list[str] | None = None) -> int:
         "uninstall": _uninstall,
         "doctor": _doctor,
         "status": _status,
+        "cat": _cat,
     }[args.command](args)
+
+
+def _cat(args) -> int:
+    from . import raw
+    from .config import Config
+    from .store import open_store
+
+    store = open_store(Config.load())
+    data = raw.read_key(store, args.key) if args.key.startswith("raw/") else raw.decompress(store.get(args.key))
+    sys.stdout.buffer.write(data)
+    return 0
 
 
 def _hook(argv: list[str]) -> int:

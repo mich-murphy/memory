@@ -78,7 +78,7 @@ def test_hook_end_to_end_detaches_and_syncs(env, capfd):
                        capture_output=True, timeout=10, env=os.environ.copy())
     assert r.returncode == 0 and r.stdout == b"" and r.stderr == b""
     assert time.monotonic() - started < 2.0
-    key = f"raw/agent=pi/machine=testbox/sessions/--home-code-proj--/{session.name}.gz"
+    key = f"raw/agent=pi/machine=testbox/sessions/--home-code-proj--/{session.name}.zst"
     deadline = time.monotonic() + 20
     while key not in bucket_keys(env["bucket"]) and time.monotonic() < deadline:
         time.sleep(0.2)

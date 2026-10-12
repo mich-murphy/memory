@@ -22,6 +22,10 @@ class Store(Protocol):
 
     def delete(self, key: str) -> None: ...
 
+    def get(self, key: str) -> bytes: ...
+
+    def list(self, prefix: str) -> list[str]: ...
+
 
 class LocalStore:
     def __init__(self, root: Path):
@@ -52,6 +56,16 @@ class LocalStore:
 
     def delete(self, key: str) -> None:
         (self.root / key).unlink(missing_ok=True)
+
+    def get(self, key: str) -> bytes:
+        return (self.root / key).read_bytes()
+
+    def list(self, prefix: str) -> list[str]:
+        base = self.root / prefix.rsplit("/", 1)[0] if "/" in prefix else self.root
+        if not base.is_dir():
+            return []
+        keys = (p.relative_to(self.root).as_posix() for p in base.rglob("*") if p.is_file() and not p.name.endswith(".tmp"))
+        return sorted(k for k in keys if k.startswith(prefix))
 
 
 class R2Store:
@@ -103,6 +117,15 @@ class R2Store:
 
     def delete(self, key: str) -> None:
         self.client.delete_object(Bucket=self.bucket, Key=key)
+
+    def get(self, key: str) -> bytes:
+        return self.client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
+
+    def list(self, prefix: str) -> list[str]:
+        keys = []
+        for page in self.client.get_paginator("list_objects_v2").paginate(Bucket=self.bucket, Prefix=prefix):
+            keys.extend(o["Key"] for o in page.get("Contents", []))
+        return keys
 
 
 def open_store(cfg: Config) -> Store:

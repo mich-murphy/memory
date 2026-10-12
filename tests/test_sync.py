@@ -9,8 +9,10 @@ import time
 
 import zstandard
 
+from agent_sessions import raw as rawfmt
 from agent_sessions import sync
 from agent_sessions.cli import main
+from agent_sessions.store import LocalStore
 from conftest import CLAUDE_SID, CODEX_THREAD, PI_SID, bucket_keys, jsonl
 
 RAW = "raw/agent={agent}/machine=testbox/"
@@ -21,11 +23,16 @@ PI_KEY = f"2026-10-10T10-00-00-000Z_{PI_SID}"
 
 
 def raw(agent: str, key: str) -> str:
-    return RAW.format(agent=agent) + key + ".gz"
+    return RAW.format(agent=agent) + key + ".zst"
 
 
 def read_object(env, key: str) -> bytes:
-    return gzip.decompress((env["bucket"] / key).read_bytes())
+    """A raw file rebuilt from its base object and segments, from the bucket alone."""
+    return rawfmt.read_key(LocalStore(env["bucket"]), key)
+
+
+def read_pieces(env, pieces: list[dict]) -> bytes:
+    return rawfmt.join(LocalStore(env["bucket"]).get, pieces)
 
 
 def manifest(env, agent: str, session_key: str) -> dict:
@@ -99,9 +106,10 @@ def test_sweep_captures_every_agent_dir_and_is_idempotent(env, capsys):
 def test_credentials_and_noise_are_never_copied(env):
     main(["sync", "--quiet"])
     keys = bucket_keys(env["bucket"])
-    assert not any(k.endswith((".credentials.json.gz", "auth.json.gz", ".key.gz")) for k in keys)
+    assert not any(k.endswith((".credentials.json.zst", "auth.json.zst", ".key.zst")) for k in keys)
     assert not any("shell-snapshots" in k for k in keys)
-    everything = b"".join(gzip.decompress(p.read_bytes()) if p.suffix == ".gz" else p.read_bytes()
+    everything = b"".join(rawfmt.decompress(p.read_bytes()) if p.suffix == ".zst" else
+                          gzip.decompress(p.read_bytes()) if p.suffix == ".gz" else p.read_bytes()
                           for p in env["bucket"].rglob("*") if p.is_file())
     assert b"secret-oauth" not in everything and b"secret-key" not in everything
     assert b"sk-ant-api-secret" not in everything and b"ghp_token" not in everything
@@ -112,17 +120,36 @@ def test_credentials_and_noise_are_never_copied(env):
     assert json.loads(runs[-1][0])["unknown"] >= 1
 
 
-def test_appended_session_is_reuploaded_without_a_version(env):
+def test_appended_session_uploads_only_new_bytes_then_folds(env):
     main(["sync", "--quiet"])
     path = env["claude_slug"] / f"{CLAUDE_SID}.jsonl"
+    key = raw("claude", f"projects/{SLUG}/{CLAUDE_SID}.jsonl")
+    first = path.stat().st_size
     with path.open("a") as fh:
         fh.write(jsonl({"type": "user", "message": {"role": "user", "content": "more"}}))
-    settle(path)
+    settle(path)  # written two minutes ago: the session is still going
     main(["sync", "--quiet"])
-    assert read_object(env, raw("claude", f"projects/{SLUG}/{CLAUDE_SID}.jsonl")) == path.read_bytes()
+    segment = rawfmt.segment_key(key, first, path.stat().st_size)
+    assert segment in bucket_keys(env["bucket"])
+    assert rawfmt.decompress((env["bucket"] / segment).read_bytes()) == path.read_bytes()[first:]
+    assert read_object(env, key) == path.read_bytes()
     main_file = next(f for f in manifest(env, "claude", CLAUDE_KEY)["transcripts"] if f["role"] == "main")
     assert main_file["size"] == path.stat().st_size and main_file["line_count"] == 3 and main_file["versions"] == []
-    assert not any(k.startswith("raw-versions/") for k in bucket_keys(env["bucket"]))
+    assert [p["start"] for p in main_file["pieces"]] == [0, first]
+    assert read_pieces(env, main_file["pieces"]) == path.read_bytes()
+    assert not any(k.startswith(("raw-versions/", "blobs/")) for k in bucket_keys(env["bucket"]))
+
+    # Quiet for longer than FOLD_AFTER_SECONDS: the next sweep folds it into one object.
+    settle(path, age=sync.FOLD_AFTER_SECONDS + 60)
+    main(["sync", "--quiet"])
+    assert not any(k.startswith(key + ".d/") for k in bucket_keys(env["bucket"]))
+    assert rawfmt.decompress((env["bucket"] / key).read_bytes()) == path.read_bytes()
+    main_file = next(f for f in manifest(env, "claude", CLAUDE_KEY)["transcripts"] if f["role"] == "main")
+    assert main_file["pieces"] == [{"start": 0, "end": path.stat().st_size, "sha256": main_file["sha256"], "object": key}]
+    # Folded and unchanged: nothing more to do.
+    before = (env["bucket"] / key).stat().st_mtime_ns
+    main(["sync", "--quiet"])
+    assert (env["bucket"] / key).stat().st_mtime_ns == before
 
 
 def test_rewritten_file_keeps_its_earlier_version(env):
@@ -134,11 +161,75 @@ def test_rewritten_file_keeps_its_earlier_version(env):
     settle(path)
     main(["sync", "--quiet"])
     key = f"projects/{SLUG}/{CLAUDE_SID}.jsonl"
-    version = f"raw-versions/agent=claude/machine=testbox/{key}/{old_sha}.gz"
-    assert read_object(env, version) == old
+    assert rawfmt.decompress((env["bucket"] / f"blobs/{old_sha}.zst").read_bytes()) == old
     assert read_object(env, raw("claude", key)) == path.read_bytes()
     main_file = next(f for f in manifest(env, "claude", CLAUDE_KEY)["transcripts"] if f["role"] == "main")
-    assert [v["object"] for v in main_file["versions"]] == [version] and main_file["versions"][0]["size"] == len(old)
+    [v] = main_file["versions"]
+    assert v["sha256"] == old_sha and v["size"] == len(old) and read_pieces(env, v["pieces"]) == old
+    index = json.loads((env["bucket"] / f"raw-versions/agent=claude/machine=testbox/{key}.json").read_text())
+    assert index["key"] == key and [x["sha256"] for x in index["versions"]] == [old_sha]
+
+
+def test_rewrite_of_a_file_with_segments_keeps_every_piece(env):
+    main(["sync", "--quiet"])
+    path = env["claude_slug"] / f"{CLAUDE_SID}.jsonl"
+    key = raw("claude", f"projects/{SLUG}/{CLAUDE_SID}.jsonl")
+    with path.open("a") as fh:
+        fh.write(jsonl({"type": "user", "message": {"role": "user", "content": "more"}}))
+    settle(path)
+    main(["sync", "--quiet"])
+    grown = path.read_bytes()
+    path.write_text(jsonl({"type": "user", "message": {"role": "user", "content": "rewritten"}}))
+    settle(path)
+    main(["sync", "--quiet"])
+    main_file = next(f for f in manifest(env, "claude", CLAUDE_KEY)["transcripts"] if f["role"] == "main")
+    [v] = main_file["versions"]
+    assert len(v["pieces"]) == 2 and all(p["object"].startswith("blobs/") for p in v["pieces"])
+    assert read_pieces(env, v["pieces"]) == grown
+    assert read_object(env, key) == path.read_bytes()
+    assert not any(k.startswith(key + ".d/") for k in bucket_keys(env["bucket"]))
+
+
+def test_identical_old_versions_are_stored_once(env):
+    main(["sync", "--quiet"])
+    a = env["claude"] / "plans" / "brave-plan.md"
+    b = env["claude"] / "plans" / "other-plan.md"
+    b.write_bytes(a.read_bytes())
+    main(["sync", "--quiet"])
+    for p in (a, b):
+        p.write_text("changed\n" + p.name)
+        settle(p)
+    main(["sync", "--quiet"])
+    blobs = [k for k in bucket_keys(env["bucket"]) if k.startswith("blobs/")]
+    assert len(blobs) == 1
+
+
+def test_database_versions_are_kept_at_most_daily(env, monkeypatch):
+    monkeypatch.setattr(sync, "SNAPSHOT_RECHECK_SECONDS", 0)
+    db_path = env["home"] / ".codex" / "state_5.sqlite"
+    key = raw("codex", "db/state_5.sqlite")
+
+    def write(n):
+        db = sqlite3.connect(db_path)
+        db.execute("CREATE TABLE IF NOT EXISTS t (n INTEGER)")
+        db.execute("INSERT INTO t VALUES (?)", (n,))
+        db.commit()
+        db.close()
+        copy = env["state"] / "exports" / "codex"
+        for c in copy.rglob("state_5.sqlite"):  # make the hourly copy due
+            settle(c, age=7200)
+
+    write(1)
+    main(["sync", "--quiet"])
+    for n in (2, 3, 4):
+        write(n)
+        main(["sync", "--quiet"])
+    out = env["tmp"] / "copy.sqlite"
+    out.write_bytes(read_object(env, key))
+    assert sqlite3.connect(out).execute("SELECT COUNT(*) FROM t").fetchone()[0] == 4
+    versions = sqlite3.connect(env["state"] / "state.sqlite3").execute(
+        "SELECT COUNT(*) FROM raw_versions WHERE key = ?", (key,)).fetchone()[0]
+    assert versions == 1
 
 
 def test_large_files_stream_and_keep_versions(env, monkeypatch):
@@ -153,15 +244,17 @@ def test_large_files_stream_and_keep_versions(env, monkeypatch):
     settle(path)
     main(["sync", "--quiet"])
     assert read_object(env, key) == path.read_bytes()
-    assert not any(k.startswith("raw-versions/") for k in bucket_keys(env["bucket"]))
+    assert any(k.startswith(key + ".d/") for k in bucket_keys(env["bucket"]))
+    assert not any(k.startswith(("raw-versions/", "blobs/")) for k in bucket_keys(env["bucket"]))
     before = path.read_bytes()
     path.write_bytes(b'{"type":"session","version":3,"id":"replaced"}\n' * 3)
     settle(path)
     main(["sync", "--quiet"])
-    versions = [k for k in bucket_keys(env["bucket"]) if k.startswith("raw-versions/agent=pi/")]
-    assert len(versions) == 1 and read_object(env, versions[0]) == before
     t = next(f for f in manifest(env, "pi", PI_KEY)["transcripts"] if f["role"] == "main")
     assert t["line_count"] == 3
+    [v] = t["versions"]
+    assert read_pieces(env, v["pieces"]) == before
+    assert read_object(env, key) == path.read_bytes()
 
 
 def test_deleted_file_gets_a_tombstone(env):
@@ -189,7 +282,7 @@ def test_partial_last_line_is_held_back_while_being_written(env):
         fh.write('"}\n')
     main(["sync", "--quiet"])
     assert read_object(env, key) == path.read_bytes()
-    assert not any(k.startswith("raw-versions/") for k in bucket_keys(env["bucket"]))
+    assert not any(k.startswith(("raw-versions/", "blobs/")) for k in bucket_keys(env["bucket"]))
 
 
 def test_codex_recompression_keeps_key_and_skips_reupload(env):
@@ -217,7 +310,7 @@ def test_hook_path_outside_default_roots_is_remembered_for_sweeps(env, tmp_path)
     assert main(["sync", "--quiet", "--agent", "pi", "--path", str(session)]) == 0
     keys = bucket_keys(env["bucket"])
     custom_keys = [k for k in keys if k.startswith("raw/agent=pi/machine=testbox/dirs/")]
-    assert len(custom_keys) == 1 and custom_keys[0].endswith(session.name + ".gz")
+    assert len(custom_keys) == 1 and custom_keys[0].endswith(session.name + ".zst")
 
     # A second session in that directory, never reported by a hook, is found by the sweep.
     sid2 = "0199a1b2-eeee-7bbb-8ccc-dddddddddddd"
@@ -240,7 +333,7 @@ def test_custom_claude_config_dir_gets_the_same_keys_from_hooks_and_sweeps(env, 
     main(["sync", "--quiet", "--agent", "claude"])
     sweep_keys = {k for k in bucket_keys(env["bucket"]) if "/roots/" in k}
     assert hook_keys and hook_keys <= sweep_keys
-    assert any(k.endswith("/settings.json.gz") for k in sweep_keys)
+    assert any(k.endswith("/settings.json.zst") for k in sweep_keys)
     # ~/.claude keeps unprefixed keys.
     assert raw("claude", "settings.json") in bucket_keys(env["bucket"])
 
@@ -355,7 +448,7 @@ def test_codex_databases_are_copied_with_the_backup_api(env):
     finally:
         db.close()
     keys = bucket_keys(env["bucket"])
-    assert not any(k.endswith(("-wal.gz", "-shm.gz")) for k in keys)
+    assert not any(k.endswith(("-wal.zst", "-shm.zst")) for k in keys)
     out = env["tmp"] / "copy.sqlite"
     out.write_bytes(read_object(env, raw("codex", "db/state_5.sqlite")))
     rows = sqlite3.connect(out).execute("SELECT * FROM threads").fetchall()
@@ -382,3 +475,15 @@ def test_git_remote_normalisation():
         assert normalise_remote(url) == "github.com/Me/proj"
     assert strip_userinfo("https://x:tok@github.com/a/b") == "https://github.com/a/b"
     assert subprocess.run(["git", "--version"], capture_output=True).returncode == 0
+
+
+def test_cat_rebuilds_a_file_from_its_segments(env, capsysbinary):
+    main(["sync", "--quiet"])
+    path = env["claude_slug"] / f"{CLAUDE_SID}.jsonl"
+    with path.open("a") as fh:
+        fh.write(jsonl({"type": "user", "message": {"role": "user", "content": "more"}}))
+    settle(path)
+    main(["sync", "--quiet"])
+    capsysbinary.readouterr()
+    assert main(["cat", raw("claude", f"projects/{SLUG}/{CLAUDE_SID}.jsonl")]) == 0
+    assert capsysbinary.readouterr().out == path.read_bytes()
