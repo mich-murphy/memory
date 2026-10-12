@@ -3,7 +3,6 @@ package syncer_test
 import (
 	"bytes"
 	"compress/gzip"
-	"context"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -39,7 +38,7 @@ var rawKey = testenv.Raw
 func run(t *testing.T, args ...string) (int, string) {
 	t.Helper()
 	var out, errOut bytes.Buffer
-	code := cli.Main(context.Background(), args, "test", cli.IO{Stdout: &out, Stderr: &errOut})
+	code := cli.Main(t.Context(), args, "test", cli.IO{Stdout: &out, Stderr: &errOut})
 	if errOut.Len() > 0 {
 		t.Logf("stderr: %s", errOut.String())
 	}
@@ -67,7 +66,7 @@ func readFile(t *testing.T, path string) []byte {
 // readObject rebuilds a raw file from its base object and segments, from the bucket alone.
 func readObject(t *testing.T, e *testenv.Env, key string) []byte {
 	t.Helper()
-	data, err := raw.ReadKey(context.Background(), store.NewLocal(e.Bucket), key)
+	data, err := raw.ReadKey(t.Context(), store.NewLocal(e.Bucket), key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +98,7 @@ func toPieces(t *testing.T, v any) []raw.Piece {
 func readPieces(t *testing.T, e *testenv.Env, v any) []byte {
 	t.Helper()
 	local := store.NewLocal(e.Bucket)
-	data, err := raw.Join(func(key string) ([]byte, error) { return local.Get(context.Background(), key) }, toPieces(t, v))
+	data, err := raw.Join(func(key string) ([]byte, error) { return local.Get(t.Context(), key) }, toPieces(t, v))
 	if err != nil {
 		t.Fatal(err)
 	}

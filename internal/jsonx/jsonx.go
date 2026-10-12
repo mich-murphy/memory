@@ -11,7 +11,7 @@ import (
 	"slices"
 )
 
-// Decode parses data into v, keeping numbers as json.Number so large integers survive a round
+// Decode parses data into v, keeping numbers as [json.Number] so large integers survive a round
 // trip.
 func Decode(data []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -88,7 +88,7 @@ func (o *Object) Len() int {
 }
 
 // MarshalJSON writes the object with its keys in order.
-func (o *Object) MarshalJSON() ([]byte, error) {
+func (o Object) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	buf.WriteByte('{')
 	for i, k := range o.keys {

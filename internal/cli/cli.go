@@ -81,11 +81,11 @@ func (a *agentList) Set(v string) error {
 	return nil
 }
 
-func (a agentList) orAll() []string {
-	if len(a) == 0 {
+func (a *agentList) orAll() []string {
+	if len(*a) == 0 {
 		return slices.Clone(adapters.Names)
 	}
-	return a
+	return *a
 }
 
 // stringList is a repeatable string flag.
@@ -104,7 +104,7 @@ func newFlags(name string, o IO) *flag.FlagSet {
 	return fs
 }
 
-// parse parses flags, returning flag.ErrHelp for -h and errUsage for anything else wrong (the
+// parse parses flags, returning [flag.ErrHelp] for -h and errUsage for anything else wrong (the
 // flag package has already printed why).
 func parse(fs *flag.FlagSet, args []string) error {
 	err := fs.Parse(args)

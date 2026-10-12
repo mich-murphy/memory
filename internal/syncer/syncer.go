@@ -167,7 +167,7 @@ func (s *Syncer) errorf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	s.Summary.Errors++
 	s.Summary.ErrorMessages = append(s.Summary.ErrorMessages, msg)
-	s.log.Error(msg)
+	s.log.Error("sync error", "error", msg)
 }
 
 // Roots lists an agent's roots: its defaults plus any a hook reported before.

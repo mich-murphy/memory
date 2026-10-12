@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
 	"net/http/httptest"
 	"os"
@@ -20,7 +19,7 @@ import (
 // exercise runs the same checks against any Store.
 func exercise(t *testing.T, s store.Store, prefix string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	k := func(name string) string { return prefix + name }
 	if err := s.Put(ctx, k("a/one"), []byte("1"), map[string]string{"sha256": "x"}); err != nil {
 		t.Fatal(err)

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	sqlite "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
 
 // SQLiteExports takes a consistent copy of each SQLite database under the root, through
