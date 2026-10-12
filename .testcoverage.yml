@@ -1,0 +1,19 @@
+# Coverage gate (go-test-coverage). Settings and reasons: docs/quality-gates.md.
+# The profile combines unit tests and the end-to-end runs of the built binary (make cover).
+profile: cover.out
+
+threshold:
+  total: 75
+  package: 60
+
+override:
+  # The packages that decide what gets uploaded: hashing and pieces, state, sync.
+  - path: ^internal/(raw|state|syncer)$
+    threshold: 85
+
+exclude:
+  paths:
+    - ^internal/testenv # fixtures for the tests themselves
+
+# A coverage-ignore comment must say why.
+force-annotation-comment: true

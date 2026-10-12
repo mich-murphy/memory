@@ -1,0 +1,20 @@
+# Install writes hooks next to the user's own settings; uninstall takes them out again.
+exec agent-sessions install --no-timer --agent claude --agent codex
+stdout 'wrote: .*settings.json'
+stdout 'codex: open Codex and run /hooks'
+grep '"model": "opus"' home/.claude/settings.json
+grep 'hook claude' home/.claude/settings.json
+grep 'hook codex' home/.codex/hooks.json
+
+exec agent-sessions install --no-timer --agent claude --agent codex
+stdout 'unchanged: .*settings.json'
+
+exec agent-sessions uninstall --keep-timer --agent claude --agent codex
+! grep 'hook claude' home/.claude/settings.json
+grep '"model": "opus"' home/.claude/settings.json
+! exists home/.codex/hooks.json
+
+-- home/.claude/settings.json --
+{"model": "opus"}
+-- home/.codex/config.toml --
+model = "gpt-5"

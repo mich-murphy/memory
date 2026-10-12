@@ -1,0 +1,23 @@
+# Git hooks: `make hooks` installs them. CI runs the same checks, so these only save a round trip.
+glob_matcher: doublestar
+
+pre-commit:
+  jobs:
+    - name: format
+      run: golangci-lint fmt {staged_files}
+      glob: "**/*.go"
+      stage_fixed: true
+    - name: lint
+      run: golangci-lint run ./...
+      glob: "**/*.go"
+    - name: tidy
+      run: go mod tidy -diff
+      glob: ["go.mod", "go.sum"]
+    - name: actionlint
+      run: go tool -modfile=tools.mod actionlint
+      glob: ".github/workflows/*.y*ml"
+
+pre-push:
+  jobs:
+    - name: test
+      run: make test

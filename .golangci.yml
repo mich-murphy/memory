@@ -1,0 +1,168 @@
+# Lint and format gates. The reasoning behind each choice, with sources, is in
+# docs/quality-gates.md. In short: checks whose fix always improves the code are hard gates;
+# size and style metrics stay off or lenient, because the cheapest way to satisfy them is an
+# arbitrary split or rename. Don't loosen or tighten this file to get a change through:
+# fix the code, or add a specific //nolint with a reason.
+version: "2"
+
+run:
+  go: "1.26"
+  tests: true
+
+linters:
+  default: none
+  enable:
+    # Bugs and correctness.
+    - govet
+    - staticcheck
+    - errcheck
+    - errorlint
+    - ineffassign
+    - unused
+    - bodyclose
+    - noctx
+    - contextcheck
+    - nilerr
+    - nilnesserr
+    - sqlclosecheck
+    - rowserrcheck
+    - copyloopvar
+    - exhaustive
+    - unparam
+    - unconvert
+    - reassign
+    - gocritic
+    - revive
+    # Security.
+    - gosec
+    # Current idioms.
+    - modernize
+    - intrange
+    - usestdlibvars
+    - usetesting
+    - perfsprint
+    # Dependencies.
+    - depguard
+    # Backstops, not targets.
+    - gocognit
+    - dupl
+    - godox
+    # Keeps suppressions honest.
+    - nolintlint
+    - misspell
+
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # reorders struct fields to save bytes: churn without a design benefit
+        - shadow # flags the idiomatic `err` shadowing in nested scopes
+    staticcheck:
+      checks:
+        - all
+        - -ST1000 # package comments on every package
+        - -ST1003 # initialism naming
+        - -ST1016 # receiver name consistency
+        - -ST1020 # doc comment form on exported functions
+        - -ST1021 # doc comment form on exported types
+        - -ST1022 # doc comment form on exported variables
+    errcheck:
+      check-type-assertions: true
+      check-blank: false # `_ = f.Close()` is a visible, reviewable decision
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+    gosec:
+      excludes:
+        - G204 # running git with fixed argument lists is part of the job
+        - G702 # G204's taint-analysis twin: same reason
+        - G304 # opening the files it walks is the job
+        - G703 # G304's taint-analysis twin: paths come from the user's own agent dirs and hooks
+        - G115 # sizes move between int, int64 and uint64 constantly
+    gocritic:
+      enabled-tags: [diagnostic, performance]
+      disabled-checks:
+        - hugeParam # copying a struct by value is fine at this size
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: errorf
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: unused-parameter
+        - name: var-declaration
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: io/ioutil
+              desc: use io and os
+            - pkg: github.com/pkg/errors
+              desc: use errors and fmt.Errorf with %w
+            - pkg: math/rand$
+              desc: use math/rand/v2
+            - pkg: github.com/stretchr/testify
+              desc: use the standard library and go-cmp in tests
+    gocognit:
+      # Default 30; golangci-lint suggests 10-20. Every `if err != nil` adds a point in Go, so
+      # lower limits force straight-line code to be split. Restructure or justify, never split
+      # a function just to get under this.
+      min-complexity: 20
+    dupl:
+      threshold: 150
+    godox:
+      keywords: [FIXME]
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+    exhaustive:
+      default-signifies-exhaustive: true
+
+  exclusions:
+    warn-unused: true
+    presets:
+      - comments
+      - common-false-positives
+    # std-error-handling is deliberately not used: it hides unchecked Close/Flush errors, which
+    # lose data on the write path.
+    rules:
+      # internal/testenv is test-only support code (fake agent homes, a git repo, fake tokens).
+      - path: (_test\.go|internal/testenv/)
+        linters: [dupl, gocognit, gosec]
+      # Unchecked type assertions in tests only: a wrong shape panics, and the test fails with
+      # the panic and its stack, which says as much as an "ok" check would. Unchecked errors
+      # (a different message) are still reported in tests.
+      - path: _test\.go
+        linters: [errcheck]
+        text: "^Error return value is not checked$"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      extra:
+        group-params: true
+        clothe-returns: true
+    goimports:
+      local-prefixes:
+        - github.com/mich-murphy/memory

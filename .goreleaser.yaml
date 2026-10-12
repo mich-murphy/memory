@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+builds:
+  - id: agent-sessions
+    main: ./cmd/agent-sessions
+    binary: agent-sessions
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    # Reproducible: the same commit builds the same bytes.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [binary]
+    name_template: "{{ .Binary }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: binary
+
+changelog:
+  use: github
+  sort: asc
