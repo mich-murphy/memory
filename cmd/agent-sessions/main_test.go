@@ -44,6 +44,14 @@ func TestScripts(t *testing.T) {
 	if coverDir == "" {
 		coverDir = t.TempDir() // a -cover binary warns on stderr without one
 	}
+	// Each -cover process writes the shared meta-data file through a temporary named only by
+	// the start time. macOS clocks tick in microseconds, so two scripts starting together can
+	// pick the same name, and one fails on stderr. Once the file exists no run writes it again.
+	prime := exec.CommandContext(t.Context(), filepath.Join(binDir, "agent-sessions"), "--version")
+	prime.Env = append(os.Environ(), "GOCOVERDIR="+coverDir)
+	if out, err := prime.CombinedOutput(); err != nil {
+		t.Fatalf("agent-sessions --version: %v\n%s", err, out)
+	}
 	testscript.Run(t, testscript.Params{
 		Dir: "testdata/script",
 		Setup: func(env *testscript.Env) error {
