@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/mich-murphy/memory/internal/adapters"
+	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/jsonx"
 	"github.com/mich-murphy/memory/internal/raw"
 	"github.com/mich-murphy/memory/internal/scrub"
@@ -104,16 +105,6 @@ func realPath(p string) string {
 	return a
 }
 
-func isFile(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && st.Mode().IsRegular()
-}
-
-func isDir(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && st.IsDir()
-}
-
 func FindProjectRoot(cwd string) (root string, isRepo bool) {
 	for d := cwd; ; d = filepath.Dir(d) {
 		if _, err := os.Lstat(filepath.Join(d, ".git")); err == nil {
@@ -151,7 +142,7 @@ func listDir(dir string, follow bool) (subdirs, files []string) {
 	}
 	for _, d := range entries {
 		p := filepath.Join(dir, d.Name())
-		linkedDir := d.Type()&os.ModeSymlink != 0 && isDir(p)
+		linkedDir := d.Type()&os.ModeSymlink != 0 && fsutil.IsDir(p)
 		switch {
 		case linkedDir && !follow:
 			continue
@@ -169,7 +160,7 @@ func listDir(dir string, follow bool) (subdirs, files []string) {
 func match(base, pattern string, recursiveOK bool) []string {
 	if top, ok := strings.CutSuffix(pattern, "/**"); ok {
 		top = filepath.Join(base, top)
-		if !isDir(top) {
+		if !fsutil.IsDir(top) {
 			return nil
 		}
 		return filterFiles(walkFiles(top, true))
@@ -180,7 +171,7 @@ func match(base, pattern string, recursiveOK bool) []string {
 		}
 		var out []string
 		for _, p := range walkFiles(base, false) {
-			if m, _ := filepath.Match(name, filepath.Base(p)); m && isFile(p) {
+			if m, _ := filepath.Match(name, filepath.Base(p)); m && fsutil.IsFile(p) {
 				out = append(out, p)
 			}
 		}
@@ -191,7 +182,7 @@ func match(base, pattern string, recursiveOK bool) []string {
 	var out []string
 	for _, p := range matches {
 		rel, err := filepath.Rel(base, p)
-		if err != nil || !isFile(p) {
+		if err != nil || !fsutil.IsFile(p) {
 			continue
 		}
 		if !slices.ContainsFunc(strings.Split(filepath.ToSlash(rel), "/"), func(part string) bool { return skipDirs[part] }) {
@@ -204,7 +195,7 @@ func match(base, pattern string, recursiveOK bool) []string {
 func filterFiles(paths []string) []string {
 	var out []string
 	for _, p := range paths {
-		if isFile(p) {
+		if fsutil.IsFile(p) {
 			out = append(out, p)
 		}
 	}
@@ -229,11 +220,11 @@ type scopeBase struct {
 func collect(a adapters.Adapter, root, cwd string) *collected {
 	c := newCollected(a.Name())
 	projectRoot, isRepo := "", false
-	if cwd != "" && isDir(cwd) {
+	if cwd != "" && fsutil.IsDir(cwd) {
 		projectRoot, isRepo = FindProjectRoot(cwd)
 	}
 	home := a.Home()
-	if isDir(home) {
+	if fsutil.IsDir(home) {
 		home = realPath(home)
 	}
 	rules := a.Rules()
@@ -253,7 +244,7 @@ func collect(a adapters.Adapter, root, cwd string) *collected {
 		c.addAncestors(projectRoot)
 	}
 	for _, p := range a.ManagedSettingsFiles() {
-		if isFile(p) {
+		if fsutil.IsFile(p) {
 			c.add("managed", p, p)
 		}
 	}
@@ -272,7 +263,7 @@ func collect(a adapters.Adapter, root, cwd string) *collected {
 }
 
 func (c *collected) addPatterns(s scopeBase) {
-	if !isDir(s.base) {
+	if !fsutil.IsDir(s.base) {
 		return
 	}
 	for _, pattern := range s.patterns {
@@ -285,7 +276,7 @@ func (c *collected) addPatterns(s scopeBase) {
 func (c *collected) addAncestors(projectRoot string) {
 	for d := filepath.Dir(projectRoot); ; d = filepath.Dir(d) {
 		for _, name := range ancestorNames {
-			if p := filepath.Join(d, name); isFile(p) {
+			if p := filepath.Join(d, name); fsutil.IsFile(p) {
 				c.add("ancestor", p, p)
 			}
 		}
@@ -341,11 +332,11 @@ func sortEntries(entries []*Entry) {
 func collectMemory(a adapters.Adapter, root, cwd, sessionKey string) *collected {
 	c := newCollected(a.Name())
 	projectRoot := ""
-	if cwd != "" && isDir(cwd) {
+	if cwd != "" && fsutil.IsDir(cwd) {
 		projectRoot, _ = FindProjectRoot(cwd)
 	}
 	for _, d := range a.MemoryDirs(root, projectRoot, sessionKey) {
-		if !isDir(d.Dir) {
+		if !fsutil.IsDir(d.Dir) {
 			continue
 		}
 		for _, p := range filterFiles(walkFiles(d.Dir, true)) {
@@ -403,7 +394,7 @@ func setDoc(kind string, a adapters.Adapter, root, projectRoot string, c *collec
 func Build(a adapters.Adapter, root, cwd, sessionKey string) (*Snapshot, error) {
 	s := &Snapshot{Blobs: map[string][]byte{}, Mtimes: map[string]float64{}}
 	projectRoot := ""
-	if cwd != "" && isDir(cwd) {
+	if cwd != "" && fsutil.IsDir(cwd) {
 		projectRoot, _ = FindProjectRoot(cwd)
 	}
 	var err error

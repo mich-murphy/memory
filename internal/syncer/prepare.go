@@ -112,14 +112,13 @@ func readCompleteLines(sf adapters.SessionFile, st os.FileInfo, mayBeMidLine boo
 }
 
 func prefixSHA(data []byte) string {
-	end := 0
-	for range prefixLines {
-		nl := bytes.IndexByte(data[end:], '\n')
-		if nl < 0 {
-			end = len(data)
+	end, read := 0, 0
+	for line := range bytes.Lines(data) {
+		if read == prefixLines {
 			break
 		}
-		end += nl + 1
+		end += len(line)
+		read++
 	}
 	return raw.SHA256(data[:end])
 }

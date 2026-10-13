@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,6 +11,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/mich-murphy/memory/internal/adapters"
+	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/jsonx"
 	"github.com/mich-murphy/memory/internal/shellwords"
 )
@@ -38,7 +40,7 @@ func commands(obj any, inHooks bool) []string {
 	var out []string
 	switch v := obj.(type) {
 	case map[string]any:
-		for _, k := range sortedKeys(v) {
+		for _, k := range slices.Sorted(maps.Keys(v)) {
 			val := v[k]
 			if k == "notify" || (k == "command" && inHooks) {
 				if c, ok := commandString(val); ok {
@@ -76,15 +78,6 @@ func commandString(v any) (string, bool) {
 		return shellwords.Join(words), true
 	}
 	return "", false
-}
-
-func sortedKeys(m map[string]any) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
 }
 
 func scriptPaths(command, home, projectRoot string) []string {
@@ -143,7 +136,7 @@ func imports(e *Entry, home string) []string {
 			if !filepath.IsAbs(p) {
 				p = filepath.Join(filepath.Dir(e.RealPath), p)
 			}
-			if isFile(p) {
+			if fsutil.IsFile(p) {
 				out = append(out, p)
 			}
 		}

@@ -37,7 +37,7 @@ const (
 
 type syncArgs struct {
 	agents      agentList
-	paths       stringList
+	paths       []string
 	delay       float64
 	marker      string
 	launch      string
@@ -52,7 +52,10 @@ func parseSync(cmd string, args []string, o IO) (*syncArgs, error) {
 	fs.Var(&a.agents, "agent", "limit to this agent: claude, codex or pi (repeatable)")
 	fs.BoolVar(&a.noSnapshots, "no-snapshots", false, "skip harness snapshots")
 	if cmd == "sync" {
-		fs.Var(&a.paths, "path", "sync this session file and its related files (repeatable)")
+		fs.Func("path", "sync this session file and its related files (repeatable)", func(p string) error {
+			a.paths = append(a.paths, p)
+			return nil
+		})
 		fs.Float64Var(&a.delay, "delay", 0, "wait this many seconds first (lets transcripts flush)")
 		fs.StringVar(&a.marker, "pending-marker", "", "internal: the hook's debounce marker")
 		fs.StringVar(&a.launch, "launch", "", "internal: launch details recorded by a session-start hook")

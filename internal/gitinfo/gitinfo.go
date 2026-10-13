@@ -10,12 +10,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/jsonx"
 	"github.com/mich-murphy/memory/internal/state"
 )
@@ -73,13 +73,8 @@ func NormaliseRemote(url string) string {
 	return strings.ToLower(host) + "/" + path
 }
 
-func isDir(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && st.IsDir()
-}
-
 func State(ctx context.Context, cwd, machineID string) state.GitState {
-	if cwd == "" || !isDir(cwd) {
+	if cwd == "" || !fsutil.IsDir(cwd) {
 		return state.GitState{}
 	}
 	root := gitLine(ctx, cwd, "rev-parse", "--show-toplevel")

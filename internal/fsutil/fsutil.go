@@ -78,12 +78,5 @@ func Exists(path string) bool {
 // Within expects both paths absolute and clean.
 func Within(path, root string) bool {
 	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (rel != ".." && !startsWithParent(rel))
-}
-
-func startsWithParent(rel string) bool {
-	return len(rel) >= 3 && rel[:3] == ".."+string(filepath.Separator)
+	return err == nil && filepath.IsLocal(rel)
 }
