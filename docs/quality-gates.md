@@ -13,10 +13,12 @@ The research behind these choices (tool versions, the configs of 13 well-regarde
 | `make lint` | golangci-lint with `.golangci.yml` |
 | `make test` | `go test -race -shuffle=on ./...` |
 | `make cover` | Tests with the race detector, plus end-to-end runs of the built binary, merged into one profile and checked against `.testcoverage.yml` |
+| `make crap` | `make cover`, then the CRAP gate on that profile |
 | `make fuzz` | Each fuzz target for `FUZZTIME` (default 30s) |
 | `make hooks` | Installs the git hooks in `lefthook.yml` |
+| `make gopls` | Installs the pinned gopls, for the Claude Code `gopls-lsp` plugin |
 
-Tools other than golangci-lint are pinned in `tools.mod` and run with `go tool -modfile=tools.mod <name>`, so they never touch the collector's own `go.mod`. golangci-lint is installed as a binary (v2.14.0), as its maintainers recommend.
+Tools other than golangci-lint are pinned in their own module, `tools/go.mod`, and run with `go tool -modfile=tools/go.mod <name>`, so they never touch the collector's `go.mod` and Dependabot updates them (it only reads files named `go.mod`). gopls has a module of its own, `tools/gopls/go.mod`, because it needs a different `golang.org/x/tools` from deadcode's. golangci-lint is installed as a binary, as its maintainers recommend, at the version in `.golangci-lint-version`: CI installs that version, and `make lint` fails when the local one differs.
 
 ## Toolchain
 
@@ -54,9 +56,9 @@ gofumpt (stricter gofmt) and goimports, with this module's imports grouped last.
 ## Other static checks
 
 - `go fix -diff ./...` fails when code isn't in current Go idiom.
-- `go mod tidy -diff` fails on an untidy `go.mod`.
-- `deadcode -test ./...` fails on functions nothing reaches from `main` or a test.
-- `govulncheck ./...` fails on a known vulnerability in code the collector calls.
+- `go mod tidy -diff` fails on an untidy `go.mod`, for the collector and both tool modules. CI also runs `go mod verify`.
+- `deadcode -test ./...` fails on functions nothing reaches from `main` or a test, and on code that doesn't load. `-test` stays because `raw.Join`, the manifest reader, is how tests prove a manifest rebuilds its file.
+- `govulncheck ./...` fails on a known vulnerability in code the collector calls. It only sees code built for the OS it runs on, so CI runs it on Linux and on macOS.
 - `actionlint` and zizmor check the GitHub Actions workflows. Every action is pinned to a commit SHA, credentials aren't persisted after checkout, and permissions are read-only unless a job needs more.
 
 ## Tests and coverage (`.testcoverage.yml`)
@@ -64,15 +66,24 @@ gofumpt (stricter gofmt) and goimports, with this module's imports grouped last.
 - Tests use the standard `testing` package and go-cmp; no assertion library. The command line is tested end to end with testscript (`cmd/agent-sessions/testdata/script`) against fake Claude Code, Codex and Pi homes. The S3 store is tested against gofakes3 in-process, and against real R2 when `AGENT_SESSIONS_TEST_R2=1` and R2 credentials are set.
 - Every test run uses the race detector (which needs cgo) and shuffled order. Release builds use `CGO_ENABLED=0`; every library is pure Go.
 - **Coverage gate:** 75% total, 60% per package, 85% for the packages that decide what gets uploaded (`internal/raw`, `internal/state`, `internal/syncer`). The end-to-end runs count, so `main` and wiring are tested rather than excluded. `internal/testenv` (test fixtures) is excluded. A coverage-ignore comment must give a reason. Coverage only finds untested code; it doesn't prove the tests are good, so raise it as the code settles rather than chasing it with tests that assert nothing.
-- **Fuzzing:** transcript heads (`internal/adapters`), hook input (`internal/hook`), JSON settings (`internal/jsonx`), zstd round trips (`internal/raw`), secret redaction in config files (`internal/scrub`) and shell quoting (`internal/shellwords`). Seeds run with every `go test`; CI fuzzes each for 30 seconds.
+- **CRAP gate (`make crap`, go-crap):** for each function, `CRAP = complexity² × (1 − coverage)³ + complexity`, from gocyclo's cyclomatic complexity and the coverage `make cover` measured. Any function over 30 fails, the threshold Savoia and Evans set and go-crap and fallow use. A fully tested function scores its complexity, so up to 30 branches pass when tested, while an untested one fails from 6 branches up. This catches what the per-package coverage gate can't: complex code with no tests inside a package that is well covered overall, such as the timer installers before this gate. Functions without coverage data count as untested. go-crap's baseline mode isn't used: it fails on any rise in any function's score, even from 2 to 3, and ignores new functions. A lower threshold would fail fully tested functions over that complexity, which is what gocognit's backstop is for. The fix for a failure is tests for the branches; simplify only where that also reads better.
+- **Fuzzing:** transcript heads (`internal/adapters`), hook input (`internal/hook`), JSON settings (`internal/jsonx`), zstd round trips (`internal/raw`), secret redaction in config files (`internal/scrub`), shell quoting (`internal/shellwords`) and credential stripping from git remotes (`internal/gitinfo`). Seeds run with every `go test`; CI fuzzes each for 30 seconds and keeps any failing input as a build artifact.
 
 ## CI and releases
 
-- `.github/workflows/ci.yml`: static checks on Linux; `make cover` on Linux amd64, Linux arm64 and macOS arm64; fuzzing; zizmor.
-- `.github/workflows/release.yml`: on a `v*` tag, GoReleaser (`.goreleaser.yaml`) builds linux and darwin binaries for amd64 and arm64 with reproducible flags, plus `checksums.txt` and SBOMs.
+- `.github/workflows/ci.yml`: static checks on Linux; `make crap` (tests, coverage and CRAP) on Linux amd64, Linux arm64 and macOS arm64, plus govulncheck on macOS; fuzzing; zizmor with its pedantic persona. Every job installs the Go on `go.mod`'s toolchain line through `.github/actions/setup-go` (setup-go's own `go-version-file` reads only the `go` line) and has a timeout.
+- `.github/workflows/release.yml`: on a `v*` tag, the whole of CI runs first; only then does GoReleaser (`.goreleaser.yaml`) builds linux and darwin binaries for amd64 and arm64 with reproducible flags, plus `checksums.txt` and SBOMs.
 - Dependabot updates Go modules and Actions weekly, grouped, after a 7-day cooldown.
 - Required checks on `main` need branch protection, which GitHub offers free on public repos.
 
+## Git hooks (`lefthook.yml`)
+
+Pre-commit formats staged Go files, runs `make lint` and `make tidy-check`, and lints changed workflows; pre-push runs the tests. The installed hooks call lefthook through `go tool -modfile=tools/go.mod`, and fail rather than let a commit through when they can't find it.
+
 ## For agents
 
-`CLAUDE.md` holds the rules for coding agents, and `.claude/settings.json` formats and lints each Go file Claude Code edits and stops it editing the gate configs.
+`CLAUDE.md` holds the rules for coding agents. `.claude/settings.json`:
+
+- formats and lints each Go file Claude Code edits (`.claude/hooks/go-check.sh`), waiting its turn when edits run in parallel, and tells you when golangci-lint or jq is missing instead of skipping silently;
+- stops it editing the gate configs;
+- turns on the `gopls-lsp` plugin (diagnostics after every edit, and navigation) and the gopls MCP server in `.mcp.json` (search, references, a package's API, safe renames and diagnostics). Claude Code doesn't start plugin language servers in cloud sessions, but it does start `.mcp.json` servers, so cloud sessions get gopls through MCP. Both run the version pinned in `tools/gopls/go.mod`. On a fresh clone the MCP server first downloads and builds gopls, which took longer than Claude Code's default 30-second MCP startup limit in a cloud session, so `env` raises `MCP_TIMEOUT` to 3 minutes. Claude Code doesn't restart a local MCP server that failed to start; `/mcp` retries it.

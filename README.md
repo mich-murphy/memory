@@ -71,11 +71,14 @@ Rerun the install script to upgrade; it verifies each download against the relea
 
 ## Development
 
-Go 1.27 and [golangci-lint](https://golangci-lint.run) v2.14.0.
+Go 1.27 and [golangci-lint](https://golangci-lint.run) at the version in `.golangci-lint-version`.
 
 ```bash
 make hooks   # git hooks: format and lint on commit, tests on push
 make check   # every gate CI runs
+make gopls   # the pinned gopls, for the Claude Code gopls-lsp plugin
 ```
+
+For Claude Code, the repo's settings turn on the `gopls-lsp` plugin and the gopls MCP server in `.mcp.json`. Install the plugin once with `claude plugin install gopls-lsp@claude-plugins-official --scope project` after `make gopls`, and approve the MCP server when asked.
 
 [docs/quality-gates.md](docs/quality-gates.md) explains each gate and its settings, and [CLAUDE.md](CLAUDE.md) has the rules for coding agents. Linux and macOS only.

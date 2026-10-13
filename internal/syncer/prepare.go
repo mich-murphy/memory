@@ -538,10 +538,11 @@ func (s *Syncer) finish(u *upload) error {
 		}
 	}
 	lines := u.lineCount
-	if err := s.state.RecordFile(&state.File{
+	file := &state.File{
 		Path: sf.Path, Agent: sf.Agent, Root: u.root, Key: sf.Key, SessionKey: sf.SessionKey, Role: sf.Role,
 		Size: u.size, MtimeNS: u.mtimeNS, SHA256: u.sha, LineCount: &lines, PrefixSHA256: u.prefixSHA, Head: u.head,
-	}); err != nil {
+	}
+	if err := s.state.RecordFile(file); err != nil {
 		return err
 	}
 	return s.state.Flush()

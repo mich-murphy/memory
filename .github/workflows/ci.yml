@@ -4,35 +4,32 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   GOTOOLCHAIN: local
-  GOLANGCI_LINT_VERSION: v2.14.0
 
 jobs:
   checks:
     name: Format, lint and static checks
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.27.2"
-          cache-dependency-path: |
-            go.sum
-            tools.sum
+      - uses: ./.github/actions/setup-go
+      - run: go mod verify
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          version-file: .golangci-lint-version
       - run: make fmt-check fix-check tidy-check deadcode vuln actionlint
 
   test:
@@ -42,32 +39,38 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-26]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.27.2"
-      # Race detector and shuffled order on every OS; the coverage gate on each too, since
-      # some code only runs on one of them (process lookup, launchd, systemd).
-      - run: make cover
+      - uses: ./.github/actions/setup-go
+      - run: make crap CRAP_FORMAT=github
+      - name: Scan darwin-only code for vulnerabilities
+        if: runner.os == 'macOS'
+        run: make vuln
 
   fuzz:
     name: Fuzz
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.27.2"
+      - uses: ./.github/actions/setup-go
       - run: make fuzz FUZZTIME=30s
+      - name: Keep failing fuzz inputs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-failures
+          path: "**/testdata/fuzz/**"
 
   zizmor:
     name: Workflow security
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -75,3 +78,4 @@ jobs:
       - uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
         with:
           advanced-security: false
+          persona: pedantic

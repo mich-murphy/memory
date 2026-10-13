@@ -1,0 +1,20 @@
+name: Set up Go
+description: Installs the Go named on go.mod's toolchain line.
+inputs:
+  cache:
+    description: Restore and save the Go module and build caches.
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - id: toolchain
+      shell: bash
+      run: echo "version=$(sed -n 's/^toolchain go//p' go.mod)" >> "$GITHUB_OUTPUT"
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: ${{ steps.toolchain.outputs.version }}
+        cache: ${{ inputs.cache }}
+        cache-dependency-path: |
+          go.sum
+          tools/go.sum
+          tools/gopls/go.sum

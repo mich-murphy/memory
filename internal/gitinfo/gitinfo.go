@@ -57,7 +57,7 @@ func gitLine(ctx context.Context, dir string, args ...string) string {
 }
 
 var (
-	userinfoRE = regexp.MustCompile(`(?i)^([a-z][a-z0-9+.-]*://)[^/@]*@`)
+	userinfoRE = regexp.MustCompile(`(?i)^([a-z][a-z0-9+.-]*://)[^/?#]*@`)
 	schemeRE   = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.-]*://`)
 	sshUserRE  = regexp.MustCompile(`^[^@/]+@`)
 	portRE     = regexp.MustCompile(`:\d+/`)

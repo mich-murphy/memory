@@ -36,7 +36,8 @@ import (
 
 var (
 	codexRolloutRE = regexp.MustCompile(
-		`^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-([0-9a-fA-F-]{36})(?:_[0-9a-fA-F-]{36})?\.jsonl(?:\.zst)?$`)
+		`^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-([0-9a-fA-F-]{36})(?:_[0-9a-fA-F-]{36})?\.jsonl(?:\.zst)?$`,
+	)
 	codexSessionDirs   = map[string]bool{"sessions": true, "archived_sessions": true}
 	codexHistoryFiles  = map[string]bool{"history.jsonl": true, "session_index.jsonl": true}
 	codexTopLevelRoles = map[string]string{

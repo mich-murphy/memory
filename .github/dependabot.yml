@@ -1,7 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: gomod
-    directory: /
+    directories: ["/", "/tools", "/tools/gopls"]
     schedule:
       interval: weekly
     cooldown:
@@ -10,7 +10,7 @@ updates:
       go-modules:
         patterns: ["*"]
   - package-ecosystem: github-actions
-    directory: /
+    directories: ["/", "/.github/actions/setup-go"]
     schedule:
       interval: weekly
     cooldown:

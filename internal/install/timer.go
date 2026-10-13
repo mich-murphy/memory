@@ -423,8 +423,8 @@ type HandlerRef struct {
 }
 
 // OurHandlers lists agent-sessions' handlers in a Claude Code settings or Codex hooks file.
-func OurHandlers(config *jsonx.Object) []HandlerRef {
-	v, _ := config.Get("hooks")
+func OurHandlers(settings *jsonx.Object) []HandlerRef {
+	v, _ := settings.Get("hooks")
 	hooks, isObj := v.(*jsonx.Object)
 	if !isObj {
 		return nil

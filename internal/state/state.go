@@ -644,8 +644,9 @@ func (s *State) RecordRun(startedAt float64, trigger string, summary any) error 
 	if err != nil {
 		return fmt.Errorf("state: %w", err)
 	}
-	if err := s.exec("INSERT INTO runs (started_at, finished_at, trigger, summary) VALUES (?,?,?,?)",
-		startedAt, Now(), trigger, string(b)); err != nil {
+	err = s.exec("INSERT INTO runs (started_at, finished_at, trigger, summary) VALUES (?,?,?,?)",
+		startedAt, Now(), trigger, string(b))
+	if err != nil {
 		return err
 	}
 	if err := s.exec("DELETE FROM runs WHERE id <= (SELECT MAX(id) - 500 FROM runs)"); err != nil {

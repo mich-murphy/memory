@@ -1,6 +1,9 @@
 package gitinfo
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRemoteNormalisation(t *testing.T) {
 	for _, url := range []string{
@@ -11,9 +14,45 @@ func TestRemoteNormalisation(t *testing.T) {
 			t.Errorf("NormaliseRemote(%q) = %q", url, got)
 		}
 	}
-	if got := StripUserinfo("https://x:tok@github.com/a/b"); got != "https://github.com/a/b" {
-		t.Errorf("StripUserinfo = %q", got)
+	for url, want := range map[string]string{
+		"https://x:tok@github.com/a/b":   "https://github.com/a/b",
+		"https://user:p@ss@github.com/a": "https://github.com/a",
+		"https://github.com/a@b":         "https://github.com/a@b",
+		"https://github.com?q=a@b":       "https://github.com?q=a@b",
+	} {
+		if got := StripUserinfo(url); got != want {
+			t.Errorf("StripUserinfo(%q) = %q, want %q", url, got, want)
+		}
 	}
+}
+
+func FuzzStripUserinfo(f *testing.F) {
+	for _, seed := range []string{
+		"https://x:tok@github.com/a/b", "https://u:p@ss@h/a", "ssh://git@h:22/p", "https://h/a@b", "git@h:p", "",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, url string) {
+		got := StripUserinfo(url)
+		if StripUserinfo(got) != got {
+			t.Errorf("not idempotent: %q -> %q -> %q", url, got, StripUserinfo(got))
+		}
+		if strings.Contains(authority(got), "@") {
+			t.Errorf("StripUserinfo(%q) = %q keeps userinfo", url, got)
+		}
+	})
+}
+
+func authority(url string) string {
+	loc := schemeRE.FindStringIndex(url)
+	if loc == nil {
+		return ""
+	}
+	rest := url[loc[1]:]
+	if end := strings.IndexAny(rest, "/?#"); end >= 0 {
+		return rest[:end]
+	}
+	return rest
 }
 
 func TestStateOutsideARepoIsZero(t *testing.T) {
