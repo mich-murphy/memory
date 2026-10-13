@@ -9,6 +9,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/mich-murphy/memory/internal/adapters"
+	"github.com/mich-murphy/memory/internal/gitinfo"
 	"github.com/mich-murphy/memory/internal/raw"
 )
 
@@ -139,24 +140,24 @@ func TestPiecesAndVersions(t *testing.T) {
 
 func TestSessionsRootsGitAndPending(t *testing.T) {
 	s := open(t)
-	if sess, err := s.GetSession(adapters.SessionRef{Agent: "pi", Key: "s"}); sess != nil || err != nil {
-		t.Errorf("GetSession(missing) = %v, %v", sess, err)
+	if sess, err := s.Session(adapters.SessionRef{Agent: "pi", Key: "s"}); sess != nil || err != nil {
+		t.Errorf("Session(missing) = %v, %v", sess, err)
 	}
 	mem := "m"
 	in := &Session{
 		Info:      map[string]any{"cwd": "/w"},
-		Snapshots: []SnapshotEntry{{ID: "set", MemoryID: &mem, Git: GitState{Head: "h"}, Timing: "post_hoc", TakenAt: 1, Mtimes: map[string]float64{"x": 2}}},
+		Snapshots: []SnapshotEntry{{ID: "set", MemoryID: &mem, Git: gitinfo.State{Head: "h"}, Timing: "post_hoc", TakenAt: 1, Mtimes: map[string]float64{"x": 2}}},
 		Launches:  []map[string]any{{"event": "SessionStart"}},
 		FirstSeen: 3,
 	}
 	check(t, s.PutSession(adapters.SessionRef{Agent: "pi", Key: "s"}, in))
-	out, err := s.GetSession(adapters.SessionRef{Agent: "pi", Key: "s"})
+	out, err := s.Session(adapters.SessionRef{Agent: "pi", Key: "s"})
 	check(t, err)
 	if diff := cmp.Diff(in, out); diff != "" {
 		t.Errorf("session round trip:\n%s", diff)
 	}
 	check(t, s.PutSession(adapters.SessionRef{Agent: "pi", Key: "empty"}, &Session{}))
-	if e, _ := s.GetSession(adapters.SessionRef{Agent: "pi", Key: "empty"}); e == nil || e.Info == nil {
+	if e, _ := s.Session(adapters.SessionRef{Agent: "pi", Key: "empty"}); e == nil || e.Info == nil {
 		t.Errorf("empty session = %+v", e)
 	}
 

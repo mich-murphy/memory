@@ -22,28 +22,28 @@ func SQLiteExports(ctx context.Context, a Adapter, root string, databases []stri
 	interval time.Duration,
 ) []SessionFile {
 	var out []SessionFile
-	for _, db := range databases {
-		rel, ok := Rel(db, root)
+	for _, src := range databases {
+		rel, ok := relative(src, root)
 		if !ok {
 			continue
 		}
-		dest := filepath.Join(workDir, a.Name(), RootTag(root), filepath.FromSlash(rel))
+		dest := filepath.Join(workDir, a.Name(), rootTag(root), filepath.FromSlash(rel))
 		sigPath := dest + ".sig"
-		sig := dbSignature(db)
+		sig := dbSignature(src)
 		old, _ := os.ReadFile(sigPath)
 		due := true
 		if st, err := os.Stat(dest); err == nil {
 			due = string(old) != sig && time.Since(st.ModTime()) >= interval
 		}
 		if due {
-			if err := BackupSQLite(ctx, db, dest); err != nil {
+			if err := backupSQLite(ctx, src, dest); err != nil {
 				// Locked, or not really a database: try again next sweep.
 				continue
 			}
 			_ = os.WriteFile(sigPath, []byte(sig), 0o600) // without it the next sweep just copies again
 		}
 		if fsutil.IsFile(dest) {
-			out = append(out, SessionFile{Agent: a.Name(), Root: root, Path: dest, Key: KeyPrefix(a, root) + "db/" + rel, Role: RoleDB})
+			out = append(out, SessionFile{Agent: a.Name(), Root: root, Path: dest, Key: keyPrefix(a, root) + "db/" + rel, Role: RoleDB})
 		}
 	}
 	return out
@@ -65,7 +65,7 @@ type backuper interface {
 	NewBackup(dstURI string) (*sqlite.Backup, error)
 }
 
-func BackupSQLite(ctx context.Context, src, dest string) error {
+func backupSQLite(ctx context.Context, src, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return fmt.Errorf("backup %s: %w", src, err)
 	}

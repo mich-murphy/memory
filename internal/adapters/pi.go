@@ -90,7 +90,7 @@ func (p *Pi) InferRoot(path string) string {
 }
 
 func (p *Pi) Classify(path, root string) (SessionFile, bool) {
-	rel, ok := Rel(path, root)
+	rel, ok := relative(path, root)
 	if !ok {
 		return SessionFile{}, false
 	}
@@ -98,7 +98,7 @@ func (p *Pi) Classify(path, root string) (SessionFile, bool) {
 	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	isJSONL := filepath.Ext(path) == ".jsonl"
 	if p.isAgentDir(root) {
-		prefix := KeyPrefix(p, root)
+		prefix := keyPrefix(p, root)
 		if parts[0] == "sessions" && isJSONL && len(parts) <= 3 {
 			return SessionFile{Agent: p.Name(), Root: root, Path: path, Key: prefix + rel, SessionKey: stem, Role: RoleMain}, true
 		}
@@ -111,7 +111,7 @@ func (p *Pi) Classify(path, root string) (SessionFile, bool) {
 	if !isJSONL || len(parts) > 2 {
 		return SessionFile{}, false
 	}
-	return SessionFile{Agent: p.Name(), Root: root, Path: path, Key: "dirs/" + RootTag(root) + "/" + rel, SessionKey: stem, Role: RoleMain}, true
+	return SessionFile{Agent: p.Name(), Root: root, Path: path, Key: "dirs/" + rootTag(root) + "/" + rel, SessionKey: stem, Role: RoleMain}, true
 }
 
 func (p *Pi) UserBase(root string) string {

@@ -29,7 +29,7 @@ import (
 // Variables so tests can shrink them.
 var (
 	snapshotRecheck       = 600 * time.Second
-	largeFileBytes  int64 = 64 << 20
+	largeFileSize   int64 = 64 << 20
 	chunkSize       int64 = 1 << 20
 )
 
@@ -83,12 +83,12 @@ type Options struct {
 
 type Syncer struct {
 	cfg      *config.Config
-	store    store.Store
-	state    *state.State
+	bucket   store.Store
+	db       *state.State
 	adapters map[string]adapters.Adapter
 	opts     Options
 	log      *slog.Logger
-	now      func() time.Time
+	clock    func() time.Time
 
 	Summary Summary
 
@@ -99,7 +99,7 @@ type Syncer struct {
 	tmpDir        string
 }
 
-func New(cfg *config.Config, st store.Store, s *state.State, ads map[string]adapters.Adapter, opts Options) *Syncer {
+func New(cfg *config.Config, bucket store.Store, db *state.State, ads map[string]adapters.Adapter, opts Options) *Syncer {
 	if opts.Trigger == "" {
 		opts.Trigger = "manual"
 	}
@@ -108,7 +108,7 @@ func New(cfg *config.Config, st store.Store, s *state.State, ads map[string]adap
 		logger = slog.Default()
 	}
 	return &Syncer{
-		cfg: cfg, store: st, state: s, adapters: ads, opts: opts, log: logger, now: time.Now,
+		cfg: cfg, bucket: bucket, db: db, adapters: ads, opts: opts, log: logger, clock: time.Now,
 		Summary:       Summary{ErrorMessages: []string{}},
 		sessionRoots:  map[adapters.SessionRef]string{},
 		touched:       map[adapters.SessionRef]bool{},
@@ -119,7 +119,7 @@ func New(cfg *config.Config, st store.Store, s *state.State, ads map[string]adap
 }
 
 func (s *Syncer) nowSeconds() float64 {
-	return state.UnixSeconds(s.now())
+	return state.UnixSeconds(s.clock())
 }
 
 func (s *Syncer) errorf(format string, args ...any) {
@@ -129,10 +129,10 @@ func (s *Syncer) errorf(format string, args ...any) {
 	s.log.Error("sync error", "error", msg)
 }
 
-// Roots always includes the canonical root: a sweep runs with the environment of whichever
+// roots always includes the canonical root: a sweep runs with the environment of whichever
 // agent's hook started it, and CLAUDE_CONFIG_DIR and friends there would otherwise hide it.
-func (s *Syncer) Roots(agent string) ([]string, error) {
-	extra, err := s.state.ExtraRoots(agent)
+func (s *Syncer) roots(agent string) ([]string, error) {
+	extra, err := s.db.ExtraRoots(agent)
 	if err != nil {
 		return nil, err
 	}
@@ -146,25 +146,25 @@ func (s *Syncer) Roots(agent string) ([]string, error) {
 	return out, nil
 }
 
-func (s *Syncer) markManifestPending(id adapters.SessionRef) error {
-	s.touched[id] = true
-	return s.state.MarkManifestPending(id)
+func (s *Syncer) markManifestPending(ref adapters.SessionRef) error {
+	s.touched[ref] = true
+	return s.db.MarkManifestPending(ref)
 }
 
-func (s *Syncer) noteSessionRoot(id adapters.SessionRef, root string) {
-	if _, ok := s.sessionRoots[id]; !ok {
-		s.sessionRoots[id] = root
+func (s *Syncer) noteSessionRoot(ref adapters.SessionRef, root string) {
+	if _, ok := s.sessionRoots[ref]; !ok {
+		s.sessionRoots[ref] = root
 	}
 }
 
 func (s *Syncer) excluded(path string) bool {
-	return path == s.cfg.ConfigPath || fsutil.Within(path, s.cfg.StateDir)
+	return path == s.cfg.Path || fsutil.Within(path, s.cfg.StateDir)
 }
 
 func (s *Syncer) SweepFiles(ctx context.Context, agents []string) ([]adapters.SessionFile, error) {
 	var out []adapters.SessionFile
 	for _, agent := range agents {
-		roots, err := s.Roots(agent)
+		roots, err := s.roots(agent)
 		if err != nil {
 			return nil, err
 		}
@@ -204,7 +204,7 @@ func (s *Syncer) tombstone(agent, root string, onDisk []adapters.SessionFile) er
 	for _, sf := range onDisk {
 		present[sf.Path] = true
 	}
-	live, err := s.state.LiveFiles(agent, root)
+	live, err := s.db.LiveFiles(agent, root)
 	if err != nil {
 		return err
 	}
@@ -213,19 +213,19 @@ func (s *Syncer) tombstone(agent, root string, onDisk []adapters.SessionFile) er
 		if present[f.Path] || fsutil.Exists(f.Path) {
 			continue
 		}
-		if err := s.state.MarkDeleted(f.Path, now); err != nil {
+		if err := s.db.MarkDeleted(f.Path, now); err != nil {
 			return err
 		}
 		s.Summary.Deleted++
 		if f.SessionKey != "" {
-			id := f.Session()
-			if err := s.markManifestPending(id); err != nil {
+			ref := f.Session()
+			if err := s.markManifestPending(ref); err != nil {
 				return err
 			}
-			s.noteSessionRoot(id, root)
+			s.noteSessionRoot(ref, root)
 		}
 	}
-	return s.state.Flush()
+	return s.db.Flush()
 }
 
 func (s *Syncer) classifyHookPath(agent, path string) (adapters.SessionFile, bool, error) {
@@ -247,7 +247,7 @@ func (s *Syncer) classifyHookPath(agent, path string) (adapters.SessionFile, boo
 }
 
 func (s *Syncer) classifyReported(a adapters.Adapter, path string) (adapters.SessionFile, bool, error) {
-	roots, err := s.Roots(a.Name())
+	roots, err := s.roots(a.Name())
 	if err != nil {
 		return adapters.SessionFile{}, false, err
 	}
@@ -273,15 +273,15 @@ func (s *Syncer) rememberExtraRoot(agent, root string) error {
 	if root == s.adapters[agent].CanonicalRoot() {
 		return nil
 	}
-	known, err := s.state.ExtraRoots(agent)
+	known, err := s.db.ExtraRoots(agent)
 	if err != nil || slices.Contains(known, root) {
 		return err
 	}
-	if err := s.state.AddExtraRoot(agent, root); err != nil {
+	if err := s.db.AddExtraRoot(agent, root); err != nil {
 		return err
 	}
 	s.log.Info("remembering root", "agent", agent, "root", root)
-	return s.state.Flush()
+	return s.db.Flush()
 }
 
 func (s *Syncer) HookFiles(agent string, paths []string) ([]adapters.SessionFile, error) {
@@ -310,12 +310,12 @@ type result struct {
 }
 
 func (s *Syncer) Run(ctx context.Context, files []adapters.SessionFile) (*Summary, error) {
-	pending, err := s.state.PendingManifests()
+	pending, err := s.db.PendingManifests()
 	if err != nil {
 		return &s.Summary, err
 	}
-	for _, id := range pending {
-		s.touched[id] = true
+	for _, ref := range pending {
+		s.touched[ref] = true
 	}
 	results := make(chan result, uploadWorkers*2)
 	sem := make(chan struct{}, uploadWorkers)
@@ -370,7 +370,7 @@ func (s *Syncer) Run(ctx context.Context, files []adapters.SessionFile) (*Summar
 	if err := s.writeManifests(ctx); err != nil {
 		return &s.Summary, err
 	}
-	return &s.Summary, s.state.Flush()
+	return &s.Summary, s.db.Flush()
 }
 
 func (s *Syncer) fail(path string, err error) {
@@ -385,8 +385,8 @@ func (s *Syncer) versionsKey(sf adapters.SessionFile) string {
 	return "raw-versions/agent=" + sf.Agent + "/machine=" + s.cfg.MachineID + "/" + sf.Key + ".json"
 }
 
-func (s *Syncer) manifestKey(id adapters.SessionRef) string {
-	return "manifests/agent=" + id.Agent + "/machine=" + s.cfg.MachineID + "/" + id.Key + ".json"
+func (s *Syncer) manifestKey(ref adapters.SessionRef) string {
+	return "manifests/agent=" + ref.Agent + "/machine=" + s.cfg.MachineID + "/" + ref.Key + ".json"
 }
 
 func parallel[T any](items []T, fn func(T) error) []error {

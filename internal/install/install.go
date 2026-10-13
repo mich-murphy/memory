@@ -22,30 +22,30 @@ import (
 var Ours = regexp.MustCompile(`(?:agent-sessions|agent_sessions).*\bhook (claude|codex|pi)\b`)
 
 type HookEvent struct {
-	Name        string
-	Async       bool
-	TimeoutSecs int
+	Name    string
+	Async   bool
+	Timeout time.Duration
 }
 
 // docs/hooks.md says why each event is hooked and how.
 var ClaudeEvents = []HookEvent{
-	{"SessionStart", true, 30},
-	{"Stop", true, 30},
-	{"StopFailure", true, 30},
-	{"SubagentStop", true, 30},
-	{"PreCompact", true, 30},
-	{"TaskCompleted", true, 30},
-	{"TeammateIdle", true, 30},
-	{"SessionEnd", false, 5},
+	{"SessionStart", true, 30 * time.Second},
+	{"Stop", true, 30 * time.Second},
+	{"StopFailure", true, 30 * time.Second},
+	{"SubagentStop", true, 30 * time.Second},
+	{"PreCompact", true, 30 * time.Second},
+	{"TaskCompleted", true, 30 * time.Second},
+	{"TeammateIdle", true, 30 * time.Second},
+	{"SessionEnd", false, 5 * time.Second},
 }
 
 var CodexEvents = []HookEvent{
-	{"SessionStart", true, 30},
-	{"Stop", true, 30},
-	{"SubagentStop", true, 30},
-	{"PreCompact", true, 30},
-	{"Interrupt", true, 3},
-	{"SessionEnd", false, 3},
+	{"SessionStart", true, 30 * time.Second},
+	{"Stop", true, 30 * time.Second},
+	{"SubagentStop", true, 30 * time.Second},
+	{"PreCompact", true, 30 * time.Second},
+	{"Interrupt", true, 3 * time.Second},
+	{"SessionEnd", false, 3 * time.Second},
 }
 
 type Options struct {
@@ -59,8 +59,6 @@ type Options struct {
 func (o *Options) Logf(format string, args ...any) {
 	o.Log = append(o.Log, fmt.Sprintf(format, args...))
 }
-
-var Agents = map[string]func(*Options) error{"claude": Claude, "codex": Codex, "pi": Pi}
 
 // Command prefers agent-sessions on PATH, whose path survives upgrades, which keeps Codex's
 // trust hash for the hook valid.
@@ -193,8 +191,8 @@ func withoutOurs(groups []any) []any {
 	return kept
 }
 
-func MergeHooks(config *jsonx.Object, events []HookEvent, command string) {
-	v, _ := config.Get("hooks")
+func mergeHooks(doc *jsonx.Object, events []HookEvent, command string) {
+	v, _ := doc.Get("hooks")
 	hooks, ok := v.(*jsonx.Object)
 	if !ok {
 		hooks = jsonx.NewObject()
@@ -216,7 +214,7 @@ func MergeHooks(config *jsonx.Object, events []HookEvent, command string) {
 			if e.Async {
 				handler.Set("async", true)
 			}
-			handler.Set("timeout", e.TimeoutSecs)
+			handler.Set("timeout", int(e.Timeout/time.Second))
 			group := jsonx.NewObject()
 			group.Set("hooks", []any{handler})
 			v, _ := hooks.Get(e.Name)
@@ -225,9 +223,9 @@ func MergeHooks(config *jsonx.Object, events []HookEvent, command string) {
 		}
 	}
 	if hooks.Len() > 0 {
-		config.Set("hooks", hooks)
+		doc.Set("hooks", hooks)
 	} else {
-		config.Delete("hooks")
+		doc.Delete("hooks")
 	}
 }
 
@@ -246,7 +244,7 @@ func Claude(o *Options) error {
 	if !o.Remove {
 		command = hookCommand(o.Command, "claude")
 	}
-	MergeHooks(settings, ClaudeEvents, command)
+	mergeHooks(settings, ClaudeEvents, command)
 	if !o.Remove {
 		raiseCleanupPeriod(settings, o)
 	}
@@ -282,7 +280,7 @@ func raiseCleanupPeriod(settings *jsonx.Object, o *Options) {
 func Codex(o *Options) error {
 	root := adapters.NewCodex(o.Home).Dir()
 	path := filepath.Join(root, "hooks.json")
-	config, err := loadJSON(path)
+	doc, err := loadJSON(path)
 	if err != nil {
 		return err
 	}
@@ -290,8 +288,8 @@ func Codex(o *Options) error {
 	if !o.Remove {
 		command = hookCommand(o.Command, "codex")
 	}
-	MergeHooks(config, CodexEvents, command)
-	if o.Remove && config.Len() == 0 {
+	mergeHooks(doc, CodexEvents, command)
+	if o.Remove && doc.Len() == 0 {
 		if fsutil.Exists(path) && !o.DryRun {
 			if _, err := backup(path); err != nil {
 				return err
@@ -303,7 +301,7 @@ func Codex(o *Options) error {
 		o.Logf("removed: %s", path)
 		return nil
 	}
-	body, err := jsonx.Indent(config, 2)
+	body, err := jsonx.Indent(doc, 2)
 	if err != nil {
 		return err
 	}

@@ -156,11 +156,11 @@ func IsCredential(name string) bool {
 		strings.HasPrefix(name, ".claude.json")
 }
 
-func Skipped(name string) bool {
+func skipped(name string) bool {
 	return IsCredential(name) || hasAnySuffix(name, skipSuffixes)
 }
 
-func IsSQLite(name string) bool {
+func isSQLite(name string) bool {
 	return hasAnySuffix(name, sqliteSuffixes)
 }
 
@@ -178,16 +178,16 @@ func IsExecutableBinary(path string, mode fs.FileMode) bool {
 	return slices.ContainsFunc(binaryMagic, func(m []byte) bool { return bytes.HasPrefix(head[:n], m) })
 }
 
-func RootTag(root string) string {
+func rootTag(root string) string {
 	sum := sha256.Sum256([]byte(root))
 	return hex.EncodeToString(sum[:])[:10]
 }
 
-func KeyPrefix(a Adapter, root string) string {
+func keyPrefix(a Adapter, root string) string {
 	if root == a.CanonicalRoot() {
 		return ""
 	}
-	return "roots/" + RootTag(root) + "/"
+	return "roots/" + rootTag(root) + "/"
 }
 
 // layout is what an adapter knows about its agent before reading a file.
@@ -258,7 +258,7 @@ func walk(a Adapter, root string) []walkedFile {
 			}
 			return nil
 		}
-		if !d.Type().IsRegular() || Skipped(d.Name()) {
+		if !d.Type().IsRegular() || skipped(d.Name()) {
 			return nil
 		}
 		info, err := d.Info()
@@ -274,7 +274,7 @@ func walk(a Adapter, root string) []walkedFile {
 func Discover(a Adapter, root string) (files []SessionFile, databases []string) {
 	for _, f := range walk(a, root) {
 		switch {
-		case IsSQLite(filepath.Base(f.path)):
+		case isSQLite(filepath.Base(f.path)):
 			databases = append(databases, f.path)
 		case IsExecutableBinary(f.path, f.mode):
 		default:
@@ -286,14 +286,14 @@ func Discover(a Adapter, root string) (files []SessionFile, databases []string) 
 	return files, databases
 }
 
-func FilesUnder(roots ...string) []string {
+func filesUnder(roots ...string) []string {
 	var out []string
 	for _, root := range roots {
 		if !fsutil.IsDir(root) {
 			continue
 		}
 		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-			if err == nil && d.Type().IsRegular() && !Skipped(d.Name()) {
+			if err == nil && d.Type().IsRegular() && !skipped(d.Name()) {
 				out = append(out, p)
 			}
 			return nil
@@ -321,7 +321,7 @@ func ReadHead(data []byte, maxLines int) []map[string]any {
 	return out
 }
 
-func Rel(path, root string) (string, bool) {
+func relative(path, root string) (string, bool) {
 	rel, err := filepath.Rel(root, path)
 	if err != nil || rel == "." || !filepath.IsLocal(rel) {
 		return "", false

@@ -206,20 +206,20 @@ func OurHandlers(settings *jsonx.Object) []HandlerRef {
 // <hooks.json path>:<event>:<group>:<handler>.
 func CodexTrustState(root string) (configured, trusted int) {
 	hooksPath := filepath.Join(root, "hooks.json")
-	cfg, err := loadJSON(hooksPath)
+	doc, err := loadJSON(hooksPath)
 	if err != nil {
 		return 0, 0
 	}
-	refs := OurHandlers(cfg)
+	handlers := OurHandlers(doc)
 	state, _ := tomlHooks(filepath.Join(root, "config.toml"))["state"].(map[string]any)
-	for _, r := range refs {
+	for _, r := range handlers {
 		key := fmt.Sprintf("%s:%s:%d:%d", hooksPath, codexEventKey(r.Event), r.GroupIndex, r.HandlerIndex)
 		entry, _ := state[key].(map[string]any)
 		if h, _ := entry["trusted_hash"].(string); h != "" {
 			trusted++
 		}
 	}
-	return len(refs), trusted
+	return len(handlers), trusted
 }
 
 func AgentsPresent(home string) map[string]bool {

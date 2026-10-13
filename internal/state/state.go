@@ -19,6 +19,7 @@ import (
 	_ "modernc.org/sqlite" // database/sql driver "sqlite"
 
 	"github.com/mich-murphy/memory/internal/adapters"
+	"github.com/mich-murphy/memory/internal/gitinfo"
 	"github.com/mich-murphy/memory/internal/jsonx"
 	"github.com/mich-murphy/memory/internal/raw"
 )
@@ -369,28 +370,14 @@ type Session struct {
 type SnapshotEntry struct {
 	ID        string             `json:"id"`
 	MemoryID  *string            `json:"memory_id"`
-	Git       GitState           `json:"git"`
+	Git       gitinfo.State      `json:"git"`
 	Timing    string             `json:"timing"`
 	TakenAt   float64            `json:"taken_at"`
 	CheckedAt float64            `json:"checked_at,omitempty"`
 	Mtimes    map[string]float64 `json:"mtimes"`
 }
 
-type GitState struct {
-	Root      string `json:"root,omitempty"`
-	CommonDir string `json:"common_dir,omitempty"`
-	Remote    string `json:"remote,omitempty"`
-	Branch    string `json:"branch,omitempty"`
-	Head      string `json:"head,omitempty"`
-	Dirty     *bool  `json:"dirty,omitempty"`
-	RepoID    string `json:"repo_id,omitempty"`
-}
-
-func (g GitState) IsZero() bool {
-	return g == GitState{}
-}
-
-func (s *State) GetSession(ref adapters.SessionRef) (*Session, error) {
+func (s *State) Session(ref adapters.SessionRef) (*Session, error) {
 	var info, snaps, launches string
 	var sess Session
 	found, err := s.queryRow("SELECT info, snapshots, launches, first_seen FROM sessions WHERE agent = ? AND session_key = ?",

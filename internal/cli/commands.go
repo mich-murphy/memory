@@ -28,45 +28,45 @@ const (
 	manualLockTimeout = 10 * time.Minute
 )
 
-type syncArgs struct {
-	agents  agentList
-	paths   []string
-	delay   float64
-	marker  string
-	launch  string
-	trigger string
-	quiet   bool
+type syncFlags struct {
+	agents       agentList
+	paths        []string
+	delaySeconds float64
+	marker       string
+	launch       string
+	trigger      string
+	quiet        bool
 }
 
-func parseSync(cmd string, args []string, o IO) (*syncArgs, error) {
-	a := &syncArgs{}
+func parseSync(cmd string, args []string, o IO) (*syncFlags, error) {
+	flags := &syncFlags{}
 	fs := newFlags(cmd, o)
-	fs.Var(&a.agents, "agent", "limit to this agent: claude, codex or pi (repeatable)")
+	fs.Var(&flags.agents, "agent", "limit to this agent: claude, codex or pi (repeatable)")
 	if cmd == "sync" {
 		fs.Func("path", "sync this session file and its related files (repeatable)", func(p string) error {
-			a.paths = append(a.paths, p)
+			flags.paths = append(flags.paths, p)
 			return nil
 		})
-		fs.Float64Var(&a.delay, "delay", 0, "wait this many seconds first (lets transcripts flush)")
-		fs.StringVar(&a.marker, "pending-marker", "", "internal: the hook's debounce marker")
-		fs.StringVar(&a.launch, "launch", "", "internal: launch details recorded by a session-start hook")
-		fs.StringVar(&a.trigger, "trigger", "manual", "internal: what started this run")
-		fs.BoolVar(&a.quiet, "quiet", false, "print nothing; exit 0 when another run holds the lock")
+		fs.Float64Var(&flags.delaySeconds, "delay", 0, "wait this many seconds first (lets transcripts flush)")
+		fs.StringVar(&flags.marker, "pending-marker", "", "internal: the hook's debounce marker")
+		fs.StringVar(&flags.launch, "launch", "", "internal: launch details recorded by a session-start hook")
+		fs.StringVar(&flags.trigger, "trigger", "manual", "internal: what started this run")
+		fs.BoolVar(&flags.quiet, "quiet", false, "print nothing; exit 0 when another run holds the lock")
 	}
 	if err := parse(fs, args); err != nil {
 		return nil, err
 	}
 	if cmd == "backfill" {
-		a.trigger = "backfill"
+		flags.trigger = "backfill"
 	}
-	return a, nil
+	return flags, nil
 }
 
-func (a *syncArgs) lockTimeout() time.Duration {
+func (f *syncFlags) lockTimeout() time.Duration {
 	switch {
-	case len(a.paths) > 0:
+	case len(f.paths) > 0:
 		return hookLockTimeout
-	case strings.HasPrefix(a.trigger, "sweep:"):
+	case strings.HasPrefix(f.trigger, "sweep:"):
 		return sweepLockTimeout
 	default:
 		return manualLockTimeout
@@ -74,7 +74,7 @@ func (a *syncArgs) lockTimeout() time.Duration {
 }
 
 func runSync(ctx context.Context, cmd string, args []string, version string, o IO) (int, error) {
-	a, err := parseSync(cmd, args, o)
+	flags, err := parseSync(cmd, args, o)
 	if err != nil {
 		return exitUsage, err
 	}
@@ -82,31 +82,31 @@ func runSync(ctx context.Context, cmd string, args []string, version string, o I
 	if err != nil {
 		return exitFailed, err
 	}
-	log, closeLog, err := logging.Open(cfg.StateDir, a.quiet)
+	log, closeLog, err := logging.Open(cfg.StateDir, flags.quiet)
 	if err != nil {
 		return exitFailed, err
 	}
 	defer closeLog()
 	started := state.UnixNow()
-	if a.delay > 0 {
+	if flags.delaySeconds > 0 {
 		select {
-		case <-time.After(time.Duration(a.delay * float64(time.Second))):
+		case <-time.After(time.Duration(flags.delaySeconds * float64(time.Second))):
 		case <-ctx.Done():
 			return exitFailed, ctx.Err()
 		}
 	}
-	st, err := store.Open(cfg)
+	bucket, err := store.Open(cfg)
 	if err != nil {
 		log.Error("cannot open store", "error", err)
-		if !a.quiet {
+		if !flags.quiet {
 			o.errorf("agent-sessions: %v\n", err)
 		}
 		return exitUsage, nil
 	}
-	unlock, err := state.Lock(ctx, cfg.StateDir, a.lockTimeout())
+	unlock, err := state.Lock(ctx, cfg.StateDir, flags.lockTimeout())
 	if errors.Is(err, state.ErrLocked) {
 		log.Warn("another run holds the lock; a later hook will catch up")
-		if a.quiet {
+		if flags.quiet {
 			return exitOK, nil
 		}
 		o.errorf("agent-sessions: %v; a later hook will catch up\n", err)
@@ -116,19 +116,19 @@ func runSync(ctx context.Context, cmd string, args []string, version string, o I
 		return exitFailed, err
 	}
 	defer unlock()
-	if a.marker != "" {
+	if flags.marker != "" {
 		// From here on a new hook should queue another sync: this one is about to read the file.
-		_ = os.Remove(a.marker) // already gone is fine
+		_ = os.Remove(flags.marker) // already gone is fine
 	}
-	summary, err := syncLocked(ctx, cfg, st, a, version, log, started)
+	summary, err := syncLocked(ctx, cfg, bucket, flags, version, log, started)
 	if err != nil {
 		return exitFailed, err
 	}
-	agents := a.agents.orAll()
+	agents := flags.agents.orAll()
 	if body, err := jsonx.Compact(summary.Trimmed()); err == nil {
 		log.Info("sync done", "agents", strings.Join(agents, ","), "summary", string(body))
 	}
-	if !a.quiet {
+	if !flags.quiet {
 		o.printf("uploaded %d files (%.1f MB compressed), %d unchanged, %d manifests, %d errors\n",
 			summary.Uploaded, float64(summary.BytesUploaded)/1e6, summary.Unchanged, summary.Manifests, summary.Errors)
 		for _, msg := range summary.Trimmed().ErrorMessages {
@@ -141,25 +141,25 @@ func runSync(ctx context.Context, cmd string, args []string, version string, o I
 	return exitOK, nil
 }
 
-func syncLocked(ctx context.Context, cfg *config.Config, st store.Store, a *syncArgs, version string, log *slog.Logger,
+func syncLocked(ctx context.Context, cfg *config.Config, bucket store.Store, flags *syncFlags, version string, log *slog.Logger,
 	started float64,
 ) (*syncer.Summary, error) {
-	s, err := state.Open(ctx, cfg.StateDir)
+	db, err := state.Open(ctx, cfg.StateDir)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		if cerr := s.Close(); cerr != nil {
+		if cerr := db.Close(); cerr != nil {
 			log.Error("closing state", "error", cerr)
 		}
 	}()
-	sy := syncer.New(cfg, st, s, adapters.All(cfg.Home), syncer.Options{
-		Trigger: a.trigger, Logger: log, Version: version,
+	sy := syncer.New(cfg, bucket, db, adapters.All(cfg.Home), syncer.Options{
+		Trigger: flags.trigger, Logger: log, Version: version,
 	})
-	if a.launch != "" {
-		recordLaunches(ctx, sy, a, log)
+	if flags.launch != "" {
+		recordLaunches(ctx, sy, flags, log)
 	}
-	files, err := filesToSync(ctx, sy, a)
+	files, err := filesToSync(ctx, sy, flags)
 	if err != nil {
 		return nil, err
 	}
@@ -167,19 +167,19 @@ func syncLocked(ctx context.Context, cfg *config.Config, st store.Store, a *sync
 	if err != nil {
 		return nil, err
 	}
-	if err := s.RecordRun(started, a.trigger, summary.Trimmed()); err != nil {
+	if err := db.RecordRun(started, flags.trigger, summary.Trimmed()); err != nil {
 		return nil, err
 	}
 	return summary, nil
 }
 
-func recordLaunches(ctx context.Context, sy *syncer.Syncer, a *syncArgs, log *slog.Logger) {
-	launch := readLaunch(a.launch)
-	if launch == nil || len(a.paths) == 0 {
+func recordLaunches(ctx context.Context, sy *syncer.Syncer, flags *syncFlags, log *slog.Logger) {
+	launch := readLaunch(flags.launch)
+	if launch == nil || len(flags.paths) == 0 {
 		return
 	}
-	for _, agent := range a.agents.orAll() {
-		if err := sy.RecordLaunch(ctx, agent, a.paths[0], launch); err != nil {
+	for _, agent := range flags.agents.orAll() {
+		if err := sy.RecordLaunch(ctx, agent, flags.paths[0], launch); err != nil {
 			sy.Summary.Errors++
 			sy.Summary.ErrorMessages = append(sy.Summary.ErrorMessages, fmt.Sprintf("launch %s: %v", agent, err))
 			log.Error("recording launch", "agent", agent, "error", err)
@@ -187,14 +187,14 @@ func recordLaunches(ctx context.Context, sy *syncer.Syncer, a *syncArgs, log *sl
 	}
 }
 
-func filesToSync(ctx context.Context, sy *syncer.Syncer, a *syncArgs) ([]adapters.SessionFile, error) {
-	agents := a.agents.orAll()
-	if len(a.paths) == 0 {
+func filesToSync(ctx context.Context, sy *syncer.Syncer, flags *syncFlags) ([]adapters.SessionFile, error) {
+	agents := flags.agents.orAll()
+	if len(flags.paths) == 0 {
 		return sy.SweepFiles(ctx, agents)
 	}
 	var files []adapters.SessionFile
 	for _, agent := range agents {
-		found, err := sy.HookFiles(agent, a.paths)
+		found, err := sy.HookFiles(agent, flags.paths)
 		if err != nil {
 			return nil, err
 		}
@@ -212,6 +212,8 @@ func readLaunch(path string) map[string]any {
 	m, _ := jsonx.Map(data)
 	return m
 }
+
+var installers = map[string]func(*install.Options) error{"claude": install.Claude, "codex": install.Codex, "pi": install.Pi}
 
 func runInstall(args []string, o IO) (int, error) {
 	var agents agentList
@@ -239,7 +241,7 @@ func runInstall(args []string, o IO) (int, error) {
 			opts.Logf("%s: not used on this machine, skipped (rerun `agent-sessions install` after installing it)", agent)
 			continue
 		}
-		if err := install.Agents[agent](opts); err != nil {
+		if err := installers[agent](opts); err != nil {
 			failed = true
 			opts.Logf("%s: not changed: %v", agent, err)
 		}
@@ -268,7 +270,7 @@ func runUninstall(args []string, o IO) (int, error) {
 	opts := &install.Options{Command: install.Command(), Home: config.Home(), DryRun: *dryRun, Remove: true}
 	failed := false
 	for _, agent := range agents.orAll() {
-		if err := install.Agents[agent](opts); err != nil {
+		if err := installers[agent](opts); err != nil {
 			failed = true
 			opts.Logf("%s: not changed: %v", agent, err)
 		}

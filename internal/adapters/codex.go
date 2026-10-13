@@ -64,11 +64,11 @@ func (c *Codex) InferRoot(path string) string {
 }
 
 func (c *Codex) Classify(path, root string) (SessionFile, bool) {
-	rel, ok := Rel(path, root)
+	rel, ok := relative(path, root)
 	if !ok {
 		return SessionFile{}, false
 	}
-	prefix := KeyPrefix(c, root)
+	prefix := keyPrefix(c, root)
 	parts := strings.Split(rel, "/")
 	name := filepath.Base(path)
 	if codexRolloutRE.MatchString(name) && codexSessionDirs[parts[0]] {

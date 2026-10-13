@@ -29,7 +29,7 @@ import (
 type level string
 
 const (
-	ok   level = "ok  "
+	pass level = "ok  "
 	warn level = "warn"
 	fail level = "FAIL"
 )
@@ -56,14 +56,14 @@ func (r *reporter) reportf(l level, format string, args ...any) {
 
 func pick(good bool, otherwise level) level {
 	if good {
-		return ok
+		return pass
 	}
 	return otherwise
 }
 
 func Run(ctx context.Context, cfg *config.Config, w io.Writer) (allPassed bool) {
 	r := &reporter{w: w}
-	r.reportf(ok, "machine id: %s (hostname %s)", cfg.MachineID, cfg.Hostname)
+	r.reportf(pass, "machine id: %s (hostname %s)", cfg.MachineID, cfg.Hostname)
 	checkStore(ctx, cfg, r)
 	checkClaude(cfg.Home, r)
 	checkCodex(cfg.Home, r)
@@ -83,33 +83,33 @@ func checkStore(ctx context.Context, cfg *config.Config, r *reporter) {
 		return
 	}
 	if missing := cfg.MissingR2Settings(); len(missing) > 0 {
-		r.reportf(fail, "missing %s (set them in %s)", strings.Join(missing, ", "), cfg.ConfigPath)
+		r.reportf(fail, "missing %s (set them in %s)", strings.Join(missing, ", "), cfg.Path)
 		return
 	}
 	if err := probeStore(ctx, cfg); err != nil {
 		r.reportf(fail, "bucket %s: %v", cfg.R2Bucket, err)
 		return
 	}
-	r.reportf(ok, "bucket %s: write, read and delete work", cfg.R2Bucket)
+	r.reportf(pass, "bucket %s: write, read and delete work", cfg.R2Bucket)
 }
 
 func probeStore(ctx context.Context, cfg *config.Config) error {
-	st, err := store.Open(cfg)
+	bucket, err := store.Open(cfg)
 	if err != nil {
 		return err
 	}
 	key := "_agent-sessions/doctor/" + cfg.MachineID + "/" + rand.Text()
-	if err := st.Put(ctx, key, []byte("ok"), map[string]string{}); err != nil {
+	if err := bucket.Put(ctx, key, []byte("ok"), map[string]string{}); err != nil {
 		return err
 	}
-	body, err := st.Get(ctx, key)
+	body, err := bucket.Get(ctx, key)
 	if err != nil {
 		return err
 	}
 	if string(body) != "ok" {
 		return errReadBack
 	}
-	return st.Delete(ctx, key)
+	return bucket.Delete(ctx, key)
 }
 
 func readJSON(path string) *jsonx.Object {
@@ -127,7 +127,7 @@ func readJSON(path string) *jsonx.Object {
 func checkClaude(home string, r *reporter) {
 	root := adapters.NewClaude(home).Dir()
 	if !fsutil.Exists(root) {
-		r.reportf(ok, "claude: not used here (%s missing)", root)
+		r.reportf(pass, "claude: not used here (%s missing)", root)
 		return
 	}
 	path := filepath.Join(root, "settings.json")
@@ -152,7 +152,7 @@ func checkClaude(home string, r *reporter) {
 func checkCodex(home string, r *reporter) {
 	root := adapters.NewCodex(home).Dir()
 	if !fsutil.Exists(root) {
-		r.reportf(ok, "codex: not used here (%s missing)", root)
+		r.reportf(pass, "codex: not used here (%s missing)", root)
 		return
 	}
 	configured, trusted := install.CodexTrustState(root)
@@ -182,7 +182,7 @@ func codexHooksDisabled(path string) bool {
 
 func checkPi(home string, r *reporter) {
 	if dir := adapters.NewPi(home).Dir(); !fsutil.Exists(dir) {
-		r.reportf(ok, "pi: not used here (%s missing)", dir)
+		r.reportf(pass, "pi: not used here (%s missing)", dir)
 		return
 	}
 	ext := install.PiExtensionPath(home)
@@ -193,7 +193,7 @@ func checkPi(home string, r *reporter) {
 	case !bytes.Equal(data, current):
 		r.reportf(warn, "pi: extension at %s is out of date (run agent-sessions install)", ext)
 	default:
-		r.reportf(ok, "pi: extension installed at %s", ext)
+		r.reportf(pass, "pi: extension installed at %s", ext)
 	}
 }
 
@@ -203,9 +203,9 @@ func isSweep(run state.Run) bool {
 
 func checkRuns(ctx context.Context, cfg *config.Config, r *reporter) {
 	var runs []state.Run
-	if st, err := state.Open(ctx, cfg.StateDir); err == nil {
-		runs, _ = st.LastRuns(runHistory) // no history to show is reported below
-		_ = st.Close()                    // read-only use
+	if db, err := state.Open(ctx, cfg.StateDir); err == nil {
+		runs, _ = db.LastRuns(runHistory) // no history to show is reported below
+		_ = db.Close()                    // read-only use
 	}
 	var errorMsgs []string
 	for _, run := range runs[:min(len(runs), recentRuns)] {
@@ -217,7 +217,7 @@ func checkRuns(ctx context.Context, cfg *config.Config, r *reporter) {
 	}
 	if i := slices.IndexFunc(runs, isSweep); i >= 0 {
 		age := time.Since(time.Unix(0, int64(runs[i].FinishedAt*1e9)))
-		r.reportf(ok, "last sweep (%s) %.0f min ago, %v errors", runs[i].Trigger, age.Minutes(), runs[i].Summary["errors"])
+		r.reportf(pass, "last sweep (%s) %.0f min ago, %v errors", runs[i].Trigger, age.Minutes(), runs[i].Summary["errors"])
 	} else {
 		r.reportf(warn, "no sweep in the last %d runs; one runs when a session starts or ends", runHistory)
 	}

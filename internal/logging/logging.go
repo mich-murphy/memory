@@ -14,17 +14,17 @@ import (
 )
 
 const (
-	maxBytes = 1_000_000
-	backups  = 3
+	maxSize = 1_000_000
+	backups = 3
 )
 
-const FileName = "agent-sessions.log"
+const fileName = "agent-sessions.log"
 
 func Open(stateDir string, quiet bool) (log *slog.Logger, closeFile func(), err error) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, nil, fmt.Errorf("log: %w", err)
 	}
-	path := filepath.Join(stateDir, FileName)
+	path := filepath.Join(stateDir, fileName)
 	rotate(path)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -44,7 +44,7 @@ func newHandler(w io.Writer, level slog.Level) slog.Handler {
 // rotate can race another process's rotation harmlessly, since each only appends.
 func rotate(path string) {
 	st, err := os.Stat(path)
-	if err != nil || st.Size() < maxBytes {
+	if err != nil || st.Size() < maxSize {
 		return
 	}
 	for i := backups - 1; i >= 1; i-- {

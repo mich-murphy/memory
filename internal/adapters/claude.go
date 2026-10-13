@@ -39,7 +39,7 @@ type rootSession struct{ root, sessionID string }
 
 type Claude struct {
 	layout
-	sessionKeyCache map[rootSession]string
+	sessionKeys map[rootSession]string
 }
 
 func NewClaude(home string) *Claude {
@@ -69,14 +69,14 @@ func NewClaude(home string) *Claude {
 				".claude/agents/**", ".claude/commands/**", ".claude/output-styles/**", ".claude/hooks/**", ".mcp.json",
 			},
 		},
-		sessionKeyCache: map[rootSession]string{},
+		sessionKeys: map[rootSession]string{},
 	}
 }
 
 func (c *Claude) InferRoot(path string) string {
 	for dir := filepath.Dir(path); dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
 		if filepath.Base(dir) == "projects" {
-			if rel, ok := Rel(path, dir); ok && strings.Count(rel, "/") >= 1 {
+			if rel, ok := relative(path, dir); ok && strings.Count(rel, "/") >= 1 {
 				return filepath.Dir(dir)
 			}
 		}
@@ -85,13 +85,13 @@ func (c *Claude) InferRoot(path string) string {
 }
 
 func (c *Claude) Classify(path, root string) (SessionFile, bool) {
-	rel, ok := Rel(path, root)
+	rel, ok := relative(path, root)
 	if !ok {
 		return SessionFile{}, false
 	}
 	parts := strings.Split(rel, "/")
 	sf := func(sessionKey string, role Role) (SessionFile, bool) {
-		return SessionFile{Agent: c.Name(), Root: root, Path: path, Key: KeyPrefix(c, root) + rel, SessionKey: sessionKey, Role: role}, true
+		return SessionFile{Agent: c.Name(), Root: root, Path: path, Key: keyPrefix(c, root) + rel, SessionKey: sessionKey, Role: role}, true
 	}
 	top := parts[0]
 	if len(parts) == 1 && hasAnySuffix(top, []string{".sh", ".py", ".js", ".ts"}) {
@@ -137,7 +137,7 @@ func (c *Claude) classifyProject(parts []string, sf func(string, Role) (SessionF
 
 func (c *Claude) sessionKey(root, sid string) string {
 	k := rootSession{root, sid}
-	if v, ok := c.sessionKeyCache[k]; ok {
+	if v, ok := c.sessionKeys[k]; ok {
 		return v
 	}
 	matches, _ := filepath.Glob(filepath.Join(root, "projects", "*", sid+".jsonl"))
@@ -145,7 +145,7 @@ func (c *Claude) sessionKey(root, sid string) string {
 		return ""
 	}
 	v := filepath.Base(filepath.Dir(matches[0])) + "/" + sid
-	c.sessionKeyCache[k] = v
+	c.sessionKeys[k] = v
 	return v
 }
 
@@ -163,7 +163,7 @@ func (c *Claude) Related(sf SessionFile) []string {
 	if fsutil.IsFile(main) {
 		out = append(out, main)
 	}
-	out = append(out, FilesUnder(filepath.Join(projectDir, sid))...)
+	out = append(out, filesUnder(filepath.Join(projectDir, sid))...)
 	if matches, err := filepath.Glob(filepath.Join(projectDir, globEscape(sid)+".*")); err == nil {
 		for _, p := range matches {
 			if p != main && fsutil.IsFile(p) {
@@ -171,7 +171,7 @@ func (c *Claude) Related(sf SessionFile) []string {
 			}
 		}
 	}
-	out = append(out, FilesUnder(filepath.Join(root, "file-history", sid), filepath.Join(root, "session-env", sid),
+	out = append(out, filesUnder(filepath.Join(root, "file-history", sid), filepath.Join(root, "session-env", sid),
 		filepath.Join(root, "tasks"), filepath.Join(root, "teams"))...)
 	if matches, err := filepath.Glob(filepath.Join(root, "todos", globEscape(sid)+"*")); err == nil {
 		for _, p := range matches {
@@ -208,7 +208,7 @@ func (c *Claude) Exports(root, workDir string, interval time.Duration) []Session
 	if err != nil {
 		return out
 	}
-	dest := filepath.Join(workDir, c.Name(), RootTag(root), "claude.json")
+	dest := filepath.Join(workDir, c.Name(), rootTag(root), "claude.json")
 	// Claude Code rewrites this file on every start, so like a database it is refreshed at
 	// most every interval to keep versions few.
 	old, rerr := os.ReadFile(dest)
@@ -218,7 +218,7 @@ func (c *Claude) Exports(root, workDir string, interval time.Duration) []Session
 			return out
 		}
 	}
-	return append(out, SessionFile{Agent: c.Name(), Root: root, Path: dest, Key: KeyPrefix(c, root) + "claude.json", Role: RoleConfig})
+	return append(out, SessionFile{Agent: c.Name(), Root: root, Path: dest, Key: keyPrefix(c, root) + "claude.json", Role: RoleConfig})
 }
 
 // ExtraSnapshotEntries records only the MCP parts of ~/.claude.json, whose UI state changes
