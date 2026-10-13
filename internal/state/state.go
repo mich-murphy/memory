@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	_ "modernc.org/sqlite" // database/sql driver "sqlite"
@@ -186,25 +187,29 @@ func (s *State) queryRow(query string, args []any, dest ...any) (bool, error) {
 	return true, nil
 }
 
-func (s *State) query(query string, args []any, row func(*sql.Rows) error) error {
+// queryAll returns one T per row, never nil, so an empty result encodes as [].
+func queryAll[T any](s *State, query string, args []any, scan func(*sql.Rows, *T) error) ([]T, error) {
 	tx, err := s.conn()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	rows, err := tx.QueryContext(s.ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("state: %w", err)
+		return nil, fmt.Errorf("state: %w", err)
 	}
 	defer func() { _ = rows.Close() }() // read-only cursor; errors surface through rows.Err
+	out := []T{}
 	for rows.Next() {
-		if err := row(rows); err != nil {
-			return err
+		var v T
+		if err := scan(rows, &v); err != nil {
+			return nil, fmt.Errorf("state: %w", err)
 		}
+		out = append(out, v)
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("state: %w", err)
+		return nil, fmt.Errorf("state: %w", err)
 	}
-	return nil
+	return out, nil
 }
 
 type File struct {
@@ -261,47 +266,24 @@ func nullString(s string) any {
 // SessionFiles returns one file per key. Codex can hold one key under two paths (.jsonl then
 // .jsonl.zst); the one still on disk wins.
 func (s *State) SessionFiles(ref adapters.SessionRef) ([]File, error) {
-	var out []File
-	index := map[string]int{}
-	err := s.query("SELECT key, role, size, sha256, line_count, prefix_sha256, head, deleted_at, mtime_ns FROM files "+
-		"WHERE agent = ? AND session_key = ? ORDER BY key, deleted_at IS NULL", []any{ref.Agent, ref.Key},
-		func(rows *sql.Rows) error {
-			var f File
-			var prefix, head sql.NullString
-			var deleted sql.NullFloat64
-			if err := rows.Scan(&f.Key, &f.Role, &f.Size, &f.SHA256, &f.LineCount, &prefix, &head, &deleted, &f.MtimeNS); err != nil {
-				return fmt.Errorf("state: %w", err)
-			}
-			f.PrefixSHA256 = prefix.String
-			if head.Valid {
-				f.Head, _ = jsonx.Map([]byte(head.String))
-			}
-			f.DeletedAt = deleted.Float64
-			if i, ok := index[f.Key]; ok {
-				out[i] = f
-			} else {
-				index[f.Key] = len(out)
-				out = append(out, f)
-			}
-			return nil
+	files, err := queryAll(s, "SELECT key, role, size, sha256, line_count, COALESCE(prefix_sha256, ''), "+
+		"COALESCE(head, ''), COALESCE(deleted_at, 0), mtime_ns FROM files "+
+		"WHERE agent = ? AND session_key = ? ORDER BY key, deleted_at IS NOT NULL", []any{ref.Agent, ref.Key},
+		func(rows *sql.Rows, f *File) error {
+			var head string
+			err := rows.Scan(&f.Key, &f.Role, &f.Size, &f.SHA256, &f.LineCount, &f.PrefixSHA256, &head, &f.DeletedAt, &f.MtimeNS)
+			f.Head, _ = jsonx.Map([]byte(head))
+			return err
 		})
-	return out, err
+	return slices.CompactFunc(files, func(a, b File) bool { return a.Key == b.Key }), err
 }
 
 func (s *State) LiveFiles(agent, root string) ([]adapters.SessionFile, error) {
-	var out []adapters.SessionFile
-	err := s.query("SELECT path, key, session_key, role FROM files WHERE agent = ? AND root = ? AND deleted_at IS NULL",
-		[]any{agent, root}, func(rows *sql.Rows) error {
-			f := adapters.SessionFile{Agent: agent, Root: root}
-			var sk sql.NullString
-			if err := rows.Scan(&f.Path, &f.Key, &sk, &f.Role); err != nil {
-				return fmt.Errorf("state: %w", err)
-			}
-			f.SessionKey = sk.String
-			out = append(out, f)
-			return nil
+	return queryAll(s, "SELECT path, agent, root, key, COALESCE(session_key, ''), role FROM files "+
+		"WHERE agent = ? AND root = ? AND deleted_at IS NULL", []any{agent, root},
+		func(rows *sql.Rows, f *adapters.SessionFile) error {
+			return rows.Scan(&f.Path, &f.Agent, &f.Root, &f.Key, &f.SessionKey, &f.Role)
 		})
-	return out, err
 }
 
 func (s *State) MarkDeleted(path string, at float64) error {
@@ -333,17 +315,8 @@ func (s *State) RecordUpload(key, sha string, size int64) error {
 }
 
 func (s *State) Pieces(key string) ([]raw.Piece, error) {
-	out := []raw.Piece{}
-	err := s.query("SELECT start, end, sha256, object FROM pieces WHERE key = ? ORDER BY start", []any{key},
-		func(rows *sql.Rows) error {
-			var p raw.Piece
-			if err := rows.Scan(&p.Start, &p.End, &p.SHA256, &p.Object); err != nil {
-				return fmt.Errorf("state: %w", err)
-			}
-			out = append(out, p)
-			return nil
-		})
-	return out, err
+	return queryAll(s, "SELECT start, end, sha256, object FROM pieces WHERE key = ? ORDER BY start", []any{key},
+		func(rows *sql.Rows, p *raw.Piece) error { return rows.Scan(&p.Start, &p.End, &p.SHA256, &p.Object) })
 }
 
 func (s *State) SetPieces(key string, pieces []raw.Piece) error {
@@ -378,21 +351,17 @@ func (s *State) RecordVersion(key string, v *Version) error {
 }
 
 func (s *State) Versions(key string) ([]Version, error) {
-	out := []Version{}
-	err := s.query("SELECT sha256, size, pieces, versioned_at FROM raw_versions WHERE key = ? ORDER BY versioned_at",
-		[]any{key}, func(rows *sql.Rows) error {
-			var v Version
+	return queryAll(s, "SELECT sha256, size, pieces, versioned_at FROM raw_versions WHERE key = ? ORDER BY versioned_at",
+		[]any{key}, func(rows *sql.Rows, v *Version) error {
 			var pieces string
 			if err := rows.Scan(&v.SHA256, &v.Size, &pieces, &v.VersionedAt); err != nil {
-				return fmt.Errorf("state: %w", err)
+				return err
 			}
 			if err := json.Unmarshal([]byte(pieces), &v.Pieces); err != nil {
-				return fmt.Errorf("state: version pieces of %s: %w", key, err)
+				return fmt.Errorf("version pieces of %s: %w", key, err)
 			}
-			out = append(out, v)
 			return nil
 		})
-	return out, err
 }
 
 func (s *State) LastVersionAt(key string) (float64, error) {
@@ -495,30 +464,13 @@ func (s *State) ManifestWritten(ref adapters.SessionRef) error {
 }
 
 func (s *State) PendingManifests() ([]adapters.SessionRef, error) {
-	var out []adapters.SessionRef
-	err := s.query("SELECT agent, session_key FROM pending_manifests ORDER BY agent, session_key", nil,
-		func(rows *sql.Rows) error {
-			var r adapters.SessionRef
-			if err := rows.Scan(&r.Agent, &r.Key); err != nil {
-				return fmt.Errorf("state: %w", err)
-			}
-			out = append(out, r)
-			return nil
-		})
-	return out, err
+	return queryAll(s, "SELECT agent, session_key FROM pending_manifests ORDER BY agent, session_key", nil,
+		func(rows *sql.Rows, r *adapters.SessionRef) error { return rows.Scan(&r.Agent, &r.Key) })
 }
 
 func (s *State) ExtraRoots(agent string) ([]string, error) {
-	var out []string
-	err := s.query("SELECT path FROM roots WHERE agent = ? ORDER BY path", []any{agent}, func(rows *sql.Rows) error {
-		var p string
-		if err := rows.Scan(&p); err != nil {
-			return fmt.Errorf("state: %w", err)
-		}
-		out = append(out, p)
-		return nil
-	})
-	return out, err
+	return queryAll(s, "SELECT path FROM roots WHERE agent = ? ORDER BY path", []any{agent},
+		func(rows *sql.Rows, p *string) error { return rows.Scan(p) })
 }
 
 func (s *State) AddExtraRoot(agent, path string) error {
@@ -549,17 +501,11 @@ func (s *State) RecordRun(startedAt float64, trigger string, summary any) error 
 }
 
 func (s *State) LastRuns(limit int) ([]Run, error) {
-	var out []Run
-	err := s.query("SELECT started_at, finished_at, trigger, summary FROM runs ORDER BY id DESC LIMIT ?", []any{limit},
-		func(rows *sql.Rows) error {
-			var r Run
+	return queryAll(s, "SELECT started_at, finished_at, trigger, summary FROM runs ORDER BY id DESC LIMIT ?", []any{limit},
+		func(rows *sql.Rows, r *Run) error {
 			var summary string
-			if err := rows.Scan(&r.StartedAt, &r.FinishedAt, &r.Trigger, &summary); err != nil {
-				return fmt.Errorf("state: %w", err)
-			}
+			err := rows.Scan(&r.StartedAt, &r.FinishedAt, &r.Trigger, &summary)
 			r.Summary, _ = jsonx.Map([]byte(summary))
-			out = append(out, r)
-			return nil
+			return err
 		})
-	return out, err
 }
