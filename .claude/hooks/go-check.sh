@@ -1,7 +1,4 @@
 #!/bin/sh
-# PostToolUse hook: format the Go file Claude just edited, lint its package, and hand any
-# problems back to Claude before CI finds them.
-
 tell_person() {
 	echo "$1" >&2
 	exit 1
