@@ -4,6 +4,7 @@ package adapters
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -98,6 +99,8 @@ type Adapter interface {
 	Rules() SnapshotRules
 	SkipDirs() []string
 	ManagedSettingsFiles() []string
+	// Dir is where the agent keeps its settings and hooks.
+	Dir() string
 	DefaultRoots() []string
 	// CanonicalRoot is the root keyed without a prefix. It is fixed from $HOME, not the
 	// environment, so a hook (which sees CLAUDE_CONFIG_DIR and friends) and a sweep (which
@@ -177,6 +180,36 @@ func KeyPrefix(a Adapter, root string) string {
 	}
 	return "roots/" + RootTag(root) + "/"
 }
+
+// layout is what an adapter knows about its agent before reading a file.
+type layout struct {
+	name string
+	home string
+	// dir is the agent's directory under home; dirEnv, when set, overrides it.
+	dir             string
+	dirEnv          string
+	skipDirs        []string
+	managedSettings []string
+	rules           SnapshotRules
+}
+
+func (l *layout) Name() string { return l.name }
+
+func (l *layout) Home() string { return l.home }
+
+func (l *layout) Rules() SnapshotRules { return l.rules }
+
+func (l *layout) SkipDirs() []string { return l.skipDirs }
+
+func (l *layout) ManagedSettingsFiles() []string { return l.managedSettings }
+
+func (l *layout) CanonicalRoot() string { return filepath.Join(l.home, l.dir) }
+
+func (l *layout) Dir() string { return cmp.Or(envPath(l.dirEnv, l.home), l.CanonicalRoot()) }
+
+func (l *layout) DefaultRoots() []string { return []string{l.Dir()} }
+
+func (l *layout) UserBase(root string) string { return root }
 
 type noExtras struct{}
 

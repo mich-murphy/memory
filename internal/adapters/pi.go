@@ -22,46 +22,31 @@ var (
 )
 
 type Pi struct {
+	layout
 	noExtras
-	home string
 }
 
-func NewPi(home string) *Pi { return &Pi{home: home} }
-
-func (p *Pi) Name() string { return "pi" }
-
-func (p *Pi) Home() string { return p.home }
-
-func (p *Pi) SkipDirs() []string { return []string{"bin"} }
-
-func (p *Pi) ManagedSettingsFiles() []string { return nil }
-
-func (p *Pi) Rules() SnapshotRules {
-	return SnapshotRules{
-		User: []string{
-			"AGENTS.override.md", "AGENTS.md", "CLAUDE.md", "SYSTEM.md", "APPEND_SYSTEM.md", "settings.json", "mcp.json",
-			"models.json", "skills/**", "prompts/**", "extensions/**",
+func NewPi(home string) *Pi {
+	return &Pi{
+		name: "pi", home: home, dir: filepath.Join(".pi", "agent"), dirEnv: "PI_CODING_AGENT_DIR",
+		skipDirs: []string{"bin"},
+		rules: SnapshotRules{
+			User: []string{
+				"AGENTS.override.md", "AGENTS.md", "CLAUDE.md", "SYSTEM.md", "APPEND_SYSTEM.md", "settings.json", "mcp.json",
+				"models.json", "skills/**", "prompts/**", "extensions/**",
+			},
+			Project: []string{
+				"AGENTS.override.md", "AGENTS.md", "CLAUDE.md", "**/AGENTS.md", "**/CLAUDE.md", ".pi/settings.json",
+				".pi/mcp.json", ".pi/SYSTEM.md", ".pi/APPEND_SYSTEM.md", ".pi/skills/**", ".pi/prompts/**",
+				".pi/extensions/**", ".agents/skills/**",
+			},
+			Home: []string{".agents/skills/**"},
 		},
-		Project: []string{
-			"AGENTS.override.md", "AGENTS.md", "CLAUDE.md", "**/AGENTS.md", "**/CLAUDE.md", ".pi/settings.json",
-			".pi/mcp.json", ".pi/SYSTEM.md", ".pi/APPEND_SYSTEM.md", ".pi/skills/**", ".pi/prompts/**",
-			".pi/extensions/**", ".agents/skills/**",
-		},
-		Home: []string{".agents/skills/**"},
 	}
 }
-
-func (p *Pi) AgentDir() string {
-	if d := envPath("PI_CODING_AGENT_DIR", p.home); d != "" {
-		return d
-	}
-	return p.CanonicalRoot()
-}
-
-func (p *Pi) CanonicalRoot() string { return filepath.Join(p.home, ".pi", "agent") }
 
 func (p *Pi) DefaultRoots() []string {
-	agentDir := p.AgentDir()
+	agentDir := p.Dir()
 	roots := []string{agentDir}
 	if d := envPath("PI_CODING_AGENT_SESSION_DIR", p.home); d != "" {
 		roots = append(roots, d)
@@ -84,7 +69,7 @@ func (p *Pi) DefaultRoots() []string {
 }
 
 func (p *Pi) isAgentDir(root string) bool {
-	return root == p.CanonicalRoot() || root == p.AgentDir() || fsutil.IsDir(filepath.Join(root, "sessions"))
+	return root == p.CanonicalRoot() || root == p.Dir() || fsutil.IsDir(filepath.Join(root, "sessions"))
 }
 
 // InferRoot maps <agent dir>/sessions/--cwd--/file.jsonl to the agent dir, so a custom
@@ -141,7 +126,7 @@ func (p *Pi) UserBase(root string) string {
 	if p.isAgentDir(root) {
 		return root
 	}
-	return p.AgentDir()
+	return p.Dir()
 }
 
 func (p *Pi) MemoryDirs(string, string, string) []ScopedDir { return nil }

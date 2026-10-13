@@ -125,7 +125,7 @@ func readJSON(path string) *jsonx.Object {
 }
 
 func checkClaude(home string, r *reporter) {
-	root := adapters.NewClaude(home).DefaultRoots()[0]
+	root := adapters.NewClaude(home).Dir()
 	if !fsutil.Exists(root) {
 		r.reportf(ok, "claude: not used here (%s missing)", root)
 		return
@@ -150,7 +150,7 @@ func checkClaude(home string, r *reporter) {
 }
 
 func checkCodex(home string, r *reporter) {
-	root := adapters.NewCodex(home).DefaultRoots()[0]
+	root := adapters.NewCodex(home).Dir()
 	if !fsutil.Exists(root) {
 		r.reportf(ok, "codex: not used here (%s missing)", root)
 		return
@@ -181,7 +181,7 @@ func codexHooksDisabled(path string) bool {
 }
 
 func checkPi(home string, r *reporter) {
-	if dir := adapters.NewPi(home).AgentDir(); !fsutil.Exists(dir) {
+	if dir := adapters.NewPi(home).Dir(); !fsutil.Exists(dir) {
 		r.reportf(ok, "pi: not used here (%s missing)", dir)
 		return
 	}

@@ -23,40 +23,24 @@ var (
 )
 
 type Codex struct {
+	layout
 	noExtras
-	home string
 }
 
-func NewCodex(home string) *Codex { return &Codex{home: home} }
-
-func (c *Codex) Name() string { return "codex" }
-
-func (c *Codex) Home() string { return c.home }
-
-func (c *Codex) SkipDirs() []string { return []string{"plugins/cache", "bin", "packages"} }
-
-func (c *Codex) ManagedSettingsFiles() []string {
-	return []string{"/etc/codex/config.toml", "/etc/codex/requirements.toml", "/etc/codex/managed_config.toml"}
-}
-
-func (c *Codex) Rules() SnapshotRules {
-	return SnapshotRules{
-		User: []string{"AGENTS.md", "AGENTS.override.md", "config.toml", "hooks.json", "rules/**", "skills/**", "prompts/**"},
-		Project: []string{
-			"AGENTS.md", "AGENTS.override.md", "**/AGENTS.md", "**/AGENTS.override.md", ".codex/config.toml",
-			".codex/hooks.json", ".codex/rules/**", ".codex/skills/**", ".agents/skills/**",
+func NewCodex(home string) *Codex {
+	return &Codex{
+		name: "codex", home: home, dir: ".codex", dirEnv: "CODEX_HOME",
+		skipDirs:        []string{"plugins/cache", "bin", "packages"},
+		managedSettings: []string{"/etc/codex/config.toml", "/etc/codex/requirements.toml", "/etc/codex/managed_config.toml"},
+		rules: SnapshotRules{
+			User: []string{"AGENTS.md", "AGENTS.override.md", "config.toml", "hooks.json", "rules/**", "skills/**", "prompts/**"},
+			Project: []string{
+				"AGENTS.md", "AGENTS.override.md", "**/AGENTS.md", "**/AGENTS.override.md", ".codex/config.toml",
+				".codex/hooks.json", ".codex/rules/**", ".codex/skills/**", ".agents/skills/**",
+			},
+			Home: []string{".agents/skills/**"},
 		},
-		Home: []string{".agents/skills/**"},
 	}
-}
-
-func (c *Codex) CanonicalRoot() string { return filepath.Join(c.home, ".codex") }
-
-func (c *Codex) DefaultRoots() []string {
-	if p := envPath("CODEX_HOME", c.home); p != "" {
-		return []string{p}
-	}
-	return []string{c.CanonicalRoot()}
 }
 
 func (c *Codex) InferRoot(path string) string {
@@ -102,8 +86,6 @@ func (c *Codex) Classify(path, root string) (SessionFile, bool) {
 	}
 	return SessionFile{Agent: c.Name(), Root: root, Path: path, Key: prefix + rel, Role: role}, true
 }
-
-func (c *Codex) UserBase(root string) string { return root }
 
 func (c *Codex) MemoryDirs(root, _, _ string) []ScopedDir {
 	return []ScopedDir{{Scope: "user", Dir: filepath.Join(root, "memories")}}

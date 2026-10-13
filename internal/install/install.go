@@ -234,7 +234,7 @@ func hookCommand(cmd []string, agent string) string {
 }
 
 func Claude(o *Options) error {
-	root := adapters.NewClaude(o.Home).DefaultRoots()[0]
+	root := adapters.NewClaude(o.Home).Dir()
 	path := filepath.Join(root, "settings.json")
 	settings, err := loadJSON(path)
 	if err != nil {
@@ -278,7 +278,7 @@ func raiseCleanupPeriod(settings *jsonx.Object, o *Options) {
 }
 
 func Codex(o *Options) error {
-	root := adapters.NewCodex(o.Home).DefaultRoots()[0]
+	root := adapters.NewCodex(o.Home).Dir()
 	path := filepath.Join(root, "hooks.json")
 	config, err := loadJSON(path)
 	if err != nil {

@@ -40,58 +40,39 @@ var (
 type rootSession struct{ root, sessionID string }
 
 type Claude struct {
-	home            string
+	layout
 	sessionKeyCache map[rootSession]string
 }
 
 func NewClaude(home string) *Claude {
-	return &Claude{home: home, sessionKeyCache: map[rootSession]string{}}
-}
-
-func (c *Claude) Name() string { return "claude" }
-
-func (c *Claude) Home() string { return c.home }
-
-// SkipDirs: plugins/cache and plugins/marketplaces are git checkouts of plugin sources
-// (snapshots record the installed plugins); local/ and downloads/ hold Claude Code's own
-// install; backups/ holds copies of ~/.claude.json, API key included.
-func (c *Claude) SkipDirs() []string {
-	return []string{"plugins/cache", "plugins/marketplaces", "local", "downloads", "backups", "statsig", "ide", "telemetry"}
-}
-
-func (c *Claude) ManagedSettingsFiles() []string {
-	return []string{
-		"/etc/claude-code/managed-settings.json",
-		"/etc/claude-code/managed-mcp.json",
-		"/etc/claude-code/CLAUDE.md",
-		"/Library/Application Support/ClaudeCode/managed-settings.json",
-		"/Library/Application Support/ClaudeCode/managed-mcp.json",
-		"/Library/Application Support/ClaudeCode/CLAUDE.md",
-	}
-}
-
-func (c *Claude) Rules() SnapshotRules {
-	return SnapshotRules{
-		User: []string{
-			"CLAUDE.md", "settings.json", "settings.local.json", "launcher-settings.json", "keybindings.json",
-			"rules/**", "skills/**", "agents/**", "commands/**", "output-styles/**", "hooks/**",
-			"plugins/installed_plugins.json", "plugins/known_marketplaces.json",
+	return &Claude{
+		name: "claude", home: home, dir: ".claude", dirEnv: "CLAUDE_CONFIG_DIR",
+		// plugins/cache and plugins/marketplaces are git checkouts of plugin sources (snapshots
+		// record the installed plugins); local/ and downloads/ hold Claude Code's own install;
+		// backups/ holds copies of ~/.claude.json, API key included.
+		skipDirs: []string{"plugins/cache", "plugins/marketplaces", "local", "downloads", "backups", "statsig", "ide", "telemetry"},
+		managedSettings: []string{
+			"/etc/claude-code/managed-settings.json",
+			"/etc/claude-code/managed-mcp.json",
+			"/etc/claude-code/CLAUDE.md",
+			"/Library/Application Support/ClaudeCode/managed-settings.json",
+			"/Library/Application Support/ClaudeCode/managed-mcp.json",
+			"/Library/Application Support/ClaudeCode/CLAUDE.md",
 		},
-		Project: []string{
-			"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "**/CLAUDE.md", "**/CLAUDE.local.md", "**/AGENTS.md",
-			".claude/settings.json", ".claude/settings.local.json", ".claude/rules/**", ".claude/skills/**",
-			".claude/agents/**", ".claude/commands/**", ".claude/output-styles/**", ".claude/hooks/**", ".mcp.json",
+		rules: SnapshotRules{
+			User: []string{
+				"CLAUDE.md", "settings.json", "settings.local.json", "launcher-settings.json", "keybindings.json",
+				"rules/**", "skills/**", "agents/**", "commands/**", "output-styles/**", "hooks/**",
+				"plugins/installed_plugins.json", "plugins/known_marketplaces.json",
+			},
+			Project: []string{
+				"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "**/CLAUDE.md", "**/CLAUDE.local.md", "**/AGENTS.md",
+				".claude/settings.json", ".claude/settings.local.json", ".claude/rules/**", ".claude/skills/**",
+				".claude/agents/**", ".claude/commands/**", ".claude/output-styles/**", ".claude/hooks/**", ".mcp.json",
+			},
 		},
+		sessionKeyCache: map[rootSession]string{},
 	}
-}
-
-func (c *Claude) CanonicalRoot() string { return filepath.Join(c.home, ".claude") }
-
-func (c *Claude) DefaultRoots() []string {
-	if p := envPath("CLAUDE_CONFIG_DIR", c.home); p != "" {
-		return []string{p}
-	}
-	return []string{c.CanonicalRoot()}
 }
 
 func (c *Claude) InferRoot(path string) string {
@@ -219,8 +200,6 @@ func (c *Claude) Related(sf SessionFile) []string {
 func globEscape(s string) string {
 	return strings.NewReplacer(`\`, `\\`, "*", `\*`, "?", `\?`, "[", `\[`).Replace(s)
 }
-
-func (c *Claude) UserBase(root string) string { return root }
 
 func (c *Claude) claudeJSON(root string) string {
 	if root != c.CanonicalRoot() {

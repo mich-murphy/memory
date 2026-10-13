@@ -73,7 +73,7 @@ func PiExtension(command []string) ([]byte, error) {
 }
 
 func PiExtensionPath(home string) string {
-	return filepath.Join(adapters.NewPi(home).AgentDir(), "extensions", "agent-sessions.ts")
+	return filepath.Join(adapters.NewPi(home).Dir(), "extensions", "agent-sessions.ts")
 }
 
 func Pi(o *Options) error {
@@ -223,14 +223,9 @@ func CodexTrustState(root string) (configured, trusted int) {
 }
 
 func AgentsPresent(home string) map[string]bool {
-	dirs := map[string]string{
-		"claude": adapters.NewClaude(home).DefaultRoots()[0],
-		"codex":  adapters.NewCodex(home).DefaultRoots()[0],
-		"pi":     adapters.NewPi(home).AgentDir(),
-	}
 	out := map[string]bool{}
-	for name, d := range dirs {
-		if fsutil.Exists(d) || have(name) {
+	for name, a := range adapters.All(home) {
+		if fsutil.Exists(a.Dir()) || have(name) {
 			out[name] = true
 		}
 	}
