@@ -217,12 +217,8 @@ type scopeBase struct {
 	recursiveOK bool
 }
 
-func collect(a adapters.Adapter, root, cwd string) *collected {
+func collect(a adapters.Adapter, root, projectRoot string, isRepo bool) *collected {
 	c := newCollected(a.Name())
-	projectRoot, isRepo := "", false
-	if cwd != "" && fsutil.IsDir(cwd) {
-		projectRoot, isRepo = FindProjectRoot(cwd)
-	}
 	home := a.Home()
 	if fsutil.IsDir(home) {
 		home = realPath(home)
@@ -329,12 +325,8 @@ func sortEntries(entries []*Entry) {
 	})
 }
 
-func collectMemory(a adapters.Adapter, root, cwd, sessionKey string) *collected {
+func collectMemory(a adapters.Adapter, root, projectRoot, sessionKey string) *collected {
 	c := newCollected(a.Name())
-	projectRoot := ""
-	if cwd != "" && fsutil.IsDir(cwd) {
-		projectRoot, _ = FindProjectRoot(cwd)
-	}
 	for _, d := range a.MemoryDirs(root, projectRoot, sessionKey) {
 		if !fsutil.IsDir(d.Dir) {
 			continue
@@ -393,16 +385,16 @@ func setDoc(kind string, a adapters.Adapter, root, projectRoot string, c *collec
 
 func Build(a adapters.Adapter, root, cwd, sessionKey string) (*Snapshot, error) {
 	s := &Snapshot{Blobs: map[string][]byte{}, Mtimes: map[string]float64{}}
-	projectRoot := ""
+	projectRoot, isRepo := "", false
 	if cwd != "" && fsutil.IsDir(cwd) {
-		projectRoot, _ = FindProjectRoot(cwd)
+		projectRoot, isRepo = FindProjectRoot(cwd)
 	}
 	var err error
-	s.SetID, s.Doc, err = setDoc("harness", a, root, projectRoot, collect(a, root, cwd), s.Blobs, s.Mtimes)
+	s.SetID, s.Doc, err = setDoc("harness", a, root, projectRoot, collect(a, root, projectRoot, isRepo), s.Blobs, s.Mtimes)
 	if err != nil {
 		return nil, err
 	}
-	memory := collectMemory(a, root, cwd, sessionKey)
+	memory := collectMemory(a, root, projectRoot, sessionKey)
 	if len(memory.entries) > 0 || len(memory.skipped) > 0 {
 		s.MemoryID, s.MemoryDoc, err = setDoc("memory", a, root, projectRoot, memory, s.Blobs, s.Mtimes)
 		if err != nil {
