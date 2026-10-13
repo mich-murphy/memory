@@ -22,13 +22,13 @@ import (
 const usage = `agent-sessions: collect coding-agent sessions into one bucket.
 
 Usage:
-  agent-sessions install      install hooks, the Pi extension and the sweep timer
+  agent-sessions install      install hooks and the Pi extension
   agent-sessions backfill     upload every session already on this machine
   agent-sessions sync         upload new or changed session files
-  agent-sessions doctor       check settings, bucket access, hooks and timer
+  agent-sessions doctor       check settings, bucket access and hooks
   agent-sessions status       what has been synced from this machine
   agent-sessions cat KEY      print a raw file rebuilt from the bucket (base object plus segments)
-  agent-sessions uninstall    remove hooks, the Pi extension and the sweep timer
+  agent-sessions uninstall    remove hooks and the Pi extension
   agent-sessions --version
 
 Run agent-sessions COMMAND -h for a command's options.

@@ -1,4 +1,4 @@
-// Package install installs and removes the hooks, the Pi extension and the sweep timer. It
+// Package install installs and removes the hooks and the Pi extension. It
 // replaces only its own entries, backs a file up before changing it, and never rewrites one it
 // can't parse.
 package install

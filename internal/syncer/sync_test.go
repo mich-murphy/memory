@@ -692,6 +692,15 @@ func TestCustomClaudeConfigDirGetsTheSameKeysFromHooksAndSweeps(t *testing.T) {
 	}
 }
 
+func TestSweepFromACustomConfigDirStillCoversTheDefaultOne(t *testing.T) {
+	e := testenv.New(t)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(e.Tmp, "work-claude"))
+	mustRun(t, "sync", "--quiet", "--agent", "claude", "--trigger", "sweep:SessionStart")
+	if !e.HasKey(rawKey("claude", "projects/"+slug+"/"+claudeSID+".jsonl")) {
+		t.Error("a sweep started under CLAUDE_CONFIG_DIR skipped ~/.claude")
+	}
+}
+
 func TestHookSyncPullsInTheWholeClaudeSession(t *testing.T) {
 	e := testenv.New(t)
 	sub := filepath.Join(e.ClaudeSlug, claudeSID, "subagents", "agent-abc.jsonl")

@@ -2,6 +2,7 @@
 package doctor
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -32,7 +34,11 @@ const (
 	fail level = "FAIL"
 )
 
-const keepDaysWanted = 365
+const (
+	keepDaysWanted = 365
+	recentRuns     = 20
+	runHistory     = 500
+)
 
 var errNotFound = errors.New("test object not found after writing it")
 
@@ -67,16 +73,11 @@ func Run(ctx context.Context, cfg *config.Config, w io.Writer) (allPassed bool) 
 	_, lookErr := exec.LookPath(cmd[0])
 	r.reportf(pick(lookErr == nil || fsutil.Exists(cmd[0]), fail), "agent-sessions command: %s", strings.Join(cmd, " "))
 
-	timer := install.TimerInstalled(ctx, cfg.Home)
-	if timer != "" {
-		r.reportf(ok, "sweep timer: %s", timer)
-	} else {
-		r.reportf(fail, "sweep timer: not installed (run agent-sessions install)")
+	if old := install.OldTimers(ctx, cfg.Home); len(old) > 0 {
+		r.reportf(fail, "an earlier version's periodic sync is still installed (%s); run agent-sessions install to remove it",
+			strings.Join(old, ", "))
 	}
-	if timer == "systemd" && !install.LingerEnabled(ctx) {
-		r.reportf(warn, "systemd user timers stop when you log out; `sudo loginctl enable-linger $USER` keeps them running")
-	}
-	checkRuns(ctx, cfg, timer, r)
+	checkRuns(ctx, cfg, r)
 	return !r.failed
 }
 
@@ -184,45 +185,45 @@ func codexHooksDisabled(path string) bool {
 }
 
 func checkPi(home string, r *reporter) {
-	dir := adapters.NewPi(home).AgentDir()
-	if !fsutil.Exists(dir) {
+	if dir := adapters.NewPi(home).AgentDir(); !fsutil.Exists(dir) {
 		r.reportf(ok, "pi: not used here (%s missing)", dir)
 		return
 	}
-	ext := filepath.Join(dir, "extensions", "agent-sessions.ts")
+	ext := install.PiExtensionPath(home)
 	data, err := os.ReadFile(ext)
-	installed := err == nil && strings.Contains(string(data), install.PiMarker)
-	word := "missing"
-	if installed {
-		word = "installed"
+	switch current, _ := install.PiExtension(install.Command()); {
+	case err != nil || !bytes.Contains(data, []byte(install.PiMarker)):
+		r.reportf(fail, "pi: extension missing at %s", ext)
+	case !bytes.Equal(data, current):
+		r.reportf(warn, "pi: extension at %s is out of date (run agent-sessions install)", ext)
+	default:
+		r.reportf(ok, "pi: extension installed at %s", ext)
 	}
-	r.reportf(pick(installed, fail), "pi: extension %s at %s", word, ext)
 }
 
-func checkRuns(ctx context.Context, cfg *config.Config, timer string, r *reporter) {
+func isSweep(run state.Run) bool {
+	return run.Trigger == "backfill" || strings.HasPrefix(run.Trigger, "sweep")
+}
+
+func checkRuns(ctx context.Context, cfg *config.Config, r *reporter) {
 	var runs []state.Run
 	if st, err := state.Open(ctx, cfg.StateDir); err == nil {
-		runs, _ = st.LastRuns(20) // no history to show is reported below
-		_ = st.Close()            // read-only use
+		runs, _ = st.LastRuns(runHistory) // no history to show is reported below
+		_ = st.Close()                    // read-only use
 	}
-	var lastSweep *state.Run
 	var errorMsgs []string
-	for i, run := range runs {
-		if run.Trigger == "sweep" && lastSweep == nil {
-			lastSweep = &runs[i]
-		}
+	for _, run := range runs[:min(len(runs), recentRuns)] {
 		if msgs, isList := run.Summary["error_messages"].([]any); isList {
 			for _, m := range msgs {
 				errorMsgs = append(errorMsgs, fmt.Sprint(m))
 			}
 		}
 	}
-	switch {
-	case lastSweep != nil:
-		age := time.Since(time.Unix(0, int64(lastSweep.FinishedAt*1e9)))
-		r.reportf(pick(age < time.Hour, warn), "last sweep %.0f min ago, %v errors", age.Minutes(), lastSweep.Summary["errors"])
-	case timer != "":
-		r.reportf(warn, "no sweep has run yet")
+	if i := slices.IndexFunc(runs, isSweep); i >= 0 {
+		age := time.Since(time.Unix(0, int64(runs[i].FinishedAt*1e9)))
+		r.reportf(ok, "last sweep (%s) %.0f min ago, %v errors", runs[i].Trigger, age.Minutes(), runs[i].Summary["errors"])
+	} else {
+		r.reportf(warn, "no sweep in the last %d runs; one runs when a session starts or ends", runHistory)
 	}
 	if len(errorMsgs) > 0 {
 		r.reportf(warn, "recent errors (see %s): %s", filepath.Join(cfg.StateDir, "agent-sessions.log"), errorMsgs[0])

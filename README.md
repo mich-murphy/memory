@@ -10,9 +10,9 @@ You need an R2 API token scoped to the bucket with Object Read & Write. Use one 
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mich-murphy/memory/main/install.sh | sh   # into ~/.local/bin
-agent-sessions install      # hooks, the Pi extension, a sweep every 10 minutes
+agent-sessions install      # hooks and the Pi extension
 $EDITOR ~/.config/agent-sessions/config.env   # R2 endpoint, bucket and keys (written for you, mode 600)
-agent-sessions doctor       # checks the bucket, every hook and the timer
+agent-sessions doctor       # checks the bucket and every hook
 agent-sessions backfill     # uploads every session already on this machine
 ```
 
@@ -20,20 +20,19 @@ If you use Codex, open it once and approve the agent-sessions hooks in `/hooks`.
 
 That's all. `agent-sessions install` only touches agents it finds on the machine, so rerun it after installing another agent. It's safe to rerun at any time: it replaces its own entries and leaves everything else in your settings alone, backing up any file before changing it.
 
-On a Linux VM where you leave agents running after logging out (in tmux, say), also run `sudo loginctl enable-linger $USER` so the sweep keeps running. `agent-sessions doctor` warns when this is needed.
+Earlier versions also ran a sync every 10 minutes from a systemd user timer, launchd or cron. `agent-sessions install` removes it, and `agent-sessions doctor` fails while it's still there.
 
 ## How it captures sessions
 
-Each agent tells agent-sessions when a session has new content, and a sweep catches whatever the hooks miss.
+Each agent tells agent-sessions when a session has new content. Nothing runs on a schedule: when any session starts or ends, a sweep of every agent's files catches whatever the hooks missed.
 
 | Agent | Trigger | Installed into |
 |---|---|---|
 | Claude Code | `SessionStart`, `Stop`, `StopFailure`, `SubagentStop`, `PreCompact`, `TaskCompleted`, `TeammateIdle`, `SessionEnd` hooks | `~/.claude/settings.json` |
 | Codex | `SessionStart`, `Stop`, `SubagentStop`, `PreCompact`, `Interrupt`, `SessionEnd` hooks | `~/.codex/hooks.json` |
 | Pi | an extension handling `session_start`, `agent_settled` and `session_shutdown` | `~/.pi/agent/extensions/agent-sessions.ts` |
-| All | `agent-sessions sync` every 10 minutes | systemd user timer, launchd or cron |
 
-The hook command returns within milliseconds, prints nothing and always exits 0. It hands the upload to a detached process that waits a few seconds for the transcript to flush, so a slow network never slows an agent down and capture never interrupts one. At session start it also records the agent's command line and settings environment, and the sync snapshots the harness and git state before the first prompt. The sweep covers crashes, killed terminals, user interrupts, `claude -p` runs, and anything from before agent-sessions was installed.
+The hook command returns within milliseconds, prints nothing and always exits 0. It hands the upload to a detached process that waits a few seconds for the transcript to flush, so a slow network never slows an agent down and capture never interrupts one. At session start it also records the agent's command line and settings environment, and the sync snapshots the harness and git state before the first prompt. The sweep covers crashes, killed terminals, user interrupts, failed uploads and anything from before agent-sessions was installed, at the next session start or end on that machine.
 
 [docs/hooks.md](docs/hooks.md) has the details for each agent, with the docs and source lines they were checked against, and the edge cases handled.
 
@@ -54,12 +53,12 @@ Claude Code deletes transcripts after 30 days by default. `agent-sessions instal
 
 | Command | What it does |
 |---|---|
-| `agent-sessions install` | Hooks, Pi extension, sweep timer, config file. `--dry-run` shows what would change. |
-| `agent-sessions doctor` | Checks settings, bucket access, each hook, Codex hook trust, the timer and recent errors. |
+| `agent-sessions install` | Hooks, Pi extension, config file, and removes an earlier version's timer. `--dry-run` shows what would change. |
+| `agent-sessions doctor` | Checks settings, bucket access, each hook, Codex hook trust, the last sweep and recent errors. |
 | `agent-sessions backfill` | Uploads everything already on the machine. |
-| `agent-sessions sync` | Uploads what changed. The timer runs this. |
+| `agent-sessions sync` | Uploads what changed. Hooks run this. |
 | `agent-sessions status` | Counts by agent, recent runs and errors. |
-| `agent-sessions uninstall` | Removes the hooks, the extension and the timer. Uploaded data stays. |
+| `agent-sessions uninstall` | Removes the hooks and the extension. Uploaded data stays. |
 
 Set `AGENT_SESSIONS_DISABLE=1` in an agent's environment to skip capture for that run.
 

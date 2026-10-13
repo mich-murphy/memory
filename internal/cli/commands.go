@@ -21,7 +21,7 @@ import (
 )
 
 // A hook's sync gives up soon when a backfill holds the lock, so waiting syncs can't pile up;
-// the next sweep catches up.
+// the next hook or sweep catches up.
 const (
 	hookLockTimeout   = 30 * time.Second
 	sweepLockTimeout  = 60 * time.Second
@@ -29,7 +29,6 @@ const (
 )
 
 const (
-	defaultInterval = 10
 	defaultKeepDays = 3650
 	statusRuns      = 8
 	statusErrors    = 3
@@ -75,7 +74,7 @@ func (a *syncArgs) lockTimeout() time.Duration {
 	switch {
 	case len(a.paths) > 0:
 		return hookLockTimeout
-	case a.trigger == "sweep":
+	case strings.HasPrefix(a.trigger, "sweep:"):
 		return sweepLockTimeout
 	default:
 		return manualLockTimeout
@@ -114,11 +113,11 @@ func runSync(ctx context.Context, cmd string, args []string, version string, o I
 	}
 	unlock, err := state.Lock(ctx, cfg.StateDir, a.lockTimeout())
 	if errors.Is(err, state.ErrLocked) {
-		log.Warn("another run holds the lock; the next sweep will catch up")
+		log.Warn("another run holds the lock; a later hook will catch up")
 		if a.quiet {
 			return exitOK, nil
 		}
-		o.errorf("agent-sessions: %v; the next sweep will catch up\n", err)
+		o.errorf("agent-sessions: %v; a later hook will catch up\n", err)
 		return exitLocked, nil
 	}
 	if err != nil {
@@ -226,8 +225,6 @@ func runInstall(ctx context.Context, args []string, o IO) (int, error) {
 	var agents agentList
 	fs := newFlags("install", o)
 	fs.Var(&agents, "agent", "only this agent: claude, codex or pi (repeatable; default all present)")
-	noTimer := fs.Bool("no-timer", false, "don't install the periodic sweep")
-	interval := fs.Int("interval", defaultInterval, "sweep interval in minutes")
 	keepDays := fs.Int("keep-days", defaultKeepDays, "raise Claude Code's cleanupPeriodDays to at least this (0 leaves it)")
 	dryRun := fs.Bool("dry-run", false, "show what would change")
 	if err := parse(fs, args); err != nil {
@@ -260,11 +257,9 @@ func runInstall(ctx context.Context, args []string, o IO) (int, error) {
 			log = append(log, fmt.Sprintf("%s: not changed: %v", agent, err))
 		}
 	}
-	if !*noTimer {
-		if err := install.Timer(ctx, opts, *interval); err != nil {
-			failed = true
-			log = append(log, fmt.Sprintf("timer: not installed: %v", err))
-		}
+	if err := install.RemoveOldTimers(ctx, opts); err != nil {
+		failed = true
+		log = append(log, fmt.Sprintf("old periodic sync: not removed: %v", err))
 	}
 	o.printf("agent-sessions command: %s\n", strings.Join(opts.Command, " "))
 	for _, line := range log {
@@ -283,7 +278,6 @@ func runUninstall(ctx context.Context, args []string, o IO) (int, error) {
 	var agents agentList
 	fs := newFlags("uninstall", o)
 	fs.Var(&agents, "agent", "only this agent: claude, codex or pi (repeatable; default all)")
-	keepTimer := fs.Bool("keep-timer", false, "leave the periodic sweep installed")
 	dryRun := fs.Bool("dry-run", false, "show what would change")
 	if err := parse(fs, args); err != nil {
 		return exitUsage, err
@@ -298,11 +292,9 @@ func runUninstall(ctx context.Context, args []string, o IO) (int, error) {
 			log = append(log, fmt.Sprintf("%s: not changed: %v", agent, err))
 		}
 	}
-	if !*keepTimer {
-		if err := install.Timer(ctx, opts, defaultInterval); err != nil {
-			failed = true
-			log = append(log, fmt.Sprintf("timer: not removed: %v", err))
-		}
+	if err := install.RemoveOldTimers(ctx, opts); err != nil {
+		failed = true
+		log = append(log, fmt.Sprintf("old periodic sync: not removed: %v", err))
 	}
 	for _, line := range log {
 		o.printf("  %s\n", line)

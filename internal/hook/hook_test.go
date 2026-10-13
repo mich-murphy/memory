@@ -156,7 +156,7 @@ func testReadFile(t *testing.T, path string) []byte {
 }
 
 func TestSessionStartRecordsLaunchContext(t *testing.T) {
-	e := testenv.New(t)
+	testenv.New(t)
 	calls := fakeSpawn(t)
 	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "secret")
@@ -166,7 +166,7 @@ func TestSessionStartRecordsLaunchContext(t *testing.T) {
 		"permission_mode": "default",
 	})
 	withStdin(t, payload, func() { Run(t.Context(), "claude", nil, "", ExtensionArgs{}) })
-	if len(*calls) != 1 {
+	if len(*calls) != 2 {
 		t.Fatalf("spawned %v", *calls)
 	}
 	c := (*calls)[0]
@@ -187,9 +187,56 @@ func TestSessionStartRecordsLaunchContext(t *testing.T) {
 	if len(launch["process"].(map[string]any)["ancestry"].([]any)) == 0 {
 		t.Error("no ancestry") // the test's own process tree; no claude in it
 	}
-	markers, _ := filepath.Glob(filepath.Join(e.State, "pending", "[0-9a-f]*"))
-	if len(markers) != 0 {
-		t.Errorf("a session start took a debounce marker: %v", markers)
+}
+
+func TestSessionStartsAndEndsQueueOneSweepAtATime(t *testing.T) {
+	e := testenv.New(t)
+	calls := fakeSpawn(t)
+	sweeps := func() []spawned {
+		var out []spawned
+		for _, c := range *calls {
+			if strings.HasPrefix(c.event, "sweep:") {
+				out = append(out, c)
+			}
+		}
+		return out
+	}
+	withStdin(t, `{"hook_event_name": "Stop", "transcript_path": "/x/a.jsonl"}`, func() {
+		Run(t.Context(), "claude", nil, "", ExtensionArgs{})
+	})
+	if s := sweeps(); len(s) != 0 {
+		t.Fatalf("a turn queued a sweep: %v", s)
+	}
+
+	withStdin(t, `{"hook_event_name": "SessionStart", "transcript_path": "/x/b.jsonl"}`, func() {
+		Run(t.Context(), "claude", nil, "", ExtensionArgs{})
+	})
+	s := sweeps()
+	if len(s) != 1 || s[0].event != "sweep:SessionStart" || s[0].agent != "" || s[0].path != "" ||
+		!slices.Contains(s[0].args, "--quiet") {
+		t.Fatalf("sweeps = %v", s)
+	}
+
+	Run(t.Context(), "pi", []string{"/p/s.jsonl"}, "session_shutdown", ExtensionArgs{})
+	if s := sweeps(); len(s) != 1 {
+		t.Errorf("a second sweep was queued behind the first: %v", s)
+	}
+	if last := (*calls)[len(*calls)-1]; last.path != "/p/s.jsonl" {
+		t.Errorf("session end didn't sync its own transcript: %v", last)
+	}
+
+	marker := s[0].args[slices.Index(s[0].args, "--pending-marker")+1]
+	if err := os.Remove(marker); err != nil { // as the sweep does once it holds the lock
+		t.Fatal(err)
+	}
+	withStdin(t, `{"hook_event_name": "SessionEnd", "transcript_path": null}`, func() {
+		Run(t.Context(), "codex", nil, "", ExtensionArgs{})
+	})
+	if s := sweeps(); len(s) != 2 || s[1].event != "sweep:SessionEnd" {
+		t.Errorf("sweeps after the first started = %v", s)
+	}
+	if !strings.HasPrefix(marker, filepath.Join(e.State, "pending")) {
+		t.Errorf("marker outside the state dir: %s", marker)
 	}
 }
 
@@ -198,7 +245,7 @@ func TestPiSessionStartPassesReasonAndCwd(t *testing.T) {
 	calls := fakeSpawn(t)
 	argv := `["/usr/bin/node", "/usr/lib/pi/dist/cli.js", "--model", "x"]`
 	Run(t.Context(), "pi", []string{"/p/s.jsonl"}, "session_start", ExtensionArgs{Source: "resume", Cwd: "/w", Argv: argv})
-	if len(*calls) != 1 {
+	if len(*calls) != 2 {
 		t.Fatalf("spawned %v", *calls)
 	}
 	launch := readLaunchFile(t, (*calls)[0].args)

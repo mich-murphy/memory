@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/mich-murphy/memory/internal/cli"
+	"github.com/mich-murphy/memory/internal/install"
 	"github.com/mich-murphy/memory/internal/testenv"
 )
 
@@ -39,7 +40,7 @@ func snapshotTree(t *testing.T, root string) map[string]string {
 }
 
 // onlyAgentSessionsOnPath leaves PATH holding just a stand-in agent-sessions, which hooks are
-// installed to run: no agents, systemd, launchd or cron.
+// installed to run: no agents, systemctl, launchctl or crontab.
 func onlyAgentSessionsOnPath(t *testing.T) {
 	t.Helper()
 	bin := t.TempDir()
@@ -53,7 +54,7 @@ func onlyAgentSessionsOnPath(t *testing.T) {
 func TestInstallDryRunTouchesNothing(t *testing.T) {
 	e := testenv.New(t)
 	before := snapshotTree(t, e.Home)
-	code, out, _ := run("install", "--dry-run", "--no-timer")
+	code, out, _ := run("install", "--dry-run")
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
@@ -71,7 +72,7 @@ func TestInstallSkipsAgentsNotOnThisMachine(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(e.Home, ".pi")); err != nil {
 		t.Fatal(err)
 	}
-	code, out, _ := run("install", "--no-timer")
+	code, out, _ := run("install")
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
@@ -84,7 +85,7 @@ func TestInstallSkipsAgentsNotOnThisMachine(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(e.Home, ".codex", "hooks.json")); err != nil {
 		t.Error("codex hooks not installed")
 	}
-	if code, out, _ := run("uninstall", "--keep-timer"); code != 0 {
+	if code, out, _ := run("uninstall"); code != 0 {
 		t.Fatalf("uninstall: exit %d\n%s", code, out)
 	}
 	if _, err := os.Stat(filepath.Join(e.Home, ".codex", "hooks.json")); !os.IsNotExist(err) {
@@ -123,28 +124,40 @@ func TestUsageAndVersion(t *testing.T) {
 }
 
 func TestDoctorReportsWhatIsMissing(t *testing.T) {
-	testenv.New(t)
+	e := testenv.New(t)
 	onlyAgentSessionsOnPath(t)
+	oldPlist := filepath.Join(e.Home, "Library", "LaunchAgents", "tech.agent-sessions.sweep.plist")
+	testenv.Write(t, oldPlist, "<plist/>")
 	code, out, _ := run("doctor")
 	if code != 1 {
 		t.Errorf("exit %d", code)
 	}
 	for _, want := range []string{
 		"[ok  ] machine id: testbox", "[warn] writing to a local directory", "[FAIL] claude: 0/8 agent-sessions hooks",
-		"[FAIL] codex: 0/6", "[FAIL] pi: extension missing", "[FAIL] sweep timer: not installed",
+		"[FAIL] codex: 0/6", "[FAIL] pi: extension missing",
+		"[FAIL] an earlier version's periodic sync is still installed (launchd)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("doctor output lacks %q:\n%s", want, out)
 		}
 	}
-	if code, _, _ := run("install", "--no-timer"); code != 0 {
-		t.Fatal("install failed")
+	if code, out, _ := run("install"); code != 0 || !strings.Contains(out, "removed: "+oldPlist) {
+		t.Fatalf("install: exit %d\n%s", code, out)
 	}
 	_, out, _ = run("doctor")
 	for _, want := range []string{"[ok  ] claude: 8/8", "[ok  ] codex: 6/6", "[FAIL] codex: 0/6 agent-sessions hooks trusted", "[ok  ] pi: extension installed", "[ok  ] claude: cleanupPeriodDays = 3650"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("doctor output lacks %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "periodic sync") {
+		t.Errorf("install left the old periodic sync:\n%s", out)
+	}
+
+	ext := filepath.Join(e.Home, ".pi", "agent", "extensions", "agent-sessions.ts")
+	testenv.Write(t, ext, install.PiMarker+"\n// an earlier version\n")
+	if _, out, _ = run("doctor"); !strings.Contains(out, "[warn] pi: extension at "+ext+" is out of date") {
+		t.Errorf("doctor missed an old extension:\n%s", out)
 	}
 }
 

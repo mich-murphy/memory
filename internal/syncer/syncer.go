@@ -142,13 +142,16 @@ func (s *Syncer) errorf(format string, args ...any) {
 	s.log.Error("sync error", "error", msg)
 }
 
+// Roots always includes the canonical root: a sweep runs with the environment of whichever
+// agent's hook started it, and CLAUDE_CONFIG_DIR and friends there would otherwise hide it.
 func (s *Syncer) Roots(agent string) ([]string, error) {
 	extra, err := s.state.ExtraRoots(agent)
 	if err != nil {
 		return nil, err
 	}
+	a := s.adapters[agent]
 	var out []string
-	for _, r := range append(s.adapters[agent].DefaultRoots(), extra...) {
+	for _, r := range slices.Concat(a.DefaultRoots(), []string{a.CanonicalRoot()}, extra) {
 		if !slices.Contains(out, r) {
 			out = append(out, r)
 		}
