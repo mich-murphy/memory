@@ -73,9 +73,7 @@ func (s *Summary) Trimmed() Summary {
 	return t
 }
 
-type sessionID struct{ agent, key string }
-
-type snapshotKey struct{ agent, root, cwd, session string }
+type snapshotKey struct{ session, root, cwd string }
 
 type snapshotResult struct {
 	setID    string
@@ -100,8 +98,8 @@ type Syncer struct {
 
 	Summary Summary
 
-	sessionRoots  map[sessionID]string
-	touched       map[sessionID]bool
+	sessionRoots  map[adapters.SessionRef]string
+	touched       map[adapters.SessionRef]bool
 	snapshotCache map[snapshotKey]snapshotResult
 	workDir       string
 	tmpDir        string
@@ -118,8 +116,8 @@ func New(cfg *config.Config, st store.Store, s *state.State, ads map[string]adap
 	return &Syncer{
 		cfg: cfg, store: st, state: s, adapters: ads, opts: opts, log: logger, now: time.Now,
 		Summary:       Summary{ErrorMessages: []string{}},
-		sessionRoots:  map[sessionID]string{},
-		touched:       map[sessionID]bool{},
+		sessionRoots:  map[adapters.SessionRef]string{},
+		touched:       map[adapters.SessionRef]bool{},
 		snapshotCache: map[snapshotKey]snapshotResult{},
 		workDir:       filepath.Join(cfg.StateDir, "exports"),
 		tmpDir:        filepath.Join(cfg.StateDir, "tmp"),
@@ -154,12 +152,12 @@ func (s *Syncer) Roots(agent string) ([]string, error) {
 	return out, nil
 }
 
-func (s *Syncer) markManifestPending(id sessionID) error {
+func (s *Syncer) markManifestPending(id adapters.SessionRef) error {
 	s.touched[id] = true
-	return s.state.MarkManifestPending(id.agent, id.key)
+	return s.state.MarkManifestPending(id)
 }
 
-func (s *Syncer) noteSessionRoot(id sessionID, root string) {
+func (s *Syncer) noteSessionRoot(id adapters.SessionRef, root string) {
 	if _, ok := s.sessionRoots[id]; !ok {
 		s.sessionRoots[id] = root
 	}
@@ -226,7 +224,7 @@ func (s *Syncer) tombstone(agent, root string, present map[string]bool) error {
 		}
 		s.Summary.Deleted++
 		if f.SessionKey != "" {
-			id := sessionID{agent, f.SessionKey}
+			id := adapters.SessionRef{Agent: agent, Key: f.SessionKey}
 			if err := s.markManifestPending(id); err != nil {
 				return err
 			}
@@ -327,8 +325,8 @@ func (s *Syncer) Run(ctx context.Context, files []adapters.SessionFile) (*Summar
 	if err != nil {
 		return &s.Summary, err
 	}
-	for _, p := range pending {
-		s.touched[sessionID{p.Agent, p.SessionKey}] = true
+	for _, id := range pending {
+		s.touched[id] = true
 	}
 	results := make(chan result, uploadWorkers*2)
 	sem := make(chan struct{}, uploadWorkers)
@@ -398,8 +396,8 @@ func (s *Syncer) versionsKey(sf adapters.SessionFile) string {
 	return "raw-versions/agent=" + sf.Agent + "/machine=" + s.cfg.MachineID + "/" + sf.Key + ".json"
 }
 
-func (s *Syncer) manifestKey(agent, sessionKey string) string {
-	return "manifests/agent=" + agent + "/machine=" + s.cfg.MachineID + "/" + sessionKey + ".json"
+func (s *Syncer) manifestKey(id adapters.SessionRef) string {
+	return "manifests/agent=" + id.Agent + "/machine=" + s.cfg.MachineID + "/" + id.Key + ".json"
 }
 
 func parallel[T any](items []T, fn func(T) error) []error {

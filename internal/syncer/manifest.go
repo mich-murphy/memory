@@ -26,13 +26,11 @@ func (s *Syncer) RecordLaunch(ctx context.Context, agent, path string, launch ma
 			cwd, _ = hi["cwd"].(string)
 		}
 	}
+	id := sf.Session()
 	now := s.nowSeconds()
-	sess, err := s.state.GetSession(agent, sf.SessionKey)
+	sess, err := s.session(id, now)
 	if err != nil {
 		return err
-	}
-	if sess == nil {
-		sess = &state.Session{Info: map[string]any{}, FirstSeen: now}
 	}
 	if _, ok := sess.Info["cwd"]; !ok && cwd != "" {
 		sess.Info["cwd"] = cwd
@@ -40,20 +38,19 @@ func (s *Syncer) RecordLaunch(ctx context.Context, agent, path string, launch ma
 	git := gitinfo.State(ctx, cwd, s.cfg.MachineID)
 	entry := maps.Clone(launch)
 	entry["git"] = git
-	snap, err := s.takeSnapshot(ctx, agent, sf.Root, cwd, sf.SessionKey)
+	snap, err := s.takeSnapshot(ctx, id, sf.Root, cwd)
 	if err != nil {
 		return err
 	}
 	entry["snapshot"] = snap.setID
 	sess.Snapshots = addSnapshot(sess.Snapshots, snap, git, "pre_session", now)
 	sess.Launches = append(sess.Launches, entry)
-	if err := s.state.PutSession(agent, sf.SessionKey, sess); err != nil {
+	if err := s.state.PutSession(id, sess); err != nil {
 		return err
 	}
 	if err := s.state.Flush(); err != nil {
 		return err
 	}
-	id := sessionID{agent, sf.SessionKey}
 	s.sessionRoots[id] = sf.Root
 	return s.markManifestPending(id)
 }
@@ -103,27 +100,35 @@ func equalPtr(a, b *string) bool {
 	return *a == *b
 }
 
+func (s *Syncer) session(id adapters.SessionRef, now float64) (*state.Session, error) {
+	sess, err := s.state.GetSession(id)
+	if sess == nil && err == nil {
+		sess = &state.Session{Info: map[string]any{}, FirstSeen: now}
+	}
+	return sess, err
+}
+
 type manifestJob struct {
-	id   sessionID
+	id   adapters.SessionRef
 	key  string
 	body []byte
 	sha  string
 }
 
 func (s *Syncer) writeManifests(ctx context.Context) error {
-	ids := slices.SortedFunc(maps.Keys(s.touched), func(a, b sessionID) int {
-		return cmp.Or(cmp.Compare(a.agent, b.agent), cmp.Compare(a.key, b.key))
+	ids := slices.SortedFunc(maps.Keys(s.touched), func(a, b adapters.SessionRef) int {
+		return cmp.Or(cmp.Compare(a.Agent, b.Agent), cmp.Compare(a.Key, b.Key))
 	})
 	var jobs []manifestJob
 	for _, id := range ids {
-		job, err := s.buildManifest(ctx, id.agent, id.key)
+		job, err := s.buildManifest(ctx, id)
 		if err != nil {
-			s.errorf("manifest %s/%s: %v", id.agent, id.key, err)
+			s.errorf("manifest %s: %v", id, err)
 			continue
 		}
 		if job != nil {
 			jobs = append(jobs, *job)
-		} else if err := s.state.ManifestWritten(id.agent, id.key); err != nil {
+		} else if err := s.state.ManifestWritten(id); err != nil {
 			return err
 		}
 	}
@@ -132,13 +137,13 @@ func (s *Syncer) writeManifests(ctx context.Context) error {
 	})
 	for i, j := range jobs {
 		if errs[i] != nil {
-			s.errorf("manifest %s/%s: %v", j.id.agent, j.id.key, errs[i])
+			s.errorf("manifest %s: %v", j.id, errs[i])
 			continue
 		}
 		if err := s.state.RecordUpload(j.key, j.sha, nil); err != nil {
 			return err
 		}
-		if err := s.state.ManifestWritten(j.id.agent, j.id.key); err != nil {
+		if err := s.state.ManifestWritten(j.id); err != nil {
 			return err
 		}
 		s.Summary.Manifests++
@@ -146,10 +151,10 @@ func (s *Syncer) writeManifests(ctx context.Context) error {
 	return nil
 }
 
-func (s *Syncer) maybeSnapshot(ctx context.Context, agent, sessionKey string, sess *state.Session, files []state.File,
+func (s *Syncer) maybeSnapshot(ctx context.Context, id adapters.SessionRef, sess *state.Session, files []state.File,
 	now float64,
 ) error {
-	root, ok := s.sessionRoots[sessionID{agent, sessionKey}]
+	root, ok := s.sessionRoots[id]
 	cwd, _ := sess.Info["cwd"].(string)
 	if !ok || cwd == "" {
 		return nil
@@ -157,7 +162,7 @@ func (s *Syncer) maybeSnapshot(ctx context.Context, agent, sessionKey string, se
 	if n := len(sess.Snapshots); n > 0 && now-sess.Snapshots[n-1].CheckedAt < snapshotRecheck.Seconds() {
 		return nil
 	}
-	snap, err := s.takeSnapshot(ctx, agent, root, cwd, sessionKey)
+	snap, err := s.takeSnapshot(ctx, id, root, cwd)
 	if err != nil {
 		return err
 	}
@@ -166,16 +171,13 @@ func (s *Syncer) maybeSnapshot(ctx context.Context, agent, sessionKey string, se
 	return nil
 }
 
-func (s *Syncer) buildManifest(ctx context.Context, agent, sessionKey string) (*manifestJob, error) {
+func (s *Syncer) buildManifest(ctx context.Context, id adapters.SessionRef) (*manifestJob, error) {
 	now := s.nowSeconds()
-	sess, err := s.state.GetSession(agent, sessionKey)
+	sess, err := s.session(id, now)
 	if err != nil {
 		return nil, err
 	}
-	if sess == nil {
-		sess = &state.Session{Info: map[string]any{}, FirstSeen: now}
-	}
-	files, err := s.state.SessionFiles(agent, sessionKey)
+	files, err := s.state.SessionFiles(id)
 	if err != nil {
 		return nil, err
 	}
@@ -184,16 +186,16 @@ func (s *Syncer) buildManifest(ctx context.Context, agent, sessionKey string) (*
 			maps.Copy(sess.Info, f.Head)
 		}
 	}
-	if root, ok := s.sessionRoots[sessionID{agent, sessionKey}]; ok {
+	if root, ok := s.sessionRoots[id]; ok {
 		sess.Info["source_root"] = root
 	}
-	if err := s.maybeSnapshot(ctx, agent, sessionKey, sess, files, now); err != nil {
+	if err := s.maybeSnapshot(ctx, id, sess, files, now); err != nil {
 		return nil, err
 	}
-	if err := s.state.PutSession(agent, sessionKey, sess); err != nil {
+	if err := s.state.PutSession(id, sess); err != nil {
 		return nil, err
 	}
-	manifest, err := s.manifest(agent, sessionKey, sess, files)
+	manifest, err := s.manifest(id, sess, files)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +204,7 @@ func (s *Syncer) buildManifest(ctx context.Context, agent, sessionKey string) (*
 		return nil, err
 	}
 	sha := raw.SHA256(body)
-	key := s.manifestKey(agent, sessionKey)
+	key := s.manifestKey(id)
 	if prev, err := s.state.UploadedSHA(key); err != nil || prev == sha {
 		return nil, err
 	}
@@ -212,15 +214,15 @@ func (s *Syncer) buildManifest(ctx context.Context, agent, sessionKey string) (*
 	if err != nil {
 		return nil, err
 	}
-	return &manifestJob{id: sessionID{agent, sessionKey}, key: key, body: body, sha: sha}, nil
+	return &manifestJob{id: id, key: key, body: body, sha: sha}, nil
 }
 
-func (s *Syncer) manifest(agent, sessionKey string, sess *state.Session, files []state.File) (map[string]any, error) {
+func (s *Syncer) manifest(id adapters.SessionRef, sess *state.Session, files []state.File) (map[string]any, error) {
 	transcripts := make([]map[string]any, 0, len(files))
 	var deleted []map[string]any
 	for i := range files {
 		f := &files[i]
-		obj := s.rawKey(agent, f.Key)
+		obj := s.rawKey(id.Agent, f.Key)
 		pieces, err := s.state.Pieces(obj)
 		if err != nil {
 			return nil, err
@@ -255,10 +257,10 @@ func (s *Syncer) manifest(agent, sessionKey string, sess *state.Session, files [
 	}
 	return map[string]any{
 		"schema":          2,
-		"agent":           agent,
+		"agent":           id.Agent,
 		"machine_id":      s.cfg.MachineID,
 		"hostname":        s.cfg.Hostname,
-		"session_key":     sessionKey,
+		"session_key":     id.Key,
 		"info":            sess.Info,
 		"transcripts":     transcripts,
 		"launch":          launch,
@@ -284,15 +286,15 @@ func orEmpty[T any](s []T) []T {
 	return s
 }
 
-func (s *Syncer) takeSnapshot(ctx context.Context, agent, root, cwd, sessionKey string) (snapshotResult, error) {
-	ck := snapshotKey{agent: agent, root: root, cwd: cwd}
-	if agent == "claude" {
-		ck.session = sessionKey
+func (s *Syncer) takeSnapshot(ctx context.Context, id adapters.SessionRef, root, cwd string) (snapshotResult, error) {
+	ck := snapshotKey{session: id.Agent, root: root, cwd: cwd}
+	if id.Agent == "claude" {
+		ck.session = id.String()
 	}
 	if r, ok := s.snapshotCache[ck]; ok {
 		return r, nil
 	}
-	snap, err := snapshot.Build(s.adapters[agent], root, cwd, sessionKey)
+	snap, err := snapshot.Build(s.adapters[id.Agent], root, cwd, id.Key)
 	if err != nil {
 		return snapshotResult{}, err
 	}

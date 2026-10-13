@@ -17,6 +17,7 @@ import (
 
 	_ "modernc.org/sqlite" // database/sql driver "sqlite"
 
+	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/jsonx"
 	"github.com/mich-murphy/memory/internal/raw"
 )
@@ -264,11 +265,11 @@ func nullString(s string) any {
 
 // SessionFiles returns one file per key. Codex can hold one key under two paths (.jsonl then
 // .jsonl.zst); the one still on disk wins.
-func (s *State) SessionFiles(agent, sessionKey string) ([]File, error) {
+func (s *State) SessionFiles(ref adapters.SessionRef) ([]File, error) {
 	var out []File
 	index := map[string]int{}
 	err := s.query("SELECT key, role, size, sha256, line_count, prefix_sha256, head, deleted_at, mtime_ns FROM files "+
-		"WHERE agent = ? AND session_key = ? ORDER BY key, deleted_at IS NULL", []any{agent, sessionKey},
+		"WHERE agent = ? AND session_key = ? ORDER BY key, deleted_at IS NULL", []any{ref.Agent, ref.Key},
 		func(rows *sql.Rows) error {
 			var f File
 			var lines sql.NullInt64
@@ -462,22 +463,22 @@ func (g GitState) IsZero() bool {
 	return g == GitState{}
 }
 
-func (s *State) GetSession(agent, sessionKey string) (*Session, error) {
+func (s *State) GetSession(ref adapters.SessionRef) (*Session, error) {
 	var info, snaps, launches string
 	var sess Session
 	found, err := s.queryRow("SELECT info, snapshots, launches, first_seen FROM sessions WHERE agent = ? AND session_key = ?",
-		[]any{agent, sessionKey}, &info, &snaps, &launches, &sess.FirstSeen)
+		[]any{ref.Agent, ref.Key}, &info, &snaps, &launches, &sess.FirstSeen)
 	if !found || err != nil {
 		return nil, err
 	}
 	if err := jsonx.Decode([]byte(info), &sess.Info); err != nil {
-		return nil, fmt.Errorf("state: session %s info: %w", sessionKey, err)
+		return nil, fmt.Errorf("state: session %s info: %w", ref.Key, err)
 	}
 	if err := jsonx.Decode([]byte(snaps), &sess.Snapshots); err != nil {
-		return nil, fmt.Errorf("state: session %s snapshots: %w", sessionKey, err)
+		return nil, fmt.Errorf("state: session %s snapshots: %w", ref.Key, err)
 	}
 	if err := jsonx.Decode([]byte(launches), &sess.Launches); err != nil {
-		return nil, fmt.Errorf("state: session %s launches: %w", sessionKey, err)
+		return nil, fmt.Errorf("state: session %s launches: %w", ref.Key, err)
 	}
 	if sess.Info == nil {
 		sess.Info = map[string]any{}
@@ -485,7 +486,7 @@ func (s *State) GetSession(agent, sessionKey string) (*Session, error) {
 	return &sess, nil
 }
 
-func (s *State) PutSession(agent, sessionKey string, sess *Session) error {
+func (s *State) PutSession(ref adapters.SessionRef, sess *Session) error {
 	info, err := jsonx.Compact(orEmptyMap(sess.Info))
 	if err != nil {
 		return err
@@ -498,7 +499,7 @@ func (s *State) PutSession(agent, sessionKey string, sess *Session) error {
 	if err != nil {
 		return err
 	}
-	return s.exec("INSERT OR REPLACE INTO sessions VALUES (?,?,?,?,?,?)", agent, sessionKey, string(info), string(snaps),
+	return s.exec("INSERT OR REPLACE INTO sessions VALUES (?,?,?,?,?,?)", ref.Agent, ref.Key, string(info), string(snaps),
 		string(launches), sess.FirstSeen)
 }
 
@@ -516,25 +517,20 @@ func orEmptyMap(m map[string]any) map[string]any {
 	return m
 }
 
-type SessionRef struct {
-	Agent      string
-	SessionKey string
+func (s *State) MarkManifestPending(ref adapters.SessionRef) error {
+	return s.exec("INSERT OR IGNORE INTO pending_manifests VALUES (?,?)", ref.Agent, ref.Key)
 }
 
-func (s *State) MarkManifestPending(agent, sessionKey string) error {
-	return s.exec("INSERT OR IGNORE INTO pending_manifests VALUES (?,?)", agent, sessionKey)
+func (s *State) ManifestWritten(ref adapters.SessionRef) error {
+	return s.exec("DELETE FROM pending_manifests WHERE agent = ? AND session_key = ?", ref.Agent, ref.Key)
 }
 
-func (s *State) ManifestWritten(agent, sessionKey string) error {
-	return s.exec("DELETE FROM pending_manifests WHERE agent = ? AND session_key = ?", agent, sessionKey)
-}
-
-func (s *State) PendingManifests() ([]SessionRef, error) {
-	var out []SessionRef
+func (s *State) PendingManifests() ([]adapters.SessionRef, error) {
+	var out []adapters.SessionRef
 	err := s.query("SELECT agent, session_key FROM pending_manifests ORDER BY agent, session_key", nil,
 		func(rows *sql.Rows) error {
-			var r SessionRef
-			if err := rows.Scan(&r.Agent, &r.SessionKey); err != nil {
+			var r adapters.SessionRef
+			if err := rows.Scan(&r.Agent, &r.Key); err != nil {
 				return fmt.Errorf("state: %w", err)
 			}
 			out = append(out, r)

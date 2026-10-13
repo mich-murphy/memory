@@ -206,7 +206,7 @@ func (s *Syncer) prepare(sf adapters.SessionFile) (*upload, error) {
 		return nil, fmt.Errorf("stat: %w", err)
 	}
 	if sf.SessionKey != "" {
-		s.noteSessionRoot(sessionID{sf.Agent, sf.SessionKey}, sf.Root)
+		s.noteSessionRoot(sf.Session(), sf.Root)
 	}
 	key := s.rawKey(sf.Agent, sf.Key)
 	pieces, err := s.state.Pieces(key)
@@ -520,7 +520,7 @@ func (s *Syncer) finish(u *upload) error {
 		s.Summary.Unchanged++
 	}
 	if sf.SessionKey != "" && (u.needsUpload || u.head != nil) {
-		if err := s.markManifestPending(sessionID{sf.Agent, sf.SessionKey}); err != nil {
+		if err := s.markManifestPending(sf.Session()); err != nil {
 			return err
 		}
 	}

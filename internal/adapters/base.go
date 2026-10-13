@@ -59,6 +59,15 @@ type SessionFile struct {
 	Zstd       bool
 }
 
+type SessionRef struct {
+	Agent string
+	Key   string
+}
+
+func (r SessionRef) String() string { return r.Agent + "/" + r.Key }
+
+func (f SessionFile) Session() SessionRef { return SessionRef{f.Agent, f.SessionKey} }
+
 // SnapshotRules are patterns relative to UserBase, the project root and $HOME. A pattern
 // ending in "/**" takes every file under that directory; "**/NAME" matches NAME at any depth.
 type SnapshotRules struct {
