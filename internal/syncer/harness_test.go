@@ -8,12 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/config"
+	"github.com/mich-murphy/memory/internal/raw"
 	"github.com/mich-murphy/memory/internal/state"
 	"github.com/mich-murphy/memory/internal/testenv"
 )
@@ -56,7 +58,15 @@ func (m *memStore) Put(_ context.Context, key string, body []byte, meta map[stri
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.objects[key] = memObject{slices.Clone(body), maps.Clone(meta)}
-	m.record("put "+key, len(body))
+	op := "put " + key
+	if strings.HasSuffix(key, ".zst") {
+		data, err := raw.Decompress(body)
+		if err != nil {
+			return err
+		}
+		op += " raw=" + raw.SHA256(data)
+	}
+	m.record(op, len(body))
 	return nil
 }
 

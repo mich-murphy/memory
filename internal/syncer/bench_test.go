@@ -34,6 +34,7 @@ type benchHome struct {
 	w      *testenv.Workload
 	synced string
 	sizes  map[string]int64
+	at     time.Time
 }
 
 var (
@@ -68,9 +69,9 @@ func home(b *testing.B, name string, p testenv.Profile) *benchHome {
 	}
 	dir := filepath.Join(homeDir, name)
 	w := testenv.NewWorkload(b, dir, p, time.Now().Add(-2*time.Hour))
-	h := &benchHome{w: w, synced: filepath.Join(dir, "synced"), sizes: map[string]int64{}}
+	h := &benchHome{w: w, synced: filepath.Join(dir, "synced"), sizes: map[string]int64{}, at: w.Start.Add(2 * time.Hour)}
 	r := newRig(b, w, h.synced)
-	r.now = time.Now()
+	r.now = h.at
 	if sum := r.sync(""); sum.Errors > 0 {
 		b.Fatalf("backfill: %v", sum.ErrorMessages)
 	}
@@ -86,7 +87,8 @@ func home(b *testing.B, name string, p testenv.Profile) *benchHome {
 }
 
 // reset puts the home's transcripts and a copy of its synced state back as the backfill left
-// them, and returns a rig on that copy.
+// them, and returns a rig on that copy a minute after the backfill, so every run of a benchmark
+// sees the same ages and snapshot checks.
 func (h *benchHome) reset(b *testing.B, stateDir string) *rig {
 	b.Helper()
 	for p, size := range h.sizes {
@@ -97,14 +99,22 @@ func (h *benchHome) reset(b *testing.B, stateDir string) *rig {
 	h.w.Touch(b, h.w.Start)
 	copyDir(b, h.synced, stateDir)
 	r := newRig(b, h.w, stateDir)
-	r.now = time.Now()
+	r.now = h.at.Add(time.Minute)
 	return r
 }
 
-func report(b *testing.B, m *memStore) {
+// tally adds up requests and bytes sent over a benchmark's runs.
+type tally struct{ requests, sent int64 }
+
+func (t *tally) add(m *memStore) {
 	ops, sent := m.takeOps()
-	b.ReportMetric(float64(len(ops))/float64(b.N), "requests/op")
-	b.ReportMetric(float64(sent)/float64(b.N), "sent-B/op")
+	t.requests += int64(len(ops))
+	t.sent += sent
+}
+
+func (t *tally) report(b *testing.B) {
+	b.ReportMetric(float64(t.requests)/float64(b.N), "requests/op")
+	b.ReportMetric(float64(t.sent)/float64(b.N), "sent-B/op")
 }
 
 func BenchmarkBackfill(b *testing.B) {
@@ -114,17 +124,19 @@ func BenchmarkBackfill(b *testing.B) {
 			stateDir := filepath.Join(b.TempDir(), "state")
 			b.SetBytes(h.w.Bytes)
 			r := newRig(b, h.w, stateDir)
+			r.now = h.at
+			var t tally
 			for b.Loop() {
 				b.StopTimer()
 				if err := os.RemoveAll(stateDir); err != nil {
 					b.Fatal(err)
 				}
 				r.store.objects = map[string]memObject{}
-				r.now = time.Now()
 				b.StartTimer()
 				r.sync("")
+				t.add(r.store)
 			}
-			report(b, r.store)
+			t.report(b)
 		})
 	}
 }
@@ -133,10 +145,12 @@ func BenchmarkSweepIdle(b *testing.B) {
 	for _, pr := range profiles[:2] {
 		b.Run(pr.name, func(b *testing.B) {
 			r := home(b, pr.name, pr.p).reset(b, filepath.Join(b.TempDir(), "state"))
+			var t tally
 			for b.Loop() {
 				r.sync("")
+				t.add(r.store)
 			}
-			report(b, r.store)
+			t.report(b)
 		})
 	}
 }
@@ -152,18 +166,19 @@ func BenchmarkSweepAfterTurns(b *testing.B) {
 			stateDir := filepath.Join(b.TempDir(), "state")
 			n := testenv.TypicalProfile.Sessions
 			active := []string{h.w.Mains[1], h.w.Mains[n+1], h.w.Mains[2*n+1]}
-			var r *rig
+			var t tally
 			for b.Loop() {
 				b.StopTimer()
-				r = h.reset(b, stateDir)
+				r := h.reset(b, stateDir)
 				r.store.latency = rtt
 				for _, p := range active {
-					h.w.AppendTurn(b, p, turnBytes, time.Now().Add(-2*time.Minute))
+					h.w.AppendTurn(b, p, turnBytes, r.now.Add(-2*time.Minute))
 				}
 				b.StartTimer()
 				r.sync("")
+				t.add(r.store)
 			}
-			report(b, r.store)
+			t.report(b)
 		})
 	}
 }
@@ -185,16 +200,17 @@ func BenchmarkHookTurn(b *testing.B) {
 			h := home(b, c.name, c.p)
 			stateDir := filepath.Join(b.TempDir(), "state")
 			path := h.w.Mains[0]
-			var r *rig
+			var t tally
 			for b.Loop() {
 				b.StopTimer()
-				r = h.reset(b, stateDir)
+				r := h.reset(b, stateDir)
 				r.store.latency = c.rtt
-				h.w.AppendTurn(b, path, turnBytes, time.Now().Add(-5*time.Second))
+				h.w.AppendTurn(b, path, turnBytes, r.now.Add(-5*time.Second))
 				b.StartTimer()
 				r.sync("claude", path)
+				t.add(r.store)
 			}
-			report(b, r.store)
+			t.report(b)
 		})
 	}
 }
