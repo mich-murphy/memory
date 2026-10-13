@@ -17,6 +17,7 @@ The benchmarks run the collector the way it runs on a machine, against a generat
 | Benchmark | The moment it stands for |
 |---|---|
 | `BenchmarkHookTurn` | A hook's sync after one agent turn (24 KiB appended to the largest session). The most frequent run. |
+| `BenchmarkHookTurnAfterSegments` | The same sync on a 12 MiB session that has gathered 1, 16 or 62 segments since its last fold (it folds at 64). |
 | `BenchmarkSweepIdle` | A sweep at session start or end when nothing has changed. |
 | `BenchmarkSweepAfterTurns` | A sweep after three sessions, one per agent, each took a turn. |
 | `BenchmarkFold` | The sweep that folds an idle session's segments into one object, once per session. |
