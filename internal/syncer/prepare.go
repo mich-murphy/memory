@@ -92,7 +92,6 @@ func (u *upload) bodySize() int64 {
 	return 0
 }
 
-// readFile reads a file as it is uploaded: decompressed, with secrets in config files redacted.
 func readFile(sf adapters.SessionFile) ([]byte, error) {
 	data, err := os.ReadFile(sf.Path)
 	if err != nil {

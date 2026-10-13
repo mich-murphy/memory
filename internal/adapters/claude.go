@@ -260,8 +260,7 @@ func (c *Claude) claudeJSON(root string) string {
 	return filepath.Join(c.home, ".claude.json")
 }
 
-// Exports adds database copies and ~/.claude.json without its API key. The copy's MCP secrets
-// are redacted when it is read for upload, like every config file.
+// Exports adds database copies and ~/.claude.json without its API key.
 func (c *Claude) Exports(root, workDir string, interval time.Duration) []SessionFile {
 	out := SQLiteExports(c, root, workDir, interval)
 	data, err := os.ReadFile(c.claudeJSON(root))
@@ -323,7 +322,6 @@ func (c *Claude) ExtraSnapshotEntries(root, projectRoot string) []Entry {
 	if err != nil {
 		return nil
 	}
-	// MCP server env and headers often hold tokens.
 	if body, err = scrub.File(c.Name(), ".claude.json", body); err != nil {
 		return nil
 	}

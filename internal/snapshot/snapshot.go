@@ -21,9 +21,6 @@
 //	script    hook and status-line scripts named in settings, by real path
 //	import    files pulled into CLAUDE.md/AGENTS.md with @path, by real path
 //
-// Secrets written inside config files (MCP env and headers, settings env, API keys) are
-// redacted by package scrub before a body is hashed; everything else is stored as it is.
-//
 // Directories in a pattern ending in /** are taken whole (a skill's scripts and references, not
 // just its SKILL.md), following symlinks; a symlinked file records its target. Files left out
 // for size or count are listed in the set's skipped. Each file's mtime is returned separately so
@@ -109,7 +106,6 @@ func (c *collected) add(scope, path, name string) *Entry {
 		return nil
 	}
 	if body, err = scrub.File(c.agent, filepath.Base(path), body); err != nil {
-		// A config file that may hold secrets but doesn't parse can't be checked, so it isn't kept.
 		c.skipped = append(c.skipped, Skipped{Scope: scope, Path: name, Reason: "unparseable", Size: st.Size()})
 		return nil
 	}

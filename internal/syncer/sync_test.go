@@ -296,18 +296,15 @@ func TestCredentialsAndNoiseAreNeverCopied(t *testing.T) {
 	for _, k := range keys {
 		everything = append(everything, decodeAny(t, filepath.Join(e.Bucket, k))...)
 	}
-	// Credential files, and secrets written inside config files (Claude settings env, MCP
-	// servers in ~/.claude.json and a project's settings, Codex config.toml, Pi models.json).
-	for _, secret := range []string{
-		"secret-oauth", "secret-key", "sk-ant-api-secret", "ghp_token",
-		"sk-ant-xxxx", "ghp_aaaa", "Bearer abc", "hunter2", "ghp_secret", "sk-pi-literal",
-	} {
+	credentials := []string{"secret-oauth", "secret-key", "sk-ant-api-secret", "ghp_token"}
+	configSecrets := []string{"sk-ant-xxxx", "ghp_aaaa", "Bearer abc", "hunter2", "ghp_secret", "sk-pi-literal"}
+	for _, secret := range slices.Concat(credentials, configSecrets) {
 		if bytes.Contains(everything, []byte(secret)) {
 			t.Errorf("bucket contains %q", secret)
 		}
 	}
-	// Their keys and the settings around them are still there.
-	for _, kept := range []string{"ANTHROPIC_API_KEY", "GITHUB_TOKEN", "DB_PASSWORD", "https://llm.corp/v1", "guard.sh"} {
+	keysAndSettingsBesideSecrets := []string{"ANTHROPIC_API_KEY", "GITHUB_TOKEN", "DB_PASSWORD", "https://llm.corp/v1", "guard.sh"}
+	for _, kept := range keysAndSettingsBesideSecrets {
 		if !bytes.Contains(everything, []byte(kept)) {
 			t.Errorf("bucket lacks %q", kept)
 		}
@@ -906,7 +903,6 @@ func TestSnapshotRecordsWholeHarnessWithSecretsRedacted(t *testing.T) {
 	blob := func(scope, path string) string {
 		return string(readFile(t, filepath.Join(e.Bucket, "snapshots", "blobs", files[[2]string{scope, path}]["sha256"].(string))))
 	}
-	// Bodies are whole, apart from secret values in config files.
 	for _, c := range []struct{ scope, path, kept, gone string }{
 		{"user", "settings.json", "guard.sh", "sk-ant-"},
 		{"project", ".claude/settings.json", "DB_PASSWORD", "hunter2"},

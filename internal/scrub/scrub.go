@@ -1,22 +1,6 @@
-// Package scrub blanks secrets written inside agent config files before they leave the machine.
-//
-// Credential files are never copied at all (adapters.IsCredential). Config files are copied,
-// because they are evidence of how the harness was set up, but several of them can hold a
-// literal secret beside ordinary settings:
-//
-//	Claude Code   ~/.claude.json and .mcp.json: MCP server env, headers and URLs;
-//	              settings.json: the env block; ~/.claude.json: the API key and its suffixes
-//	Codex         config.toml: MCP server env, headers, URLs and bearer tokens, provider
-//	              headers and bearer tokens, shell_environment_policy.set
-//	Pi            models.json: provider API keys and headers; mcp.json: MCP server env,
-//	              headers and URLs
-//
-// File replaces each such value with "[redacted]" and leaves every other byte as it was, so the
-// file still parses, diffs and hashes like the original apart from those values. A value that
-// only names a secret is kept, because it says how the harness is wired without revealing
-// anything: a ${VAR} or $VAR reference, "Bearer ${TOKEN}", a Pi !command, a number or boolean.
-// Keys are always kept. URLs keep their scheme, host and path; a password in them is dropped and
-// each query value redacted.
+// Package scrub replaces literal secrets in agent config files with "[redacted]" and keeps every
+// other byte, so a scrubbed file still parses and diffs like the original. Values that only point
+// at a secret, such as ${VAR} or a Pi !command, are kept: they show how the harness is wired.
 package scrub
 
 import (
@@ -34,22 +18,20 @@ import (
 	"github.com/mich-murphy/memory/internal/jsonx"
 )
 
-// Redacted replaces a secret value.
 const Redacted = "[redacted]"
 
-// kind says which values at a rule's path are kept.
-type kind int
+type keep int
 
 const (
-	kindValue  kind = iota // env and header values: kept only if they hold no literal secret
-	kindAlways             // tokens and keys that are always literal: never kept
-	kindAPIKey             // Pi apiKey: also kept when it names an environment variable
-	kindURL                // URLs: password dropped, query values redacted
+	keepReferences keep = iota
+	keepNothing
+	keepReferencesAndEnvNames
+	keepURLWithoutCredentials
 )
 
 type rule struct {
-	path []string // "*" matches any one key or array index
-	kind kind
+	pattern []string
+	keep    keep
 }
 
 type format int
@@ -59,43 +41,39 @@ const (
 	formatTOML
 )
 
-func r(path string, k kind) rule {
-	return rule{path: strings.Split(path, "."), kind: k}
+func r(pattern string, k keep) rule {
+	return rule{pattern: strings.Split(pattern, "."), keep: k}
 }
 
 func mcpRules(prefix string) []rule {
 	return []rule{
-		r(prefix+"mcpServers.*.env.*", kindValue),
-		r(prefix+"mcpServers.*.headers.*", kindValue),
-		r(prefix+"mcpServers.*.url", kindURL),
-		r(prefix+"mcpServers.*.oauth.clientSecret", kindAlways),
+		r(prefix+"mcpServers.*.env.*", keepReferences),
+		r(prefix+"mcpServers.*.headers.*", keepReferences),
+		r(prefix+"mcpServers.*.url", keepURLWithoutCredentials),
+		r(prefix+"mcpServers.*.oauth.clientSecret", keepNothing),
 	}
 }
 
 var (
-	// claudeJSONRules cover ~/.claude.json and the MCP extract of it that snapshots record
-	// (top-level "project" there).
 	claudeJSONRules = slices.Concat([]rule{
-		r("primaryApiKey", kindAlways),
-		r("customApiKeyResponses.*", kindAlways), // the last 20 characters of each API key approved or rejected
-	}, mcpRules(""), mcpRules("projects.*."), mcpRules("project."))
-	settingsRules  = []rule{r("env.*", kindValue)}
+		r("primaryApiKey", keepNothing),
+		r("customApiKeyResponses.*", keepNothing), // suffixes of approved and rejected API keys
+	}, mcpRules(""), mcpRules("projects.*."), mcpRules("project.")) // "project." is the snapshot's MCP extract
+	settingsRules  = []rule{r("env.*", keepReferences)}
 	mcpFileRules   = mcpRules("")
-	piModelsRules  = []rule{r("providers.*.apiKey", kindAPIKey), r("providers.*.headers.*", kindValue)}
+	piModelsRules  = []rule{r("providers.*.apiKey", keepReferencesAndEnvNames), r("providers.*.headers.*", keepReferences)}
 	codexTOMLRules = []rule{
-		r("mcp_servers.*.env.*", kindValue),
-		r("mcp_servers.*.http_headers.*", kindValue),
-		r("mcp_servers.*.url", kindURL),
-		r("mcp_servers.*.bearer_token", kindAlways),
-		r("model_providers.*.http_headers.*", kindValue),
-		r("model_providers.*.experimental_bearer_token", kindAlways),
-		r("model_providers.*.base_url", kindURL),
-		r("shell_environment_policy.set.*", kindValue),
+		r("mcp_servers.*.env.*", keepReferences),
+		r("mcp_servers.*.http_headers.*", keepReferences),
+		r("mcp_servers.*.url", keepURLWithoutCredentials),
+		r("mcp_servers.*.bearer_token", keepNothing),
+		r("model_providers.*.http_headers.*", keepReferences),
+		r("model_providers.*.experimental_bearer_token", keepNothing),
+		r("model_providers.*.base_url", keepURLWithoutCredentials),
+		r("shell_environment_policy.set.*", keepReferences),
 	}
 )
 
-// rulesFor picks the rules for a file by agent and base name; nil means the file is copied as
-// it is.
 func rulesFor(agent, name string) ([]rule, format) {
 	switch name {
 	case "claude.json", ".claude.json":
@@ -116,15 +94,13 @@ func rulesFor(agent, name string) ([]rule, format) {
 	return nil, formatJSON
 }
 
-// Applies reports whether File may change the file.
 func Applies(agent, name string) bool {
 	r, _ := rulesFor(agent, name)
 	return r != nil
 }
 
-// File returns data with the secrets in it redacted, chosen by the agent and the file's base
-// name. A file with no rules comes back unchanged. A file that has rules but doesn't parse is an
-// error: it can't be checked, so it must not be uploaded.
+// File fails when a file it has rules for doesn't parse: such a file can't be checked, so it
+// mustn't be uploaded.
 func File(agent, name string, data []byte) ([]byte, error) {
 	rs, f := rulesFor(agent, name)
 	if rs == nil || len(bytes.TrimSpace(data)) == 0 {
@@ -134,16 +110,15 @@ func File(agent, name string, data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("scrub %s: %w", name, err)
 	}
-	changes := map[string]string{}
-	doc = walk(doc, nil, rs, changes)
-	if len(changes) == 0 {
+	redactions := map[string]string{}
+	doc = walk(doc, nil, rs, redactions)
+	if len(redactions) == 0 {
 		return data, nil
 	}
-	if out, ok := replaceLiterals(f, data, changes); ok && clean(f, out, rs) {
+	if out, ok := replaceInPlace(f, data, redactions); ok && nothingLeftToRedact(f, out, rs) {
 		return out, nil
 	}
-	// A value written in a form the literal search doesn't know (escapes, multi-line strings):
-	// rewrite the whole file from the redacted document instead.
+	// Escaped and multi-line strings aren't found in place; re-encoding loses layout and comments.
 	out, err := encode(f, doc)
 	if err != nil {
 		return nil, fmt.Errorf("scrub %s: %w", name, err)
@@ -177,15 +152,14 @@ func encode(f format, doc any) ([]byte, error) {
 	return jsonx.Indent(doc, 2)
 }
 
-// clean reports whether data parses and has nothing left to redact.
-func clean(f format, data []byte, rs []rule) bool {
+func nothingLeftToRedact(f format, data []byte, rs []rule) bool {
 	doc, err := decode(f, data)
 	if err != nil {
 		return false
 	}
-	changes := map[string]string{}
-	walk(doc, nil, rs, changes)
-	return len(changes) == 0
+	redactions := map[string]string{}
+	walk(doc, nil, rs, redactions)
+	return len(redactions) == 0
 }
 
 func matches(path, pattern []string) bool {
@@ -200,51 +174,48 @@ func matches(path, pattern []string) bool {
 	return true
 }
 
-// walk redacts the values under any rule's path, recording each changed string as old -> new,
-// and returns the node with its redactions applied.
-func walk(node any, path []string, rs []rule, changes map[string]string) any {
+func walk(node any, path []string, rs []rule, redactions map[string]string) any {
 	for _, r := range rs {
-		if matches(path, r.path) {
-			return redactAll(node, r.kind, changes)
+		if matches(path, r.pattern) {
+			return redactAll(node, r.keep, redactions)
 		}
 	}
 	switch n := node.(type) {
 	case map[string]any:
 		for k, v := range n {
-			n[k] = walk(v, append(path, k), rs, changes)
+			n[k] = walk(v, append(path, k), rs, redactions)
 		}
 	case []any:
 		for i, v := range n {
-			n[i] = walk(v, append(path, strconv.Itoa(i)), rs, changes)
+			n[i] = walk(v, append(path, strconv.Itoa(i)), rs, redactions)
 		}
 	case []map[string]any: // a TOML array of tables
 		for i, v := range n {
-			n[i], _ = walk(v, append(path, strconv.Itoa(i)), rs, changes).(map[string]any)
+			n[i], _ = walk(v, append(path, strconv.Itoa(i)), rs, redactions).(map[string]any)
 		}
 	}
 	return node
 }
 
-// redactAll applies k to every string at or under node.
-func redactAll(node any, k kind, changes map[string]string) any {
+func redactAll(node any, k keep, redactions map[string]string) any {
 	switch n := node.(type) {
 	case string:
 		out := redact(n, k)
 		if out != n {
-			changes[n] = out
+			redactions[n] = out
 		}
 		return out
 	case map[string]any:
 		for key, v := range n {
-			n[key] = redactAll(v, k, changes)
+			n[key] = redactAll(v, k, redactions)
 		}
 	case []any:
 		for i, v := range n {
-			n[i] = redactAll(v, k, changes)
+			n[i] = redactAll(v, k, redactions)
 		}
 	case []map[string]any:
 		for i, v := range n {
-			n[i], _ = redactAll(v, k, changes).(map[string]any)
+			n[i], _ = redactAll(v, k, redactions).(map[string]any)
 		}
 	}
 	return node
@@ -257,8 +228,7 @@ var (
 	authWords   = map[string]bool{"bearer": true, "basic": true, "token": true}
 )
 
-// harmless reports whether a value holds no literal secret.
-func harmless(s string) bool {
+func holdsNoSecret(s string) bool {
 	switch strings.ToLower(s) {
 	case "", Redacted, "true", "false", "yes", "no", "on", "off":
 		return true
@@ -277,20 +247,20 @@ func harmless(s string) bool {
 	return true
 }
 
-func redact(s string, k kind) string {
+func redact(s string, k keep) string {
 	switch k {
-	case kindAlways:
+	case keepNothing:
 		if s == "" {
 			return s
 		}
-	case kindURL:
+	case keepURLWithoutCredentials:
 		return redactURL(s)
-	case kindAPIKey:
-		if harmless(s) || strings.HasPrefix(s, "!") || envNameRE.MatchString(s) {
+	case keepReferencesAndEnvNames:
+		if holdsNoSecret(s) || strings.HasPrefix(s, "!") || envNameRE.MatchString(s) {
 			return s
 		}
-	case kindValue:
-		if harmless(s) || strings.HasPrefix(s, "!") {
+	case keepReferences:
+		if holdsNoSecret(s) || strings.HasPrefix(s, "!") {
 			return s
 		}
 	}
@@ -298,7 +268,7 @@ func redact(s string, k kind) string {
 }
 
 func redactURL(s string) string {
-	if harmless(s) {
+	if holdsNoSecret(s) {
 		return s
 	}
 	u, err := url.Parse(s)
@@ -314,7 +284,7 @@ func redactURL(s string) string {
 		parts := strings.Split(u.RawQuery, "&")
 		for i, p := range parts {
 			name, value, ok := strings.Cut(p, "=")
-			if v, err := url.QueryUnescape(value); ok && (err != nil || !harmless(v)) {
+			if v, err := url.QueryUnescape(value); ok && (err != nil || !holdsNoSecret(v)) {
 				parts[i] = name + "=" + Redacted
 				changed = true
 			}
@@ -327,15 +297,13 @@ func redactURL(s string) string {
 	return u.String()
 }
 
-// replaceLiterals swaps each old string's literal in data for the new one's, leaving keys alone.
-// ok is false if some old string's literal wasn't found.
-func replaceLiterals(f format, data []byte, changes map[string]string) ([]byte, bool) {
+func replaceInPlace(f format, data []byte, redactions map[string]string) ([]byte, bool) {
 	out := data
-	for old, repl := range changes {
+	for old, repl := range redactions {
 		found := false
-		for _, lit := range literals(f, old) {
+		for _, lit := range spellings(f, old) {
 			var n int
-			out, n = replaceValues(f, out, lit, quote(f, repl))
+			out, n = replaceNonKeys(f, out, lit, quote(f, repl))
 			found = found || n > 0
 		}
 		if !found {
@@ -345,8 +313,7 @@ func replaceLiterals(f format, data []byte, changes map[string]string) ([]byte, 
 	return out, true
 }
 
-// literals are the ways old is commonly written as a string value.
-func literals(f format, s string) [][]byte {
+func spellings(f format, s string) [][]byte {
 	if f == formatTOML {
 		out := [][]byte{quote(f, s)}
 		if !strings.ContainsAny(s, "'\n\r") {
@@ -387,9 +354,7 @@ func quote(f format, s string) []byte {
 	return out
 }
 
-// replaceValues replaces each occurrence of lit that is a value rather than a key: JSON keys are
-// followed by ':', TOML keys by '=' or '.'.
-func replaceValues(f format, data, lit, repl []byte) ([]byte, int) {
+func replaceNonKeys(f format, data, lit, repl []byte) ([]byte, int) {
 	var out bytes.Buffer
 	n := 0
 	for {

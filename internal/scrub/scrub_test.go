@@ -133,8 +133,6 @@ AWS_SECRET_ACCESS_KEY = "[redacted]"
 }
 
 func TestFileRewritesWhenASecretIsWrittenWithEscapes(t *testing.T) {
-	// \u0073 is "s": the literal search can't find it, so the file is rewritten from the
-	// redacted document.
 	got, err := File("claude", "settings.json", []byte(`{"env": {"KEY": "\u0073ecret"}, "model": "opus"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -218,9 +216,8 @@ func FuzzFile(f *testing.F) {
 		if err != nil || strings.TrimSpace(in) == "" {
 			return
 		}
-		// Whatever came in, what goes out parses and has nothing left to redact.
 		rs, form := rulesFor(file.agent, file.name)
-		if !clean(form, out, rs) {
+		if !nothingLeftToRedact(form, out, rs) {
 			t.Errorf("File(%s, %q) = %q, which still has secrets or doesn't parse", file.name, in, out)
 		}
 	})
