@@ -71,8 +71,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     first_seen REAL NOT NULL,
     PRIMARY KEY (agent, session_key)
 );
--- Roots learned from hooks (CLAUDE_CONFIG_DIR, CODEX_HOME, Pi's sessionDir...), which the
--- sweep's environment never sees.
+-- Roots learned from hooks (CLAUDE_CONFIG_DIR, CODEX_HOME, Pi's sessionDir...), which a sweep
+-- started from another agent's hook may not see.
 CREATE TABLE IF NOT EXISTS roots (
     agent TEXT NOT NULL,
     path TEXT NOT NULL,

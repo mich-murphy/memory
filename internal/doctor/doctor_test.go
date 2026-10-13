@@ -29,39 +29,49 @@ func recordRuns(t *testing.T, dir string, runs ...state.Run) {
 	}
 }
 
-func runsReport(t *testing.T, cfg *config.Config, timer string) string {
+func runsReport(t *testing.T, cfg *config.Config) string {
 	t.Helper()
 	var out bytes.Buffer
 	r := &reporter{w: &out}
-	checkRuns(t.Context(), cfg, timer, r)
+	checkRuns(t.Context(), cfg, r)
 	if r.failed {
 		t.Error("run history failed the doctor; it should only warn")
 	}
 	return out.String()
 }
 
-func TestCheckRunsReportsTheLatestSweepAndFirstRecentError(t *testing.T) {
+func TestCheckRunsFindsTheLatestSweepBehindManyHookRuns(t *testing.T) {
 	cfg := &config.Config{StateDir: t.TempDir()}
-	recordRuns(t, cfg.StateDir,
-		state.Run{Trigger: "sweep", Summary: map[string]any{"errors": 0}},
-		state.Run{Trigger: "sweep", Summary: map[string]any{"errors": 2, "error_messages": []string{"from the latest sweep"}}},
-		state.Run{Trigger: "hook", Summary: map[string]any{"errors": 1, "error_messages": []string{"from the newest run"}}},
-	)
-	want := "[ok  ] last sweep 0 min ago, 2 errors\n" +
+	runs := []state.Run{
+		{Trigger: "sweep:SessionStart", Summary: map[string]any{"errors": 0}},
+		{Trigger: "sweep:SessionEnd", Summary: map[string]any{"errors": 2, "error_messages": []string{"too old to show"}}},
+	}
+	for range recentRuns {
+		runs = append(runs, state.Run{Trigger: "hook:Stop", Summary: map[string]any{"errors": 0}})
+	}
+	runs = append(runs, state.Run{Trigger: "hook:Stop", Summary: map[string]any{"errors": 1, "error_messages": []string{"from the newest run"}}})
+	recordRuns(t, cfg.StateDir, runs...)
+	want := "[ok  ] last sweep (sweep:SessionEnd) 0 min ago, 2 errors\n" +
 		"[warn] recent errors (see " + filepath.Join(cfg.StateDir, "agent-sessions.log") + "): from the newest run\n"
-	if diff := cmp.Diff(want, runsReport(t, cfg, "systemd")); diff != "" {
+	if diff := cmp.Diff(want, runsReport(t, cfg)); diff != "" {
 		t.Errorf("report (-want +got):\n%s", diff)
 	}
 }
 
-func TestCheckRunsWithoutHistory(t *testing.T) {
+func TestCheckRunsCountsABackfillAsASweep(t *testing.T) {
 	cfg := &config.Config{StateDir: t.TempDir()}
-	recordRuns(t, cfg.StateDir, state.Run{Trigger: "hook", Summary: map[string]any{"errors": 0}})
-	if diff := cmp.Diff("[warn] no sweep has run yet\n", runsReport(t, cfg, "cron")); diff != "" {
-		t.Errorf("with a timer (-want +got):\n%s", diff)
+	recordRuns(t, cfg.StateDir, state.Run{Trigger: "backfill", Summary: map[string]any{"errors": 0}})
+	if got := runsReport(t, cfg); got != "[ok  ] last sweep (backfill) 0 min ago, 0 errors\n" {
+		t.Errorf("report: %q", got)
 	}
-	if got := runsReport(t, cfg, ""); got != "" {
-		t.Errorf("without a timer, which already fails the doctor: %q", got)
+}
+
+func TestCheckRunsWithoutASweep(t *testing.T) {
+	cfg := &config.Config{StateDir: t.TempDir()}
+	recordRuns(t, cfg.StateDir, state.Run{Trigger: "hook:Stop", Summary: map[string]any{"errors": 0}})
+	want := "[warn] no sweep in the last 500 runs; one runs when a session starts or ends\n"
+	if diff := cmp.Diff(want, runsReport(t, cfg)); diff != "" {
+		t.Errorf("report (-want +got):\n%s", diff)
 	}
 }
 

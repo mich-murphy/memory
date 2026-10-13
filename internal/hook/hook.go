@@ -30,10 +30,12 @@ const (
 	stdinLimit              = 1 << 20
 	stdinTimeout            = 2 * time.Second
 	maxAncestors            = 10
+	sweepKey                = "sweep"
 )
 
 var (
 	sessionStartEvents = []string{"SessionStart", "session_start"}
+	sessionEndEvents   = []string{"SessionEnd", "session_shutdown"}
 	envPrefixes        = []string{"CLAUDE_CODE_", "CODEX_", "PI_", "ANTHROPIC_DEFAULT_"}
 	envNames           = []string{
 		"ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "MAX_THINKING_TOKENS", "CLAUDE_CONFIG_DIR",
@@ -81,12 +83,13 @@ func PathsFromInput(data map[string]any) []string {
 	return out
 }
 
-func ClaimPending(stateDir, path string) (marker string) {
+// ClaimPending queues at most one sync per key: a transcript's path, or sweepKey.
+func ClaimPending(stateDir, key string) (marker string) {
 	pending := filepath.Join(stateDir, "pending")
 	if err := os.MkdirAll(pending, 0o700); err != nil {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(path))
+	sum := sha256.Sum256([]byte(key))
 	marker = filepath.Join(pending, hex.EncodeToString(sum[:])[:24])
 	f, err := os.OpenFile(marker, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if errors.Is(err, os.ErrExist) {
@@ -100,7 +103,7 @@ func ClaimPending(stateDir, path string) (marker string) {
 	if err != nil {
 		return ""
 	}
-	_, werr := f.WriteString(path)
+	_, werr := f.WriteString(key)
 	if cerr := f.Close(); werr != nil || cerr != nil {
 		_ = os.Remove(marker)
 		return ""
@@ -257,6 +260,16 @@ func spawnSync(ctx context.Context, agent, path, marker, event string) error {
 		"--pending-marker", marker, "--trigger", "hook:"+event)
 }
 
+// The delay lets a session-start sync take the lock first.
+func spawnSweep(ctx context.Context, stateDir, event string) error {
+	marker := ClaimPending(stateDir, sweepKey)
+	if marker == "" {
+		return nil
+	}
+	return startSync(ctx, "sync", "--quiet", "--delay", strconv.FormatFloat(syncDelay.Seconds(), 'f', -1, 64),
+		"--pending-marker", marker, "--trigger", "sweep:"+event)
+}
+
 func spawnDetached(ctx context.Context, args ...string) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -292,7 +305,11 @@ func Run(ctx context.Context, agent string, explicitPaths []string, event string
 		if len(paths) > 0 {
 			_ = recordSessionStart(ctx, stateDir, agent, paths[0], data, event, extra) // never break the agent
 		}
+		_ = spawnSweep(ctx, stateDir, event) // never break the agent
 		return
+	}
+	if slices.Contains(sessionEndEvents, event) {
+		_ = spawnSweep(ctx, stateDir, event) // never break the agent
 	}
 	seen := map[string]bool{}
 	for _, path := range paths {

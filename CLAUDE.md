@@ -1,6 +1,6 @@
 # agent-sessions
 
-A Go command-line collector that copies Claude Code, Codex and Pi session data into a Cloudflare R2 bucket. It runs from agent hooks and a timer on many machines, so it must be fast, never fail an agent, and never lose or corrupt data.
+A Go command-line collector that copies Claude Code, Codex and Pi session data into a Cloudflare R2 bucket. It runs from agent hooks on many machines, so it must be fast, never fail an agent, and never lose or corrupt data.
 
 - Layout: `cmd/agent-sessions` (entry point and end-to-end tests), `internal/*` (one package per concern: `adapters` per agent, `syncer` decides and runs uploads, `state` is the local SQLite record, `raw` is hashing, pieces and zstd, `store` is R2 or a local dir).
 - The bucket layout is a contract other stages read: `docs/storage-layout.md`. Don't change a key, field or format without updating that doc and saying so in the PR.

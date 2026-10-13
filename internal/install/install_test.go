@@ -234,7 +234,7 @@ func TestPiInstallWritesExtensionAndRespectsForeignFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{PiMarker, `["/opt/agent-sessions/bin/agent-sessions"]`, `pi.on("agent_settled"`, `pi.on("session_shutdown"`, `pi.on("session_start"`} {
+	for _, want := range []string{PiMarker, `["/opt/agent-sessions/bin/agent-sessions"]`, `pi.on("agent_settled"`, `["--event", "session_shutdown"]`, `"--event", "session_start"`} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("extension lacks %q", want)
 		}

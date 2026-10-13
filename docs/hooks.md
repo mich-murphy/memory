@@ -21,10 +21,22 @@ Why each part matters:
 | Claude Code `SessionEnd` gets 1.5 s; Codex `SessionEnd` gets 1 s by default, at most 3 s, and can't be async | hooks docs; `session_end.rs:20-23`, `discovery.rs:533` | The hook returns in about 0.1 s. Timeouts are set to 5 s (Claude Code) and 3 s (Codex) as headroom for a cold interpreter |
 | `claude -p` kills async hooks still running at teardown, and the docs say to "start a fully detached process" | hooks docs, "Run hooks in the background" | The sync runs in its own session (`start_new_session`) |
 | Codex kills the hook's process group on timeout, and waits for the hook's stdout to close | `command_runner.rs:339`, `:413`, wait_with_output | Own session, so the group kill misses it; stdio detached, so Codex isn't left waiting. Codex's own comment at `:281`: "Successfully completed hooks may intentionally leave detached helpers running" |
-| The transcript can lag the in-memory conversation when a hook fires | hooks docs, `transcript_path` field | The sync waits 3 s before reading. The sweep catches anything later |
+| The transcript can lag the in-memory conversation when a hook fires | hooks docs, `transcript_path` field | The sync waits 3 s before reading. The next turn's hook or the next sweep catches anything later |
 | Stop fires after every turn | all three | Debounce: a marker per transcript means only one sync is queued at a time. The queued one reads the file after its delay, so it includes the turns that arrived meanwhile |
 
-The sweep (`agent-sessions sync` every 10 minutes, plus `agent-sessions backfill` once) is what makes capture complete. Hooks make it prompt, catch short-lived files before the agent deletes them, and record what only exists at session start.
+## The sweep at session start and end
+
+Nothing runs on a schedule. When any agent's session starts (`SessionStart`, `session_start`) or ends (`SessionEnd`, `session_shutdown`), the hook also starts a sweep: `agent-sessions sync --trigger sweep:<event>` over every agent's directories, 3 s later so a session-start sync gets the lock first. It is what makes capture complete, together with `agent-sessions backfill` once at install. It picks up:
+
+- the end of a session that crashed, was killed or was interrupted after its last hook;
+- uploads and manifests that failed, for example while the machine was offline;
+- files no hook names: databases (copied at most once an hour), `~/.claude.json`, settings and skills outside a session, history files;
+- files deleted locally, which get `deleted_locally` in their manifest;
+- roots learned from earlier hooks, and the default root of each agent even when the hook's environment points elsewhere.
+
+One marker in the state directory's `pending/` means only one sweep is queued at a time; a session that starts or ends while one is queued doesn't add another. Hooks make capture prompt, catch short-lived files before the agent deletes them, and record what only exists at session start.
+
+Earlier versions ran this sweep every 10 minutes from a systemd user timer, launchd or cron. `agent-sessions install` and `uninstall` remove those, and `agent-sessions doctor` fails while one is still installed.
 
 ## Session start
 
@@ -52,12 +64,12 @@ It writes that to a file and starts a detached sync with no delay and no debounc
 ```
 
 - **`SessionStart`** fires on startup, resume, `/clear` and after compaction. It records the launch (above). It is async, and prints nothing, so it adds no context to the session.
-- **`Stop`** runs after each turn. It **does not fire when you interrupt Claude**, and the docs are explicit about that. `SessionEnd` and the sweep cover interrupted turns.
+- **`Stop`** runs after each turn. It **does not fire when you interrupt Claude**, and the docs are explicit about that. The next turn's `Stop`, `SessionEnd` and its sweep cover interrupted turns.
 - **`StopFailure`** covers turns that end on an API error, which fire it instead of `Stop`.
 - **`SubagentStop`** carries `agent_transcript_path`. agent-sessions syncs the whole session around it: the main transcript, every subagent file and spilled tool output.
 - **`PreCompact`** syncs the transcript before compaction rewrites the context.
 - **`TaskCompleted`** and **`TeammateIdle`** sync agent-team task lists and mailboxes (`tasks/`, `teams/`), which Claude Code deletes when a team is done.
-- **`SessionEnd`** fires on `/clear`, `/resume`, exit and logout.
+- **`SessionEnd`** fires on `/clear`, `/resume`, exit and logout. It also starts a sweep.
 - **Every Claude Code hook sync** also picks up the session's `file-history/`, `todos/`, `session-env/` and `debug/` files, and all of `tasks/` and `teams/`, since these are deleted with the session.
 - **No `matcher`.** Stop doesn't support one, and the others should fire for every value.
 - **The command is in shell form, quoted with `shlex`**, so a path with spaces works on every Claude Code version.
@@ -74,7 +86,7 @@ It writes that to a file and starts a detached sync with no delay and no debounc
 - **`PreCompact`** runs before compaction (async, 30 s).
 - **`SubagentStop`** covers subagent threads. It carries `agent_transcript_path`; each subagent has its own rollout file.
 - **`Interrupt`** runs when you cancel a turn (async, 3 s, which is the cap for this event).
-- **`SessionEnd`** runs on exit (synchronous, 3 s).
+- **`SessionEnd`** runs on exit (synchronous, 3 s). It also starts a sweep.
 
 **Trust.** Codex skips a user hook until it has been reviewed. Its trust record is a hash in `config.toml` under `[hooks.state."<hooks.json path>:<event>:<group>:<handler>"]`, written when you approve it in `/hooks` (`discovery.rs:715`, `:796`). agent-sessions deliberately leaves that review to you. `agent-sessions doctor` reads `config.toml` and reports how many agent-sessions hooks are trusted.
 
@@ -101,16 +113,17 @@ The trust hash covers the command string, so a hook that changes needs approving
 pi.on("session_start",    (e, ctx) => kick(ctx.sessionManager.getSessionFile(),
                                            ["--event", "session_start", "--source", e.reason, "--cwd", ctx.cwd,
                                             "--argv", JSON.stringify(process.argv)]));
-pi.on("agent_settled",    (_e, ctx) => kick(ctx.sessionManager.getSessionFile()));
-pi.on("session_shutdown", (_e, ctx) => kick(ctx.sessionManager.getSessionFile()));
+pi.on("agent_settled",    (_e, ctx) => kick(ctx.sessionManager.getSessionFile(), ["--event", "agent_settled"]));
+pi.on("session_shutdown", (_e, ctx) => kick(ctx.sessionManager.getSessionFile(), ["--event", "session_shutdown"]));
 ```
 
 - **`session_start`** fires on startup, `/new`, `/resume`, `/fork` and `/reload` (`types.ts:741`), with the reason. It records the launch (above).
 - **`agent_settled`** means a prompt has fully finished, with no retry, compaction or queued follow-up left to run (`types.ts:1005`).
-- **`session_shutdown`** fires on quit, `/new`, `/resume`, `/fork` and `/reload` (`types.ts:810`).
+- **`session_shutdown`** fires on quit, `/new`, `/resume`, `/fork` and `/reload` (`types.ts:810`). It also starts a sweep, unless the session has no file (`--no-session`, or no message yet).
   - Pi awaits these handlers (`runner.ts:258`), so `kick` only spawns a detached `agent-sessions hook pi --path …` and returns.
   - SIGTERM and SIGHUP also emit `session_shutdown` before Pi exits, in both interactive mode (`interactive-mode.ts:4403`) and print mode (`print-mode.ts:59`).
 - **Nothing in the factory.** The extension starts no processes or timers when it loads, as Pi's lifecycle rules ask.
+- **An extension from an earlier version** passes no `--event` on shutdown, so it starts no sweep. `agent-sessions doctor` warns when the extension is out of date, and `agent-sessions install` rewrites it.
 
 **Edge cases:**
 
@@ -122,10 +135,9 @@ pi.on("session_shutdown", (_e, ctx) => kick(ctx.sessionManager.getSessionFile())
 
 ## Edge cases common to all three
 
-- **Config dirs set only in your shell.** `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and Pi's session dir settings are invisible to cron. Hooks run with the agent's environment, so the first hook from a non-default directory teaches agent-sessions that root, and later sweeps include it.
+- **Config dirs set only in your shell.** `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and Pi's session dir settings can differ between shells. Hooks run with the agent's environment, so the first hook from a non-default directory teaches agent-sessions that root, and later sweeps include it, whichever agent's hook starts them.
 - **Half-written lines.** A transcript written in the last minute that ends mid-line is uploaded up to its last complete line, and re-read on the next sync.
-- **Hooks and the sweep at once.** One lock serialises syncs. A hook's sync gives up after 30 s if a long backfill holds the lock, so waiting syncs can't pile up; the next sweep covers it. A pending marker older than 2 minutes, left by a sync that died, is taken over.
-- **Offline machines.** A failed upload isn't recorded as done, so the next sweep retries it. Nothing is lost while the transcript stays on disk, which is why `cleanupPeriodDays` is raised.
+- **Hooks and the sweep at once.** One lock serialises syncs. A hook's sync gives up after 30 s, and a sweep after 60 s, if a long backfill holds the lock, so waiting syncs can't pile up; the next hook or sweep covers it. A pending marker older than 2 minutes, left by a sync that died, is taken over.
+- **Offline machines.** A failed upload isn't recorded as done, so the session's next hook or the next sweep retries it. Nothing is lost while the transcript stays on disk, which is why `cleanupPeriodDays` is raised.
 - **Settings files.** The installer never rewrites a settings file it can't parse. It backs up every file before changing it, keeps other hooks in place, and replaces only its own entries, which it recognises by the `agent-sessions … hook <agent>` command (or `memsync … hook <agent>`, the earlier name).
-- **Sleeping laptops.** The systemd timer is `Persistent=true`, and launchd runs a missed interval on wake.
-- **Linux VMs after logout.** User timers stop when you log out unless lingering is enabled. `install` and `doctor` print the `loginctl enable-linger` command when it's off.
+- **No session, no sweep.** Without a timer, what only a sweep picks up waits for the next session to start or end on that machine. A crashed session's last turns, a failed upload from another session, or a database that changed while a long session ran stay on disk until then; `agent-sessions sync` uploads them at any time.
