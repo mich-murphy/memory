@@ -76,15 +76,6 @@ func (a *agentList) orAll() []string {
 	return *a
 }
 
-type stringList []string
-
-func (s *stringList) String() string { return strings.Join(*s, ",") }
-
-func (s *stringList) Set(v string) error {
-	*s = append(*s, v)
-	return nil
-}
-
 func newFlags(name string, o IO) *flag.FlagSet {
 	fs := flag.NewFlagSet("agent-sessions "+name, flag.ContinueOnError)
 	fs.SetOutput(o.Stderr)

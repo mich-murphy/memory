@@ -2,9 +2,11 @@ package adapters
 
 import (
 	"bytes"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -187,13 +189,13 @@ func (c *Claude) Related(sf SessionFile, root string) []string {
 	projectDir := filepath.Join(root, "projects", slug)
 	main := filepath.Join(projectDir, sid+".jsonl")
 	var out []string
-	if isFile(main) {
+	if fsutil.IsFile(main) {
 		out = append(out, main)
 	}
 	out = append(out, FilesUnder(filepath.Join(projectDir, sid))...)
 	if matches, err := filepath.Glob(filepath.Join(projectDir, globEscape(sid)+".*")); err == nil {
 		for _, p := range matches {
-			if p != main && isFile(p) {
+			if p != main && fsutil.IsFile(p) {
 				out = append(out, p)
 			}
 		}
@@ -202,12 +204,12 @@ func (c *Claude) Related(sf SessionFile, root string) []string {
 		filepath.Join(root, "tasks"), filepath.Join(root, "teams"))...)
 	if matches, err := filepath.Glob(filepath.Join(root, "todos", globEscape(sid)+"*")); err == nil {
 		for _, p := range matches {
-			if isFile(p) {
+			if fsutil.IsFile(p) {
 				out = append(out, p)
 			}
 		}
 	}
-	if debug := filepath.Join(root, "debug", sid+".txt"); isFile(debug) {
+	if debug := filepath.Join(root, "debug", sid+".txt"); fsutil.IsFile(debug) {
 		out = append(out, debug)
 	}
 	return out
@@ -315,14 +317,14 @@ func (c *Claude) Plugins(root string) []Plugin {
 	}
 	plugins, _ := m["plugins"].(map[string]any)
 	var out []Plugin
-	for _, name := range sortedKeys(plugins) {
+	for _, name := range slices.Sorted(maps.Keys(plugins)) {
 		installs, ok := plugins[name].([]any)
 		if !ok {
 			installs = []any{plugins[name]}
 		}
 		for _, inst := range installs {
 			im, _ := inst.(map[string]any)
-			if p := str(im, "installPath"); p != "" && isDir(p) {
+			if p := str(im, "installPath"); p != "" && fsutil.IsDir(p) {
 				out = append(out, Plugin{Name: name, Dir: p})
 			}
 		}

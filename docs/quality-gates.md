@@ -22,7 +22,7 @@ Tools other than golangci-lint are pinned in their own module, `tools/go.mod`, a
 
 ## Toolchain
 
-Go 1.27 builds and tests; `go.mod` says `go 1.26.0`, the oldest supported release and the minimum the SQLite driver needs. Binaries built with Go 1.27 run on macOS 13 or later.
+Go 1.27 builds and tests, and `go.mod` says `go 1.27.0`: the code uses the `uuid` package and other APIs new in 1.27. Binaries built with Go 1.27 run on macOS 13 or later.
 
 ## Formatting
 

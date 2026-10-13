@@ -15,8 +15,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/config"
@@ -404,16 +405,15 @@ func (s *Syncer) manifestKey(agent, sessionKey string) string {
 
 func parallel[T any](items []T, fn func(T) error) []error {
 	errs := make([]error, len(items))
-	sem := make(chan struct{}, uploadWorkers)
-	var wg sync.WaitGroup
+	var g errgroup.Group
+	g.SetLimit(uploadWorkers)
 	for i, item := range items {
-		wg.Go(func() {
-			sem <- struct{}{}
-			defer func() { <-sem }()
+		g.Go(func() error {
 			errs[i] = fn(item)
+			return nil
 		})
 	}
-	wg.Wait()
+	_ = g.Wait() // each item's error is kept in errs, so the group's is always nil
 	return errs
 }
 

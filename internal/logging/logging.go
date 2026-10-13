@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"golang.org/x/term"
 )
 
 const (
@@ -29,7 +31,7 @@ func Open(stateDir string, quiet bool) (log *slog.Logger, closeFile func(), err 
 		return nil, nil, fmt.Errorf("log: %w", err)
 	}
 	handlers := []slog.Handler{newHandler(f, slog.LevelInfo).WithAttrs([]slog.Attr{slog.Int("pid", os.Getpid())})}
-	if !quiet && isTerminal(os.Stderr) {
+	if !quiet && term.IsTerminal(int(os.Stderr.Fd())) {
 		handlers = append(handlers, newHandler(os.Stderr, slog.LevelWarn))
 	}
 	return slog.New(slog.NewMultiHandler(handlers...)), func() { _ = f.Close() }, nil // appends are already written
@@ -49,9 +51,4 @@ func rotate(path string) {
 		_ = os.Rename(path+"."+strconv.Itoa(i), path+"."+strconv.Itoa(i+1)) // missing older logs are fine
 	}
 	_ = os.Rename(path, path+".1") // if this fails the log just grows a little longer
-}
-
-func isTerminal(f *os.File) bool {
-	st, err := f.Stat()
-	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }

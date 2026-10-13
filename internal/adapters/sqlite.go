@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"modernc.org/sqlite"
+
+	"github.com/mich-murphy/memory/internal/fsutil"
 )
 
 // SQLiteExports copies each database through SQLite's backup API: copying the file itself would
@@ -41,7 +43,7 @@ func SQLiteExports(a Adapter, root, workDir string, interval time.Duration) []Se
 			}
 			_ = os.WriteFile(sigPath, []byte(sig), 0o600) // without it the next sweep just copies again
 		}
-		if isFile(dest) {
+		if fsutil.IsFile(dest) {
 			out = append(out, SessionFile{Agent: a.Name(), Path: dest, Key: KeyPrefix(a, root) + "db/" + rel, Role: RoleDB})
 		}
 	}

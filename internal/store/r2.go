@@ -17,6 +17,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -46,21 +47,22 @@ func NewR2(cfg *config.Config) (*R2, error) {
 	if missing := cfg.MissingR2Settings(); len(missing) > 0 {
 		return nil, fmt.Errorf("missing R2 settings: %s", strings.Join(missing, ", "))
 	}
-	transport, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		return nil, errors.New("unexpected default HTTP transport")
-	}
-	transport = transport.Clone()
-	transport.DialContext = (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext
-	transport.TLSHandshakeTimeout = 15 * time.Second
-	transport.ResponseHeaderTimeout = 2 * time.Minute
+	httpClient := awshttp.NewBuildableClient().
+		WithDialerOptions(func(d *net.Dialer) {
+			d.Timeout = 15 * time.Second
+			d.KeepAlive = 30 * time.Second
+		}).
+		WithTransportOptions(func(t *http.Transport) {
+			t.TLSHandshakeTimeout = 15 * time.Second
+			t.ResponseHeaderTimeout = 2 * time.Minute
+		})
 	client := s3.New(s3.Options{
 		Region:       "auto",
 		BaseEndpoint: aws.String(cfg.R2Endpoint),
 		// R2 takes either addressing style; path style also works against local S3 fakes.
 		UsePathStyle: true,
 		Credentials:  credentials.NewStaticCredentialsProvider(cfg.R2AccessKeyID, cfg.R2SecretAccessKey, ""),
-		HTTPClient:   &http.Client{Transport: transport},
+		HTTPClient:   httpClient,
 		Retryer: retry.NewStandard(func(o *retry.StandardOptions) {
 			o.MaxAttempts = maxRetries
 		}),

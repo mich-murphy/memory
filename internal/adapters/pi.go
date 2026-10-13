@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/jsonx"
 )
 
@@ -75,20 +76,15 @@ func (p *Pi) DefaultRoots() []string {
 	}
 	var out []string
 	for _, r := range roots {
-		if (r == agentDir || !withinDir(r, agentDir)) && !slices.Contains(out, r) {
+		if (r == agentDir || !fsutil.Within(r, agentDir)) && !slices.Contains(out, r) {
 			out = append(out, r)
 		}
 	}
 	return out
 }
 
-func withinDir(path, root string) bool {
-	_, ok := Rel(path, root)
-	return ok || path == root
-}
-
 func (p *Pi) isAgentDir(root string) bool {
-	return root == p.CanonicalRoot() || root == p.AgentDir() || isDir(filepath.Join(root, "sessions"))
+	return root == p.CanonicalRoot() || root == p.AgentDir() || fsutil.IsDir(filepath.Join(root, "sessions"))
 }
 
 // InferRoot maps <agent dir>/sessions/--cwd--/file.jsonl to the agent dir, so a custom

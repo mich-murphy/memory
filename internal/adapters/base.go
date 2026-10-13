@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/jsonx"
 )
 
@@ -173,7 +174,7 @@ type WalkedFile struct {
 }
 
 func Walk(a Adapter, root string) []WalkedFile {
-	if !isDir(root) {
+	if !fsutil.IsDir(root) {
 		return nil
 	}
 	skip := map[string]bool{}
@@ -224,7 +225,7 @@ func Discover(a Adapter, root string) []SessionFile {
 func FilesUnder(roots ...string) []string {
 	var out []string
 	for _, root := range roots {
-		if !isDir(root) {
+		if !fsutil.IsDir(root) {
 			continue
 		}
 		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -239,13 +240,12 @@ func FilesUnder(roots ...string) []string {
 
 func ReadHead(data []byte, maxLines int) []map[string]any {
 	var out []map[string]any
-	for i := 0; i < maxLines && len(data) > 0; i++ {
-		line := data
-		if nl := bytes.IndexByte(data, '\n'); nl >= 0 {
-			line, data = data[:nl], data[nl+1:]
-		} else {
-			data = nil
+	read := 0
+	for line := range bytes.Lines(data) {
+		if read == maxLines {
+			break
 		}
+		read++
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
 			continue
@@ -259,20 +259,10 @@ func ReadHead(data []byte, maxLines int) []map[string]any {
 
 func Rel(path, root string) (string, bool) {
 	rel, err := filepath.Rel(root, path)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if err != nil || rel == "." || !filepath.IsLocal(rel) {
 		return "", false
 	}
 	return filepath.ToSlash(rel), true
-}
-
-func isDir(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && st.IsDir()
-}
-
-func isFile(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && st.Mode().IsRegular()
 }
 
 func expandUser(p, home string) string {
@@ -296,15 +286,6 @@ func envPath(name, home string) string {
 func str(m map[string]any, key string) string {
 	s, _ := m[key].(string)
 	return s
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
 }
 
 func truthy(v any) bool {
