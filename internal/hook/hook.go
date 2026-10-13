@@ -42,7 +42,7 @@ var (
 		"MAX_MCP_OUTPUT_TOKENS", "DISABLE_PROMPT_CACHING",
 	}
 	secretEnv    = regexp.MustCompile(`(?i)TOKEN|KEY|SECRET|PASSWORD|AUTH|CREDENTIAL|COOKIE`)
-	agentMarkers = map[string][]string{
+	agentMarkers = map[string]struct{ bin, pkg string }{
 		"claude": {"claude", "@anthropic-ai/claude-code"},
 		"codex":  {"codex", "@openai/codex"},
 		"pi":     {"pi", "pi-coding-agent"},
@@ -134,18 +134,12 @@ func isAgent(agent string, argv []string) bool {
 	if strings.Contains(text, "agent-sessions") || strings.Contains(text, "agent_sessions") {
 		return false
 	}
-	markers := agentMarkers[agent]
-	for _, tok := range tokens {
+	m := agentMarkers[agent]
+	return slices.ContainsFunc(tokens, func(tok string) bool {
 		first, _, _ := strings.Cut(tok, " ")
 		base := first[strings.LastIndexByte(first, '/')+1:]
-		if base == markers[0] || strings.HasPrefix(base, markers[0]+"-") {
-			return true
-		}
-		if slices.ContainsFunc(markers[1:], func(m string) bool { return strings.Contains(tok, m) }) {
-			return true
-		}
-	}
-	return false
+		return base == m.bin || strings.HasPrefix(base, m.bin+"-") || strings.Contains(tok, m.pkg)
+	})
 }
 
 func LaunchProcess(agent string) map[string]any {
