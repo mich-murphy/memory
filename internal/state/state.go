@@ -224,36 +224,25 @@ type File struct {
 }
 
 func (s *State) FileUnchanged(path string, size, mtimeNS int64) (bool, error) {
-	var gotSize, gotMtime int64
-	var deleted sql.NullFloat64
-	found, err := s.queryRow("SELECT size, mtime_ns, deleted_at FROM files WHERE path = ?", []any{path},
-		&gotSize, &gotMtime, &deleted)
-	return found && gotSize == size && gotMtime == mtimeNS && !deleted.Valid, err
+	var one int
+	return s.queryRow("SELECT 1 FROM files WHERE path = ? AND size = ? AND mtime_ns = ? AND deleted_at IS NULL",
+		[]any{path, size, mtimeNS}, &one)
 }
 
 // RecordFile keeps the previous head when f.Head is nil.
 func (s *State) RecordFile(f *File) error {
-	head := f.Head
-	if head == nil {
-		var prev sql.NullString
-		if _, err := s.queryRow("SELECT head FROM files WHERE path = ?", []any{f.Path}, &prev); err != nil {
-			return err
-		}
-		if prev.Valid {
-			head, _ = jsonx.Map([]byte(prev.String))
-		}
-	}
-	var headJSON any
-	if head != nil {
-		b, err := jsonx.Compact(head)
+	var head any
+	if f.Head != nil {
+		b, err := jsonx.Compact(f.Head)
 		if err != nil {
 			return err
 		}
-		headJSON = string(b)
+		head = string(b)
 	}
-	return s.exec("INSERT OR REPLACE INTO files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL)",
+	return s.exec("INSERT OR REPLACE INTO files VALUES "+
+		"(?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, (SELECT head FROM files WHERE path = ?)),NULL)",
 		f.Path, f.Agent, f.Root, f.Key, nullString(f.SessionKey), f.Role, f.Size, f.MtimeNS, f.SHA256,
-		f.LineCount, nullString(f.PrefixSHA256), headJSON)
+		f.LineCount, nullString(f.PrefixSHA256), head, f.Path)
 }
 
 func nullString(s string) any {
