@@ -23,7 +23,19 @@ The collector walks each agent's whole directory and copies every file except:
 - **Noise**: locks, temp files, caches, `node_modules`, shell snapshots, executables, Claude Code's own install (`local/`, `downloads/`), plugin source checkouts, and Pi's `bin/` (fd and rg).
 - **Live SQLite files**, which are uploaded as consistent copies instead (below).
 
-Nothing is redacted. Files the collector doesn't recognise are uploaded with role `unknown` and counted in each run's summary.
+**Secrets inside config files** are redacted before upload, by `internal/scrub`. Credential files are left out whole, but some config files hold a secret beside settings worth keeping, so only those values are replaced with `"[redacted]"`. Every other byte of the file, keys included, is kept as it was:
+
+| File | Values redacted |
+|---|---|
+| `~/.claude.json` (uploaded as `claude.json`) | `primaryApiKey`, `customApiKeyResponses`, and each MCP server's `env`, `headers`, `url` and `oauth.clientSecret`, at the top level and under `projects` |
+| `settings.json`, `settings.local.json`, `managed-settings.json` | `env` |
+| `.mcp.json`, `mcp.json`, `managed-mcp.json` | each MCP server's `env`, `headers`, `url` and `oauth.clientSecret` |
+| Pi `models.json` | each provider's `apiKey` and `headers` |
+| Codex `config.toml`, `managed_config.toml` | `mcp_servers.*` `env`, `http_headers`, `url` and `bearer_token`; `model_providers.*` `http_headers`, `experimental_bearer_token` and `base_url`; `shell_environment_policy.set` |
+
+A value that only names a secret is kept: `${VAR}`, `$VAR`, `Bearer ${TOKEN}`, a Pi `!command`, a number or a boolean, and for Pi's `apiKey` an environment variable name. A URL keeps its scheme, host, user and path; its password is dropped and each query value redacted. The same string anywhere else in the file is redacted too. A value written in a form the collector can't find in place (a JSON `\u` escape, a TOML multi-line string) makes it rewrite the whole file from the parsed document, which loses comments and layout. A file that has these rules but doesn't parse isn't uploaded; the run counts it as an error and tries again next sweep.
+
+Nothing else is redacted: transcripts, history, logs and every other file are copied as they are. Files the collector doesn't recognise are uploaded with role `unknown` and counted in each run's summary.
 
 `<key>` mirrors where the file lives under the agent's directory:
 
@@ -112,7 +124,7 @@ There's one manifest per session: a Claude Code session (`<slug>/<session id>`),
 }
 ```
 
-File bodies are stored unredacted. The scopes are:
+File bodies are stored as they are on disk, except for the secret values in config files listed under [Raw files](#raw-files); a config file that doesn't parse is listed in `skipped` with reason `unparseable`. The scopes are:
 
 - **`user`**: the agent's config dir. Skill, agent, command, rule and hook directories are taken whole.
 - **`home`**: `~/.agents/skills` for Codex and Pi.

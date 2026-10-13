@@ -17,6 +17,7 @@ import (
 	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/jsonx"
 	"github.com/mich-murphy/memory/internal/raw"
+	"github.com/mich-murphy/memory/internal/scrub"
 	"github.com/mich-murphy/memory/internal/state"
 )
 
@@ -99,7 +100,7 @@ func readFile(sf adapters.SessionFile) ([]byte, error) {
 	if sf.Compression == "zst" {
 		return raw.Decompress(data)
 	}
-	return data, nil
+	return scrub.File(sf.Agent, filepath.Base(sf.Path), data)
 }
 
 // readComplete reads a file, holding back a last line still being written. Its mtime comes
@@ -239,7 +240,7 @@ func (s *Syncer) prepare(sf adapters.SessionFile, root string) (*upload, error) 
 		return nil, err
 	}
 	active := filepath.Ext(sf.Path) == ".jsonl" && age < activeWrite.Seconds()
-	if st.Size() > largeFileBytes && sf.Compression == "" {
+	if st.Size() > largeFileBytes && sf.Compression == "" && !scrub.Applies(sf.Agent, filepath.Base(sf.Path)) {
 		return s.prepareLarge(sf, root, st, key, prev, pieces, active, idle)
 	}
 	return s.prepareSmall(sf, root, st, key, prev, pieces, active, idle)

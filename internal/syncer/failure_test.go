@@ -273,3 +273,18 @@ func TestALargeFileThatCannotBeStagedIsRetried(t *testing.T) {
 		t.Error("large file not uploaded on retry")
 	}
 }
+
+func TestAConfigFileThatCannotBeCheckedForSecretsIsNotUploaded(t *testing.T) {
+	e := testenv.New(t)
+	testenv.Write(t, filepath.Join(e.Claude, "settings.local.json"), `{"env": {"API_KEY": "sk-half-written`)
+	summary := sweep(t, store.NewLocal(e.Bucket))
+	if summary.Errors != 1 || !strings.Contains(strings.Join(summary.ErrorMessages, " "), "settings.local.json") {
+		t.Errorf("errors = %d %v", summary.Errors, summary.ErrorMessages)
+	}
+	if e.HasKey(rawKey("claude", "settings.local.json")) {
+		t.Error("uploaded a config file it couldn't check")
+	}
+	if !e.HasKey(rawKey("claude", "settings.json")) {
+		t.Error("one unparseable file stopped the others")
+	}
+}

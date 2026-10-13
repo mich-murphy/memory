@@ -7,7 +7,7 @@ COVER_DIR     := $(CURDIR)/.cover
 FUZZTIME      ?= 30s
 FUZZ_TARGETS  := internal/adapters:FuzzSessionInfo internal/hook:FuzzReadInput \
                  internal/jsonx:FuzzParseObjectRoundTrip internal/raw:FuzzCompressRoundTrip \
-                 internal/shellwords:FuzzJoinSplit internal/gitinfo:FuzzStripUserinfo
+                 internal/scrub:FuzzFile internal/shellwords:FuzzJoinSplit internal/gitinfo:FuzzStripUserinfo
 
 .PHONY: check fmt fmt-check lint lint-version tidy-check fix-check deadcode vuln test cover crap fuzz actionlint build hooks gopls clean
 

@@ -268,6 +268,7 @@ func (e *Env) pi() {
 	))
 	Write(t, filepath.Join(agent, "AGENTS.md"), "pi user rules\n")
 	Write(t, filepath.Join(agent, "auth.json"), `{"anthropic": {"key": "sk-secret"}}`)
+	Write(t, filepath.Join(agent, "models.json"), `{"providers": {"corp": {"baseUrl": "https://llm.corp/v1", "apiKey": "sk-pi-literal"}}}`)
 }
 
 // BucketKeys lists every object in the local bucket, sorted.

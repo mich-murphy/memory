@@ -33,6 +33,7 @@ import (
 
 	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/jsonx"
+	"github.com/mich-murphy/memory/internal/scrub"
 )
 
 var (
@@ -319,6 +320,9 @@ func (c *Claude) ExtraSnapshotEntries(root, projectRoot string) []Entry {
 	}
 	body, err := jsonx.Indent(picked, 1)
 	if err != nil {
+		return nil
+	}
+	if body, err = scrub.File(c.Name(), ".claude.json", body); err != nil {
 		return nil
 	}
 	return []Entry{{Scope: "user", Name: ".claude.json#mcp", Body: bytes.TrimSuffix(body, []byte("\n"))}}
