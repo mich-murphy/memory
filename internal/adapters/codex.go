@@ -1,7 +1,6 @@
 package adapters
 
 import (
-	"maps"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -89,13 +88,6 @@ func (c *Codex) MemoryDirs(root, _, _ string) []ScopedDir {
 
 func (c *Codex) SessionInfo(head []map[string]any) map[string]any {
 	info := map[string]any{}
-	setDefaults := func(src map[string]any, fields map[string]string) {
-		for field, from := range fields {
-			if _, ok := info[field]; !ok {
-				info[field] = src[from]
-			}
-		}
-	}
 	for _, d := range head {
 		payload, ok := d["payload"].(map[string]any)
 		if !ok {
@@ -103,18 +95,15 @@ func (c *Codex) SessionInfo(head []map[string]any) map[string]any {
 		}
 		switch d["type"] {
 		case "session_meta":
-			setDefaults(payload, codexMetaInfo)
+			fill(info, payload, codexMetaInfo)
 			git, ok := payload["git"].(map[string]any)
 			if !ok || !truthy(payload["git"]) {
 				git, _ = d["git"].(map[string]any)
 			}
-			if git != nil {
-				setDefaults(git, codexGitInfo)
-			}
+			fill(info, git, codexGitInfo)
 		case "turn_context":
-			setDefaults(payload, codexTurnInfo)
+			fill(info, payload, codexTurnInfo)
 		}
 	}
-	maps.DeleteFunc(info, func(_ string, v any) bool { return !truthy(v) })
 	return info
 }

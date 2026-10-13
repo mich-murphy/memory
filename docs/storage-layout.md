@@ -94,7 +94,7 @@ There's one manifest per session: a Claude Code session (`<slug>/<session id>`),
 }
 ```
 
-- **`transcripts`** lists every file of the session, with the `pieces` that make up its current bytes and its earlier `versions`. `role` is `main`, `subagent`, `tool_result`, `superseded` (an earlier transcript Claude Code set aside), `file_history`, `todo`, `task`, `session_env`, `debug` or `aux`. `line_count` and `prefix_sha256` (the hash of the first 20 lines) let the normaliser pin an input and spot a rewritten file. `head` is what the file's first lines say about it, so a Claude subagent file carries its own `agent_id`.
+- **`transcripts`** lists every file of the session, with the `pieces` that make up its current bytes and its earlier `versions`. `role` is `main`, `subagent`, `tool_result`, `superseded` (an earlier transcript Claude Code set aside), `file_history`, `todo`, `task`, `session_env`, `debug` or `aux`. `line_count` and `prefix_sha256` (the hash of the first 20 lines) let the normaliser pin an input and spot a rewritten file. `head` is what the file's first lines say about it, each field taking the first non-empty value in those lines, so a Claude subagent file carries its own `agent_id`.
 - **`launch`** is recorded by the session-start hook:
   - `process.argv` is the agent's command line, found by walking up from the hook to the agent's process. Pi hides its arguments from the process table, so its extension passes `process.argv` (`via: "extension"`).
   - `env` keeps `CLAUDE_CODE_*`, `CODEX_*`, `PI_*`, `ANTHROPIC_MODEL`, `MAX_THINKING_TOKENS` and a few other variables, minus anything named like a token, key, secret or password.
