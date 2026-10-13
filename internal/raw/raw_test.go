@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -91,9 +92,17 @@ func TestReadKeyJoinsSegmentsAndSkipsStaleOnes(t *testing.T) {
 	if _, err := ReadKey(t.Context(), s, "nope"); !errors.Is(err, errMissing) {
 		t.Errorf("missing key: %v", err)
 	}
-	s[key+".d/junk.zst"] = Compress(nil)
-	if _, err := ReadKey(t.Context(), s, key); !errors.Is(err, errSegmentName) {
-		t.Errorf("bad segment name: %v", err)
+	for _, name := range []string{"junk.zst", "x-6.zst"} {
+		bad := maps.Clone(s)
+		bad[key+".d/"+name] = Compress(nil)
+		if _, err := ReadKey(t.Context(), bad, key); !errors.Is(err, errSegmentName) {
+			t.Errorf("segment named %s: %v", name, err)
+		}
+	}
+	corrupt := maps.Clone(s)
+	corrupt[SegmentKey(key, 6, 7)] = []byte("not zstd")
+	if _, err := ReadKey(t.Context(), corrupt, key); err == nil || !strings.Contains(err.Error(), SegmentKey(key, 6, 7)) {
+		t.Errorf("corrupt segment: %v, want an error naming it", err)
 	}
 }
 

@@ -146,7 +146,7 @@ func ReadKey(ctx context.Context, store Reader, rawKey string) ([]byte, error) {
 	}
 	slices.Sort(keys)
 	for _, key := range keys {
-		start, _, err := segmentRange(key)
+		start, err := segmentStart(key)
 		if err != nil {
 			return nil, err
 		}
@@ -168,17 +168,15 @@ func ReadKey(ctx context.Context, store Reader, rawKey string) ([]byte, error) {
 
 var errSegmentName = errors.New("not a segment key")
 
-func segmentRange(key string) (start, end int64, err error) {
+func segmentStart(key string) (int64, error) {
 	name := key[strings.LastIndexByte(key, '/')+1:]
-	a, b, ok := strings.Cut(strings.TrimSuffix(name, ".zst"), "-")
+	a, _, ok := strings.Cut(name, "-")
 	if !ok {
-		return 0, 0, fmt.Errorf("%s: %w", key, errSegmentName)
+		return 0, fmt.Errorf("%s: %w", key, errSegmentName)
 	}
-	if start, err = strconv.ParseInt(a, 10, 64); err != nil {
-		return 0, 0, fmt.Errorf("%s: %w", key, errSegmentName)
+	start, err := strconv.ParseInt(a, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, errSegmentName)
 	}
-	if end, err = strconv.ParseInt(b, 10, 64); err != nil {
-		return 0, 0, fmt.Errorf("%s: %w", key, errSegmentName)
-	}
-	return start, end, nil
+	return start, nil
 }
