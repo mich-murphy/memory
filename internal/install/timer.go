@@ -24,19 +24,17 @@ import (
 	"github.com/mich-murphy/memory/internal/shellwords"
 )
 
-// PiMarker is the first line of the Pi extension agent-sessions manages.
 const PiMarker = "// agent-sessions: managed by `agent-sessions install`"
 
 const piExtension = `%s; edits are overwritten.
-// Ships this Pi session to the agent-sessions store. agent-sessions hands the upload to a detached process,
-// so these handlers return immediately. Docs: https://github.com/mich-murphy/memory
+// Docs: https://github.com/mich-murphy/memory
 import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const AGENT_SESSIONS: string[] = %s;
 
 function kick(file: string | undefined, extra: string[] = []): void {
-	// No file for --no-session runs; Pi also creates the file only after the first message.
+	// No file for --no-session runs, or before the session's first message.
 	if (!file || process.env.AGENT_SESSIONS_DISABLE) return;
 	try {
 		const child = spawn(AGENT_SESSIONS[0], [...AGENT_SESSIONS.slice(1), "hook", "pi", "--path", file, ...extra], {
@@ -51,16 +49,13 @@ function kick(file: string | undefined, extra: string[] = []): void {
 }
 
 export default function (pi: ExtensionAPI) {
-	// Startup, /new, /resume, /fork, /reload: record the launch and the harness before the first prompt.
 	// Pi renames its process, which hides its arguments from the process table, so pass them along.
 	pi.on("session_start", (event, ctx) =>
 		kick(ctx.sessionManager.getSessionFile(), [
 			"--event", "session_start", "--source", event.reason, "--cwd", ctx.cwd, "--argv", JSON.stringify(process.argv),
 		]),
 	);
-	// A prompt has fully finished: no retries, compaction or queued follow-ups left.
 	pi.on("agent_settled", (_event, ctx) => kick(ctx.sessionManager.getSessionFile()));
-	// Quit (including SIGTERM/SIGHUP), /new, /resume, /fork and /reload: flush the session being left.
 	pi.on("session_shutdown", (_event, ctx) => kick(ctx.sessionManager.getSessionFile()));
 }
 `
@@ -87,7 +82,6 @@ Persistent=true
 WantedBy=timers.target
 `
 
-// LaunchdLabel names the macOS sweep job.
 const LaunchdLabel = "tech.agent-sessions.sweep"
 
 const launchdPlist = `<?xml version="1.0" encoding="UTF-8"?>
@@ -124,7 +118,6 @@ R2_SECRET_ACCESS_KEY=%s
 
 const commandTimeout = 30 * time.Second
 
-// Pi installs (or removes) the Pi extension.
 func Pi(o *Options) error {
 	path := filepath.Join(adapters.NewPi(o.Home).AgentDir(), "extensions", "agent-sessions.ts")
 	if data, err := os.ReadFile(path); err == nil && !bytes.Contains(data, []byte(PiMarker)) {
@@ -187,8 +180,6 @@ func launchdPlistPath(home string) string {
 	return filepath.Join(home, "Library", "LaunchAgents", LaunchdLabel+".plist")
 }
 
-// Timer installs (or removes) the periodic sweep: launchd on macOS, a systemd user timer where
-// there is a user session, cron otherwise.
 func Timer(ctx context.Context, o *Options, minutes int) error {
 	minutes = max(1, min(minutes, 59))
 	switch {
@@ -314,8 +305,7 @@ func cron(ctx context.Context, o *Options, minutes int) error {
 	return nil
 }
 
-// LingerEnabled reports whether systemd keeps this user's timers running after logout (true
-// when it can't tell, so as not to nag).
+// LingerEnabled is true when it can't tell, so as not to nag.
 func LingerEnabled(ctx context.Context) bool {
 	user := os.Getenv("USER")
 	if user == "" || !have("loginctl") {
@@ -325,7 +315,6 @@ func LingerEnabled(ctx context.Context) bool {
 	return !r.ok || strings.Contains(r.stdout, "Linger=yes")
 }
 
-// TimerInstalled names the sweep timer that is set up ("launchd", "systemd", "cron"), or "".
 func TimerInstalled(ctx context.Context, home string) string {
 	if runtime.GOOS == "darwin" {
 		if fsutil.Exists(launchdPlistPath(home)) {
@@ -344,8 +333,6 @@ func TimerInstalled(ctx context.Context, home string) string {
 	return ""
 }
 
-// WriteConfigTemplate writes the config file from the environment's R2 settings, unless one
-// exists.
 func WriteConfigTemplate(o *Options) (string, error) {
 	path := config.FilePath()
 	if fsutil.Exists(path) {
@@ -384,8 +371,7 @@ func WriteConfigTemplate(o *Options) (string, error) {
 	return path, nil
 }
 
-// codexEventKey is Codex's snake_case event label (codex-rs/hooks/src/lib.rs
-// hook_event_key_label).
+// codexEventKey mirrors hook_event_key_label in codex-rs/hooks/src/lib.rs.
 func codexEventKey(event string) string {
 	var b strings.Builder
 	for i, r := range event {
@@ -415,14 +401,12 @@ func tomlHasHookEvents(path string) bool {
 	return false
 }
 
-// HandlerRef locates one hook handler: its event, and its group's and its own index.
 type HandlerRef struct {
-	Event   string
-	Group   int
-	Handler int
+	Event        string
+	GroupIndex   int
+	HandlerIndex int
 }
 
-// OurHandlers lists agent-sessions' handlers in a Claude Code settings or Codex hooks file.
 func OurHandlers(settings *jsonx.Object) []HandlerRef {
 	v, _ := settings.Get("hooks")
 	hooks, isObj := v.(*jsonx.Object)
@@ -444,8 +428,8 @@ func OurHandlers(settings *jsonx.Object) []HandlerRef {
 	return out
 }
 
-// CodexTrustState counts agent-sessions' Codex hooks and how many of them have a trusted hash
-// recorded in config.toml, under keys like <hooks.json path>:<event>:<group>:<handler>.
+// CodexTrustState reads Codex's trust records from config.toml, kept under keys like
+// <hooks.json path>:<event>:<group>:<handler>.
 func CodexTrustState(root string) (configured, trusted int) {
 	hooksPath := filepath.Join(root, "hooks.json")
 	cfg, err := loadJSON(hooksPath)
@@ -455,7 +439,7 @@ func CodexTrustState(root string) (configured, trusted int) {
 	refs := OurHandlers(cfg)
 	state, _ := tomlHooks(filepath.Join(root, "config.toml"))["state"].(map[string]any)
 	for _, r := range refs {
-		key := fmt.Sprintf("%s:%s:%d:%d", hooksPath, codexEventKey(r.Event), r.Group, r.Handler)
+		key := fmt.Sprintf("%s:%s:%d:%d", hooksPath, codexEventKey(r.Event), r.GroupIndex, r.HandlerIndex)
 		entry, _ := state[key].(map[string]any)
 		if h, _ := entry["trusted_hash"].(string); h != "" {
 			trusted++
@@ -464,7 +448,6 @@ func CodexTrustState(root string) (configured, trusted int) {
 	return len(refs), trusted
 }
 
-// AgentsPresent lists the agents with a config dir or a command on PATH.
 func AgentsPresent(home string) map[string]bool {
 	dirs := map[string]string{
 		"claude": adapters.NewClaude(home).DefaultRoots()[0],

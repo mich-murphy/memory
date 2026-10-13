@@ -19,7 +19,7 @@ func writePlugins(t *testing.T, root, body string) {
 	}
 }
 
-func TestClaudePluginDirsReadsBothFileVersions(t *testing.T) {
+func TestClaudePluginsReadsBothFileVersions(t *testing.T) {
 	root := t.TempDir()
 	lsp, docs, v1 := filepath.Join(root, "cache", "lsp"), filepath.Join(root, "cache", "docs"), filepath.Join(root, "cache", "v1")
 	for _, d := range []string{lsp, docs, v1} {
@@ -33,21 +33,21 @@ func TestClaudePluginDirsReadsBothFileVersions(t *testing.T) {
 		"docs@official": [{"scope": "user", "installPath": "`+docs+`"}, "not an object", {"scope": "user"}],
 		"v1-format": {"installPath": "`+v1+`"}
 	}}`)
-	want := []ScopedDir{{Name: "docs@official", Dir: docs}, {Name: "lsp@official", Dir: lsp}, {Name: "v1-format", Dir: v1}}
-	if diff := cmp.Diff(want, NewClaude(t.TempDir()).PluginDirs(root)); diff != "" {
-		t.Errorf("plugin dirs (-want +got):\n%s", diff)
+	want := []Plugin{{Name: "docs@official", Dir: docs}, {Name: "lsp@official", Dir: lsp}, {Name: "v1-format", Dir: v1}}
+	if diff := cmp.Diff(want, NewClaude(t.TempDir()).Plugins(root)); diff != "" {
+		t.Errorf("plugins (-want +got):\n%s", diff)
 	}
 }
 
-func TestClaudePluginDirsWithoutAUsableFile(t *testing.T) {
+func TestClaudePluginsWithoutAUsableFile(t *testing.T) {
 	c := NewClaude(t.TempDir())
 	root := t.TempDir()
-	if got := c.PluginDirs(root); got != nil {
+	if got := c.Plugins(root); got != nil {
 		t.Errorf("no file: %v", got)
 	}
 	for _, body := range []string{`{"plugins": `, `[1, 2]`, `{"plugins": []}`} {
 		writePlugins(t, root, body)
-		if got := c.PluginDirs(root); got != nil {
+		if got := c.Plugins(root); got != nil {
 			t.Errorf("%s: %v", body, got)
 		}
 	}

@@ -21,16 +21,18 @@ import (
 	"github.com/mich-murphy/memory/internal/state"
 )
 
-type planMode int
+type uploadPlan int
 
 const (
-	planNone    planMode = iota // the bucket has these bytes
-	planSegment                 // only the bytes after start
-	planWhole                   // one object, replacing any segments
+	uploadNothing uploadPlan = iota
+	uploadSegment
+	uploadWhole
 )
 
-// versionPiece is a piece of a replaced version, and where to copy it from if no blob with
-// that content is in the bucket yet.
+// mtimeLastLineHeldBack is recorded instead of a file's mtime while its partial last line is
+// held back, so the next sync reads the file again.
+const mtimeLastLineHeldBack int64 = -1
+
 type versionPiece struct {
 	raw.Piece
 	copyFrom string
@@ -44,7 +46,7 @@ type versionPlan struct {
 	index       []byte
 }
 
-func (v *versionPlan) clean() *state.Version {
+func (v *versionPlan) stateVersion() *state.Version {
 	pieces := make([]raw.Piece, len(v.pieces))
 	for i, p := range v.pieces {
 		pieces[i] = p.Piece
@@ -53,27 +55,22 @@ func (v *versionPlan) clean() *state.Version {
 }
 
 type upload struct {
-	sf   adapters.SessionFile
-	root string
-	key  string
-	// sha is the sha256 of the whole file as uploaded; size the bytes uploaded (uncompressed),
-	// less than the file while a last line is held back.
-	sha       string
-	size      int64
-	mtimeNS   int64
-	lineCount int64
-	prefixSHA string
-	head      map[string]any
-	// changed is false when the bucket already has these bytes and only local state needs
-	// updating.
-	changed bool
-	// start above 0 means a segment holding only bytes [start, size).
-	start     int64
-	pieceSHA  string
-	body      []byte
-	bodyPath  string
-	oldPieces []raw.Piece // what a whole upload replaces
-	version   *versionPlan
+	sf             adapters.SessionFile
+	root           string
+	key            string
+	sha            string
+	size           int64
+	mtimeNS        int64
+	lineCount      int64
+	prefixSHA      string
+	head           map[string]any
+	needsUpload    bool
+	segmentStart   int64
+	pieceSHA       string
+	body           []byte
+	bodyPath       string
+	replacedPieces []raw.Piece
+	version        *versionPlan
 }
 
 func (u *upload) cleanup() {
@@ -97,26 +94,23 @@ func readFile(sf adapters.SessionFile) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read: %w", err)
 	}
-	if sf.Compression == "zst" {
+	if sf.Zstd {
 		return raw.Decompress(data)
 	}
 	return scrub.File(sf.Agent, filepath.Base(sf.Path), data)
 }
 
-// readComplete reads a file, holding back a last line still being written. Its mtime comes
-// back as -1 then, so the next sync re-reads it once the line is complete.
-func readComplete(sf adapters.SessionFile, st os.FileInfo, active bool) ([]byte, int64, error) {
-	data, err := readFile(sf)
+func readCompleteLines(sf adapters.SessionFile, st os.FileInfo, mayBeMidLine bool) (data []byte, mtimeNS int64, err error) {
+	data, err = readFile(sf)
 	if err != nil {
 		return nil, 0, err
 	}
-	if active && !bytes.HasSuffix(data, []byte("\n")) {
-		return data[:bytes.LastIndexByte(data, '\n')+1], -1, nil
+	if mayBeMidLine && !bytes.HasSuffix(data, []byte("\n")) {
+		return data[:bytes.LastIndexByte(data, '\n')+1], mtimeLastLineHeldBack, nil
 	}
 	return data, st.ModTime().UnixNano(), nil
 }
 
-// prefixSHA is the sha256 of the first prefixLines lines.
 func prefixSHA(data []byte) string {
 	end := 0
 	for range prefixLines {
@@ -130,8 +124,7 @@ func prefixSHA(data []byte) string {
 	return raw.SHA256(data[:end])
 }
 
-// lastNewline is the offset just past the last newline in the first size bytes (0 if none).
-func lastNewline(path string, size int64) (int64, error) {
+func completeLinesEnd(path string, size int64) (int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return 0, fmt.Errorf("read: %w", err)
@@ -152,21 +145,19 @@ func lastNewline(path string, size int64) (int64, error) {
 	return 0, nil
 }
 
-func plan(prev *state.Upload, pieces []raw.Piece, sha string, size int64, appended, idle bool) (planMode, int64) {
+func plan(prev *state.Upload, pieces []raw.Piece, sha string, size int64, appended, idle bool) (uploadPlan, int64) {
 	if prev != nil && prev.SHA256 == sha {
 		if idle && len(pieces) > 1 {
-			return planWhole, 0 // fold once the file is quiet
+			return uploadWhole, 0
 		}
-		return planNone, 0
+		return uploadNothing, 0
 	}
 	if appended && !idle && len(pieces) > 0 && len(pieces) < maxSegments && size > *prev.Size {
-		return planSegment, *prev.Size
+		return uploadSegment, *prev.Size
 	}
-	return planWhole, 0
+	return uploadWhole, 0
 }
 
-// planVersion keeps the bytes a rewrite replaces: each piece they were stored in is copied to
-// blobs/<sha>.zst, unless a blob with that content is already there.
 func (s *Syncer) planVersion(sf adapters.SessionFile, key string, prev *state.Upload, pieces []raw.Piece) (*versionPlan, error) {
 	now := s.nowSeconds()
 	if sf.Role == "db" {
@@ -203,22 +194,21 @@ func (s *Syncer) planVersion(sf adapters.SessionFile, key string, prev *state.Up
 	if err != nil {
 		return nil, err
 	}
-	index = append(index, *v.clean())
-	v.index, err = jsonx.Sorted(map[string]any{"key": sf.Key, "versions": index}, 1)
+	index = append(index, *v.stateVersion())
+	v.index, err = jsonx.SortedIndented(map[string]any{"key": sf.Key, "versions": index})
 	if err != nil {
 		return nil, err
 	}
 	return v, nil
 }
 
-// prepare works out what a file needs: nothing (nil), a local state update, or an upload.
 func (s *Syncer) prepare(sf adapters.SessionFile, root string) (*upload, error) {
 	st, err := os.Stat(sf.Path)
 	if err != nil {
 		return nil, fmt.Errorf("stat: %w", err)
 	}
 	if sf.SessionKey != "" {
-		s.rememberRoot(sessionID{sf.Agent, sf.SessionKey}, root)
+		s.noteSessionRoot(sessionID{sf.Agent, sf.SessionKey}, root)
 	}
 	key := s.rawKey(sf.Agent, sf.Key)
 	pieces, err := s.state.Pieces(key)
@@ -239,18 +229,17 @@ func (s *Syncer) prepare(sf adapters.SessionFile, root string) (*upload, error) 
 	if err != nil {
 		return nil, err
 	}
-	active := filepath.Ext(sf.Path) == ".jsonl" && age < activeWrite.Seconds()
-	if st.Size() > largeFileBytes && sf.Compression == "" && !scrub.Applies(sf.Agent, filepath.Base(sf.Path)) {
-		return s.prepareLarge(sf, root, st, key, prev, pieces, active, idle)
+	mayBeMidLine := filepath.Ext(sf.Path) == ".jsonl" && age < partialLineWindow.Seconds()
+	if st.Size() > largeFileBytes && !sf.Zstd && !scrub.Applies(sf.Agent, filepath.Base(sf.Path)) {
+		return s.prepareStreamed(sf, root, st, key, prev, pieces, mayBeMidLine, idle)
 	}
-	return s.prepareSmall(sf, root, st, key, prev, pieces, active, idle)
+	return s.prepareInMemory(sf, root, st, key, prev, pieces, mayBeMidLine, idle)
 }
 
-// prepareSmall reads the file into memory, hashes it and compresses the bytes being uploaded.
-func (s *Syncer) prepareSmall(sf adapters.SessionFile, root string, st os.FileInfo, key string, prev *state.Upload,
-	pieces []raw.Piece, active, idle bool,
+func (s *Syncer) prepareInMemory(sf adapters.SessionFile, root string, st os.FileInfo, key string, prev *state.Upload,
+	pieces []raw.Piece, mayBeMidLine, idle bool,
 ) (*upload, error) {
-	data, mtimeNS, err := readComplete(sf, st, active)
+	data, mtimeNS, err := readCompleteLines(sf, st, mayBeMidLine)
 	if err != nil {
 		return nil, err
 	}
@@ -269,26 +258,25 @@ func (s *Syncer) prepareSmall(sf adapters.SessionFile, root string, st os.FileIn
 	u := &upload{
 		sf: sf, root: root, key: key, sha: sha, size: size, mtimeNS: mtimeNS,
 		lineCount: int64(bytes.Count(data, []byte("\n"))), prefixSHA: prefixSHA(data), head: head,
-		changed: mode != planNone, start: start,
+		needsUpload: mode != uploadNothing, segmentStart: start,
 	}
 	switch mode {
-	case planSegment:
+	case uploadSegment:
 		u.pieceSHA = raw.SHA256(data[start:])
 		u.body = raw.Compress(data[start:])
-	case planWhole:
+	case uploadWhole:
 		u.pieceSHA = sha
 		u.body = raw.Compress(data)
 		if err := s.planReplace(u, prev, pieces, appended); err != nil {
 			return nil, err
 		}
-	case planNone:
+	case uploadNothing:
 	}
 	return u, nil
 }
 
-// planReplace notes what a whole upload replaces, and keeps a rewrite's old bytes as a version.
 func (s *Syncer) planReplace(u *upload, prev *state.Upload, pieces []raw.Piece, appended bool) error {
-	u.oldPieces = pieces
+	u.replacedPieces = pieces
 	if prev == nil || appended {
 		return nil
 	}
@@ -297,10 +285,7 @@ func (s *Syncer) planReplace(u *upload, prev *state.Upload, pieces []raw.Piece, 
 	return err
 }
 
-// hashLarge reads the first limit bytes of path in chunks, returning the whole sha256, the
-// sha256 of the first oldSize bytes (if oldSize >= 0), how many bytes were read and how many
-// newlines they hold.
-func hashLarge(path string, limit, oldSize int64) (whole, oldPrefix string, read, lines int64, err error) {
+func hashStreamed(path string, limit, oldSize int64) (whole, oldPrefix string, read, lines int64, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", "", 0, 0, fmt.Errorf("read: %w", err)
@@ -327,7 +312,6 @@ func hashLarge(path string, limit, oldSize int64) (whole, oldPrefix string, read
 	return hex.EncodeToString(wh.Sum(nil)), hex.EncodeToString(oh.Sum(nil)), read, lines, nil
 }
 
-// headLines reads up to prefixLines lines (each at most 16 chunks) from the start of path.
 func headLines(path string, limit int64) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -346,7 +330,6 @@ func headLines(path string, limit int64) ([]byte, error) {
 	return out, nil
 }
 
-// readLine reads through the next newline, or max bytes, like Python's readline(max).
 func readLine(r *bufio.Reader, maxBytes int) ([]byte, error) {
 	var out []byte
 	for len(out) < maxBytes {
@@ -362,15 +345,13 @@ func readLine(r *bufio.Reader, maxBytes int) ([]byte, error) {
 	return out, nil
 }
 
-// prepareLarge hashes the file in a stream, then compresses only the bytes being uploaded to a
-// temp file.
-func (s *Syncer) prepareLarge(sf adapters.SessionFile, root string, st os.FileInfo, key string, prev *state.Upload,
-	pieces []raw.Piece, active, idle bool,
+func (s *Syncer) prepareStreamed(sf adapters.SessionFile, root string, st os.FileInfo, key string, prev *state.Upload,
+	pieces []raw.Piece, mayBeMidLine, idle bool,
 ) (*upload, error) {
 	limit := st.Size()
-	if active {
+	if mayBeMidLine {
 		var err error
-		if limit, err = lastNewline(sf.Path, st.Size()); err != nil {
+		if limit, err = completeLinesEnd(sf.Path, st.Size()); err != nil {
 			return nil, err
 		}
 	}
@@ -382,7 +363,7 @@ func (s *Syncer) prepareLarge(sf adapters.SessionFile, root string, st os.FileIn
 	if prev != nil && prev.Size != nil {
 		oldSize = *prev.Size
 	}
-	sha, oldPrefix, read, lines, err := hashLarge(sf.Path, limit, oldSize)
+	sha, oldPrefix, read, lines, err := hashStreamed(sf.Path, limit, oldSize)
 	if err != nil {
 		return nil, err
 	}
@@ -396,21 +377,21 @@ func (s *Syncer) prepareLarge(sf adapters.SessionFile, root string, st os.FileIn
 	}
 	appended := oldSize >= 0 && read >= oldSize && oldPrefix == prev.SHA256
 	mode, start := plan(prev, pieces, sha, read, appended, idle)
-	mtimeNS := int64(-1)
+	mtimeNS := mtimeLastLineHeldBack
 	if limit == st.Size() {
 		mtimeNS = st.ModTime().UnixNano()
 	}
 	u := &upload{
 		sf: sf, root: root, key: key, sha: sha, size: read, mtimeNS: mtimeNS, lineCount: lines,
-		prefixSHA: prefixSHA(first), head: head, changed: mode != planNone, start: start,
+		prefixSHA: prefixSHA(first), head: head, needsUpload: mode != uploadNothing, segmentStart: start,
 	}
-	if mode == planNone {
+	if mode == uploadNothing {
 		return u, nil
 	}
 	if u.bodyPath, u.pieceSHA, err = s.compressToTemp(sf.Path, start, read-start); err != nil {
 		return nil, err
 	}
-	if mode == planWhole {
+	if mode == uploadWhole {
 		if err := s.planReplace(u, prev, pieces, appended); err != nil {
 			u.cleanup()
 			return nil, err
@@ -419,8 +400,6 @@ func (s *Syncer) prepareLarge(sf adapters.SessionFile, root string, st os.FileIn
 	return u, nil
 }
 
-// compressToTemp compresses length bytes of path from offset start into a temp file, returning
-// its path and the sha256 of the bytes.
 func (s *Syncer) compressToTemp(path string, start, length int64) (tmpPath, sha string, err error) {
 	if err := os.MkdirAll(s.tmpDir, 0o700); err != nil {
 		return "", "", fmt.Errorf("temp dir: %w", err)
@@ -453,18 +432,18 @@ func (s *Syncer) compressToTemp(path string, start, length int64) (tmpPath, sha 
 	return out.Name(), sha, nil
 }
 
-// upload runs on the pool. A rewrite first copies the bytes it replaces into blobs/.
+// upload runs on the upload pool, so it must not touch local state.
 func (s *Syncer) upload(ctx context.Context, u *upload) error {
 	if err := s.copyVersion(ctx, u); err != nil {
 		return err
 	}
 	target := u.key
-	if u.start > 0 {
-		target = raw.SegmentKey(u.key, u.start, u.size)
+	if u.segmentStart > 0 {
+		target = raw.SegmentKey(u.key, u.segmentStart, u.size)
 	}
 	meta := map[string]string{
-		"sha256": u.pieceSHA, "agent": u.sf.Agent, "machine": s.cfg.MachineID, "role": u.sf.Role,
-		"start": strconv.FormatInt(u.start, 10), "end": strconv.FormatInt(u.size, 10),
+		"sha256": u.pieceSHA, "agent": u.sf.Agent, "machine": s.cfg.MachineID, "role": string(u.sf.Role),
+		"start": strconv.FormatInt(u.segmentStart, 10), "end": strconv.FormatInt(u.size, 10),
 	}
 	var err error
 	if u.bodyPath != "" {
@@ -480,14 +459,12 @@ func (s *Syncer) upload(ctx context.Context, u *upload) error {
 			return err
 		}
 	}
-	if u.start == 0 {
-		s.deleteReplacedSegments(ctx, u.oldPieces)
+	if u.segmentStart == 0 {
+		s.deleteReplacedSegments(ctx, u.replacedPieces)
 	}
 	return nil
 }
 
-// copyVersion copies each piece of the bytes a rewrite replaces to its blob. If one is missing
-// from the bucket the earlier version can't be kept, and the upload goes ahead without it.
 func (s *Syncer) copyVersion(ctx context.Context, u *upload) error {
 	if u.version == nil {
 		return nil
@@ -510,8 +487,8 @@ func (s *Syncer) copyVersion(ctx context.Context, u *upload) error {
 	return nil
 }
 
-// deleteReplacedSegments removes the segments a new whole object replaces. Leaving one is
-// harmless: readers skip segments that start before the base ends.
+// deleteReplacedSegments only logs failures: readers skip a leftover segment, since it starts
+// before the new base ends.
 func (s *Syncer) deleteReplacedSegments(ctx context.Context, pieces []raw.Piece) {
 	for _, p := range pieces {
 		if p.Start == 0 {
@@ -525,21 +502,21 @@ func (s *Syncer) deleteReplacedSegments(ctx context.Context, pieces []raw.Piece)
 
 func (s *Syncer) finish(u *upload) error {
 	sf := u.sf
-	if u.changed {
+	if u.needsUpload {
 		if err := s.recordChanged(u); err != nil {
 			return err
 		}
 	} else {
 		s.Summary.Unchanged++
 	}
-	if sf.SessionKey != "" && (u.changed || u.head != nil) {
-		if err := s.touch(sessionID{sf.Agent, sf.SessionKey}); err != nil {
+	if sf.SessionKey != "" && (u.needsUpload || u.head != nil) {
+		if err := s.markManifestPending(sessionID{sf.Agent, sf.SessionKey}); err != nil {
 			return err
 		}
 	}
 	lines := u.lineCount
 	file := &state.File{
-		Path: sf.Path, Agent: sf.Agent, Root: u.root, Key: sf.Key, SessionKey: sf.SessionKey, Role: sf.Role,
+		Path: sf.Path, Agent: sf.Agent, Root: u.root, Key: sf.Key, SessionKey: sf.SessionKey, Role: string(sf.Role),
 		Size: u.size, MtimeNS: u.mtimeNS, SHA256: u.sha, LineCount: &lines, PrefixSHA256: u.prefixSHA, Head: u.head,
 	}
 	if err := s.state.RecordFile(file); err != nil {
@@ -553,9 +530,9 @@ func (s *Syncer) recordChanged(u *upload) error {
 	if err := s.state.RecordUpload(u.key, u.sha, &size); err != nil {
 		return err
 	}
-	if u.start > 0 {
-		obj := raw.SegmentKey(u.key, u.start, u.size)
-		if err := s.state.AddPiece(u.key, raw.Piece{Start: u.start, End: u.size, SHA256: u.pieceSHA, Object: obj}); err != nil {
+	if u.segmentStart > 0 {
+		obj := raw.SegmentKey(u.key, u.segmentStart, u.size)
+		if err := s.state.AddPiece(u.key, raw.Piece{Start: u.segmentStart, End: u.size, SHA256: u.pieceSHA, Object: obj}); err != nil {
 			return err
 		}
 		s.Summary.Segments++
@@ -563,7 +540,7 @@ func (s *Syncer) recordChanged(u *upload) error {
 		if err := s.state.SetPieces(u.key, []raw.Piece{{Start: 0, End: u.size, SHA256: u.sha, Object: u.key}}); err != nil {
 			return err
 		}
-		if len(u.oldPieces) > 1 {
+		if len(u.replacedPieces) > 1 {
 			s.Summary.Folded++
 		}
 	}
@@ -577,14 +554,14 @@ func (s *Syncer) recordChanged(u *upload) error {
 				return err
 			}
 		}
-		if err := s.state.RecordVersion(u.key, u.version.clean()); err != nil {
+		if err := s.state.RecordVersion(u.key, u.version.stateVersion()); err != nil {
 			return err
 		}
 		s.Summary.Versions++
 	}
 	s.Summary.Uploaded++
 	s.Summary.BytesUploaded += u.bodySize()
-	if u.sf.Role == "unknown" {
+	if u.sf.Role == adapters.RoleUnknown {
 		s.Summary.Unknown++
 	}
 	return nil

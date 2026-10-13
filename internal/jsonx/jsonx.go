@@ -1,5 +1,5 @@
-// Package jsonx holds JSON helpers: lossless decoding of arbitrary documents, and an object type
-// that keeps its keys in order so a user's settings file is rewritten without reshuffling it.
+// Package jsonx decodes arbitrary JSON losslessly, and keeps an object's key order so a user's
+// settings file is rewritten without reshuffling it.
 package jsonx
 
 import (
@@ -25,7 +25,6 @@ func Decode(data []byte, v any) error {
 	return nil
 }
 
-// Map parses data as a JSON object; ok is false if it isn't one.
 func Map(data []byte) (m map[string]any, ok bool) {
 	if err := Decode(data, &m); err != nil || m == nil {
 		return nil, false
@@ -33,25 +32,21 @@ func Map(data []byte) (m map[string]any, ok bool) {
 	return m, true
 }
 
-// Object is a JSON object that remembers key order. Values are any JSON value, with nested
-// objects as *Object.
+// Object holds nested objects as *Object.
 type Object struct {
 	keys   []string
 	values map[string]any
 }
 
-// NewObject returns an empty object.
 func NewObject() *Object {
 	return &Object{values: map[string]any{}}
 }
 
-// Get returns the value for key.
 func (o *Object) Get(key string) (any, bool) {
 	v, ok := o.values[key]
 	return v, ok
 }
 
-// Set adds or replaces key, keeping its position if it exists.
 func (o *Object) Set(key string, v any) {
 	if _, ok := o.values[key]; !ok {
 		o.keys = append(o.keys, key)
@@ -59,7 +54,6 @@ func (o *Object) Set(key string, v any) {
 	o.values[key] = v
 }
 
-// Delete removes key.
 func (o *Object) Delete(key string) {
 	if _, ok := o.values[key]; !ok {
 		return
@@ -68,7 +62,6 @@ func (o *Object) Delete(key string) {
 	o.keys = slices.DeleteFunc(o.keys, func(k string) bool { return k == key })
 }
 
-// Clone returns a shallow copy.
 func (o *Object) Clone() *Object {
 	c := NewObject()
 	for _, k := range o.keys {
@@ -77,17 +70,14 @@ func (o *Object) Clone() *Object {
 	return c
 }
 
-// Keys returns the keys in order.
 func (o *Object) Keys() []string {
 	return slices.Clone(o.keys)
 }
 
-// Len is the number of keys.
 func (o *Object) Len() int {
 	return len(o.keys)
 }
 
-// MarshalJSON writes the object with its keys in order.
 func (o Object) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	buf.WriteByte('{')
@@ -111,7 +101,6 @@ func (o Object) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// ParseObject parses a JSON object, keeping key order at every level.
 func ParseObject(data []byte) (*Object, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
@@ -166,7 +155,7 @@ func parseObject(dec *json.Decoder) (*Object, error) {
 		}
 		obj.Set(key, v)
 	}
-	if _, err := dec.Token(); err != nil { // closing brace
+	if err := consumeClosingDelim(dec); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -181,14 +170,17 @@ func parseArray(dec *json.Decoder) ([]any, error) {
 		}
 		out = append(out, v)
 	}
-	if _, err := dec.Token(); err != nil { // closing bracket
+	if err := consumeClosingDelim(dec); err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// Indent marshals v indented with indent spaces per level and a trailing newline, the way
-// Python's json.dumps(indent=n) lays out a settings file.
+func consumeClosingDelim(dec *json.Decoder) error {
+	_, err := dec.Token()
+	return err
+}
+
 func Indent(v any, indent int) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -200,7 +192,6 @@ func Indent(v any, indent int) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Compact marshals v without HTML escaping.
 func Compact(v any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -211,10 +202,28 @@ func Compact(v any) ([]byte, error) {
 	return bytes.TrimSuffix(buf.Bytes(), []byte{'\n'}), nil
 }
 
-// Sorted marshals v with every object's keys sorted, struct fields included, the way Python's
-// json.dumps(sort_keys=True) writes documents in the bucket. indent 0 means compact; otherwise
-// it is the indent per level, and the output has no trailing newline.
-func Sorted(v any, indent int) ([]byte, error) {
+func SortedCompact(v any) ([]byte, error) {
+	generic, err := toGeneric(v)
+	if err != nil {
+		return nil, err
+	}
+	return Compact(generic)
+}
+
+func SortedIndented(v any) ([]byte, error) {
+	generic, err := toGeneric(v)
+	if err != nil {
+		return nil, err
+	}
+	out, err := Indent(generic, 1)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(out, []byte{'\n'}), nil
+}
+
+// toGeneric turns struct fields into map keys, which encoding/json sorts.
+func toGeneric(v any) (any, error) {
 	body, err := Compact(v)
 	if err != nil {
 		return nil, err
@@ -223,12 +232,5 @@ func Sorted(v any, indent int) ([]byte, error) {
 	if err := Decode(body, &generic); err != nil {
 		return nil, err
 	}
-	if indent == 0 {
-		return Compact(generic)
-	}
-	out, err := Indent(generic, indent)
-	if err != nil {
-		return nil, err
-	}
-	return bytes.TrimSuffix(out, []byte{'\n'}), nil
+	return generic, nil
 }

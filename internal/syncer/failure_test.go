@@ -74,7 +74,7 @@ func sweep(t *testing.T, st store.Store) *syncer.Summary {
 		}
 	}()
 	sy := syncer.New(cfg, st, s, adapters.All(cfg.Home), syncer.Options{Trigger: "sweep", Snapshots: true, Logger: slog.New(slog.DiscardHandler)})
-	files, err := sy.SweepFiles(adapters.Names, true)
+	files, err := sy.SweepFiles(adapters.Names)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestRewriteWhoseOldObjectIsGoneStillUploads(t *testing.T) {
 	}
 	path := filepath.Join(e.Claude, "plans", "brave-plan.md")
 	testenv.Write(t, path, "# new plan\n")
-	testenv.Settle(t, path, 2*time.Minute)
+	testenv.Backdate(t, path, 2*time.Minute)
 	mustRun(t, "sync", "--quiet")
 	if string(readBlob(t, e, key)) != "# new plan\n" {
 		t.Error("rewrite not uploaded")
@@ -186,11 +186,10 @@ func TestSnapshotsAreRecheckedAndOnlyAddedWhenSomethingChanged(t *testing.T) {
 	if a["id"] == b["id"] || a["git"].(map[string]any)["head"] == b["git"].(map[string]any)["head"] {
 		t.Errorf("second snapshot didn't change: %v vs %v", a, b)
 	}
-	// The second export only carries the new commit.
 	g := b["git"].(map[string]any)
 	log := gunzip(t, filepath.Join(e.Bucket, "git", g["repo_id"].(string), "log", g["head"].(string)+".txt.gz"))
 	if !strings.Contains(log, "second") || strings.Contains(log, "first") {
-		t.Errorf("incremental log:\n%s", log)
+		t.Errorf("second export should carry only the new commit:\n%s", log)
 	}
 }
 
@@ -204,7 +203,6 @@ func TestSyncWaitsForTheLockThenGivesUp(t *testing.T) {
 	if _, err := state.Lock(t.Context(), e.State, 300*time.Millisecond); !errors.Is(err, state.ErrLocked) {
 		t.Errorf("second lock: %v", err)
 	}
-	// A hook's sync waits 30 s at most; a quiet one exits 0 for the next sweep to catch up.
 	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
 	if _, err := state.Lock(ctx, e.State, time.Minute); err == nil {
@@ -220,7 +218,7 @@ func TestARewriteIsHeldBackUntilItsOldBytesAreKept(t *testing.T) {
 	old := readBlob(t, e, key)
 	path := filepath.Join(e.Claude, "plans", "brave-plan.md")
 	testenv.Write(t, path, "# new plan\n")
-	testenv.Settle(t, path, 2*time.Minute)
+	testenv.Backdate(t, path, 2*time.Minute)
 	if s := sweep(t, &flakyStore{Store: local, fail: []string{"blobs/"}}); s.Errors != 1 {
 		t.Errorf("errors = %v", s.ErrorMessages)
 	}

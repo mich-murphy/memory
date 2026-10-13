@@ -11,12 +11,9 @@ import (
 	"github.com/gofrs/flock"
 )
 
-// ErrLocked means another run held the sync lock for the whole timeout.
 var ErrLocked = errors.New("another agent-sessions run is holding the lock")
 
-// Lock serialises hook-triggered and sweep runs so the same file isn't uploaded twice at once.
-// It returns the function that releases the lock.
-func Lock(ctx context.Context, dir string, timeout time.Duration) (func(), error) {
+func Lock(ctx context.Context, dir string, timeout time.Duration) (unlock func(), err error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("lock: %w", err)
 	}

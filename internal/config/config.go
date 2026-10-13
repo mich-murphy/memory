@@ -1,8 +1,5 @@
-// Package config loads settings from environment variables and an optional env file.
-//
-// Hooks run without the user's shell profile, so credentials can also live in
-// ~/.config/agent-sessions/config.env (KEY=VALUE lines). Real environment variables win over
-// the file.
+// Package config loads settings from environment variables and an env file. Hooks run without
+// the user's shell profile, so the file is how they get credentials.
 package config
 
 import (
@@ -19,7 +16,6 @@ import (
 	"strings"
 )
 
-// Config is everything a run needs to know about this machine and the bucket.
 type Config struct {
 	MachineID  string
 	Hostname   string
@@ -32,13 +28,11 @@ type Config struct {
 	R2SecretAccessKey string
 	R2Bucket          string
 
-	// LocalStore writes to a local directory instead of R2 (testing, or a mounted share).
-	LocalStore string
-	// DBIntervalMinutes is the minimum time between SQLite copies of one database.
+	LocalStore        string
 	DBIntervalMinutes int
 }
 
-// Home is the user's home directory, from $HOME first so tests and hooks agree.
+// Home reads $HOME first so tests and hooks agree.
 func Home() string {
 	if h := os.Getenv("HOME"); h != "" {
 		return h
@@ -50,7 +44,6 @@ func Home() string {
 	return h
 }
 
-// FilePath is the env file: $AGENT_SESSIONS_CONFIG, or ~/.config/agent-sessions/config.env.
 func FilePath() string {
 	if p := os.Getenv("AGENT_SESSIONS_CONFIG"); p != "" {
 		return p
@@ -58,13 +51,11 @@ func FilePath() string {
 	return filepath.Join(Home(), ".config", "agent-sessions", "config.env")
 }
 
-// DefaultStateDir is where state, logs and temp files live unless AGENT_SESSIONS_STATE_DIR says
-// otherwise.
 func DefaultStateDir() string {
 	return filepath.Join(Home(), ".local", "state", "agent-sessions")
 }
 
-// StateDir is the state directory from the environment alone, for the hook's fast path.
+// StateDir skips the env file, for the hook's fast path.
 func StateDir() string {
 	if d := os.Getenv("AGENT_SESSIONS_STATE_DIR"); d != "" {
 		return d
@@ -72,7 +63,6 @@ func StateDir() string {
 	return DefaultStateDir()
 }
 
-// Load reads the env file at path (FilePath() when empty) and the environment.
 func Load(path string) (*Config, error) {
 	if path == "" {
 		path = FilePath()
@@ -117,7 +107,6 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// MissingR2Settings names the R2 settings that are empty.
 func (c *Config) MissingR2Settings() []string {
 	var missing []string
 	for _, kv := range []struct{ name, value string }{
@@ -175,9 +164,8 @@ func sanitize(name string) string {
 	return s
 }
 
-// MachineUUID is this machine's id in object keys: a UUID made on first use and kept in
-// machine-id next to config.env. Hostnames collide (two laptops called "macbook", VMs rebuilt
-// from one image), so they are only a label in manifests.
+// MachineUUID is used in object keys instead of the hostname, because hostnames collide (two
+// laptops called "macbook", VMs rebuilt from one image).
 func MachineUUID(configDir string) (string, error) {
 	path := filepath.Join(configDir, "machine-id")
 	if data, err := os.ReadFile(path); err == nil {
@@ -191,7 +179,6 @@ func MachineUUID(configDir string) (string, error) {
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if errors.Is(err, fs.ErrExist) {
-		// Another process won the race; use its id.
 		data, rerr := os.ReadFile(path)
 		if rerr != nil {
 			return "", fmt.Errorf("machine id: %w", rerr)

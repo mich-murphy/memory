@@ -1,14 +1,5 @@
 // Package adapters describes each coding agent's on-disk layout: which files to capture, how
 // to key them in the bucket, and which belong to one session.
-//
-// A root is a directory an agent writes under (~/.claude, $CODEX_HOME, ~/.pi/agent, or a Pi
-// session dir). Agents can be pointed elsewhere with environment variables or settings that a
-// cron job never sees, so a hook that reports a path outside the known roots makes the
-// collector remember that root and sweep it from then on.
-//
-// Capture is a denylist walk: every file under a root is copied unless it is a credential, a
-// lock, cache, temp file or binary, or on the adapter's own skip list. Files the adapter
-// doesn't recognise get role "unknown" rather than being dropped.
 package adapters
 
 import (
@@ -26,81 +17,94 @@ import (
 	"github.com/mich-murphy/memory/internal/jsonx"
 )
 
-// Names lists the supported agents.
 var Names = []string{"claude", "codex", "pi"}
 
-// SessionFile is one local file and where it goes in the bucket.
+type Role string
+
+const (
+	RoleMain         Role = "main"
+	RoleSubagent     Role = "subagent"
+	RoleToolResult   Role = "tool_result"
+	RoleSuperseded   Role = "superseded"
+	RoleAux          Role = "aux"
+	RoleFileHistory  Role = "file_history"
+	RoleSessionEnv   Role = "session_env"
+	RoleDebug        Role = "debug"
+	RoleTodo         Role = "todo"
+	RoleTask         Role = "task"
+	RoleTeam         Role = "team"
+	RolePlan         Role = "plan"
+	RolePaste        Role = "paste"
+	RoleUsage        Role = "usage"
+	RoleMemory       Role = "memory"
+	RoleHistory      Role = "history"
+	RoleLiveness     Role = "liveness"
+	RoleExperimental Role = "experimental"
+	RoleConfig       Role = "config"
+	RoleLog          Role = "log"
+	RoleDB           Role = "db"
+	RoleUnknown      Role = "unknown"
+)
+
 type SessionFile struct {
 	Agent string
 	Path  string
-	// Key is the object key relative to raw/agent=<agent>/machine=<machine>/, without .zst.
+	// Key is relative to raw/agent=<agent>/machine=<machine>/, without .zst.
 	Key string
-	// SessionKey groups the files of one session; empty for agent-wide files like history.
+	// SessionKey is empty for agent-wide files like history.
 	SessionKey string
-	// Role is main, subagent, tool_result, superseded, memory, history, plan, file_history,
-	// task, todo, team, session_env, debug, paste, usage, config, log, db or unknown...
-	Role string
-	// Compression is "zst" for Codex's recompressed rollouts.
-	Compression string
+	Role       Role
+	Zstd       bool
 }
 
-// SnapshotRules are harness files worth recording, as patterns relative to a base directory.
-// A pattern ending in "/**" takes every file under that directory; "**/NAME" matches NAME at
-// any depth.
+// SnapshotRules are patterns relative to UserBase, the project root and $HOME. A pattern
+// ending in "/**" takes every file under that directory; "**/NAME" matches NAME at any depth.
 type SnapshotRules struct {
 	User    []string
 	Project []string
-	Home    []string // relative to $HOME, e.g. .agents/skills/**
+	Home    []string
 }
 
-// Entry is harness state that doesn't live in a plain file of its own.
 type Entry struct {
 	Scope string
 	Name  string
 	Body  []byte
 }
 
-// ScopedDir is a directory with the snapshot scope or plugin name it belongs to.
 type ScopedDir struct {
+	Scope string
+	Dir   string
+}
+
+type Plugin struct {
 	Name string
 	Dir  string
 }
 
-// Adapter is one agent's layout.
 type Adapter interface {
 	Name() string
 	Home() string
 	Rules() SnapshotRules
-	// SkipDirs are directories (relative to a root) never copied.
 	SkipDirs() []string
-	// ManagedPaths are settings files outside the user's dirs that an administrator controls.
-	ManagedPaths() []string
+	ManagedSettingsFiles() []string
 	DefaultRoots() []string
 	// CanonicalRoot is the root keyed without a prefix. It is fixed from $HOME, not the
 	// environment, so a hook (which sees CLAUDE_CONFIG_DIR and friends) and a sweep (which
 	// doesn't) agree on keys.
 	CanonicalRoot() string
-	// InferRoot works out the root from the shape of a path a hook reported ("" if it can't).
 	InferRoot(path string) string
-	// Classify maps a local path to a SessionFile; false if it isn't captured.
 	Classify(path, root string) (SessionFile, bool)
-	// Related lists other files to sync alongside a file a hook pointed at.
 	Related(sf SessionFile, root string) []string
-	// UserBase is the directory the user-level snapshot patterns are relative to.
 	UserBase(root string) string
 	ExtraSnapshotEntries(root, projectRoot string) []Entry
-	// MemoryDirs are directories of memory the agent writes for itself, as (scope, dir).
 	MemoryDirs(root, projectRoot, sessionKey string) []ScopedDir
-	// PluginDirs are installed plugins, as (name, install dir).
-	PluginDirs(root string) []ScopedDir
-	// Exports materialises data that can't be copied as-is (live SQLite databases, files
-	// holding a credential field) under workDir. Run by sweeps.
+	Plugins(root string) []Plugin
+	// Exports materialises what can't be copied as-is (live SQLite databases, files holding a
+	// credential field) under workDir.
 	Exports(root, workDir string, dbInterval time.Duration) []SessionFile
-	// SessionInfo extracts session_id, cwd, version... from a transcript's first lines.
 	SessionInfo(head []map[string]any) map[string]any
 }
 
-// All returns every adapter for a home directory, keyed by name.
 func All(home string) map[string]Adapter {
 	return map[string]Adapter{
 		"claude": NewClaude(home),
@@ -124,23 +128,19 @@ func hasAnySuffix(name string, suffixes []string) bool {
 	return slices.ContainsFunc(suffixes, func(s string) bool { return strings.HasSuffix(name, s) })
 }
 
-// IsCredential reports whether a file name is a credential, never copied.
 func IsCredential(name string) bool {
 	return credentialNames[name] || strings.HasSuffix(name, ".key") || strings.HasSuffix(name, ".pem") ||
 		strings.HasPrefix(name, ".claude.json")
 }
 
-// Skipped reports whether a file name is a credential or noise (locks, temp files, journals).
 func Skipped(name string) bool {
 	return IsCredential(name) || hasAnySuffix(name, skipSuffixes)
 }
 
-// IsSQLite reports whether a file name looks like a SQLite database.
 func IsSQLite(name string) bool {
 	return hasAnySuffix(name, sqliteSuffixes)
 }
 
-// IsExecutableBinary reports whether path is an executable with a native binary header.
 func IsExecutableBinary(path string, mode fs.FileMode) bool {
 	if mode&0o111 == 0 {
 		return false
@@ -155,14 +155,11 @@ func IsExecutableBinary(path string, mode fs.FileMode) bool {
 	return slices.ContainsFunc(binaryMagic, func(m []byte) bool { return bytes.HasPrefix(head[:n], m) })
 }
 
-// RootTag is a short stable prefix for keys under a non-default root, so two roots can't
-// collide.
 func RootTag(root string) string {
 	sum := sha256.Sum256([]byte(root))
 	return hex.EncodeToString(sum[:])[:10]
 }
 
-// KeyPrefix is "" for the canonical root and roots/<tag>/ for any other.
 func KeyPrefix(a Adapter, root string) string {
 	if root == a.CanonicalRoot() {
 		return ""
@@ -170,14 +167,11 @@ func KeyPrefix(a Adapter, root string) string {
 	return "roots/" + RootTag(root) + "/"
 }
 
-// WalkedFile is a regular file found under a root.
 type WalkedFile struct {
 	Path string
 	Mode fs.FileMode
 }
 
-// Walk lists every capturable regular file under root in lexical order, skipping credentials,
-// noise, symlinks and the adapter's skip list.
 func Walk(a Adapter, root string) []WalkedFile {
 	if !isDir(root) {
 		return nil
@@ -214,7 +208,6 @@ func Walk(a Adapter, root string) []WalkedFile {
 	return out
 }
 
-// Discover lists the captured files under root.
 func Discover(a Adapter, root string) []SessionFile {
 	var out []SessionFile
 	for _, f := range Walk(a, root) {
@@ -228,7 +221,6 @@ func Discover(a Adapter, root string) []SessionFile {
 	return out
 }
 
-// FilesUnder lists capturable regular files under each root, recursively and sorted.
 func FilesUnder(roots ...string) []string {
 	var out []string
 	for _, root := range roots {
@@ -245,7 +237,6 @@ func FilesUnder(roots ...string) []string {
 	return out
 }
 
-// ReadHead parses the JSON objects among the first maxLines lines of data.
 func ReadHead(data []byte, maxLines int) []map[string]any {
 	var out []map[string]any
 	for i := 0; i < maxLines && len(data) > 0; i++ {
@@ -266,7 +257,6 @@ func ReadHead(data []byte, maxLines int) []map[string]any {
 	return out
 }
 
-// Rel returns path relative to root in slash form, or false if path isn't under root.
 func Rel(path, root string) (string, bool) {
 	rel, err := filepath.Rel(root, path)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -285,7 +275,6 @@ func isFile(p string) bool {
 	return err == nil && st.Mode().IsRegular()
 }
 
-// expandUser expands a leading ~ to the home directory.
 func expandUser(p, home string) string {
 	if p == "~" {
 		return home
@@ -296,7 +285,6 @@ func expandUser(p, home string) string {
 	return p
 }
 
-// envPath is an environment variable as a cleaned, ~-expanded path, or "".
 func envPath(name, home string) string {
 	v := os.Getenv(name)
 	if v == "" {
@@ -319,8 +307,6 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// truthy is Python's truth test for a decoded JSON value, which the adapters' field picking
-// follows.
 func truthy(v any) bool {
 	switch t := v.(type) {
 	case nil:

@@ -1,4 +1,3 @@
-// Package fsutil holds small file helpers shared by the collector.
 package fsutil
 
 import (
@@ -10,13 +9,10 @@ import (
 	"path/filepath"
 )
 
-// WriteFileAtomic writes data to path through a synced temp file and a rename, so readers see
-// the old contents or the new ones, never a partial file, even after a crash.
 func WriteFileAtomic(path string, data []byte, perm fs.FileMode) error {
 	return WriteAtomic(path, bytes.NewReader(data), perm)
 }
 
-// WriteAtomic is WriteFileAtomic for a stream.
 func WriteAtomic(path string, r io.Reader, perm fs.FileMode) (err error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -64,25 +60,22 @@ func syncDir(dir string) error {
 	return nil
 }
 
-// IsFile reports whether path is a regular file (following symlinks).
 func IsFile(path string) bool {
 	st, err := os.Stat(path)
 	return err == nil && st.Mode().IsRegular()
 }
 
-// IsDir reports whether path is a directory (following symlinks).
 func IsDir(path string) bool {
 	st, err := os.Stat(path)
 	return err == nil && st.IsDir()
 }
 
-// Exists reports whether anything is at path.
 func Exists(path string) bool {
 	_, err := os.Lstat(path)
 	return err == nil
 }
 
-// Within reports whether path is root or inside it. Both should be absolute and clean.
+// Within expects both paths absolute and clean.
 func Within(path, root string) bool {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {

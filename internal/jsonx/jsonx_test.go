@@ -47,14 +47,14 @@ func TestSortedSortsStructFieldsToo(t *testing.T) {
 		B int `json:"b"`
 		A int `json:"a"`
 	}
-	got, err := Sorted(map[string]any{"z": s{1, 2}, "a": []any{s{3, 4}}}, 0)
+	got, err := SortedCompact(map[string]any{"z": s{1, 2}, "a": []any{s{3, 4}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := `{"a":[{"a":4,"b":3}],"z":{"a":2,"b":1}}`; string(got) != want {
 		t.Errorf("got %s", got)
 	}
-	got, err = Sorted(map[string]any{"b": 1, "a": 2}, 1)
+	got, err = SortedIndented(map[string]any{"b": 1, "a": 2})
 	if err != nil {
 		t.Fatal(err)
 	}

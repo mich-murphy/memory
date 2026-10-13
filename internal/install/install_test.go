@@ -102,7 +102,6 @@ func TestClaudeInstallMergesIdempotentlyAndUninstalls(t *testing.T) {
 	if backups, _ := filepath.Glob(path + ".agent-sessions-backup-*"); len(backups) == 0 {
 		t.Error("no backup written")
 	}
-	// Key order is kept: the user's keys stay where they were.
 	in, err := jsonx.ParseObject(body)
 	if err != nil {
 		t.Fatal(err)

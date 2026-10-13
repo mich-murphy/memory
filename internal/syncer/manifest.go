@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/gitinfo"
 	"github.com/mich-murphy/memory/internal/jsonx"
 	"github.com/mich-murphy/memory/internal/raw"
@@ -14,10 +15,8 @@ import (
 	"github.com/mich-murphy/memory/internal/state"
 )
 
-// RecordLaunch keeps how a session was launched, its git state and the harness on disk before
-// the first prompt (timing pre_session).
 func (s *Syncer) RecordLaunch(ctx context.Context, agent, path string, launch map[string]any) error {
-	sf, root, ok, err := s.resolve(agent, path)
+	sf, root, ok, err := s.classifyHookPath(agent, path)
 	if err != nil || !ok || sf.SessionKey == "" {
 		return err
 	}
@@ -58,8 +57,8 @@ func (s *Syncer) RecordLaunch(ctx context.Context, agent, path string, launch ma
 		return err
 	}
 	id := sessionID{agent, sf.SessionKey}
-	s.roots[id] = root
-	return s.touch(id)
+	s.sessionRoots[id] = root
+	return s.markManifestPending(id)
 }
 
 func (s *Syncer) timing(files []state.File) string {
@@ -69,21 +68,20 @@ func (s *Syncer) timing(files []state.File) string {
 	var latest int64
 	for i := range files {
 		f := &files[i]
-		if f.Role != "main" {
+		if f.Role != string(adapters.RoleMain) {
 			continue
 		}
-		if f.MtimeNS == -1 { // last line held back: being written right now
+		if f.MtimeNS == mtimeLastLineHeldBack {
 			return "in_session"
 		}
 		latest = max(latest, f.MtimeNS)
 	}
-	if s.nowSeconds()-float64(latest)/1e9 < activeSession.Seconds() {
+	if s.nowSeconds()-float64(latest)/1e9 < inSessionWindow.Seconds() {
 		return "in_session"
 	}
 	return "post_hoc"
 }
 
-// addSnapshot appends a snapshot, or only marks the last one checked when nothing changed.
 func addSnapshot(snapshots []state.SnapshotEntry, snap snapshotResult, git state.GitState, timing string,
 	now float64,
 ) []state.SnapshotEntry {
@@ -154,7 +152,7 @@ func (s *Syncer) writeManifests(ctx context.Context) error {
 func (s *Syncer) maybeSnapshot(ctx context.Context, agent, sessionKey string, sess *state.Session, files []state.File,
 	now float64,
 ) error {
-	root, ok := s.roots[sessionID{agent, sessionKey}]
+	root, ok := s.sessionRoots[sessionID{agent, sessionKey}]
 	cwd, _ := sess.Info["cwd"].(string)
 	if !s.opts.Snapshots || !ok || cwd == "" {
 		return nil
@@ -172,7 +170,6 @@ func (s *Syncer) maybeSnapshot(ctx context.Context, agent, sessionKey string, se
 	return nil
 }
 
-// buildManifest updates local session state and returns the manifest upload if it changed.
 func (s *Syncer) buildManifest(ctx context.Context, agent, sessionKey string) (*manifestJob, error) {
 	now := s.nowSeconds()
 	sess, err := s.state.GetSession(agent, sessionKey)
@@ -187,11 +184,11 @@ func (s *Syncer) buildManifest(ctx context.Context, agent, sessionKey string) (*
 		return nil, err
 	}
 	for i := range files {
-		if f := &files[i]; f.Role == "main" && len(f.Head) > 0 {
+		if f := &files[i]; f.Role == string(adapters.RoleMain) && len(f.Head) > 0 {
 			maps.Copy(sess.Info, f.Head)
 		}
 	}
-	if root, ok := s.roots[sessionID{agent, sessionKey}]; ok {
+	if root, ok := s.sessionRoots[sessionID{agent, sessionKey}]; ok {
 		sess.Info["source_root"] = root
 	}
 	if err := s.maybeSnapshot(ctx, agent, sessionKey, sess, files, now); err != nil {
@@ -204,7 +201,7 @@ func (s *Syncer) buildManifest(ctx context.Context, agent, sessionKey string) (*
 	if err != nil {
 		return nil, err
 	}
-	body, err := jsonx.Sorted(manifest, 0)
+	body, err := jsonx.SortedCompact(manifest)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +212,7 @@ func (s *Syncer) buildManifest(ctx context.Context, agent, sessionKey string) (*
 	}
 	manifest["synced_at"] = now
 	manifest["collector_version"] = s.opts.Version
-	body, err = jsonx.Sorted(manifest, 1)
+	body, err = jsonx.SortedIndented(manifest)
 	if err != nil {
 		return nil, err
 	}
@@ -347,7 +344,7 @@ func (s *Syncer) putSet(ctx context.Context, setID string, doc map[string]any) e
 	if err != nil || have != "" {
 		return err
 	}
-	body, err := jsonx.Sorted(doc, 1)
+	body, err := jsonx.SortedIndented(doc)
 	if err != nil {
 		return err
 	}
@@ -357,8 +354,6 @@ func (s *Syncer) putSet(ctx context.Context, setID string, doc map[string]any) e
 	return s.state.RecordUpload(key, setID, nil)
 }
 
-// exportGit uploads the history of a repo up to its head, once per head. Failures are counted
-// as errors but don't stop the sync.
 func (s *Syncer) exportGit(ctx context.Context, git state.GitState) {
 	if git.RepoID == "" || git.Head == "" {
 		return

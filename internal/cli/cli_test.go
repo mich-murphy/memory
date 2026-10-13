@@ -84,7 +84,6 @@ func TestInstallSkipsAgentsNotOnThisMachine(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(e.Home, ".codex", "hooks.json")); err != nil {
 		t.Error("codex hooks not installed")
 	}
-	// And uninstall takes them out again.
 	if code, out, _ := run("uninstall", "--keep-timer"); code != 0 {
 		t.Fatalf("uninstall: exit %d\n%s", code, out)
 	}

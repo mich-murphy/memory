@@ -15,7 +15,6 @@ import (
 	"time"
 )
 
-// Session ids used throughout the fixture.
 const (
 	ClaudeSID   = "11111111-2222-3333-4444-555555555555"
 	CodexThread = "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
@@ -27,7 +26,6 @@ const (
 	PiKey       = "2026-10-10T10-00-00-000Z_" + PiSID
 )
 
-// Env is a fake home and the collector's directories for one test.
 type Env struct {
 	T            testing.TB
 	Tmp          string
@@ -41,7 +39,6 @@ type Env struct {
 	PiDir        string
 }
 
-// JSONL renders objects one per line.
 func JSONL(t testing.TB, objs ...any) string {
 	t.Helper()
 	var b strings.Builder
@@ -56,7 +53,6 @@ func JSONL(t testing.TB, objs ...any) string {
 	return b.String()
 }
 
-// Write creates path (and its parents) holding text.
 func Write(t testing.TB, path, text string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -67,7 +63,6 @@ func Write(t testing.TB, path, text string) {
 	}
 }
 
-// Append adds text to the end of path.
 func Append(t testing.TB, path, text string) {
 	t.Helper()
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
@@ -82,8 +77,7 @@ func Append(t testing.TB, path, text string) {
 	}
 }
 
-// Settle sets path's mtime age ago.
-func Settle(t testing.TB, path string, age time.Duration) {
+func Backdate(t testing.TB, path string, age time.Duration) {
 	t.Helper()
 	old := time.Now().Add(-age)
 	if err := os.Chtimes(path, old, old); err != nil {
@@ -91,7 +85,6 @@ func Settle(t testing.TB, path string, age time.Duration) {
 	}
 }
 
-// Git runs git in dir.
 func Git(t testing.TB, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...)
@@ -109,8 +102,7 @@ func mustJSON(t testing.TB, v any) string {
 	return string(b)
 }
 
-// New builds the fake home and points the collector's environment at it. Tests using it can't
-// run in parallel, since it sets environment variables.
+// New sets environment variables, so tests using it can't run in parallel.
 func New(t testing.TB) *Env {
 	t.Helper()
 	tmp := t.TempDir()
@@ -142,12 +134,12 @@ func New(t testing.TB) *Env {
 	e.codex()
 	e.pi()
 
-	// Make everything look settled (older than the partial-line window).
+	// Older than the partial-line window, so no session looks mid-write.
 	err := filepath.WalkDir(home, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || !d.Type().IsRegular() {
 			return err
 		}
-		Settle(t, p, time.Hour)
+		Backdate(t, p, time.Hour)
 		return nil
 	})
 	if err != nil {
@@ -271,7 +263,6 @@ func (e *Env) pi() {
 	Write(t, filepath.Join(agent, "models.json"), `{"providers": {"corp": {"baseUrl": "https://llm.corp/v1", "apiKey": "sk-pi-literal"}}}`)
 }
 
-// BucketKeys lists every object in the local bucket, sorted.
 func (e *Env) BucketKeys() []string {
 	var keys []string
 	err := filepath.WalkDir(e.Bucket, func(p string, d fs.DirEntry, err error) error {
@@ -289,24 +280,20 @@ func (e *Env) BucketKeys() []string {
 	return keys
 }
 
-// HasKey reports whether the bucket holds key.
 func (e *Env) HasKey(key string) bool {
 	_, err := os.Stat(filepath.Join(e.Bucket, filepath.FromSlash(key)))
 	return err == nil
 }
 
-// Raw is the object key of an agent's raw file.
 func Raw(agent, key string) string {
 	return "raw/agent=" + agent + "/machine=" + MachineID + "/" + key + ".zst"
 }
 
-// Manifest reads a session's manifest from the bucket.
 func (e *Env) Manifest(agent, sessionKey string) map[string]any {
 	e.T.Helper()
 	return e.ReadJSON("manifests/agent=" + agent + "/machine=" + MachineID + "/" + sessionKey + ".json")
 }
 
-// ReadJSON reads a JSON object from the bucket.
 func (e *Env) ReadJSON(key string) map[string]any {
 	e.T.Helper()
 	data, err := os.ReadFile(filepath.Join(e.Bucket, filepath.FromSlash(key)))

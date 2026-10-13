@@ -1,21 +1,5 @@
-// Package hook is the command each agent runs from its hooks: hand off to a detached sync and
-// exit at once.
-//
-// Rules this follows, from each agent's docs and source (see docs/hooks.md):
-//   - Always exit 0 and print nothing. Claude Code's Stop hook treats exit 2 as "keep working",
-//     and Codex's synchronous Stop hook fails on any stdout that isn't JSON.
-//   - Return within milliseconds. Codex gives SessionEnd hooks 1 s by default (3 s max), Claude
-//     Code 1.5 s, and both kill a hook's process group when it times out.
-//   - Hand the real work to a process in its own session with stdio detached, so it survives
-//     `claude -p` teardown, Codex's process-group kill and Pi exiting, and so the agent isn't
-//     left waiting for the hook's stdout to close.
-//   - Debounce: Stop fires every turn. If a sync for the same file is already queued, don't
-//     queue another; the queued one reads the file after its delay, so it picks up this turn
-//     too.
-//   - Session start is different: record how the agent was launched (its command line, found
-//     by walking up the process tree, and allowlisted environment variables) right here, while
-//     the agent is still our ancestor, and hand it to the sync, which snapshots the harness and
-//     git state before the first prompt.
+// Package hook is what each agent's hooks run. It must exit 0, print nothing and return within
+// milliseconds, handing the work to a detached sync; docs/hooks.md has each agent's rules.
 package hook
 
 import (
@@ -41,14 +25,12 @@ import (
 )
 
 const (
-	// PendingStale is how old a pending marker must be before a new hook takes it over.
-	PendingStale = 120 * time.Second
-	// DefaultDelay is how long a queued sync waits before reading the file.
-	DefaultDelay = 3 * time.Second
-	stdinLimit   = 1 << 20
-	stdinTimeout = 2 * time.Second
-	maxAncestors = 10
-	psTimeout    = 2 * time.Second
+	PendingMarkerStaleAfter = 120 * time.Second
+	syncDelay               = 3 * time.Second
+	stdinLimit              = 1 << 20
+	stdinTimeout            = 2 * time.Second
+	maxAncestors            = 10
+	psTimeout               = 2 * time.Second
 )
 
 var (
@@ -68,13 +50,11 @@ var (
 
 // Seams the tests replace.
 var (
-	startSync = spawn
+	startSync = spawnDetached
 	readProc  = proc
 	parentPID = os.Getppid
 )
 
-// ReadInput reads the JSON object Claude Code and Codex write to a hook's stdin, giving up after
-// a short wait so a hook run by hand doesn't hang.
 func ReadInput(f *os.File) map[string]any {
 	st, err := f.Stat()
 	if err != nil || st.Mode()&os.ModeCharDevice != 0 {
@@ -92,9 +72,6 @@ func ReadInput(f *os.File) map[string]any {
 	return m
 }
 
-// PathsFromInput returns transcript_path (the session) and agent_transcript_path (a
-// subagent's, from SubagentStop). Codex sends transcript_path: null for sessions it doesn't
-// persist.
 func PathsFromInput(data map[string]any) []string {
 	var out []string
 	for _, key := range []string{"transcript_path", "agent_transcript_path"} {
@@ -105,18 +82,17 @@ func PathsFromInput(data map[string]any) []string {
 	return out
 }
 
-// ClaimPending creates a marker for a queued sync of path; "" if one is already queued.
-func ClaimPending(stateDir, path string) string {
+func ClaimPending(stateDir, path string) (marker string) {
 	pending := filepath.Join(stateDir, "pending")
 	if err := os.MkdirAll(pending, 0o700); err != nil {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(path))
-	marker := filepath.Join(pending, hex.EncodeToString(sum[:])[:24])
+	marker = filepath.Join(pending, hex.EncodeToString(sum[:])[:24])
 	f, err := os.OpenFile(marker, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if errors.Is(err, os.ErrExist) {
 		st, serr := os.Stat(marker)
-		if serr != nil || time.Since(st.ModTime()) < PendingStale {
+		if serr != nil || time.Since(st.ModTime()) < PendingMarkerStaleAfter {
 			return ""
 		}
 		_ = os.Remove(marker) // left behind by a sync that died; take it over
@@ -133,7 +109,7 @@ func ClaimPending(stateDir, path string) string {
 	return marker
 }
 
-func proc(ctx context.Context, pid int) ([]string, int, bool) {
+func proc(ctx context.Context, pid int) (argv []string, ppid int, ok bool) {
 	dir := "/proc/" + strconv.Itoa(pid)
 	cmdline, err := os.ReadFile(dir + "/cmdline")
 	if err != nil {
@@ -143,7 +119,7 @@ func proc(ctx context.Context, pid int) ([]string, int, bool) {
 	if err != nil {
 		return nil, 0, false
 	}
-	ppid, ok := statPPID(stat)
+	ppid, ok = statPPID(stat)
 	if !ok {
 		return nil, 0, false
 	}
@@ -175,7 +151,7 @@ func splitCmdline(data []byte) []string {
 }
 
 // ps can't split a command line reliably, so argv is the whole line.
-func procPS(ctx context.Context, pid int) ([]string, int, bool) {
+func procPS(ctx context.Context, pid int) (argv []string, ppid int, ok bool) {
 	ctx, cancel := context.WithTimeout(ctx, psTimeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "ps", "-o", "ppid=,args=", "-p", strconv.Itoa(pid)).Output()
@@ -183,7 +159,7 @@ func procPS(ctx context.Context, pid int) ([]string, int, bool) {
 		return nil, 0, false
 	}
 	ppidStr, args, _ := strings.Cut(strings.TrimSpace(string(out)), " ")
-	ppid, err := strconv.Atoi(ppidStr)
+	ppid, err = strconv.Atoi(ppidStr)
 	if err != nil {
 		return nil, 0, false
 	}
@@ -195,7 +171,7 @@ func isAgent(agent string, argv []string) bool {
 	switch {
 	case len(argv) > 1:
 		tokens = argv[:min(3, len(argv))]
-	case len(argv) == 1: // a macOS ps line: split it roughly, for matching only
+	case len(argv) == 1: // a whole ps line: split roughly, for matching only
 		f := strings.Fields(argv[0])
 		tokens = f[:min(3, len(f))]
 	}
@@ -217,7 +193,6 @@ func isAgent(agent string, argv []string) bool {
 	return false
 }
 
-// LaunchProcess finds the agent's own command line among this process's ancestors.
 func LaunchProcess(ctx context.Context, agent string) map[string]any {
 	chain := []string{}
 	pid := parentPID()
@@ -242,9 +217,7 @@ func LaunchProcess(ctx context.Context, agent string) map[string]any {
 	return map[string]any{"argv": nil, "ancestry": chain}
 }
 
-// givenProcess is argv passed in by the Pi extension (process.argv), which the process table
-// can't show.
-func givenProcess(argvJSON string) map[string]any {
+func processFromExtension(argvJSON string) map[string]any {
 	if argvJSON == "" {
 		return nil
 	}
@@ -255,7 +228,6 @@ func givenProcess(argvJSON string) map[string]any {
 	return map[string]any{"argv": argv, "pid": parentPID(), "via": "extension"}
 }
 
-// LaunchEnv returns the allowlisted environment variables, never ones that look like secrets.
 func LaunchEnv(environ []string) map[string]any {
 	out := map[string]any{}
 	for _, kv := range environ {
@@ -269,9 +241,7 @@ func LaunchEnv(environ []string) map[string]any {
 	return out
 }
 
-// Extra is what a hook was told on its command line (the Pi extension passes cwd, source and
-// argv).
-type Extra struct {
+type ExtensionArgs struct {
 	Source string
 	Cwd    string
 	Argv   string
@@ -286,12 +256,14 @@ func firstString(vals ...any) any {
 	return nil
 }
 
-func recordSessionStart(ctx context.Context, stateDir, agent, path string, data map[string]any, event string, extra Extra) error {
+func recordSessionStart(ctx context.Context, stateDir, agent, path string, data map[string]any, event string,
+	extra ExtensionArgs,
+) error {
 	var hookInput any
 	if len(data) > 0 {
 		hookInput = data
 	}
-	process := givenProcess(extra.Argv)
+	process := processFromExtension(extra.Argv)
 	if process == nil {
 		process = LaunchProcess(ctx, agent)
 	}
@@ -329,13 +301,11 @@ func spawnSync(ctx context.Context, agent, path, marker, event string) error {
 	if event == "" {
 		event = agent
 	}
-	return startSync(ctx, "sync", "--agent", agent, "--path", path, "--delay", strconv.FormatFloat(DefaultDelay.Seconds(), 'f', -1, 64),
+	return startSync(ctx, "sync", "--agent", agent, "--path", path, "--delay", strconv.FormatFloat(syncDelay.Seconds(), 'f', -1, 64),
 		"--pending-marker", marker, "--trigger", "hook:"+event)
 }
 
-// spawn starts this binary detached: its own session and process group, so it outlives the
-// agent's kill, with stdio on /dev/null.
-func spawn(ctx context.Context, args ...string) error {
+func spawnDetached(ctx context.Context, args ...string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -350,8 +320,7 @@ func spawn(ctx context.Context, args ...string) error {
 	return cmd.Process.Release()
 }
 
-// Run handles one hook call. It never fails: capture must not break the agent.
-func Run(ctx context.Context, agent string, explicitPaths []string, event string, extra Extra) {
+func Run(ctx context.Context, agent string, explicitPaths []string, event string, extra ExtensionArgs) {
 	if os.Getenv("AGENT_SESSIONS_DISABLE") != "" {
 		return
 	}

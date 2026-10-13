@@ -1,8 +1,6 @@
-// Package install installs and removes the hooks, the Pi extension and the sweep timer.
-//
-// Every edit is idempotent: agent-sessions' own entries are recognised by their command,
-// removed and re-added, and anything else in the file is left alone. A file is backed up before
-// it changes and never rewritten if it can't be parsed.
+// Package install installs and removes the hooks, the Pi extension and the sweep timer. It
+// replaces only its own entries, backs a file up before changing it, and never rewrites one it
+// can't parse.
 package install
 
 import (
@@ -21,29 +19,16 @@ import (
 	"github.com/mich-murphy/memory/internal/shellwords"
 )
 
-// Ours matches the hook commands agent-sessions writes. It also matches entries written by
-// memsync, this tool's earlier name, so a reinstall replaces them.
+// Ours also matches memsync, this tool's earlier name, so a reinstall replaces its entries.
 var Ours = regexp.MustCompile(`(?:agent-sessions|agent_sessions|memsync).*\bhook (claude|codex|pi)\b`)
 
-// ErrNotObject means a settings file holds JSON that isn't an object.
-var ErrNotObject = errors.New("does not contain a JSON object")
-
-// HookEvent is one event to hook and the handler settings it gets.
 type HookEvent struct {
-	Name    string
-	Async   bool
-	Timeout int
+	Name        string
+	Async       bool
+	TimeoutSecs int
 }
 
-// ClaudeEvents are the Claude Code hooks (https://code.claude.com/docs/en/hooks).
-//
-// SessionStart (startup, resume, clear, compact) records the launch and the harness before the
-// first prompt. Stop fires after every turn but not on a user interrupt; StopFailure covers
-// turns that end on an API error; SubagentStop carries agent_transcript_path; PreCompact
-// catches the transcript before compaction; TaskCompleted and TeammateIdle catch task lists and
-// agent-team mailboxes that Claude Code deletes when the team is done; SessionEnd covers
-// /clear, /resume, exit and logout. async keeps the hook off Claude's path. SessionEnd stays
-// synchronous (it runs during teardown) with a timeout well above the hook's run time.
+// docs/hooks.md says why each event is hooked and how.
 var ClaudeEvents = []HookEvent{
 	{"SessionStart", true, 30},
 	{"Stop", true, 30},
@@ -55,12 +40,6 @@ var ClaudeEvents = []HookEvent{
 	{"SessionEnd", false, 5},
 }
 
-// CodexEvents are the Codex hooks (codex-rs/hooks, codex-rs/config/src/hook_config.rs).
-//
-// SessionStart on startup and resume, Stop after every turn, SubagentStop for subagent threads,
-// PreCompact before compaction, Interrupt when the user cancels a turn, SessionEnd on exit
-// (sync only, 1 s default, clamped to 3 s). Async hooks ignore stdout, which keeps a chatty
-// login shell (Codex runs hooks with `$SHELL -lc`) from failing Stop.
 var CodexEvents = []HookEvent{
 	{"SessionStart", true, 30},
 	{"Stop", true, 30},
@@ -70,25 +49,21 @@ var CodexEvents = []HookEvent{
 	{"SessionEnd", false, 3},
 }
 
-// Options are what an install or removal does.
 type Options struct {
-	// Command is the agent-sessions command line hooks run.
-	Command []string
-	Home    string
-	DryRun  bool
-	Remove  bool
-	// KeepDays raises Claude Code's cleanupPeriodDays to at least this (0 leaves it).
+	Command  []string
+	Home     string
+	DryRun   bool
+	Remove   bool
 	KeepDays int
-	// Log collects what was done, one line per change.
-	Log *[]string
+	Log      *[]string
 }
 
 func (o *Options) logf(format string, args ...any) {
 	*o.Log = append(*o.Log, fmt.Sprintf(format, args...))
 }
 
-// Command is the command hooks should run. It prefers agent-sessions on PATH, whose path
-// survives upgrades, which keeps Codex's trust hash for the hook valid.
+// Command prefers agent-sessions on PATH, whose path survives upgrades, which keeps Codex's
+// trust hash for the hook valid.
 func Command() []string {
 	if p, err := exec.LookPath("agent-sessions"); err == nil {
 		if abs, err := filepath.Abs(p); err == nil {
@@ -120,7 +95,6 @@ func backup(path string) (string, error) {
 	return name, nil
 }
 
-// write replaces path with text (backed up first), unless it already holds it.
 func write(path string, text []byte, o *Options) error {
 	old, err := os.ReadFile(path)
 	exists := err == nil
@@ -154,8 +128,8 @@ func write(path string, text []byte, o *Options) error {
 	return nil
 }
 
-// loadJSON reads a JSON object keeping its key order. It fails rather than return an empty
-// object for a file it can't parse, so the file is never overwritten.
+// loadJSON fails rather than return an empty object for a file it can't parse, so the file is
+// never overwritten.
 func loadJSON(path string) (*jsonx.Object, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) || (err == nil && len(bytes.TrimSpace(data)) == 0) {
@@ -196,8 +170,6 @@ func handlersOf(group any) []any {
 	return handlers
 }
 
-// withoutOurs drops agent-sessions' handlers from an event's groups, and any group left empty
-// by that.
 func withoutOurs(groups []any) []any {
 	var kept []any
 	for _, group := range groups {
@@ -221,8 +193,6 @@ func withoutOurs(groups []any) []any {
 	return kept
 }
 
-// MergeHooks removes agent-sessions' handlers from every event, then adds one group per event
-// unless command is "".
 func MergeHooks(config *jsonx.Object, events []HookEvent, command string) {
 	v, _ := config.Get("hooks")
 	hooks, ok := v.(*jsonx.Object)
@@ -246,7 +216,7 @@ func MergeHooks(config *jsonx.Object, events []HookEvent, command string) {
 			if e.Async {
 				handler.Set("async", true)
 			}
-			handler.Set("timeout", e.Timeout)
+			handler.Set("timeout", e.TimeoutSecs)
 			group := jsonx.NewObject()
 			group.Set("hooks", []any{handler})
 			v, _ := hooks.Get(e.Name)
@@ -265,7 +235,6 @@ func hookCommand(cmd []string, agent string) string {
 	return shellwords.Join(append(append([]string{}, cmd...), "hook", agent))
 }
 
-// Claude installs (or removes) the Claude Code hooks in settings.json.
 func Claude(o *Options) error {
 	root := adapters.NewClaude(o.Home).DefaultRoots()[0]
 	path := filepath.Join(root, "settings.json")
@@ -307,7 +276,6 @@ func raiseCleanupPeriod(settings *jsonx.Object, o *Options) {
 	o.logf("claude: cleanupPeriodDays %d -> %d (transcripts were being deleted after it)", shown, o.KeepDays)
 }
 
-// Codex installs (or removes) the Codex hooks in hooks.json.
 func Codex(o *Options) error {
 	root := adapters.NewCodex(o.Home).DefaultRoots()[0]
 	path := filepath.Join(root, "hooks.json")

@@ -14,12 +14,8 @@ import (
 	"modernc.org/sqlite"
 )
 
-// SQLiteExports takes a consistent copy of each SQLite database under the root, through
-// SQLite's backup API, and returns the copies as files to sync.
-//
-// Copying the file itself would miss whatever still sits in the -wal file and can catch the
-// database mid-write. A copy is refreshed when the database changed and the last copy is older
-// than interval, so a busy database isn't re-uploaded every sweep.
+// SQLiteExports copies each database through SQLite's backup API: copying the file itself would
+// miss rows still in the -wal file and can catch the database mid-write.
 func SQLiteExports(a Adapter, root, workDir string, interval time.Duration) []SessionFile {
 	var out []SessionFile
 	for _, f := range Walk(a, root) {
@@ -46,7 +42,7 @@ func SQLiteExports(a Adapter, root, workDir string, interval time.Duration) []Se
 			_ = os.WriteFile(sigPath, []byte(sig), 0o600) // without it the next sweep just copies again
 		}
 		if isFile(dest) {
-			out = append(out, SessionFile{Agent: a.Name(), Path: dest, Key: KeyPrefix(a, root) + "db/" + rel, Role: "db"})
+			out = append(out, SessionFile{Agent: a.Name(), Path: dest, Key: KeyPrefix(a, root) + "db/" + rel, Role: RoleDB})
 		}
 	}
 	return out
@@ -68,8 +64,6 @@ type backuper interface {
 	NewBackup(dstURI string) (*sqlite.Backup, error)
 }
 
-// BackupSQLite copies the database at src to dest with SQLite's online backup API, which
-// includes rows still in the -wal file. dest is replaced atomically.
 func BackupSQLite(src, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return fmt.Errorf("backup %s: %w", src, err)

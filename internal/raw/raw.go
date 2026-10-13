@@ -1,8 +1,5 @@
-// Package raw compresses raw objects and reads a raw file back from its pieces.
-//
-// A raw file is stored as a base object plus the append segments uploaded since it was last
-// folded (see docs/storage-layout.md). Each object is zstd and holds bytes [start, end) of the
-// file; the file is their concatenation in start order.
+// Package raw compresses raw objects and reads a raw file back from its pieces: a base object
+// plus the append segments uploaded since it was last folded (docs/storage-layout.md).
 package raw
 
 import (
@@ -21,12 +18,11 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-// Level is the zstd level objects are written at, about zstd's level 7. It compresses
-// transcripts within a few percent of level 10 at a fraction of the CPU.
+// Level is about zstd's level 7. It compresses transcripts within a few percent of level 10 at
+// a fraction of the CPU.
 const Level = zstd.SpeedBetterCompression
 
-// maxDecoded bounds what one object may expand to, so a corrupt object can't exhaust memory.
-const maxDecoded = 16 << 30
+const maxDecodedBytes = 16 << 30
 
 var (
 	encoderOnce sync.Once
@@ -37,9 +33,9 @@ var (
 
 func sharedEncoder() *zstd.Encoder {
 	encoderOnce.Do(func() {
-		// Options are constants, so this can't fail. Single segment makes every frame record
-		// its content size, as Python's zstandard does; EncodeAll only sees files below the
-		// syncer's 64 MB streaming threshold, well within zstd's default 128 MB window limit.
+		// Options are constants, so this can't fail. A single segment records the content
+		// size; EncodeAll only sees files below the syncer's 64 MB streaming threshold, well
+		// within zstd's default 128 MB window limit.
 		encoder, _ = zstd.NewWriter(nil, zstd.WithEncoderLevel(Level), zstd.WithLowerEncoderMem(true),
 			zstd.WithSingleSegment(true))
 	})
@@ -48,24 +44,21 @@ func sharedEncoder() *zstd.Encoder {
 
 func sharedDecoder() *zstd.Decoder {
 	decoderOnce.Do(func() {
-		decoder, _ = zstd.NewReader(nil, zstd.WithDecoderMaxMemory(maxDecoded), zstd.WithDecoderLowmem(true))
+		decoder, _ = zstd.NewReader(nil, zstd.WithDecoderMaxMemory(maxDecodedBytes), zstd.WithDecoderLowmem(true))
 	})
 	return decoder
 }
 
-// Compress returns data as one zstd frame that records its content size, so any zstd reader,
-// including Python's zstandard.decompress, can decode it.
+// Compress records the content size in the frame, so any zstd reader, including Python's
+// zstandard.decompress, can decode it in one call.
 func Compress(data []byte) []byte {
 	return sharedEncoder().EncodeAll(data, make([]byte, 0, len(data)/4+64))
 }
 
-// streamMin is the smallest length CompressStream streams. zstd's frame header has no room for
-// a content size under 256 bytes unless the frame is a single segment, which only EncodeAll
-// writes, so shorter inputs go through Compress.
+// zstd's frame header has no room for a content size under 256 bytes unless the frame is a
+// single segment, which only EncodeAll writes, so shorter inputs go through Compress.
 const streamMin = 256
 
-// CompressStream compresses the next length bytes of src into dst and returns their sha256.
-// The frame records length as its content size.
 func CompressStream(src io.Reader, dst io.Writer, length int64) (string, error) {
 	if length < streamMin {
 		return compressSmall(src, dst, length)
@@ -103,7 +96,6 @@ func compressSmall(src io.Reader, dst io.Writer, length int64) (string, error) {
 	return SHA256(data), nil
 }
 
-// Decompress decodes every zstd frame in body.
 func Decompress(body []byte) ([]byte, error) {
 	out, err := sharedDecoder().DecodeAll(body, nil)
 	if err != nil {
@@ -112,24 +104,20 @@ func Decompress(body []byte) ([]byte, error) {
 	return out, nil
 }
 
-// SHA256 is the hex sha256 of data.
 func SHA256(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
 
-// SegmentKey names the object holding bytes [start, end) appended to rawKey. The offsets are
-// zero-padded so the segments list in order.
+// SegmentKey zero-pads the offsets so the segments list in order.
 func SegmentKey(rawKey string, start, end int64) string {
 	return fmt.Sprintf("%s.d/%015d-%015d.zst", rawKey, start, end)
 }
 
-// BlobKey names the object holding earlier bytes with this sha256, stored once.
 func BlobKey(sha string) string {
 	return "blobs/" + sha + ".zst"
 }
 
-// Piece is one object of a raw file: bytes [Start, End) with their sha256.
 type Piece struct {
 	Start  int64  `json:"start"`
 	End    int64  `json:"end"`
@@ -137,8 +125,6 @@ type Piece struct {
 	Object string `json:"object"`
 }
 
-// Join rebuilds a file from pieces as manifests list them, checking each piece's length and
-// sha256. get returns an object's body.
 func Join(get func(key string) ([]byte, error), pieces []Piece) ([]byte, error) {
 	sorted := slices.Clone(pieces)
 	slices.SortFunc(sorted, func(a, b Piece) int { return cmp.Compare(a.Start, b.Start) })
@@ -163,15 +149,13 @@ func Join(get func(key string) ([]byte, error), pieces []Piece) ([]byte, error) 
 	return out, nil
 }
 
-// Reader is the part of a store ReadKey needs.
 type Reader interface {
 	Get(ctx context.Context, key string) ([]byte, error)
 	List(ctx context.Context, prefix string) ([]string, error)
 }
 
-// ReadKey rebuilds a file from the bucket alone, without a manifest: the base object, then each
-// segment that starts where the bytes so far end. Segments left behind by a fold that could not
-// delete them start before that point and are skipped.
+// ReadKey rebuilds a file without a manifest. Segments left behind by a fold that could not
+// delete them start before the bytes so far end, and are skipped.
 func ReadKey(ctx context.Context, store Reader, rawKey string) ([]byte, error) {
 	body, err := store.Get(ctx, rawKey)
 	if err != nil {

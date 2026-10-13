@@ -174,7 +174,6 @@ func TestSweepCapturesEveryAgentDirAndIsIdempotent(t *testing.T) {
 			t.Errorf("missing %s", k)
 		}
 	}
-	// Raw bytes are stored unmodified.
 	original := readFile(t, filepath.Join(e.ClaudeSlug, claudeSID+".jsonl"))
 	if got := readObject(t, e, rawKey("claude", p+"/"+claudeSID+".jsonl")); !bytes.Equal(got, original) {
 		t.Errorf("stored transcript differs:\n%s", cmp.Diff(string(original), string(got)))
@@ -318,9 +317,8 @@ func TestCredentialsAndNoiseAreNeverCopied(t *testing.T) {
 	if claudeJSON["oauthAccount"].(map[string]any)["emailAddress"] != "me@example.com" {
 		t.Errorf("claude.json lost oauthAccount: %v", claudeJSON)
 	}
-	// Unknown files are kept and counted, not dropped.
 	if n := lastRunSummary(t, e)["unknown"].(float64); n < 1 {
-		t.Errorf("unknown = %v", n)
+		t.Errorf("unknown files counted = %v, want at least 1", n)
 	}
 }
 
@@ -331,7 +329,7 @@ func TestAppendedSessionUploadsOnlyNewBytesThenFolds(t *testing.T) {
 	key := rawKey("claude", "projects/"+slug+"/"+claudeSID+".jsonl")
 	first := int64(len(readFile(t, path)))
 	testenv.Append(t, path, testenv.JSONL(t, map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "more"}}))
-	testenv.Settle(t, path, 2*time.Minute) // written two minutes ago: the session is still going
+	testenv.Backdate(t, path, 2*time.Minute) // written two minutes ago: the session is still going
 	mustRun(t, "sync", "--quiet")
 	now := readFile(t, path)
 	segment := raw.SegmentKey(key, first, int64(len(now)))
@@ -358,8 +356,7 @@ func TestAppendedSessionUploadsOnlyNewBytesThenFolds(t *testing.T) {
 		t.Error("an append kept a version")
 	}
 
-	// Quiet for longer than the fold delay: the next sweep folds it into one object.
-	testenv.Settle(t, path, syncer.FoldAfter+time.Minute)
+	testenv.Backdate(t, path, syncer.FoldAfter+time.Minute)
 	mustRun(t, "sync", "--quiet")
 	if hasPrefix(e.BucketKeys(), key+".d/") {
 		t.Error("segments left after folding")
@@ -372,7 +369,6 @@ func TestAppendedSessionUploadsOnlyNewBytesThenFolds(t *testing.T) {
 	if diff := cmp.Diff(want, toPieces(t, main["pieces"])); diff != "" {
 		t.Errorf("pieces after folding:\n%s", diff)
 	}
-	// Folded and unchanged: nothing more to do.
 	before := mtimes(t, e)[key]
 	mustRun(t, "sync", "--quiet")
 	if mtimes(t, e)[key] != before {
@@ -387,7 +383,7 @@ func TestRewrittenFileKeepsItsEarlierVersion(t *testing.T) {
 	old := readFile(t, path)
 	oldSHA := raw.SHA256(old)
 	testenv.Write(t, path, testenv.JSONL(t, map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "rewritten"}}))
-	testenv.Settle(t, path, 2*time.Minute)
+	testenv.Backdate(t, path, 2*time.Minute)
 	mustRun(t, "sync", "--quiet")
 	key := "projects/" + slug + "/" + claudeSID + ".jsonl"
 	if !bytes.Equal(readBlob(t, e, "blobs/"+oldSHA+".zst"), old) {
@@ -416,11 +412,11 @@ func TestRewriteOfAFileWithSegmentsKeepsEveryPiece(t *testing.T) {
 	path := filepath.Join(e.ClaudeSlug, claudeSID+".jsonl")
 	key := rawKey("claude", "projects/"+slug+"/"+claudeSID+".jsonl")
 	testenv.Append(t, path, testenv.JSONL(t, map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "more"}}))
-	testenv.Settle(t, path, 2*time.Minute)
+	testenv.Backdate(t, path, 2*time.Minute)
 	mustRun(t, "sync", "--quiet")
 	grown := readFile(t, path)
 	testenv.Write(t, path, testenv.JSONL(t, map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "rewritten"}}))
-	testenv.Settle(t, path, 2*time.Minute)
+	testenv.Backdate(t, path, 2*time.Minute)
 	mustRun(t, "sync", "--quiet")
 	versions := list(mainTranscript(t, e.Manifest("claude", claudeKey))["versions"])
 	if len(versions) != 1 {
@@ -450,7 +446,7 @@ func TestIdenticalOldVersionsAreStoredOnce(t *testing.T) {
 	mustRun(t, "sync", "--quiet")
 	for _, p := range []string{a, b} {
 		testenv.Write(t, p, "changed\n"+filepath.Base(p))
-		testenv.Settle(t, p, 2*time.Minute)
+		testenv.Backdate(t, p, 2*time.Minute)
 	}
 	mustRun(t, "sync", "--quiet")
 	var blobs []string
@@ -510,7 +506,7 @@ func TestDatabaseVersionsAreKeptAtMostDaily(t *testing.T) {
 		// Make the hourly copy due.
 		_ = filepath.WalkDir(filepath.Join(e.State, "exports", "codex"), func(p string, _ os.DirEntry, err error) error {
 			if err == nil && filepath.Base(p) == "state_5.sqlite" {
-				testenv.Settle(t, p, 2*time.Hour)
+				testenv.Backdate(t, p, 2*time.Hour)
 			}
 			return nil
 		})
@@ -541,7 +537,7 @@ func TestLargeFilesStreamAndKeepVersions(t *testing.T) {
 		t.Fatal("first upload differs")
 	}
 	testenv.Append(t, path, testenv.JSONL(t, map[string]any{"type": "message", "id": strings.Repeat("x", 50)}))
-	testenv.Settle(t, path, 2*time.Minute)
+	testenv.Backdate(t, path, 2*time.Minute)
 	mustRun(t, "sync", "--quiet")
 	if !bytes.Equal(readObject(t, e, key), readFile(t, path)) {
 		t.Error("appended upload differs")
@@ -554,7 +550,7 @@ func TestLargeFilesStreamAndKeepVersions(t *testing.T) {
 	}
 	before := readFile(t, path)
 	testenv.Write(t, path, strings.Repeat(`{"type":"session","version":3,"id":"replaced"}`+"\n", 3))
-	testenv.Settle(t, path, 2*time.Minute)
+	testenv.Backdate(t, path, 2*time.Minute)
 	mustRun(t, "sync", "--quiet")
 	main := mainTranscript(t, e.Manifest("pi", piKey))
 	if main["line_count"] != 3.0 {
@@ -584,7 +580,6 @@ func TestDeletedFileGetsATombstone(t *testing.T) {
 	if diff := cmp.Diff(want, gone); diff != "" {
 		t.Fatalf("deleted_locally:\n%s", diff)
 	}
-	// The object itself stays in the bucket.
 	if !e.HasKey(rawKey("claude", gone[0])) {
 		t.Error("object removed from the bucket")
 	}
@@ -650,13 +645,12 @@ func TestHookPathOutsideDefaultRootsIsRememberedForSweeps(t *testing.T) {
 	if len(custKeys) != 1 || !strings.HasSuffix(custKeys[0], filepath.Base(session)+".zst") {
 		t.Fatalf("custom keys = %v", custKeys)
 	}
-	// A second session in that directory, never reported by a hook, is found by the sweep.
 	sid2 := "0199a1b2-eeee-7bbb-8ccc-dddddddddddd"
 	testenv.Write(t, filepath.Join(custom, "2026-10-10T12-00-00-000Z_"+sid2+".jsonl"),
 		testenv.JSONL(t, map[string]any{"type": "session", "version": 3, "id": sid2}))
 	mustRun(t, "sync", "--quiet")
 	if !slices.ContainsFunc(e.BucketKeys(), func(k string) bool { return strings.Contains(k, sid2) }) {
-		t.Error("sweep missed the second session")
+		t.Error("sweep missed a session no hook reported")
 	}
 }
 
@@ -693,7 +687,6 @@ func TestCustomClaudeConfigDirGetsTheSameKeysFromHooksAndSweeps(t *testing.T) {
 	if !slices.ContainsFunc(sweepKeys, func(k string) bool { return strings.HasSuffix(k, "/settings.json.zst") }) {
 		t.Errorf("sweep missed the custom settings.json: %v", sweepKeys)
 	}
-	// ~/.claude keeps unprefixed keys.
 	if !e.HasKey(rawKey("claude", "settings.json")) {
 		t.Error("~/.claude settings.json key changed")
 	}
@@ -835,7 +828,7 @@ func TestCatRebuildsAFileFromItsSegments(t *testing.T) {
 	mustRun(t, "sync", "--quiet")
 	path := filepath.Join(e.ClaudeSlug, claudeSID+".jsonl")
 	testenv.Append(t, path, testenv.JSONL(t, map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "more"}}))
-	testenv.Settle(t, path, 2*time.Minute)
+	testenv.Backdate(t, path, 2*time.Minute)
 	mustRun(t, "sync", "--quiet")
 	out := mustRun(t, "cat", rawKey("claude", "projects/"+slug+"/"+claudeSID+".jsonl"))
 	if out != string(readFile(t, path)) {
@@ -921,7 +914,6 @@ func TestSnapshotRecordsWholeHarnessWithSecretsRedacted(t *testing.T) {
 		t.Errorf("memory set = %v", memory)
 	}
 
-	// The repo's history and tree at the snapshotted HEAD.
 	git := snap["git"].(map[string]any)
 	head, repo := git["head"].(string), git["repo_id"].(string)
 	log := gunzip(t, filepath.Join(e.Bucket, "git", repo, "log", head+".txt.gz"))

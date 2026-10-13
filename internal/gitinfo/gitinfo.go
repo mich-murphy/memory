@@ -1,14 +1,5 @@
-// Package gitinfo records git state at session start and exports the repository history the
-// normaliser needs.
-//
-//	git/<repo_id>/repo.json           the remote (checkouts are in each session's manifest)
-//	git/<repo_id>/log/<head>.txt.gz   `git log --name-status` for commits not in an earlier export
-//	git/<repo_id>/tree/<head>.txt.gz  `git ls-tree -r -l <head>`: every file and blob at that commit
-//
-// Log records are separated by \x1e; each starts with NUL-separated fields (sha, parents, author
-// name, author email, author date, committer date, full message) followed by the --name-status
-// lines. repo_id is a hash of the normalised remote URL, or of the machine and the common git
-// dir when there is no remote, so clones of one repo on many machines share it.
+// Package gitinfo records git state at session start and exports the repository history in
+// the format docs/storage-layout.md describes.
 package gitinfo
 
 import (
@@ -31,7 +22,6 @@ import (
 
 const logFormat = "%x1e%H%x00%P%x00%an%x00%ae%x00%aI%x00%cI%x00%B%x00"
 
-// ErrGit means a git command failed.
 var ErrGit = errors.New("git failed")
 
 func git(ctx context.Context, dir string, timeout time.Duration, stdin []byte, args ...string) ([]byte, error) {
@@ -64,7 +54,6 @@ var (
 	scpRE      = regexp.MustCompile(`^([^/:]+):(\d+/)?`)
 )
 
-// StripUserinfo drops a token or password embedded in a remote URL (a credential, never stored).
 func StripUserinfo(url string) string {
 	return userinfoRE.ReplaceAllString(url, "$1")
 }
@@ -89,7 +78,6 @@ func isDir(p string) bool {
 	return err == nil && st.IsDir()
 }
 
-// State is the git state of the repository containing cwd, or a zero value outside one.
 func State(ctx context.Context, cwd, machineID string) state.GitState {
 	if cwd == "" || !isDir(cwd) {
 		return state.GitState{}
@@ -123,14 +111,11 @@ func State(ctx context.Context, cwd, machineID string) state.GitState {
 	return g
 }
 
-// Object is one object to upload: key and body.
 type Object struct {
 	Key  string
 	Body []byte
 }
 
-// Export returns the objects to upload for g's HEAD, leaving out commits reachable from heads
-// exported before.
 func Export(ctx context.Context, g state.GitState, exportedHeads []string) ([]Object, error) {
 	if g.Root == "" || g.Head == "" || g.RepoID == "" {
 		return nil, nil
