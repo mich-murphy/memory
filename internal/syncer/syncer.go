@@ -73,11 +73,6 @@ func (s *Summary) Trimmed() Summary {
 	return t
 }
 
-type Found struct {
-	File adapters.SessionFile
-	Root string
-}
-
 type sessionID struct{ agent, key string }
 
 type snapshotKey struct{ agent, root, cwd, session string }
@@ -174,8 +169,8 @@ func (s *Syncer) excluded(path string) bool {
 	return path == s.cfg.ConfigPath || fsutil.Within(path, s.cfg.StateDir)
 }
 
-func (s *Syncer) SweepFiles(ctx context.Context, agents []string) ([]Found, error) {
-	var out []Found
+func (s *Syncer) SweepFiles(ctx context.Context, agents []string) ([]adapters.SessionFile, error) {
+	var out []adapters.SessionFile
 	seen := map[string]bool{}
 	for _, agent := range agents {
 		roots, err := s.Roots(agent)
@@ -194,7 +189,7 @@ func (s *Syncer) SweepFiles(ctx context.Context, agents []string) ([]Found, erro
 	return out, nil
 }
 
-func (s *Syncer) sweepRoot(ctx context.Context, agent, root string, seen map[string]bool, out *[]Found) (present map[string]bool) {
+func (s *Syncer) sweepRoot(ctx context.Context, agent, root string, seen map[string]bool, out *[]adapters.SessionFile) (present map[string]bool) {
 	a := s.adapters[agent]
 	present = map[string]bool{}
 	files, databases := adapters.Discover(a, root)
@@ -202,14 +197,14 @@ func (s *Syncer) sweepRoot(ctx context.Context, agent, root string, seen map[str
 		if !s.excluded(sf.Path) && !seen[sf.Path] {
 			seen[sf.Path] = true
 			present[sf.Path] = true
-			*out = append(*out, Found{sf, root})
+			*out = append(*out, sf)
 		}
 	}
 	exports := adapters.SQLiteExports(ctx, a, root, databases, s.workDir, recopyAfter)
 	for _, sf := range append(exports, a.Exports(root, s.workDir, recopyAfter)...) {
 		if !seen[sf.Path] {
 			seen[sf.Path] = true
-			*out = append(*out, Found{sf, root})
+			*out = append(*out, sf)
 		}
 		present[sf.Path] = true
 	}
@@ -241,7 +236,7 @@ func (s *Syncer) tombstone(agent, root string, present map[string]bool) error {
 	return s.state.Flush()
 }
 
-func (s *Syncer) classifyHookPath(agent, path string) (adapters.SessionFile, string, bool, error) {
+func (s *Syncer) classifyHookPath(agent, path string) (adapters.SessionFile, bool, error) {
 	a := s.adapters[agent]
 	if rest, ok := strings.CutPrefix(path, "~"); ok && (rest == "" || rest[0] == '/') {
 		path = a.Home() + rest
@@ -249,37 +244,37 @@ func (s *Syncer) classifyHookPath(agent, path string) (adapters.SessionFile, str
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
 	}
-	sf, root, ok, err := s.classifyReported(a, path)
+	sf, ok, err := s.classifyReported(a, path)
 	if err != nil || !ok {
-		return sf, root, ok, err
+		return sf, ok, err
 	}
-	if err := s.rememberExtraRoot(agent, root); err != nil {
-		return adapters.SessionFile{}, "", false, err
+	if err := s.rememberExtraRoot(agent, sf.Root); err != nil {
+		return adapters.SessionFile{}, false, err
 	}
-	return sf, root, true, nil
+	return sf, true, nil
 }
 
-func (s *Syncer) classifyReported(a adapters.Adapter, path string) (adapters.SessionFile, string, bool, error) {
+func (s *Syncer) classifyReported(a adapters.Adapter, path string) (adapters.SessionFile, bool, error) {
 	roots, err := s.Roots(a.Name())
 	if err != nil {
-		return adapters.SessionFile{}, "", false, err
+		return adapters.SessionFile{}, false, err
 	}
 	for _, r := range roots {
 		if !fsutil.Within(path, r) {
 			continue
 		}
 		if sf, ok := a.Classify(path, r); ok {
-			return sf, r, true, nil
+			return sf, true, nil
 		}
 	}
 	if root := a.InferRoot(path); root != "" {
 		if sf, ok := a.Classify(path, root); ok {
-			return sf, root, true, nil
+			return sf, true, nil
 		}
 	}
 	s.log.Warn("not a recognised session file", "path", path, "agent", a.Name())
 	s.Summary.Skipped++
-	return adapters.SessionFile{}, "", false, nil
+	return adapters.SessionFile{}, false, nil
 }
 
 func (s *Syncer) rememberExtraRoot(agent, root string) error {
@@ -297,25 +292,25 @@ func (s *Syncer) rememberExtraRoot(agent, root string) error {
 	return s.state.Flush()
 }
 
-func (s *Syncer) HookFiles(agent string, paths []string) ([]Found, error) {
+func (s *Syncer) HookFiles(agent string, paths []string) ([]adapters.SessionFile, error) {
 	a := s.adapters[agent]
-	var out []Found
+	var out []adapters.SessionFile
 	seen := map[string]bool{}
 	for _, path := range paths {
-		sf, root, ok, err := s.classifyHookPath(agent, path)
+		sf, ok, err := s.classifyHookPath(agent, path)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
 			continue
 		}
-		for _, p := range append([]string{sf.Path}, a.Related(sf, root)...) {
+		for _, p := range append([]string{sf.Path}, a.Related(sf)...) {
 			if seen[p] || s.excluded(p) {
 				continue
 			}
-			if related, ok := a.Classify(p, root); ok {
+			if related, ok := a.Classify(p, sf.Root); ok {
 				seen[p] = true
-				out = append(out, Found{related, root})
+				out = append(out, related)
 			}
 		}
 	}
@@ -327,7 +322,7 @@ type result struct {
 	err error
 }
 
-func (s *Syncer) Run(ctx context.Context, files []Found) (*Summary, error) {
+func (s *Syncer) Run(ctx context.Context, files []adapters.SessionFile) (*Summary, error) {
 	pending, err := s.state.PendingManifests()
 	if err != nil {
 		return &s.Summary, err
@@ -349,16 +344,16 @@ func (s *Syncer) Run(ctx context.Context, files []Found) (*Summary, error) {
 		return s.finish(r.u)
 	}
 	var stateErr error
-	for _, f := range files {
+	for _, sf := range files {
 		if ctx.Err() != nil || stateErr != nil {
 			break
 		}
-		u, err := s.prepare(f.File, f.Root)
+		u, err := s.prepare(sf)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			continue // rotated or recompressed between discovery and read
 		case err != nil:
-			s.fail(f.File, err)
+			s.fail(sf, err)
 			continue
 		case u == nil:
 			continue

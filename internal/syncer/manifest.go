@@ -16,7 +16,7 @@ import (
 )
 
 func (s *Syncer) RecordLaunch(ctx context.Context, agent, path string, launch map[string]any) error {
-	sf, root, ok, err := s.classifyHookPath(agent, path)
+	sf, ok, err := s.classifyHookPath(agent, path)
 	if err != nil || !ok || sf.SessionKey == "" {
 		return err
 	}
@@ -40,7 +40,7 @@ func (s *Syncer) RecordLaunch(ctx context.Context, agent, path string, launch ma
 	git := gitinfo.State(ctx, cwd, s.cfg.MachineID)
 	entry := maps.Clone(launch)
 	entry["git"] = git
-	snap, err := s.takeSnapshot(ctx, agent, root, cwd, sf.SessionKey)
+	snap, err := s.takeSnapshot(ctx, agent, sf.Root, cwd, sf.SessionKey)
 	if err != nil {
 		return err
 	}
@@ -54,7 +54,7 @@ func (s *Syncer) RecordLaunch(ctx context.Context, agent, path string, launch ma
 		return err
 	}
 	id := sessionID{agent, sf.SessionKey}
-	s.sessionRoots[id] = root
+	s.sessionRoots[id] = sf.Root
 	return s.markManifestPending(id)
 }
 

@@ -187,12 +187,12 @@ func recordLaunches(ctx context.Context, sy *syncer.Syncer, a *syncArgs, log *sl
 	}
 }
 
-func filesToSync(ctx context.Context, sy *syncer.Syncer, a *syncArgs) ([]syncer.Found, error) {
+func filesToSync(ctx context.Context, sy *syncer.Syncer, a *syncArgs) ([]adapters.SessionFile, error) {
 	agents := a.agents.orAll()
 	if len(a.paths) == 0 {
 		return sy.SweepFiles(ctx, agents)
 	}
-	var files []syncer.Found
+	var files []adapters.SessionFile
 	for _, agent := range agents {
 		found, err := sy.HookFiles(agent, a.paths)
 		if err != nil {

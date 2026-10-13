@@ -49,6 +49,7 @@ const (
 
 type SessionFile struct {
 	Agent string
+	Root  string
 	Path  string
 	// Key is relative to raw/agent=<agent>/machine=<machine>/, without .zst.
 	Key string
@@ -95,7 +96,7 @@ type Adapter interface {
 	CanonicalRoot() string
 	InferRoot(path string) string
 	Classify(path, root string) (SessionFile, bool)
-	Related(sf SessionFile, root string) []string
+	Related(sf SessionFile) []string
 	UserBase(root string) string
 	ExtraSnapshotEntries(root, projectRoot string) []Entry
 	MemoryDirs(root, projectRoot, sessionKey string) []ScopedDir
@@ -170,7 +171,7 @@ func KeyPrefix(a Adapter, root string) string {
 
 type noExtras struct{}
 
-func (noExtras) Related(SessionFile, string) []string { return nil }
+func (noExtras) Related(SessionFile) []string { return nil }
 
 func (noExtras) ExtraSnapshotEntries(string, string) []Entry { return nil }
 

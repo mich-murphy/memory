@@ -116,7 +116,7 @@ func (p *Pi) Classify(path, root string) (SessionFile, bool) {
 	if p.isAgentDir(root) {
 		prefix := KeyPrefix(p, root)
 		if parts[0] == "sessions" && isJSONL && len(parts) <= 3 {
-			return SessionFile{Agent: p.Name(), Path: path, Key: prefix + rel, SessionKey: stem, Role: RoleMain}, true
+			return SessionFile{Agent: p.Name(), Root: root, Path: path, Key: prefix + rel, SessionKey: stem, Role: RoleMain}, true
 		}
 		role := RoleUnknown
 		switch {
@@ -129,12 +129,12 @@ func (p *Pi) Classify(path, root string) (SessionFile, bool) {
 				role = r
 			}
 		}
-		return SessionFile{Agent: p.Name(), Path: path, Key: prefix + rel, Role: role}, true
+		return SessionFile{Agent: p.Name(), Root: root, Path: path, Key: prefix + rel, Role: role}, true
 	}
 	if !isJSONL || len(parts) > 2 {
 		return SessionFile{}, false
 	}
-	return SessionFile{Agent: p.Name(), Path: path, Key: "dirs/" + RootTag(root) + "/" + rel, SessionKey: stem, Role: RoleMain}, true
+	return SessionFile{Agent: p.Name(), Root: root, Path: path, Key: "dirs/" + RootTag(root) + "/" + rel, SessionKey: stem, Role: RoleMain}, true
 }
 
 func (p *Pi) UserBase(root string) string {

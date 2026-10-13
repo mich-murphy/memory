@@ -84,7 +84,7 @@ func (c *Codex) Classify(path, root string) (SessionFile, bool) {
 		// archives or resumes it.
 		uncompressed, zstd := strings.CutSuffix(name, ".zst")
 		return SessionFile{
-			Agent: c.Name(), Path: path, Key: prefix + "rollouts/" + uncompressed,
+			Agent: c.Name(), Root: root, Path: path, Key: prefix + "rollouts/" + uncompressed,
 			SessionKey: strings.TrimSuffix(uncompressed, ".jsonl"), Role: RoleMain, Zstd: zstd,
 		}, true
 	}
@@ -100,7 +100,7 @@ func (c *Codex) Classify(path, root string) (SessionFile, bool) {
 			role = r
 		}
 	}
-	return SessionFile{Agent: c.Name(), Path: path, Key: prefix + rel, Role: role}, true
+	return SessionFile{Agent: c.Name(), Root: root, Path: path, Key: prefix + rel, Role: role}, true
 }
 
 func (c *Codex) UserBase(root string) string { return root }

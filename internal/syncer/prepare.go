@@ -56,7 +56,6 @@ func (v *versionPlan) stateVersion() *state.Version {
 
 type upload struct {
 	sf             adapters.SessionFile
-	root           string
 	key            string
 	sha            string
 	size           int64
@@ -201,13 +200,13 @@ func (s *Syncer) planVersion(sf adapters.SessionFile, key string, prev *state.Up
 	return v, nil
 }
 
-func (s *Syncer) prepare(sf adapters.SessionFile, root string) (*upload, error) {
+func (s *Syncer) prepare(sf adapters.SessionFile) (*upload, error) {
 	st, err := os.Stat(sf.Path)
 	if err != nil {
 		return nil, fmt.Errorf("stat: %w", err)
 	}
 	if sf.SessionKey != "" {
-		s.noteSessionRoot(sessionID{sf.Agent, sf.SessionKey}, root)
+		s.noteSessionRoot(sessionID{sf.Agent, sf.SessionKey}, sf.Root)
 	}
 	key := s.rawKey(sf.Agent, sf.Key)
 	pieces, err := s.state.Pieces(key)
@@ -242,7 +241,7 @@ func (s *Syncer) prepare(sf adapters.SessionFile, root string) (*upload, error) 
 		s.Summary.Skipped++
 		return nil, nil
 	}
-	return s.planUpload(sf, root, key, c, prev, pieces, idle)
+	return s.planUpload(sf, key, c, prev, pieces, idle)
 }
 
 type content struct {
@@ -314,7 +313,7 @@ func (s *Syncer) streamedContent(path string, st os.FileInfo, prev *state.Upload
 	}, nil
 }
 
-func (s *Syncer) planUpload(sf adapters.SessionFile, root, key string, c *content, prev *state.Upload,
+func (s *Syncer) planUpload(sf adapters.SessionFile, key string, c *content, prev *state.Upload,
 	pieces []raw.Piece, idle bool,
 ) (*upload, error) {
 	var head map[string]any
@@ -323,7 +322,7 @@ func (s *Syncer) planUpload(sf adapters.SessionFile, root, key string, c *conten
 	}
 	mode, start := plan(prev, pieces, c.sha, c.size, c.appended, idle)
 	u := &upload{
-		sf: sf, root: root, key: key, sha: c.sha, size: c.size, mtimeNS: c.mtimeNS, lineCount: c.lines,
+		sf: sf, key: key, sha: c.sha, size: c.size, mtimeNS: c.mtimeNS, lineCount: c.lines,
 		prefixSHA: prefixSHA(c.first), head: head, needsUpload: mode != uploadNothing, segmentStart: start,
 	}
 	if mode == uploadNothing {
@@ -527,7 +526,7 @@ func (s *Syncer) finish(u *upload) error {
 	}
 	lines := u.lineCount
 	file := &state.File{
-		Path: sf.Path, Agent: sf.Agent, Root: u.root, Key: sf.Key, SessionKey: sf.SessionKey, Role: string(sf.Role),
+		Path: sf.Path, Agent: sf.Agent, Root: sf.Root, Key: sf.Key, SessionKey: sf.SessionKey, Role: string(sf.Role),
 		Size: u.size, MtimeNS: u.mtimeNS, SHA256: u.sha, LineCount: &lines, PrefixSHA256: u.prefixSHA, Head: u.head,
 	}
 	if err := s.state.RecordFile(file); err != nil {

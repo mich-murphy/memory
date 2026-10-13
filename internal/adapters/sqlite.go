@@ -43,7 +43,7 @@ func SQLiteExports(ctx context.Context, a Adapter, root string, databases []stri
 			_ = os.WriteFile(sigPath, []byte(sig), 0o600) // without it the next sweep just copies again
 		}
 		if fsutil.IsFile(dest) {
-			out = append(out, SessionFile{Agent: a.Name(), Path: dest, Key: KeyPrefix(a, root) + "db/" + rel, Role: RoleDB})
+			out = append(out, SessionFile{Agent: a.Name(), Root: root, Path: dest, Key: KeyPrefix(a, root) + "db/" + rel, Role: RoleDB})
 		}
 	}
 	return out

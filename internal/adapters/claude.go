@@ -112,7 +112,7 @@ func (c *Claude) Classify(path, root string) (SessionFile, bool) {
 	}
 	parts := strings.Split(rel, "/")
 	sf := func(sessionKey string, role Role) (SessionFile, bool) {
-		return SessionFile{Agent: c.Name(), Path: path, Key: KeyPrefix(c, root) + rel, SessionKey: sessionKey, Role: role}, true
+		return SessionFile{Agent: c.Name(), Root: root, Path: path, Key: KeyPrefix(c, root) + rel, SessionKey: sessionKey, Role: role}, true
 	}
 	top := parts[0]
 	if len(parts) == 1 {
@@ -181,7 +181,8 @@ func (c *Claude) sessionKey(root, sid string) string {
 
 // Related includes the per-session files (file history, todos, tasks, team mailboxes) that
 // Claude Code deletes once the session or team is done.
-func (c *Claude) Related(sf SessionFile, root string) []string {
+func (c *Claude) Related(sf SessionFile) []string {
+	root := sf.Root
 	slug, sid, ok := strings.Cut(sf.SessionKey, "/")
 	if !ok {
 		return nil
@@ -249,7 +250,7 @@ func (c *Claude) Exports(root, workDir string, interval time.Duration) []Session
 			return out
 		}
 	}
-	return append(out, SessionFile{Agent: c.Name(), Path: dest, Key: KeyPrefix(c, root) + "claude.json", Role: RoleConfig})
+	return append(out, SessionFile{Agent: c.Name(), Root: root, Path: dest, Key: KeyPrefix(c, root) + "claude.json", Role: RoleConfig})
 }
 
 // ExtraSnapshotEntries records only the MCP parts of ~/.claude.json, whose UI state changes
