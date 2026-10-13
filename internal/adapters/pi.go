@@ -18,6 +18,8 @@ var piRoles = map[string]Role{
 	"experimental/": RoleExperimental,
 }
 
+var piInfo = map[string]string{"session_id": "id", "cwd": "cwd", "format_version": "version", "parent_session": "parentSession"}
+
 type Pi struct {
 	layout
 	noExtras
@@ -127,11 +129,7 @@ func (p *Pi) SessionInfo(head []map[string]any) map[string]any {
 			continue
 		}
 		info := map[string]any{}
-		for _, f := range [][2]string{{"session_id", "id"}, {"cwd", "cwd"}, {"format_version", "version"}, {"parent_session", "parentSession"}} {
-			if truthy(d[f[1]]) {
-				info[f[0]] = d[f[1]]
-			}
-		}
+		fill(info, d, piInfo)
 		return info
 	}
 	return map[string]any{}

@@ -295,22 +295,15 @@ func (c *Claude) Plugins(root string) []Plugin {
 	return out
 }
 
+var claudeInfo = map[string]string{
+	"session_id": "sessionId", "agent_id": "agentId", "cwd": "cwd", "git_branch": "gitBranch",
+	"agent_version": "version", "entrypoint": "entrypoint",
+}
+
 func (c *Claude) SessionInfo(head []map[string]any) map[string]any {
 	info := map[string]any{}
-	fields := [][2]string{
-		{"sessionId", "session_id"},
-		{"agentId", "agent_id"},
-		{"cwd", "cwd"},
-		{"gitBranch", "git_branch"},
-		{"version", "agent_version"},
-		{"entrypoint", "entrypoint"},
-	}
 	for _, d := range head {
-		for _, f := range fields {
-			if _, done := info[f[1]]; !done && truthy(d[f[0]]) {
-				info[f[1]] = d[f[0]]
-			}
-		}
+		fill(info, d, claudeInfo)
 	}
 	return info
 }

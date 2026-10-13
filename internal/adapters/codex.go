@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"maps"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -17,6 +18,16 @@ var (
 		"requirements.toml": RoleConfig, "managed_config.toml": RoleConfig, "memories/": RoleMemory, "log/": RoleLog,
 		"rules/": RoleConfig, "skills/": RoleConfig, "prompts/": RoleConfig, "plugins/": RoleConfig,
 	}
+)
+
+var (
+	codexMetaInfo = map[string]string{
+		"session_id": "id", "root_session_id": "session_id", "cwd": "cwd", "agent_version": "cli_version",
+		"originator": "originator", "forked_from": "forked_from_id", "parent_session": "parent_thread_id",
+		"agent_role": "agent_role",
+	}
+	codexGitInfo  = map[string]string{"git_branch": "branch", "git_commit": "commit_hash", "git_remote": "repository_url"}
+	codexTurnInfo = map[string]string{"cwd": "cwd", "model": "model"}
 )
 
 type Codex struct {
@@ -78,9 +89,11 @@ func (c *Codex) MemoryDirs(root, _, _ string) []ScopedDir {
 
 func (c *Codex) SessionInfo(head []map[string]any) map[string]any {
 	info := map[string]any{}
-	setDefault := func(k string, v any) {
-		if _, ok := info[k]; !ok {
-			info[k] = v
+	setDefaults := func(src map[string]any, fields map[string]string) {
+		for field, from := range fields {
+			if _, ok := info[field]; !ok {
+				info[field] = src[from]
+			}
 		}
 	}
 	for _, d := range head {
@@ -90,36 +103,18 @@ func (c *Codex) SessionInfo(head []map[string]any) map[string]any {
 		}
 		switch d["type"] {
 		case "session_meta":
-			for _, f := range [][2]string{
-				{"session_id", "id"},
-				{"root_session_id", "session_id"},
-				{"cwd", "cwd"},
-				{"agent_version", "cli_version"},
-				{"originator", "originator"},
-				{"forked_from", "forked_from_id"},
-				{"parent_session", "parent_thread_id"},
-				{"agent_role", "agent_role"},
-			} {
-				setDefault(f[0], payload[f[1]])
-			}
+			setDefaults(payload, codexMetaInfo)
 			git, ok := payload["git"].(map[string]any)
 			if !ok || !truthy(payload["git"]) {
 				git, _ = d["git"].(map[string]any)
 			}
 			if git != nil {
-				setDefault("git_branch", git["branch"])
-				setDefault("git_commit", git["commit_hash"])
-				setDefault("git_remote", git["repository_url"])
+				setDefaults(git, codexGitInfo)
 			}
 		case "turn_context":
-			setDefault("cwd", payload["cwd"])
-			setDefault("model", payload["model"])
+			setDefaults(payload, codexTurnInfo)
 		}
 	}
-	for k, v := range info {
-		if !truthy(v) {
-			delete(info, k)
-		}
-	}
+	maps.DeleteFunc(info, func(_ string, v any) bool { return !truthy(v) })
 	return info
 }

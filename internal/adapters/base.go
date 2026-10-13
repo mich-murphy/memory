@@ -347,6 +347,15 @@ func envPath(name, home string) string {
 	return filepath.Clean(expandUser(v, home))
 }
 
+// fill sets each field of info from d[fields[field]], keeping the first non-empty value.
+func fill(info, d map[string]any, fields map[string]string) {
+	for field, from := range fields {
+		if _, done := info[field]; !done && truthy(d[from]) {
+			info[field] = d[from]
+		}
+	}
+}
+
 func str(m map[string]any, key string) string {
 	s, _ := m[key].(string)
 	return s
