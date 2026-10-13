@@ -1,0 +1,1151 @@
+== backfill
+summary {"uploaded":37,"unchanged":0,"skipped":0,"errors":0,"bytes_uploaded":269136,"manifests":9,"versions":0,"segments":0,"folded":0,"deleted":0,"unknown":0,"error_messages":[]}
+put manifests/agent=claude/machine=bench/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.json
+put manifests/agent=claude/machine=bench/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.json
+put manifests/agent=claude/machine=bench/-home-dev-code-proj-2/426b2564-4425-6b57-2939-85d342e21aa3.json
+put manifests/agent=codex/machine=bench/rollout-2026-10-01T08-00-00-b469f990-ccf4-c276-f720-398c84ff96c4.json
+put manifests/agent=codex/machine=bench/rollout-2026-10-01T09-00-00-6b9acc15-2c47-b679-3c3c-bb5a1c20dceb.json
+put manifests/agent=codex/machine=bench/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.json
+put manifests/agent=pi/machine=bench/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.json
+put manifests/agent=pi/machine=bench/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.json
+put manifests/agent=pi/machine=bench/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.json
+put raw/agent=claude/machine=bench/CLAUDE.md.zst
+put raw/agent=claude/machine=bench/claude.json.zst
+put raw/agent=claude/machine=bench/debug/426b2564-4425-6b57-2939-85d342e21aa3.txt.zst
+put raw/agent=claude/machine=bench/debug/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.txt.zst
+put raw/agent=claude/machine=bench/debug/d3347d6d-4d5a-8c60-aef0-9601215332b5.txt.zst
+put raw/agent=claude/machine=bench/file-history/426b2564-4425-6b57-2939-85d342e21aa3/371161edc5a178dd@v3.zst
+put raw/agent=claude/machine=bench/file-history/426b2564-4425-6b57-2939-85d342e21aa3/670312af1c27a02c@v2.zst
+put raw/agent=claude/machine=bench/file-history/426b2564-4425-6b57-2939-85d342e21aa3/7dc007d22233b113@v1.zst
+put raw/agent=claude/machine=bench/file-history/b70b9078-c52a-d556-19fa-f1c1ea7d61c2/7f28a87d6081f79f@v1.zst
+put raw/agent=claude/machine=bench/file-history/b70b9078-c52a-d556-19fa-f1c1ea7d61c2/c13c42aa239dd0a2@v2.zst
+put raw/agent=claude/machine=bench/file-history/d3347d6d-4d5a-8c60-aef0-9601215332b5/4fe969333c23eed2@v1.zst
+put raw/agent=claude/machine=bench/history.jsonl.zst
+put raw/agent=claude/machine=bench/plans/quiet-plan.md.zst
+put raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.jsonl.zst
+put raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5/subagents/agent-feQPvv1zg862.jsonl.zst
+put raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5/subagents/agent-feQPvv1zg862.meta.json.zst
+put raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5/tool-results/toolu_BvO/WL7IWZUg.txt.zst
+put raw/agent=claude/machine=bench/projects/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.jsonl.zst
+put raw/agent=claude/machine=bench/projects/-home-dev-code-proj-2/426b2564-4425-6b57-2939-85d342e21aa3.jsonl.zst
+put raw/agent=claude/machine=bench/settings.json.zst
+put raw/agent=claude/machine=bench/skills/review/SKILL.md.zst
+put raw/agent=claude/machine=bench/todos/426b2564-4425-6b57-2939-85d342e21aa3-agent-426b2564-4425-6b57-2939-85d342e21aa3.json.zst
+put raw/agent=claude/machine=bench/todos/b70b9078-c52a-d556-19fa-f1c1ea7d61c2-agent-b70b9078-c52a-d556-19fa-f1c1ea7d61c2.json.zst
+put raw/agent=claude/machine=bench/todos/d3347d6d-4d5a-8c60-aef0-9601215332b5-agent-d3347d6d-4d5a-8c60-aef0-9601215332b5.json.zst
+put raw/agent=codex/machine=bench/AGENTS.md.zst
+put raw/agent=codex/machine=bench/config.toml.zst
+put raw/agent=codex/machine=bench/db/state_5.sqlite.zst
+put raw/agent=codex/machine=bench/history.jsonl.zst
+put raw/agent=codex/machine=bench/log/codex-tui.log.zst
+put raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T08-00-00-b469f990-ccf4-c276-f720-398c84ff96c4.jsonl.zst
+put raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T09-00-00-6b9acc15-2c47-b679-3c3c-bb5a1c20dceb.jsonl.zst
+put raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.jsonl.zst
+put raw/agent=pi/machine=bench/AGENTS.md.zst
+put raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.jsonl.zst
+put raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.jsonl.zst
+put raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-2--/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.jsonl.zst
+put raw/agent=pi/machine=bench/settings.json.zst
+put snapshots/blobs/2a20ccc9c7bd5db942e400bafe43ab48740f38bf36368b2090da0c8d7ab7e240
+put snapshots/blobs/3697fe1659a49222e72893adebb635fae4141a8c61dd57ac6fc9e3482a3e49a5
+put snapshots/blobs/38e37a29f630da8ea66b340b504dc7fdaf7f1ff0ca537d8a24105144554be0e7
+put snapshots/blobs/7a542318d20c5d4a2ced6ae02634c8222becb612c9ae85716de7c35d024afdec
+put snapshots/blobs/ccd3ce6367b61d9cfad88882c21c8226a2ebddf57e6cfcc57a1dc7d6845e8b93
+put snapshots/blobs/d3c526f43bd4464e9c52df4de7256660dd84a5928ec7b64acef804966a517913
+put snapshots/blobs/edf18c30d92a56c7508bfefb5498b92198d7b132cb25277f345ef5a047a79505
+put snapshots/blobs/f89d649dae913fb9b9b7e6e8b0c5113a1b0d496085155779d606754b10f20c42
+put snapshots/sets/set-0.json
+put snapshots/sets/set-1.json
+put snapshots/sets/set-2.json
+== idle sweep
+summary {"uploaded":0,"unchanged":37,"skipped":0,"errors":0,"bytes_uploaded":0,"manifests":0,"versions":0,"segments":0,"folded":0,"deleted":0,"unknown":0,"error_messages":[]}
+== sweep after turns
+summary {"uploaded":3,"unchanged":34,"skipped":0,"errors":0,"bytes_uploaded":27349,"manifests":3,"versions":0,"segments":3,"folded":0,"deleted":0,"unknown":0,"error_messages":[]}
+put manifests/agent=claude/machine=bench/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.json
+put manifests/agent=codex/machine=bench/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.json
+put manifests/agent=pi/machine=bench/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.json
+put raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.jsonl.zst.d/000000000164672-000000000196231.zst
+put raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.jsonl.zst.d/000000000175129-000000000204559.zst
+put raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.jsonl.zst.d/000000000175280-000000000197435.zst
+== hook after a turn
+summary {"uploaded":1,"unchanged":6,"skipped":0,"errors":0,"bytes_uploaded":2756,"manifests":1,"versions":0,"segments":1,"folded":0,"deleted":0,"unknown":0,"error_messages":[]}
+put manifests/agent=claude/machine=bench/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.json
+put raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.jsonl.zst.d/000000000196231-000000000204891.zst
+== launch
+summary {"uploaded":0,"unchanged":0,"skipped":0,"errors":0,"bytes_uploaded":0,"manifests":1,"versions":0,"segments":0,"folded":0,"deleted":0,"unknown":0,"error_messages":[]}
+put manifests/agent=codex/machine=bench/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.json
+== rewrite and delete
+summary {"uploaded":2,"unchanged":34,"skipped":0,"errors":0,"bytes_uploaded":11204,"manifests":3,"versions":1,"segments":1,"folded":0,"deleted":1,"unknown":0,"error_messages":[]}
+copy raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.jsonl.zst blobs/537523511f8a88980c45425b163553c3f1fdaced532b1cb234a27f6e650d8112.zst
+put manifests/agent=claude/machine=bench/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.json
+put manifests/agent=claude/machine=bench/-home-dev-code-proj-2/426b2564-4425-6b57-2939-85d342e21aa3.json
+put manifests/agent=pi/machine=bench/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.json
+put raw-versions/agent=pi/machine=bench/sessions/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.jsonl.json
+put raw/agent=claude/machine=bench/projects/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.jsonl.zst.d/000000000071832-000000000071887.zst
+put raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.jsonl.zst
+== fold once idle
+summary {"uploaded":4,"unchanged":32,"skipped":0,"errors":0,"bytes_uploaded":165358,"manifests":4,"versions":0,"segments":0,"folded":4,"deleted":0,"unknown":0,"error_messages":[]}
+delete raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.jsonl.zst.d/000000000164672-000000000196231.zst
+delete raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.jsonl.zst.d/000000000196231-000000000204891.zst
+delete raw/agent=claude/machine=bench/projects/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.jsonl.zst.d/000000000071832-000000000071887.zst
+delete raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.jsonl.zst.d/000000000175129-000000000204559.zst
+delete raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.jsonl.zst.d/000000000175280-000000000197435.zst
+put manifests/agent=claude/machine=bench/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.json
+put manifests/agent=claude/machine=bench/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.json
+put manifests/agent=codex/machine=bench/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.json
+put manifests/agent=pi/machine=bench/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.json
+put raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.jsonl.zst
+put raw/agent=claude/machine=bench/projects/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.jsonl.zst
+put raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.jsonl.zst
+put raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.jsonl.zst
+== bucket
+blobs/537523511f8a88980c45425b163553c3f1fdaced532b1cb234a27f6e650d8112.zst {"agent":"pi","end":"35555","machine":"bench","role":"main","sha256":"537523511f8a88980c45425b163553c3f1fdaced532b1cb234a27f6e650d8112","start":"0"} size=11140 stored=9063e5ebab91da95dca4f14c4a03ab2a22c818e966ce02fc6edb33d509f8a4a6 raw=537523511f8a88980c45425b163553c3f1fdaced532b1cb234a27f6e650d8112 rawsize=35555
+manifests/agent=claude/machine=bench/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.json
+{
+ "agent": "claude",
+ "collector_version": "test",
+ "deleted_locally": [],
+ "first_seen": 1790856000,
+ "git": {},
+ "hostname": "bench",
+ "info": {
+  "agent_version": "2.1.296",
+  "cwd": "/home/dev/code/proj-0",
+  "git_branch": "main",
+  "session_id": "799a9c1c-da31-2616-7dc2-144c788c16f7",
+  "source_root": "$HOME/.claude"
+ },
+ "launch": null,
+ "launches": [],
+ "machine_id": "bench",
+ "schema": 2,
+ "session_key": "-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5",
+ "snapshots": [
+  {
+   "git": {},
+   "id": "set-0",
+   "memory_id": null,
+   "mtimes": {
+    "harness:user:CLAUDE.md": 1790848800,
+    "harness:user:settings.json": 1790848800,
+    "harness:user:skills/review/SKILL.md": 1790848800
+   },
+   "taken_at": 1790856000,
+   "timing": "post_hoc"
+  }
+ ],
+ "synced_at": 1790858400,
+ "transcripts": [
+  {
+   "head": null,
+   "key": "debug/d3347d6d-4d5a-8c60-aef0-9601215332b5.txt",
+   "line_count": 462,
+   "object": "raw/agent=claude/machine=bench/debug/d3347d6d-4d5a-8c60-aef0-9601215332b5.txt.zst",
+   "pieces": [
+    {
+     "end": 54783,
+     "object": "raw/agent=claude/machine=bench/debug/d3347d6d-4d5a-8c60-aef0-9601215332b5.txt.zst",
+     "sha256": "9430160e06425bd7d7b5722a95ff68841e78e4f2ca272cc11ae58b4359031619",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "1a4e137f993a51347bc697c10ba7a58e009c56580f2946f4d701b8fe72c4ac74",
+   "role": "debug",
+   "sha256": "9430160e06425bd7d7b5722a95ff68841e78e4f2ca272cc11ae58b4359031619",
+   "size": 54783,
+   "versions": []
+  },
+  {
+   "head": null,
+   "key": "file-history/d3347d6d-4d5a-8c60-aef0-9601215332b5/4fe969333c23eed2@v1",
+   "line_count": 196,
+   "object": "raw/agent=claude/machine=bench/file-history/d3347d6d-4d5a-8c60-aef0-9601215332b5/4fe969333c23eed2@v1.zst",
+   "pieces": [
+    {
+     "end": 6439,
+     "object": "raw/agent=claude/machine=bench/file-history/d3347d6d-4d5a-8c60-aef0-9601215332b5/4fe969333c23eed2@v1.zst",
+     "sha256": "cc2f8913032fe481451dce32f7efa6750e4a0e804752f8b30645656cabd7c28c",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "53ae9c74c9783507c8e80ca68966b021dab7a58dde72de8dec6e78b099ff1bb3",
+   "role": "file_history",
+   "sha256": "cc2f8913032fe481451dce32f7efa6750e4a0e804752f8b30645656cabd7c28c",
+   "size": 6439,
+   "versions": []
+  },
+  {
+   "head": {
+    "agent_version": "2.1.296",
+    "cwd": "/home/dev/code/proj-0",
+    "git_branch": "main",
+    "session_id": "799a9c1c-da31-2616-7dc2-144c788c16f7"
+   },
+   "key": "projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.jsonl",
+   "line_count": 72,
+   "object": "raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.jsonl.zst",
+   "pieces": [
+    {
+     "end": 204891,
+     "object": "raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.jsonl.zst",
+     "sha256": "bf6d4bd0ba6c54e202a2316662063f0a7e8e1dcdd288fe253c35d3af61f72c9e",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "1fa7dccdfae765f3bf9700aed4ee60913fc2edd6bc42bec4b8387d0f67c60b7c",
+   "role": "main",
+   "sha256": "bf6d4bd0ba6c54e202a2316662063f0a7e8e1dcdd288fe253c35d3af61f72c9e",
+   "size": 204891,
+   "versions": []
+  },
+  {
+   "head": {
+    "agent_version": "2.1.296",
+    "cwd": "/home/dev/code/proj-0",
+    "git_branch": "main",
+    "session_id": "95f39c5c-04d5-91ca-b892-2bba13a80c5e"
+   },
+   "key": "projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5/subagents/agent-feQPvv1zg862.jsonl",
+   "line_count": 12,
+   "object": "raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5/subagents/agent-feQPvv1zg862.jsonl.zst",
+   "pieces": [
+    {
+     "end": 46032,
+     "object": "raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5/subagents/agent-feQPvv1zg862.jsonl.zst",
+     "sha256": "e72d15d6d8096618a0899da3d98e1f7744b579396a92aebcbfd4e8ded2e935f4",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "e72d15d6d8096618a0899da3d98e1f7744b579396a92aebcbfd4e8ded2e935f4",
+   "role": "subagent",
+   "sha256": "e72d15d6d8096618a0899da3d98e1f7744b579396a92aebcbfd4e8ded2e935f4",
+   "size": 46032,
+   "versions": []
+  },
+  {
+   "head": null,
+   "key": "projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5/subagents/agent-feQPvv1zg862.meta.json",
+   "line_count": 0,
+   "object": "raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5/subagents/agent-feQPvv1zg862.meta.json.zst",
+   "pieces": [
+    {
+     "end": 23,
+     "object": "raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5/subagents/agent-feQPvv1zg862.meta.json.zst",
+     "sha256": "fb70fc6ed370c9a01104b362336d694b4eba9f53985d240b6083432bef4dbbac",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "fb70fc6ed370c9a01104b362336d694b4eba9f53985d240b6083432bef4dbbac",
+   "role": "subagent",
+   "sha256": "fb70fc6ed370c9a01104b362336d694b4eba9f53985d240b6083432bef4dbbac",
+   "size": 23,
+   "versions": []
+  },
+  {
+   "head": null,
+   "key": "projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5/tool-results/toolu_BvO/WL7IWZUg.txt",
+   "line_count": 176,
+   "object": "raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5/tool-results/toolu_BvO/WL7IWZUg.txt.zst",
+   "pieces": [
+    {
+     "end": 6328,
+     "object": "raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5/tool-results/toolu_BvO/WL7IWZUg.txt.zst",
+     "sha256": "321aa88dfabb8cd08abe5b701335dcbb2c09b4e347626335f8073c97dd907a20",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "a387abf1119879f095fe64abcd516a59e08cccceba73afee4d24b8b6aa46dae6",
+   "role": "tool_result",
+   "sha256": "321aa88dfabb8cd08abe5b701335dcbb2c09b4e347626335f8073c97dd907a20",
+   "size": 6328,
+   "versions": []
+  },
+  {
+   "head": null,
+   "key": "todos/d3347d6d-4d5a-8c60-aef0-9601215332b5-agent-d3347d6d-4d5a-8c60-aef0-9601215332b5.json",
+   "line_count": 1,
+   "object": "raw/agent=claude/machine=bench/todos/d3347d6d-4d5a-8c60-aef0-9601215332b5-agent-d3347d6d-4d5a-8c60-aef0-9601215332b5.json.zst",
+   "pieces": [
+    {
+     "end": 123,
+     "object": "raw/agent=claude/machine=bench/todos/d3347d6d-4d5a-8c60-aef0-9601215332b5-agent-d3347d6d-4d5a-8c60-aef0-9601215332b5.json.zst",
+     "sha256": "e32a7f87137f74a348853d4a519b389c272e9fbbdd7a5ba3af1d28fc1b1c3c5c",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "e32a7f87137f74a348853d4a519b389c272e9fbbdd7a5ba3af1d28fc1b1c3c5c",
+   "role": "todo",
+   "sha256": "e32a7f87137f74a348853d4a519b389c272e9fbbdd7a5ba3af1d28fc1b1c3c5c",
+   "size": 123,
+   "versions": []
+  }
+ ]
+}
+manifests/agent=claude/machine=bench/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.json
+{
+ "agent": "claude",
+ "collector_version": "test",
+ "deleted_locally": [],
+ "first_seen": 1790856000,
+ "git": {},
+ "hostname": "bench",
+ "info": {
+  "agent_version": "2.1.296",
+  "cwd": "/home/dev/code/proj-1",
+  "git_branch": "main",
+  "session_id": "ec701ae4-9726-bc22-2d8b-af2e1532deae",
+  "source_root": "$HOME/.claude"
+ },
+ "launch": null,
+ "launches": [],
+ "machine_id": "bench",
+ "schema": 2,
+ "session_key": "-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2",
+ "snapshots": [
+  {
+   "git": {},
+   "id": "set-0",
+   "memory_id": null,
+   "mtimes": {
+    "harness:user:CLAUDE.md": 1790848800,
+    "harness:user:settings.json": 1790848800,
+    "harness:user:skills/review/SKILL.md": 1790848800
+   },
+   "taken_at": 1790856000,
+   "timing": "post_hoc"
+  }
+ ],
+ "synced_at": 1790858400,
+ "transcripts": [
+  {
+   "head": null,
+   "key": "debug/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.txt",
+   "line_count": 176,
+   "object": "raw/agent=claude/machine=bench/debug/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.txt.zst",
+   "pieces": [
+    {
+     "end": 21482,
+     "object": "raw/agent=claude/machine=bench/debug/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.txt.zst",
+     "sha256": "d16d8a252ae4838ca54b075398d28762a861b96179d76532da7ed75c910e638d",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "66a86061d7f4f803b167b74088f1a76216f05ad0a309f76faefe1b038713ebbc",
+   "role": "debug",
+   "sha256": "d16d8a252ae4838ca54b075398d28762a861b96179d76532da7ed75c910e638d",
+   "size": 21482,
+   "versions": []
+  },
+  {
+   "head": null,
+   "key": "file-history/b70b9078-c52a-d556-19fa-f1c1ea7d61c2/7f28a87d6081f79f@v1",
+   "line_count": 40,
+   "object": "raw/agent=claude/machine=bench/file-history/b70b9078-c52a-d556-19fa-f1c1ea7d61c2/7f28a87d6081f79f@v1.zst",
+   "pieces": [
+    {
+     "end": 1219,
+     "object": "raw/agent=claude/machine=bench/file-history/b70b9078-c52a-d556-19fa-f1c1ea7d61c2/7f28a87d6081f79f@v1.zst",
+     "sha256": "e55e3f1c84d3212b6b872b63f21bc1e46366dc4b5fbe9562edaa9943f5892615",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "9c37858f32df787fffc9ea7ae41f9f2057fb3d9a6dfeeb9978230b5f62b641f0",
+   "role": "file_history",
+   "sha256": "e55e3f1c84d3212b6b872b63f21bc1e46366dc4b5fbe9562edaa9943f5892615",
+   "size": 1219,
+   "versions": []
+  },
+  {
+   "head": null,
+   "key": "file-history/b70b9078-c52a-d556-19fa-f1c1ea7d61c2/c13c42aa239dd0a2@v2",
+   "line_count": 121,
+   "object": "raw/agent=claude/machine=bench/file-history/b70b9078-c52a-d556-19fa-f1c1ea7d61c2/c13c42aa239dd0a2@v2.zst",
+   "pieces": [
+    {
+     "end": 3894,
+     "object": "raw/agent=claude/machine=bench/file-history/b70b9078-c52a-d556-19fa-f1c1ea7d61c2/c13c42aa239dd0a2@v2.zst",
+     "sha256": "c38d1e770fb5ed7b506d8144f8523cb1942d92d73aaaabb6c8017a9ce41c6830",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "adaf235291865dc4468d08434f5f86aef2b4f1f6b62a90acea5bf173e002b4cf",
+   "role": "file_history",
+   "sha256": "c38d1e770fb5ed7b506d8144f8523cb1942d92d73aaaabb6c8017a9ce41c6830",
+   "size": 3894,
+   "versions": []
+  },
+  {
+   "head": {
+    "agent_version": "2.1.296",
+    "cwd": "/home/dev/code/proj-1",
+    "git_branch": "main",
+    "session_id": "ec701ae4-9726-bc22-2d8b-af2e1532deae"
+   },
+   "key": "projects/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.jsonl",
+   "line_count": 28,
+   "object": "raw/agent=claude/machine=bench/projects/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.jsonl.zst",
+   "pieces": [
+    {
+     "end": 71887,
+     "object": "raw/agent=claude/machine=bench/projects/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.jsonl.zst",
+     "sha256": "9fa048467a2c80fadd11767be70a216c70dc96d2c9d1f3bd10ad2aaf3cbb5847",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "fe3e44502ba7cddacd9b0e0070516c8f1b77865b9ceb821478d548cce3bf4e90",
+   "role": "main",
+   "sha256": "9fa048467a2c80fadd11767be70a216c70dc96d2c9d1f3bd10ad2aaf3cbb5847",
+   "size": 71887,
+   "versions": []
+  },
+  {
+   "head": null,
+   "key": "todos/b70b9078-c52a-d556-19fa-f1c1ea7d61c2-agent-b70b9078-c52a-d556-19fa-f1c1ea7d61c2.json",
+   "line_count": 1,
+   "object": "raw/agent=claude/machine=bench/todos/b70b9078-c52a-d556-19fa-f1c1ea7d61c2-agent-b70b9078-c52a-d556-19fa-f1c1ea7d61c2.json.zst",
+   "pieces": [
+    {
+     "end": 113,
+     "object": "raw/agent=claude/machine=bench/todos/b70b9078-c52a-d556-19fa-f1c1ea7d61c2-agent-b70b9078-c52a-d556-19fa-f1c1ea7d61c2.json.zst",
+     "sha256": "e8d4e651e38057844ab4f5b244289ab72a5ce0aaae4c77a21af687cb3a7e9c20",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "e8d4e651e38057844ab4f5b244289ab72a5ce0aaae4c77a21af687cb3a7e9c20",
+   "role": "todo",
+   "sha256": "e8d4e651e38057844ab4f5b244289ab72a5ce0aaae4c77a21af687cb3a7e9c20",
+   "size": 113,
+   "versions": []
+  }
+ ]
+}
+manifests/agent=claude/machine=bench/-home-dev-code-proj-2/426b2564-4425-6b57-2939-85d342e21aa3.json
+{
+ "agent": "claude",
+ "collector_version": "test",
+ "deleted_locally": [
+  {
+   "at": 1790856660,
+   "key": "todos/426b2564-4425-6b57-2939-85d342e21aa3-agent-426b2564-4425-6b57-2939-85d342e21aa3.json"
+  }
+ ],
+ "first_seen": 1790856000,
+ "git": {},
+ "hostname": "bench",
+ "info": {
+  "agent_version": "2.1.296",
+  "cwd": "/home/dev/code/proj-2",
+  "git_branch": "main",
+  "session_id": "6269008b-171e-857b-0554-ff5de99c24e1",
+  "source_root": "$HOME/.claude"
+ },
+ "launch": null,
+ "launches": [],
+ "machine_id": "bench",
+ "schema": 2,
+ "session_key": "-home-dev-code-proj-2/426b2564-4425-6b57-2939-85d342e21aa3",
+ "snapshots": [
+  {
+   "git": {},
+   "id": "set-0",
+   "memory_id": null,
+   "mtimes": {
+    "harness:user:CLAUDE.md": 1790848800,
+    "harness:user:settings.json": 1790848800,
+    "harness:user:skills/review/SKILL.md": 1790848800
+   },
+   "taken_at": 1790856000,
+   "timing": "post_hoc"
+  }
+ ],
+ "synced_at": 1790856660,
+ "transcripts": [
+  {
+   "head": null,
+   "key": "debug/426b2564-4425-6b57-2939-85d342e21aa3.txt",
+   "line_count": 71,
+   "object": "raw/agent=claude/machine=bench/debug/426b2564-4425-6b57-2939-85d342e21aa3.txt.zst",
+   "pieces": [
+    {
+     "end": 8297,
+     "object": "raw/agent=claude/machine=bench/debug/426b2564-4425-6b57-2939-85d342e21aa3.txt.zst",
+     "sha256": "6dbe824135c2fccf228b5c1eabf49860f9e6331ab25dba40b968b937982ce4d2",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "e5e5907c81b7eb094434c622786458378e47770bcc7245492cc34edf7ff1ba44",
+   "role": "debug",
+   "sha256": "6dbe824135c2fccf228b5c1eabf49860f9e6331ab25dba40b968b937982ce4d2",
+   "size": 8297,
+   "versions": []
+  },
+  {
+   "head": null,
+   "key": "file-history/426b2564-4425-6b57-2939-85d342e21aa3/371161edc5a178dd@v3",
+   "line_count": 168,
+   "object": "raw/agent=claude/machine=bench/file-history/426b2564-4425-6b57-2939-85d342e21aa3/371161edc5a178dd@v3.zst",
+   "pieces": [
+    {
+     "end": 5499,
+     "object": "raw/agent=claude/machine=bench/file-history/426b2564-4425-6b57-2939-85d342e21aa3/371161edc5a178dd@v3.zst",
+     "sha256": "5de5a7af2247a0327836e33fb43d6b423d7d335a512900014c5580f7e58f8239",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "841a5a1cfa4f39e73c527daaa9bef0b4401d14a7db30ce516d7264b96f446c21",
+   "role": "file_history",
+   "sha256": "5de5a7af2247a0327836e33fb43d6b423d7d335a512900014c5580f7e58f8239",
+   "size": 5499,
+   "versions": []
+  },
+  {
+   "head": null,
+   "key": "file-history/426b2564-4425-6b57-2939-85d342e21aa3/670312af1c27a02c@v2",
+   "line_count": 71,
+   "object": "raw/agent=claude/machine=bench/file-history/426b2564-4425-6b57-2939-85d342e21aa3/670312af1c27a02c@v2.zst",
+   "pieces": [
+    {
+     "end": 2220,
+     "object": "raw/agent=claude/machine=bench/file-history/426b2564-4425-6b57-2939-85d342e21aa3/670312af1c27a02c@v2.zst",
+     "sha256": "04f3321186dfa3c37c921fcc5a2cb20a049c12fc5ac8118771dd3df1155618ac",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "19a391ffddd10019173c86b7e2a90646e6de11bcca2c9ccc0578f42e6292d481",
+   "role": "file_history",
+   "sha256": "04f3321186dfa3c37c921fcc5a2cb20a049c12fc5ac8118771dd3df1155618ac",
+   "size": 2220,
+   "versions": []
+  },
+  {
+   "head": null,
+   "key": "file-history/426b2564-4425-6b57-2939-85d342e21aa3/7dc007d22233b113@v1",
+   "line_count": 107,
+   "object": "raw/agent=claude/machine=bench/file-history/426b2564-4425-6b57-2939-85d342e21aa3/7dc007d22233b113@v1.zst",
+   "pieces": [
+    {
+     "end": 3604,
+     "object": "raw/agent=claude/machine=bench/file-history/426b2564-4425-6b57-2939-85d342e21aa3/7dc007d22233b113@v1.zst",
+     "sha256": "b701b03d30e38eab3ad29670f1ee110894e31f5020e650cd3293db163e1180b9",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "cd3c2abd8ebc2d3e9ef2c4c54bee6c22d46898b7ec5eb1f82db2d891855648dd",
+   "role": "file_history",
+   "sha256": "b701b03d30e38eab3ad29670f1ee110894e31f5020e650cd3293db163e1180b9",
+   "size": 3604,
+   "versions": []
+  },
+  {
+   "head": {
+    "agent_version": "2.1.296",
+    "cwd": "/home/dev/code/proj-2",
+    "git_branch": "main",
+    "session_id": "6269008b-171e-857b-0554-ff5de99c24e1"
+   },
+   "key": "projects/-home-dev-code-proj-2/426b2564-4425-6b57-2939-85d342e21aa3.jsonl",
+   "line_count": 18,
+   "object": "raw/agent=claude/machine=bench/projects/-home-dev-code-proj-2/426b2564-4425-6b57-2939-85d342e21aa3.jsonl.zst",
+   "pieces": [
+    {
+     "end": 57018,
+     "object": "raw/agent=claude/machine=bench/projects/-home-dev-code-proj-2/426b2564-4425-6b57-2939-85d342e21aa3.jsonl.zst",
+     "sha256": "16dc3ae7771368d5712961b1b77853941653aa0ab72b24c4db7f0d50dc609948",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "16dc3ae7771368d5712961b1b77853941653aa0ab72b24c4db7f0d50dc609948",
+   "role": "main",
+   "sha256": "16dc3ae7771368d5712961b1b77853941653aa0ab72b24c4db7f0d50dc609948",
+   "size": 57018,
+   "versions": []
+  },
+  {
+   "head": null,
+   "key": "todos/426b2564-4425-6b57-2939-85d342e21aa3-agent-426b2564-4425-6b57-2939-85d342e21aa3.json",
+   "line_count": 1,
+   "object": "raw/agent=claude/machine=bench/todos/426b2564-4425-6b57-2939-85d342e21aa3-agent-426b2564-4425-6b57-2939-85d342e21aa3.json.zst",
+   "pieces": [
+    {
+     "end": 120,
+     "object": "raw/agent=claude/machine=bench/todos/426b2564-4425-6b57-2939-85d342e21aa3-agent-426b2564-4425-6b57-2939-85d342e21aa3.json.zst",
+     "sha256": "cbf415e8a5071a0a989050ee2b9e35d7b97aa3c9d5ace114ca0038f4f63fdd04",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "cbf415e8a5071a0a989050ee2b9e35d7b97aa3c9d5ace114ca0038f4f63fdd04",
+   "role": "todo",
+   "sha256": "cbf415e8a5071a0a989050ee2b9e35d7b97aa3c9d5ace114ca0038f4f63fdd04",
+   "size": 120,
+   "versions": []
+  }
+ ]
+}
+manifests/agent=codex/machine=bench/rollout-2026-10-01T08-00-00-b469f990-ccf4-c276-f720-398c84ff96c4.json
+{
+ "agent": "codex",
+ "collector_version": "test",
+ "deleted_locally": [],
+ "first_seen": 1790856000,
+ "git": {},
+ "hostname": "bench",
+ "info": {
+  "agent_version": "0.162.1",
+  "cwd": "/home/dev/code/proj-2",
+  "git_branch": "main",
+  "git_commit": "000000000000000000000000451db1d009f2067f",
+  "git_remote": "git@github.com:dev/proj.git",
+  "model": "gpt-5.5-codex",
+  "originator": "codex_cli_rs",
+  "root_session_id": "b469f990-ccf4-c276-f720-398c84ff96c4",
+  "session_id": "b469f990-ccf4-c276-f720-398c84ff96c4",
+  "source_root": "$HOME/.codex"
+ },
+ "launch": null,
+ "launches": [],
+ "machine_id": "bench",
+ "schema": 2,
+ "session_key": "rollout-2026-10-01T08-00-00-b469f990-ccf4-c276-f720-398c84ff96c4",
+ "snapshots": [
+  {
+   "git": {},
+   "id": "set-1",
+   "memory_id": null,
+   "mtimes": {
+    "harness:user:AGENTS.md": 1790848800,
+    "harness:user:config.toml": 1790848800
+   },
+   "taken_at": 1790856000,
+   "timing": "post_hoc"
+  }
+ ],
+ "synced_at": 1790856000,
+ "transcripts": [
+  {
+   "head": {
+    "agent_version": "0.162.1",
+    "cwd": "/home/dev/code/proj-2",
+    "git_branch": "main",
+    "git_commit": "000000000000000000000000451db1d009f2067f",
+    "git_remote": "git@github.com:dev/proj.git",
+    "model": "gpt-5.5-codex",
+    "originator": "codex_cli_rs",
+    "root_session_id": "b469f990-ccf4-c276-f720-398c84ff96c4",
+    "session_id": "b469f990-ccf4-c276-f720-398c84ff96c4"
+   },
+   "key": "rollouts/rollout-2026-10-01T08-00-00-b469f990-ccf4-c276-f720-398c84ff96c4.jsonl",
+   "line_count": 53,
+   "object": "raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T08-00-00-b469f990-ccf4-c276-f720-398c84ff96c4.jsonl.zst",
+   "pieces": [
+    {
+     "end": 82938,
+     "object": "raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T08-00-00-b469f990-ccf4-c276-f720-398c84ff96c4.jsonl.zst",
+     "sha256": "0326980ed8d6df9101d59bb8fa7d5c3ab88d6a599d84d1a36090e5484e433baf",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "8e72f3327c3d3d5e13ac02ac1769b6248434059611fb7ae232ddc94fc3376fbd",
+   "role": "main",
+   "sha256": "0326980ed8d6df9101d59bb8fa7d5c3ab88d6a599d84d1a36090e5484e433baf",
+   "size": 82938,
+   "versions": []
+  }
+ ]
+}
+manifests/agent=codex/machine=bench/rollout-2026-10-01T09-00-00-6b9acc15-2c47-b679-3c3c-bb5a1c20dceb.json
+{
+ "agent": "codex",
+ "collector_version": "test",
+ "deleted_locally": [],
+ "first_seen": 1790856000,
+ "git": {},
+ "hostname": "bench",
+ "info": {
+  "agent_version": "0.162.1",
+  "cwd": "/home/dev/code/proj-1",
+  "git_branch": "main",
+  "git_commit": "0000000000000000000000009f68a65c9d19989d",
+  "git_remote": "git@github.com:dev/proj.git",
+  "originator": "codex_cli_rs",
+  "root_session_id": "6b9acc15-2c47-b679-3c3c-bb5a1c20dceb",
+  "session_id": "6b9acc15-2c47-b679-3c3c-bb5a1c20dceb",
+  "source_root": "$HOME/.codex"
+ },
+ "launch": null,
+ "launches": [],
+ "machine_id": "bench",
+ "schema": 2,
+ "session_key": "rollout-2026-10-01T09-00-00-6b9acc15-2c47-b679-3c3c-bb5a1c20dceb",
+ "snapshots": [
+  {
+   "git": {},
+   "id": "set-1",
+   "memory_id": null,
+   "mtimes": {
+    "harness:user:AGENTS.md": 1790848800,
+    "harness:user:config.toml": 1790848800
+   },
+   "taken_at": 1790856000,
+   "timing": "post_hoc"
+  }
+ ],
+ "synced_at": 1790856000,
+ "transcripts": [
+  {
+   "head": {
+    "agent_version": "0.162.1",
+    "cwd": "/home/dev/code/proj-1",
+    "git_branch": "main",
+    "git_commit": "0000000000000000000000009f68a65c9d19989d",
+    "git_remote": "git@github.com:dev/proj.git",
+    "originator": "codex_cli_rs",
+    "root_session_id": "6b9acc15-2c47-b679-3c3c-bb5a1c20dceb",
+    "session_id": "6b9acc15-2c47-b679-3c3c-bb5a1c20dceb"
+   },
+   "key": "rollouts/rollout-2026-10-01T09-00-00-6b9acc15-2c47-b679-3c3c-bb5a1c20dceb.jsonl",
+   "line_count": 1,
+   "object": "raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T09-00-00-6b9acc15-2c47-b679-3c3c-bb5a1c20dceb.jsonl.zst",
+   "pieces": [
+    {
+     "end": 21373,
+     "object": "raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T09-00-00-6b9acc15-2c47-b679-3c3c-bb5a1c20dceb.jsonl.zst",
+     "sha256": "ef2c6cf58bb8cc6bdd63e2cdc19bf6d921a166c0ede7768154441bbc85230b96",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "ef2c6cf58bb8cc6bdd63e2cdc19bf6d921a166c0ede7768154441bbc85230b96",
+   "role": "main",
+   "sha256": "ef2c6cf58bb8cc6bdd63e2cdc19bf6d921a166c0ede7768154441bbc85230b96",
+   "size": 21373,
+   "versions": []
+  }
+ ]
+}
+manifests/agent=codex/machine=bench/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.json
+{
+ "agent": "codex",
+ "collector_version": "test",
+ "deleted_locally": [],
+ "first_seen": 1790856000,
+ "git": {},
+ "hostname": "bench",
+ "info": {
+  "agent_version": "0.162.1",
+  "cwd": "/home/dev/code/proj-0",
+  "git_branch": "main",
+  "git_commit": "000000000000000000000000a78f837b95b47320",
+  "git_remote": "git@github.com:dev/proj.git",
+  "model": "gpt-5.5-codex",
+  "originator": "codex_cli_rs",
+  "root_session_id": "753b6d12-5fc4-3ce2-846d-d752b7190682",
+  "session_id": "753b6d12-5fc4-3ce2-846d-d752b7190682",
+  "source_root": "$HOME/.codex"
+ },
+ "launch": {
+  "cwd": "/home/dev/code/proj-0",
+  "event": "SessionStart",
+  "git": {},
+  "hook_input": {
+   "session_id": "x",
+   "transcript_path": "$HOME/.codex/sessions/2026/10/01/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.jsonl"
+  },
+  "recorded_at": 1500000000,
+  "snapshot": "set-1",
+  "source": "resume"
+ },
+ "launches": [
+  {
+   "cwd": "/home/dev/code/proj-0",
+   "event": "SessionStart",
+   "git": {},
+   "hook_input": {
+    "session_id": "x",
+    "transcript_path": "$HOME/.codex/sessions/2026/10/01/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.jsonl"
+   },
+   "recorded_at": 1500000000,
+   "snapshot": "set-1",
+   "source": "resume"
+  }
+ ],
+ "machine_id": "bench",
+ "schema": 2,
+ "session_key": "rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682",
+ "snapshots": [
+  {
+   "git": {},
+   "id": "set-1",
+   "memory_id": null,
+   "mtimes": {
+    "harness:user:AGENTS.md": 1790848800,
+    "harness:user:config.toml": 1790848800
+   },
+   "taken_at": 1790856000,
+   "timing": "post_hoc"
+  }
+ ],
+ "synced_at": 1790858400,
+ "transcripts": [
+  {
+   "head": {
+    "agent_version": "0.162.1",
+    "cwd": "/home/dev/code/proj-0",
+    "git_branch": "main",
+    "git_commit": "000000000000000000000000a78f837b95b47320",
+    "git_remote": "git@github.com:dev/proj.git",
+    "model": "gpt-5.5-codex",
+    "originator": "codex_cli_rs",
+    "root_session_id": "753b6d12-5fc4-3ce2-846d-d752b7190682",
+    "session_id": "753b6d12-5fc4-3ce2-846d-d752b7190682"
+   },
+   "key": "rollouts/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.jsonl",
+   "line_count": 173,
+   "object": "raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.jsonl.zst",
+   "pieces": [
+    {
+     "end": 204559,
+     "object": "raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.jsonl.zst",
+     "sha256": "37aa4650df16bcacce891b80d5be3946748d7168cc1118c7434ba1ee96ae5478",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "95ba2e0f4298f72783fba61f10c381e45976299dbe95f47e409ee68d8bd3b850",
+   "role": "main",
+   "sha256": "37aa4650df16bcacce891b80d5be3946748d7168cc1118c7434ba1ee96ae5478",
+   "size": 204559,
+   "versions": []
+  }
+ ]
+}
+manifests/agent=pi/machine=bench/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.json
+{
+ "agent": "pi",
+ "collector_version": "test",
+ "deleted_locally": [],
+ "first_seen": 1790856000,
+ "git": {},
+ "hostname": "bench",
+ "info": {
+  "cwd": "/home/dev/code/proj-2",
+  "format_version": 3,
+  "session_id": "d4c2eef2-e35f-f68f-493e-8c5734c3f357",
+  "source_root": "$HOME/.pi/agent"
+ },
+ "launch": null,
+ "launches": [],
+ "machine_id": "bench",
+ "schema": 2,
+ "session_key": "2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357",
+ "snapshots": [
+  {
+   "git": {},
+   "id": "set-2",
+   "memory_id": null,
+   "mtimes": {
+    "harness:user:AGENTS.md": 1790848800,
+    "harness:user:settings.json": 1790848800
+   },
+   "taken_at": 1790856000,
+   "timing": "post_hoc"
+  }
+ ],
+ "synced_at": 1790856000,
+ "transcripts": [
+  {
+   "head": {
+    "cwd": "/home/dev/code/proj-2",
+    "format_version": 3,
+    "session_id": "d4c2eef2-e35f-f68f-493e-8c5734c3f357"
+   },
+   "key": "sessions/--home-dev-code-proj-2--/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.jsonl",
+   "line_count": 48,
+   "object": "raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-2--/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.jsonl.zst",
+   "pieces": [
+    {
+     "end": 65986,
+     "object": "raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-2--/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.jsonl.zst",
+     "sha256": "5aa6383fed532b77737052176391034e9af8036c102f0fd70181d3a7b510f8a5",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "2b0d896cdf5edd414503114b76fc65a2dfa394a00d101158e4e115dd9f96ac8c",
+   "role": "main",
+   "sha256": "5aa6383fed532b77737052176391034e9af8036c102f0fd70181d3a7b510f8a5",
+   "size": 65986,
+   "versions": []
+  }
+ ]
+}
+manifests/agent=pi/machine=bench/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.json
+{
+ "agent": "pi",
+ "collector_version": "test",
+ "deleted_locally": [],
+ "first_seen": 1790856000,
+ "git": {},
+ "hostname": "bench",
+ "info": {
+  "cwd": "/home/dev/code/proj-1",
+  "format_version": 4,
+  "session_id": "eae4580b-696c-ea92-88b4-ba6b82040c4e",
+  "source_root": "$HOME/.pi/agent"
+ },
+ "launch": null,
+ "launches": [],
+ "machine_id": "bench",
+ "schema": 2,
+ "session_key": "2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e",
+ "snapshots": [
+  {
+   "git": {},
+   "id": "set-2",
+   "memory_id": null,
+   "mtimes": {
+    "harness:user:AGENTS.md": 1790848800,
+    "harness:user:settings.json": 1790848800
+   },
+   "taken_at": 1790856000,
+   "timing": "post_hoc"
+  }
+ ],
+ "synced_at": 1790856660,
+ "transcripts": [
+  {
+   "head": {
+    "cwd": "/home/dev/code/proj-1",
+    "format_version": 4,
+    "session_id": "eae4580b-696c-ea92-88b4-ba6b82040c4e"
+   },
+   "key": "sessions/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.jsonl",
+   "line_count": 26,
+   "object": "raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.jsonl.zst",
+   "pieces": [
+    {
+     "end": 35555,
+     "object": "raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.jsonl.zst",
+     "sha256": "7a322afd5de01e205d3b56db56934d2828c66a7b494006c1b371751d55e6020f",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "7ac9230c582806f1086c43e7260a72d566f88adea3f12dc6437e377f42a001c4",
+   "role": "main",
+   "sha256": "7a322afd5de01e205d3b56db56934d2828c66a7b494006c1b371751d55e6020f",
+   "size": 35555,
+   "versions": [
+    {
+     "pieces": [
+      {
+       "end": 35555,
+       "object": "blobs/537523511f8a88980c45425b163553c3f1fdaced532b1cb234a27f6e650d8112.zst",
+       "sha256": "537523511f8a88980c45425b163553c3f1fdaced532b1cb234a27f6e650d8112",
+       "start": 0
+      }
+     ],
+     "sha256": "537523511f8a88980c45425b163553c3f1fdaced532b1cb234a27f6e650d8112",
+     "size": 35555,
+     "versioned_at": 1790856660
+    }
+   ]
+  }
+ ]
+}
+manifests/agent=pi/machine=bench/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.json
+{
+ "agent": "pi",
+ "collector_version": "test",
+ "deleted_locally": [],
+ "first_seen": 1790856000,
+ "git": {},
+ "hostname": "bench",
+ "info": {
+  "cwd": "/home/dev/code/proj-0",
+  "format_version": 3,
+  "session_id": "82b05ea5-6550-93e4-c2a3-44abfd10b810",
+  "source_root": "$HOME/.pi/agent"
+ },
+ "launch": null,
+ "launches": [],
+ "machine_id": "bench",
+ "schema": 2,
+ "session_key": "2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810",
+ "snapshots": [
+  {
+   "git": {},
+   "id": "set-2",
+   "memory_id": null,
+   "mtimes": {
+    "harness:user:AGENTS.md": 1790848800,
+    "harness:user:settings.json": 1790848800
+   },
+   "taken_at": 1790856000,
+   "timing": "post_hoc"
+  }
+ ],
+ "synced_at": 1790858400,
+ "transcripts": [
+  {
+   "head": {
+    "cwd": "/home/dev/code/proj-0",
+    "format_version": 3,
+    "session_id": "82b05ea5-6550-93e4-c2a3-44abfd10b810"
+   },
+   "key": "sessions/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.jsonl",
+   "line_count": 128,
+   "object": "raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.jsonl.zst",
+   "pieces": [
+    {
+     "end": 197435,
+     "object": "raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.jsonl.zst",
+     "sha256": "7a4bacdf9febdb8823a2f8dee1f78ef5816d2f44da36650e17a564d60b9f2d4b",
+     "start": 0
+    }
+   ],
+   "prefix_sha256": "d3885d6bf9586eb2fbadaf04fb52742efdcfb4459c3435bbe34620ba8b93c305",
+   "role": "main",
+   "sha256": "7a4bacdf9febdb8823a2f8dee1f78ef5816d2f44da36650e17a564d60b9f2d4b",
+   "size": 197435,
+   "versions": []
+  }
+ ]
+}
+raw-versions/agent=pi/machine=bench/sessions/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.jsonl.json
+{
+ "key": "sessions/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.jsonl",
+ "versions": [
+  {
+   "pieces": [
+    {
+     "end": 35555,
+     "object": "blobs/537523511f8a88980c45425b163553c3f1fdaced532b1cb234a27f6e650d8112.zst",
+     "sha256": "537523511f8a88980c45425b163553c3f1fdaced532b1cb234a27f6e650d8112",
+     "start": 0
+    }
+   ],
+   "sha256": "537523511f8a88980c45425b163553c3f1fdaced532b1cb234a27f6e650d8112",
+   "size": 35555,
+   "versioned_at": 1790856660
+  }
+ ]
+}
+raw/agent=claude/machine=bench/CLAUDE.md.zst {"agent":"claude","end":"1111","machine":"bench","role":"config","sha256":"ccd3ce6367b61d9cfad88882c21c8226a2ebddf57e6cfcc57a1dc7d6845e8b93","start":"0"} size=547 stored=4b18fb4909bd03589385ef27c8510b945a0e2040c494d1a184c6598fbea91853 raw=ccd3ce6367b61d9cfad88882c21c8226a2ebddf57e6cfcc57a1dc7d6845e8b93 rawsize=1111
+raw/agent=claude/machine=bench/claude.json.zst {"agent":"claude","end":"749","machine":"bench","role":"config","sha256":"35b314cd2a700704d9335afddcd7af3694aa5dc21715c2a0b2a1eb17ae903823","start":"0"} size=298 stored=6c477f0e14305d4bac5d9cab3ecc769943c978ce380ae8af5a9ae0ab9f746537 raw=35b314cd2a700704d9335afddcd7af3694aa5dc21715c2a0b2a1eb17ae903823 rawsize=749
+raw/agent=claude/machine=bench/debug/426b2564-4425-6b57-2939-85d342e21aa3.txt.zst {"agent":"claude","end":"8297","machine":"bench","role":"debug","sha256":"6dbe824135c2fccf228b5c1eabf49860f9e6331ab25dba40b968b937982ce4d2","start":"0"} size=2858 stored=6bb632c9a0f21256792e5c9d0a26de9a50a5cd65f027f62dcea5aacf0c2a6be0 raw=6dbe824135c2fccf228b5c1eabf49860f9e6331ab25dba40b968b937982ce4d2 rawsize=8297
+raw/agent=claude/machine=bench/debug/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.txt.zst {"agent":"claude","end":"21482","machine":"bench","role":"debug","sha256":"d16d8a252ae4838ca54b075398d28762a861b96179d76532da7ed75c910e638d","start":"0"} size=6896 stored=2b3b89e9cc613b03fc470c3351e51c7fb9634a85e66ef08c3905c5ba4dff8cac raw=d16d8a252ae4838ca54b075398d28762a861b96179d76532da7ed75c910e638d rawsize=21482
+raw/agent=claude/machine=bench/debug/d3347d6d-4d5a-8c60-aef0-9601215332b5.txt.zst {"agent":"claude","end":"54783","machine":"bench","role":"debug","sha256":"9430160e06425bd7d7b5722a95ff68841e78e4f2ca272cc11ae58b4359031619","start":"0"} size=16902 stored=6d6a9fd97dc8237f54269311b321a2e43e417faf6d099db4234aff2048611cb3 raw=9430160e06425bd7d7b5722a95ff68841e78e4f2ca272cc11ae58b4359031619 rawsize=54783
+raw/agent=claude/machine=bench/file-history/426b2564-4425-6b57-2939-85d342e21aa3/371161edc5a178dd@v3.zst {"agent":"claude","end":"5499","machine":"bench","role":"file_history","sha256":"5de5a7af2247a0327836e33fb43d6b423d7d335a512900014c5580f7e58f8239","start":"0"} size=2450 stored=8bad00d855dc553cdd9fb07259482972c1114e522244e6265383d7d24c549b85 raw=5de5a7af2247a0327836e33fb43d6b423d7d335a512900014c5580f7e58f8239 rawsize=5499
+raw/agent=claude/machine=bench/file-history/426b2564-4425-6b57-2939-85d342e21aa3/670312af1c27a02c@v2.zst {"agent":"claude","end":"2220","machine":"bench","role":"file_history","sha256":"04f3321186dfa3c37c921fcc5a2cb20a049c12fc5ac8118771dd3df1155618ac","start":"0"} size=1145 stored=09e1b055bb49e6114ddf64c240efd58809d30e77a08ddc593d1618d8a33152ca raw=04f3321186dfa3c37c921fcc5a2cb20a049c12fc5ac8118771dd3df1155618ac rawsize=2220
+raw/agent=claude/machine=bench/file-history/426b2564-4425-6b57-2939-85d342e21aa3/7dc007d22233b113@v1.zst {"agent":"claude","end":"3604","machine":"bench","role":"file_history","sha256":"b701b03d30e38eab3ad29670f1ee110894e31f5020e650cd3293db163e1180b9","start":"0"} size=1735 stored=917b4d624defd4258951bed3db253ccdf600b04d0037f3723337039111b31340 raw=b701b03d30e38eab3ad29670f1ee110894e31f5020e650cd3293db163e1180b9 rawsize=3604
+raw/agent=claude/machine=bench/file-history/b70b9078-c52a-d556-19fa-f1c1ea7d61c2/7f28a87d6081f79f@v1.zst {"agent":"claude","end":"1219","machine":"bench","role":"file_history","sha256":"e55e3f1c84d3212b6b872b63f21bc1e46366dc4b5fbe9562edaa9943f5892615","start":"0"} size=719 stored=23d5f53fa719ae82c9b6924fb2afd38cde25d4b8d565ae7a4a7e4f89f4924233 raw=e55e3f1c84d3212b6b872b63f21bc1e46366dc4b5fbe9562edaa9943f5892615 rawsize=1219
+raw/agent=claude/machine=bench/file-history/b70b9078-c52a-d556-19fa-f1c1ea7d61c2/c13c42aa239dd0a2@v2.zst {"agent":"claude","end":"3894","machine":"bench","role":"file_history","sha256":"c38d1e770fb5ed7b506d8144f8523cb1942d92d73aaaabb6c8017a9ce41c6830","start":"0"} size=1838 stored=9ebacc7a6f6106c0c22d012c877c34f0e68ab1851f56e633f32a2a0dc4672556 raw=c38d1e770fb5ed7b506d8144f8523cb1942d92d73aaaabb6c8017a9ce41c6830 rawsize=3894
+raw/agent=claude/machine=bench/file-history/d3347d6d-4d5a-8c60-aef0-9601215332b5/4fe969333c23eed2@v1.zst {"agent":"claude","end":"6439","machine":"bench","role":"file_history","sha256":"cc2f8913032fe481451dce32f7efa6750e4a0e804752f8b30645656cabd7c28c","start":"0"} size=2780 stored=3c01f73afbccacde3bc1802ddfd3126bcabeb644d51e0fe0c77017c325b5da6d raw=cc2f8913032fe481451dce32f7efa6750e4a0e804752f8b30645656cabd7c28c rawsize=6439
+raw/agent=claude/machine=bench/history.jsonl.zst {"agent":"claude","end":"3373","machine":"bench","role":"history","sha256":"a1f9eeba53df024347caf7d1eee82edb82aa25740f46cbfb80dcc3082fb62de6","start":"0"} size=1000 stored=8da332d4cdf0ff424d81f3d2d6d8d7414dba93c8e3fb95784655ca3b2b1c7468 raw=a1f9eeba53df024347caf7d1eee82edb82aa25740f46cbfb80dcc3082fb62de6 rawsize=3373
+raw/agent=claude/machine=bench/plans/quiet-plan.md.zst {"agent":"claude","end":"2260","machine":"bench","role":"plan","sha256":"c53a2ec19236b53d383b11841547f5799e32d258dfa469179270384363a4bd3c","start":"0"} size=938 stored=106a5599771a75eca3c1b22222e2f715936e5b4262a677e037d55eb0240fd386 raw=c53a2ec19236b53d383b11841547f5799e32d258dfa469179270384363a4bd3c rawsize=2260
+raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.jsonl.zst {"agent":"claude","end":"204891","machine":"bench","role":"main","sha256":"bf6d4bd0ba6c54e202a2316662063f0a7e8e1dcdd288fe253c35d3af61f72c9e","start":"0"} size=35192 stored=aae23fe248f002f2dedb3ee41cd4666233313fd062e013dfafbbb7d86b6efb48 raw=bf6d4bd0ba6c54e202a2316662063f0a7e8e1dcdd288fe253c35d3af61f72c9e rawsize=204891
+raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5/subagents/agent-feQPvv1zg862.jsonl.zst {"agent":"claude","end":"46032","machine":"bench","role":"subagent","sha256":"e72d15d6d8096618a0899da3d98e1f7744b579396a92aebcbfd4e8ded2e935f4","start":"0"} size=10355 stored=258a2f36ea1199ccee488764435f3978a48966712e38a77674a9d1c1241a9882 raw=e72d15d6d8096618a0899da3d98e1f7744b579396a92aebcbfd4e8ded2e935f4 rawsize=46032
+raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5/subagents/agent-feQPvv1zg862.meta.json.zst {"agent":"claude","end":"23","machine":"bench","role":"subagent","sha256":"fb70fc6ed370c9a01104b362336d694b4eba9f53985d240b6083432bef4dbbac","start":"0"} size=36 stored=d67d1229b8766e5703f0c35f7af64572cda27e24d73e0915c47cb1fe189fac5f raw=fb70fc6ed370c9a01104b362336d694b4eba9f53985d240b6083432bef4dbbac rawsize=23
+raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5/tool-results/toolu_BvO/WL7IWZUg.txt.zst {"agent":"claude","end":"6328","machine":"bench","role":"tool_result","sha256":"321aa88dfabb8cd08abe5b701335dcbb2c09b4e347626335f8073c97dd907a20","start":"0"} size=497 stored=85bcb87c3130c113a2892b7c6d6332c8b6e11c51344545d35898d8d5cbaa85bc raw=321aa88dfabb8cd08abe5b701335dcbb2c09b4e347626335f8073c97dd907a20 rawsize=6328
+raw/agent=claude/machine=bench/projects/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.jsonl.zst {"agent":"claude","end":"71887","machine":"bench","role":"main","sha256":"9fa048467a2c80fadd11767be70a216c70dc96d2c9d1f3bd10ad2aaf3cbb5847","start":"0"} size=14680 stored=54c287029b713a581869eb0adf24ad52f2a08f15fc1182cea4dc140f09a9720e raw=9fa048467a2c80fadd11767be70a216c70dc96d2c9d1f3bd10ad2aaf3cbb5847 rawsize=71887
+raw/agent=claude/machine=bench/projects/-home-dev-code-proj-2/426b2564-4425-6b57-2939-85d342e21aa3.jsonl.zst {"agent":"claude","end":"57018","machine":"bench","role":"main","sha256":"16dc3ae7771368d5712961b1b77853941653aa0ab72b24c4db7f0d50dc609948","start":"0"} size=11988 stored=b443cffd851da6685799959399d75af4f35854edadf4f29df760172fb9c92cd5 raw=16dc3ae7771368d5712961b1b77853941653aa0ab72b24c4db7f0d50dc609948 rawsize=57018
+raw/agent=claude/machine=bench/settings.json.zst {"agent":"claude","end":"61","machine":"bench","role":"config","sha256":"d3c526f43bd4464e9c52df4de7256660dd84a5928ec7b64acef804966a517913","start":"0"} size=74 stored=1fa5f5e42154cbf7f9a262fb36a05e137cfd5100769a15ac58aea8092af21ffa raw=d3c526f43bd4464e9c52df4de7256660dd84a5928ec7b64acef804966a517913 rawsize=61
+raw/agent=claude/machine=bench/skills/review/SKILL.md.zst {"agent":"claude","end":"1743","machine":"bench","role":"config","sha256":"38e37a29f630da8ea66b340b504dc7fdaf7f1ff0ca537d8a24105144554be0e7","start":"0"} size=786 stored=21f6633ff15ee1e957a7d24ffcfb39a3c24140eb3c454876151955e28226a4c5 raw=38e37a29f630da8ea66b340b504dc7fdaf7f1ff0ca537d8a24105144554be0e7 rawsize=1743
+raw/agent=claude/machine=bench/todos/426b2564-4425-6b57-2939-85d342e21aa3-agent-426b2564-4425-6b57-2939-85d342e21aa3.json.zst {"agent":"claude","end":"120","machine":"bench","role":"todo","sha256":"cbf415e8a5071a0a989050ee2b9e35d7b97aa3c9d5ace114ca0038f4f63fdd04","start":"0"} size=110 stored=840ea5b35311082ee1efe47a253afd47d743ffc37b299f00aee3249831e05c86 raw=cbf415e8a5071a0a989050ee2b9e35d7b97aa3c9d5ace114ca0038f4f63fdd04 rawsize=120
+raw/agent=claude/machine=bench/todos/b70b9078-c52a-d556-19fa-f1c1ea7d61c2-agent-b70b9078-c52a-d556-19fa-f1c1ea7d61c2.json.zst {"agent":"claude","end":"113","machine":"bench","role":"todo","sha256":"e8d4e651e38057844ab4f5b244289ab72a5ce0aaae4c77a21af687cb3a7e9c20","start":"0"} size=105 stored=39427f95c1822946b91e687eaf80dd77740e0935d4344f49eddcbeb4d12ea6f7 raw=e8d4e651e38057844ab4f5b244289ab72a5ce0aaae4c77a21af687cb3a7e9c20 rawsize=113
+raw/agent=claude/machine=bench/todos/d3347d6d-4d5a-8c60-aef0-9601215332b5-agent-d3347d6d-4d5a-8c60-aef0-9601215332b5.json.zst {"agent":"claude","end":"123","machine":"bench","role":"todo","sha256":"e32a7f87137f74a348853d4a519b389c272e9fbbdd7a5ba3af1d28fc1b1c3c5c","start":"0"} size=113 stored=495d35dfb6c478e00fc559590f5cc05193bc8f2772ff0f9b7c23e3493574f6b8 raw=e32a7f87137f74a348853d4a519b389c272e9fbbdd7a5ba3af1d28fc1b1c3c5c rawsize=123
+raw/agent=codex/machine=bench/AGENTS.md.zst {"agent":"codex","end":"868","machine":"bench","role":"config","sha256":"f89d649dae913fb9b9b7e6e8b0c5113a1b0d496085155779d606754b10f20c42","start":"0"} size=439 stored=9f75c4c513c8950af46ecbb5e8046de546d33cb96a8298508bd38c1c328b7a8a raw=f89d649dae913fb9b9b7e6e8b0c5113a1b0d496085155779d606754b10f20c42 rawsize=868
+raw/agent=codex/machine=bench/config.toml.zst {"agent":"codex","end":"73","machine":"bench","role":"config","sha256":"3697fe1659a49222e72893adebb635fae4141a8c61dd57ac6fc9e3482a3e49a5","start":"0"} size=86 stored=d5bd81edb2b33893555c2f6a6a8d89a12ac9ee4b92192f78cbce494d8650e786 raw=3697fe1659a49222e72893adebb635fae4141a8c61dd57ac6fc9e3482a3e49a5 rawsize=73
+raw/agent=codex/machine=bench/db/state_5.sqlite.zst {"agent":"codex","end":"12288","machine":"bench","role":"db","sha256":"53e389c4e05db955aacf485f69563951945abb3895fbbff3639c74cc25320d7b","start":"0"} size=298 stored=97a4fcd34314210a3949db2a7f328962f11a8d94c3a80364ad55891dcde0e1c1 raw=53e389c4e05db955aacf485f69563951945abb3895fbbff3639c74cc25320d7b rawsize=12288
+raw/agent=codex/machine=bench/history.jsonl.zst {"agent":"codex","end":"3373","machine":"bench","role":"history","sha256":"a1f9eeba53df024347caf7d1eee82edb82aa25740f46cbfb80dcc3082fb62de6","start":"0"} size=1000 stored=8da332d4cdf0ff424d81f3d2d6d8d7414dba93c8e3fb95784655ca3b2b1c7468 raw=a1f9eeba53df024347caf7d1eee82edb82aa25740f46cbfb80dcc3082fb62de6 rawsize=3373
+raw/agent=codex/machine=bench/log/codex-tui.log.zst {"agent":"codex","end":"24605","machine":"bench","role":"log","sha256":"eb25c182c615c1fc7d3d4fc4be5286f16ce0aef6a15161bfea1de99c3aa6a6fa","start":"0"} size=7877 stored=a875be2db0ee58b7548f177ed341c7db43f5e4b8691fd5f6775dc9a214614505 raw=eb25c182c615c1fc7d3d4fc4be5286f16ce0aef6a15161bfea1de99c3aa6a6fa rawsize=24605
+raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T08-00-00-b469f990-ccf4-c276-f720-398c84ff96c4.jsonl.zst {"agent":"codex","end":"82938","machine":"bench","role":"main","sha256":"0326980ed8d6df9101d59bb8fa7d5c3ab88d6a599d84d1a36090e5484e433baf","start":"0"} size=26362 stored=7b0f64fb3761dcd63f645d7f2cb4d2ba526045ae716d20da97bd6cbd780f800d raw=0326980ed8d6df9101d59bb8fa7d5c3ab88d6a599d84d1a36090e5484e433baf rawsize=82938
+raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T09-00-00-6b9acc15-2c47-b679-3c3c-bb5a1c20dceb.jsonl.zst {"agent":"codex","end":"21373","machine":"bench","role":"main","sha256":"ef2c6cf58bb8cc6bdd63e2cdc19bf6d921a166c0ede7768154441bbc85230b96","start":"0"} size=430 stored=f8d564477b378e8af02d767a2310cf182fad206b28ee58a7cc01914f6bf92986 raw=ef2c6cf58bb8cc6bdd63e2cdc19bf6d921a166c0ede7768154441bbc85230b96 rawsize=21373
+raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.jsonl.zst {"agent":"codex","end":"204559","machine":"bench","role":"main","sha256":"37aa4650df16bcacce891b80d5be3946748d7168cc1118c7434ba1ee96ae5478","start":"0"} size=71740 stored=de24b58b412dc0a19febb9092f5ff1033d2cde28ef1a6c630a789fbaa8903896 raw=37aa4650df16bcacce891b80d5be3946748d7168cc1118c7434ba1ee96ae5478 rawsize=204559
+raw/agent=pi/machine=bench/AGENTS.md.zst {"agent":"pi","end":"856","machine":"bench","role":"config","sha256":"2a20ccc9c7bd5db942e400bafe43ab48740f38bf36368b2090da0c8d7ab7e240","start":"0"} size=434 stored=97758b429bf82238377303d32e2b029b630b441da44a766d369f924a22f16e62 raw=2a20ccc9c7bd5db942e400bafe43ab48740f38bf36368b2090da0c8d7ab7e240 rawsize=856
+raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.jsonl.zst {"agent":"pi","end":"197435","machine":"bench","role":"main","sha256":"7a4bacdf9febdb8823a2f8dee1f78ef5816d2f44da36650e17a564d60b9f2d4b","start":"0"} size=43746 stored=686d1cd56b96bf6491563883fd587ab439d57eb7356a3ec5184e0df4ef0c0c06 raw=7a4bacdf9febdb8823a2f8dee1f78ef5816d2f44da36650e17a564d60b9f2d4b rawsize=197435
+raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.jsonl.zst {"agent":"pi","end":"35555","machine":"bench","role":"main","sha256":"7a322afd5de01e205d3b56db56934d2828c66a7b494006c1b371751d55e6020f","start":"0"} size=11140 stored=1cc761e1112813369aa44c836a153b796090d98c45994d0b06bc92ec8db67597 raw=7a322afd5de01e205d3b56db56934d2828c66a7b494006c1b371751d55e6020f rawsize=35555
+raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-2--/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.jsonl.zst {"agent":"pi","end":"65986","machine":"bench","role":"main","sha256":"5aa6383fed532b77737052176391034e9af8036c102f0fd70181d3a7b510f8a5","start":"0"} size=17160 stored=b3525dc78277bdb11adc60156135007d25fd428306bdde1da04e29d121e964a0 raw=5aa6383fed532b77737052176391034e9af8036c102f0fd70181d3a7b510f8a5 rawsize=65986
+raw/agent=pi/machine=bench/settings.json.zst {"agent":"pi","end":"67","machine":"bench","role":"config","sha256":"edf18c30d92a56c7508bfefb5498b92198d7b132cb25277f345ef5a047a79505","start":"0"} size=78 stored=617e05a63d338b2dc4c4f76b1f866e54aa6db3c79fe2c0a080f41e9a762d57e7 raw=edf18c30d92a56c7508bfefb5498b92198d7b132cb25277f345ef5a047a79505 rawsize=67
+snapshots/blobs/2a20ccc9c7bd5db942e400bafe43ab48740f38bf36368b2090da0c8d7ab7e240 {"sha256":"2a20ccc9c7bd5db942e400bafe43ab48740f38bf36368b2090da0c8d7ab7e240"} size=856 stored=2a20ccc9c7bd5db942e400bafe43ab48740f38bf36368b2090da0c8d7ab7e240
+snapshots/blobs/3697fe1659a49222e72893adebb635fae4141a8c61dd57ac6fc9e3482a3e49a5 {"sha256":"3697fe1659a49222e72893adebb635fae4141a8c61dd57ac6fc9e3482a3e49a5"} size=73 stored=3697fe1659a49222e72893adebb635fae4141a8c61dd57ac6fc9e3482a3e49a5
+snapshots/blobs/38e37a29f630da8ea66b340b504dc7fdaf7f1ff0ca537d8a24105144554be0e7 {"sha256":"38e37a29f630da8ea66b340b504dc7fdaf7f1ff0ca537d8a24105144554be0e7"} size=1743 stored=38e37a29f630da8ea66b340b504dc7fdaf7f1ff0ca537d8a24105144554be0e7
+snapshots/blobs/7a542318d20c5d4a2ced6ae02634c8222becb612c9ae85716de7c35d024afdec {"sha256":"7a542318d20c5d4a2ced6ae02634c8222becb612c9ae85716de7c35d024afdec"} size=108 stored=7a542318d20c5d4a2ced6ae02634c8222becb612c9ae85716de7c35d024afdec
+snapshots/blobs/ccd3ce6367b61d9cfad88882c21c8226a2ebddf57e6cfcc57a1dc7d6845e8b93 {"sha256":"ccd3ce6367b61d9cfad88882c21c8226a2ebddf57e6cfcc57a1dc7d6845e8b93"} size=1111 stored=ccd3ce6367b61d9cfad88882c21c8226a2ebddf57e6cfcc57a1dc7d6845e8b93
+snapshots/blobs/d3c526f43bd4464e9c52df4de7256660dd84a5928ec7b64acef804966a517913 {"sha256":"d3c526f43bd4464e9c52df4de7256660dd84a5928ec7b64acef804966a517913"} size=61 stored=d3c526f43bd4464e9c52df4de7256660dd84a5928ec7b64acef804966a517913
+snapshots/blobs/edf18c30d92a56c7508bfefb5498b92198d7b132cb25277f345ef5a047a79505 {"sha256":"edf18c30d92a56c7508bfefb5498b92198d7b132cb25277f345ef5a047a79505"} size=67 stored=edf18c30d92a56c7508bfefb5498b92198d7b132cb25277f345ef5a047a79505
+snapshots/blobs/f89d649dae913fb9b9b7e6e8b0c5113a1b0d496085155779d606754b10f20c42 {"sha256":"f89d649dae913fb9b9b7e6e8b0c5113a1b0d496085155779d606754b10f20c42"} size=868 stored=f89d649dae913fb9b9b7e6e8b0c5113a1b0d496085155779d606754b10f20c42
+snapshots/sets/set-0.json
+{
+ "agent": "claude",
+ "files": [
+  {
+   "path": ".claude.json#mcp",
+   "scope": "user",
+   "sha256": "7a542318d20c5d4a2ced6ae02634c8222becb612c9ae85716de7c35d024afdec",
+   "size": 108
+  },
+  {
+   "path": "CLAUDE.md",
+   "scope": "user",
+   "sha256": "ccd3ce6367b61d9cfad88882c21c8226a2ebddf57e6cfcc57a1dc7d6845e8b93",
+   "size": 1111
+  },
+  {
+   "path": "settings.json",
+   "scope": "user",
+   "sha256": "d3c526f43bd4464e9c52df4de7256660dd84a5928ec7b64acef804966a517913",
+   "size": 61
+  },
+  {
+   "path": "skills/review/SKILL.md",
+   "scope": "user",
+   "sha256": "38e37a29f630da8ea66b340b504dc7fdaf7f1ff0ca537d8a24105144554be0e7",
+   "size": 1743
+  }
+ ],
+ "kind": "harness",
+ "project_root": null,
+ "skipped": [],
+ "user_base": "$HOME/.claude"
+}
+snapshots/sets/set-1.json
+{
+ "agent": "codex",
+ "files": [
+  {
+   "path": "AGENTS.md",
+   "scope": "user",
+   "sha256": "f89d649dae913fb9b9b7e6e8b0c5113a1b0d496085155779d606754b10f20c42",
+   "size": 868
+  },
+  {
+   "path": "config.toml",
+   "scope": "user",
+   "sha256": "3697fe1659a49222e72893adebb635fae4141a8c61dd57ac6fc9e3482a3e49a5",
+   "size": 73
+  }
+ ],
+ "kind": "harness",
+ "project_root": null,
+ "skipped": [],
+ "user_base": "$HOME/.codex"
+}
+snapshots/sets/set-2.json
+{
+ "agent": "pi",
+ "files": [
+  {
+   "path": "AGENTS.md",
+   "scope": "user",
+   "sha256": "2a20ccc9c7bd5db942e400bafe43ab48740f38bf36368b2090da0c8d7ab7e240",
+   "size": 856
+  },
+  {
+   "path": "settings.json",
+   "scope": "user",
+   "sha256": "edf18c30d92a56c7508bfefb5498b92198d7b132cb25277f345ef5a047a79505",
+   "size": 67
+  }
+ ],
+ "kind": "harness",
+ "project_root": null,
+ "skipped": [],
+ "user_base": "$HOME/.pi/agent"
+}
