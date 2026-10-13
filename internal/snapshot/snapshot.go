@@ -30,10 +30,11 @@ var (
 )
 
 type Entry struct {
-	Scope    string
-	Path     string
-	Body     []byte
-	Mtime    *float64
+	Scope string
+	Path  string
+	Body  []byte
+	// Mtime is zero for entries that are not files on disk.
+	Mtime    float64
 	Target   string
 	RealPath string
 }
@@ -45,20 +46,22 @@ type Skipped struct {
 	Size   int64  `json:"size"`
 }
 
+type scopedName struct{ scope, name string }
+
 type collected struct {
 	agent   string
 	entries []*Entry
 	skipped []Skipped
 	counts  map[string]int
-	seen    map[string]bool
+	seen    map[scopedName]bool
 }
 
 func newCollected(agent string) *collected {
-	return &collected{agent: agent, counts: map[string]int{}, seen: map[string]bool{}}
+	return &collected{agent: agent, skipped: []Skipped{}, counts: map[string]int{}, seen: map[scopedName]bool{}}
 }
 
 func (c *collected) add(scope, path, name string) *Entry {
-	if c.seen[scope+"\x00"+name] || adapters.IsCredential(filepath.Base(path)) {
+	if c.seen[scopedName{scope, name}] || adapters.IsCredential(filepath.Base(path)) {
 		return nil
 	}
 	st, err := os.Stat(path)
@@ -81,12 +84,11 @@ func (c *collected) add(scope, path, name string) *Entry {
 		c.skipped = append(c.skipped, Skipped{Scope: scope, Path: name, Reason: "unparseable", Size: st.Size()})
 		return nil
 	}
-	c.seen[scope+"\x00"+name] = true
+	c.seen[scopedName{scope, name}] = true
 	c.counts[scope]++
 	resolved := realPath(path)
 	abs, _ := filepath.Abs(path)
-	mtime := float64(st.ModTime().UnixNano()) / 1e9
-	e := &Entry{Scope: scope, Path: name, Body: body, Mtime: &mtime, RealPath: resolved}
+	e := &Entry{Scope: scope, Path: name, Body: body, Mtime: float64(st.ModTime().UnixNano()) / 1e9, RealPath: resolved}
 	if resolved != abs {
 		e.Target = resolved
 	}
@@ -339,48 +341,55 @@ func collectMemory(a adapters.Adapter, root, projectRoot, sessionKey string) *co
 	return c
 }
 
-type Snapshot struct {
-	SetID     string
-	Doc       map[string]any
-	MemoryID  string
-	MemoryDoc map[string]any
-	Blobs     map[string][]byte
-	Mtimes    map[string]float64
+// Set is the document stored at snapshots/sets/<ID>.json; ID is the sha256 of its compact form.
+type Set struct {
+	ID          string    `json:"-"`
+	Kind        string    `json:"kind"`
+	Agent       string    `json:"agent"`
+	UserBase    string    `json:"user_base"`
+	ProjectRoot *string   `json:"project_root"`
+	Files       []File    `json:"files"`
+	Skipped     []Skipped `json:"skipped"`
 }
 
-func setDoc(kind string, a adapters.Adapter, root, projectRoot string, c *collected, blobs map[string][]byte,
-	mtimes map[string]float64,
-) (string, map[string]any, error) {
-	files := make([]map[string]any, 0, len(c.entries))
+type File struct {
+	Scope  string `json:"scope"`
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+	Size   int    `json:"size"`
+	Target string `json:"target,omitempty"`
+}
+
+type Snapshot struct {
+	Harness *Set
+	// Memory is nil when the agent kept no memory for the session.
+	Memory *Set
+	Blobs  map[string][]byte
+	Mtimes map[string]float64
+}
+
+func (s *Snapshot) set(kind string, a adapters.Adapter, root, projectRoot string, c *collected) (*Set, error) {
+	set := &Set{
+		Kind: kind, Agent: a.Name(), UserBase: a.UserBase(root), Files: make([]File, 0, len(c.entries)),
+		Skipped: c.skipped,
+	}
+	if projectRoot != "" {
+		set.ProjectRoot = &projectRoot
+	}
 	for _, e := range c.entries {
 		sha := raw.SHA256(e.Body)
-		blobs[sha] = e.Body
-		f := map[string]any{"scope": e.Scope, "path": e.Path, "sha256": sha, "size": len(e.Body)}
-		if e.Target != "" {
-			f["target"] = e.Target
-		}
-		files = append(files, f)
-		if e.Mtime != nil {
-			mtimes[kind+":"+e.Scope+":"+e.Path] = *e.Mtime
+		s.Blobs[sha] = e.Body
+		set.Files = append(set.Files, File{Scope: e.Scope, Path: e.Path, SHA256: sha, Size: len(e.Body), Target: e.Target})
+		if e.Mtime != 0 {
+			s.Mtimes[kind+":"+e.Scope+":"+e.Path] = e.Mtime
 		}
 	}
-	skipped := c.skipped
-	if skipped == nil {
-		skipped = []Skipped{}
-	}
-	var pr any
-	if projectRoot != "" {
-		pr = projectRoot
-	}
-	doc := map[string]any{
-		"kind": kind, "agent": a.Name(), "user_base": a.UserBase(root), "project_root": pr,
-		"files": files, "skipped": skipped,
-	}
-	body, err := jsonx.SortedCompact(doc)
+	body, err := jsonx.SortedCompact(set)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
-	return raw.SHA256(body), doc, nil
+	set.ID = raw.SHA256(body)
+	return set, nil
 }
 
 func Build(a adapters.Adapter, root, cwd, sessionKey string) (*Snapshot, error) {
@@ -390,14 +399,12 @@ func Build(a adapters.Adapter, root, cwd, sessionKey string) (*Snapshot, error) 
 		projectRoot, isRepo = FindProjectRoot(cwd)
 	}
 	var err error
-	s.SetID, s.Doc, err = setDoc("harness", a, root, projectRoot, collect(a, root, projectRoot, isRepo), s.Blobs, s.Mtimes)
-	if err != nil {
+	if s.Harness, err = s.set("harness", a, root, projectRoot, collect(a, root, projectRoot, isRepo)); err != nil {
 		return nil, err
 	}
 	memory := collectMemory(a, root, projectRoot, sessionKey)
 	if len(memory.entries) > 0 || len(memory.skipped) > 0 {
-		s.MemoryID, s.MemoryDoc, err = setDoc("memory", a, root, projectRoot, memory, s.Blobs, s.Mtimes)
-		if err != nil {
+		if s.Memory, err = s.set("memory", a, root, projectRoot, memory); err != nil {
 			return nil, err
 		}
 	}

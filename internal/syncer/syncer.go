@@ -75,12 +75,6 @@ func (s *Summary) Trimmed() Summary {
 
 type snapshotKey struct{ session, root, cwd string }
 
-type snapshotResult struct {
-	setID    string
-	memoryID *string
-	mtimes   map[string]float64
-}
-
 type Options struct {
 	Trigger string
 	Logger  *slog.Logger
@@ -100,7 +94,7 @@ type Syncer struct {
 
 	sessionRoots  map[adapters.SessionRef]string
 	touched       map[adapters.SessionRef]bool
-	snapshotCache map[snapshotKey]snapshotResult
+	snapshotCache map[snapshotKey]state.SnapshotEntry
 	workDir       string
 	tmpDir        string
 }
@@ -118,7 +112,7 @@ func New(cfg *config.Config, st store.Store, s *state.State, ads map[string]adap
 		Summary:       Summary{ErrorMessages: []string{}},
 		sessionRoots:  map[adapters.SessionRef]string{},
 		touched:       map[adapters.SessionRef]bool{},
-		snapshotCache: map[snapshotKey]snapshotResult{},
+		snapshotCache: map[snapshotKey]state.SnapshotEntry{},
 		workDir:       filepath.Join(cfg.StateDir, "exports"),
 		tmpDir:        filepath.Join(cfg.StateDir, "tmp"),
 	}

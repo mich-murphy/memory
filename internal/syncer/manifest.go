@@ -42,7 +42,7 @@ func (s *Syncer) RecordLaunch(ctx context.Context, agent, path string, launch ma
 	if err != nil {
 		return err
 	}
-	entry["snapshot"] = snap.setID
+	entry["snapshot"] = snap.ID
 	sess.Snapshots = addSnapshot(sess.Snapshots, snap, git, "pre_session", now)
 	sess.Launches = append(sess.Launches, entry)
 	if err := s.state.PutSession(id, sess); err != nil {
@@ -76,21 +76,19 @@ func (s *Syncer) timing(files []state.File) string {
 	return "post_hoc"
 }
 
-func addSnapshot(snapshots []state.SnapshotEntry, snap snapshotResult, git state.GitState, timing string,
+func addSnapshot(snapshots []state.SnapshotEntry, snap state.SnapshotEntry, git state.GitState, timing string,
 	now float64,
 ) []state.SnapshotEntry {
 	if n := len(snapshots); n > 0 {
 		last := &snapshots[n-1]
 		sameGit := last.Git.Head == git.Head && last.Git.Branch == git.Branch
-		if last.ID == snap.setID && equalPtr(last.MemoryID, snap.memoryID) && sameGit {
+		if last.ID == snap.ID && equalPtr(last.MemoryID, snap.MemoryID) && sameGit {
 			last.CheckedAt = now
 			return snapshots
 		}
 	}
-	return append(snapshots, state.SnapshotEntry{
-		ID: snap.setID, MemoryID: snap.memoryID, Git: git, Timing: timing, TakenAt: now, CheckedAt: now,
-		Mtimes: snap.mtimes,
-	})
+	snap.Git, snap.Timing, snap.TakenAt, snap.CheckedAt = git, timing, now, now
+	return append(snapshots, snap)
 }
 
 func equalPtr(a, b *string) bool {
@@ -286,7 +284,7 @@ func orEmpty[T any](s []T) []T {
 	return s
 }
 
-func (s *Syncer) takeSnapshot(ctx context.Context, id adapters.SessionRef, root, cwd string) (snapshotResult, error) {
+func (s *Syncer) takeSnapshot(ctx context.Context, id adapters.SessionRef, root, cwd string) (state.SnapshotEntry, error) {
 	ck := snapshotKey{session: id.Agent, root: root, cwd: cwd}
 	if id.Agent == "claude" {
 		ck.session = id.String()
@@ -296,13 +294,13 @@ func (s *Syncer) takeSnapshot(ctx context.Context, id adapters.SessionRef, root,
 	}
 	snap, err := snapshot.Build(s.adapters[id.Agent], root, cwd, id.Key)
 	if err != nil {
-		return snapshotResult{}, err
+		return state.SnapshotEntry{}, err
 	}
 	var missing []string
 	for _, sha := range slices.Sorted(maps.Keys(snap.Blobs)) {
 		have, err := s.state.UploadedSHA("snapshots/blobs/" + sha)
 		if err != nil {
-			return snapshotResult{}, err
+			return state.SnapshotEntry{}, err
 		}
 		if have == "" {
 			missing = append(missing, sha)
@@ -313,38 +311,38 @@ func (s *Syncer) takeSnapshot(ctx context.Context, id adapters.SessionRef, root,
 	})
 	for i, sha := range missing {
 		if errs[i] != nil {
-			return snapshotResult{}, errs[i]
+			return state.SnapshotEntry{}, errs[i]
 		}
 		if err := s.state.RecordUpload("snapshots/blobs/"+sha, sha, int64(len(snap.Blobs[sha]))); err != nil {
-			return snapshotResult{}, err
+			return state.SnapshotEntry{}, err
 		}
 	}
-	if err := s.putSet(ctx, snap.SetID, snap.Doc); err != nil {
-		return snapshotResult{}, err
+	if err := s.putSet(ctx, snap.Harness); err != nil {
+		return state.SnapshotEntry{}, err
 	}
-	r := snapshotResult{setID: snap.SetID, mtimes: snap.Mtimes}
-	if snap.MemoryID != "" {
-		if err := s.putSet(ctx, snap.MemoryID, snap.MemoryDoc); err != nil {
-			return snapshotResult{}, err
+	r := state.SnapshotEntry{ID: snap.Harness.ID, Mtimes: snap.Mtimes}
+	if snap.Memory != nil {
+		if err := s.putSet(ctx, snap.Memory); err != nil {
+			return state.SnapshotEntry{}, err
 		}
-		r.memoryID = &snap.MemoryID
+		r.MemoryID = &snap.Memory.ID
 	}
 	s.snapshotCache[ck] = r
 	return r, nil
 }
 
-func (s *Syncer) putSet(ctx context.Context, setID string, doc map[string]any) error {
-	key := "snapshots/sets/" + setID + ".json"
+func (s *Syncer) putSet(ctx context.Context, set *snapshot.Set) error {
+	key := "snapshots/sets/" + set.ID + ".json"
 	have, err := s.state.UploadedSHA(key)
 	if err != nil || have != "" {
 		return err
 	}
-	body, err := jsonx.SortedIndented(doc)
+	body, err := jsonx.SortedIndented(set)
 	if err != nil {
 		return err
 	}
 	if err := s.store.Put(ctx, key, body, map[string]string{}); err != nil {
 		return err
 	}
-	return s.state.RecordUpload(key, setID, int64(len(body)))
+	return s.state.RecordUpload(key, set.ID, int64(len(body)))
 }
