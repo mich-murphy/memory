@@ -68,7 +68,8 @@ func home(b *testing.B, name string, p testenv.Profile) *benchHome {
 		}
 	}
 	dir := filepath.Join(homeDir, name)
-	w := testenv.NewWorkload(b, dir, p, time.Now().Add(-2*time.Hour))
+	// A fixed start makes every run of the benchmarks see the same home.
+	w := testenv.NewWorkload(b, dir, p, time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC))
 	h := &benchHome{w: w, synced: filepath.Join(dir, "synced"), sizes: map[string]int64{}, at: w.Start.Add(2 * time.Hour)}
 	r := newRig(b, w, h.synced)
 	r.now = h.at

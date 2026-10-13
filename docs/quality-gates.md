@@ -15,6 +15,8 @@ The research behind these choices (tool versions, the configs of 13 well-regarde
 | `make cover` | Tests with the race detector, plus end-to-end runs of the built binary, merged into one profile and checked against `.testcoverage.yml` |
 | `make crap` | `make cover`, then the CRAP gate on that profile |
 | `make fuzz` | Each fuzz target for `FUZZTIME` (default 30s) |
+| `make bench` | Every benchmark `BENCHCOUNT` times (default 10) into `bench.txt`, for benchstat ([benchmarks.md](benchmarks.md)) |
+| `make bench-smoke` | Every benchmark once, as CI does, so a broken one fails |
 | `make hooks` | Installs the git hooks in `lefthook.yml` |
 | `make gopls` | Installs the pinned gopls, for the Claude Code `gopls-lsp` plugin |
 

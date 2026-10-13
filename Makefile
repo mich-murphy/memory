@@ -2,13 +2,16 @@ GOLANGCI_LINT ?= golangci-lint
 TOOL          := go tool -modfile=tools/go.mod
 COVER_DIR     := $(CURDIR)/.cover
 FUZZTIME      ?= 30s
+BENCH         ?= .
+BENCHCOUNT    ?= 10
+BENCHOUT      ?= bench.txt
 FUZZ_TARGETS  := internal/adapters:FuzzSessionInfo internal/hook:FuzzReadInput \
                  internal/jsonx:FuzzParseObjectRoundTrip internal/raw:FuzzCompressRoundTrip \
                  internal/scrub:FuzzFile internal/shellwords:FuzzJoinSplit internal/gitinfo:FuzzStripUserinfo
 
-.PHONY: check fmt fmt-check lint lint-version tidy-check fix-check deadcode vuln test cover crap fuzz actionlint build hooks gopls clean
+.PHONY: check fmt fmt-check lint lint-version tidy-check fix-check deadcode vuln test cover crap fuzz bench bench-smoke actionlint build hooks gopls clean
 
-check: fmt-check lint fix-check tidy-check deadcode vuln crap actionlint
+check: fmt-check lint fix-check tidy-check deadcode vuln crap bench-smoke actionlint
 
 fmt:
 	$(GOLANGCI_LINT) fmt ./...
@@ -53,6 +56,14 @@ cover:
 	go tool covdata textfmt -i=$(COVER_DIR)/unit,$(COVER_DIR)/e2e -o cover.out
 	$(TOOL) go-test-coverage --config=.testcoverage.yml
 
+# Compare two runs with: go tool -modfile=tools/go.mod benchstat old.txt new.txt
+bench:
+	go test -run='^$$' -bench='$(BENCH)' -benchmem -count=$(BENCHCOUNT) ./... | tee $(BENCHOUT)
+
+# Runs each benchmark once, so a broken one fails CI.
+bench-smoke:
+	go test -run='^$$' -bench=. -benchtime=1x ./...
+
 CRAP_FORMAT ?= table
 crap: cover
 	$(TOOL) go-crap scan ./... --coverage-profile=cover.out --exclude='internal/testenv/' \
@@ -75,4 +86,4 @@ hooks:
 	$(TOOL) lefthook install
 
 clean:
-	rm -rf $(COVER_DIR) cover.out bin dist
+	rm -rf $(COVER_DIR) cover.out bench.txt bin dist

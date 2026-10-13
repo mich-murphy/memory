@@ -5,6 +5,7 @@ A Go command-line collector that copies Claude Code, Codex and Pi session data i
 - Layout: `cmd/agent-sessions` (entry point and end-to-end tests), `internal/*` (one package per concern: `adapters` per agent, `syncer` decides and runs uploads, `state` is the local SQLite record, `raw` is hashing, pieces and zstd, `store` is R2 or a local dir).
 - The bucket layout is a contract other stages read: `docs/storage-layout.md`. Don't change a key, field or format without updating that doc and saying so in the PR.
 - Hook behaviour per agent, with sources: `docs/hooks.md`.
+- Benchmarks and the golden bucket test: `docs/benchmarks.md`. Back a performance change with a benchstat comparison of `make bench` before and after.
 
 ## Working on the code
 

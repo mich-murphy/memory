@@ -31,6 +31,7 @@ jobs:
         with:
           version-file: .golangci-lint-version
       - run: make fmt-check fix-check tidy-check deadcode vuln actionlint
+      - run: make bench-smoke
 
   test:
     name: Tests (${{ matrix.os }})
