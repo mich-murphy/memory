@@ -269,10 +269,11 @@ func (s *State) SessionFiles(ref adapters.SessionRef) ([]File, error) {
 }
 
 func (s *State) LiveFiles(agent, root string) ([]adapters.SessionFile, error) {
-	return queryAll(s, "SELECT path, agent, root, key, COALESCE(session_key, ''), role FROM files "+
+	return queryAll(s, "SELECT path, key, COALESCE(session_key, ''), role FROM files "+
 		"WHERE agent = ? AND root = ? AND deleted_at IS NULL", []any{agent, root},
 		func(rows *sql.Rows, f *adapters.SessionFile) error {
-			return rows.Scan(&f.Path, &f.Agent, &f.Root, &f.Key, &f.SessionKey, &f.Role)
+			f.Agent, f.Root = agent, root
+			return rows.Scan(&f.Path, &f.Key, &f.SessionKey, &f.Role)
 		})
 }
 
