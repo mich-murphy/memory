@@ -184,7 +184,7 @@ func (s *Syncer) planVersion(sf adapters.SessionFile, key string, prev *state.Up
 		if err != nil {
 			return nil, err
 		}
-		vp := versionPiece{Piece: raw.Piece{Start: p.Start, End: p.End, SHA256: p.SHA256, Object: blob}}
+		vp := versionPiece{Start: p.Start, End: p.End, SHA256: p.SHA256, Object: blob}
 		if have == nil {
 			vp.copyFrom = p.Object
 		}

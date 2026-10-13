@@ -5,7 +5,6 @@ package config
 import (
 	"bufio"
 	"bytes"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -14,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"uuid"
 )
 
 type Config struct {
@@ -32,11 +32,8 @@ type Config struct {
 	DBIntervalMinutes int
 }
 
-// Home reads $HOME first so tests and hooks agree.
+// Home falls back to / so a hook run without $HOME still never fails.
 func Home() string {
-	if h := os.Getenv("HOME"); h != "" {
-		return h
-	}
 	h, err := os.UserHomeDir()
 	if err != nil {
 		return "/"
@@ -173,7 +170,7 @@ func MachineUUID(configDir string) (string, error) {
 			return sanitize(v), nil
 		}
 	}
-	id := newUUID()
+	id := uuid.New().String()
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		return "", fmt.Errorf("machine id: %w", err)
 	}
@@ -199,12 +196,4 @@ func MachineUUID(configDir string) (string, error) {
 		return "", fmt.Errorf("machine id: %w", err)
 	}
 	return id, nil
-}
-
-func newUUID() string {
-	var b [16]byte
-	_, _ = rand.Read(b[:]) // crypto/rand.Read never fails
-	b[6] = b[6]&0x0f | 0x40
-	b[8] = b[8]&0x3f | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }

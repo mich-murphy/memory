@@ -86,8 +86,8 @@ func (l *Local) Get(_ context.Context, key string) ([]byte, error) {
 
 func (l *Local) List(_ context.Context, prefix string) ([]string, error) {
 	base := l.root
-	if i := strings.LastIndexByte(prefix, '/'); i >= 0 {
-		base = l.path(prefix[:i])
+	if dir, _, ok := strings.CutLast(prefix, "/"); ok {
+		base = l.path(dir)
 	}
 	if !fsutil.IsDir(base) {
 		return nil, nil

@@ -128,11 +128,11 @@ func proc(ctx context.Context, pid int) (argv []string, ppid int, ok bool) {
 
 // The command name in parentheses may itself contain ") ".
 func statPPID(stat []byte) (int, bool) {
-	i := bytes.LastIndexByte(stat, ')')
-	if i < 0 {
+	_, afterName, ok := bytes.CutLast(stat, []byte(")"))
+	if !ok {
 		return 0, false
 	}
-	fields := strings.Fields(string(stat[i+1:]))
+	fields := strings.Fields(string(afterName))
 	if len(fields) < 2 {
 		return 0, false
 	}
