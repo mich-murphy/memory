@@ -163,47 +163,47 @@ func (s *Syncer) excluded(path string) bool {
 
 func (s *Syncer) SweepFiles(ctx context.Context, agents []string) ([]adapters.SessionFile, error) {
 	var out []adapters.SessionFile
-	seen := map[string]bool{}
 	for _, agent := range agents {
 		roots, err := s.Roots(agent)
 		if err != nil {
 			return nil, err
 		}
 		for _, root := range roots {
-			present := s.sweepRoot(ctx, agent, root, seen, &out)
+			files := s.sweepRoot(ctx, agent, root)
 			if fsutil.IsDir(root) {
-				if err := s.tombstone(agent, root, present); err != nil {
+				if err := s.tombstone(agent, root, files); err != nil {
 					return nil, err
 				}
 			}
+			out = append(out, files...)
 		}
 	}
-	return out, nil
+	return uniqueByPath(out), nil
 }
 
-func (s *Syncer) sweepRoot(ctx context.Context, agent, root string, seen map[string]bool, out *[]adapters.SessionFile) (present map[string]bool) {
+func uniqueByPath(files []adapters.SessionFile) []adapters.SessionFile {
+	seen := map[string]bool{}
+	return slices.DeleteFunc(files, func(sf adapters.SessionFile) bool {
+		dup := seen[sf.Path]
+		seen[sf.Path] = true
+		return dup
+	})
+}
+
+// sweepRoot leaves the exports in, although they live under the state dir.
+func (s *Syncer) sweepRoot(ctx context.Context, agent, root string) []adapters.SessionFile {
 	a := s.adapters[agent]
-	present = map[string]bool{}
 	files, databases := adapters.Discover(a, root)
-	for _, sf := range files {
-		if !s.excluded(sf.Path) && !seen[sf.Path] {
-			seen[sf.Path] = true
-			present[sf.Path] = true
-			*out = append(*out, sf)
-		}
-	}
-	exports := adapters.SQLiteExports(ctx, a, root, databases, s.workDir, recopyAfter)
-	for _, sf := range append(exports, a.Exports(root, s.workDir, recopyAfter)...) {
-		if !seen[sf.Path] {
-			seen[sf.Path] = true
-			*out = append(*out, sf)
-		}
+	files = slices.DeleteFunc(files, func(sf adapters.SessionFile) bool { return s.excluded(sf.Path) })
+	return slices.Concat(files, adapters.SQLiteExports(ctx, a, root, databases, s.workDir, recopyAfter),
+		a.Exports(root, s.workDir, recopyAfter))
+}
+
+func (s *Syncer) tombstone(agent, root string, onDisk []adapters.SessionFile) error {
+	present := map[string]bool{}
+	for _, sf := range onDisk {
 		present[sf.Path] = true
 	}
-	return present
-}
-
-func (s *Syncer) tombstone(agent, root string, present map[string]bool) error {
 	live, err := s.state.LiveFiles(agent, root)
 	if err != nil {
 		return err
@@ -287,7 +287,6 @@ func (s *Syncer) rememberExtraRoot(agent, root string) error {
 func (s *Syncer) HookFiles(agent string, paths []string) ([]adapters.SessionFile, error) {
 	a := s.adapters[agent]
 	var out []adapters.SessionFile
-	seen := map[string]bool{}
 	for _, path := range paths {
 		sf, ok, err := s.classifyHookPath(agent, path)
 		if err != nil {
@@ -297,16 +296,12 @@ func (s *Syncer) HookFiles(agent string, paths []string) ([]adapters.SessionFile
 			continue
 		}
 		for _, p := range append([]string{sf.Path}, a.Related(sf)...) {
-			if seen[p] || s.excluded(p) {
-				continue
-			}
-			if related, ok := a.Classify(p, sf.Root); ok {
-				seen[p] = true
+			if related, ok := a.Classify(p, sf.Root); ok && !s.excluded(p) {
 				out = append(out, related)
 			}
 		}
 	}
-	return out, nil
+	return uniqueByPath(out), nil
 }
 
 type result struct {
