@@ -53,12 +53,14 @@ type Options struct {
 	Home    string
 	DryRun  bool
 	Remove  bool
-	Log     *[]string
+	Log     []string
 }
 
-func (o *Options) logf(format string, args ...any) {
-	*o.Log = append(*o.Log, fmt.Sprintf(format, args...))
+func (o *Options) Logf(format string, args ...any) {
+	o.Log = append(o.Log, fmt.Sprintf(format, args...))
 }
+
+var Agents = map[string]func(*Options) error{"claude": Claude, "codex": Codex, "pi": Pi}
 
 // Command prefers agent-sessions on PATH, whose path survives upgrades, which keeps Codex's
 // trust hash for the hook valid.
@@ -97,11 +99,11 @@ func write(path string, text []byte, o *Options) error {
 	old, err := os.ReadFile(path)
 	exists := err == nil
 	if exists && bytes.Equal(old, text) {
-		o.logf("unchanged: %s", path)
+		o.Logf("unchanged: %s", path)
 		return nil
 	}
 	if o.DryRun {
-		o.logf("would write: %s", path)
+		o.Logf("would write: %s", path)
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -119,9 +121,9 @@ func write(path string, text []byte, o *Options) error {
 		return err
 	}
 	if saved != "" {
-		o.logf("wrote: %s (backup: %s)", path, filepath.Base(saved))
+		o.Logf("wrote: %s (backup: %s)", path, filepath.Base(saved))
 	} else {
-		o.logf("wrote: %s", path)
+		o.Logf("wrote: %s", path)
 	}
 	return nil
 }
@@ -274,7 +276,7 @@ func raiseCleanupPeriod(settings *jsonx.Object, o *Options) {
 	if shown == 0 {
 		shown = 30
 	}
-	o.logf("claude: cleanupPeriodDays %d -> %d (transcripts were being deleted after it)", shown, keepDays)
+	o.Logf("claude: cleanupPeriodDays %d -> %d (transcripts were being deleted after it)", shown, keepDays)
 }
 
 func Codex(o *Options) error {
@@ -298,7 +300,7 @@ func Codex(o *Options) error {
 				return fmt.Errorf("install: %w", err)
 			}
 		}
-		o.logf("removed: %s", path)
+		o.Logf("removed: %s", path)
 		return nil
 	}
 	body, err := jsonx.Indent(config, 2)
@@ -309,9 +311,9 @@ func Codex(o *Options) error {
 		return err
 	}
 	if !o.Remove {
-		o.logf("codex: open Codex and run /hooks once to trust the agent-sessions hooks. Codex skips new hooks until they're trusted.")
+		o.Logf("codex: open Codex and run /hooks once to trust the agent-sessions hooks. Codex skips new hooks until they're trusted.")
 		if tomlHasHookEvents(filepath.Join(root, "config.toml")) {
-			o.logf("codex: config.toml also defines [hooks]; Codex runs both but warns. Moving them into hooks.json silences it.")
+			o.Logf("codex: config.toml also defines [hooks]; Codex runs both but warns. Moving them into hooks.json silences it.")
 		}
 	}
 	return nil

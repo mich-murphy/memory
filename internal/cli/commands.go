@@ -221,35 +221,31 @@ func runInstall(args []string, o IO) (int, error) {
 	if err := parse(fs, args); err != nil {
 		return exitUsage, err
 	}
-	var log []string
-	opts := &install.Options{
-		Command: install.Command(), Home: config.Home(), DryRun: *dryRun, Log: &log,
-	}
+	opts := &install.Options{Command: install.Command(), Home: config.Home(), DryRun: *dryRun}
 	failed := false
 	if _, err := install.WriteConfigTemplate(opts); err != nil {
 		failed = true
-		log = append(log, fmt.Sprintf("config: not written: %v", err))
+		opts.Logf("config: not written: %v", err)
 	}
 	if !*dryRun {
 		dir := filepath.Dir(config.FilePath())
 		if id, err := config.MachineUUID(dir); err == nil {
-			log = append(log, fmt.Sprintf("machine id: %s (kept in %s)", id, filepath.Join(dir, "machine-id")))
+			opts.Logf("machine id: %s (kept in %s)", id, filepath.Join(dir, "machine-id"))
 		}
 	}
 	present := install.AgentsPresent(opts.Home)
-	steps := map[string]func(*install.Options) error{"claude": install.Claude, "codex": install.Codex, "pi": install.Pi}
 	for _, agent := range agents.orAll() {
 		if len(agents) == 0 && !present[agent] {
-			log = append(log, agent+": not used on this machine, skipped (rerun `agent-sessions install` after installing it)")
+			opts.Logf("%s: not used on this machine, skipped (rerun `agent-sessions install` after installing it)", agent)
 			continue
 		}
-		if err := steps[agent](opts); err != nil {
+		if err := install.Agents[agent](opts); err != nil {
 			failed = true
-			log = append(log, fmt.Sprintf("%s: not changed: %v", agent, err))
+			opts.Logf("%s: not changed: %v", agent, err)
 		}
 	}
 	o.printf("agent-sessions command: %s\n", strings.Join(opts.Command, " "))
-	for _, line := range log {
+	for _, line := range opts.Log {
 		o.printf("  %s\n", line)
 	}
 	if !*dryRun {
@@ -269,17 +265,15 @@ func runUninstall(args []string, o IO) (int, error) {
 	if err := parse(fs, args); err != nil {
 		return exitUsage, err
 	}
-	var log []string
-	opts := &install.Options{Command: install.Command(), Home: config.Home(), DryRun: *dryRun, Remove: true, Log: &log}
-	steps := map[string]func(*install.Options) error{"claude": install.Claude, "codex": install.Codex, "pi": install.Pi}
+	opts := &install.Options{Command: install.Command(), Home: config.Home(), DryRun: *dryRun, Remove: true}
 	failed := false
 	for _, agent := range agents.orAll() {
-		if err := steps[agent](opts); err != nil {
+		if err := install.Agents[agent](opts); err != nil {
 			failed = true
-			log = append(log, fmt.Sprintf("%s: not changed: %v", agent, err))
+			opts.Logf("%s: not changed: %v", agent, err)
 		}
 	}
-	for _, line := range log {
+	for _, line := range opts.Log {
 		o.printf("  %s\n", line)
 	}
 	if failed {

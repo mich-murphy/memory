@@ -79,7 +79,7 @@ func PiExtensionPath(home string) string {
 func Pi(o *Options) error {
 	path := PiExtensionPath(o.Home)
 	if data, err := os.ReadFile(path); err == nil && !bytes.Contains(data, []byte(PiMarker)) {
-		o.logf("pi: %s exists and isn't agent-sessions'; leaving it alone", path)
+		o.Logf("pi: %s exists and isn't agent-sessions'; leaving it alone", path)
 		return nil
 	}
 	if o.Remove {
@@ -88,7 +88,7 @@ func Pi(o *Options) error {
 				return fmt.Errorf("install: %w", err)
 			}
 		}
-		o.logf("removed: %s", path)
+		o.Logf("removed: %s", path)
 		return nil
 	}
 	body, err := PiExtension(o.Command)
@@ -98,7 +98,7 @@ func Pi(o *Options) error {
 	if err := write(path, body, o); err != nil {
 		return err
 	}
-	o.logf("pi: new Pi sessions load the extension; run /reload in open ones.")
+	o.Logf("pi: new Pi sessions load the extension; run /reload in open ones.")
 	return nil
 }
 
@@ -110,7 +110,7 @@ func have(name string) bool {
 func WriteConfigTemplate(o *Options) (string, error) {
 	path := config.FilePath()
 	if fsutil.Exists(path) {
-		o.logf("config: keeping %s", path)
+		o.Logf("config: keeping %s", path)
 		return path, nil
 	}
 	names := []string{"R2_ENDPOINT", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"}
@@ -123,7 +123,7 @@ func WriteConfigTemplate(o *Options) (string, error) {
 		}
 	}
 	if o.DryRun {
-		o.logf("would write: %s", path)
+		o.Logf("would write: %s", path)
 		return path, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -138,9 +138,9 @@ func WriteConfigTemplate(o *Options) (string, error) {
 		return "", fmt.Errorf("config: %w", err)
 	}
 	if len(missing) > 0 {
-		o.logf("config: wrote %s; fill in %s", path, strings.Join(missing, ", "))
+		o.Logf("config: wrote %s; fill in %s", path, strings.Join(missing, ", "))
 	} else {
-		o.logf("config: wrote %s from your environment", path)
+		o.Logf("config: wrote %s from your environment", path)
 	}
 	return path, nil
 }
