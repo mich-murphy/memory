@@ -35,11 +35,11 @@ var (
 	}
 )
 
-type rootSession struct{ root, sessionID string }
-
 type Claude struct {
 	layout
-	sessionKeys map[rootSession]string
+	// slugs maps each root's session ids to their project slugs, read once per root: a glob
+	// per id lists every project, for each of the files a session leaves outside its project.
+	slugs map[string]map[string]string
 }
 
 func NewClaude(home string) *Claude {
@@ -69,7 +69,7 @@ func NewClaude(home string) *Claude {
 				".claude/agents/**", ".claude/commands/**", ".claude/output-styles/**", ".claude/hooks/**", ".mcp.json",
 			},
 		},
-		sessionKeys: map[rootSession]string{},
+		slugs: map[string]map[string]string{},
 	}
 }
 
@@ -136,17 +136,37 @@ func (c *Claude) classifyProject(parts []string, sf func(string, Role) (SessionF
 }
 
 func (c *Claude) sessionKey(root, sid string) string {
-	k := rootSession{root, sid}
-	if v, ok := c.sessionKeys[k]; ok {
-		return v
+	slugs, ok := c.slugs[root]
+	if !ok {
+		slugs = sessionSlugs(filepath.Join(root, "projects"))
+		c.slugs[root] = slugs
 	}
+	if slug, ok := slugs[sid]; ok {
+		return slug + "/" + sid
+	}
+	// Started since the index was read.
 	matches, _ := filepath.Glob(filepath.Join(root, "projects", "*", sid+".jsonl"))
 	if len(matches) == 0 {
 		return ""
 	}
-	v := filepath.Base(filepath.Dir(matches[0])) + "/" + sid
-	c.sessionKeys[k] = v
-	return v
+	return filepath.Base(filepath.Dir(matches[0])) + "/" + sid
+}
+
+// sessionSlugs keeps the first slug in name order for an id, as a glob would.
+func sessionSlugs(projects string) map[string]string {
+	out := map[string]string{}
+	dirs, _ := os.ReadDir(projects) // no projects yet: nothing to index
+	for _, d := range dirs {
+		entries, _ := os.ReadDir(filepath.Join(projects, d.Name())) // not a directory: nothing to index
+		for _, e := range entries {
+			if sid, ok := strings.CutSuffix(e.Name(), ".jsonl"); ok {
+				if _, seen := out[sid]; !seen {
+					out[sid] = d.Name()
+				}
+			}
+		}
+	}
+	return out
 }
 
 // Related includes the per-session files (file history, todos, tasks, team mailboxes) that

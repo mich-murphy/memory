@@ -6,6 +6,7 @@ A Go command-line collector that copies Claude Code, Codex and Pi session data i
 - The bucket layout is a contract other stages read: `docs/storage-layout.md`. Don't change a key, field or format without updating that doc and saying so in the PR.
 - Hook behaviour per agent, with sources: `docs/hooks.md`.
 - Naming rules, with sources: `docs/naming.md`. Follow them in every change.
+- Benchmarks and the golden bucket test: `docs/benchmarks.md`. Back a performance change with a benchstat comparison of `make bench` before and after.
 
 ## Working on the code
 

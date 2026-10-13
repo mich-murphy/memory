@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"io"
 	"sync"
 
@@ -53,41 +54,43 @@ func Compress(data []byte) []byte {
 // single segment, which only EncodeAll writes, so shorter inputs go through Compress.
 const streamMin = 256
 
-func CompressStream(src io.Reader, dst io.Writer, length int64) (string, error) {
+// CompressStream compresses the next length bytes of src into dst and writes them to h, so the
+// caller can check what it compressed.
+func CompressStream(src io.Reader, dst io.Writer, length int64, h hash.Hash) error {
 	if length < streamMin {
-		return compressSmall(src, dst, length)
+		return compressSmall(src, dst, length, h)
 	}
 	enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(level), zstd.WithLowerEncoderMem(true),
 		zstd.WithEncoderConcurrency(1))
 	if err != nil {
-		return "", fmt.Errorf("zstd writer: %w", err)
+		return fmt.Errorf("zstd writer: %w", err)
 	}
 	enc.ResetContentSize(dst, length)
-	h := sha256.New()
 	n, err := io.Copy(io.MultiWriter(h, enc), io.LimitReader(src, length))
 	if err != nil {
 		_ = enc.Close()
-		return "", fmt.Errorf("compress: %w", err)
+		return fmt.Errorf("compress: %w", err)
 	}
 	if n != length {
 		_ = enc.Close()
-		return "", fmt.Errorf("compress: read %d bytes, expected %d (file shrank)", n, length)
+		return fmt.Errorf("compress: read %d bytes, expected %d (file shrank)", n, length)
 	}
 	if err := enc.Close(); err != nil {
-		return "", fmt.Errorf("compress: %w", err)
+		return fmt.Errorf("compress: %w", err)
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return nil
 }
 
-func compressSmall(src io.Reader, dst io.Writer, length int64) (string, error) {
+func compressSmall(src io.Reader, dst io.Writer, length int64, h hash.Hash) error {
 	data := make([]byte, length)
 	if _, err := io.ReadFull(src, data); err != nil {
-		return "", fmt.Errorf("compress: read %d bytes: %w (file shrank)", length, err)
+		return fmt.Errorf("compress: read %d bytes: %w (file shrank)", length, err)
 	}
+	_, _ = h.Write(data) // hash writes never fail
 	if _, err := dst.Write(Compress(data)); err != nil {
-		return "", fmt.Errorf("compress: %w", err)
+		return fmt.Errorf("compress: %w", err)
 	}
-	return SHA256(data), nil
+	return nil
 }
 
 func Decompress(body []byte) ([]byte, error) {

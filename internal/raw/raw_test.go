@@ -2,6 +2,8 @@ package raw
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"slices"
 	"strings"
 	"testing"
@@ -33,11 +35,11 @@ func FuzzCompressRoundTrip(f *testing.F) {
 func stream(t *testing.T, data []byte) []byte {
 	t.Helper()
 	var out bytes.Buffer
-	sha, err := CompressStream(bytes.NewReader(append(slices.Clone(data), "trailing"...)), &out, int64(len(data)))
-	if err != nil {
+	h := sha256.New()
+	if err := CompressStream(bytes.NewReader(append(slices.Clone(data), "trailing"...)), &out, int64(len(data)), h); err != nil {
 		t.Fatal(err)
 	}
-	if sha != SHA256(data) {
+	if sha := hex.EncodeToString(h.Sum(nil)); sha != SHA256(data) {
 		t.Fatalf("sha256 %s, want %s", sha, SHA256(data))
 	}
 	return out.Bytes()
@@ -46,7 +48,7 @@ func stream(t *testing.T, data []byte) []byte {
 func TestCompressStreamNoticesAShrunkFile(t *testing.T) {
 	for _, length := range []int64{100, 1000} {
 		var out bytes.Buffer
-		if _, err := CompressStream(strings.NewReader("short"), &out, length); err == nil {
+		if err := CompressStream(strings.NewReader("short"), &out, length, sha256.New()); err == nil {
 			t.Errorf("length %d: no error for a file that shrank", length)
 		}
 	}

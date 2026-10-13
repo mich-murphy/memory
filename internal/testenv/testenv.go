@@ -85,9 +85,13 @@ func Backdate(t testing.TB, path string, age time.Duration) {
 	}
 }
 
+// Git runs git without its background maintenance, which on macOS can still be writing lock
+// files in .git while a test walks the home.
 func Git(t testing.TB, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...)
+	cmd := exec.CommandContext(t.Context(), "git", append([]string{
+		"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "maintenance.auto=false",
+	}, args...)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}

@@ -6,6 +6,7 @@ import (
 	"crypto/md5" //nolint:gosec // Content-MD5 is S3's per-part integrity header, not a security use
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -17,11 +18,13 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
+	"github.com/aws/smithy-go/middleware"
 
 	"github.com/mich-murphy/memory/internal/config"
 )
@@ -74,22 +77,34 @@ func NewR2(cfg *config.Config) (*R2, error) {
 	return &R2{client: client, bucket: cfg.R2Bucket}, nil
 }
 
-func sha256Base64(body []byte) string {
-	sum := sha256.Sum256(body)
-	return base64.StdEncoding.EncodeToString(sum[:])
+// payloadHash hands the signer a body's SHA-256 we already have, so it doesn't hash the body
+// a second time.
+func payloadHash(sum []byte) func(*s3.Options) {
+	hash := hex.EncodeToString(sum)
+	return func(o *s3.Options) {
+		o.APIOptions = append(o.APIOptions, func(st *middleware.Stack) error {
+			return st.Finalize.Add(middleware.FinalizeMiddlewareFunc("PayloadHash",
+				func(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (
+					middleware.FinalizeOutput, middleware.Metadata, error,
+				) {
+					return next.HandleFinalize(v4.SetPayloadHash(ctx, hash), in)
+				}), middleware.Before)
+		})
+	}
 }
 
 func (r *R2) Put(ctx context.Context, key string, body []byte, meta map[string]string) error {
 	ctx, cancel := context.WithTimeout(ctx, opTimeout)
 	defer cancel()
+	sum := sha256.Sum256(body)
 	_, err := r.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:         &r.bucket,
 		Key:            &key,
 		Body:           bytes.NewReader(body),
 		ContentLength:  aws.Int64(int64(len(body))),
 		Metadata:       meta,
-		ChecksumSHA256: aws.String(sha256Base64(body)),
-	})
+		ChecksumSHA256: aws.String(base64.StdEncoding.EncodeToString(sum[:])),
+	}, payloadHash(sum[:]))
 	if err != nil {
 		return fmt.Errorf("put %s: %w", key, err)
 	}

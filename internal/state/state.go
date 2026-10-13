@@ -49,6 +49,13 @@ CREATE TABLE IF NOT EXISTS uploads (
     size INTEGER,
     uploaded_at REAL NOT NULL
 );
+-- Where hashing an object's bytes left off, so an append is hashed from there (Resume).
+CREATE TABLE IF NOT EXISTS resumes (
+    key TEXT PRIMARY KEY,
+    size INTEGER NOT NULL,
+    fast INTEGER NOT NULL,
+    sha_state BLOB NOT NULL
+);
 CREATE TABLE IF NOT EXISTS pieces (
     key TEXT NOT NULL,
     start INTEGER NOT NULL,
@@ -107,9 +114,15 @@ func UnixNow() float64 {
 }
 
 type State struct {
-	db  *sql.DB
-	tx  *sql.Tx
-	ctx context.Context
+	db *sql.DB
+	// conn is the one connection every query runs on, so a statement is prepared once per
+	// State: a sweep asks the same few questions of every file, and parsing the SQL each time
+	// cost more than answering it. Transactions are BEGIN and COMMIT on it, since a sql.Tx
+	// would prepare every statement again.
+	conn  *sql.Conn
+	inTx  bool
+	ctx   context.Context
+	stmts map[string]*sql.Stmt
 }
 
 func Open(ctx context.Context, dir string) (*State, error) {
@@ -122,63 +135,76 @@ func Open(ctx context.Context, dir string) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("state: %w", err)
 	}
-	db.SetMaxOpenConns(1)
-	if _, err := db.ExecContext(ctx, schema); err != nil {
-		_ = db.Close()
+	// Writes record uploads that already happened, so they commit even when the run is cancelled.
+	ctx = context.WithoutCancel(ctx)
+	conn, err := db.Conn(ctx)
+	if err == nil {
+		_, err = conn.ExecContext(ctx, schema)
+	}
+	if err != nil {
+		_ = db.Close() // already failing; this only frees the handle
 		return nil, fmt.Errorf("state schema: %w", err)
 	}
-	// Writes record uploads that already happened, so they commit even when the run is cancelled.
-	return &State{db: db, ctx: context.WithoutCancel(ctx)}, nil
+	return &State{db: db, conn: conn, ctx: ctx, stmts: map[string]*sql.Stmt{}}, nil
 }
 
 func (s *State) Close() error {
-	ferr := s.Flush()
-	if err := s.db.Close(); err != nil {
+	errs := []error{s.Flush()}
+	for _, st := range s.stmts {
+		errs = append(errs, st.Close())
+	}
+	errs = append(errs, s.conn.Close(), s.db.Close())
+	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("state close: %w", err)
 	}
-	return ferr
+	return nil
 }
 
 func (s *State) Flush() error {
-	if s.tx == nil {
+	if !s.inTx {
 		return nil
 	}
-	tx := s.tx
-	s.tx = nil
-	if err := tx.Commit(); err != nil {
+	s.inTx = false
+	if _, err := s.conn.ExecContext(s.ctx, "COMMIT"); err != nil {
 		return fmt.Errorf("state commit: %w", err)
 	}
 	return nil
 }
 
-func (s *State) conn() (*sql.Tx, error) {
-	if s.tx == nil {
-		tx, err := s.db.BeginTx(s.ctx, nil)
-		if err != nil {
-			return nil, fmt.Errorf("state: %w", err)
+// prepare leaves query's statement in s.stmts and opens a transaction if none is open.
+func (s *State) prepare(query string) error {
+	if !s.inTx {
+		if _, err := s.conn.ExecContext(s.ctx, "BEGIN"); err != nil {
+			return fmt.Errorf("state: %w", err)
 		}
-		s.tx = tx
+		s.inTx = true
 	}
-	return s.tx, nil
+	if _, ok := s.stmts[query]; ok {
+		return nil
+	}
+	st, err := s.conn.PrepareContext(s.ctx, query) //nolint:sqlclosecheck // kept for the State's life; Close closes it
+	if err != nil {
+		return fmt.Errorf("state: %w", err)
+	}
+	s.stmts[query] = st
+	return nil
 }
 
 func (s *State) exec(query string, args ...any) error {
-	tx, err := s.conn()
-	if err != nil {
+	if err := s.prepare(query); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(s.ctx, query, args...); err != nil {
+	if _, err := s.stmts[query].ExecContext(s.ctx, args...); err != nil {
 		return fmt.Errorf("state: %w", err)
 	}
 	return nil
 }
 
 func (s *State) queryRow(query string, args []any, dest ...any) (bool, error) {
-	tx, err := s.conn()
-	if err != nil {
+	if err := s.prepare(query); err != nil {
 		return false, err
 	}
-	err = tx.QueryRowContext(s.ctx, query, args...).Scan(dest...)
+	err := s.stmts[query].QueryRowContext(s.ctx, args...).Scan(dest...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -190,11 +216,10 @@ func (s *State) queryRow(query string, args []any, dest ...any) (bool, error) {
 
 // queryAll returns one T per row, never nil, so an empty result encodes as [].
 func queryAll[T any](s *State, query string, args []any, scan func(*sql.Rows, *T) error) ([]T, error) {
-	tx, err := s.conn()
-	if err != nil {
+	if err := s.prepare(query); err != nil {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(s.ctx, query, args...)
+	rows, err := s.stmts[query].QueryContext(s.ctx, args...)
 	if err != nil {
 		return nil, fmt.Errorf("state: %w", err)
 	}
@@ -224,10 +249,12 @@ type File struct {
 	DeletedAt    float64
 }
 
-func (s *State) FileUnchanged(path string, size, mtimeNS int64) (bool, error) {
-	var one int
-	return s.queryRow("SELECT 1 FROM files WHERE path = ? AND size = ? AND mtime_ns = ? AND deleted_at IS NULL",
-		[]any{path, size, mtimeNS}, &one)
+// FileUnchanged says whether path was last recorded with this size and mtime, and how many
+// pieces key's object has, in one query since a sweep asks both of every file.
+func (s *State) FileUnchanged(path, key string, size, mtimeNS int64) (unchanged bool, pieces int, err error) {
+	_, err = s.queryRow("SELECT size = ? AND mtime_ns = ? AND deleted_at IS NULL, (SELECT COUNT(*) FROM pieces WHERE key = ?) "+
+		"FROM files WHERE path = ?", []any{size, mtimeNS, key, path}, &unchanged, &pieces)
+	return unchanged, pieces, err
 }
 
 // RecordFile keeps the previous head when f.Head is nil.
@@ -303,6 +330,30 @@ func (s *State) UploadedSHA(key string) (string, error) {
 
 func (s *State) RecordUpload(key, sha string, size int64) error {
 	return s.exec("INSERT OR REPLACE INTO uploads VALUES (?,?,?,?)", key, sha, size, UnixNow())
+}
+
+// Resume is where hashing an object's first Size bytes left off: their xxhash, and the SHA-256
+// state after them. When a file's first Size bytes still have that xxhash, it only grew, and
+// its SHA-256 carries on from SHA instead of reading those bytes through SHA-256 again.
+type Resume struct {
+	Size int64
+	Fast uint64
+	SHA  []byte
+}
+
+func (s *State) Resume(key string) (*Resume, error) {
+	var r Resume
+	var fast int64
+	found, err := s.queryRow("SELECT size, fast, sha_state FROM resumes WHERE key = ?", []any{key}, &r.Size, &fast, &r.SHA)
+	if !found || err != nil {
+		return nil, err
+	}
+	r.Fast = uint64(fast)
+	return &r, nil
+}
+
+func (s *State) SetResume(key string, r *Resume) error {
+	return s.exec("INSERT OR REPLACE INTO resumes VALUES (?,?,?,?)", key, r.Size, int64(r.Fast), r.SHA)
 }
 
 func (s *State) Pieces(key string) ([]raw.Piece, error) {

@@ -52,3 +52,40 @@ func TestClaudePluginsWithoutAUsableFile(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeKeysPerSessionFilesByTheSessionsProject(t *testing.T) {
+	root := t.TempDir()
+	touch := func(rel string) string {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	const a, b = "11111111-0000-0000-0000-000000000001", "11111111-0000-0000-0000-000000000002"
+	touch("projects/-z-proj/" + a + ".jsonl")
+	touch("projects/-a-proj/" + a + ".jsonl") // the same id in two projects: the first in name order wins
+	c := NewClaude(t.TempDir())
+	key := func(rel string) string {
+		t.Helper()
+		sf, ok := c.Classify(touch(rel), root)
+		if !ok {
+			t.Fatalf("%s not classified", rel)
+		}
+		return sf.SessionKey
+	}
+	if got := key("file-history/" + a + "/x@v1"); got != "-a-proj/"+a {
+		t.Errorf("indexed session: %q", got)
+	}
+	if got := key("todos/" + b + "-agent.json"); got != "" {
+		t.Errorf("unknown session: %q", got)
+	}
+	touch("projects/-m-proj/" + b + ".jsonl")
+	if got := key("todos/" + b + "-agent.json"); got != "-m-proj/"+b {
+		t.Errorf("session started after the index was read: %q", got)
+	}
+}
