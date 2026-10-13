@@ -25,15 +25,15 @@ var update = flag.Bool("update", false, "rewrite testdata/golden.txt from this r
 // change that alters what is captured or sent shows up here as a diff; rewrite the file with
 // -update only when the change is meant to.
 func TestBucketMatchesGolden(t *testing.T) {
-	oldLarge, oldChunk := largeFileBytes, chunkSize
-	largeFileBytes, chunkSize = 100<<10, 4<<10 // the largest transcripts take the streamed path
-	t.Cleanup(func() { largeFileBytes, chunkSize = oldLarge, oldChunk })
+	oldLarge, oldChunk := largeFileSize, chunkSize
+	largeFileSize, chunkSize = 100<<10, 4<<10 // the largest transcripts take the streamed path
+	t.Cleanup(func() { largeFileSize, chunkSize = oldLarge, oldChunk })
 
 	t0 := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	dir := resolvedTempDir(t)
 	w := testenv.NewWorkload(t, dir, testenv.SmallProfile, t0.Add(-2*time.Hour))
 	r := newRig(t, w, filepath.Join(dir, "state"))
-	r.store.pin = true
+	r.bucket.pin = true
 	n := testenv.SmallProfile.Sessions
 	claude, codex, pi := w.Mains[0], w.Mains[n], w.Mains[2*n]
 
@@ -41,7 +41,7 @@ func TestBucketMatchesGolden(t *testing.T) {
 	step := func(name string, at time.Time, sync func() *Summary) {
 		r.now = at
 		sum := sync()
-		ops, _ := r.store.takeOps()
+		ops, _ := r.bucket.takeOps()
 		body, err := jsonx.Compact(sum.Trimmed())
 		if err != nil {
 			t.Fatal(err)
@@ -79,8 +79,8 @@ func TestBucketMatchesGolden(t *testing.T) {
 
 	step("fold once idle", t0.Add(40*time.Minute), sweep)
 
-	out = append(out, section{"== bucket", bucketDigest(t, r.store)})
-	got := render(out, w, dir, setIDs(r.store, w, dir))
+	out = append(out, section{"== bucket", bucketDigest(t, r.bucket)})
+	got := render(out, w, dir, setIDs(r.bucket, w, dir))
 
 	golden := filepath.Join("testdata", "golden.txt")
 	if *update {

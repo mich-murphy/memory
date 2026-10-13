@@ -99,11 +99,11 @@ func TestHookQueuesOneSyncPerTranscriptAndDebounces(t *testing.T) {
 func TestStalePendingMarkerIsTakenOver(t *testing.T) {
 	e := testenv.New(t)
 	calls := fakeSpawn(t)
-	marker := ClaimPending(e.State, "/x/a.jsonl")
+	marker := claimPending(e.State, "/x/a.jsonl")
 	if marker == "" {
 		t.Fatal("no marker")
 	}
-	testenv.Backdate(t, marker, PendingMarkerStaleAfter+5*time.Second)
+	testenv.Backdate(t, marker, markerStaleAfter+5*time.Second)
 	withStdin(t, `{"transcript_path": "/x/a.jsonl"}`, func() { Run(t.Context(), "codex", nil, "", ExtensionArgs{}) })
 	if len(*calls) != 1 || (*calls)[0].path != "/x/a.jsonl" || (*calls)[0].event != "codex" {
 		t.Errorf("spawned %v", *calls)
@@ -276,17 +276,17 @@ func TestAgentProcessIsFoundAmongAncestors(t *testing.T) {
 	tree[10] = entry{[]string{"/bin/sh", "-c", "/opt/agent-sessions hook claude"}, 9}
 	tree[9] = entry{[]string{"claude", "--model", "opus"}, 1}
 	want := map[string]any{"argv": []string{"claude", "--model", "opus"}, "pid": 9, "ancestry": []string{"sh", "claude"}}
-	if diff := cmp.Diff(want, LaunchProcess("claude")); diff != "" {
+	if diff := cmp.Diff(want, launchProcess("claude")); diff != "" {
 		t.Errorf("claude:\n%s", diff)
 	}
 	clear(tree)
 	tree[10] = entry{[]string{"/usr/bin/node", "/usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", "-c"}, 1}
-	if got := LaunchProcess("pi")["pid"]; got != 10 {
+	if got := launchProcess("pi")["pid"]; got != 10 {
 		t.Errorf("pi pid = %v", got)
 	}
 	clear(tree)
 	tree[10] = entry{[]string{"/usr/local/bin/codex exec --full-auto"}, 1}
-	if got := LaunchProcess("codex")["pid"]; got != 10 {
+	if got := launchProcess("codex")["pid"]; got != 10 {
 		t.Errorf("codex pid from a whole ps line = %v", got)
 	}
 }
@@ -316,11 +316,11 @@ func FuzzReadInput(f *testing.F) {
 			t.Fatal(err)
 		}
 		defer func() { _ = in.Close() }() // read-only
-		got := ReadInput(in)
+		got := readInput(in)
 		if got == nil {
 			t.Fatal("nil input map")
 		}
-		for _, p := range PathsFromInput(got) {
+		for _, p := range pathsFromInput(got) {
 			if p == "" {
 				t.Fatal("empty path")
 			}

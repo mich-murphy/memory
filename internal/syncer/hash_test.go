@@ -29,7 +29,7 @@ func TestHashContentMatchesAFullReadWithOrWithoutAResume(t *testing.T) {
 	chunkSize = 7 // reads cross the old size mid-chunk
 	before := "line one\nline two\n"
 	first := hashOf(t, before, nil, nil)
-	prev := &state.Upload{SHA256: first.sha, Size: &first.size}
+	prev := &state.Upload{SHA256: first.sha, Size: first.size}
 	corrupt := *first.resume
 	corrupt.SHA = []byte("not a sha256 state")
 	cases := []struct {
@@ -57,7 +57,7 @@ func TestHashContentMatchesAFullReadWithOrWithoutAResume(t *testing.T) {
 			}, cmp.Ignore())); diff != "" {
 				t.Errorf("(-want +got):\n%s", diff)
 			}
-			again := hashOf(t, c.data+"more\n", &state.Upload{SHA256: got.sha, Size: &got.size}, got.resume)
+			again := hashOf(t, c.data+"more\n", &state.Upload{SHA256: got.sha, Size: got.size}, got.resume)
 			if !again.appended || again.sha != raw.SHA256([]byte(c.data+"more\n")) {
 				t.Errorf("the resume this left doesn't carry on: %+v", again)
 			}
@@ -71,7 +71,7 @@ func TestHashContentUsesTheResume(t *testing.T) {
 	a := hashOf(t, "aaaa\n", nil, nil)
 	b := hashOf(t, "bbbb\n", nil, nil)
 	forged := &state.Resume{Size: a.size, Fast: a.resume.Fast, SHA: b.resume.SHA}
-	got := hashOf(t, "aaaa\nmore\n", &state.Upload{SHA256: a.sha, Size: &a.size}, forged)
+	got := hashOf(t, "aaaa\nmore\n", &state.Upload{SHA256: a.sha, Size: a.size}, forged)
 	if got.sha != raw.SHA256([]byte("bbbb\nmore\n")) {
 		t.Errorf("sha256 %s wasn't carried on from the resume", got.sha)
 	}
@@ -91,12 +91,12 @@ func (failingReader) ReadAt([]byte, int64) (int, error) { return 0, bytes.ErrToo
 // TestCompressChecksTheBytesItHashed rewrites a file between hashing and compressing it, which
 // must fail the upload rather than send bytes that don't match the recorded sha256.
 func TestCompressChecksTheBytesItHashed(t *testing.T) {
-	defer func(old int64) { largeFileBytes = old }(largeFileBytes)
+	defer func(old int64) { largeFileSize = old }(largeFileSize)
 	const before, after = "line one\nline two\n", "line ONE\nline two\n"
 	for _, large := range []int64{1 << 20, 4} {
 		for _, rewrite := range []bool{false, true} {
 			t.Run(fmt.Sprintf("large=%d/rewrite=%v", large, rewrite), func(t *testing.T) {
-				largeFileBytes = large
+				largeFileSize = large
 				path := filepath.Join(t.TempDir(), "s.jsonl")
 				if err := os.WriteFile(path, []byte(before), 0o600); err != nil {
 					t.Fatal(err)
@@ -115,7 +115,7 @@ func TestCompressChecksTheBytesItHashed(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				u := &upload{sha: c.sha, size: c.size, resume: c.resume}
+				u := &upload{file: state.File{SHA256: c.sha, Size: c.size}, piece: raw.Piece{End: c.size}, resume: c.resume}
 				defer u.cleanup()
 				err = c.compress(u)
 				if rewrite {
@@ -127,8 +127,8 @@ func TestCompressChecksTheBytesItHashed(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if u.pieceSHA != raw.SHA256([]byte(before)) {
-					t.Errorf("piece sha256 %s, want the file's", u.pieceSHA)
+				if u.piece.SHA256 != raw.SHA256([]byte(before)) {
+					t.Errorf("piece sha256 %s, want the file's", u.piece.SHA256)
 				}
 			})
 		}

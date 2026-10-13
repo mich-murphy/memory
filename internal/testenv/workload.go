@@ -44,8 +44,8 @@ type Workload struct {
 	Start time.Time
 	// Mains are the main transcripts, in a fixed order: claude, codex, pi.
 	Mains []string
-	// Bytes is the total size of every file written.
-	Bytes int64
+	// Size is the total size of every file written.
+	Size  int64
 	Files int
 
 	profile Profile
@@ -113,7 +113,7 @@ func (w *Workload) Touch(tb testing.TB, at time.Time) {
 func (w *Workload) write(tb testing.TB, path, text string) {
 	tb.Helper()
 	Write(tb, path, text)
-	w.Bytes += int64(len(text))
+	w.Size += int64(len(text))
 	w.Files++
 }
 

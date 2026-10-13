@@ -22,15 +22,15 @@ var (
 	homeVarRE    = regexp.MustCompile(`\$\{?HOME\}?`)
 )
 
-func parseSettings(e *Entry) any {
+func parseSettings(e *entry) any {
 	var v any
-	if strings.HasSuffix(e.Path, ".toml") {
-		if _, err := toml.Decode(string(e.Body), &v); err != nil {
+	if strings.HasSuffix(e.path, ".toml") {
+		if _, err := toml.Decode(string(e.body), &v); err != nil {
 			return nil
 		}
 		return v
 	}
-	if err := jsonx.Decode(e.Body, &v); err != nil {
+	if err := jsonx.Decode(e.body, &v); err != nil {
 		return nil
 	}
 	return v
@@ -113,13 +113,13 @@ func scriptPaths(command, home, projectRoot string) []string {
 	return out
 }
 
-func imports(e *Entry, home string) []string {
-	if e.RealPath == "" || !strings.HasSuffix(e.Path, ".md") {
+func imports(e *entry, home string) []string {
+	if e.realPath == "" || !strings.HasSuffix(e.path, ".md") {
 		return nil
 	}
 	var out []string
 	fenced := false
-	for line := range strings.Lines(string(e.Body)) {
+	for line := range strings.Lines(string(e.body)) {
 		if strings.HasPrefix(strings.TrimLeft(line, " \t"), "```") {
 			fenced = !fenced
 			continue
@@ -134,7 +134,7 @@ func imports(e *Entry, home string) []string {
 				p = home + p[1:]
 			}
 			if !filepath.IsAbs(p) {
-				p = filepath.Join(filepath.Dir(e.RealPath), p)
+				p = filepath.Join(filepath.Dir(e.realPath), p)
 			}
 			if fsutil.IsFile(p) {
 				out = append(out, p)

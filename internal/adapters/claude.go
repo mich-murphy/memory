@@ -25,79 +25,58 @@ var (
 		"file-history": RoleFileHistory, "session-env": RoleSessionEnv, "debug": RoleDebug, "todos": RoleTodo,
 		"tasks": RoleTask,
 	}
-	claudeTopLevelRoles = map[string]Role{
-		"plans": RolePlan, "teams": RoleTeam, "paste-cache": RolePaste, "usage-data": RoleUsage,
-		"agent-memory": RoleMemory, "skills": RoleConfig, "agents": RoleConfig, "commands": RoleConfig,
-		"rules": RoleConfig, "output-styles": RoleConfig, "hooks": RoleConfig, "plugins": RoleConfig,
-		"sessions": RoleLiveness,
-	}
-	claudeConfigFiles = map[string]bool{
-		"settings.json": true, "settings.local.json": true, "CLAUDE.md": true, "keybindings.json": true,
-		"launcher-settings.json": true, "remote-settings.json": true, "policy-limits.json": true,
+	claudeRoles = map[string]Role{
+		"history.jsonl": RoleHistory, "settings.json": RoleConfig, "settings.local.json": RoleConfig,
+		"CLAUDE.md": RoleConfig, "keybindings.json": RoleConfig, "launcher-settings.json": RoleConfig,
+		"remote-settings.json": RoleConfig, "policy-limits.json": RoleConfig, "plans/": RolePlan, "teams/": RoleTeam,
+		"paste-cache/": RolePaste, "usage-data/": RoleUsage, "agent-memory/": RoleMemory, "skills/": RoleConfig,
+		"agents/": RoleConfig, "commands/": RoleConfig, "rules/": RoleConfig, "output-styles/": RoleConfig,
+		"hooks/": RoleConfig, "plugins/": RoleConfig, "sessions/": RoleLiveness,
 	}
 )
 
 type Claude struct {
-	home string
+	layout
 	// slugs maps each root's session ids to their project slugs, read once per root: a glob
 	// per id lists every project, for each of the files a session leaves outside its project.
 	slugs map[string]map[string]string
 }
 
 func NewClaude(home string) *Claude {
-	return &Claude{home: home, slugs: map[string]map[string]string{}}
-}
-
-func (c *Claude) Name() string { return "claude" }
-
-func (c *Claude) Home() string { return c.home }
-
-// SkipDirs: plugins/cache and plugins/marketplaces are git checkouts of plugin sources
-// (snapshots record the installed plugins); local/ and downloads/ hold Claude Code's own
-// install; backups/ holds copies of ~/.claude.json, API key included.
-func (c *Claude) SkipDirs() []string {
-	return []string{"plugins/cache", "plugins/marketplaces", "local", "downloads", "backups", "statsig", "ide", "telemetry"}
-}
-
-func (c *Claude) ManagedSettingsFiles() []string {
-	return []string{
-		"/etc/claude-code/managed-settings.json",
-		"/etc/claude-code/managed-mcp.json",
-		"/etc/claude-code/CLAUDE.md",
-		"/Library/Application Support/ClaudeCode/managed-settings.json",
-		"/Library/Application Support/ClaudeCode/managed-mcp.json",
-		"/Library/Application Support/ClaudeCode/CLAUDE.md",
-	}
-}
-
-func (c *Claude) Rules() SnapshotRules {
-	return SnapshotRules{
-		User: []string{
-			"CLAUDE.md", "settings.json", "settings.local.json", "launcher-settings.json", "keybindings.json",
-			"rules/**", "skills/**", "agents/**", "commands/**", "output-styles/**", "hooks/**",
-			"plugins/installed_plugins.json", "plugins/known_marketplaces.json",
+	return &Claude{
+		name: "claude", home: home, dir: ".claude", dirEnv: "CLAUDE_CONFIG_DIR",
+		// plugins/cache and plugins/marketplaces are git checkouts of plugin sources (snapshots
+		// record the installed plugins); local/ and downloads/ hold Claude Code's own install;
+		// backups/ holds copies of ~/.claude.json, API key included.
+		skipDirs: []string{"plugins/cache", "plugins/marketplaces", "local", "downloads", "backups", "statsig", "ide", "telemetry"},
+		managedSettings: []string{
+			"/etc/claude-code/managed-settings.json",
+			"/etc/claude-code/managed-mcp.json",
+			"/etc/claude-code/CLAUDE.md",
+			"/Library/Application Support/ClaudeCode/managed-settings.json",
+			"/Library/Application Support/ClaudeCode/managed-mcp.json",
+			"/Library/Application Support/ClaudeCode/CLAUDE.md",
 		},
-		Project: []string{
-			"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "**/CLAUDE.md", "**/CLAUDE.local.md", "**/AGENTS.md",
-			".claude/settings.json", ".claude/settings.local.json", ".claude/rules/**", ".claude/skills/**",
-			".claude/agents/**", ".claude/commands/**", ".claude/output-styles/**", ".claude/hooks/**", ".mcp.json",
+		rules: SnapshotRules{
+			User: []string{
+				"CLAUDE.md", "settings.json", "settings.local.json", "launcher-settings.json", "keybindings.json",
+				"rules/**", "skills/**", "agents/**", "commands/**", "output-styles/**", "hooks/**",
+				"plugins/installed_plugins.json", "plugins/known_marketplaces.json",
+			},
+			Project: []string{
+				"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "**/CLAUDE.md", "**/CLAUDE.local.md", "**/AGENTS.md",
+				".claude/settings.json", ".claude/settings.local.json", ".claude/rules/**", ".claude/skills/**",
+				".claude/agents/**", ".claude/commands/**", ".claude/output-styles/**", ".claude/hooks/**", ".mcp.json",
+			},
 		},
+		slugs: map[string]map[string]string{},
 	}
-}
-
-func (c *Claude) CanonicalRoot() string { return filepath.Join(c.home, ".claude") }
-
-func (c *Claude) DefaultRoots() []string {
-	if p := envPath("CLAUDE_CONFIG_DIR", c.home); p != "" {
-		return []string{p}
-	}
-	return []string{c.CanonicalRoot()}
 }
 
 func (c *Claude) InferRoot(path string) string {
 	for dir := filepath.Dir(path); dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
 		if filepath.Base(dir) == "projects" {
-			if rel, ok := Rel(path, dir); ok && strings.Count(rel, "/") >= 1 {
+			if rel, ok := relative(path, dir); ok && strings.Count(rel, "/") >= 1 {
 				return filepath.Dir(dir)
 			}
 		}
@@ -106,37 +85,28 @@ func (c *Claude) InferRoot(path string) string {
 }
 
 func (c *Claude) Classify(path, root string) (SessionFile, bool) {
-	rel, ok := Rel(path, root)
+	rel, ok := relative(path, root)
 	if !ok {
 		return SessionFile{}, false
 	}
 	parts := strings.Split(rel, "/")
 	sf := func(sessionKey string, role Role) (SessionFile, bool) {
-		return SessionFile{Agent: c.Name(), Path: path, Key: KeyPrefix(c, root) + rel, SessionKey: sessionKey, Role: role}, true
+		return SessionFile{Agent: c.Name(), Root: root, Path: path, Key: keyPrefix(c, root) + rel, SessionKey: sessionKey, Role: role}, true
 	}
 	top := parts[0]
-	if len(parts) == 1 {
-		if top == "history.jsonl" {
-			return sf("", RoleHistory)
-		}
-		if claudeConfigFiles[top] || hasAnySuffix(top, []string{".sh", ".py", ".js", ".ts"}) {
-			return sf("", RoleConfig)
-		}
-		return sf("", RoleUnknown)
+	if len(parts) == 1 && hasAnySuffix(top, []string{".sh", ".py", ".js", ".ts"}) {
+		return sf("", RoleConfig)
 	}
-	if top == "projects" {
+	if top == "projects" && len(parts) > 1 {
 		return c.classifyProject(parts, sf)
 	}
-	if role, ok := claudePerSessionDirs[top]; ok {
+	if role, ok := claudePerSessionDirs[top]; ok && len(parts) > 1 {
 		if sid := uuidPrefixRE.FindString(parts[1]); sid != "" {
 			return sf(c.sessionKey(root, sid), role)
 		}
 		return sf("", role)
 	}
-	if role, ok := claudeTopLevelRoles[top]; ok {
-		return sf("", role)
-	}
-	return sf("", RoleUnknown)
+	return sf("", topRole(claudeRoles, rel))
 }
 
 func (c *Claude) classifyProject(parts []string, sf func(string, Role) (SessionFile, bool)) (SessionFile, bool) {
@@ -201,7 +171,8 @@ func sessionSlugs(projects string) map[string]string {
 
 // Related includes the per-session files (file history, todos, tasks, team mailboxes) that
 // Claude Code deletes once the session or team is done.
-func (c *Claude) Related(sf SessionFile, root string) []string {
+func (c *Claude) Related(sf SessionFile) []string {
+	root := sf.Root
 	slug, sid, ok := strings.Cut(sf.SessionKey, "/")
 	if !ok {
 		return nil
@@ -212,7 +183,7 @@ func (c *Claude) Related(sf SessionFile, root string) []string {
 	if fsutil.IsFile(main) {
 		out = append(out, main)
 	}
-	out = append(out, FilesUnder(filepath.Join(projectDir, sid))...)
+	out = append(out, filesUnder(filepath.Join(projectDir, sid))...)
 	if matches, err := filepath.Glob(filepath.Join(projectDir, globEscape(sid)+".*")); err == nil {
 		for _, p := range matches {
 			if p != main && fsutil.IsFile(p) {
@@ -220,7 +191,7 @@ func (c *Claude) Related(sf SessionFile, root string) []string {
 			}
 		}
 	}
-	out = append(out, FilesUnder(filepath.Join(root, "file-history", sid), filepath.Join(root, "session-env", sid),
+	out = append(out, filesUnder(filepath.Join(root, "file-history", sid), filepath.Join(root, "session-env", sid),
 		filepath.Join(root, "tasks"), filepath.Join(root, "teams"))...)
 	if matches, err := filepath.Glob(filepath.Join(root, "todos", globEscape(sid)+"*")); err == nil {
 		for _, p := range matches {
@@ -238,8 +209,6 @@ func (c *Claude) Related(sf SessionFile, root string) []string {
 func globEscape(s string) string {
 	return strings.NewReplacer(`\`, `\\`, "*", `\*`, "?", `\?`, "[", `\[`).Replace(s)
 }
-
-func (c *Claude) UserBase(root string) string { return root }
 
 func (c *Claude) claudeJSON(root string) string {
 	if root != c.CanonicalRoot() {
@@ -259,7 +228,7 @@ func (c *Claude) Exports(root, workDir string, interval time.Duration) []Session
 	if err != nil {
 		return out
 	}
-	dest := filepath.Join(workDir, c.Name(), RootTag(root), "claude.json")
+	dest := filepath.Join(workDir, c.Name(), rootTag(root), "claude.json")
 	// Claude Code rewrites this file on every start, so like a database it is refreshed at
 	// most every interval to keep versions few.
 	old, rerr := os.ReadFile(dest)
@@ -269,7 +238,7 @@ func (c *Claude) Exports(root, workDir string, interval time.Duration) []Session
 			return out
 		}
 	}
-	return append(out, SessionFile{Agent: c.Name(), Path: dest, Key: KeyPrefix(c, root) + "claude.json", Role: RoleConfig})
+	return append(out, SessionFile{Agent: c.Name(), Root: root, Path: dest, Key: keyPrefix(c, root) + "claude.json", Role: RoleConfig})
 }
 
 // ExtraSnapshotEntries records only the MCP parts of ~/.claude.json, whose UI state changes
@@ -346,22 +315,15 @@ func (c *Claude) Plugins(root string) []Plugin {
 	return out
 }
 
+var claudeInfo = map[string]string{
+	"session_id": "sessionId", "agent_id": "agentId", "cwd": "cwd", "git_branch": "gitBranch",
+	"agent_version": "version", "entrypoint": "entrypoint",
+}
+
 func (c *Claude) SessionInfo(head []map[string]any) map[string]any {
 	info := map[string]any{}
-	fields := [][2]string{
-		{"sessionId", "session_id"},
-		{"agentId", "agent_id"},
-		{"cwd", "cwd"},
-		{"gitBranch", "git_branch"},
-		{"version", "agent_version"},
-		{"entrypoint", "entrypoint"},
-	}
 	for _, d := range head {
-		for _, f := range fields {
-			if _, done := info[f[1]]; !done && truthy(d[f[0]]) {
-				info[f[1]] = d[f[0]]
-			}
-		}
+		fill(info, d, claudeInfo)
 	}
 	return info
 }

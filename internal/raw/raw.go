@@ -13,11 +13,11 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-// Level is about zstd's level 7. It compresses transcripts within a few percent of level 10 at
+// level is about zstd's level 7. It compresses transcripts within a few percent of level 10 at
 // a fraction of the CPU.
-const Level = zstd.SpeedBetterCompression
+const level = zstd.SpeedBetterCompression
 
-const maxDecodedBytes = 16 << 30
+const maxDecodedSize = 16 << 30
 
 var (
 	encoderOnce sync.Once
@@ -31,7 +31,7 @@ func sharedEncoder() *zstd.Encoder {
 		// Options are constants, so this can't fail. A single segment records the content
 		// size; EncodeAll only sees files below the syncer's 64 MB streaming threshold, well
 		// within zstd's default 128 MB window limit.
-		encoder, _ = zstd.NewWriter(nil, zstd.WithEncoderLevel(Level), zstd.WithLowerEncoderMem(true),
+		encoder, _ = zstd.NewWriter(nil, zstd.WithEncoderLevel(level), zstd.WithLowerEncoderMem(true),
 			zstd.WithSingleSegment(true))
 	})
 	return encoder
@@ -39,7 +39,7 @@ func sharedEncoder() *zstd.Encoder {
 
 func sharedDecoder() *zstd.Decoder {
 	decoderOnce.Do(func() {
-		decoder, _ = zstd.NewReader(nil, zstd.WithDecoderMaxMemory(maxDecodedBytes), zstd.WithDecoderLowmem(true))
+		decoder, _ = zstd.NewReader(nil, zstd.WithDecoderMaxMemory(maxDecodedSize), zstd.WithDecoderLowmem(true))
 	})
 	return decoder
 }
@@ -60,7 +60,7 @@ func CompressStream(src io.Reader, dst io.Writer, length int64, h hash.Hash) err
 	if length < streamMin {
 		return compressSmall(src, dst, length, h)
 	}
-	enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(Level), zstd.WithLowerEncoderMem(true),
+	enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(level), zstd.WithLowerEncoderMem(true),
 		zstd.WithEncoderConcurrency(1))
 	if err != nil {
 		return fmt.Errorf("zstd writer: %w", err)

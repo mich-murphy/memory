@@ -10,7 +10,7 @@ import (
 
 var safe = regexp.MustCompile(`^[\w@%+=:,./-]+$`)
 
-func Quote(s string) string {
+func quote(s string) string {
 	if s == "" {
 		return "''"
 	}
@@ -23,12 +23,12 @@ func Quote(s string) string {
 func Join(words []string) string {
 	quoted := make([]string, len(words))
 	for i, w := range words {
-		quoted[i] = Quote(w)
+		quoted[i] = quote(w)
 	}
 	return strings.Join(quoted, " ")
 }
 
-var ErrUnterminated = errors.New("unterminated quote")
+var errUnterminated = errors.New("unterminated quote")
 
 // Split does no expansion.
 func Split(s string) ([]string, error) {
@@ -47,7 +47,7 @@ func Split(s string) ([]string, error) {
 		case c == '\'':
 			end := strings.IndexByte(s[i+1:], '\'')
 			if end < 0 {
-				return nil, ErrUnterminated
+				return nil, errUnterminated
 			}
 			cur.WriteString(s[i+1 : i+1+end])
 			i += end + 1
@@ -86,5 +86,5 @@ func readDoubleQuoted(s string, cur *strings.Builder) (consumedWithClosingQuote 
 			cur.WriteByte(c)
 		}
 	}
-	return 0, ErrUnterminated
+	return 0, errUnterminated
 }

@@ -4,6 +4,7 @@ package adapters
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -49,6 +50,7 @@ const (
 
 type SessionFile struct {
 	Agent string
+	Root  string
 	Path  string
 	// Key is relative to raw/agent=<agent>/machine=<machine>/, without .zst.
 	Key string
@@ -57,6 +59,15 @@ type SessionFile struct {
 	Role       Role
 	Zstd       bool
 }
+
+type SessionRef struct {
+	Agent string
+	Key   string
+}
+
+func (r SessionRef) String() string { return r.Agent + "/" + r.Key }
+
+func (f SessionFile) Session() SessionRef { return SessionRef{f.Agent, f.SessionKey} }
 
 // SnapshotRules are patterns relative to UserBase, the project root and $HOME. A pattern
 // ending in "/**" takes every file under that directory; "**/NAME" matches NAME at any depth.
@@ -88,6 +99,8 @@ type Adapter interface {
 	Rules() SnapshotRules
 	SkipDirs() []string
 	ManagedSettingsFiles() []string
+	// Dir is where the agent keeps its settings and hooks.
+	Dir() string
 	DefaultRoots() []string
 	// CanonicalRoot is the root keyed without a prefix. It is fixed from $HOME, not the
 	// environment, so a hook (which sees CLAUDE_CONFIG_DIR and friends) and a sweep (which
@@ -95,7 +108,7 @@ type Adapter interface {
 	CanonicalRoot() string
 	InferRoot(path string) string
 	Classify(path, root string) (SessionFile, bool)
-	Related(sf SessionFile, root string) []string
+	Related(sf SessionFile) []string
 	UserBase(root string) string
 	ExtraSnapshotEntries(root, projectRoot string) []Entry
 	MemoryDirs(root, projectRoot, sessionKey string) []ScopedDir
@@ -125,6 +138,15 @@ var (
 	binaryMagic    = [][]byte{{0x7f, 'E', 'L', 'F'}, {0xcf, 0xfa, 0xed, 0xfe}, {0xce, 0xfa, 0xed, 0xfe}, {0xca, 0xfe, 0xba, 0xbe}, []byte("MZ")}
 )
 
+// topRole looks up the first element of rel in roles, where a directory's entry ends in "/".
+func topRole(roles map[string]Role, rel string) Role {
+	top, _, isDir := strings.Cut(rel, "/")
+	if isDir {
+		top += "/"
+	}
+	return cmp.Or(roles[top], RoleUnknown)
+}
+
 func hasAnySuffix(name string, suffixes []string) bool {
 	return slices.ContainsFunc(suffixes, func(s string) bool { return strings.HasSuffix(name, s) })
 }
@@ -134,11 +156,11 @@ func IsCredential(name string) bool {
 		strings.HasPrefix(name, ".claude.json")
 }
 
-func Skipped(name string) bool {
+func skipped(name string) bool {
 	return IsCredential(name) || hasAnySuffix(name, skipSuffixes)
 }
 
-func IsSQLite(name string) bool {
+func isSQLite(name string) bool {
 	return hasAnySuffix(name, sqliteSuffixes)
 }
 
@@ -156,21 +178,51 @@ func IsExecutableBinary(path string, mode fs.FileMode) bool {
 	return slices.ContainsFunc(binaryMagic, func(m []byte) bool { return bytes.HasPrefix(head[:n], m) })
 }
 
-func RootTag(root string) string {
+func rootTag(root string) string {
 	sum := sha256.Sum256([]byte(root))
 	return hex.EncodeToString(sum[:])[:10]
 }
 
-func KeyPrefix(a Adapter, root string) string {
+func keyPrefix(a Adapter, root string) string {
 	if root == a.CanonicalRoot() {
 		return ""
 	}
-	return "roots/" + RootTag(root) + "/"
+	return "roots/" + rootTag(root) + "/"
 }
+
+// layout is what an adapter knows about its agent before reading a file.
+type layout struct {
+	name string
+	home string
+	// dir is the agent's directory under home; dirEnv, when set, overrides it.
+	dir             string
+	dirEnv          string
+	skipDirs        []string
+	managedSettings []string
+	rules           SnapshotRules
+}
+
+func (l *layout) Name() string { return l.name }
+
+func (l *layout) Home() string { return l.home }
+
+func (l *layout) Rules() SnapshotRules { return l.rules }
+
+func (l *layout) SkipDirs() []string { return l.skipDirs }
+
+func (l *layout) ManagedSettingsFiles() []string { return l.managedSettings }
+
+func (l *layout) CanonicalRoot() string { return filepath.Join(l.home, l.dir) }
+
+func (l *layout) Dir() string { return cmp.Or(envPath(l.dirEnv, l.home), l.CanonicalRoot()) }
+
+func (l *layout) DefaultRoots() []string { return []string{l.Dir()} }
+
+func (l *layout) UserBase(root string) string { return root }
 
 type noExtras struct{}
 
-func (noExtras) Related(SessionFile, string) []string { return nil }
+func (noExtras) Related(SessionFile) []string { return nil }
 
 func (noExtras) ExtraSnapshotEntries(string, string) []Entry { return nil }
 
@@ -206,7 +258,7 @@ func walk(a Adapter, root string) []walkedFile {
 			}
 			return nil
 		}
-		if !d.Type().IsRegular() || Skipped(d.Name()) {
+		if !d.Type().IsRegular() || skipped(d.Name()) {
 			return nil
 		}
 		info, err := d.Info()
@@ -222,7 +274,7 @@ func walk(a Adapter, root string) []walkedFile {
 func Discover(a Adapter, root string) (files []SessionFile, databases []string) {
 	for _, f := range walk(a, root) {
 		switch {
-		case IsSQLite(filepath.Base(f.path)):
+		case isSQLite(filepath.Base(f.path)):
 			databases = append(databases, f.path)
 		case IsExecutableBinary(f.path, f.mode):
 		default:
@@ -234,14 +286,14 @@ func Discover(a Adapter, root string) (files []SessionFile, databases []string) 
 	return files, databases
 }
 
-func FilesUnder(roots ...string) []string {
+func filesUnder(roots ...string) []string {
 	var out []string
 	for _, root := range roots {
 		if !fsutil.IsDir(root) {
 			continue
 		}
 		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-			if err == nil && d.Type().IsRegular() && !Skipped(d.Name()) {
+			if err == nil && d.Type().IsRegular() && !skipped(d.Name()) {
 				out = append(out, p)
 			}
 			return nil
@@ -269,7 +321,7 @@ func ReadHead(data []byte, maxLines int) []map[string]any {
 	return out
 }
 
-func Rel(path, root string) (string, bool) {
+func relative(path, root string) (string, bool) {
 	rel, err := filepath.Rel(root, path)
 	if err != nil || rel == "." || !filepath.IsLocal(rel) {
 		return "", false
@@ -293,6 +345,15 @@ func envPath(name, home string) string {
 		return ""
 	}
 	return filepath.Clean(expandUser(v, home))
+}
+
+// fill sets each field of info from d[fields[field]], keeping the first non-empty value.
+func fill(info, d map[string]any, fields map[string]string) {
+	for field, from := range fields {
+		if _, done := info[field]; !done && truthy(d[from]) {
+			info[field] = d[from]
+		}
+	}
 }
 
 func str(m map[string]any, key string) string {

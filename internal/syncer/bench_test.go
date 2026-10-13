@@ -128,7 +128,7 @@ func BenchmarkBackfill(b *testing.B) {
 		b.Run(pr.name, func(b *testing.B) {
 			h := home(b, pr)
 			stateDir := filepath.Join(b.TempDir(), "state")
-			b.SetBytes(h.w.Bytes)
+			b.SetBytes(h.w.Size)
 			r := newRig(b, h.w, stateDir)
 			r.now = h.at
 			var t tally
@@ -137,10 +137,10 @@ func BenchmarkBackfill(b *testing.B) {
 				if err := os.RemoveAll(stateDir); err != nil {
 					b.Fatal(err)
 				}
-				r.store.objects = map[string]memObject{}
+				r.bucket.objects = map[string]memObject{}
 				b.StartTimer()
 				r.sync("")
-				t.add(r.store)
+				t.add(r.bucket)
 			}
 			t.report(b)
 		})
@@ -154,16 +154,16 @@ func BenchmarkSweepIdle(b *testing.B) {
 			var t tally
 			for b.Loop() {
 				r.sync("")
-				t.add(r.store)
+				t.add(r.bucket)
 			}
 			t.report(b)
 		})
 	}
 }
 
-// turnBytes is about what one agent turn adds to a transcript: a prompt, a few tool calls and
+// turnSize is about what one agent turn adds to a transcript: a prompt, a few tool calls and
 // their results, and a reply.
-const turnBytes = 24 << 10
+const turnSize = 24 << 10
 
 func BenchmarkSweepAfterTurns(b *testing.B) {
 	for _, rtt := range []time.Duration{0, 30 * time.Millisecond} {
@@ -176,13 +176,13 @@ func BenchmarkSweepAfterTurns(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
 				r := h.reset(b, stateDir)
-				r.store.latency = rtt
+				r.bucket.latency = rtt
 				for _, p := range active {
-					h.w.AppendTurn(b, p, turnBytes, r.now.Add(-2*time.Minute))
+					h.w.AppendTurn(b, p, turnSize, r.now.Add(-2*time.Minute))
 				}
 				b.StartTimer()
 				r.sync("")
-				t.add(r.store)
+				t.add(r.bucket)
 			}
 			t.report(b)
 		})
@@ -207,11 +207,11 @@ func BenchmarkHookTurn(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
 				r := h.reset(b, stateDir)
-				r.store.latency = c.rtt
-				h.w.AppendTurn(b, path, turnBytes, r.now.Add(-5*time.Second))
+				r.bucket.latency = c.rtt
+				h.w.AppendTurn(b, path, turnSize, r.now.Add(-5*time.Second))
 				b.StartTimer()
 				r.sync("claude", path)
-				t.add(r.store)
+				t.add(r.bucket)
 			}
 			t.report(b)
 		})
@@ -246,7 +246,7 @@ func segmentedSession(b *testing.B, turns []int) *segmented {
 		for _, k := range turns {
 			for ; done < k; done++ {
 				r.now = r.now.Add(10 * time.Second)
-				h.w.AppendTurn(b, path, turnBytes, r.now.Add(-5*time.Second))
+				h.w.AppendTurn(b, path, turnSize, r.now.Add(-5*time.Second))
 				if sum := r.sync("claude", path); sum.Errors > 0 {
 					b.Fatalf("turn %d: %v", done, sum.ErrorMessages)
 				}
@@ -292,12 +292,12 @@ func BenchmarkHookTurnAfterSegments(b *testing.B) {
 				copyDir(b, s.states[k], stateDir)
 				r := newRig(b, s.h.w, stateDir)
 				r.now = s.at[k].Add(10 * time.Second)
-				s.h.w.AppendTurn(b, path, turnBytes, r.now.Add(-5*time.Second))
+				s.h.w.AppendTurn(b, path, turnSize, r.now.Add(-5*time.Second))
 				b.StartTimer()
 				if sum := r.sync("claude", path); sum.Errors > 0 {
 					b.Fatal(sum.ErrorMessages)
 				}
-				t.add(r.store)
+				t.add(r.bucket)
 			}
 			t.report(b)
 		})
@@ -314,13 +314,13 @@ func BenchmarkFold(b *testing.B) {
 	for b.Loop() {
 		b.StopTimer()
 		r := h.reset(b, stateDir)
-		h.w.AppendTurn(b, path, turnBytes, r.now.Add(-5*time.Second))
+		h.w.AppendTurn(b, path, turnSize, r.now.Add(-5*time.Second))
 		r.sync("claude", path)
-		r.store.takeOps()
+		r.bucket.takeOps()
 		r.now = r.now.Add(time.Hour)
 		b.StartTimer()
 		r.sync("claude", path)
-		t.add(r.store)
+		t.add(r.bucket)
 	}
 	t.report(b)
 }

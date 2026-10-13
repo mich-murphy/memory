@@ -1,6 +1,8 @@
 package adapters
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -26,4 +28,47 @@ func FuzzSessionInfo(f *testing.F) {
 			_ = all[name].SessionInfo(head)
 		}
 	})
+}
+
+func TestClassifyRoles(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+	rollout := "rollout-2026-01-02T03-04-05-" + id + ".jsonl"
+	all := All(t.TempDir())
+	for _, tc := range []struct {
+		agent, rel string
+		role       Role
+		session    string
+	}{
+		{"claude", "history.jsonl", RoleHistory, ""},
+		{"claude", "settings.json", RoleConfig, ""},
+		{"claude", "statusline.sh", RoleConfig, ""},
+		{"claude", "todos", RoleUnknown, ""},
+		{"claude", "notes.txt", RoleUnknown, ""},
+		{"claude", "plans/p.md", RolePlan, ""},
+		{"claude", "sessions/123.json", RoleLiveness, ""},
+		{"claude", "todos/" + id + "-agent.json", RoleTodo, ""},
+		{"claude", "projects/slug/" + id + ".jsonl", RoleMain, "slug/" + id},
+		{"claude", "projects/slug/" + id + "/subagents/a.jsonl", RoleSubagent, "slug/" + id},
+		{"claude", "projects/slug/memory/m.md", RoleMemory, ""},
+		{"codex", "history.jsonl", RoleHistory, ""},
+		{"codex", "config.toml", RoleConfig, ""},
+		{"codex", "skills", RoleUnknown, ""},
+		{"codex", "memories/m.md", RoleMemory, ""},
+		{"codex", "log/codex.log", RoleLog, ""},
+		{"codex", "sessions/notes.txt", RoleUnknown, ""},
+		{"codex", "sessions/2026/01/02/" + rollout, RoleMain, strings.TrimSuffix(rollout, ".jsonl")},
+		{"pi", "settings.json", RoleConfig, ""},
+		{"pi", "pi-debug.log", RoleLog, ""},
+		{"pi", "themes", RoleUnknown, ""},
+		{"pi", "extensions/e.ts", RoleConfig, ""},
+		{"pi", "experimental/x.json", RoleExperimental, ""},
+		{"pi", "sessions/--w--/s.jsonl", RoleMain, "s"},
+	} {
+		a := all[tc.agent]
+		root := a.CanonicalRoot()
+		sf, ok := a.Classify(filepath.Join(root, filepath.FromSlash(tc.rel)), root)
+		if !ok || sf.Role != tc.role || sf.SessionKey != tc.session {
+			t.Errorf("%s %s = %q %q %v, want %q %q", tc.agent, tc.rel, sf.Role, sf.SessionKey, ok, tc.role, tc.session)
+		}
+	}
 }

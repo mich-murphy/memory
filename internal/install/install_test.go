@@ -17,8 +17,8 @@ import (
 
 var testCmd = []string{"/opt/agent-sessions/bin/agent-sessions"}
 
-func opts(e *testenv.Env, log *[]string) *Options {
-	return &Options{Command: testCmd, Home: e.Home, Log: log}
+func opts(e *testenv.Env) *Options {
+	return &Options{Command: testCmd, Home: e.Home}
 }
 
 func readJSON(t *testing.T, path string) map[string]any {
@@ -58,15 +58,14 @@ func TestClaudeInstallMergesIdempotentlyAndUninstalls(t *testing.T) {
 	}
 	testenv.Write(t, path, string(body))
 
-	var log []string
-	if err := Claude(opts(e, &log)); err != nil {
+	if err := Claude(opts(e)); err != nil {
 		t.Fatal(err)
 	}
 	first, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Claude(opts(e, &log)); err != nil {
+	if err := Claude(opts(e)); err != nil {
 		t.Fatal(err)
 	}
 	if again, _ := os.ReadFile(path); !bytes.Equal(again, first) {
@@ -114,7 +113,7 @@ func TestClaudeInstallMergesIdempotentlyAndUninstalls(t *testing.T) {
 		t.Errorf("settings.json keys reordered:\n%s", diff)
 	}
 
-	remove := opts(e, &log)
+	remove := opts(e)
 	remove.Remove = true
 	if err := Claude(remove); err != nil {
 		t.Fatal(err)
@@ -133,15 +132,14 @@ func TestClaudeInstallNeverLowersRetentionAndRefusesBrokenJSON(t *testing.T) {
 	e := testenv.New(t)
 	path := filepath.Join(e.Claude, "settings.json")
 	testenv.Write(t, path, `{"cleanupPeriodDays": 9999}`)
-	var log []string
-	if err := Claude(opts(e, &log)); err != nil {
+	if err := Claude(opts(e)); err != nil {
 		t.Fatal(err)
 	}
 	if got := readJSON(t, path)["cleanupPeriodDays"]; got != 9999.0 {
 		t.Errorf("cleanupPeriodDays = %v", got)
 	}
 	testenv.Write(t, path, "{ not json")
-	if err := Claude(opts(e, &log)); err == nil {
+	if err := Claude(opts(e)); err == nil {
 		t.Error("installed over a broken settings.json")
 	}
 	if data, _ := os.ReadFile(path); string(data) != "{ not json" {
@@ -151,8 +149,7 @@ func TestClaudeInstallNeverLowersRetentionAndRefusesBrokenJSON(t *testing.T) {
 
 func TestClaudeHookCommandQuotesPathsWithSpaces(t *testing.T) {
 	e := testenv.New(t)
-	var log []string
-	o := opts(e, &log)
+	o := opts(e)
 	o.Command = []string{"/Users/me/My Tools/agent-sessions"}
 	if err := Claude(o); err != nil {
 		t.Fatal(err)
@@ -167,8 +164,7 @@ func TestClaudeSettingsKeepShellOperatorsUnescaped(t *testing.T) {
 	e := testenv.New(t)
 	path := filepath.Join(e.Claude, "settings.json")
 	testenv.Write(t, path, `{"statusLine": {"command": "a && b < c > d"}}`)
-	var log []string
-	if err := Claude(opts(e, &log)); err != nil {
+	if err := Claude(opts(e)); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"a && b < c > d"`) {
@@ -179,8 +175,8 @@ func TestClaudeSettingsKeepShellOperatorsUnescaped(t *testing.T) {
 func TestCodexInstallWritesHooksJSONAndReportsTrust(t *testing.T) {
 	e := testenv.New(t)
 	root := filepath.Join(e.Home, ".codex")
-	var log []string
-	if err := Codex(opts(e, &log)); err != nil {
+	o := opts(e)
+	if err := Codex(o); err != nil {
 		t.Fatal(err)
 	}
 	hooksJSON := filepath.Join(root, "hooks.json")
@@ -197,8 +193,8 @@ func TestCodexInstallWritesHooksJSONAndReportsTrust(t *testing.T) {
 	if diff := cmp.Diff(want, firstHandler(t, cfg, "SessionEnd")); diff != "" {
 		t.Errorf("SessionEnd handler:\n%s", diff)
 	}
-	if !slices.ContainsFunc(log, func(l string) bool { return strings.Contains(l, "/hooks") }) {
-		t.Errorf("no trust hint in %v", log)
+	if !slices.ContainsFunc(o.Log, func(l string) bool { return strings.Contains(l, "/hooks") }) {
+		t.Errorf("no trust hint in %v", o.Log)
 	}
 	if n, trusted := CodexTrustState(root); n != 6 || trusted != 0 {
 		t.Errorf("trust = %d/%d", trusted, n)
@@ -212,7 +208,7 @@ func TestCodexInstallWritesHooksJSONAndReportsTrust(t *testing.T) {
 		t.Errorf("trust = %d/%d", trusted, n)
 	}
 
-	remove := opts(e, &log)
+	remove := opts(e)
 	remove.Remove = true
 	if err := Codex(remove); err != nil {
 		t.Fatal(err)
@@ -224,8 +220,7 @@ func TestCodexInstallWritesHooksJSONAndReportsTrust(t *testing.T) {
 
 func TestPiInstallWritesExtensionAndRespectsForeignFile(t *testing.T) {
 	e := testenv.New(t)
-	var log []string
-	if err := Pi(opts(e, &log)); err != nil {
+	if err := Pi(opts(e)); err != nil {
 		t.Fatal(err)
 	}
 	ext := filepath.Join(e.Home, ".pi", "agent", "extensions", "agent-sessions.ts")
@@ -239,7 +234,7 @@ func TestPiInstallWritesExtensionAndRespectsForeignFile(t *testing.T) {
 		}
 	}
 	testenv.Write(t, ext, "// someone else's extension\n")
-	if err := Pi(opts(e, &log)); err != nil {
+	if err := Pi(opts(e)); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(ext); string(data) != "// someone else's extension\n" {

@@ -25,12 +25,12 @@ import (
 )
 
 const (
-	PendingMarkerStaleAfter = 120 * time.Second
-	syncDelay               = 3 * time.Second
-	stdinLimit              = 1 << 20
-	stdinTimeout            = 2 * time.Second
-	maxAncestors            = 10
-	sweepKey                = "sweep"
+	markerStaleAfter = 120 * time.Second
+	syncDelay        = 3 * time.Second
+	maxStdinSize     = 1 << 20
+	stdinTimeout     = 2 * time.Second
+	maxAncestors     = 10
+	sweepKey         = "sweep"
 )
 
 var (
@@ -42,7 +42,7 @@ var (
 		"MAX_MCP_OUTPUT_TOKENS", "DISABLE_PROMPT_CACHING",
 	}
 	secretEnv    = regexp.MustCompile(`(?i)TOKEN|KEY|SECRET|PASSWORD|AUTH|CREDENTIAL|COOKIE`)
-	agentMarkers = map[string][]string{
+	agentMarkers = map[string]struct{ bin, pkg string }{
 		"claude": {"claude", "@anthropic-ai/claude-code"},
 		"codex":  {"codex", "@openai/codex"},
 		"pi":     {"pi", "pi-coding-agent"},
@@ -56,13 +56,13 @@ var (
 	parentPID = os.Getppid
 )
 
-func ReadInput(f *os.File) map[string]any {
+func readInput(f *os.File) map[string]any {
 	st, err := f.Stat()
 	if err != nil || st.Mode()&os.ModeCharDevice != 0 {
 		return map[string]any{}
 	}
 	_ = f.SetReadDeadline(time.Now().Add(stdinTimeout)) // fails for regular files, which never block
-	data, _ := io.ReadAll(io.LimitReader(f, stdinLimit))
+	data, _ := io.ReadAll(io.LimitReader(f, maxStdinSize))
 	if len(bytes.TrimSpace(data)) == 0 {
 		return map[string]any{}
 	}
@@ -73,7 +73,7 @@ func ReadInput(f *os.File) map[string]any {
 	return m
 }
 
-func PathsFromInput(data map[string]any) []string {
+func pathsFromInput(data map[string]any) []string {
 	var out []string
 	for _, key := range []string{"transcript_path", "agent_transcript_path"} {
 		if v, ok := data[key].(string); ok && v != "" {
@@ -83,8 +83,8 @@ func PathsFromInput(data map[string]any) []string {
 	return out
 }
 
-// ClaimPending queues at most one sync per key: a transcript's path, or sweepKey.
-func ClaimPending(stateDir, key string) (marker string) {
+// claimPending queues at most one sync per key: a transcript's path, or sweepKey.
+func claimPending(stateDir, key string) (marker string) {
 	pending := filepath.Join(stateDir, "pending")
 	if err := os.MkdirAll(pending, 0o700); err != nil {
 		return ""
@@ -94,7 +94,7 @@ func ClaimPending(stateDir, key string) (marker string) {
 	f, err := os.OpenFile(marker, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if errors.Is(err, os.ErrExist) {
 		st, serr := os.Stat(marker)
-		if serr != nil || time.Since(st.ModTime()) < PendingMarkerStaleAfter {
+		if serr != nil || time.Since(st.ModTime()) < markerStaleAfter {
 			return ""
 		}
 		_ = os.Remove(marker) // left behind by a sync that died; take it over
@@ -134,21 +134,15 @@ func isAgent(agent string, argv []string) bool {
 	if strings.Contains(text, "agent-sessions") || strings.Contains(text, "agent_sessions") {
 		return false
 	}
-	markers := agentMarkers[agent]
-	for _, tok := range tokens {
+	m := agentMarkers[agent]
+	return slices.ContainsFunc(tokens, func(tok string) bool {
 		first, _, _ := strings.Cut(tok, " ")
 		base := first[strings.LastIndexByte(first, '/')+1:]
-		if base == markers[0] || strings.HasPrefix(base, markers[0]+"-") {
-			return true
-		}
-		if slices.ContainsFunc(markers[1:], func(m string) bool { return strings.Contains(tok, m) }) {
-			return true
-		}
-	}
-	return false
+		return base == m.bin || strings.HasPrefix(base, m.bin+"-") || strings.Contains(tok, m.pkg)
+	})
 }
 
-func LaunchProcess(agent string) map[string]any {
+func launchProcess(agent string) map[string]any {
 	chain := []string{}
 	pid := parentPID()
 	for range maxAncestors {
@@ -183,7 +177,7 @@ func processFromExtension(argvJSON string) map[string]any {
 	return map[string]any{"argv": argv, "pid": parentPID(), "via": "extension"}
 }
 
-func LaunchEnv(environ []string) map[string]any {
+func launchEnv(environ []string) map[string]any {
 	out := map[string]any{}
 	for _, kv := range environ {
 		k, v, _ := strings.Cut(kv, "=")
@@ -220,7 +214,7 @@ func recordSessionStart(ctx context.Context, stateDir, agent, path string, data 
 	}
 	process := processFromExtension(extra.Argv)
 	if process == nil {
-		process = LaunchProcess(agent)
+		process = launchProcess(agent)
 	}
 	launch := map[string]any{
 		"event":           event,
@@ -230,7 +224,7 @@ func recordSessionStart(ctx context.Context, stateDir, agent, path string, data 
 		"permission_mode": data["permission_mode"],
 		"hook_input":      hookInput,
 		"process":         process,
-		"env":             LaunchEnv(os.Environ()),
+		"env":             launchEnv(os.Environ()),
 	}
 	body, err := jsonx.Compact(launch)
 	if err != nil {
@@ -262,7 +256,7 @@ func spawnSync(ctx context.Context, agent, path, marker, event string) error {
 
 // The delay lets a session-start sync take the lock first.
 func spawnSweep(ctx context.Context, stateDir, event string) error {
-	marker := ClaimPending(stateDir, sweepKey)
+	marker := claimPending(stateDir, sweepKey)
 	if marker == "" {
 		return nil
 	}
@@ -292,11 +286,11 @@ func Run(ctx context.Context, agent string, explicitPaths []string, event string
 	stateDir := config.StateDir()
 	data := map[string]any{}
 	if len(explicitPaths) == 0 {
-		data = ReadInput(os.Stdin)
+		data = readInput(os.Stdin)
 	}
 	paths := explicitPaths
 	if len(paths) == 0 {
-		paths = PathsFromInput(data)
+		paths = pathsFromInput(data)
 	}
 	if e, ok := data["hook_event_name"].(string); ok {
 		event = e
@@ -317,7 +311,7 @@ func Run(ctx context.Context, agent string, explicitPaths []string, event string
 			continue
 		}
 		seen[path] = true
-		if marker := ClaimPending(stateDir, path); marker != "" {
+		if marker := claimPending(stateDir, path); marker != "" {
 			_ = spawnSync(ctx, agent, path, marker, event) // never break the agent
 		}
 	}

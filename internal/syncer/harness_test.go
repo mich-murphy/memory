@@ -120,11 +120,11 @@ func (m *memStore) takeOps() (ops []string, sent int64) {
 // rig runs syncs against a workload the way the command line does, with a clock the caller
 // sets.
 type rig struct {
-	tb    testing.TB
-	w     *testenv.Workload
-	cfg   *config.Config
-	store *memStore
-	now   time.Time
+	tb     testing.TB
+	w      *testenv.Workload
+	cfg    *config.Config
+	bucket *memStore
+	now    time.Time
 }
 
 func newRig(tb testing.TB, w *testenv.Workload, stateDir string) *rig {
@@ -133,10 +133,10 @@ func newRig(tb testing.TB, w *testenv.Workload, stateDir string) *rig {
 		tb.Setenv(v, "")
 	}
 	return &rig{
-		tb: tb, w: w, store: newMemStore(), now: w.Start,
+		tb: tb, w: w, bucket: newMemStore(), now: w.Start,
 		cfg: &config.Config{
 			MachineID: "bench", Hostname: "bench", Home: w.Home, StateDir: stateDir,
-			ConfigPath: filepath.Join(stateDir, "config.env"),
+			Path: filepath.Join(stateDir, "config.env"),
 		},
 	}
 }
@@ -145,7 +145,7 @@ func newRig(tb testing.TB, w *testenv.Workload, stateDir string) *rig {
 // those transcripts.
 func (r *rig) sync(agent string, hookPaths ...string) *Summary {
 	r.tb.Helper()
-	return r.run(func(s *Syncer) ([]Found, error) {
+	return r.run(func(s *Syncer) ([]adapters.SessionFile, error) {
 		if len(hookPaths) == 0 {
 			return s.SweepFiles(context.Background(), adapters.Names)
 		}
@@ -157,25 +157,25 @@ func (r *rig) sync(agent string, hookPaths ...string) *Summary {
 // syncWith runs before, then a sync with no files, as a session-start hook does.
 func (r *rig) syncWith(before func(*Syncer) error) *Summary {
 	r.tb.Helper()
-	return r.run(func(s *Syncer) ([]Found, error) { return nil, before(s) })
+	return r.run(func(s *Syncer) ([]adapters.SessionFile, error) { return nil, before(s) })
 }
 
-func (r *rig) run(files func(*Syncer) ([]Found, error)) *Summary {
+func (r *rig) run(files func(*Syncer) ([]adapters.SessionFile, error)) *Summary {
 	r.tb.Helper()
 	ctx := context.Background()
-	st, err := state.Open(ctx, r.cfg.StateDir)
+	db, err := state.Open(ctx, r.cfg.StateDir)
 	if err != nil {
 		r.tb.Fatal(err)
 	}
 	defer func() {
-		if err := st.Close(); err != nil {
+		if err := db.Close(); err != nil {
 			r.tb.Fatal(err)
 		}
 	}()
-	s := New(r.cfg, r.store, st, adapters.All(r.w.Home), Options{
+	s := New(r.cfg, r.bucket, db, adapters.All(r.w.Home), Options{
 		Trigger: "sweep:test", Logger: slog.New(slog.DiscardHandler), Version: "test",
 	})
-	s.now = func() time.Time { return r.now }
+	s.clock = func() time.Time { return r.now }
 	found, err := files(s)
 	if err != nil {
 		r.tb.Fatal(err)

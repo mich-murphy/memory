@@ -29,7 +29,7 @@ import (
 // Variables so tests can shrink them.
 var (
 	snapshotRecheck       = 600 * time.Second
-	largeFileBytes  int64 = 64 << 20
+	largeFileSize   int64 = 64 << 20
 	chunkSize       int64 = 1 << 20
 )
 
@@ -41,7 +41,7 @@ const (
 	dbVersionEvery    = 24 * time.Hour
 	recopyAfter       = time.Hour
 	uploadWorkers     = 8
-	maxHeldBytes      = 128 << 20
+	maxHeldSize       = 128 << 20
 	prefixLines       = 20
 	maxErrorMsgs      = 10
 )
@@ -74,20 +74,7 @@ func (s *Summary) Trimmed() Summary {
 	return t
 }
 
-type Found struct {
-	File adapters.SessionFile
-	Root string
-}
-
-type sessionID struct{ agent, key string }
-
-type snapshotKey struct{ agent, root, cwd, session string }
-
-type snapshotResult struct {
-	setID    string
-	memoryID *string
-	mtimes   map[string]float64
-}
+type snapshotKey struct{ session, root, cwd string }
 
 type Options struct {
 	Trigger string
@@ -97,23 +84,23 @@ type Options struct {
 
 type Syncer struct {
 	cfg      *config.Config
-	store    store.Store
-	state    *state.State
+	bucket   store.Store
+	db       *state.State
 	adapters map[string]adapters.Adapter
 	opts     Options
 	log      *slog.Logger
-	now      func() time.Time
+	clock    func() time.Time
 
 	Summary Summary
 
-	sessionRoots  map[sessionID]string
-	touched       map[sessionID]bool
-	snapshotCache map[snapshotKey]snapshotResult
+	sessionRoots  map[adapters.SessionRef]string
+	touched       map[adapters.SessionRef]bool
+	snapshotCache map[snapshotKey]state.SnapshotEntry
 	workDir       string
 	tmpDir        string
 }
 
-func New(cfg *config.Config, st store.Store, s *state.State, ads map[string]adapters.Adapter, opts Options) *Syncer {
+func New(cfg *config.Config, bucket store.Store, db *state.State, ads map[string]adapters.Adapter, opts Options) *Syncer {
 	if opts.Trigger == "" {
 		opts.Trigger = "manual"
 	}
@@ -122,18 +109,18 @@ func New(cfg *config.Config, st store.Store, s *state.State, ads map[string]adap
 		logger = slog.Default()
 	}
 	return &Syncer{
-		cfg: cfg, store: st, state: s, adapters: ads, opts: opts, log: logger, now: time.Now,
+		cfg: cfg, bucket: bucket, db: db, adapters: ads, opts: opts, log: logger, clock: time.Now,
 		Summary:       Summary{ErrorMessages: []string{}},
-		sessionRoots:  map[sessionID]string{},
-		touched:       map[sessionID]bool{},
-		snapshotCache: map[snapshotKey]snapshotResult{},
+		sessionRoots:  map[adapters.SessionRef]string{},
+		touched:       map[adapters.SessionRef]bool{},
+		snapshotCache: map[snapshotKey]state.SnapshotEntry{},
 		workDir:       filepath.Join(cfg.StateDir, "exports"),
 		tmpDir:        filepath.Join(cfg.StateDir, "tmp"),
 	}
 }
 
 func (s *Syncer) nowSeconds() float64 {
-	return state.UnixSeconds(s.now())
+	return state.UnixSeconds(s.clock())
 }
 
 func (s *Syncer) errorf(format string, args ...any) {
@@ -143,10 +130,10 @@ func (s *Syncer) errorf(format string, args ...any) {
 	s.log.Error("sync error", "error", msg)
 }
 
-// Roots always includes the canonical root: a sweep runs with the environment of whichever
+// roots always includes the canonical root: a sweep runs with the environment of whichever
 // agent's hook started it, and CLAUDE_CONFIG_DIR and friends there would otherwise hide it.
-func (s *Syncer) Roots(agent string) ([]string, error) {
-	extra, err := s.state.ExtraRoots(agent)
+func (s *Syncer) roots(agent string) ([]string, error) {
+	extra, err := s.db.ExtraRoots(agent)
 	if err != nil {
 		return nil, err
 	}
@@ -160,65 +147,65 @@ func (s *Syncer) Roots(agent string) ([]string, error) {
 	return out, nil
 }
 
-func (s *Syncer) markManifestPending(id sessionID) error {
-	s.touched[id] = true
-	return s.state.MarkManifestPending(id.agent, id.key)
+func (s *Syncer) markManifestPending(ref adapters.SessionRef) error {
+	s.touched[ref] = true
+	return s.db.MarkManifestPending(ref)
 }
 
-func (s *Syncer) noteSessionRoot(id sessionID, root string) {
-	if _, ok := s.sessionRoots[id]; !ok {
-		s.sessionRoots[id] = root
+func (s *Syncer) noteSessionRoot(ref adapters.SessionRef, root string) {
+	if _, ok := s.sessionRoots[ref]; !ok {
+		s.sessionRoots[ref] = root
 	}
 }
 
 func (s *Syncer) excluded(path string) bool {
-	return path == s.cfg.ConfigPath || fsutil.Within(path, s.cfg.StateDir)
+	return path == s.cfg.Path || fsutil.Within(path, s.cfg.StateDir)
 }
 
-func (s *Syncer) SweepFiles(ctx context.Context, agents []string) ([]Found, error) {
-	var out []Found
-	seen := map[string]bool{}
+func (s *Syncer) SweepFiles(ctx context.Context, agents []string) ([]adapters.SessionFile, error) {
+	var out []adapters.SessionFile
 	for _, agent := range agents {
-		roots, err := s.Roots(agent)
+		roots, err := s.roots(agent)
 		if err != nil {
 			return nil, err
 		}
 		for _, root := range roots {
-			present := s.sweepRoot(ctx, agent, root, seen, &out)
+			files := s.sweepRoot(ctx, agent, root)
 			if fsutil.IsDir(root) {
-				if err := s.tombstone(agent, root, present); err != nil {
+				if err := s.tombstone(agent, root, files); err != nil {
 					return nil, err
 				}
 			}
+			out = append(out, files...)
 		}
 	}
-	return out, nil
+	return uniqueByPath(out), nil
 }
 
-func (s *Syncer) sweepRoot(ctx context.Context, agent, root string, seen map[string]bool, out *[]Found) (present map[string]bool) {
+func uniqueByPath(files []adapters.SessionFile) []adapters.SessionFile {
+	seen := map[string]bool{}
+	return slices.DeleteFunc(files, func(sf adapters.SessionFile) bool {
+		dup := seen[sf.Path]
+		seen[sf.Path] = true
+		return dup
+	})
+}
+
+// sweepRoot leaves the exports in, although they live under the state dir.
+func (s *Syncer) sweepRoot(ctx context.Context, agent, root string) []adapters.SessionFile {
 	a := s.adapters[agent]
-	present = map[string]bool{}
 	files, databases := adapters.Discover(a, root)
-	for _, sf := range files {
-		if !s.excluded(sf.Path) && !seen[sf.Path] {
-			seen[sf.Path] = true
-			present[sf.Path] = true
-			*out = append(*out, Found{sf, root})
-		}
-	}
-	exports := adapters.SQLiteExports(ctx, a, root, databases, s.workDir, recopyAfter)
-	for _, sf := range append(exports, a.Exports(root, s.workDir, recopyAfter)...) {
-		if !seen[sf.Path] {
-			seen[sf.Path] = true
-			*out = append(*out, Found{sf, root})
-		}
+	files = slices.DeleteFunc(files, func(sf adapters.SessionFile) bool { return s.excluded(sf.Path) })
+	return slices.Concat(files, adapters.SQLiteExports(ctx, a, root, databases, s.workDir, recopyAfter),
+		a.Exports(root, s.workDir, recopyAfter))
+}
+
+func (s *Syncer) tombstone(agent, root string, onDisk []adapters.SessionFile) error {
+	present := map[string]bool{}
+	for _, sf := range onDisk {
 		present[sf.Path] = true
 	}
-	return present
-}
-
-func (s *Syncer) tombstone(agent, root string, present map[string]bool) error {
-	live, err := s.state.LiveFiles(agent, root)
+	live, err := s.db.LiveFiles(agent, root)
 	if err != nil {
 		return err
 	}
@@ -227,22 +214,22 @@ func (s *Syncer) tombstone(agent, root string, present map[string]bool) error {
 		if present[f.Path] || fsutil.Exists(f.Path) {
 			continue
 		}
-		if err := s.state.MarkDeleted(f.Path, now); err != nil {
+		if err := s.db.MarkDeleted(f.Path, now); err != nil {
 			return err
 		}
 		s.Summary.Deleted++
 		if f.SessionKey != "" {
-			id := sessionID{agent, f.SessionKey}
-			if err := s.markManifestPending(id); err != nil {
+			ref := f.Session()
+			if err := s.markManifestPending(ref); err != nil {
 				return err
 			}
-			s.noteSessionRoot(id, root)
+			s.noteSessionRoot(ref, root)
 		}
 	}
-	return s.state.Flush()
+	return s.db.Flush()
 }
 
-func (s *Syncer) classifyHookPath(agent, path string) (adapters.SessionFile, string, bool, error) {
+func (s *Syncer) classifyHookPath(agent, path string) (adapters.SessionFile, bool, error) {
 	a := s.adapters[agent]
 	if rest, ok := strings.CutPrefix(path, "~"); ok && (rest == "" || rest[0] == '/') {
 		path = a.Home() + rest
@@ -250,77 +237,72 @@ func (s *Syncer) classifyHookPath(agent, path string) (adapters.SessionFile, str
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
 	}
-	sf, root, ok, err := s.classifyReported(a, path)
+	sf, ok, err := s.classifyReported(a, path)
 	if err != nil || !ok {
-		return sf, root, ok, err
+		return sf, ok, err
 	}
-	if err := s.rememberExtraRoot(agent, root); err != nil {
-		return adapters.SessionFile{}, "", false, err
+	if err := s.rememberExtraRoot(agent, sf.Root); err != nil {
+		return adapters.SessionFile{}, false, err
 	}
-	return sf, root, true, nil
+	return sf, true, nil
 }
 
-func (s *Syncer) classifyReported(a adapters.Adapter, path string) (adapters.SessionFile, string, bool, error) {
-	roots, err := s.Roots(a.Name())
+func (s *Syncer) classifyReported(a adapters.Adapter, path string) (adapters.SessionFile, bool, error) {
+	roots, err := s.roots(a.Name())
 	if err != nil {
-		return adapters.SessionFile{}, "", false, err
+		return adapters.SessionFile{}, false, err
 	}
 	for _, r := range roots {
 		if !fsutil.Within(path, r) {
 			continue
 		}
 		if sf, ok := a.Classify(path, r); ok {
-			return sf, r, true, nil
+			return sf, true, nil
 		}
 	}
 	if root := a.InferRoot(path); root != "" {
 		if sf, ok := a.Classify(path, root); ok {
-			return sf, root, true, nil
+			return sf, true, nil
 		}
 	}
 	s.log.Warn("not a recognised session file", "path", path, "agent", a.Name())
 	s.Summary.Skipped++
-	return adapters.SessionFile{}, "", false, nil
+	return adapters.SessionFile{}, false, nil
 }
 
 func (s *Syncer) rememberExtraRoot(agent, root string) error {
 	if root == s.adapters[agent].CanonicalRoot() {
 		return nil
 	}
-	known, err := s.state.ExtraRoots(agent)
+	known, err := s.db.ExtraRoots(agent)
 	if err != nil || slices.Contains(known, root) {
 		return err
 	}
-	if err := s.state.AddExtraRoot(agent, root); err != nil {
+	if err := s.db.AddExtraRoot(agent, root); err != nil {
 		return err
 	}
 	s.log.Info("remembering root", "agent", agent, "root", root)
-	return s.state.Flush()
+	return s.db.Flush()
 }
 
-func (s *Syncer) HookFiles(agent string, paths []string) ([]Found, error) {
+func (s *Syncer) HookFiles(agent string, paths []string) ([]adapters.SessionFile, error) {
 	a := s.adapters[agent]
-	var out []Found
-	seen := map[string]bool{}
+	var out []adapters.SessionFile
 	for _, path := range paths {
-		sf, root, ok, err := s.classifyHookPath(agent, path)
+		sf, ok, err := s.classifyHookPath(agent, path)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
 			continue
 		}
-		for _, p := range append([]string{sf.Path}, a.Related(sf, root)...) {
-			if seen[p] || s.excluded(p) {
-				continue
-			}
-			if related, ok := a.Classify(p, root); ok {
-				seen[p] = true
-				out = append(out, Found{related, root})
+		for _, p := range append([]string{sf.Path}, a.Related(sf)...) {
+			if related, ok := a.Classify(p, sf.Root); ok && !s.excluded(p) {
+				out = append(out, related)
 			}
 		}
 	}
-	return out, nil
+	return uniqueByPath(out), nil
 }
 
 type result struct {
@@ -329,7 +311,7 @@ type result struct {
 }
 
 // pool runs uploads on uploadWorkers goroutines, with at most twice that many, holding at
-// most maxHeldBytes of files, in flight. Results are handled on the caller's goroutine, which
+// most maxHeldSize of files, in flight. Results are handled on the caller's goroutine, which
 // alone writes local state.
 type pool struct {
 	s        *Syncer
@@ -341,7 +323,7 @@ type pool struct {
 }
 
 func (p *pool) add(u *upload) error {
-	for p.inflight >= uploadWorkers*2 || p.inflight > 0 && p.held+u.held() > maxHeldBytes {
+	for p.inflight >= uploadWorkers*2 || p.inflight > 0 && p.held+u.held() > maxHeldSize {
 		if err := p.collect(); err != nil {
 			return err
 		}
@@ -366,7 +348,7 @@ func (p *pool) collect() error {
 		return nil
 	}
 	if r.err != nil {
-		p.s.fail(r.u.sf, r.err)
+		p.s.fail(r.u.file.Path, r.err)
 		return nil
 	}
 	return p.s.finish(r.u)
@@ -382,26 +364,26 @@ func (p *pool) wait() error {
 	return first
 }
 
-func (s *Syncer) Run(ctx context.Context, files []Found) (*Summary, error) {
-	pending, err := s.state.PendingManifests()
+func (s *Syncer) Run(ctx context.Context, files []adapters.SessionFile) (*Summary, error) {
+	pending, err := s.db.PendingManifests()
 	if err != nil {
 		return &s.Summary, err
 	}
-	for _, p := range pending {
-		s.touched[sessionID{p.Agent, p.SessionKey}] = true
+	for _, ref := range pending {
+		s.touched[ref] = true
 	}
 	p := &pool{s: s, ctx: ctx, results: make(chan result, uploadWorkers*2), sem: make(chan struct{}, uploadWorkers)}
 	var stateErr error
-	for _, f := range files {
+	for _, sf := range files {
 		if ctx.Err() != nil || stateErr != nil {
 			break
 		}
-		u, err := s.prepare(f.File, f.Root)
+		u, err := s.prepare(sf)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			continue // rotated or recompressed between discovery and read
 		case err != nil:
-			s.fail(f.File, err)
+			s.fail(sf.Path, err)
 		case u == nil:
 		case !u.needsUpload:
 			stateErr = s.finish(u)
@@ -418,11 +400,11 @@ func (s *Syncer) Run(ctx context.Context, files []Found) (*Summary, error) {
 	if err := s.writeManifests(ctx); err != nil {
 		return &s.Summary, err
 	}
-	return &s.Summary, s.state.Flush()
+	return &s.Summary, s.db.Flush()
 }
 
-func (s *Syncer) fail(sf adapters.SessionFile, err error) {
-	s.errorf("%s: %v", sf.Path, err)
+func (s *Syncer) fail(path string, err error) {
+	s.errorf("%s: %v", path, err)
 }
 
 func (s *Syncer) rawKey(agent, key string) string {
@@ -433,8 +415,8 @@ func (s *Syncer) versionsKey(sf adapters.SessionFile) string {
 	return "raw-versions/agent=" + sf.Agent + "/machine=" + s.cfg.MachineID + "/" + sf.Key + ".json"
 }
 
-func (s *Syncer) manifestKey(agent, sessionKey string) string {
-	return "manifests/agent=" + agent + "/machine=" + s.cfg.MachineID + "/" + sessionKey + ".json"
+func (s *Syncer) manifestKey(ref adapters.SessionRef) string {
+	return "manifests/agent=" + ref.Agent + "/machine=" + s.cfg.MachineID + "/" + ref.Key + ".json"
 }
 
 func parallel[T any](items []T, fn func(T) error) []error {

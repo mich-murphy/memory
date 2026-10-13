@@ -16,11 +16,11 @@ import (
 )
 
 type Config struct {
-	MachineID  string
-	Hostname   string
-	StateDir   string
-	Home       string
-	ConfigPath string
+	MachineID string
+	Hostname  string
+	StateDir  string
+	Home      string
+	Path      string
 
 	R2Endpoint        string
 	R2AccessKeyID     string
@@ -46,7 +46,7 @@ func FilePath() string {
 	return filepath.Join(Home(), ".config", "agent-sessions", "config.env")
 }
 
-func DefaultStateDir() string {
+func defaultStateDir() string {
 	return filepath.Join(Home(), ".local", "state", "agent-sessions")
 }
 
@@ -55,7 +55,7 @@ func StateDir() string {
 	if d := os.Getenv("AGENT_SESSIONS_STATE_DIR"); d != "" {
 		return d
 	}
-	return DefaultStateDir()
+	return defaultStateDir()
 }
 
 func Load(path string) (*Config, error) {
@@ -80,7 +80,7 @@ func Load(path string) (*Config, error) {
 		Hostname:          hostname,
 		StateDir:          get("AGENT_SESSIONS_STATE_DIR"),
 		Home:              Home(),
-		ConfigPath:        path,
+		Path:              path,
 		R2Endpoint:        get("R2_ENDPOINT"),
 		R2AccessKeyID:     get("R2_ACCESS_KEY_ID"),
 		R2SecretAccessKey: get("R2_SECRET_ACCESS_KEY"),
@@ -88,7 +88,7 @@ func Load(path string) (*Config, error) {
 		LocalStore:        get("AGENT_SESSIONS_LOCAL_STORE"),
 	}
 	if cfg.StateDir == "" {
-		cfg.StateDir = DefaultStateDir()
+		cfg.StateDir = defaultStateDir()
 	}
 	if override := get("AGENT_SESSIONS_MACHINE_ID"); override != "" {
 		cfg.MachineID = sanitize(override)
