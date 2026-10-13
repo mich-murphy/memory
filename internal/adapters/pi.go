@@ -10,16 +10,13 @@ import (
 	"github.com/mich-murphy/memory/internal/jsonx"
 )
 
-var (
-	piTopLevelRoles = map[string]Role{
-		"extensions": RoleConfig, "prompts": RoleConfig, "skills": RoleConfig, "themes": RoleConfig,
-		"tools": RoleConfig, "experimental": RoleExperimental,
-	}
-	piConfigFiles = map[string]bool{
-		"settings.json": true, "models.json": true, "models-store.json": true, "mcp.json": true, "keybindings.json": true,
-		"AGENTS.md": true, "AGENTS.override.md": true, "CLAUDE.md": true, "SYSTEM.md": true, "APPEND_SYSTEM.md": true,
-	}
-)
+var piRoles = map[string]Role{
+	"settings.json": RoleConfig, "models.json": RoleConfig, "models-store.json": RoleConfig, "mcp.json": RoleConfig,
+	"keybindings.json": RoleConfig, "AGENTS.md": RoleConfig, "AGENTS.override.md": RoleConfig,
+	"CLAUDE.md": RoleConfig, "SYSTEM.md": RoleConfig, "APPEND_SYSTEM.md": RoleConfig, "extensions/": RoleConfig,
+	"prompts/": RoleConfig, "skills/": RoleConfig, "themes/": RoleConfig, "tools/": RoleConfig,
+	"experimental/": RoleExperimental,
+}
 
 type Pi struct {
 	layout
@@ -103,16 +100,9 @@ func (p *Pi) Classify(path, root string) (SessionFile, bool) {
 		if parts[0] == "sessions" && isJSONL && len(parts) <= 3 {
 			return SessionFile{Agent: p.Name(), Root: root, Path: path, Key: prefix + rel, SessionKey: stem, Role: RoleMain}, true
 		}
-		role := RoleUnknown
-		switch {
-		case len(parts) == 1 && piConfigFiles[parts[0]]:
-			role = RoleConfig
-		case len(parts) == 1 && strings.HasSuffix(parts[0], ".log"):
+		role := topRole(piRoles, rel)
+		if len(parts) == 1 && strings.HasSuffix(rel, ".log") {
 			role = RoleLog
-		case len(parts) > 1:
-			if r, ok := piTopLevelRoles[parts[0]]; ok {
-				role = r
-			}
 		}
 		return SessionFile{Agent: p.Name(), Root: root, Path: path, Key: prefix + rel, Role: role}, true
 	}

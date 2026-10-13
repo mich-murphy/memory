@@ -10,15 +10,12 @@ var (
 	codexRolloutRE = regexp.MustCompile(
 		`^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-([0-9a-fA-F-]{36})(?:_[0-9a-fA-F-]{36})?\.jsonl(?:\.zst)?$`,
 	)
-	codexSessionDirs   = map[string]bool{"sessions": true, "archived_sessions": true}
-	codexHistoryFiles  = map[string]bool{"history.jsonl": true, "session_index.jsonl": true}
-	codexTopLevelRoles = map[string]Role{
-		"memories": RoleMemory, "log": RoleLog, "rules": RoleConfig, "skills": RoleConfig, "prompts": RoleConfig,
-		"plugins": RoleConfig,
-	}
-	codexConfigFiles = map[string]bool{
-		"config.toml": true, "hooks.json": true, "AGENTS.md": true, "AGENTS.override.md": true,
-		"requirements.toml": true, "managed_config.toml": true,
+	codexSessionDirs = map[string]bool{"sessions": true, "archived_sessions": true}
+	codexRoles       = map[string]Role{
+		"history.jsonl": RoleHistory, "session_index.jsonl": RoleHistory, "config.toml": RoleConfig,
+		"hooks.json": RoleConfig, "AGENTS.md": RoleConfig, "AGENTS.override.md": RoleConfig,
+		"requirements.toml": RoleConfig, "managed_config.toml": RoleConfig, "memories/": RoleMemory, "log/": RoleLog,
+		"rules/": RoleConfig, "skills/": RoleConfig, "prompts/": RoleConfig, "plugins/": RoleConfig,
 	}
 )
 
@@ -72,19 +69,7 @@ func (c *Codex) Classify(path, root string) (SessionFile, bool) {
 			SessionKey: strings.TrimSuffix(uncompressed, ".jsonl"), Role: RoleMain, Zstd: zstd,
 		}, true
 	}
-	top := parts[0]
-	role := RoleUnknown
-	switch {
-	case len(parts) == 1 && codexHistoryFiles[top]:
-		role = RoleHistory
-	case len(parts) == 1 && codexConfigFiles[top]:
-		role = RoleConfig
-	case len(parts) > 1 && !codexSessionDirs[top]:
-		if r, ok := codexTopLevelRoles[top]; ok {
-			role = r
-		}
-	}
-	return SessionFile{Agent: c.Name(), Root: root, Path: path, Key: prefix + rel, Role: role}, true
+	return SessionFile{Agent: c.Name(), Root: root, Path: path, Key: prefix + rel, Role: topRole(codexRoles, rel)}, true
 }
 
 func (c *Codex) MemoryDirs(root, _, _ string) []ScopedDir {

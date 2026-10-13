@@ -138,6 +138,15 @@ var (
 	binaryMagic    = [][]byte{{0x7f, 'E', 'L', 'F'}, {0xcf, 0xfa, 0xed, 0xfe}, {0xce, 0xfa, 0xed, 0xfe}, {0xca, 0xfe, 0xba, 0xbe}, []byte("MZ")}
 )
 
+// topRole looks up the first element of rel in roles, where a directory's entry ends in "/".
+func topRole(roles map[string]Role, rel string) Role {
+	top, _, isDir := strings.Cut(rel, "/")
+	if isDir {
+		top += "/"
+	}
+	return cmp.Or(roles[top], RoleUnknown)
+}
+
 func hasAnySuffix(name string, suffixes []string) bool {
 	return slices.ContainsFunc(suffixes, func(s string) bool { return strings.HasSuffix(name, s) })
 }

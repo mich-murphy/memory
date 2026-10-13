@@ -25,15 +25,13 @@ var (
 		"file-history": RoleFileHistory, "session-env": RoleSessionEnv, "debug": RoleDebug, "todos": RoleTodo,
 		"tasks": RoleTask,
 	}
-	claudeTopLevelRoles = map[string]Role{
-		"plans": RolePlan, "teams": RoleTeam, "paste-cache": RolePaste, "usage-data": RoleUsage,
-		"agent-memory": RoleMemory, "skills": RoleConfig, "agents": RoleConfig, "commands": RoleConfig,
-		"rules": RoleConfig, "output-styles": RoleConfig, "hooks": RoleConfig, "plugins": RoleConfig,
-		"sessions": RoleLiveness,
-	}
-	claudeConfigFiles = map[string]bool{
-		"settings.json": true, "settings.local.json": true, "CLAUDE.md": true, "keybindings.json": true,
-		"launcher-settings.json": true, "remote-settings.json": true, "policy-limits.json": true,
+	claudeRoles = map[string]Role{
+		"history.jsonl": RoleHistory, "settings.json": RoleConfig, "settings.local.json": RoleConfig,
+		"CLAUDE.md": RoleConfig, "keybindings.json": RoleConfig, "launcher-settings.json": RoleConfig,
+		"remote-settings.json": RoleConfig, "policy-limits.json": RoleConfig, "plans/": RolePlan, "teams/": RoleTeam,
+		"paste-cache/": RolePaste, "usage-data/": RoleUsage, "agent-memory/": RoleMemory, "skills/": RoleConfig,
+		"agents/": RoleConfig, "commands/": RoleConfig, "rules/": RoleConfig, "output-styles/": RoleConfig,
+		"hooks/": RoleConfig, "plugins/": RoleConfig, "sessions/": RoleLiveness,
 	}
 )
 
@@ -96,28 +94,19 @@ func (c *Claude) Classify(path, root string) (SessionFile, bool) {
 		return SessionFile{Agent: c.Name(), Root: root, Path: path, Key: KeyPrefix(c, root) + rel, SessionKey: sessionKey, Role: role}, true
 	}
 	top := parts[0]
-	if len(parts) == 1 {
-		if top == "history.jsonl" {
-			return sf("", RoleHistory)
-		}
-		if claudeConfigFiles[top] || hasAnySuffix(top, []string{".sh", ".py", ".js", ".ts"}) {
-			return sf("", RoleConfig)
-		}
-		return sf("", RoleUnknown)
+	if len(parts) == 1 && hasAnySuffix(top, []string{".sh", ".py", ".js", ".ts"}) {
+		return sf("", RoleConfig)
 	}
-	if top == "projects" {
+	if top == "projects" && len(parts) > 1 {
 		return c.classifyProject(parts, sf)
 	}
-	if role, ok := claudePerSessionDirs[top]; ok {
+	if role, ok := claudePerSessionDirs[top]; ok && len(parts) > 1 {
 		if sid := uuidPrefixRE.FindString(parts[1]); sid != "" {
 			return sf(c.sessionKey(root, sid), role)
 		}
 		return sf("", role)
 	}
-	if role, ok := claudeTopLevelRoles[top]; ok {
-		return sf("", role)
-	}
-	return sf("", RoleUnknown)
+	return sf("", topRole(claudeRoles, rel))
 }
 
 func (c *Claude) classifyProject(parts []string, sf func(string, Role) (SessionFile, bool)) (SessionFile, bool) {
