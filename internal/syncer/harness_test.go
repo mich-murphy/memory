@@ -22,13 +22,15 @@ import (
 
 // memStore is a bucket in memory that records every request, so the golden test can compare
 // what a run sends and the benchmarks can count it. latency, when set, is added to each request
-// as a stand-in for R2's round trip.
+// as a stand-in for R2's round trip. pin records the content of each raw object put, which the
+// golden test checks and the benchmarks leave out, since it costs more than the put.
 type memStore struct {
 	mu      sync.Mutex
 	objects map[string]memObject
 	ops     []string
 	sent    int64
 	latency time.Duration
+	pin     bool
 }
 
 type memObject struct {
@@ -59,7 +61,7 @@ func (m *memStore) Put(_ context.Context, key string, body []byte, meta map[stri
 	defer m.mu.Unlock()
 	m.objects[key] = memObject{slices.Clone(body), maps.Clone(meta)}
 	op := "put " + key
-	if strings.HasSuffix(key, ".zst") {
+	if m.pin && strings.HasSuffix(key, ".zst") {
 		data, err := raw.Decompress(body)
 		if err != nil {
 			return err

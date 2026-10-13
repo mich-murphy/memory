@@ -33,6 +33,7 @@ func TestBucketMatchesGolden(t *testing.T) {
 	dir := resolvedTempDir(t)
 	w := testenv.NewWorkload(t, dir, testenv.SmallProfile, t0.Add(-2*time.Hour))
 	r := newRig(t, w, filepath.Join(dir, "state"))
+	r.store.pin = true
 	n := testenv.SmallProfile.Sessions
 	claude, codex, pi := w.Mains[0], w.Mains[n], w.Mains[2*n]
 
