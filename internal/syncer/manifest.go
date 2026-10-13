@@ -247,17 +247,14 @@ func (s *Syncer) manifest(agent, sessionKey string, sess *state.Session, files [
 	for i := range snapshots {
 		snapshots[i].CheckedAt = 0 // left out of the manifest so a recheck alone doesn't rewrite it
 	}
-	var launch any
-	var git any = map[string]any{}
+	var launch map[string]any
 	if len(sess.Launches) > 0 {
 		launch = sess.Launches[0]
-		if g, ok := sess.Launches[0]["git"].(map[string]any); ok && len(g) > 0 {
-			git = g
-		} else if g, ok := sess.Launches[0]["git"].(state.GitState); ok && !g.IsZero() {
-			git = g
-		}
 	}
-	if m, ok := git.(map[string]any); ok && len(m) == 0 && len(sess.Snapshots) > 0 && !sess.Snapshots[0].Git.IsZero() {
+	var git any = map[string]any{}
+	if g, _ := launch["git"].(map[string]any); len(g) > 0 {
+		git = g
+	} else if len(sess.Snapshots) > 0 && !sess.Snapshots[0].Git.IsZero() {
 		git = sess.Snapshots[0].Git
 	}
 	return map[string]any{
