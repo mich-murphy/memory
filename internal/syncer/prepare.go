@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,6 +19,10 @@ import (
 	"github.com/mich-murphy/memory/internal/scrub"
 	"github.com/mich-murphy/memory/internal/state"
 )
+
+// errVanished is a file that was rotated or recompressed between being read and uploaded; the
+// next sync sees it under its new name.
+var errVanished = errors.New("file vanished")
 
 type uploadPlan int
 
@@ -70,12 +75,19 @@ type upload struct {
 	replacedPieces []raw.Piece
 	version        *versionPlan
 	resume         *state.Resume
+	// compress runs on the upload pool, so backfills use every core.
+	compress func(u *upload) error
 }
 
 func (u *upload) cleanup() {
 	if u.bodyPath != "" {
 		_ = os.Remove(u.bodyPath) // a leftover temp file is swept with the tmp dir
 	}
+}
+
+// held is about how many bytes of the file the upload holds in memory until it is sent.
+func (u *upload) held() int64 {
+	return min(u.size-u.segmentStart, largeFileBytes)
 }
 
 func (u *upload) bodySize() int64 {
@@ -358,12 +370,9 @@ func (s *Syncer) planUpload(sf adapters.SessionFile, root, key string, c *conten
 	if mode == uploadNothing {
 		return u, nil
 	}
-	if err := c.compress(u); err != nil {
-		return nil, err
-	}
+	u.compress = c.compress
 	if mode == uploadWhole {
 		if err := s.planReplace(u, prev, pieces, c.appended); err != nil {
-			u.cleanup()
 			return nil, err
 		}
 	}
@@ -456,6 +465,12 @@ func (s *Syncer) compressToTemp(path string, start, length int64) (tmpPath, sha 
 
 // upload runs on the upload pool, so it must not touch local state.
 func (s *Syncer) upload(ctx context.Context, u *upload) error {
+	if err := u.compress(u); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return errVanished
+		}
+		return err
+	}
 	if err := s.copyVersion(ctx, u); err != nil {
 		return err
 	}

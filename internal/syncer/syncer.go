@@ -41,6 +41,7 @@ const (
 	dbVersionEvery    = 24 * time.Hour
 	recopyAfter       = time.Hour
 	uploadWorkers     = 8
+	maxHeldBytes      = 128 << 20
 	prefixLines       = 20
 	maxErrorMsgs      = 10
 )
@@ -327,6 +328,60 @@ type result struct {
 	err error
 }
 
+// pool runs uploads on uploadWorkers goroutines, with at most twice that many, holding at
+// most maxHeldBytes of files, in flight. Results are handled on the caller's goroutine, which
+// alone writes local state.
+type pool struct {
+	s        *Syncer
+	ctx      context.Context
+	results  chan result
+	sem      chan struct{}
+	inflight int
+	held     int64
+}
+
+func (p *pool) add(u *upload) error {
+	for p.inflight >= uploadWorkers*2 || p.inflight > 0 && p.held+u.held() > maxHeldBytes {
+		if err := p.collect(); err != nil {
+			return err
+		}
+	}
+	p.inflight++
+	p.held += u.held()
+	go func() {
+		p.sem <- struct{}{}
+		err := p.s.upload(p.ctx, u)
+		<-p.sem
+		p.results <- result{u, err}
+	}()
+	return nil
+}
+
+func (p *pool) collect() error {
+	r := <-p.results
+	p.inflight--
+	p.held -= r.u.held()
+	defer r.u.cleanup()
+	if errors.Is(r.err, errVanished) {
+		return nil
+	}
+	if r.err != nil {
+		p.s.fail(r.u.sf, r.err)
+		return nil
+	}
+	return p.s.finish(r.u)
+}
+
+func (p *pool) wait() error {
+	var first error
+	for p.inflight > 0 {
+		if err := p.collect(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
 func (s *Syncer) Run(ctx context.Context, files []Found) (*Summary, error) {
 	pending, err := s.state.PendingManifests()
 	if err != nil {
@@ -335,19 +390,7 @@ func (s *Syncer) Run(ctx context.Context, files []Found) (*Summary, error) {
 	for _, p := range pending {
 		s.touched[sessionID{p.Agent, p.SessionKey}] = true
 	}
-	results := make(chan result, uploadWorkers*2)
-	sem := make(chan struct{}, uploadWorkers)
-	inflight := 0
-	collect := func() error {
-		r := <-results
-		inflight--
-		defer r.u.cleanup()
-		if r.err != nil {
-			s.fail(r.u.sf, r.err)
-			return nil
-		}
-		return s.finish(r.u)
-	}
+	p := &pool{s: s, ctx: ctx, results: make(chan result, uploadWorkers*2), sem: make(chan struct{}, uploadWorkers)}
 	var stateErr error
 	for _, f := range files {
 		if ctx.Err() != nil || stateErr != nil {
@@ -359,28 +402,15 @@ func (s *Syncer) Run(ctx context.Context, files []Found) (*Summary, error) {
 			continue // rotated or recompressed between discovery and read
 		case err != nil:
 			s.fail(f.File, err)
-			continue
 		case u == nil:
-			continue
 		case !u.needsUpload:
 			stateErr = s.finish(u)
-			continue
+		default:
+			stateErr = p.add(u)
 		}
-		for inflight >= uploadWorkers*2 && stateErr == nil {
-			stateErr = collect()
-		}
-		inflight++
-		go func() {
-			sem <- struct{}{}
-			err := s.upload(ctx, u)
-			<-sem
-			results <- result{u, err}
-		}()
 	}
-	for inflight > 0 {
-		if err := collect(); err != nil && stateErr == nil {
-			stateErr = err
-		}
+	if err := p.wait(); err != nil && stateErr == nil {
+		stateErr = err
 	}
 	if stateErr != nil {
 		return &s.Summary, stateErr
