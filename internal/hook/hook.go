@@ -133,34 +133,49 @@ func ClaimPending(stateDir, path string) string {
 	return marker
 }
 
-// proc returns a process's argv and parent pid. On macOS argv is the whole `ps` line, since ps
-// can't split it reliably.
 func proc(ctx context.Context, pid int) ([]string, int, bool) {
-	if data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline"); err == nil {
-		stat, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
-		if err != nil {
-			return nil, 0, false
-		}
-		i := bytes.LastIndexByte(stat, ')')
-		if i < 0 {
-			return nil, 0, false
-		}
-		fields := strings.Fields(string(stat[i+1:]))
-		if len(fields) < 2 {
-			return nil, 0, false
-		}
-		ppid, err := strconv.Atoi(fields[1])
-		if err != nil {
-			return nil, 0, false
-		}
-		var argv []string
-		for a := range strings.SplitSeq(string(data), "\x00") {
-			if a != "" {
-				argv = append(argv, strings.ToValidUTF8(a, "�"))
-			}
-		}
-		return argv, ppid, true
+	dir := "/proc/" + strconv.Itoa(pid)
+	cmdline, err := os.ReadFile(dir + "/cmdline")
+	if err != nil {
+		return procPS(ctx, pid)
 	}
+	stat, err := os.ReadFile(dir + "/stat")
+	if err != nil {
+		return nil, 0, false
+	}
+	ppid, ok := statPPID(stat)
+	if !ok {
+		return nil, 0, false
+	}
+	return splitCmdline(cmdline), ppid, true
+}
+
+// The command name in parentheses may itself contain ") ".
+func statPPID(stat []byte) (int, bool) {
+	i := bytes.LastIndexByte(stat, ')')
+	if i < 0 {
+		return 0, false
+	}
+	fields := strings.Fields(string(stat[i+1:]))
+	if len(fields) < 2 {
+		return 0, false
+	}
+	ppid, err := strconv.Atoi(fields[1])
+	return ppid, err == nil
+}
+
+func splitCmdline(data []byte) []string {
+	var argv []string
+	for a := range strings.SplitSeq(string(data), "\x00") {
+		if a != "" {
+			argv = append(argv, strings.ToValidUTF8(a, "�"))
+		}
+	}
+	return argv
+}
+
+// ps can't split a command line reliably, so argv is the whole line.
+func procPS(ctx context.Context, pid int) ([]string, int, bool) {
 	ctx, cancel := context.WithTimeout(ctx, psTimeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "ps", "-o", "ppid=,args=", "-p", strconv.Itoa(pid)).Output()

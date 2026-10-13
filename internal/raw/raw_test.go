@@ -85,22 +85,22 @@ func TestReadKeyJoinsSegmentsAndSkipsStaleOnes(t *testing.T) {
 		SegmentKey(key, 1, 2):     Compress([]byte("X")), // left behind by a fold
 		SegmentKey("other", 3, 4): Compress([]byte("Y")),
 	}
-	got, err := ReadKey(context.Background(), s, key)
+	got, err := ReadKey(t.Context(), s, key)
 	if err != nil || string(got) != "abcdef" {
 		t.Errorf("ReadKey = %q, %v", got, err)
 	}
-	if _, err := ReadKey(context.Background(), s, "nope"); !errors.Is(err, errMissing) {
+	if _, err := ReadKey(t.Context(), s, "nope"); !errors.Is(err, errMissing) {
 		t.Errorf("missing key: %v", err)
 	}
 	s[key+".d/junk.zst"] = Compress(nil)
-	if _, err := ReadKey(context.Background(), s, key); !errors.Is(err, errSegmentName) {
+	if _, err := ReadKey(t.Context(), s, key); !errors.Is(err, errSegmentName) {
 		t.Errorf("bad segment name: %v", err)
 	}
 }
 
 func TestJoinChecksEveryPiece(t *testing.T) {
 	s := memStore{"a": Compress([]byte("abc")), "b": Compress([]byte("de"))}
-	get := func(k string) ([]byte, error) { return s.Get(context.Background(), k) }
+	get := func(k string) ([]byte, error) { return s.Get(t.Context(), k) }
 	good := []Piece{{Start: 3, End: 5, SHA256: SHA256([]byte("de")), Object: "b"}, {Start: 0, End: 3, SHA256: SHA256([]byte("abc")), Object: "a"}}
 	if got, err := Join(get, good); err != nil || string(got) != "abcde" {
 		t.Errorf("Join = %q, %v", got, err)

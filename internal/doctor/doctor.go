@@ -41,7 +41,7 @@ type reporter struct {
 	failed bool
 }
 
-func (r *reporter) report(l level, format string, args ...any) {
+func (r *reporter) reportf(l level, format string, args ...any) {
 	if l == fail {
 		r.failed = true
 	}
@@ -58,7 +58,7 @@ func pick(good bool, otherwise level) level {
 // Run prints each check to w and reports whether all of them passed.
 func Run(ctx context.Context, cfg *config.Config, w io.Writer) bool {
 	r := &reporter{w: w}
-	r.report(ok, "machine id: %s (hostname %s)", cfg.MachineID, cfg.Hostname)
+	r.reportf(ok, "machine id: %s (hostname %s)", cfg.MachineID, cfg.Hostname)
 	checkStore(ctx, cfg, r)
 	checkClaude(cfg.Home, r)
 	checkCodex(cfg.Home, r)
@@ -66,16 +66,16 @@ func Run(ctx context.Context, cfg *config.Config, w io.Writer) bool {
 
 	cmd := install.Command()
 	_, lookErr := exec.LookPath(cmd[0])
-	r.report(pick(lookErr == nil || fsutil.Exists(cmd[0]), fail), "agent-sessions command: %s", strings.Join(cmd, " "))
+	r.reportf(pick(lookErr == nil || fsutil.Exists(cmd[0]), fail), "agent-sessions command: %s", strings.Join(cmd, " "))
 
 	timer := install.TimerInstalled(ctx, cfg.Home)
 	if timer != "" {
-		r.report(ok, "sweep timer: %s", timer)
+		r.reportf(ok, "sweep timer: %s", timer)
 	} else {
-		r.report(fail, "sweep timer: not installed (run agent-sessions install)")
+		r.reportf(fail, "sweep timer: not installed (run agent-sessions install)")
 	}
 	if timer == "systemd" && !install.LingerEnabled(ctx) {
-		r.report(warn, "systemd user timers stop when you log out; `sudo loginctl enable-linger $USER` keeps them running")
+		r.reportf(warn, "systemd user timers stop when you log out; `sudo loginctl enable-linger $USER` keeps them running")
 	}
 	checkRuns(ctx, cfg, timer, r)
 	return !r.failed
@@ -83,18 +83,18 @@ func Run(ctx context.Context, cfg *config.Config, w io.Writer) bool {
 
 func checkStore(ctx context.Context, cfg *config.Config, r *reporter) {
 	if cfg.LocalStore != "" {
-		r.report(warn, "writing to a local directory, not R2: %s", cfg.LocalStore)
+		r.reportf(warn, "writing to a local directory, not R2: %s", cfg.LocalStore)
 		return
 	}
 	if missing := cfg.MissingR2Settings(); len(missing) > 0 {
-		r.report(fail, "missing %s (set them in %s)", strings.Join(missing, ", "), cfg.ConfigPath)
+		r.reportf(fail, "missing %s (set them in %s)", strings.Join(missing, ", "), cfg.ConfigPath)
 		return
 	}
 	if err := probeStore(ctx, cfg); err != nil {
-		r.report(fail, "bucket %s: %v", cfg.R2Bucket, err)
+		r.reportf(fail, "bucket %s: %v", cfg.R2Bucket, err)
 		return
 	}
-	r.report(ok, "bucket %s: write, read and delete work", cfg.R2Bucket)
+	r.reportf(ok, "bucket %s: write, read and delete work", cfg.R2Bucket)
 }
 
 func probeStore(ctx context.Context, cfg *config.Config) error {
@@ -131,15 +131,15 @@ func readJSON(path string) *jsonx.Object {
 func checkClaude(home string, r *reporter) {
 	root := adapters.NewClaude(home).DefaultRoots()[0]
 	if !fsutil.Exists(root) {
-		r.report(ok, "claude: not used here (%s missing)", root)
+		r.reportf(ok, "claude: not used here (%s missing)", root)
 		return
 	}
 	path := filepath.Join(root, "settings.json")
 	settings := readJSON(path)
 	n, want := len(install.OurHandlers(settings)), len(install.ClaudeEvents)
-	r.report(pick(n >= want, fail), "claude: %d/%d agent-sessions hooks in %s", n, want, path)
+	r.reportf(pick(n >= want, fail), "claude: %d/%d agent-sessions hooks in %s", n, want, path)
 	if v, _ := settings.Get("disableAllHooks"); v == true {
-		r.report(fail, "claude: disableAllHooks is set, so no hooks run")
+		r.reportf(fail, "claude: disableAllHooks is set, so no hooks run")
 	}
 	days, set := settings.Get("cleanupPeriodDays")
 	if !set {
@@ -150,28 +150,28 @@ func checkClaude(home string, r *reporter) {
 		i, err := n.Int64()
 		good = err == nil && i >= keepDaysWanted
 	}
-	r.report(pick(good, warn), "claude: cleanupPeriodDays = %v (Claude Code deletes older transcripts)", days)
+	r.reportf(pick(good, warn), "claude: cleanupPeriodDays = %v (Claude Code deletes older transcripts)", days)
 }
 
 func checkCodex(home string, r *reporter) {
 	root := adapters.NewCodex(home).DefaultRoots()[0]
 	if !fsutil.Exists(root) {
-		r.report(ok, "codex: not used here (%s missing)", root)
+		r.reportf(ok, "codex: not used here (%s missing)", root)
 		return
 	}
 	configured, trusted := install.CodexTrustState(root)
 	want := len(install.CodexEvents)
-	r.report(pick(configured >= want, fail), "codex: %d/%d agent-sessions hooks in %s", configured, want,
+	r.reportf(pick(configured >= want, fail), "codex: %d/%d agent-sessions hooks in %s", configured, want,
 		filepath.Join(root, "hooks.json"))
 	if configured > 0 {
 		hint := ""
 		if trusted != configured {
 			hint = " (open Codex and review them in /hooks)"
 		}
-		r.report(pick(trusted == configured, fail), "codex: %d/%d agent-sessions hooks trusted%s", trusted, configured, hint)
+		r.reportf(pick(trusted == configured, fail), "codex: %d/%d agent-sessions hooks trusted%s", trusted, configured, hint)
 	}
 	if codexHooksDisabled(filepath.Join(root, "config.toml")) {
-		r.report(fail, "codex: [features] hooks = false in config.toml, so no hooks run")
+		r.reportf(fail, "codex: [features] hooks = false in config.toml, so no hooks run")
 	}
 }
 
@@ -187,7 +187,7 @@ func codexHooksDisabled(path string) bool {
 func checkPi(home string, r *reporter) {
 	dir := adapters.NewPi(home).AgentDir()
 	if !fsutil.Exists(dir) {
-		r.report(ok, "pi: not used here (%s missing)", dir)
+		r.reportf(ok, "pi: not used here (%s missing)", dir)
 		return
 	}
 	ext := filepath.Join(dir, "extensions", "agent-sessions.ts")
@@ -197,7 +197,7 @@ func checkPi(home string, r *reporter) {
 	if installed {
 		word = "installed"
 	}
-	r.report(pick(installed, fail), "pi: extension %s at %s", word, ext)
+	r.reportf(pick(installed, fail), "pi: extension %s at %s", word, ext)
 }
 
 func checkRuns(ctx context.Context, cfg *config.Config, timer string, r *reporter) {
@@ -221,11 +221,11 @@ func checkRuns(ctx context.Context, cfg *config.Config, timer string, r *reporte
 	switch {
 	case lastSweep != nil:
 		age := time.Since(time.Unix(0, int64(lastSweep.FinishedAt*1e9)))
-		r.report(pick(age < time.Hour, warn), "last sweep %.0f min ago, %v errors", age.Minutes(), lastSweep.Summary["errors"])
+		r.reportf(pick(age < time.Hour, warn), "last sweep %.0f min ago, %v errors", age.Minutes(), lastSweep.Summary["errors"])
 	case timer != "":
-		r.report(warn, "no sweep has run yet")
+		r.reportf(warn, "no sweep has run yet")
 	}
 	if len(errorMsgs) > 0 {
-		r.report(warn, "recent errors (see %s): %s", filepath.Join(cfg.StateDir, "agent-sessions.log"), errorMsgs[0])
+		r.reportf(warn, "recent errors (see %s): %s", filepath.Join(cfg.StateDir, "agent-sessions.log"), errorMsgs[0])
 	}
 }

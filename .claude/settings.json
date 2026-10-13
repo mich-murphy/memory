@@ -1,4 +1,13 @@
 {
+  "env": {
+    "MCP_TIMEOUT": "180000"
+  },
+  "enabledPlugins": {
+    "gopls-lsp@claude-plugins-official": true
+  },
+  "enabledMcpjsonServers": [
+    "gopls"
+  ],
   "permissions": {
     "deny": [
       "Edit(**/.golangci.yml)",
@@ -8,7 +17,7 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit",
+        "matcher": "^(Edit|Write|MultiEdit)$",
         "hooks": [
           {
             "type": "command",

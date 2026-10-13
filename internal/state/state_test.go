@@ -110,6 +110,13 @@ func TestPiecesAndVersions(t *testing.T) {
 	if len(pieces) != 2 || pieces[1].Object != "k.d/3-5" {
 		t.Errorf("Pieces = %v", pieces)
 	}
+	several := []raw.Piece{{Start: 0, End: 2, SHA256: "x", Object: "k"}, {Start: 2, End: 5, SHA256: "y", Object: "k.d/2-5"}}
+	check(t, s.SetPieces("k", several))
+	pieces, err = s.Pieces("k")
+	check(t, err)
+	if diff := cmp.Diff(several, pieces); diff != "" {
+		t.Errorf("SetPieces (-want +got):\n%s", diff)
+	}
 	check(t, s.SetPieces("k", []raw.Piece{{Start: 0, End: 5, SHA256: "c", Object: "k"}}))
 	if pieces, _ = s.Pieces("k"); len(pieces) != 1 {
 		t.Errorf("fold left %v", pieces)
