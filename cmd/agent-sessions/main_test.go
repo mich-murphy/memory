@@ -44,14 +44,7 @@ func TestScripts(t *testing.T) {
 	if coverDir == "" {
 		coverDir = t.TempDir() // a -cover binary warns on stderr without one
 	}
-	// Each -cover process writes the shared meta-data file through a temporary named only by
-	// the start time. macOS clocks tick in microseconds, so two scripts starting together can
-	// pick the same name, and one fails on stderr. Once the file exists no run writes it again.
-	prime := exec.CommandContext(t.Context(), filepath.Join(binDir, "agent-sessions"), "--version")
-	prime.Env = append(os.Environ(), "GOCOVERDIR="+coverDir)
-	if out, err := prime.CombinedOutput(); err != nil {
-		t.Fatalf("agent-sessions --version: %v\n%s", err, out)
-	}
+	writeCoverMetaFile(t, coverDir)
 	testscript.Run(t, testscript.Params{
 		Dir: "testdata/script",
 		Setup: func(env *testscript.Env) error {
@@ -70,6 +63,17 @@ func TestScripts(t *testing.T) {
 			"age":     age,
 		},
 	})
+}
+
+// Each -cover process that finds no meta-data file writes one through a temporary named by its
+// start time, and on macOS's microsecond clock two scripts starting together collide.
+func writeCoverMetaFile(t *testing.T, coverDir string) {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), filepath.Join(binDir, "agent-sessions"), "--version")
+	cmd.Env = append(os.Environ(), "GOCOVERDIR="+coverDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("agent-sessions --version: %v\n%s", err, out)
+	}
 }
 
 // waitfor GLOB [SECONDS] waits for a file matching GLOB to appear (default 20 s); negated, for

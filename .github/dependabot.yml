@@ -1,8 +1,6 @@
 version: 2
 updates:
   - package-ecosystem: gomod
-    # The collector, the pinned dev tools, and gopls (its own module: it needs a different
-    # golang.org/x/tools from deadcode's).
     directories: ["/", "/tools", "/tools/gopls"]
     schedule:
       interval: weekly
@@ -12,7 +10,7 @@ updates:
       go-modules:
         patterns: ["*"]
   - package-ecosystem: github-actions
-    directory: /
+    directories: ["/", "/.github/actions/setup-go"]
     schedule:
       interval: weekly
     cooldown:

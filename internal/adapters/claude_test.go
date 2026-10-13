@@ -21,21 +21,19 @@ func writePlugins(t *testing.T, root, body string) {
 
 func TestClaudePluginDirsReadsBothFileVersions(t *testing.T) {
 	root := t.TempDir()
-	lsp, docs, old := filepath.Join(root, "cache", "lsp"), filepath.Join(root, "cache", "docs"), filepath.Join(root, "cache", "old")
-	for _, d := range []string{lsp, docs, old} {
+	lsp, docs, v1 := filepath.Join(root, "cache", "lsp"), filepath.Join(root, "cache", "docs"), filepath.Join(root, "cache", "v1")
+	for _, d := range []string{lsp, docs, v1} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	gone := filepath.Join(root, "cache", "uninstalled")
-	// Version 2 lists installs per plugin; version 1 had one object per plugin. A plugin whose
-	// install dir is gone, or an entry without one, is skipped.
+	uninstalled := filepath.Join(root, "cache", "uninstalled")
 	writePlugins(t, root, `{"version": 2, "plugins": {
-		"lsp@official": [{"scope": "user", "installPath": "`+lsp+`"}, {"scope": "project", "installPath": "`+gone+`"}],
+		"lsp@official": [{"scope": "user", "installPath": "`+lsp+`"}, {"scope": "project", "installPath": "`+uninstalled+`"}],
 		"docs@official": [{"scope": "user", "installPath": "`+docs+`"}, "not an object", {"scope": "user"}],
-		"old": {"installPath": "`+old+`"}
+		"v1-format": {"installPath": "`+v1+`"}
 	}}`)
-	want := []ScopedDir{{Name: "docs@official", Dir: docs}, {Name: "lsp@official", Dir: lsp}, {Name: "old", Dir: old}}
+	want := []ScopedDir{{Name: "docs@official", Dir: docs}, {Name: "lsp@official", Dir: lsp}, {Name: "v1-format", Dir: v1}}
 	if diff := cmp.Diff(want, NewClaude(t.TempDir()).PluginDirs(root)); diff != "" {
 		t.Errorf("plugin dirs (-want +got):\n%s", diff)
 	}

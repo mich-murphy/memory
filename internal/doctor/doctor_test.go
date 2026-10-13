@@ -44,12 +44,11 @@ func TestCheckRunsReportsTheLatestSweepAndFirstRecentError(t *testing.T) {
 	cfg := &config.Config{StateDir: t.TempDir()}
 	recordRuns(t, cfg.StateDir,
 		state.Run{Trigger: "sweep", Summary: map[string]any{"errors": 0}},
-		state.Run{Trigger: "sweep", Summary: map[string]any{"errors": 2, "error_messages": []string{"first", "second"}}},
-		state.Run{Trigger: "hook", Summary: map[string]any{"errors": 1, "error_messages": []string{"newest"}}},
+		state.Run{Trigger: "sweep", Summary: map[string]any{"errors": 2, "error_messages": []string{"from the latest sweep"}}},
+		state.Run{Trigger: "hook", Summary: map[string]any{"errors": 1, "error_messages": []string{"from the newest run"}}},
 	)
-	// Runs are read newest first: the hook's error leads, and the sweep is the second one recorded.
 	want := "[ok  ] last sweep 0 min ago, 2 errors\n" +
-		"[warn] recent errors (see " + filepath.Join(cfg.StateDir, "agent-sessions.log") + "): newest\n"
+		"[warn] recent errors (see " + filepath.Join(cfg.StateDir, "agent-sessions.log") + "): from the newest run\n"
 	if diff := cmp.Diff(want, runsReport(t, cfg, "systemd")); diff != "" {
 		t.Errorf("report (-want +got):\n%s", diff)
 	}
@@ -61,9 +60,8 @@ func TestCheckRunsWithoutHistory(t *testing.T) {
 	if diff := cmp.Diff("[warn] no sweep has run yet\n", runsReport(t, cfg, "cron")); diff != "" {
 		t.Errorf("with a timer (-want +got):\n%s", diff)
 	}
-	// Without a timer the missing timer is already a failure; no second line about sweeps.
 	if got := runsReport(t, cfg, ""); got != "" {
-		t.Errorf("without a timer: %q", got)
+		t.Errorf("without a timer, which already fails the doctor: %q", got)
 	}
 }
 
@@ -73,7 +71,6 @@ func TestProbeStoreWritesReadsAndDeletes(t *testing.T) {
 	if err := probeStore(t.Context(), cfg); err != nil {
 		t.Fatal(err)
 	}
-	// The probe cleans up after itself: only empty directories may remain.
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err == nil && !d.IsDir() {
 			t.Errorf("probe left %s behind", path)
@@ -84,12 +81,11 @@ func TestProbeStoreWritesReadsAndDeletes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A store that can't be written to fails the probe.
-	blocked := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(blocked, nil, 0o600); err != nil {
+	regularFile := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(regularFile, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := probeStore(t.Context(), &config.Config{MachineID: "testbox", LocalStore: blocked}); err == nil {
+	if err := probeStore(t.Context(), &config.Config{MachineID: "testbox", LocalStore: regularFile}); err == nil {
 		t.Error("probe of a store under a regular file succeeded")
 	}
 }

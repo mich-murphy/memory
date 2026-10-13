@@ -252,8 +252,7 @@ func TestProcReadsThisProcess(t *testing.T) {
 	if !ok || len(argv) == 0 || ppid != os.Getppid() {
 		t.Errorf("proc(self) = %v, %d, %v", argv, ppid, ok)
 	}
-	// ps is the macOS path; Linux has it too, so both platforms check it. macOS ps may cut the
-	// line to the terminal width, so only its presence is checked.
+	// macOS ps may cut the line to the terminal width.
 	argv, ppid, ok = procPS(t.Context(), os.Getpid())
 	if !ok || len(argv) != 1 || argv[0] == "" || ppid != os.Getppid() {
 		t.Errorf("procPS(self) = %q, %d, %v", argv, ppid, ok)
@@ -266,7 +265,7 @@ func TestProcReadsThisProcess(t *testing.T) {
 func TestStatPPIDCountsFromTheLastParenthesis(t *testing.T) {
 	for stat, want := range map[string]int{
 		"42 (claude) S 7 42 42 0":     7,
-		"42 (a) b (c)) R 9 42 42 0":   9, // a command name holding ") "
+		"42 (a) b (c)) R 9 42 42 0":   9,
 		"42 (claude) S":               -1,
 		"42 claude S 7 42":            -1,
 		"42 (claude) S seven 42 42 0": -1,

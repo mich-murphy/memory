@@ -13,29 +13,26 @@ concurrency:
 jobs:
   ci:
     name: CI
-    # actionlint 1.7.12 rejects GitHub's new `$/` form, and no earlier step can swap this file.
-    uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository]
+    uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
 
   release:
     name: Build and publish
-    needs: ci # only a commit that passes every CI gate is released
+    needs: ci
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: write # create the GitHub release and upload binaries
     env:
       GOTOOLCHAIN: local
-      GO_VERSION: "1.27.2" # go.mod's toolchain line
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: ./.github/actions/setup-go
         with:
-          go-version: ${{ env.GO_VERSION }}
           cache: false # no build cache in release jobs, so nothing cached elsewhere can leak in
       - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3

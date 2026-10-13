@@ -110,7 +110,6 @@ func TestPiecesAndVersions(t *testing.T) {
 	if len(pieces) != 2 || pieces[1].Object != "k.d/3-5" {
 		t.Errorf("Pieces = %v", pieces)
 	}
-	// Replacing with several pieces keeps all of them, in order.
 	several := []raw.Piece{{Start: 0, End: 2, SHA256: "x", Object: "k"}, {Start: 2, End: 5, SHA256: "y", Object: "k.d/2-5"}}
 	check(t, s.SetPieces("k", several))
 	pieces, err = s.Pieces("k")

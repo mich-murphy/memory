@@ -1,6 +1,4 @@
 # Git hooks: `make hooks` installs them. CI runs the same checks, so these only save a round trip.
-# lefthook lives in tools/go.mod, so the installed hooks call it through `go tool`; a hook that
-# can't find it fails instead of letting the commit through unchecked.
 lefthook: go tool -modfile=tools/go.mod lefthook
 assert_lefthook_installed: true
 glob_matcher: doublestar

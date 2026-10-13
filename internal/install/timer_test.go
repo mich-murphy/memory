@@ -12,34 +12,30 @@ import (
 	"github.com/mich-murphy/memory/internal/testenv"
 )
 
-// fakeTools puts stand-ins for systemctl, launchctl, loginctl and crontab first on PATH. Each
-// records its arguments, one call per line, in calls.log. crontab keeps its table in crontab.txt;
-// loginctl reports the linger value given.
 type fakeTools struct {
 	dir string
 }
 
-const fakeTool = `#!/bin/sh
-echo "${0##*/} $*" >> "%[1]s/calls.log"
+const fakeToolScript = `#!/bin/sh
+echo "${0##*/} $*" >> "$FAKE_TOOLS_DIR/calls.log"
 case "${0##*/} $1" in
-"crontab -l") [ -f "%[1]s/crontab.txt" ] && cat "%[1]s/crontab.txt" || exit 1 ;;
-"crontab -") cat > "%[1]s/crontab.txt" ;;
-"loginctl show-user") echo "Linger=%[2]s" ;;
+"crontab -l") cat "$FAKE_TOOLS_DIR/crontab.txt" 2>/dev/null || exit 1 ;;
+"crontab -") cat > "$FAKE_TOOLS_DIR/crontab.txt" ;;
+"loginctl show-user") echo "Linger=$FAKE_LINGER" ;;
 esac
-exit 0
 `
 
 func newFakeTools(t *testing.T, linger string) *fakeTools {
 	t.Helper()
 	dir := t.TempDir()
 	for _, name := range []string{"systemctl", "launchctl", "loginctl", "crontab"} {
-		script := strings.ReplaceAll(fakeTool, "%[1]s", dir)
-		script = strings.ReplaceAll(script, "%[2]s", linger)
-		testenv.Write(t, filepath.Join(dir, name), script)
+		testenv.Write(t, filepath.Join(dir, name), fakeToolScript)
 		if err := os.Chmod(filepath.Join(dir, name), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
+	t.Setenv("FAKE_TOOLS_DIR", dir)
+	t.Setenv("FAKE_LINGER", linger)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("USER", "tester")
 	t.Setenv("XDG_CONFIG_HOME", "")
@@ -131,9 +127,8 @@ func TestSystemdWritesUnitsEnablesTimerAndRemovesThem(t *testing.T) {
 		t.Errorf("removal commands (-want +got):\n%s", diff)
 	}
 
-	// Removing again finds nothing to delete and still succeeds.
 	if err := systemd(ctx, o, 15); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing when already removed: %v", err)
 	}
 }
 
@@ -148,7 +143,6 @@ func TestSystemdDryRunChangesNothing(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(e.Home, ".config", "systemd")); !os.IsNotExist(err) {
 		t.Errorf("dry run created unit files: %v", err)
 	}
-	// Only the read-only linger check runs; with linger on there's no advice.
 	if diff := cmp.Diff([]string{"loginctl show-user tester -p Linger"}, tools.calls(t)); diff != "" {
 		t.Errorf("commands (-want +got):\n%s", diff)
 	}
@@ -257,7 +251,6 @@ func TestCronStartsATableAndDryRunLeavesItAlone(t *testing.T) {
 		t.Errorf("dry run commands (-want +got):\n%s", diff)
 	}
 
-	// No crontab yet: `crontab -l` fails, and the sweep becomes the only line.
 	o.DryRun = false
 	if err := cron(ctx, o, 10); err != nil {
 		t.Fatal(err)

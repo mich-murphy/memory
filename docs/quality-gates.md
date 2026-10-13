@@ -71,7 +71,7 @@ gofumpt (stricter gofmt) and goimports, with this module's imports grouped last.
 
 ## CI and releases
 
-- `.github/workflows/ci.yml`: static checks on Linux; `make crap` (tests, coverage and CRAP) on Linux amd64, Linux arm64 and macOS arm64, plus govulncheck on macOS; fuzzing; zizmor with its pedantic persona. Every job uses the Go in `go.mod`'s toolchain line (set once per workflow as `GO_VERSION`) and has a timeout.
+- `.github/workflows/ci.yml`: static checks on Linux; `make crap` (tests, coverage and CRAP) on Linux amd64, Linux arm64 and macOS arm64, plus govulncheck on macOS; fuzzing; zizmor with its pedantic persona. Every job installs the Go on `go.mod`'s toolchain line through `.github/actions/setup-go` (setup-go's own `go-version-file` reads only the `go` line) and has a timeout.
 - `.github/workflows/release.yml`: on a `v*` tag, the whole of CI runs first; only then does GoReleaser (`.goreleaser.yaml`) builds linux and darwin binaries for amd64 and arm64 with reproducible flags, plus `checksums.txt` and SBOMs.
 - Dependabot updates Go modules and Actions weekly, grouped, after a 7-day cooldown.
 - Required checks on `main` need branch protection, which GitHub offers free on public repos.

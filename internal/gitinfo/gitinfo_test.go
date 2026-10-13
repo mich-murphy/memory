@@ -15,8 +15,7 @@ func TestRemoteNormalisation(t *testing.T) {
 		}
 	}
 	for url, want := range map[string]string{
-		"https://x:tok@github.com/a/b": "https://github.com/a/b",
-		// An unescaped @ in the password: the host starts after the last @.
+		"https://x:tok@github.com/a/b":   "https://github.com/a/b",
 		"https://user:p@ss@github.com/a": "https://github.com/a",
 		"https://github.com/a@b":         "https://github.com/a@b",
 		"https://github.com?q=a@b":       "https://github.com?q=a@b",
@@ -27,8 +26,6 @@ func TestRemoteNormalisation(t *testing.T) {
 	}
 }
 
-// FuzzStripUserinfo checks that no part of a credential survives in a URL's authority, the part
-// between "scheme://" and the first "/", "?" or "#".
 func FuzzStripUserinfo(f *testing.F) {
 	for _, seed := range []string{
 		"https://x:tok@github.com/a/b", "https://u:p@ss@h/a", "ssh://git@h:22/p", "https://h/a@b", "git@h:p", "",
@@ -40,18 +37,22 @@ func FuzzStripUserinfo(f *testing.F) {
 		if StripUserinfo(got) != got {
 			t.Errorf("not idempotent: %q -> %q -> %q", url, got, StripUserinfo(got))
 		}
-		loc := schemeRE.FindStringIndex(got)
-		if loc == nil {
-			return
-		}
-		authority := got[loc[1]:]
-		if end := strings.IndexAny(authority, "/?#"); end >= 0 {
-			authority = authority[:end]
-		}
-		if strings.Contains(authority, "@") {
+		if strings.Contains(authority(got), "@") {
 			t.Errorf("StripUserinfo(%q) = %q keeps userinfo", url, got)
 		}
 	})
+}
+
+func authority(url string) string {
+	loc := schemeRE.FindStringIndex(url)
+	if loc == nil {
+		return ""
+	}
+	rest := url[loc[1]:]
+	if end := strings.IndexAny(rest, "/?#"); end >= 0 {
+		return rest[:end]
+	}
+	return rest
 }
 
 func TestStateOutsideARepoIsZero(t *testing.T) {

@@ -133,8 +133,6 @@ func ClaimPending(stateDir, path string) string {
 	return marker
 }
 
-// proc returns a process's argv and parent pid: from /proc where there is one (Linux), from ps
-// otherwise (macOS).
 func proc(ctx context.Context, pid int) ([]string, int, bool) {
 	dir := "/proc/" + strconv.Itoa(pid)
 	cmdline, err := os.ReadFile(dir + "/cmdline")
@@ -152,8 +150,7 @@ func proc(ctx context.Context, pid int) ([]string, int, bool) {
 	return splitCmdline(cmdline), ppid, true
 }
 
-// statPPID reads the parent pid from /proc/<pid>/stat. The command name in parentheses may
-// itself hold spaces and parentheses, so fields are counted from the last ')'.
+// The command name in parentheses may itself contain ") ".
 func statPPID(stat []byte) (int, bool) {
 	i := bytes.LastIndexByte(stat, ')')
 	if i < 0 {
@@ -167,7 +164,6 @@ func statPPID(stat []byte) (int, bool) {
 	return ppid, err == nil
 }
 
-// splitCmdline splits /proc/<pid>/cmdline's NUL-separated arguments.
 func splitCmdline(data []byte) []string {
 	var argv []string
 	for a := range strings.SplitSeq(string(data), "\x00") {
@@ -178,7 +174,7 @@ func splitCmdline(data []byte) []string {
 	return argv
 }
 
-// procPS asks ps. Its argv is the whole command line, since ps can't split it reliably.
+// ps can't split a command line reliably, so argv is the whole line.
 func procPS(ctx context.Context, pid int) ([]string, int, bool) {
 	ctx, cancel := context.WithTimeout(ctx, psTimeout)
 	defer cancel()
