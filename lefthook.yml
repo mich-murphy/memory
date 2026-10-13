@@ -1,4 +1,3 @@
-# Git hooks: `make hooks` installs them. CI runs the same checks, so these only save a round trip.
 lefthook: go tool -modfile=tools/go.mod lefthook
 assert_lefthook_installed: true
 glob_matcher: doublestar

@@ -45,10 +45,9 @@ func FuzzCompressRoundTrip(f *testing.F) {
 			if !bytes.Equal(got, data) {
 				t.Fatalf("%s round trip changed %d bytes into %d", name, len(data), len(got))
 			}
-			// The frame records its size, so any zstd reader can decode it in one call.
 			var h zstd.Header
 			if err := h.Decode(body); err != nil || !h.HasFCS || h.FrameContentSize != uint64(len(data)) {
-				t.Fatalf("%s frame header %+v, %v", name, h, err)
+				t.Fatalf("%s frame doesn't record its content size: %+v, %v", name, h, err)
 			}
 		}
 	})

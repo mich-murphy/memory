@@ -20,16 +20,19 @@ import (
 	"github.com/mich-murphy/memory/internal/syncer"
 )
 
-// Lock waits. A hook's sync gives up quickly if a long backfill holds the lock (the sweep
-// catches up), so waiting syncs can't pile up; a sweep skips its turn; a manual run waits.
+// A hook's sync gives up soon when a backfill holds the lock, so waiting syncs can't pile up;
+// the next sweep catches up.
 const (
 	hookLockTimeout   = 30 * time.Second
 	sweepLockTimeout  = 60 * time.Second
 	manualLockTimeout = 10 * time.Minute
-	defaultInterval   = 10
-	defaultKeepDays   = 3650
-	statusRuns        = 8
-	statusErrors      = 3
+)
+
+const (
+	defaultInterval = 10
+	defaultKeepDays = 3650
+	statusRuns      = 8
+	statusErrors    = 3
 )
 
 type syncArgs struct {
@@ -90,7 +93,7 @@ func runSync(ctx context.Context, cmd string, args []string, version string, o I
 		return exitFailed, err
 	}
 	defer closeLog()
-	started := state.Now()
+	started := state.UnixNow()
 	if a.delay > 0 {
 		select {
 		case <-time.After(time.Duration(a.delay * float64(time.Second))):
@@ -176,7 +179,6 @@ func syncLocked(ctx context.Context, cfg *config.Config, st store.Store, a *sync
 	return summary, nil
 }
 
-// recordLaunches records a session-start hook's launch details for the session it reported.
 func recordLaunches(ctx context.Context, sy *syncer.Syncer, a *syncArgs, log *slog.Logger) {
 	launch := readLaunch(a.launch)
 	if launch == nil || len(a.paths) == 0 {
@@ -191,11 +193,10 @@ func recordLaunches(ctx context.Context, sy *syncer.Syncer, a *syncArgs, log *sl
 	}
 }
 
-// filesToSync is what a hook reported (with related files), or everything for a sweep.
 func filesToSync(sy *syncer.Syncer, a *syncArgs) ([]syncer.Found, error) {
 	agents := a.agents.orAll()
 	if len(a.paths) == 0 {
-		return sy.SweepFiles(agents, true)
+		return sy.SweepFiles(agents)
 	}
 	var files []syncer.Found
 	for _, agent := range agents {
@@ -208,7 +209,6 @@ func filesToSync(sy *syncer.Syncer, a *syncArgs) ([]syncer.Found, error) {
 	return files, nil
 }
 
-// readLaunch reads and removes the launch file a session-start hook wrote.
 func readLaunch(path string) map[string]any {
 	data, err := os.ReadFile(path)
 	_ = os.Remove(path) // one use only; a leftover is harmless
@@ -324,19 +324,22 @@ func runStatus(ctx context.Context, args []string, o IO) (int, error) {
 	}
 	defer func() { _ = s.Close() }() // read-only use
 	o.printf("machine: %s (%s)   state: %s\n", cfg.MachineID, cfg.Hostname, cfg.StateDir)
-	counts, err := s.Counts()
+	totals, err := s.FileTotals()
 	if err != nil {
 		return exitFailed, err
 	}
-	for _, c := range counts {
-		if c.Plain {
-			o.printf("  %-22s %7d\n", c.Name, c.Files)
-		} else {
-			o.printf("  %-22s %7d files %10.1f MB\n", c.Name, c.Files, float64(c.Bytes)/1e6)
-		}
+	for _, t := range totals {
+		o.printf("  %-22s %7d files %10.1f MB\n", t.Agent+"/"+t.Role, t.Files, float64(t.Bytes)/1e6)
+	}
+	tallies, err := s.Tallies()
+	if err != nil {
+		return exitFailed, err
+	}
+	for _, t := range tallies {
+		o.printf("  %-22s %7d\n", t.Name, t.Count)
 	}
 	for _, agent := range adapters.Names {
-		roots, err := s.Roots(agent)
+		roots, err := s.ExtraRoots(agent)
 		if err != nil {
 			return exitFailed, err
 		}

@@ -161,10 +161,10 @@ func TestSessionsRootsGitAndPending(t *testing.T) {
 		t.Errorf("empty session = %+v", e)
 	}
 
-	check(t, s.AddRoot("pi", "/custom"))
-	check(t, s.AddRoot("pi", "/custom"))
-	if roots, _ := s.Roots("pi"); len(roots) != 1 {
-		t.Errorf("Roots = %v", roots)
+	check(t, s.AddExtraRoot("pi", "/custom"))
+	check(t, s.AddExtraRoot("pi", "/custom"))
+	if roots, _ := s.ExtraRoots("pi"); len(roots) != 1 {
+		t.Errorf("ExtraRoots = %v", roots)
 	}
 	check(t, s.RecordGitExport("repo", "h1"))
 	check(t, s.RecordGitExport("repo", "h2"))
@@ -196,10 +196,15 @@ func TestRunsKeepTheLast500AndCountsSummarise(t *testing.T) {
 	}
 	lines := int64(1)
 	check(t, s.RecordFile(&File{Path: "/p", Agent: "pi", Root: "/r", Key: "k", Role: "main", Size: 7, SHA256: "x", LineCount: &lines}))
-	counts, err := s.Counts()
+	totals, err := s.FileTotals()
 	check(t, err)
-	if counts[0] != (Count{Name: "pi/main", Files: 1, Bytes: 7}) || len(counts) != 5 || !counts[1].Plain {
-		t.Errorf("Counts = %+v", counts)
+	if diff := cmp.Diff([]FileTotal{{Agent: "pi", Role: "main", Files: 1, Bytes: 7}}, totals); diff != "" {
+		t.Errorf("FileTotals:\n%s", diff)
+	}
+	tallies, err := s.Tallies()
+	check(t, err)
+	if len(tallies) != 4 || tallies[0] != (Tally{Name: "uploaded_objects", Count: 0}) {
+		t.Errorf("Tallies = %+v", tallies)
 	}
 }
 

@@ -1,30 +1,6 @@
 // Package snapshot records which instructions, skills, settings and scripts an agent had for a
-// project.
-//
-// A snapshot is a content-addressed set of (scope, path, sha256) entries. File bodies are stored
-// once under snapshots/blobs/<sha256>, and sets under snapshots/sets/<set-id>.json,
-// so identical files across sessions and machines cost nothing extra. Two kinds of set are
-// taken:
-//
-//	harness  what shapes the agent's behaviour
-//	memory   memory the agent writes for itself (Claude auto memory and agent-memory, Codex
-//	         memories/), kept apart because it changes during sessions on its own
-//
-// Scopes:
-//
-//	user      the agent's user config dir (~/.claude, ~/.codex, ~/.pi/agent)
-//	home      files under $HOME that agents also read (~/.agents/skills)
-//	project   the git repo containing the session's cwd (or just the cwd outside a repo)
-//	ancestor  instruction files in the directories above the project
-//	managed   administrator settings (/etc/claude-code, /etc/codex, ...)
-//	plugin    every file of each installed Claude Code plugin, as <plugin>/<path>
-//	script    hook and status-line scripts named in settings, by real path
-//	import    files pulled into CLAUDE.md/AGENTS.md with @path, by real path
-//
-// Directories in a pattern ending in /** are taken whole (a skill's scripts and references, not
-// just its SKILL.md), following symlinks; a symlinked file records its target. Files left out
-// for size or count are listed in the set's skipped. Each file's mtime is returned separately so
-// it doesn't change the set id.
+// project, as content-addressed sets. The set format and its scopes are in
+// docs/storage-layout.md.
 package snapshot
 
 import (
@@ -52,19 +28,15 @@ var (
 	settingsNames = map[string]bool{"settings.json": true, "settings.local.json": true, "hooks.json": true, "config.toml": true, "managed-settings.json": true}
 )
 
-// Entry is one file in a set.
 type Entry struct {
-	Scope  string
-	Path   string
-	Body   []byte
-	Mtime  *float64
-	Target string
-	// Source is where the bytes came from, for following imports.
-	Source string
+	Scope    string
+	Path     string
+	Body     []byte
+	Mtime    *float64
+	Target   string
+	RealPath string
 }
 
-// Skipped is a file left out of a set, and why.
-// Fields are in key order so the set doc marshals with sorted keys throughout.
 type Skipped struct {
 	Path   string `json:"path"`
 	Reason string `json:"reason"`
@@ -84,7 +56,6 @@ func newCollected(agent string) *collected {
 	return &collected{agent: agent, counts: map[string]int{}, seen: map[string]bool{}}
 }
 
-// add reads one file into the set, or notes why it was left out.
 func (c *collected) add(scope, path, name string) *Entry {
 	if c.seen[scope+"\x00"+name] || adapters.IsCredential(filepath.Base(path)) {
 		return nil
@@ -114,7 +85,7 @@ func (c *collected) add(scope, path, name string) *Entry {
 	resolved := realPath(path)
 	abs, _ := filepath.Abs(path)
 	mtime := float64(st.ModTime().UnixNano()) / 1e9
-	e := &Entry{Scope: scope, Path: name, Body: body, Mtime: &mtime, Source: resolved}
+	e := &Entry{Scope: scope, Path: name, Body: body, Mtime: &mtime, RealPath: resolved}
 	if resolved != abs {
 		e.Target = resolved
 	}
@@ -143,9 +114,7 @@ func isDir(p string) bool {
 	return err == nil && st.IsDir()
 }
 
-// FindProjectRoot returns the nearest directory at or above cwd holding .git, and whether one
-// was found; otherwise cwd itself.
-func FindProjectRoot(cwd string) (string, bool) {
+func FindProjectRoot(cwd string) (root string, isRepo bool) {
 	for d := cwd; ; d = filepath.Dir(d) {
 		if _, err := os.Lstat(filepath.Join(d, ".git")); err == nil {
 			return d, true
@@ -156,9 +125,6 @@ func FindProjectRoot(cwd string) (string, bool) {
 	}
 }
 
-// walkFiles lists every file under top (following directory symlinks when asked), pruning
-// skipDirs and stopping after maxWalkDirs directories. The order is os.walk's: depth first,
-// each directory's files before its subdirectories'.
 func walkFiles(top string, follow bool) []string {
 	var out []string
 	visited := map[string]bool{}
@@ -167,7 +133,7 @@ func walkFiles(top string, follow bool) []string {
 		dir := queue[0]
 		queue = queue[1:]
 		resolved := realPath(dir)
-		if visited[resolved] { // a symlink loop
+		if visited[resolved] {
 			continue
 		}
 		visited[resolved] = true
@@ -178,9 +144,6 @@ func walkFiles(top string, follow bool) []string {
 	return out
 }
 
-// listDir splits a directory's entries into subdirectories to walk and everything else. A
-// symlinked directory is walked only when following links; otherwise, like os.walk, it is
-// neither walked nor listed as a file.
 func listDir(dir string, follow bool) (subdirs, files []string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -190,11 +153,12 @@ func listDir(dir string, follow bool) (subdirs, files []string) {
 		p := filepath.Join(dir, d.Name())
 		linkedDir := d.Type()&os.ModeSymlink != 0 && isDir(p)
 		switch {
-		case d.IsDir() || (linkedDir && follow):
+		case linkedDir && !follow:
+			continue
+		case d.IsDir() || linkedDir:
 			if !skipDirs[d.Name()] {
 				subdirs = append(subdirs, p)
 			}
-		case linkedDir:
 		default:
 			files = append(files, p)
 		}
@@ -262,7 +226,6 @@ type scopeBase struct {
 	recursiveOK bool
 }
 
-// collect gathers every harness file for a session in cwd.
 func collect(a adapters.Adapter, root, cwd string) *collected {
 	c := newCollected(a.Name())
 	projectRoot, isRepo := "", false
@@ -279,9 +242,9 @@ func collect(a adapters.Adapter, root, cwd string) *collected {
 		{"home", a.Home(), rules.Home, false},
 	}
 	if projectRoot != "" {
-		// Outside a git repo (say, a session started in ~), only look at the cwd itself.
 		resolved := realPath(projectRoot)
-		scopes = append(scopes, scopeBase{"project", projectRoot, rules.Project, isRepo && resolved != home && resolved != "/"})
+		searchSubdirs := isRepo && resolved != home && resolved != "/"
+		scopes = append(scopes, scopeBase{"project", projectRoot, rules.Project, searchSubdirs})
 	}
 	for _, s := range scopes {
 		c.addPatterns(s)
@@ -289,12 +252,12 @@ func collect(a adapters.Adapter, root, cwd string) *collected {
 	if projectRoot != "" && projectRoot != filepath.Dir(projectRoot) {
 		c.addAncestors(projectRoot)
 	}
-	for _, p := range a.ManagedPaths() {
+	for _, p := range a.ManagedSettingsFiles() {
 		if isFile(p) {
 			c.add("managed", p, p)
 		}
 	}
-	for _, plugin := range a.PluginDirs(root) {
+	for _, plugin := range a.Plugins(root) {
 		for _, p := range filterFiles(walkFiles(plugin.Dir, true)) {
 			c.add("plugin", p, plugin.Name+"/"+relSlash(p, plugin.Dir))
 		}
@@ -308,7 +271,6 @@ func collect(a adapters.Adapter, root, cwd string) *collected {
 	return c
 }
 
-// addPatterns adds the files a scope's patterns match, named relative to its base.
 func (c *collected) addPatterns(s scopeBase) {
 	if !isDir(s.base) {
 		return
@@ -320,7 +282,6 @@ func (c *collected) addPatterns(s scopeBase) {
 	}
 }
 
-// addAncestors adds the instruction files in every directory above the project.
 func (c *collected) addAncestors(projectRoot string) {
 	for d := filepath.Dir(projectRoot); ; d = filepath.Dir(d) {
 		for _, name := range ancestorNames {
@@ -334,7 +295,6 @@ func (c *collected) addAncestors(projectRoot string) {
 	}
 }
 
-// addScripts adds hook and status-line scripts named in any settings file collected so far.
 func addScripts(c *collected, home, projectRoot string) {
 	for _, e := range slices.Clone(c.entries) {
 		if !settingsNames[filepath.Base(e.Path)] {
@@ -348,7 +308,6 @@ func addScripts(c *collected, home, projectRoot string) {
 	}
 }
 
-// addImports follows @imports a few levels deep.
 func addImports(c *collected, home string) {
 	var frontier []*Entry
 	for _, e := range c.entries {
@@ -379,7 +338,6 @@ func sortEntries(entries []*Entry) {
 	})
 }
 
-// collectMemory gathers the memory the agent writes for itself.
 func collectMemory(a adapters.Adapter, root, cwd, sessionKey string) *collected {
 	c := newCollected(a.Name())
 	projectRoot := ""
@@ -391,18 +349,17 @@ func collectMemory(a adapters.Adapter, root, cwd, sessionKey string) *collected 
 			continue
 		}
 		for _, p := range filterFiles(walkFiles(d.Dir, true)) {
-			c.add(d.Name, p, p)
+			c.add(d.Scope, p, p)
 		}
 	}
 	sortEntries(c.entries)
 	return c
 }
 
-// Snapshot is a harness set and, if the agent keeps any, a memory set.
 type Snapshot struct {
 	SetID     string
 	Doc       map[string]any
-	MemoryID  string // "" when there is no memory set
+	MemoryID  string
 	MemoryDoc map[string]any
 	Blobs     map[string][]byte
 	Mtimes    map[string]float64
@@ -436,14 +393,13 @@ func setDoc(kind string, a adapters.Adapter, root, projectRoot string, c *collec
 		"kind": kind, "agent": a.Name(), "user_base": a.UserBase(root), "project_root": pr,
 		"files": files, "skipped": skipped,
 	}
-	body, err := jsonx.Sorted(doc, 0)
+	body, err := jsonx.SortedCompact(doc)
 	if err != nil {
 		return "", nil, err
 	}
 	return raw.SHA256(body), doc, nil
 }
 
-// Build takes the harness and memory sets for a session in cwd.
 func Build(a adapters.Adapter, root, cwd, sessionKey string) (*Snapshot, error) {
 	s := &Snapshot{Blobs: map[string][]byte{}, Mtimes: map[string]float64{}}
 	projectRoot := ""

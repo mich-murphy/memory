@@ -1,13 +1,4 @@
 // Package cli is the agent-sessions command line.
-//
-//	agent-sessions install      hooks for Claude Code and Codex, the Pi extension, the sweep timer
-//	agent-sessions backfill     upload every session already on this machine
-//	agent-sessions sync         upload what changed (the timer runs this; hooks run it per session)
-//	agent-sessions hook AGENT   what the agents' hooks call; returns at once
-//	agent-sessions doctor       check settings, bucket access, hooks and timer
-//	agent-sessions status       what has been synced from this machine
-//	agent-sessions cat KEY      print a raw file rebuilt from the bucket
-//	agent-sessions uninstall    remove hooks, extension and timer
 package cli
 
 import (
@@ -43,7 +34,6 @@ Usage:
 Run agent-sessions COMMAND -h for a command's options.
 `
 
-// Exit codes.
 const (
 	exitOK     = 0
 	exitFailed = 1
@@ -51,10 +41,9 @@ const (
 	exitLocked = 3
 )
 
-// errUsage means the command line was wrong; the flag package has already said how.
+// errUsage is returned once the flag package has already printed what was wrong.
 var errUsage = errors.New("usage")
 
-// IO is where a command reads and writes.
 type IO struct {
 	Stdout io.Writer
 	Stderr io.Writer
@@ -68,7 +57,6 @@ func (o IO) errorf(format string, args ...any) {
 	_, _ = fmt.Fprintf(o.Stderr, format, args...) // nowhere to report a broken stderr
 }
 
-// agentList is a repeatable --agent flag.
 type agentList []string
 
 func (a *agentList) String() string { return strings.Join(*a, ",") }
@@ -88,7 +76,6 @@ func (a *agentList) orAll() []string {
 	return *a
 }
 
-// stringList is a repeatable string flag.
 type stringList []string
 
 func (s *stringList) String() string { return strings.Join(*s, ",") }
@@ -104,8 +91,6 @@ func newFlags(name string, o IO) *flag.FlagSet {
 	return fs
 }
 
-// parse parses flags, returning [flag.ErrHelp] for -h and errUsage for anything else wrong (the
-// flag package has already printed why).
 func parse(fs *flag.FlagSet, args []string) error {
 	err := fs.Parse(args)
 	switch {
@@ -118,7 +103,6 @@ func parse(fs *flag.FlagSet, args []string) error {
 	}
 }
 
-// Main runs the command line and returns the exit code.
 func Main(ctx context.Context, args []string, version string, o IO) int {
 	if len(args) == 0 {
 		o.errorf("%s", usage)
@@ -126,7 +110,7 @@ func Main(ctx context.Context, args []string, version string, o IO) int {
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
-	case "hook": // the fast path every agent turn takes
+	case "hook":
 		runHook(ctx, rest)
 		return exitOK
 	case "--version", "-version", "version":
@@ -176,7 +160,7 @@ func runHook(ctx context.Context, args []string) {
 	agent := args[0]
 	var paths []string
 	var event string
-	var extra hook.Extra
+	var extra hook.ExtensionArgs
 	for i := 1; i+1 < len(args); i++ {
 		v := args[i+1]
 		switch args[i] {

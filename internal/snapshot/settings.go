@@ -20,7 +20,6 @@ var (
 	homeVarRE    = regexp.MustCompile(`\$\{?HOME\}?`)
 )
 
-// parseSettings decodes a JSON or TOML settings file, or returns nil.
 func parseSettings(e *Entry) any {
 	var v any
 	if strings.HasSuffix(e.Path, ".toml") {
@@ -35,7 +34,6 @@ func parseSettings(e *Entry) any {
 	return v
 }
 
-// commands returns the command strings in a settings tree: hooks, statusLine, Codex notify.
 func commands(obj any, inHooks bool) []string {
 	var out []string
 	switch v := obj.(type) {
@@ -62,7 +60,6 @@ func commands(obj any, inHooks bool) []string {
 	return out
 }
 
-// commandString is a command given as a string or as an argv list.
 func commandString(v any) (string, bool) {
 	switch c := v.(type) {
 	case string:
@@ -90,7 +87,6 @@ func sortedKeys(m map[string]any) []string {
 	return keys
 }
 
-// scriptPaths returns the script files a command names: absolute, ~, or relative to the project.
 func scriptPaths(command, home, projectRoot string) []string {
 	expanded := command
 	if projectRoot != "" {
@@ -124,9 +120,8 @@ func scriptPaths(command, home, projectRoot string) []string {
 	return out
 }
 
-// imports returns the files a Markdown instruction file pulls in with @path, outside code fences.
 func imports(e *Entry, home string) []string {
-	if e.Source == "" || !strings.HasSuffix(e.Path, ".md") {
+	if e.RealPath == "" || !strings.HasSuffix(e.Path, ".md") {
 		return nil
 	}
 	var out []string
@@ -146,7 +141,7 @@ func imports(e *Entry, home string) []string {
 				p = home + p[1:]
 			}
 			if !filepath.IsAbs(p) {
-				p = filepath.Join(filepath.Dir(e.Source), p)
+				p = filepath.Join(filepath.Dir(e.RealPath), p)
 			}
 			if isFile(p) {
 				out = append(out, p)

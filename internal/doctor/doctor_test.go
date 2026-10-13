@@ -20,7 +20,7 @@ func recordRuns(t *testing.T, dir string, runs ...state.Run) {
 		t.Fatal(err)
 	}
 	for _, r := range runs {
-		if err := st.RecordRun(state.Now(), r.Trigger, r.Summary); err != nil {
+		if err := st.RecordRun(state.UnixNow(), r.Trigger, r.Summary); err != nil {
 			t.Fatal(err)
 		}
 	}

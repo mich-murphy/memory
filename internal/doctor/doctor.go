@@ -55,8 +55,7 @@ func pick(good bool, otherwise level) level {
 	return otherwise
 }
 
-// Run prints each check to w and reports whether all of them passed.
-func Run(ctx context.Context, cfg *config.Config, w io.Writer) bool {
+func Run(ctx context.Context, cfg *config.Config, w io.Writer) (allPassed bool) {
 	r := &reporter{w: w}
 	r.reportf(ok, "machine id: %s (hostname %s)", cfg.MachineID, cfg.Hostname)
 	checkStore(ctx, cfg, r)

@@ -16,12 +16,9 @@ const (
 	backups  = 3
 )
 
-// FileName is the log's name in the state dir.
 const FileName = "agent-sessions.log"
 
-// Open returns a logger writing INFO and above to the log file and, unless quiet, WARN and
-// above to stderr when it is a terminal. The returned function closes the file.
-func Open(stateDir string, quiet bool) (*slog.Logger, func(), error) {
+func Open(stateDir string, quiet bool) (log *slog.Logger, closeFile func(), err error) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, nil, fmt.Errorf("log: %w", err)
 	}
@@ -42,8 +39,7 @@ func newHandler(w io.Writer, level slog.Level) slog.Handler {
 	return slog.NewTextHandler(w, &slog.HandlerOptions{Level: level})
 }
 
-// rotate keeps the log under maxBytes by shifting it to .1, .2, .3. Several processes may
-// share the file; a rotation racing another is harmless, since each only appends.
+// rotate can race another process's rotation harmlessly, since each only appends.
 func rotate(path string) {
 	st, err := os.Stat(path)
 	if err != nil || st.Size() < maxBytes {

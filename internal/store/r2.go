@@ -25,9 +25,8 @@ import (
 	"github.com/mich-murphy/memory/internal/config"
 )
 
-// Variables only so tests can shrink them.
+// Variables so tests can shrink them.
 var (
-	// Files at or below this size go up in one PutObject; larger ones as a multipart upload.
 	singlePutMax int64 = 64 << 20
 	// R2 needs every part but the last to be the same size.
 	partSize = 16 << 20
@@ -38,13 +37,11 @@ const (
 	maxRetries = 5
 )
 
-// R2 is a Cloudflare R2 bucket reached through the S3 API.
 type R2 struct {
 	client *s3.Client
 	bucket string
 }
 
-// NewR2 connects to the bucket the config names.
 func NewR2(cfg *config.Config) (*R2, error) {
 	if missing := cfg.MissingR2Settings(); len(missing) > 0 {
 		return nil, fmt.Errorf("missing R2 settings: %s", strings.Join(missing, ", "))
@@ -80,7 +77,6 @@ func sha256Base64(body []byte) string {
 	return base64.StdEncoding.EncodeToString(sum[:])
 }
 
-// Put uploads body under key. R2 checks the body against its SHA-256 and rejects a mismatch.
 func (r *R2) Put(ctx context.Context, key string, body []byte, meta map[string]string) error {
 	ctx, cancel := context.WithTimeout(ctx, opTimeout)
 	defer cancel()
@@ -98,7 +94,6 @@ func (r *R2) Put(ctx context.Context, key string, body []byte, meta map[string]s
 	return nil
 }
 
-// PutFile uploads the file at path, as a multipart upload when it is large.
 func (r *R2) PutFile(ctx context.Context, key, path string, meta map[string]string) error {
 	st, err := os.Stat(path)
 	if err != nil {
@@ -177,11 +172,10 @@ func (r *R2) uploadPart(ctx context.Context, key string, uploadID *string, n int
 	return types.CompletedPart{ETag: out.ETag, PartNumber: aws.Int32(n)}, nil
 }
 
-// Copy copies src to dst inside the bucket; false if src doesn't exist.
-func (r *R2) Copy(ctx context.Context, src, dst string) (bool, error) {
+func (r *R2) Copy(ctx context.Context, src, dst string) (srcExists bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, opTimeout)
 	defer cancel()
-	_, err := r.client.CopyObject(ctx, &s3.CopyObjectInput{Bucket: &r.bucket, Key: &dst, CopySource: aws.String(r.bucket + "/" + src)})
+	_, err = r.client.CopyObject(ctx, &s3.CopyObjectInput{Bucket: &r.bucket, Key: &dst, CopySource: aws.String(r.bucket + "/" + src)})
 	if isNotFound(err) {
 		return false, nil
 	}
@@ -191,7 +185,6 @@ func (r *R2) Copy(ctx context.Context, src, dst string) (bool, error) {
 	return true, nil
 }
 
-// Exists reports whether key is in the bucket.
 func (r *R2) Exists(ctx context.Context, key string) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, opTimeout)
 	defer cancel()
@@ -205,7 +198,6 @@ func (r *R2) Exists(ctx context.Context, key string) (bool, error) {
 	return true, nil
 }
 
-// Delete removes key.
 func (r *R2) Delete(ctx context.Context, key string) error {
 	ctx, cancel := context.WithTimeout(ctx, opTimeout)
 	defer cancel()
@@ -215,7 +207,6 @@ func (r *R2) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-// Get downloads key.
 func (r *R2) Get(ctx context.Context, key string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, opTimeout)
 	defer cancel()
@@ -224,10 +215,13 @@ func (r *R2) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, fmt.Errorf("get %s: %w", key, err)
 	}
 	defer func() { _ = out.Body.Close() }() // read-only
-	return readAllLimited(out.Body)
+	data, err := io.ReadAll(out.Body)
+	if err != nil {
+		return nil, fmt.Errorf("get %s: %w", key, err)
+	}
+	return data, nil
 }
 
-// List returns every key starting with prefix.
 func (r *R2) List(ctx context.Context, prefix string) ([]string, error) {
 	var keys []string
 	pages := s3.NewListObjectsV2Paginator(r.client, &s3.ListObjectsV2Input{Bucket: &r.bucket, Prefix: &prefix})

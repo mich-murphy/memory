@@ -1,28 +1,5 @@
 package adapters
 
-// Claude Code.
-//
-// Layout (checked against https://code.claude.com/docs/en/claude-directory and a real ~/.claude,
-// Claude Code 2.1.x):
-//
-//	projects/<cwd-slug>/<session-id>.jsonl                          main transcript
-//	projects/<cwd-slug>/<session-id>.orphaned-<ts>-<suffix>.jsonl   earlier transcript set aside
-//	projects/<cwd-slug>/<session-id>.jsonl.superseded-<ts>          earlier transcript set aside
-//	projects/<cwd-slug>/<session-id>/subagents/agent-<id>.jsonl     subagent transcript (+ .meta.json)
-//	projects/<cwd-slug>/<session-id>/tool-results/<file>            large tool output spilled to disk
-//	projects/<cwd-slug>/memory/                                     auto memory (Claude's own notes)
-//	file-history/<session-id>/<hash>@v<n>                           file contents before each edit
-//	todos/<session-id>-agent-<agent-id>.json, tasks/<list-id>/      todo and task lists
-//	teams/<team>/                                                   agent-team config and mailboxes
-//	session-env/<session-id>/, debug/<session-id>.txt               per-session env and debug log
-//	plans/, paste-cache/, usage-data/, agent-memory/, history.jsonl
-//	settings.json, CLAUDE.md, skills/, agents/, commands/, rules/, hooks/ ...   the harness
-//
-// ~/.claude.json (outside the dir unless CLAUDE_CONFIG_DIR is set) holds MCP servers,
-// per-project settings and UI state next to the API key, so it is exported without
-// primaryApiKey. CLAUDE_CONFIG_DIR moves the whole tree. Everything except auto memory is
-// deleted after cleanupPeriodDays (default 30), which `agent-sessions install` raises.
-
 import (
 	"bytes"
 	"os"
@@ -41,16 +18,16 @@ var (
 	claudeSetAsideRE = regexp.MustCompile(`^([^./]+)\.(?:orphaned-.+\.jsonl|jsonl\.superseded-.+)$`)
 	uuidPrefixRE     = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
 
-	claudeSessionSubdirRoles = map[string]string{"subagents": "subagent", "tool-results": "tool_result"}
-	// Top-level directories whose files belong to one session, found from the session id in
-	// the path.
-	claudePerSessionDirs = map[string]string{
-		"file-history": "file_history", "session-env": "session_env", "debug": "debug", "todos": "todo", "tasks": "task",
+	claudeSessionSubdirRoles = map[string]Role{"subagents": RoleSubagent, "tool-results": RoleToolResult}
+	claudePerSessionDirs     = map[string]Role{
+		"file-history": RoleFileHistory, "session-env": RoleSessionEnv, "debug": RoleDebug, "todos": RoleTodo,
+		"tasks": RoleTask,
 	}
-	claudeTopLevelRoles = map[string]string{
-		"plans": "plan", "teams": "team", "paste-cache": "paste", "usage-data": "usage", "agent-memory": "memory",
-		"skills": "config", "agents": "config", "commands": "config", "rules": "config", "output-styles": "config",
-		"hooks": "config", "plugins": "config", "sessions": "liveness",
+	claudeTopLevelRoles = map[string]Role{
+		"plans": RolePlan, "teams": RoleTeam, "paste-cache": RolePaste, "usage-data": RoleUsage,
+		"agent-memory": RoleMemory, "skills": RoleConfig, "agents": RoleConfig, "commands": RoleConfig,
+		"rules": RoleConfig, "output-styles": RoleConfig, "hooks": RoleConfig, "plugins": RoleConfig,
+		"sessions": RoleLiveness,
 	}
 	claudeConfigFiles = map[string]bool{
 		"settings.json": true, "settings.local.json": true, "CLAUDE.md": true, "keybindings.json": true,
@@ -58,21 +35,19 @@ var (
 	}
 )
 
-// Claude is the Claude Code adapter.
+type rootSession struct{ root, sessionID string }
+
 type Claude struct {
-	home  string
-	found map[string]string // "<root>\x00<sid>" -> "<slug>/<sid>"
+	home            string
+	sessionKeyCache map[rootSession]string
 }
 
-// NewClaude returns the Claude Code adapter for a home directory.
 func NewClaude(home string) *Claude {
-	return &Claude{home: home, found: map[string]string{}}
+	return &Claude{home: home, sessionKeyCache: map[rootSession]string{}}
 }
 
-// Name is "claude".
 func (c *Claude) Name() string { return "claude" }
 
-// Home is the user's home directory.
 func (c *Claude) Home() string { return c.home }
 
 // SkipDirs: plugins/cache and plugins/marketplaces are git checkouts of plugin sources
@@ -82,8 +57,7 @@ func (c *Claude) SkipDirs() []string {
 	return []string{"plugins/cache", "plugins/marketplaces", "local", "downloads", "backups", "statsig", "ide", "telemetry"}
 }
 
-// ManagedPaths are the administrator settings files.
-func (c *Claude) ManagedPaths() []string {
+func (c *Claude) ManagedSettingsFiles() []string {
 	return []string{
 		"/etc/claude-code/managed-settings.json",
 		"/etc/claude-code/managed-mcp.json",
@@ -94,7 +68,6 @@ func (c *Claude) ManagedPaths() []string {
 	}
 }
 
-// Rules are the harness files a snapshot records.
 func (c *Claude) Rules() SnapshotRules {
 	return SnapshotRules{
 		User: []string{
@@ -110,10 +83,8 @@ func (c *Claude) Rules() SnapshotRules {
 	}
 }
 
-// CanonicalRoot is ~/.claude.
 func (c *Claude) CanonicalRoot() string { return filepath.Join(c.home, ".claude") }
 
-// DefaultRoots is $CLAUDE_CONFIG_DIR or ~/.claude.
 func (c *Claude) DefaultRoots() []string {
 	if p := envPath("CLAUDE_CONFIG_DIR", c.home); p != "" {
 		return []string{p}
@@ -121,7 +92,6 @@ func (c *Claude) DefaultRoots() []string {
 	return []string{c.CanonicalRoot()}
 }
 
-// InferRoot finds the directory holding projects/ above a transcript path.
 func (c *Claude) InferRoot(path string) string {
 	for dir := filepath.Dir(path); dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
 		if filepath.Base(dir) == "projects" {
@@ -133,59 +103,58 @@ func (c *Claude) InferRoot(path string) string {
 	return ""
 }
 
-// Classify maps a path under root to its key, session and role.
 func (c *Claude) Classify(path, root string) (SessionFile, bool) {
 	rel, ok := Rel(path, root)
 	if !ok {
 		return SessionFile{}, false
 	}
 	parts := strings.Split(rel, "/")
-	sf := func(sessionKey, role string) (SessionFile, bool) {
+	sf := func(sessionKey string, role Role) (SessionFile, bool) {
 		return SessionFile{Agent: c.Name(), Path: path, Key: KeyPrefix(c, root) + rel, SessionKey: sessionKey, Role: role}, true
 	}
 	top := parts[0]
 	if len(parts) == 1 {
 		if top == "history.jsonl" {
-			return sf("", "history")
+			return sf("", RoleHistory)
 		}
 		if claudeConfigFiles[top] || hasAnySuffix(top, []string{".sh", ".py", ".js", ".ts"}) {
-			return sf("", "config")
+			return sf("", RoleConfig)
 		}
-		return sf("", "unknown")
+		return sf("", RoleUnknown)
 	}
 	if top == "projects" {
 		return c.classifyProject(parts, sf)
 	}
 	if role, ok := claudePerSessionDirs[top]; ok {
 		if sid := uuidPrefixRE.FindString(parts[1]); sid != "" {
-			return sf(c.findSession(root, sid), role)
+			return sf(c.sessionKey(root, sid), role)
 		}
 		return sf("", role)
 	}
 	if role, ok := claudeTopLevelRoles[top]; ok {
 		return sf("", role)
 	}
-	return sf("", "unknown")
+	return sf("", RoleUnknown)
 }
 
-func (c *Claude) classifyProject(parts []string, sf func(string, string) (SessionFile, bool)) (SessionFile, bool) {
+func (c *Claude) classifyProject(parts []string, sf func(string, Role) (SessionFile, bool)) (SessionFile, bool) {
 	if len(parts) < 3 {
-		return sf("", "unknown")
+		return sf("", RoleUnknown)
 	}
 	slug, name := parts[1], parts[2]
 	if len(parts) == 3 {
 		if m := claudeMainRE.FindStringSubmatch(name); m != nil {
-			return sf(slug+"/"+m[1], "main")
+			return sf(slug+"/"+m[1], RoleMain)
 		}
 		if m := claudeSetAsideRE.FindStringSubmatch(name); m != nil {
-			return sf(slug+"/"+m[1], "superseded")
+			return sf(slug+"/"+m[1], RoleSuperseded)
 		}
-		return sf("", "unknown")
+		return sf("", RoleUnknown)
 	}
 	if name == "memory" {
-		return sf("", "memory")
+		return sf("", RoleMemory)
 	}
-	role := "aux"
+	role := RoleAux
 	if len(parts) > 4 {
 		if r, ok := claudeSessionSubdirRoles[parts[3]]; ok {
 			role = r
@@ -194,10 +163,9 @@ func (c *Claude) classifyProject(parts []string, sf func(string, string) (Sessio
 	return sf(slug+"/"+name, role)
 }
 
-// findSession returns "<slug>/<sid>" for a session id, from where its transcript lives.
-func (c *Claude) findSession(root, sid string) string {
-	k := root + "\x00" + sid
-	if v, ok := c.found[k]; ok {
+func (c *Claude) sessionKey(root, sid string) string {
+	k := rootSession{root, sid}
+	if v, ok := c.sessionKeyCache[k]; ok {
 		return v
 	}
 	matches, _ := filepath.Glob(filepath.Join(root, "projects", "*", sid+".jsonl"))
@@ -205,13 +173,12 @@ func (c *Claude) findSession(root, sid string) string {
 		return ""
 	}
 	v := filepath.Base(filepath.Dir(matches[0])) + "/" + sid
-	c.found[k] = v
+	c.sessionKeyCache[k] = v
 	return v
 }
 
-// Related: a hook points at <session>.jsonl or at a subagent file inside <session>/, so sync the
-// lot, plus the short-lived per-session files (file history, todos, tasks, team mailboxes)
-// that Claude Code deletes once the session or team is done.
+// Related includes the per-session files (file history, todos, tasks, team mailboxes) that
+// Claude Code deletes once the session or team is done.
 func (c *Claude) Related(sf SessionFile, root string) []string {
 	slug, sid, ok := strings.Cut(sf.SessionKey, "/")
 	if !ok {
@@ -250,7 +217,6 @@ func globEscape(s string) string {
 	return strings.NewReplacer(`\`, `\\`, "*", `\*`, "?", `\?`, "[", `\[`).Replace(s)
 }
 
-// UserBase is the root itself.
 func (c *Claude) UserBase(root string) string { return root }
 
 func (c *Claude) claudeJSON(root string) string {
@@ -260,7 +226,6 @@ func (c *Claude) claudeJSON(root string) string {
 	return filepath.Join(c.home, ".claude.json")
 }
 
-// Exports adds database copies and ~/.claude.json without its API key.
 func (c *Claude) Exports(root, workDir string, interval time.Duration) []SessionFile {
 	out := SQLiteExports(c, root, workDir, interval)
 	data, err := os.ReadFile(c.claudeJSON(root))
@@ -279,8 +244,8 @@ func (c *Claude) Exports(root, workDir string, interval time.Duration) []Session
 		return out
 	}
 	dest := filepath.Join(workDir, c.Name(), RootTag(root), "claude.json")
-	// Claude Code rewrites this file on every start (counters, tips, per-project state), so
-	// like a database it is refreshed at most every interval to keep versions few.
+	// Claude Code rewrites this file on every start, so like a database it is refreshed at
+	// most every interval to keep versions few.
 	old, rerr := os.ReadFile(dest)
 	st, serr := os.Stat(dest)
 	if rerr != nil || serr != nil || (!bytes.Equal(old, body) && time.Since(st.ModTime()) >= interval) {
@@ -288,11 +253,11 @@ func (c *Claude) Exports(root, workDir string, interval time.Duration) []Session
 			return out
 		}
 	}
-	return append(out, SessionFile{Agent: c.Name(), Path: dest, Key: KeyPrefix(c, root) + "claude.json", Role: "config"})
+	return append(out, SessionFile{Agent: c.Name(), Path: dest, Key: KeyPrefix(c, root) + "claude.json", Role: RoleConfig})
 }
 
-// ExtraSnapshotEntries: user- and project-scoped MCP servers live in ~/.claude.json next to UI
-// state that changes every run, so the harness set records only the MCP parts.
+// ExtraSnapshotEntries records only the MCP parts of ~/.claude.json, whose UI state changes
+// every run.
 func (c *Claude) ExtraSnapshotEntries(root, projectRoot string) []Entry {
 	data, err := os.ReadFile(c.claudeJSON(root))
 	if err != nil {
@@ -328,20 +293,18 @@ func (c *Claude) ExtraSnapshotEntries(root, projectRoot string) []Entry {
 	return []Entry{{Scope: "user", Name: ".claude.json#mcp", Body: bytes.TrimSuffix(body, []byte("\n"))}}
 }
 
-// MemoryDirs: agent-memory/ (user and project) and the project's auto memory.
 func (c *Claude) MemoryDirs(root, projectRoot, sessionKey string) []ScopedDir {
-	out := []ScopedDir{{Name: "user", Dir: filepath.Join(root, "agent-memory")}}
+	out := []ScopedDir{{Scope: "user", Dir: filepath.Join(root, "agent-memory")}}
 	if slug, _, ok := strings.Cut(sessionKey, "/"); ok {
-		out = append(out, ScopedDir{Name: "auto", Dir: filepath.Join(root, "projects", slug, "memory")})
+		out = append(out, ScopedDir{Scope: "auto", Dir: filepath.Join(root, "projects", slug, "memory")})
 	}
 	if projectRoot != "" {
-		out = append(out, ScopedDir{Name: "project", Dir: filepath.Join(projectRoot, ".claude", "agent-memory")})
+		out = append(out, ScopedDir{Scope: "project", Dir: filepath.Join(projectRoot, ".claude", "agent-memory")})
 	}
 	return out
 }
 
-// PluginDirs reads installed_plugins.json.
-func (c *Claude) PluginDirs(root string) []ScopedDir {
+func (c *Claude) Plugins(root string) []Plugin {
 	data, err := os.ReadFile(filepath.Join(root, "plugins", "installed_plugins.json"))
 	if err != nil {
 		return nil
@@ -351,7 +314,7 @@ func (c *Claude) PluginDirs(root string) []ScopedDir {
 		return nil
 	}
 	plugins, _ := m["plugins"].(map[string]any)
-	var out []ScopedDir
+	var out []Plugin
 	for _, name := range sortedKeys(plugins) {
 		installs, ok := plugins[name].([]any)
 		if !ok {
@@ -360,14 +323,13 @@ func (c *Claude) PluginDirs(root string) []ScopedDir {
 		for _, inst := range installs {
 			im, _ := inst.(map[string]any)
 			if p := str(im, "installPath"); p != "" && isDir(p) {
-				out = append(out, ScopedDir{Name: name, Dir: p})
+				out = append(out, Plugin{Name: name, Dir: p})
 			}
 		}
 	}
 	return out
 }
 
-// SessionInfo reads ids, cwd, branch and version from a transcript's first lines.
 func (c *Claude) SessionInfo(head []map[string]any) map[string]any {
 	info := map[string]any{}
 	fields := [][2]string{

@@ -10,7 +10,6 @@ import (
 
 var safe = regexp.MustCompile(`^[\w@%+=:,./-]+$`)
 
-// Quote returns s quoted for a POSIX shell, unchanged if it needs no quoting.
 func Quote(s string) string {
 	if s == "" {
 		return "''"
@@ -21,7 +20,6 @@ func Quote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }
 
-// Join quotes each word and joins them with spaces.
 func Join(words []string) string {
 	quoted := make([]string, len(words))
 	for i, w := range words {
@@ -30,10 +28,9 @@ func Join(words []string) string {
 	return strings.Join(quoted, " ")
 }
 
-// ErrUnterminated means a quote was not closed.
 var ErrUnterminated = errors.New("unterminated quote")
 
-// Split breaks s into words the way a POSIX shell would, without expansion.
+// Split does no expansion.
 func Split(s string) ([]string, error) {
 	var words []string
 	var cur strings.Builder
@@ -56,7 +53,7 @@ func Split(s string) ([]string, error) {
 			i += end + 1
 			inWord = true
 		case c == '"':
-			n, err := readDouble(s[i+1:], &cur)
+			n, err := readDoubleQuoted(s[i+1:], &cur)
 			if err != nil {
 				return nil, err
 			}
@@ -77,9 +74,7 @@ func Split(s string) ([]string, error) {
 	return words, nil
 }
 
-// readDouble copies a double-quoted string's contents into cur and returns how many bytes it
-// consumed, including the closing quote.
-func readDouble(s string, cur *strings.Builder) (int, error) {
+func readDoubleQuoted(s string, cur *strings.Builder) (consumedWithClosingQuote int, err error) {
 	for i := 0; i < len(s); i++ {
 		switch c := s[i]; {
 		case c == '"':

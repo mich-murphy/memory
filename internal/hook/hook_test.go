@@ -78,7 +78,7 @@ func TestHookQueuesOneSyncPerTranscriptAndDebounces(t *testing.T) {
 		"hook_event_name": "SubagentStop", "transcript_path": "/x/main.jsonl",
 		"agent_transcript_path": "/x/main/subagents/agent-1.jsonl",
 	})
-	withStdin(t, payload, func() { Run(t.Context(), "claude", nil, "", Extra{}) })
+	withStdin(t, payload, func() { Run(t.Context(), "claude", nil, "", ExtensionArgs{}) })
 	var got [][3]string
 	for _, c := range *calls {
 		got = append(got, [3]string{c.agent, c.path, c.event})
@@ -90,10 +90,9 @@ func TestHookQueuesOneSyncPerTranscriptAndDebounces(t *testing.T) {
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Fatalf("spawned:\n%s", diff)
 	}
-	// The next turn's Stop arrives while that sync is still queued: nothing new is spawned.
-	withStdin(t, `{"transcript_path": "/x/main.jsonl"}`, func() { Run(t.Context(), "claude", nil, "", Extra{}) })
+	withStdin(t, `{"transcript_path": "/x/main.jsonl"}`, func() { Run(t.Context(), "claude", nil, "", ExtensionArgs{}) })
 	if len(*calls) != 2 {
-		t.Errorf("spawned %d syncs", len(*calls))
+		t.Errorf("a Stop while a sync was queued spawned another: %d syncs", len(*calls))
 	}
 }
 
@@ -104,8 +103,8 @@ func TestStalePendingMarkerIsTakenOver(t *testing.T) {
 	if marker == "" {
 		t.Fatal("no marker")
 	}
-	testenv.Settle(t, marker, PendingStale+5*time.Second)
-	withStdin(t, `{"transcript_path": "/x/a.jsonl"}`, func() { Run(t.Context(), "codex", nil, "", Extra{}) })
+	testenv.Backdate(t, marker, PendingMarkerStaleAfter+5*time.Second)
+	withStdin(t, `{"transcript_path": "/x/a.jsonl"}`, func() { Run(t.Context(), "codex", nil, "", ExtensionArgs{}) })
 	if len(*calls) != 1 || (*calls)[0].path != "/x/a.jsonl" || (*calls)[0].event != "codex" {
 		t.Errorf("spawned %v", *calls)
 	}
@@ -116,7 +115,7 @@ func TestHookNeverFails(t *testing.T) {
 		t.Run(payload, func(t *testing.T) {
 			testenv.New(t)
 			calls := fakeSpawn(t)
-			withStdin(t, payload, func() { Run(t.Context(), "codex", nil, "", Extra{}) })
+			withStdin(t, payload, func() { Run(t.Context(), "codex", nil, "", ExtensionArgs{}) })
 			if len(*calls) != 0 {
 				t.Errorf("spawned %v", *calls)
 			}
@@ -128,7 +127,7 @@ func TestDisabledHookIsANoop(t *testing.T) {
 	testenv.New(t)
 	calls := fakeSpawn(t)
 	t.Setenv("AGENT_SESSIONS_DISABLE", "1")
-	Run(t.Context(), "pi", []string{"/x/s.jsonl"}, "", Extra{})
+	Run(t.Context(), "pi", []string{"/x/s.jsonl"}, "", ExtensionArgs{})
 	if len(*calls) != 0 {
 		t.Errorf("spawned %v", *calls)
 	}
@@ -166,7 +165,7 @@ func TestSessionStartRecordsLaunchContext(t *testing.T) {
 		"hook_event_name": "SessionStart", "source": "startup", "cwd": "/w", "transcript_path": "/x/s.jsonl",
 		"permission_mode": "default",
 	})
-	withStdin(t, payload, func() { Run(t.Context(), "claude", nil, "", Extra{}) })
+	withStdin(t, payload, func() { Run(t.Context(), "claude", nil, "", ExtensionArgs{}) })
 	if len(*calls) != 1 {
 		t.Fatalf("spawned %v", *calls)
 	}
@@ -188,10 +187,9 @@ func TestSessionStartRecordsLaunchContext(t *testing.T) {
 	if len(launch["process"].(map[string]any)["ancestry"].([]any)) == 0 {
 		t.Error("no ancestry") // the test's own process tree; no claude in it
 	}
-	// A session start never takes the debounce marker that turn hooks use.
 	markers, _ := filepath.Glob(filepath.Join(e.State, "pending", "[0-9a-f]*"))
 	if len(markers) != 0 {
-		t.Errorf("markers = %v", markers)
+		t.Errorf("a session start took a debounce marker: %v", markers)
 	}
 }
 
@@ -199,7 +197,7 @@ func TestPiSessionStartPassesReasonAndCwd(t *testing.T) {
 	testenv.New(t)
 	calls := fakeSpawn(t)
 	argv := `["/usr/bin/node", "/usr/lib/pi/dist/cli.js", "--model", "x"]`
-	Run(t.Context(), "pi", []string{"/p/s.jsonl"}, "session_start", Extra{Source: "resume", Cwd: "/w", Argv: argv})
+	Run(t.Context(), "pi", []string{"/p/s.jsonl"}, "session_start", ExtensionArgs{Source: "resume", Cwd: "/w", Argv: argv})
 	if len(*calls) != 1 {
 		t.Fatalf("spawned %v", *calls)
 	}
@@ -239,11 +237,10 @@ func TestAgentProcessIsFoundAmongAncestors(t *testing.T) {
 	if got := LaunchProcess(t.Context(), "pi")["pid"]; got != 10 {
 		t.Errorf("pi pid = %v", got)
 	}
-	// A macOS ps line, kept whole.
 	clear(tree)
 	tree[10] = entry{[]string{"/usr/local/bin/codex exec --full-auto"}, 1}
 	if got := LaunchProcess(t.Context(), "codex")["pid"]; got != 10 {
-		t.Errorf("codex pid = %v", got)
+		t.Errorf("codex pid from a whole ps line = %v", got)
 	}
 }
 
