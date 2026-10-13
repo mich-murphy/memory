@@ -57,7 +57,7 @@ gofumpt (stricter gofmt) and goimports, with this module's imports grouped last.
 
 - `go fix -diff ./...` fails when code isn't in current Go idiom.
 - `go mod tidy -diff` fails on an untidy `go.mod`, for the collector and both tool modules. CI also runs `go mod verify`.
-- `deadcode -test ./...` fails on functions nothing reaches from `main` or a test, and on code that doesn't load. `-test` stays because `raw.Join`, the manifest reader, is how tests prove a manifest rebuilds its file.
+- `deadcode -test ./...` fails on functions nothing reaches from `main` or a test, and on code that doesn't load. `-test` stays because `internal/testenv` is only used by tests.
 - `govulncheck ./...` fails on a known vulnerability in code the collector calls. It only sees code built for the OS it runs on, so CI runs it on Linux and on macOS.
 - `actionlint` and zizmor check the GitHub Actions workflows. Every action is pinned to a commit SHA, credentials aren't persisted after checkout, and permissions are read-only unless a job needs more.
 

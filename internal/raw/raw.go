@@ -3,7 +3,6 @@
 package raw
 
 import (
-	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -123,30 +122,6 @@ type Piece struct {
 	End    int64  `json:"end"`
 	SHA256 string `json:"sha256"`
 	Object string `json:"object"`
-}
-
-func Join(get func(key string) ([]byte, error), pieces []Piece) ([]byte, error) {
-	sorted := slices.Clone(pieces)
-	slices.SortFunc(sorted, func(a, b Piece) int { return cmp.Compare(a.Start, b.Start) })
-	var out []byte
-	for _, p := range sorted {
-		if p.Start != int64(len(out)) {
-			return nil, fmt.Errorf("gap or overlap at byte %d: next piece starts at %d", len(out), p.Start)
-		}
-		body, err := get(p.Object)
-		if err != nil {
-			return nil, err
-		}
-		data, err := Decompress(body)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", p.Object, err)
-		}
-		if int64(len(data)) != p.End-p.Start || SHA256(data) != p.SHA256 {
-			return nil, fmt.Errorf("%s does not match its sha256 or length", p.Object)
-		}
-		out = append(out, data...)
-	}
-	return out, nil
 }
 
 type Reader interface {

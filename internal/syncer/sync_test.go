@@ -97,12 +97,18 @@ func toPieces(t *testing.T, v any) []raw.Piece {
 
 func readPieces(t *testing.T, e *testenv.Env, v any) []byte {
 	t.Helper()
-	local := store.NewLocal(e.Bucket)
-	data, err := raw.Join(func(key string) ([]byte, error) { return local.Get(t.Context(), key) }, toPieces(t, v))
-	if err != nil {
-		t.Fatal(err)
+	var out []byte
+	for _, p := range toPieces(t, v) {
+		if p.Start != int64(len(out)) {
+			t.Fatalf("gap or overlap at byte %d: next piece starts at %d", len(out), p.Start)
+		}
+		data := readBlob(t, e, p.Object)
+		if int64(len(data)) != p.End-p.Start || raw.SHA256(data) != p.SHA256 {
+			t.Fatalf("%s does not match its sha256 or length", p.Object)
+		}
+		out = append(out, data...)
 	}
-	return data
+	return out
 }
 
 func mainTranscript(t *testing.T, m map[string]any) map[string]any {

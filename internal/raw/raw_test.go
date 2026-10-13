@@ -97,25 +97,6 @@ func TestReadKeyJoinsSegmentsAndSkipsStaleOnes(t *testing.T) {
 	}
 }
 
-func TestJoinChecksEveryPiece(t *testing.T) {
-	s := memStore{"a": Compress([]byte("abc")), "b": Compress([]byte("de"))}
-	get := func(k string) ([]byte, error) { return s.Get(t.Context(), k) }
-	good := []Piece{{Start: 3, End: 5, SHA256: SHA256([]byte("de")), Object: "b"}, {Start: 0, End: 3, SHA256: SHA256([]byte("abc")), Object: "a"}}
-	if got, err := Join(get, good); err != nil || string(got) != "abcde" {
-		t.Errorf("Join = %q, %v", got, err)
-	}
-	for name, pieces := range map[string][]Piece{
-		"gap":     {{Start: 1, End: 3, SHA256: SHA256([]byte("abc")), Object: "a"}},
-		"sha":     {{Start: 0, End: 3, SHA256: "bad", Object: "a"}},
-		"length":  {{Start: 0, End: 4, SHA256: SHA256([]byte("abc")), Object: "a"}},
-		"missing": {{Start: 0, End: 3, SHA256: SHA256([]byte("abc")), Object: "zz"}},
-	} {
-		if _, err := Join(get, pieces); err == nil {
-			t.Errorf("%s: no error", name)
-		}
-	}
-}
-
 func TestDecompressRejectsGarbage(t *testing.T) {
 	if _, err := Decompress([]byte("not zstd")); err == nil {
 		t.Error("no error")
