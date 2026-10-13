@@ -111,11 +111,14 @@ func UnixNow() float64 {
 }
 
 type State struct {
-	db  *sql.DB
-	tx  *sql.Tx
-	ctx context.Context
-	// stmts are prepared once per transaction: a sweep asks the same few questions of every
-	// file, and parsing the SQL each time cost more than answering it.
+	db *sql.DB
+	// conn is the one connection every query runs on, so a statement is prepared once per
+	// State: a sweep asks the same few questions of every file, and parsing the SQL each time
+	// cost more than answering it. Transactions are BEGIN and COMMIT on it, since a sql.Tx
+	// would prepare every statement again.
+	conn  *sql.Conn
+	inTx  bool
+	ctx   context.Context
 	stmts map[string]*sql.Stmt
 }
 
@@ -129,63 +132,58 @@ func Open(ctx context.Context, dir string) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("state: %w", err)
 	}
-	db.SetMaxOpenConns(1)
-	if _, err := db.ExecContext(ctx, schema); err != nil {
-		_ = db.Close()
+	// Writes record uploads that already happened, so they commit even when the run is cancelled.
+	ctx = context.WithoutCancel(ctx)
+	conn, err := db.Conn(ctx)
+	if err == nil {
+		_, err = conn.ExecContext(ctx, schema)
+	}
+	if err != nil {
+		_ = db.Close() // already failing; this only frees the handle
 		return nil, fmt.Errorf("state schema: %w", err)
 	}
-	// Writes record uploads that already happened, so they commit even when the run is cancelled.
-	return &State{db: db, ctx: context.WithoutCancel(ctx)}, nil
+	return &State{db: db, conn: conn, ctx: ctx, stmts: map[string]*sql.Stmt{}}, nil
 }
 
 func (s *State) Close() error {
-	ferr := s.Flush()
-	if err := s.db.Close(); err != nil {
+	errs := []error{s.Flush()}
+	for _, st := range s.stmts {
+		errs = append(errs, st.Close())
+	}
+	errs = append(errs, s.conn.Close(), s.db.Close())
+	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("state close: %w", err)
 	}
-	return ferr
+	return nil
 }
 
 func (s *State) Flush() error {
-	if s.tx == nil {
+	if !s.inTx {
 		return nil
 	}
-	tx := s.tx
-	s.tx, s.stmts = nil, nil
-	if err := tx.Commit(); err != nil {
+	s.inTx = false
+	if _, err := s.conn.ExecContext(s.ctx, "COMMIT"); err != nil {
 		return fmt.Errorf("state commit: %w", err)
 	}
 	return nil
 }
 
-func (s *State) conn() (*sql.Tx, error) {
-	if s.tx == nil {
-		tx, err := s.db.BeginTx(s.ctx, nil)
-		if err != nil {
-			return nil, fmt.Errorf("state: %w", err)
-		}
-		s.tx = tx
-	}
-	return s.tx, nil
-}
-
-// prepare leaves query's statement in s.stmts, to be closed with the transaction.
+// prepare leaves query's statement in s.stmts and opens a transaction if none is open.
 func (s *State) prepare(query string) error {
+	if !s.inTx {
+		if _, err := s.conn.ExecContext(s.ctx, "BEGIN"); err != nil {
+			return fmt.Errorf("state: %w", err)
+		}
+		s.inTx = true
+	}
 	if _, ok := s.stmts[query]; ok {
 		return nil
 	}
-	tx, err := s.conn()
+	st, err := s.conn.PrepareContext(s.ctx, query) //nolint:sqlclosecheck // kept for the State's life; Close closes it
 	if err != nil {
-		return err
-	}
-	if s.stmts == nil {
-		s.stmts = map[string]*sql.Stmt{}
-	}
-	//nolint:sqlclosecheck // a statement prepared on a transaction is closed when it commits
-	if s.stmts[query], err = tx.PrepareContext(s.ctx, query); err != nil {
-		delete(s.stmts, query)
 		return fmt.Errorf("state: %w", err)
 	}
+	s.stmts[query] = st
 	return nil
 }
 
