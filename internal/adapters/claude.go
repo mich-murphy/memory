@@ -234,14 +234,8 @@ func (c *Claude) Exports(root, workDir string, interval time.Duration) []Session
 	if err != nil {
 		return out
 	}
-	var doc any
-	if jsonx.Decode(data, &doc) != nil {
-		return out
-	}
-	if m, ok := doc.(map[string]any); ok {
-		delete(m, "primaryApiKey")
-	}
-	body, err := jsonx.Indent(doc, 2)
+	// Scrubbed here as well as at upload, so the copy in the state dir holds no API key either.
+	body, err := scrub.File(c.Name(), ".claude.json", data)
 	if err != nil {
 		return out
 	}

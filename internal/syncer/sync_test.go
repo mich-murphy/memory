@@ -19,6 +19,7 @@ import (
 
 	"github.com/mich-murphy/memory/internal/cli"
 	"github.com/mich-murphy/memory/internal/raw"
+	"github.com/mich-murphy/memory/internal/scrub"
 	"github.com/mich-murphy/memory/internal/syncer"
 	"github.com/mich-murphy/memory/internal/testenv"
 )
@@ -318,8 +319,8 @@ func TestCredentialsAndNoiseAreNeverCopied(t *testing.T) {
 	if err := json.Unmarshal(readObject(t, e, rawKey("claude", "claude.json")), &claudeJSON); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := claudeJSON["primaryApiKey"]; ok {
-		t.Error("claude.json kept primaryApiKey")
+	if claudeJSON["primaryApiKey"] != scrub.Redacted {
+		t.Errorf("claude.json primaryApiKey = %v", claudeJSON["primaryApiKey"])
 	}
 	if claudeJSON["oauthAccount"].(map[string]any)["emailAddress"] != "me@example.com" {
 		t.Errorf("claude.json lost oauthAccount: %v", claudeJSON)

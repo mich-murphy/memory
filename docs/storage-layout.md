@@ -16,7 +16,7 @@ snapshots/sets/<set-id>.json                                        which files 
 
 The collector walks each agent's whole directory and copies every file except:
 
-- **Credentials**, never copied: `.credentials.json` (Claude Code's login, Codex's MCP OAuth tokens), `auth.json`, `oauth.json`, `mcp-auth.json`, any `*.key` or `*.pem`, `~/.claude.json` backups, and the collector's own `config.env`. `~/.claude.json` itself is uploaded as `claude.json` without its `primaryApiKey` field.
+- **Credentials**, never copied: `.credentials.json` (Claude Code's login, Codex's MCP OAuth tokens), `auth.json`, `oauth.json`, `mcp-auth.json`, any `*.key` or `*.pem`, `~/.claude.json` backups, and the collector's own `config.env`. `~/.claude.json` itself is uploaded as `claude.json`, with the secrets below redacted and its layout kept.
 - **Noise**: locks, temp files, caches, `node_modules`, shell snapshots, executables, Claude Code's own install (`local/`, `downloads/`), plugin source checkouts, and Pi's `bin/` (fd and rg).
 - **Live SQLite files**, which are uploaded as consistent copies instead (below).
 

@@ -73,7 +73,7 @@ It writes that to a file and starts a detached sync with no delay and no debounc
 - **The command is in shell form, quoted with `shlex`**, so a path with spaces works on every Claude Code version.
 - **`cleanupPeriodDays`** is raised to 3650 if lower. Claude Code otherwise deletes transcripts, subagent files, tool results, plans and file history after 30 days.
 
-**Files captured:** all of `~/.claude` except credentials (`.credentials.json`, `sessions/*.key`), Claude Code's own install, caches and plugin source checkouts. See [storage-layout.md](storage-layout.md). `~/.claude.json` is uploaded without its `primaryApiKey`.
+**Files captured:** all of `~/.claude` except credentials (`.credentials.json`, `sessions/*.key`), Claude Code's own install, caches and plugin source checkouts. See [storage-layout.md](storage-layout.md). `~/.claude.json` is uploaded with its `primaryApiKey` redacted.
 
 ## Codex
 
