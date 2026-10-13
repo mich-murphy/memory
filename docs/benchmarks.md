@@ -10,7 +10,9 @@ The benchmarks run the collector the way it runs on a machine, against a generat
 |---|---|---|---|
 | `small` | 3 | 24 KiB | 160 KiB |
 | `typical` | 40 | 256 KiB | 12 MiB |
+| `many` | 400 | 24 KiB | 1 MiB |
 | `large` | 1 | | 72 MiB, above the 64 MiB streaming threshold |
+| `huge` | 1 | | 256 MiB |
 
 | Benchmark | The moment it stands for |
 |---|---|

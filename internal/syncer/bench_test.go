@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -17,16 +18,20 @@ import (
 // the rtt variants add a fixed round trip per request to show what R2's latency costs.
 // docs/benchmarks.md explains how to run and compare them.
 
-var largeProfile = testenv.Profile{Sessions: 1, Largest: 72 << 20}
-
-var profiles = []struct {
+type profile struct {
 	name string
 	p    testenv.Profile
-}{
-	{"small", testenv.SmallProfile},
-	{"typical", testenv.TypicalProfile},
-	{"large", largeProfile},
 }
+
+// The profiles span the homes and sessions the collector meets: from 9 sessions to 1,200, and
+// from a 160 KiB main transcript to a 256 MiB one.
+var (
+	small   = profile{"small", testenv.SmallProfile}
+	typical = profile{"typical", testenv.TypicalProfile}
+	many    = profile{"many", testenv.Profile{Sessions: 400, Median: 24 << 10, Largest: 1 << 20}}
+	large   = profile{"large", testenv.Profile{Sessions: 1, Largest: 72 << 20}}
+	huge    = profile{"huge", testenv.Profile{Sessions: 1, Largest: 256 << 20}}
+)
 
 // benchHome is a workload and the state dir a backfill of it left, built once per test binary
 // and copied by each benchmark, since a typical home takes seconds to write.
@@ -51,11 +56,11 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func home(b *testing.B, name string, p testenv.Profile) *benchHome {
+func home(b *testing.B, pr profile) *benchHome {
 	b.Helper()
 	homesMu.Lock()
 	defer homesMu.Unlock()
-	if h, ok := homes[name]; ok {
+	if h, ok := homes[pr.name]; ok {
 		return h
 	}
 	if homeDir == "" {
@@ -67,9 +72,9 @@ func home(b *testing.B, name string, p testenv.Profile) *benchHome {
 			b.Fatal(err)
 		}
 	}
-	dir := filepath.Join(homeDir, name)
+	dir := filepath.Join(homeDir, pr.name)
 	// A fixed start makes every run of the benchmarks see the same home.
-	w := testenv.NewWorkload(b, dir, p, time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC))
+	w := testenv.NewWorkload(b, dir, pr.p, time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC))
 	h := &benchHome{w: w, synced: filepath.Join(dir, "synced"), sizes: map[string]int64{}, at: w.Start.Add(2 * time.Hour)}
 	r := newRig(b, w, h.synced)
 	r.now = h.at
@@ -83,7 +88,7 @@ func home(b *testing.B, name string, p testenv.Profile) *benchHome {
 		}
 		h.sizes[p] = st.Size()
 	}
-	homes[name] = h
+	homes[pr.name] = h
 	return h
 }
 
@@ -119,9 +124,9 @@ func (t *tally) report(b *testing.B) {
 }
 
 func BenchmarkBackfill(b *testing.B) {
-	for _, pr := range profiles {
+	for _, pr := range []profile{small, typical, many, large, huge} {
 		b.Run(pr.name, func(b *testing.B) {
-			h := home(b, pr.name, pr.p)
+			h := home(b, pr)
 			stateDir := filepath.Join(b.TempDir(), "state")
 			b.SetBytes(h.w.Bytes)
 			r := newRig(b, h.w, stateDir)
@@ -143,9 +148,9 @@ func BenchmarkBackfill(b *testing.B) {
 }
 
 func BenchmarkSweepIdle(b *testing.B) {
-	for _, pr := range profiles[:2] {
+	for _, pr := range []profile{small, typical, many} {
 		b.Run(pr.name, func(b *testing.B) {
-			r := home(b, pr.name, pr.p).reset(b, filepath.Join(b.TempDir(), "state"))
+			r := home(b, pr).reset(b, filepath.Join(b.TempDir(), "state"))
 			var t tally
 			for b.Loop() {
 				r.sync("")
@@ -163,9 +168,9 @@ const turnBytes = 24 << 10
 func BenchmarkSweepAfterTurns(b *testing.B) {
 	for _, rtt := range []time.Duration{0, 30 * time.Millisecond} {
 		b.Run(fmt.Sprintf("typical/rtt=%v", rtt), func(b *testing.B) {
-			h := home(b, "typical", testenv.TypicalProfile)
+			h := home(b, typical)
 			stateDir := filepath.Join(b.TempDir(), "state")
-			n := testenv.TypicalProfile.Sessions
+			n := typical.p.Sessions
 			active := []string{h.w.Mains[1], h.w.Mains[n+1], h.w.Mains[2*n+1]}
 			var t tally
 			for b.Loop() {
@@ -188,17 +193,14 @@ func BenchmarkSweepAfterTurns(b *testing.B) {
 // which a hook starts after every turn.
 func BenchmarkHookTurn(b *testing.B) {
 	cases := []struct {
-		name string
-		p    testenv.Profile
-		rtt  time.Duration
+		profile
+		rtt time.Duration
 	}{
-		{"typical", testenv.TypicalProfile, 0},
-		{"typical", testenv.TypicalProfile, 30 * time.Millisecond},
-		{"large", largeProfile, 0},
+		{small, 0}, {typical, 0}, {typical, 30 * time.Millisecond}, {many, 0}, {large, 0}, {huge, 0},
 	}
 	for _, c := range cases {
 		b.Run(fmt.Sprintf("%s/rtt=%v", c.name, c.rtt), func(b *testing.B) {
-			h := home(b, c.name, c.p)
+			h := home(b, c.profile)
 			stateDir := filepath.Join(b.TempDir(), "state")
 			path := h.w.Mains[0]
 			var t tally
@@ -216,10 +218,96 @@ func BenchmarkHookTurn(b *testing.B) {
 	}
 }
 
+// segmented is a 12 MiB Claude session after each of a hook sync per turn for some number of
+// turns: the transcript at its longest, and per number of turns, its size, the state and the
+// clock after that turn.
+type segmented struct {
+	h      *benchHome
+	full   []byte
+	sizes  map[int]int64
+	states map[int]string
+	at     map[int]time.Time
+}
+
+var (
+	segmentedOnce sync.Once
+	segmentedHome *segmented
+)
+
+func segmentedSession(b *testing.B, turns []int) *segmented {
+	b.Helper()
+	segmentedOnce.Do(func() {
+		h := home(b, profile{"segmented", testenv.Profile{Sessions: 1, Largest: 12 << 20}})
+		s := &segmented{h: h, sizes: map[int]int64{}, states: map[int]string{}, at: map[int]time.Time{}}
+		dir := filepath.Join(filepath.Dir(h.synced), "turns")
+		r := h.reset(b, filepath.Join(dir, "work"))
+		path := h.w.Mains[0]
+		done := 0
+		for _, k := range turns {
+			for ; done < k; done++ {
+				r.now = r.now.Add(10 * time.Second)
+				h.w.AppendTurn(b, path, turnBytes, r.now.Add(-5*time.Second))
+				if sum := r.sync("claude", path); sum.Errors > 0 {
+					b.Fatalf("turn %d: %v", done, sum.ErrorMessages)
+				}
+			}
+			st, err := os.Stat(path)
+			if err != nil {
+				b.Fatal(err)
+			}
+			s.states[k] = filepath.Join(dir, strconv.Itoa(k))
+			copyDir(b, filepath.Join(dir, "work"), s.states[k])
+			s.sizes[k], s.at[k] = st.Size(), r.now
+		}
+		full, err := os.ReadFile(path)
+		if err != nil {
+			b.Fatal(err)
+		}
+		s.full = full
+		segmentedHome = s
+	})
+	if segmentedHome == nil {
+		b.Fatal("building the segmented session failed in an earlier benchmark")
+	}
+	return segmentedHome
+}
+
+// BenchmarkHookTurnAfterSegments is the hook sync of a session that has gathered segments since
+// its last fold, up to the most a session gathers before it is folded.
+func BenchmarkHookTurnAfterSegments(b *testing.B) {
+	turns := []int{1, 16, maxSegments - 2}
+	for _, k := range turns {
+		b.Run(fmt.Sprintf("segments=%d", k), func(b *testing.B) {
+			s := segmentedSession(b, turns)
+			path := s.h.w.Mains[0]
+			stateDir := filepath.Join(b.TempDir(), "state")
+			var t tally
+			for b.Loop() {
+				b.StopTimer()
+				// Written whole rather than truncated, since growing a file by truncation pads
+				// it with zeros.
+				if err := os.WriteFile(path, s.full[:s.sizes[k]], 0o600); err != nil {
+					b.Fatal(err)
+				}
+				copyDir(b, s.states[k], stateDir)
+				r := newRig(b, s.h.w, stateDir)
+				r.now = s.at[k].Add(10 * time.Second)
+				s.h.w.AppendTurn(b, path, turnBytes, r.now.Add(-5*time.Second))
+				b.StartTimer()
+				if sum := r.sync("claude", path); sum.Errors > 0 {
+					b.Fatal(sum.ErrorMessages)
+				}
+				t.add(r.store)
+			}
+			t.report(b)
+		})
+	}
+}
+
 // BenchmarkFold is the sweep that folds a session's segments into one object once it has been
 // idle, which every session gets once after it ends.
 func BenchmarkFold(b *testing.B) {
-	h := home(b, "typical", testenv.TypicalProfile)
+	h := home(b, typical)
 	stateDir := filepath.Join(b.TempDir(), "state")
 	path := h.w.Mains[0]
 	var t tally
