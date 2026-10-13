@@ -49,15 +49,14 @@ func TestWritesSurviveCancellationAndReopen(t *testing.T) {
 	s, err := Open(ctx, dir)
 	check(t, err)
 	cancel() // a SIGTERM mid-run must not roll back what was already uploaded
-	size := int64(3)
-	check(t, s.RecordUpload("k", "sha", &size))
+	check(t, s.RecordUpload("k", "sha", 3))
 	check(t, s.Close())
 	s, err = Open(t.Context(), dir)
 	check(t, err)
 	defer func() { check(t, s.Close()) }()
 	u, err := s.Uploaded("k")
 	check(t, err)
-	if u == nil || u.SHA256 != "sha" || *u.Size != 3 {
+	if u == nil || u.SHA256 != "sha" || u.Size != 3 {
 		t.Errorf("Uploaded = %+v", u)
 	}
 	if u, err := s.Uploaded("missing"); u != nil || err != nil {
@@ -67,10 +66,9 @@ func TestWritesSurviveCancellationAndReopen(t *testing.T) {
 
 func TestFilesKeepHeadsAndPreferTheOneOnDisk(t *testing.T) {
 	s := open(t)
-	lines := int64(2)
 	f := File{
 		Path: "/a.jsonl", Agent: "codex", Root: "/r", Key: "k", SessionKey: "s", Role: "main", Size: 10, MtimeNS: 5,
-		SHA256: "x", LineCount: &lines, PrefixSHA256: "p", Head: map[string]any{"cwd": "/w"},
+		SHA256: "x", LineCount: 2, PrefixSHA256: "p", Head: map[string]any{"cwd": "/w"},
 	}
 	check(t, s.RecordFile(&f))
 	f.Head, f.Size = nil, 20 // a later sync with no head keeps the earlier one
@@ -85,7 +83,7 @@ func TestFilesKeepHeadsAndPreferTheOneOnDisk(t *testing.T) {
 	check(t, s.MarkDeleted("/a.jsonl", 99))
 	files, err := s.SessionFiles(adapters.SessionRef{Agent: "codex", Key: "s"})
 	check(t, err)
-	if len(files) != 1 || files[0].DeletedAt != nil || files[0].Head["cwd"] != "/z" || files[0].Size != 20 {
+	if len(files) != 1 || files[0].DeletedAt != 0 || files[0].Head["cwd"] != "/z" || files[0].Size != 20 {
 		t.Errorf("SessionFiles = %+v", files)
 	}
 	live, err := s.LiveFiles("codex", "/r")
@@ -123,11 +121,10 @@ func TestPiecesAndVersions(t *testing.T) {
 	if pieces, _ = s.Pieces("k"); len(pieces) != 1 {
 		t.Errorf("fold left %v", pieces)
 	}
-	if at, err := s.LastVersionAt("k"); at != nil || err != nil {
+	if at, err := s.LastVersionAt("k"); at != 0 || err != nil {
 		t.Errorf("LastVersionAt before any = %v, %v", at, err)
 	}
-	size := int64(5)
-	v := Version{SHA256: "old", Size: &size, VersionedAt: 10, Pieces: pieces}
+	v := Version{SHA256: "old", Size: 5, VersionedAt: 10, Pieces: pieces}
 	check(t, s.RecordVersion("k", &v))
 	check(t, s.RecordVersion("k", &v)) // once per sha256
 	versions, err := s.Versions("k")
@@ -135,7 +132,7 @@ func TestPiecesAndVersions(t *testing.T) {
 	if diff := cmp.Diff([]Version{v}, versions); diff != "" {
 		t.Errorf("Versions:\n%s", diff)
 	}
-	if at, _ := s.LastVersionAt("k"); at == nil || *at != 10 {
+	if at, _ := s.LastVersionAt("k"); at != 10 {
 		t.Errorf("LastVersionAt = %v", at)
 	}
 }
@@ -195,7 +192,7 @@ func TestClosedStateReportsErrors(t *testing.T) {
 	s, err := Open(t.Context(), t.TempDir())
 	check(t, err)
 	check(t, s.Close())
-	if err := s.RecordUpload("k", "x", nil); err == nil {
+	if err := s.RecordUpload("k", "x", 0); err == nil {
 		t.Error("write to a closed state succeeded")
 	}
 	if _, err := s.Pieces("k"); err == nil {

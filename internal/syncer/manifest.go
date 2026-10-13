@@ -140,7 +140,7 @@ func (s *Syncer) writeManifests(ctx context.Context) error {
 			s.errorf("manifest %s: %v", j.id, errs[i])
 			continue
 		}
-		if err := s.state.RecordUpload(j.key, j.sha, nil); err != nil {
+		if err := s.state.RecordUpload(j.key, j.sha, int64(len(j.body))); err != nil {
 			return err
 		}
 		if err := s.state.ManifestWritten(j.id); err != nil {
@@ -236,8 +236,8 @@ func (s *Syncer) manifest(id adapters.SessionRef, sess *state.Session, files []s
 			"prefix_sha256": nilIfEmpty(f.PrefixSHA256), "head": f.Head, "object": obj, "pieces": pieces,
 			"versions": versions,
 		})
-		if f.DeletedAt != nil {
-			deleted = append(deleted, map[string]any{"key": f.Key, "at": *f.DeletedAt})
+		if f.DeletedAt > 0 {
+			deleted = append(deleted, map[string]any{"key": f.Key, "at": f.DeletedAt})
 		}
 	}
 	snapshots := make([]state.SnapshotEntry, len(sess.Snapshots))
@@ -315,7 +315,7 @@ func (s *Syncer) takeSnapshot(ctx context.Context, id adapters.SessionRef, root,
 		if errs[i] != nil {
 			return snapshotResult{}, errs[i]
 		}
-		if err := s.state.RecordUpload("snapshots/blobs/"+sha, sha, nil); err != nil {
+		if err := s.state.RecordUpload("snapshots/blobs/"+sha, sha, int64(len(snap.Blobs[sha]))); err != nil {
 			return snapshotResult{}, err
 		}
 	}
@@ -346,5 +346,5 @@ func (s *Syncer) putSet(ctx context.Context, setID string, doc map[string]any) e
 	if err := s.store.Put(ctx, key, body, map[string]string{}); err != nil {
 		return err
 	}
-	return s.state.RecordUpload(key, setID, nil)
+	return s.state.RecordUpload(key, setID, int64(len(body)))
 }

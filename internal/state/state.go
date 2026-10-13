@@ -212,10 +212,10 @@ type File struct {
 	Size         int64
 	MtimeNS      int64
 	SHA256       string
-	LineCount    *int64
+	LineCount    int64
 	PrefixSHA256 string
 	Head         map[string]any
-	DeletedAt    *float64
+	DeletedAt    float64
 }
 
 func (s *State) FileUnchanged(path string, size, mtimeNS int64) (bool, error) {
@@ -267,22 +267,16 @@ func (s *State) SessionFiles(ref adapters.SessionRef) ([]File, error) {
 		"WHERE agent = ? AND session_key = ? ORDER BY key, deleted_at IS NULL", []any{ref.Agent, ref.Key},
 		func(rows *sql.Rows) error {
 			var f File
-			var lines sql.NullInt64
 			var prefix, head sql.NullString
 			var deleted sql.NullFloat64
-			if err := rows.Scan(&f.Key, &f.Role, &f.Size, &f.SHA256, &lines, &prefix, &head, &deleted, &f.MtimeNS); err != nil {
+			if err := rows.Scan(&f.Key, &f.Role, &f.Size, &f.SHA256, &f.LineCount, &prefix, &head, &deleted, &f.MtimeNS); err != nil {
 				return fmt.Errorf("state: %w", err)
-			}
-			if lines.Valid {
-				f.LineCount = &lines.Int64
 			}
 			f.PrefixSHA256 = prefix.String
 			if head.Valid {
 				f.Head, _ = jsonx.Map([]byte(head.String))
 			}
-			if deleted.Valid {
-				f.DeletedAt = &deleted.Float64
-			}
+			f.DeletedAt = deleted.Float64
 			if i, ok := index[f.Key]; ok {
 				out[i] = f
 			} else {
@@ -316,31 +310,25 @@ func (s *State) MarkDeleted(path string, at float64) error {
 
 type Upload struct {
 	SHA256 string
-	Size   *int64
+	Size   int64
 }
 
 func (s *State) Uploaded(key string) (*Upload, error) {
 	var u Upload
-	var size sql.NullInt64
-	found, err := s.queryRow("SELECT sha256, size FROM uploads WHERE key = ?", []any{key}, &u.SHA256, &size)
+	found, err := s.queryRow("SELECT sha256, size FROM uploads WHERE key = ?", []any{key}, &u.SHA256, &u.Size)
 	if !found || err != nil {
 		return nil, err
-	}
-	if size.Valid {
-		u.Size = &size.Int64
 	}
 	return &u, nil
 }
 
 func (s *State) UploadedSHA(key string) (string, error) {
-	u, err := s.Uploaded(key)
-	if u == nil {
-		return "", err
-	}
-	return u.SHA256, nil
+	var sha string
+	_, err := s.queryRow("SELECT sha256 FROM uploads WHERE key = ?", []any{key}, &sha)
+	return sha, err
 }
 
-func (s *State) RecordUpload(key, sha string, size *int64) error {
+func (s *State) RecordUpload(key, sha string, size int64) error {
 	return s.exec("INSERT OR REPLACE INTO uploads VALUES (?,?,?,?)", key, sha, size, UnixNow())
 }
 
@@ -376,7 +364,7 @@ func (s *State) AddPiece(key string, p raw.Piece) error {
 
 type Version struct {
 	SHA256      string      `json:"sha256"`
-	Size        *int64      `json:"size"`
+	Size        int64       `json:"size"`
 	VersionedAt float64     `json:"versioned_at"`
 	Pieces      []raw.Piece `json:"pieces"`
 }
@@ -394,13 +382,9 @@ func (s *State) Versions(key string) ([]Version, error) {
 	err := s.query("SELECT sha256, size, pieces, versioned_at FROM raw_versions WHERE key = ? ORDER BY versioned_at",
 		[]any{key}, func(rows *sql.Rows) error {
 			var v Version
-			var size sql.NullInt64
 			var pieces string
-			if err := rows.Scan(&v.SHA256, &size, &pieces, &v.VersionedAt); err != nil {
+			if err := rows.Scan(&v.SHA256, &v.Size, &pieces, &v.VersionedAt); err != nil {
 				return fmt.Errorf("state: %w", err)
-			}
-			if size.Valid {
-				v.Size = &size.Int64
 			}
 			if err := json.Unmarshal([]byte(pieces), &v.Pieces); err != nil {
 				return fmt.Errorf("state: version pieces of %s: %w", key, err)
@@ -411,15 +395,10 @@ func (s *State) Versions(key string) ([]Version, error) {
 	return out, err
 }
 
-func (s *State) LastVersionAt(key string) (*float64, error) {
-	var at sql.NullFloat64
-	if _, err := s.queryRow("SELECT MAX(versioned_at) FROM raw_versions WHERE key = ?", []any{key}, &at); err != nil {
-		return nil, err
-	}
-	if !at.Valid {
-		return nil, nil
-	}
-	return &at.Float64, nil
+func (s *State) LastVersionAt(key string) (float64, error) {
+	var at float64
+	_, err := s.queryRow("SELECT COALESCE(MAX(versioned_at), 0) FROM raw_versions WHERE key = ?", []any{key}, &at)
+	return at, err
 }
 
 type Session struct {
