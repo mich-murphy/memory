@@ -114,6 +114,9 @@ type State struct {
 	db  *sql.DB
 	tx  *sql.Tx
 	ctx context.Context
+	// stmts are prepared once per transaction: a sweep asks the same few questions of every
+	// file, and parsing the SQL each time cost more than answering it.
+	stmts map[string]*sql.Stmt
 }
 
 func Open(ctx context.Context, dir string) (*State, error) {
@@ -148,7 +151,7 @@ func (s *State) Flush() error {
 		return nil
 	}
 	tx := s.tx
-	s.tx = nil
+	s.tx, s.stmts = nil, nil
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("state commit: %w", err)
 	}
@@ -166,23 +169,41 @@ func (s *State) conn() (*sql.Tx, error) {
 	return s.tx, nil
 }
 
-func (s *State) exec(query string, args ...any) error {
+// prepare leaves query's statement in s.stmts, to be closed with the transaction.
+func (s *State) prepare(query string) error {
+	if _, ok := s.stmts[query]; ok {
+		return nil
+	}
 	tx, err := s.conn()
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(s.ctx, query, args...); err != nil {
+	if s.stmts == nil {
+		s.stmts = map[string]*sql.Stmt{}
+	}
+	//nolint:sqlclosecheck // a statement prepared on a transaction is closed when it commits
+	if s.stmts[query], err = tx.PrepareContext(s.ctx, query); err != nil {
+		delete(s.stmts, query)
+		return fmt.Errorf("state: %w", err)
+	}
+	return nil
+}
+
+func (s *State) exec(query string, args ...any) error {
+	if err := s.prepare(query); err != nil {
+		return err
+	}
+	if _, err := s.stmts[query].ExecContext(s.ctx, args...); err != nil {
 		return fmt.Errorf("state: %w", err)
 	}
 	return nil
 }
 
 func (s *State) queryRow(query string, args []any, dest ...any) (bool, error) {
-	tx, err := s.conn()
-	if err != nil {
+	if err := s.prepare(query); err != nil {
 		return false, err
 	}
-	err = tx.QueryRowContext(s.ctx, query, args...).Scan(dest...)
+	err := s.stmts[query].QueryRowContext(s.ctx, args...).Scan(dest...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -193,11 +214,10 @@ func (s *State) queryRow(query string, args []any, dest ...any) (bool, error) {
 }
 
 func (s *State) query(query string, args []any, row func(*sql.Rows) error) error {
-	tx, err := s.conn()
-	if err != nil {
+	if err := s.prepare(query); err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(s.ctx, query, args...)
+	rows, err := s.stmts[query].QueryContext(s.ctx, args...)
 	if err != nil {
 		return fmt.Errorf("state: %w", err)
 	}
@@ -229,12 +249,14 @@ type File struct {
 	DeletedAt    *float64
 }
 
-func (s *State) FileUnchanged(path string, size, mtimeNS int64) (bool, error) {
+// FileUnchanged says whether path was last recorded with this size and mtime, and how many
+// pieces key's object has, in one query since a sweep asks both of every file.
+func (s *State) FileUnchanged(path, key string, size, mtimeNS int64) (unchanged bool, pieces int, err error) {
 	var gotSize, gotMtime int64
 	var deleted sql.NullFloat64
-	found, err := s.queryRow("SELECT size, mtime_ns, deleted_at FROM files WHERE path = ?", []any{path},
-		&gotSize, &gotMtime, &deleted)
-	return found && gotSize == size && gotMtime == mtimeNS && !deleted.Valid, err
+	found, err := s.queryRow("SELECT size, mtime_ns, deleted_at, (SELECT COUNT(*) FROM pieces WHERE key = ?) FROM files "+
+		"WHERE path = ?", []any{key, path}, &gotSize, &gotMtime, &deleted, &pieces)
+	return found && gotSize == size && gotMtime == mtimeNS && !deleted.Valid, pieces, err
 }
 
 // RecordFile keeps the previous head when f.Head is nil.

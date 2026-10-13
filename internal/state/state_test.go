@@ -92,12 +92,13 @@ func TestFilesKeepHeadsAndPreferTheOneOnDisk(t *testing.T) {
 	if diff := cmp.Diff([]LiveFile{{Path: "/a.jsonl.zst", SessionKey: "s"}}, live); diff != "" {
 		t.Errorf("LiveFiles:\n%s", diff)
 	}
-	same, err := s.FileUnchanged("/a.jsonl.zst", 20, 5)
+	check(t, s.SetPieces("k", []raw.Piece{{Start: 0, End: 10, SHA256: "a", Object: "k"}, {Start: 10, End: 20, SHA256: "b", Object: "k.d/1"}}))
+	same, pieces, err := s.FileUnchanged("/a.jsonl.zst", "k", 20, 5)
 	check(t, err)
-	gone, err := s.FileUnchanged("/a.jsonl", 20, 5)
+	gone, _, err := s.FileUnchanged("/a.jsonl", "k", 20, 5)
 	check(t, err)
-	if !same || gone {
-		t.Errorf("FileUnchanged = %v, %v", same, gone)
+	if !same || gone || pieces != 2 {
+		t.Errorf("FileUnchanged = %v, %v, %d pieces", same, gone, pieces)
 	}
 }
 

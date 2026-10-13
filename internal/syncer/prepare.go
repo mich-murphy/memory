@@ -209,19 +209,19 @@ func (s *Syncer) prepare(sf adapters.SessionFile, root string) (*upload, error) 
 		s.noteSessionRoot(sessionID{sf.Agent, sf.SessionKey}, root)
 	}
 	key := s.rawKey(sf.Agent, sf.Key)
+	age := s.nowSeconds() - fileMtime(st)
+	idle := age >= foldAfter.Seconds()
+	unchanged, npieces, err := s.state.FileUnchanged(sf.Path, key, st.Size(), st.ModTime().UnixNano())
+	if err != nil {
+		return nil, err
+	}
+	if unchanged && (!idle || npieces <= 1) {
+		s.Summary.Unchanged++
+		return nil, nil
+	}
 	pieces, err := s.state.Pieces(key)
 	if err != nil {
 		return nil, err
-	}
-	age := s.nowSeconds() - fileMtime(st)
-	idle := age >= foldAfter.Seconds()
-	unchanged, err := s.state.FileUnchanged(sf.Path, st.Size(), st.ModTime().UnixNano())
-	if err != nil {
-		return nil, err
-	}
-	if unchanged && (!idle || len(pieces) <= 1) {
-		s.Summary.Unchanged++
-		return nil, nil
 	}
 	prev, err := s.state.Uploaded(key)
 	if err != nil {

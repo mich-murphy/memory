@@ -49,7 +49,7 @@ func (d *digest) read(src io.ReaderAt, end int64, withSHA bool) error {
 		if err != nil && !errors.Is(err, io.EOF) {
 			return fmt.Errorf("read: %w", err)
 		}
-		if err != nil || n == 0 {
+		if errors.Is(err, io.EOF) || n == 0 {
 			return nil
 		}
 	}
