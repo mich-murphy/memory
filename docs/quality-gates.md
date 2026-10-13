@@ -64,7 +64,7 @@ gofumpt (stricter gofmt) and goimports, with this module's imports grouped last.
 - Tests use the standard `testing` package and go-cmp; no assertion library. The command line is tested end to end with testscript (`cmd/agent-sessions/testdata/script`) against fake Claude Code, Codex and Pi homes. The S3 store is tested against gofakes3 in-process, and against real R2 when `AGENT_SESSIONS_TEST_R2=1` and R2 credentials are set.
 - Every test run uses the race detector (which needs cgo) and shuffled order. Release builds use `CGO_ENABLED=0`; every library is pure Go.
 - **Coverage gate:** 75% total, 60% per package, 85% for the packages that decide what gets uploaded (`internal/raw`, `internal/state`, `internal/syncer`). The end-to-end runs count, so `main` and wiring are tested rather than excluded. `internal/testenv` (test fixtures) is excluded. A coverage-ignore comment must give a reason. Coverage only finds untested code; it doesn't prove the tests are good, so raise it as the code settles rather than chasing it with tests that assert nothing.
-- **Fuzzing:** transcript heads (`internal/adapters`), hook input (`internal/hook`), JSON settings (`internal/jsonx`), zstd round trips (`internal/raw`) and shell quoting (`internal/shellwords`). Seeds run with every `go test`; CI fuzzes each for 30 seconds.
+- **Fuzzing:** transcript heads (`internal/adapters`), hook input (`internal/hook`), JSON settings (`internal/jsonx`), zstd round trips (`internal/raw`), secret redaction in config files (`internal/scrub`) and shell quoting (`internal/shellwords`). Seeds run with every `go test`; CI fuzzes each for 30 seconds.
 
 ## CI and releases
 

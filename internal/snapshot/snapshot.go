@@ -2,7 +2,7 @@
 // project.
 //
 // A snapshot is a content-addressed set of (scope, path, sha256) entries. File bodies are stored
-// once under snapshots/blobs/<sha256>, unredacted, and sets under snapshots/sets/<set-id>.json,
+// once under snapshots/blobs/<sha256>, and sets under snapshots/sets/<set-id>.json,
 // so identical files across sessions and machines cost nothing extra. Two kinds of set are
 // taken:
 //
@@ -21,6 +21,9 @@
 //	script    hook and status-line scripts named in settings, by real path
 //	import    files pulled into CLAUDE.md/AGENTS.md with @path, by real path
 //
+// Secrets written inside config files (MCP env and headers, settings env, API keys) are
+// redacted by package scrub before a body is hashed; everything else is stored as it is.
+//
 // Directories in a pattern ending in /** are taken whole (a skill's scripts and references, not
 // just its SKILL.md), following symlinks; a symlinked file records its target. Files left out
 // for size or count are listed in the set's skipped. Each file's mtime is returned separately so
@@ -36,6 +39,7 @@ import (
 	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/jsonx"
 	"github.com/mich-murphy/memory/internal/raw"
+	"github.com/mich-murphy/memory/internal/scrub"
 )
 
 const (
@@ -72,14 +76,15 @@ type Skipped struct {
 }
 
 type collected struct {
+	agent   string
 	entries []*Entry
 	skipped []Skipped
 	counts  map[string]int
 	seen    map[string]bool
 }
 
-func newCollected() *collected {
-	return &collected{counts: map[string]int{}, seen: map[string]bool{}}
+func newCollected(agent string) *collected {
+	return &collected{agent: agent, counts: map[string]int{}, seen: map[string]bool{}}
 }
 
 // add reads one file into the set, or notes why it was left out.
@@ -101,6 +106,11 @@ func (c *collected) add(scope, path, name string) *Entry {
 	}
 	body, err := os.ReadFile(path)
 	if err != nil {
+		return nil
+	}
+	if body, err = scrub.File(c.agent, filepath.Base(path), body); err != nil {
+		// A config file that may hold secrets but doesn't parse can't be checked, so it isn't kept.
+		c.skipped = append(c.skipped, Skipped{Scope: scope, Path: name, Reason: "unparseable", Size: st.Size()})
 		return nil
 	}
 	c.seen[scope+"\x00"+name] = true
@@ -258,7 +268,7 @@ type scopeBase struct {
 
 // collect gathers every harness file for a session in cwd.
 func collect(a adapters.Adapter, root, cwd string) *collected {
-	c := newCollected()
+	c := newCollected(a.Name())
 	projectRoot, isRepo := "", false
 	if cwd != "" && isDir(cwd) {
 		projectRoot, isRepo = FindProjectRoot(cwd)
@@ -375,7 +385,7 @@ func sortEntries(entries []*Entry) {
 
 // collectMemory gathers the memory the agent writes for itself.
 func collectMemory(a adapters.Adapter, root, cwd, sessionKey string) *collected {
-	c := newCollected()
+	c := newCollected(a.Name())
 	projectRoot := ""
 	if cwd != "" && isDir(cwd) {
 		projectRoot, _ = FindProjectRoot(cwd)

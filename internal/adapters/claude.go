@@ -33,6 +33,7 @@ import (
 
 	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/jsonx"
+	"github.com/mich-murphy/memory/internal/scrub"
 )
 
 var (
@@ -259,7 +260,8 @@ func (c *Claude) claudeJSON(root string) string {
 	return filepath.Join(c.home, ".claude.json")
 }
 
-// Exports adds database copies and ~/.claude.json without its API key.
+// Exports adds database copies and ~/.claude.json without its API key. The copy's MCP secrets
+// are redacted when it is read for upload, like every config file.
 func (c *Claude) Exports(root, workDir string, interval time.Duration) []SessionFile {
 	out := SQLiteExports(c, root, workDir, interval)
 	data, err := os.ReadFile(c.claudeJSON(root))
@@ -319,6 +321,10 @@ func (c *Claude) ExtraSnapshotEntries(root, projectRoot string) []Entry {
 	}
 	body, err := jsonx.Indent(picked, 1)
 	if err != nil {
+		return nil
+	}
+	// MCP server env and headers often hold tokens.
+	if body, err = scrub.File(c.Name(), ".claude.json", body); err != nil {
 		return nil
 	}
 	return []Entry{{Scope: "user", Name: ".claude.json#mcp", Body: bytes.TrimSuffix(body, []byte("\n"))}}

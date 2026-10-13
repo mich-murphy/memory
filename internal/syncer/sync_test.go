@@ -296,9 +296,20 @@ func TestCredentialsAndNoiseAreNeverCopied(t *testing.T) {
 	for _, k := range keys {
 		everything = append(everything, decodeAny(t, filepath.Join(e.Bucket, k))...)
 	}
-	for _, secret := range []string{"secret-oauth", "secret-key", "sk-ant-api-secret", "ghp_token"} {
+	// Credential files, and secrets written inside config files (Claude settings env, MCP
+	// servers in ~/.claude.json and a project's settings, Codex config.toml, Pi models.json).
+	for _, secret := range []string{
+		"secret-oauth", "secret-key", "sk-ant-api-secret", "ghp_token",
+		"sk-ant-xxxx", "ghp_aaaa", "Bearer abc", "hunter2", "ghp_secret", "sk-pi-literal",
+	} {
 		if bytes.Contains(everything, []byte(secret)) {
 			t.Errorf("bucket contains %q", secret)
+		}
+	}
+	// Their keys and the settings around them are still there.
+	for _, kept := range []string{"ANTHROPIC_API_KEY", "GITHUB_TOKEN", "DB_PASSWORD", "https://llm.corp/v1", "guard.sh"} {
+		if !bytes.Contains(everything, []byte(kept)) {
+			t.Errorf("bucket lacks %q", kept)
 		}
 	}
 	var claudeJSON map[string]any
@@ -841,7 +852,7 @@ func gunzip(t *testing.T, path string) string {
 	return string(decodeAny(t, path))
 }
 
-func TestSnapshotRecordsWholeHarnessUnredacted(t *testing.T) {
+func TestSnapshotRecordsWholeHarnessWithSecretsRedacted(t *testing.T) {
 	e := testenv.New(t)
 	target := filepath.Join(e.Tmp, "dotfiles", "review")
 	testenv.Write(t, filepath.Join(target, "SKILL.md"), "review skill\n")
@@ -895,11 +906,15 @@ func TestSnapshotRecordsWholeHarnessUnredacted(t *testing.T) {
 	blob := func(scope, path string) string {
 		return string(readFile(t, filepath.Join(e.Bucket, "snapshots", "blobs", files[[2]string{scope, path}]["sha256"].(string))))
 	}
-	for _, c := range []struct{ scope, path, want string }{
-		{"user", "settings.json", "sk-ant-"}, {"project", ".claude/settings.json", "hunter2"}, {"user", ".claude.json#mcp", "ghp_"},
+	// Bodies are whole, apart from secret values in config files.
+	for _, c := range []struct{ scope, path, kept, gone string }{
+		{"user", "settings.json", "guard.sh", "sk-ant-"},
+		{"project", ".claude/settings.json", "DB_PASSWORD", "hunter2"},
+		{"user", ".claude.json#mcp", "GITHUB_TOKEN", "ghp_"},
 	} {
-		if !strings.Contains(blob(c.scope, c.path), c.want) {
-			t.Errorf("%s %s was redacted", c.scope, c.path)
+		body := blob(c.scope, c.path)
+		if !strings.Contains(body, c.kept) || strings.Contains(body, c.gone) || !strings.Contains(body, "[redacted]") {
+			t.Errorf("%s %s = %s", c.scope, c.path, body)
 		}
 	}
 	memory := e.ReadJSON("snapshots/sets/" + snap["memory_id"].(string) + ".json")
