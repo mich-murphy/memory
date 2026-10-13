@@ -221,7 +221,7 @@ func readLaunch(path string) map[string]any {
 	return m
 }
 
-func runInstall(ctx context.Context, args []string, o IO) (int, error) {
+func runInstall(args []string, o IO) (int, error) {
 	var agents agentList
 	fs := newFlags("install", o)
 	fs.Var(&agents, "agent", "only this agent: claude, codex or pi (repeatable; default all present)")
@@ -257,10 +257,6 @@ func runInstall(ctx context.Context, args []string, o IO) (int, error) {
 			log = append(log, fmt.Sprintf("%s: not changed: %v", agent, err))
 		}
 	}
-	if err := install.RemoveOldTimers(ctx, opts); err != nil {
-		failed = true
-		log = append(log, fmt.Sprintf("old periodic sync: not removed: %v", err))
-	}
 	o.printf("agent-sessions command: %s\n", strings.Join(opts.Command, " "))
 	for _, line := range log {
 		o.printf("  %s\n", line)
@@ -274,7 +270,7 @@ func runInstall(ctx context.Context, args []string, o IO) (int, error) {
 	return exitOK, nil
 }
 
-func runUninstall(ctx context.Context, args []string, o IO) (int, error) {
+func runUninstall(args []string, o IO) (int, error) {
 	var agents agentList
 	fs := newFlags("uninstall", o)
 	fs.Var(&agents, "agent", "only this agent: claude, codex or pi (repeatable; default all)")
@@ -291,10 +287,6 @@ func runUninstall(ctx context.Context, args []string, o IO) (int, error) {
 			failed = true
 			log = append(log, fmt.Sprintf("%s: not changed: %v", agent, err))
 		}
-	}
-	if err := install.RemoveOldTimers(ctx, opts); err != nil {
-		failed = true
-		log = append(log, fmt.Sprintf("old periodic sync: not removed: %v", err))
 	}
 	for _, line := range log {
 		o.printf("  %s\n", line)

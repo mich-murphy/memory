@@ -40,7 +40,7 @@ func snapshotTree(t *testing.T, root string) map[string]string {
 }
 
 // onlyAgentSessionsOnPath leaves PATH holding just a stand-in agent-sessions, which hooks are
-// installed to run: no agents, systemctl, launchctl or crontab.
+// installed to run, and no agents.
 func onlyAgentSessionsOnPath(t *testing.T) {
 	t.Helper()
 	bin := t.TempDir()
@@ -126,8 +126,6 @@ func TestUsageAndVersion(t *testing.T) {
 func TestDoctorReportsWhatIsMissing(t *testing.T) {
 	e := testenv.New(t)
 	onlyAgentSessionsOnPath(t)
-	oldPlist := filepath.Join(e.Home, "Library", "LaunchAgents", "tech.agent-sessions.sweep.plist")
-	testenv.Write(t, oldPlist, "<plist/>")
 	code, out, _ := run("doctor")
 	if code != 1 {
 		t.Errorf("exit %d", code)
@@ -135,13 +133,12 @@ func TestDoctorReportsWhatIsMissing(t *testing.T) {
 	for _, want := range []string{
 		"[ok  ] machine id: testbox", "[warn] writing to a local directory", "[FAIL] claude: 0/8 agent-sessions hooks",
 		"[FAIL] codex: 0/6", "[FAIL] pi: extension missing",
-		"[FAIL] an earlier version's periodic sync is still installed (launchd)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("doctor output lacks %q:\n%s", want, out)
 		}
 	}
-	if code, out, _ := run("install"); code != 0 || !strings.Contains(out, "removed: "+oldPlist) {
+	if code, out, _ := run("install"); code != 0 {
 		t.Fatalf("install: exit %d\n%s", code, out)
 	}
 	_, out, _ = run("doctor")
@@ -149,9 +146,6 @@ func TestDoctorReportsWhatIsMissing(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("doctor output lacks %q:\n%s", want, out)
 		}
-	}
-	if strings.Contains(out, "periodic sync") {
-		t.Errorf("install left the old periodic sync:\n%s", out)
 	}
 
 	ext := filepath.Join(e.Home, ".pi", "agent", "extensions", "agent-sessions.ts")

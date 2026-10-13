@@ -1,47 +1,19 @@
 # Install writes hooks next to the user's own settings; uninstall takes them out again.
-# Stand-ins for crontab and systemctl keep the real ones out of reach.
-chmod 0700 bin/crontab
-chmod 0700 bin/systemctl
-env PATH=$WORK/bin${:}$PATH
-
-# An earlier version's periodic sync goes, and the user's own cron jobs stay.
 exec agent-sessions install --agent claude --agent codex
 stdout 'wrote: .*settings.json'
 stdout 'codex: open Codex and run /hooks'
-stdout 'removed: .*agent-sessions.service, .*agent-sessions.timer'
-stdout 'removed: the agent-sessions line in your crontab'
-! exists home/.config/systemd/user/agent-sessions.timer
-cmp crontab.txt want-crontab.txt
 grep '"model": "opus"' home/.claude/settings.json
 grep 'hook claude' home/.claude/settings.json
 grep 'hook codex' home/.codex/hooks.json
 
 exec agent-sessions install --agent claude --agent codex
 stdout 'unchanged: .*settings.json'
-! stdout 'removed'
 
 exec agent-sessions uninstall --agent claude --agent codex
 ! grep 'hook claude' home/.claude/settings.json
 grep '"model": "opus"' home/.claude/settings.json
 ! exists home/.codex/hooks.json
 
--- bin/crontab --
-#!/bin/sh
-case "$1" in
--l) cat "$WORK/crontab.txt" ;;
--) cat > "$WORK/crontab.txt" ;;
-esac
--- bin/systemctl --
-#!/bin/sh
--- crontab.txt --
-0 3 * * * backup.sh
-*/10 * * * * /usr/local/bin/agent-sessions sync --quiet --trigger sweep >/dev/null 2>&1 # agent-sessions sweep
--- want-crontab.txt --
-0 3 * * * backup.sh
--- home/.config/systemd/user/agent-sessions.service --
-[Service]
--- home/.config/systemd/user/agent-sessions.timer --
-[Timer]
 -- home/.claude/settings.json --
 {"model": "opus"}
 -- home/.codex/config.toml --

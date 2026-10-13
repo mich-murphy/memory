@@ -20,8 +20,6 @@ If you use Codex, open it once and approve the agent-sessions hooks in `/hooks`.
 
 That's all. `agent-sessions install` only touches agents it finds on the machine, so rerun it after installing another agent. It's safe to rerun at any time: it replaces its own entries and leaves everything else in your settings alone, backing up any file before changing it.
 
-Earlier versions also ran a sync every 10 minutes from a systemd user timer, launchd or cron. `agent-sessions install` removes it, and `agent-sessions doctor` fails while it's still there.
-
 ## How it captures sessions
 
 Each agent tells agent-sessions when a session has new content. Nothing runs on a schedule: when any session starts or ends, a sweep of every agent's files catches whatever the hooks missed.
@@ -53,7 +51,7 @@ Claude Code deletes transcripts after 30 days by default. `agent-sessions instal
 
 | Command | What it does |
 |---|---|
-| `agent-sessions install` | Hooks, Pi extension, config file, and removes an earlier version's timer. `--dry-run` shows what would change. |
+| `agent-sessions install` | Hooks, Pi extension, config file. `--dry-run` shows what would change. |
 | `agent-sessions doctor` | Checks settings, bucket access, each hook, Codex hook trust, the last sweep and recent errors. |
 | `agent-sessions backfill` | Uploads everything already on the machine. |
 | `agent-sessions sync` | Uploads what changed. Hooks run this. |
@@ -63,8 +61,6 @@ Claude Code deletes transcripts after 30 days by default. `agent-sessions instal
 Set `AGENT_SESSIONS_DISABLE=1` in an agent's environment to skip capture for that run.
 
 Logs are in `~/.local/state/agent-sessions/agent-sessions.log`.
-
-If a machine has memsync (this tool's earlier name) installed, run `memsync uninstall` first. A reinstall also replaces any memsync hook entries it finds.
 
 Rerun the install script to upgrade; it verifies each download against the release's `checksums.txt`. `VERSION=v0.1.0` picks a release. While the repo is private, the script downloads through `gh`, so log in with `gh auth login` first.
 

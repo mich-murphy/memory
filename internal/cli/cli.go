@@ -117,9 +117,9 @@ func Main(ctx context.Context, args []string, version string, o IO) int {
 	case "sync", "backfill":
 		code, err = runSync(ctx, cmd, rest, version, o)
 	case "install":
-		code, err = runInstall(ctx, rest, o)
+		code, err = runInstall(rest, o)
 	case "uninstall":
-		code, err = runUninstall(ctx, rest, o)
+		code, err = runUninstall(rest, o)
 	case "doctor":
 		code, err = runDoctor(ctx, rest, o)
 	case "status":

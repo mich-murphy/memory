@@ -19,8 +19,7 @@ import (
 	"github.com/mich-murphy/memory/internal/shellwords"
 )
 
-// Ours also matches memsync, this tool's earlier name, so a reinstall replaces its entries.
-var Ours = regexp.MustCompile(`(?:agent-sessions|agent_sessions|memsync).*\bhook (claude|codex|pi)\b`)
+var Ours = regexp.MustCompile(`(?:agent-sessions|agent_sessions).*\bhook (claude|codex|pi)\b`)
 
 type HookEvent struct {
 	Name        string

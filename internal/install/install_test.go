@@ -47,7 +47,7 @@ func TestClaudeInstallMergesIdempotentlyAndUninstalls(t *testing.T) {
 	settings["hooks"] = map[string]any{
 		"Stop": []any{
 			map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "notify-send done"}}},
-			map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "/old/bin/memsync hook claude"}}},
+			map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "/old/bin/agent-sessions hook claude"}}},
 		},
 		"PreToolUse": []any{map[string]any{"matcher": "Bash", "hooks": []any{map[string]any{"type": "command", "command": "guard.sh"}}}},
 	}
@@ -120,7 +120,7 @@ func TestClaudeInstallMergesIdempotentlyAndUninstalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	after := readJSON(t, path)["hooks"].(map[string]any)
-	wantAfter := map[string]any{} // the old memsync entry is gone too
+	wantAfter := map[string]any{} // the entry from an earlier install path is gone too
 	for k, v := range settings["hooks"].(map[string]any) {
 		wantAfter[k] = v.([]any)[:1]
 	}
