@@ -28,11 +28,7 @@ const (
 	manualLockTimeout = 10 * time.Minute
 )
 
-const (
-	defaultKeepDays = 3650
-	statusRuns      = 8
-	statusErrors    = 3
-)
+const defaultKeepDays = 3650
 
 type syncArgs struct {
 	agents      agentList
@@ -293,59 +289,6 @@ func runUninstall(args []string, o IO) (int, error) {
 	}
 	if failed {
 		return exitFailed, nil
-	}
-	return exitOK, nil
-}
-
-func runStatus(ctx context.Context, args []string, o IO) (int, error) {
-	if err := parse(newFlags("status", o), args); err != nil {
-		return exitUsage, err
-	}
-	cfg, err := config.Load(config.FilePath())
-	if err != nil {
-		return exitFailed, err
-	}
-	s, err := state.Open(ctx, cfg.StateDir)
-	if err != nil {
-		return exitFailed, err
-	}
-	defer func() { _ = s.Close() }() // read-only use
-	o.printf("machine: %s (%s)   state: %s\n", cfg.MachineID, cfg.Hostname, cfg.StateDir)
-	totals, err := s.FileTotals()
-	if err != nil {
-		return exitFailed, err
-	}
-	for _, t := range totals {
-		o.printf("  %-22s %7d files %10.1f MB\n", t.Agent+"/"+t.Role, t.Files, float64(t.Bytes)/1e6)
-	}
-	tallies, err := s.Tallies()
-	if err != nil {
-		return exitFailed, err
-	}
-	for _, t := range tallies {
-		o.printf("  %-22s %7d\n", t.Name, t.Count)
-	}
-	for _, agent := range adapters.Names {
-		roots, err := s.ExtraRoots(agent)
-		if err != nil {
-			return exitFailed, err
-		}
-		for _, root := range roots {
-			o.printf("  extra %s root: %s\n", agent, root)
-		}
-	}
-	runs, err := s.LastRuns(statusRuns)
-	if err != nil {
-		return exitFailed, err
-	}
-	o.printf("recent runs:\n")
-	for _, run := range runs {
-		when := time.Unix(0, int64(run.FinishedAt*1e9)).Format("2006-01-02 15:04:05")
-		o.printf("  %s %-24s up %4v  errors %v\n", when, run.Trigger, run.Summary["uploaded"], run.Summary["errors"])
-		msgs, _ := run.Summary["error_messages"].([]any)
-		for _, m := range msgs[:min(len(msgs), statusErrors)] {
-			o.printf("      %v\n", m)
-		}
 	}
 	return exitOK, nil
 }

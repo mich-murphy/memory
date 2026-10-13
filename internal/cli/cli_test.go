@@ -118,9 +118,6 @@ func TestUsageAndVersion(t *testing.T) {
 	if code, _, _ := run("sync", "-h"); code != 0 {
 		t.Errorf("sync -h: exit %d", code)
 	}
-	if code, _, _ := run("cat"); code != 2 {
-		t.Errorf("cat without a key: exit %d", code)
-	}
 }
 
 func TestDoctorReportsWhatIsMissing(t *testing.T) {

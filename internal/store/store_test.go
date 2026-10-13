@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"github.com/johannesboyne/gofakes3"
@@ -35,14 +34,6 @@ func exercise(t *testing.T, s store.Store, prefix string) {
 	}
 	if _, err := s.Get(ctx, k("missing")); err == nil {
 		t.Error("Get of a missing key succeeded")
-	}
-	keys, err := s.List(ctx, k("a/"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	slices.Sort(keys)
-	if !slices.Equal(keys, []string{k("a/one"), k("a/two")}) {
-		t.Errorf("List = %v", keys)
 	}
 	if ok, err := s.Copy(ctx, k("a/one"), k("c/copy")); !ok || err != nil {
 		t.Errorf("Copy = %v, %v", ok, err)
@@ -87,8 +78,10 @@ func exercise(t *testing.T, s store.Store, prefix string) {
 	if err := s.Delete(ctx, k("never-there")); err != nil {
 		t.Errorf("Delete(missing) = %v", err)
 	}
-	if keys, err := s.List(ctx, prefix); err != nil || len(keys) != 0 {
-		t.Errorf("left behind: %v, %v", keys, err)
+	for _, key := range []string{"a/one", "a/two", "b/three", "c/copy", "big", "small"} {
+		if _, err := s.Get(ctx, k(key)); err == nil {
+			t.Errorf("%s left behind", key)
+		}
 	}
 }
 

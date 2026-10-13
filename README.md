@@ -55,7 +55,6 @@ Claude Code deletes transcripts after 30 days by default. `agent-sessions instal
 | `agent-sessions doctor` | Checks settings, bucket access, each hook, Codex hook trust, the last sweep and recent errors. |
 | `agent-sessions backfill` | Uploads everything already on the machine. |
 | `agent-sessions sync` | Uploads what changed. Hooks run this. |
-| `agent-sessions status` | Counts by agent, recent runs and errors. |
 | `agent-sessions uninstall` | Removes the hooks and the extension. Uploaded data stays. |
 
 Set `AGENT_SESSIONS_DISABLE=1` in an agent's environment to skip capture for that run.

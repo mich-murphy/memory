@@ -15,8 +15,6 @@ import (
 	"github.com/mich-murphy/memory/internal/config"
 	"github.com/mich-murphy/memory/internal/doctor"
 	"github.com/mich-murphy/memory/internal/hook"
-	"github.com/mich-murphy/memory/internal/raw"
-	"github.com/mich-murphy/memory/internal/store"
 )
 
 const usage = `agent-sessions: collect coding-agent sessions into one bucket.
@@ -26,8 +24,6 @@ Usage:
   agent-sessions backfill     upload every session already on this machine
   agent-sessions sync         upload new or changed session files
   agent-sessions doctor       check settings, bucket access and hooks
-  agent-sessions status       what has been synced from this machine
-  agent-sessions cat KEY      print a raw file rebuilt from the bucket (base object plus segments)
   agent-sessions uninstall    remove hooks and the Pi extension
   agent-sessions --version
 
@@ -122,10 +118,6 @@ func Main(ctx context.Context, args []string, version string, o IO) int {
 		code, err = runUninstall(rest, o)
 	case "doctor":
 		code, err = runDoctor(ctx, rest, o)
-	case "status":
-		code, err = runStatus(ctx, rest, o)
-	case "cat":
-		code, err = runCat(ctx, rest, o)
 	default:
 		o.errorf("agent-sessions: unknown command %q\n\n%s", cmd, usage)
 		return exitUsage
@@ -185,43 +177,4 @@ func runDoctor(ctx context.Context, args []string, o IO) (int, error) {
 		return exitOK, nil
 	}
 	return exitFailed, nil
-}
-
-func runCat(ctx context.Context, args []string, o IO) (int, error) {
-	fs := newFlags("cat", o)
-	fs.Usage = func() {
-		o.errorf("usage: agent-sessions cat raw/agent=<agent>/machine=<machine>/<key>.zst | blobs/<sha256>.zst\n")
-	}
-	if err := parse(fs, args); err != nil {
-		return exitUsage, err
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
-		return exitUsage, errUsage
-	}
-	key := fs.Arg(0)
-	cfg, err := config.Load(config.FilePath())
-	if err != nil {
-		return exitFailed, err
-	}
-	st, err := store.Open(cfg)
-	if err != nil {
-		return exitFailed, err
-	}
-	var data []byte
-	if strings.HasPrefix(key, "raw/") {
-		data, err = raw.ReadKey(ctx, st, key)
-	} else {
-		var body []byte
-		if body, err = st.Get(ctx, key); err == nil {
-			data, err = raw.Decompress(body)
-		}
-	}
-	if err != nil {
-		return exitFailed, err
-	}
-	if _, err := o.Stdout.Write(data); err != nil {
-		return exitFailed, fmt.Errorf("write: %w", err)
-	}
-	return exitOK, nil
 }

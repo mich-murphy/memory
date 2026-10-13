@@ -1,13 +1,9 @@
-# A manual sync uploads, a second finds nothing new, and status reports both runs.
+# A manual sync uploads, and a second finds nothing new.
 age 3600 home/.claude/projects/-w/11111111-2222-3333-4444-555555555555.jsonl home/.claude/settings.json
 exec agent-sessions sync
 stdout 'uploaded 2 files'
 exec agent-sessions sync
 stdout 'uploaded 0 files'
-exec agent-sessions status
-stdout 'machine: testbox'
-stdout 'claude/main'
-stdout 'manual'
 
 exec agent-sessions --version
 stdout 'dev'

@@ -211,21 +211,6 @@ func (r *R2) Get(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
-func (r *R2) List(ctx context.Context, prefix string) ([]string, error) {
-	var keys []string
-	pages := s3.NewListObjectsV2Paginator(r.client, &s3.ListObjectsV2Input{Bucket: &r.bucket, Prefix: &prefix})
-	for pages.HasMorePages() {
-		page, err := pages.NextPage(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("list %s: %w", prefix, err)
-		}
-		for _, o := range page.Contents {
-			keys = append(keys, aws.ToString(o.Key))
-		}
-	}
-	return keys, nil
-}
-
 func isNotFound(err error) bool {
 	if err == nil {
 		return false

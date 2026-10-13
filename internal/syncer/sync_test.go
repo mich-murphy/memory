@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +19,6 @@ import (
 
 	"github.com/mich-murphy/memory/internal/cli"
 	"github.com/mich-murphy/memory/internal/raw"
-	"github.com/mich-murphy/memory/internal/store"
 	"github.com/mich-murphy/memory/internal/syncer"
 	"github.com/mich-murphy/memory/internal/testenv"
 )
@@ -61,14 +63,26 @@ func readFile(t *testing.T, path string) []byte {
 	return data
 }
 
-// readObject rebuilds a raw file from its base object and segments, from the bucket alone.
+// readObject rebuilds a raw file without its manifest, as docs/storage-layout.md says a reader
+// can: the base object, then each segment that starts where the bytes so far end.
 func readObject(t *testing.T, e *testenv.Env, key string) []byte {
 	t.Helper()
-	data, err := raw.ReadKey(t.Context(), store.NewLocal(e.Bucket), key)
-	if err != nil {
+	out := readBlob(t, e, key)
+	segments, err := os.ReadDir(filepath.Join(e.Bucket, filepath.FromSlash(key)+".d"))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal(err)
 	}
-	return data
+	for _, s := range segments {
+		startText, _, _ := strings.Cut(s.Name(), "-")
+		start, err := strconv.ParseInt(startText, 10, 64)
+		if err != nil {
+			t.Fatalf("segment %s: %v", s.Name(), err)
+		}
+		if start == int64(len(out)) {
+			out = append(out, readBlob(t, e, key+".d/"+s.Name())...)
+		}
+	}
+	return out
 }
 
 func readBlob(t *testing.T, e *testenv.Env, key string) []byte {
@@ -778,16 +792,12 @@ func TestLaunchFallsBackToTheHookInputCwd(t *testing.T) {
 	}
 }
 
-func TestStatusAndBackfillCommands(t *testing.T) {
+func TestBackfillSnapshotsArePostHoc(t *testing.T) {
 	e := testenv.New(t)
 	mustRun(t, "backfill")
 	snap := list(e.Manifest("pi", piKey)["snapshots"])[0].(map[string]any)
 	if snap["timing"] != "post_hoc" {
 		t.Errorf("timing = %v", snap["timing"])
-	}
-	out := mustRun(t, "status")
-	if !strings.Contains(out, "claude/main") || !strings.Contains(out, "backfill") {
-		t.Errorf("status:\n%s", out)
 	}
 }
 
@@ -822,19 +832,6 @@ func TestCodexDatabasesAreCopiedWithTheBackupAPI(t *testing.T) {
 	testenv.Write(t, out, string(readObject(t, e, rawKey("codex", "db/state_5.sqlite"))))
 	if n := countRows(t, out, "SELECT COUNT(*) FROM threads WHERE id = ? AND title = 'Fix the build' AND tokens_used = 1234", codexThread); n != 1 {
 		t.Error("the copy lost the row in the WAL")
-	}
-}
-
-func TestCatRebuildsAFileFromItsSegments(t *testing.T) {
-	e := testenv.New(t)
-	mustRun(t, "sync", "--quiet")
-	path := filepath.Join(e.ClaudeSlug, claudeSID+".jsonl")
-	testenv.Append(t, path, testenv.JSONL(t, map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "more"}}))
-	testenv.Backdate(t, path, 2*time.Minute)
-	mustRun(t, "sync", "--quiet")
-	out := mustRun(t, "cat", rawKey("claude", "projects/"+slug+"/"+claudeSID+".jsonl"))
-	if out != string(readFile(t, path)) {
-		t.Errorf("cat printed %q", out)
 	}
 }
 

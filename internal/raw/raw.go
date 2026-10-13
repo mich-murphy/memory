@@ -3,15 +3,10 @@
 package raw
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
-	"slices"
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
@@ -122,61 +117,4 @@ type Piece struct {
 	End    int64  `json:"end"`
 	SHA256 string `json:"sha256"`
 	Object string `json:"object"`
-}
-
-type Reader interface {
-	Get(ctx context.Context, key string) ([]byte, error)
-	List(ctx context.Context, prefix string) ([]string, error)
-}
-
-// ReadKey rebuilds a file without a manifest. Segments left behind by a fold that could not
-// delete them start before the bytes so far end, and are skipped.
-func ReadKey(ctx context.Context, store Reader, rawKey string) ([]byte, error) {
-	body, err := store.Get(ctx, rawKey)
-	if err != nil {
-		return nil, err
-	}
-	out, err := Decompress(body)
-	if err != nil {
-		return nil, err
-	}
-	keys, err := store.List(ctx, rawKey+".d/")
-	if err != nil {
-		return nil, err
-	}
-	slices.Sort(keys)
-	for _, key := range keys {
-		start, err := segmentStart(key)
-		if err != nil {
-			return nil, err
-		}
-		if start != int64(len(out)) {
-			continue
-		}
-		body, err := store.Get(ctx, key)
-		if err != nil {
-			return nil, err
-		}
-		data, err := Decompress(body)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", key, err)
-		}
-		out = append(out, data...)
-	}
-	return out, nil
-}
-
-var errSegmentName = errors.New("not a segment key")
-
-func segmentStart(key string) (int64, error) {
-	name := key[strings.LastIndexByte(key, '/')+1:]
-	a, _, ok := strings.Cut(name, "-")
-	if !ok {
-		return 0, fmt.Errorf("%s: %w", key, errSegmentName)
-	}
-	start, err := strconv.ParseInt(a, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("%s: %w", key, errSegmentName)
-	}
-	return start, nil
 }
