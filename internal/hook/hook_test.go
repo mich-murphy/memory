@@ -219,7 +219,7 @@ func TestAgentProcessIsFoundAmongAncestors(t *testing.T) {
 	}
 	tree := map[int]entry{}
 	oldProc, oldPPID := readProc, parentPID
-	readProc = func(_ context.Context, pid int) ([]string, int, bool) {
+	readProc = func(pid int) ([]string, int, bool) {
 		e, ok := tree[pid]
 		return e.argv, e.ppid, ok
 	}
@@ -229,58 +229,28 @@ func TestAgentProcessIsFoundAmongAncestors(t *testing.T) {
 	tree[10] = entry{[]string{"/bin/sh", "-c", "/opt/agent-sessions hook claude"}, 9}
 	tree[9] = entry{[]string{"claude", "--model", "opus"}, 1}
 	want := map[string]any{"argv": []string{"claude", "--model", "opus"}, "pid": 9, "ancestry": []string{"sh", "claude"}}
-	if diff := cmp.Diff(want, LaunchProcess(t.Context(), "claude")); diff != "" {
+	if diff := cmp.Diff(want, LaunchProcess("claude")); diff != "" {
 		t.Errorf("claude:\n%s", diff)
 	}
 	clear(tree)
 	tree[10] = entry{[]string{"/usr/bin/node", "/usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", "-c"}, 1}
-	if got := LaunchProcess(t.Context(), "pi")["pid"]; got != 10 {
+	if got := LaunchProcess("pi")["pid"]; got != 10 {
 		t.Errorf("pi pid = %v", got)
 	}
 	clear(tree)
 	tree[10] = entry{[]string{"/usr/local/bin/codex exec --full-auto"}, 1}
-	if got := LaunchProcess(t.Context(), "codex")["pid"]; got != 10 {
+	if got := LaunchProcess("codex")["pid"]; got != 10 {
 		t.Errorf("codex pid from a whole ps line = %v", got)
 	}
 }
 
 func TestProcReadsThisProcess(t *testing.T) {
-	argv, ppid, ok := proc(t.Context(), os.Getpid())
+	argv, ppid, ok := proc(os.Getpid())
 	if !ok || len(argv) == 0 || ppid != os.Getppid() {
 		t.Errorf("proc(self) = %v, %d, %v", argv, ppid, ok)
 	}
-	// macOS ps may cut the line to the terminal width.
-	argv, ppid, ok = procPS(t.Context(), os.Getpid())
-	if !ok || len(argv) != 1 || argv[0] == "" || ppid != os.Getppid() {
-		t.Errorf("procPS(self) = %q, %d, %v", argv, ppid, ok)
-	}
-	if _, _, ok := procPS(t.Context(), -1); ok {
-		t.Error("procPS found pid -1")
-	}
-}
-
-func TestStatPPIDCountsFromTheLastParenthesis(t *testing.T) {
-	for stat, want := range map[string]int{
-		"42 (claude) S 7 42 42 0":     7,
-		"42 (a) b (c)) R 9 42 42 0":   9,
-		"42 (claude) S":               -1,
-		"42 claude S 7 42":            -1,
-		"42 (claude) S seven 42 42 0": -1,
-	} {
-		ppid, ok := statPPID([]byte(stat))
-		if !ok {
-			ppid = -1
-		}
-		if ppid != want {
-			t.Errorf("statPPID(%q) = %d, %v; want %d", stat, ppid, ok, want)
-		}
-	}
-}
-
-func TestSplitCmdlineDropsEmptyArgsAndRepairsUTF8(t *testing.T) {
-	got := splitCmdline([]byte("node\x00/usr/bin/pi\x00\x00--model\x00x\xff\x00"))
-	if diff := cmp.Diff([]string{"node", "/usr/bin/pi", "--model", "x\uFFFD"}, got); diff != "" {
-		t.Errorf("splitCmdline (-want +got):\n%s", diff)
+	if _, _, ok := proc(-1); ok {
+		t.Error("proc found pid -1")
 	}
 }
 

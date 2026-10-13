@@ -30,7 +30,6 @@ const (
 	stdinLimit              = 1 << 20
 	stdinTimeout            = 2 * time.Second
 	maxAncestors            = 10
-	psTimeout               = 2 * time.Second
 )
 
 var (
@@ -109,61 +108,14 @@ func ClaimPending(stateDir, path string) (marker string) {
 	return marker
 }
 
-func proc(ctx context.Context, pid int) (argv []string, ppid int, ok bool) {
-	dir := "/proc/" + strconv.Itoa(pid)
-	cmdline, err := os.ReadFile(dir + "/cmdline")
-	if err != nil {
-		return procPS(ctx, pid)
-	}
-	stat, err := os.ReadFile(dir + "/stat")
-	if err != nil {
-		return nil, 0, false
-	}
-	ppid, ok = statPPID(stat)
-	if !ok {
-		return nil, 0, false
-	}
-	return splitCmdline(cmdline), ppid, true
-}
-
-// The command name in parentheses may itself contain ") ".
-func statPPID(stat []byte) (int, bool) {
-	_, afterName, ok := bytes.CutLast(stat, []byte(")"))
-	if !ok {
-		return 0, false
-	}
-	fields := strings.Fields(string(afterName))
-	if len(fields) < 2 {
-		return 0, false
-	}
-	ppid, err := strconv.Atoi(fields[1])
-	return ppid, err == nil
-}
-
-func splitCmdline(data []byte) []string {
+func cleanArgs(args []string) []string {
 	var argv []string
-	for a := range strings.SplitSeq(string(data), "\x00") {
+	for _, a := range args {
 		if a != "" {
-			argv = append(argv, strings.ToValidUTF8(a, "�"))
+			argv = append(argv, strings.ToValidUTF8(a, "\uFFFD"))
 		}
 	}
 	return argv
-}
-
-// ps can't split a command line reliably, so argv is the whole line.
-func procPS(ctx context.Context, pid int) (argv []string, ppid int, ok bool) {
-	ctx, cancel := context.WithTimeout(ctx, psTimeout)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "ps", "-o", "ppid=,args=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return nil, 0, false
-	}
-	ppidStr, args, _ := strings.Cut(strings.TrimSpace(string(out)), " ")
-	ppid, err = strconv.Atoi(ppidStr)
-	if err != nil {
-		return nil, 0, false
-	}
-	return []string{strings.TrimSpace(args)}, ppid, true
 }
 
 func isAgent(agent string, argv []string) bool {
@@ -171,7 +123,7 @@ func isAgent(agent string, argv []string) bool {
 	switch {
 	case len(argv) > 1:
 		tokens = argv[:min(3, len(argv))]
-	case len(argv) == 1: // a whole ps line: split roughly, for matching only
+	case len(argv) == 1: // a retitled process shows its whole command line as one string
 		f := strings.Fields(argv[0])
 		tokens = f[:min(3, len(f))]
 	}
@@ -193,14 +145,14 @@ func isAgent(agent string, argv []string) bool {
 	return false
 }
 
-func LaunchProcess(ctx context.Context, agent string) map[string]any {
+func LaunchProcess(agent string) map[string]any {
 	chain := []string{}
 	pid := parentPID()
 	for range maxAncestors {
 		if pid <= 1 {
 			break
 		}
-		argv, ppid, ok := readProc(ctx, pid)
+		argv, ppid, ok := readProc(pid)
 		if !ok {
 			break
 		}
@@ -265,7 +217,7 @@ func recordSessionStart(ctx context.Context, stateDir, agent, path string, data 
 	}
 	process := processFromExtension(extra.Argv)
 	if process == nil {
-		process = LaunchProcess(ctx, agent)
+		process = LaunchProcess(agent)
 	}
 	launch := map[string]any{
 		"event":           event,
