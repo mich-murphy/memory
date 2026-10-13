@@ -214,3 +214,24 @@ func BenchmarkHookTurn(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkFold is the sweep that folds a session's segments into one object once it has been
+// idle, which every session gets once after it ends.
+func BenchmarkFold(b *testing.B) {
+	h := home(b, "typical", testenv.TypicalProfile)
+	stateDir := filepath.Join(b.TempDir(), "state")
+	path := h.w.Mains[0]
+	var t tally
+	for b.Loop() {
+		b.StopTimer()
+		r := h.reset(b, stateDir)
+		h.w.AppendTurn(b, path, turnBytes, r.now.Add(-5*time.Second))
+		r.sync("claude", path)
+		r.store.takeOps()
+		r.now = r.now.Add(time.Hour)
+		b.StartTimer()
+		r.sync("claude", path)
+		t.add(r.store)
+	}
+	t.report(b)
+}

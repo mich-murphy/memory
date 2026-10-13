@@ -102,3 +102,29 @@ func hashContent(src io.ReaderAt, size int64, prev *state.Upload, saved *state.R
 	}
 	return d.result(appended), nil
 }
+
+// pieceHash checks the bytes an upload compresses. A whole file is checked against the xxhash
+// taken when it was hashed, at a fraction of SHA-256's cost; a segment needs its own SHA-256.
+func (u *upload) pieceHash() hash.Hash {
+	if u.segmentStart == 0 && u.resume != nil {
+		return xxhash.New()
+	}
+	return sha256.New()
+}
+
+func (u *upload) setPieceSHA(h hash.Hash) error {
+	if x, ok := h.(*xxhash.Digest); ok {
+		if x.Sum64() != u.resume.Fast {
+			return errRewritten
+		}
+		u.pieceSHA = u.sha
+		return nil
+	}
+	u.pieceSHA = hex.EncodeToString(h.Sum(nil))
+	if u.segmentStart == 0 && u.pieceSHA != u.sha {
+		return errRewritten
+	}
+	return nil
+}
+
+var errRewritten = errors.New("changed while being read; the next sync uploads it")

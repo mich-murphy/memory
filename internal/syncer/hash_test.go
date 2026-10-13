@@ -2,6 +2,10 @@ package syncer
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -83,3 +87,50 @@ func TestHashContentReportsReadErrors(t *testing.T) {
 type failingReader struct{}
 
 func (failingReader) ReadAt([]byte, int64) (int, error) { return 0, bytes.ErrTooLarge }
+
+// TestCompressChecksTheBytesItHashed rewrites a file between hashing and compressing it, which
+// must fail the upload rather than send bytes that don't match the recorded sha256.
+func TestCompressChecksTheBytesItHashed(t *testing.T) {
+	defer func(old int64) { largeFileBytes = old }(largeFileBytes)
+	const before, after = "line one\nline two\n", "line ONE\nline two\n"
+	for _, large := range []int64{1 << 20, 4} {
+		for _, rewrite := range []bool{false, true} {
+			t.Run(fmt.Sprintf("large=%d/rewrite=%v", large, rewrite), func(t *testing.T) {
+				largeFileBytes = large
+				path := filepath.Join(t.TempDir(), "s.jsonl")
+				if err := os.WriteFile(path, []byte(before), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				st, err := os.Stat(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				s := &Syncer{tmpDir: t.TempDir()}
+				c, err := s.streamedContent(path, st, nil, nil, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if rewrite {
+					if err := os.WriteFile(path, []byte(after), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				u := &upload{sha: c.sha, size: c.size, resume: c.resume}
+				defer u.cleanup()
+				err = c.compress(u)
+				if rewrite {
+					if !errors.Is(err, errRewritten) {
+						t.Errorf("compress after a rewrite = %v, want errRewritten", err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if u.pieceSHA != raw.SHA256([]byte(before)) {
+					t.Errorf("piece sha256 %s, want the file's", u.pieceSHA)
+				}
+			})
+		}
+	}
+}

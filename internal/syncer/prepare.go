@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"io/fs"
 	"os"
@@ -321,19 +322,23 @@ func (s *Syncer) streamedContent(path string, st os.FileInfo, prev *state.Upload
 	}
 	return &content{
 		hashed: h, mtimeNS: mtimeNS, first: first,
-		compress: func(u *upload) (err error) {
+		compress: func(u *upload) error {
 			n := u.size - u.segmentStart
+			h := u.pieceHash()
 			if n > largeFileBytes {
-				u.bodyPath, u.pieceSHA, err = s.compressToTemp(path, u.segmentStart, n)
-				return err
+				var err error
+				if u.bodyPath, err = s.compressToTemp(path, u.segmentStart, n, h); err != nil {
+					return err
+				}
+				return u.setPieceSHA(h)
 			}
 			part, err := readRange(path, u.segmentStart, n)
 			if err != nil {
 				return err
 			}
-			u.pieceSHA = raw.SHA256(part)
-			if u.segmentStart == 0 && u.pieceSHA != u.sha {
-				return errors.New("changed while being read; the next sync uploads it")
+			_, _ = h.Write(part) // hash writes never fail
+			if err := u.setPieceSHA(h); err != nil {
+				return err
 			}
 			u.body = raw.Compress(part)
 			return nil
@@ -431,18 +436,18 @@ func readLine(r *bufio.Reader, maxBytes int) ([]byte, error) {
 	return out, nil
 }
 
-func (s *Syncer) compressToTemp(path string, start, length int64) (tmpPath, sha string, err error) {
+func (s *Syncer) compressToTemp(path string, start, length int64, h hash.Hash) (tmpPath string, err error) {
 	if err := os.MkdirAll(s.tmpDir, 0o700); err != nil {
-		return "", "", fmt.Errorf("temp dir: %w", err)
+		return "", fmt.Errorf("temp dir: %w", err)
 	}
 	src, err := os.Open(path)
 	if err != nil {
-		return "", "", fmt.Errorf("read: %w", err)
+		return "", fmt.Errorf("read: %w", err)
 	}
 	defer func() { _ = src.Close() }() // read-only
 	out, err := os.CreateTemp(s.tmpDir, "*.zst")
 	if err != nil {
-		return "", "", fmt.Errorf("temp file: %w", err)
+		return "", fmt.Errorf("temp file: %w", err)
 	}
 	defer func() {
 		if err != nil {
@@ -451,16 +456,16 @@ func (s *Syncer) compressToTemp(path string, start, length int64) (tmpPath, sha 
 	}()
 	if _, err = src.Seek(start, io.SeekStart); err != nil {
 		_ = out.Close() // the seek error is the one to report
-		return "", "", fmt.Errorf("seek: %w", err)
+		return "", fmt.Errorf("seek: %w", err)
 	}
-	sha, err = raw.CompressStream(src, out, length)
+	err = raw.CompressStream(src, out, length, h)
 	if cerr := out.Close(); err == nil && cerr != nil {
 		err = fmt.Errorf("temp file: %w", cerr)
 	}
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
-	return out.Name(), sha, nil
+	return out.Name(), nil
 }
 
 // upload runs on the upload pool, so it must not touch local state.
