@@ -10,9 +10,6 @@ raw-versions/agent=<agent>/machine=<machine>/<key>.json             which blobs 
 manifests/agent=<agent>/machine=<machine>/<session>.json            one per session
 snapshots/blobs/<sha256>                                            a harness or memory file, stored once
 snapshots/sets/<set-id>.json                                        which files made up one set
-git/<repo-id>/log/<head>.txt.gz                                     git log --name-status up to <head>
-git/<repo-id>/tree/<head>.txt.gz                                    git ls-tree -r -l <head>
-git/<repo-id>/repo.json                                             the repo's remote
 ```
 
 ## Raw files
@@ -103,7 +100,7 @@ There's one manifest per session: a Claude Code session (`<slug>/<session id>`),
   - `env` keeps `CLAUDE_CODE_*`, `CODEX_*`, `PI_*`, `ANTHROPIC_MODEL`, `MAX_THINKING_TOKENS` and a few other variables, minus anything named like a token, key, secret or password.
   - `hook_input` is the hook's whole payload.
   - Sessions from before agent-sessions was installed have no launch.
-- **`git`** is the repo state when the session started, or at its first snapshot if there was no launch. `common_dir` points worktrees at their main repo. A token in the remote URL is dropped.
+- **`git`** is the repo state when the session started, or at its first snapshot if there was no launch. `common_dir` points worktrees at their main repo. A token in the remote URL is dropped. `repo_id` is a hash of the normalised remote URL (`github.com/owner/repo`), so clones on different machines share it; a repo with no remote is keyed by machine and git directory instead. The repository's history isn't exported: for a repo with a remote, fetch it from there when analysing.
 - **`snapshots`** get a new entry when the harness set, the memory set, the branch or HEAD changes, checked at most every 10 minutes. `timing` says how far to trust it: `pre_session` (taken at session start), `in_session` (taken while the session was running) or `post_hoc` (a sweep or backfill of a session that had already finished, so the harness may have changed since).
 
 ## Snapshot sets
@@ -138,12 +135,3 @@ File bodies are stored as they are on disk, except for the secret values in conf
 Symlinks are followed, and `target` records where a file really lives. Files over 5 MB, or past 3000 in one scope, are listed in `skipped` with the reason. Each file's mtime goes in the manifest's snapshot entry, not the set, so it doesn't change the set id.
 
 A second set of `kind: "memory"` holds memory the agent writes for itself: Claude Code's auto memory for the project (scope `auto`) and `agent-memory/` (scopes `user` and `project`), and Codex's `memories/`.
-
-## Git history
-
-For each repository a snapshot sees, the collector exports, once per HEAD:
-
-- **`log/<head>.txt.gz`**: `git log --name-status` for commits not in an earlier export from this machine. Records are separated by `\x1e`. Each starts with NUL-separated fields (sha, parents, author name, author email, author date, committer date, full message), followed by the `--name-status` lines.
-- **`tree/<head>.txt.gz`**: `git ls-tree -r -l <head>`, every file and blob id at that commit.
-
-`repo_id` is a hash of the normalised remote URL (`github.com/owner/repo`), so clones on different machines share it. A repo with no remote is keyed by machine and git directory instead.

@@ -79,12 +79,6 @@ CREATE TABLE IF NOT EXISTS roots (
     added_at REAL NOT NULL,
     PRIMARY KEY (agent, path)
 );
-CREATE TABLE IF NOT EXISTS git_exports (
-    repo_id TEXT NOT NULL,
-    head TEXT NOT NULL,
-    exported_at REAL NOT NULL,
-    PRIMARY KEY (repo_id, head)
-);
 CREATE TABLE IF NOT EXISTS pending_manifests (
     agent TEXT NOT NULL,
     session_key TEXT NOT NULL,
@@ -547,29 +541,6 @@ func (s *State) PendingManifests() ([]SessionRef, error) {
 			return nil
 		})
 	return out, err
-}
-
-func (s *State) GitExported(repoID, head string) (bool, error) {
-	var one int
-	return s.queryRow("SELECT 1 FROM git_exports WHERE repo_id = ? AND head = ?", []any{repoID, head}, &one)
-}
-
-func (s *State) GitHeads(repoID string) ([]string, error) {
-	var out []string
-	err := s.query("SELECT head FROM git_exports WHERE repo_id = ? ORDER BY exported_at", []any{repoID},
-		func(rows *sql.Rows) error {
-			var h string
-			if err := rows.Scan(&h); err != nil {
-				return fmt.Errorf("state: %w", err)
-			}
-			out = append(out, h)
-			return nil
-		})
-	return out, err
-}
-
-func (s *State) RecordGitExport(repoID, head string) error {
-	return s.exec("INSERT OR IGNORE INTO git_exports VALUES (?,?,?)", repoID, head, UnixNow())
 }
 
 func (s *State) ExtraRoots(agent string) ([]string, error) {

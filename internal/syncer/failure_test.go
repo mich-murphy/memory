@@ -186,11 +186,6 @@ func TestSnapshotsAreRecheckedAndOnlyAddedWhenSomethingChanged(t *testing.T) {
 	if a["id"] == b["id"] || a["git"].(map[string]any)["head"] == b["git"].(map[string]any)["head"] {
 		t.Errorf("second snapshot didn't change: %v vs %v", a, b)
 	}
-	g := b["git"].(map[string]any)
-	log := gunzip(t, filepath.Join(e.Bucket, "git", g["repo_id"].(string), "log", g["head"].(string)+".txt.gz"))
-	if !strings.Contains(log, "second") || strings.Contains(log, "first") {
-		t.Errorf("second export should carry only the new commit:\n%s", log)
-	}
 }
 
 func TestSyncWaitsForTheLockThenGivesUp(t *testing.T) {

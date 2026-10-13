@@ -2,10 +2,8 @@ package syncer_test
 
 import (
 	"bytes"
-	"compress/gzip"
 	"database/sql"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -239,25 +237,14 @@ func TestSweepCapturesEveryAgentDirAndIsIdempotent(t *testing.T) {
 func decodeAny(t *testing.T, path string) []byte {
 	t.Helper()
 	data := readFile(t, path)
-	switch filepath.Ext(path) {
-	case ".zst":
-		out, err := raw.Decompress(data)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return out
-	case ".gz":
-		zr, err := gzip.NewReader(bytes.NewReader(data))
-		if err != nil {
-			t.Fatal(err)
-		}
-		out, err := io.ReadAll(zr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return out
+	if filepath.Ext(path) != ".zst" {
+		return data
 	}
-	return data
+	out, err := raw.Decompress(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 func lastRunSummary(t *testing.T, e *testenv.Env) map[string]any {
@@ -851,11 +838,6 @@ func TestCatRebuildsAFileFromItsSegments(t *testing.T) {
 	}
 }
 
-func gunzip(t *testing.T, path string) string {
-	t.Helper()
-	return string(decodeAny(t, path))
-}
-
 func TestSnapshotRecordsWholeHarnessWithSecretsRedacted(t *testing.T) {
 	e := testenv.New(t)
 	target := filepath.Join(e.Tmp, "dotfiles", "review")
@@ -929,15 +911,7 @@ func TestSnapshotRecordsWholeHarnessWithSecretsRedacted(t *testing.T) {
 		t.Errorf("memory set = %v", memory)
 	}
 
-	git := snap["git"].(map[string]any)
-	head, repo := git["head"].(string), git["repo_id"].(string)
-	log := gunzip(t, filepath.Join(e.Bucket, "git", repo, "log", head+".txt.gz"))
-	for _, want := range []string{head, "CLAUDE.md", "first"} {
-		if !strings.Contains(log, want) {
-			t.Errorf("git log lacks %q", want)
-		}
-	}
-	if tree := gunzip(t, filepath.Join(e.Bucket, "git", repo, "tree", head+".txt.gz")); !strings.Contains(tree, "docs/conventions.md") {
-		t.Error("git tree lacks docs/conventions.md")
+	if keys := e.BucketKeys(); slices.ContainsFunc(keys, func(k string) bool { return strings.HasPrefix(k, "git/") }) {
+		t.Errorf("git history exported: %v", keys)
 	}
 }

@@ -47,7 +47,6 @@ func (s *Syncer) RecordLaunch(ctx context.Context, agent, path string, launch ma
 		}
 		entry["snapshot"] = snap.setID
 		sess.Snapshots = addSnapshot(sess.Snapshots, snap, git, "pre_session", now)
-		s.exportGit(ctx, git)
 	}
 	sess.Launches = append(sess.Launches, entry)
 	if err := s.state.PutSession(agent, sf.SessionKey, sess); err != nil {
@@ -166,7 +165,6 @@ func (s *Syncer) maybeSnapshot(ctx context.Context, agent, sessionKey string, se
 	}
 	git := gitinfo.State(ctx, cwd, s.cfg.MachineID)
 	sess.Snapshots = addSnapshot(sess.Snapshots, snap, git, s.timing(files), now)
-	s.exportGit(ctx, git)
 	return nil
 }
 
@@ -349,36 +347,4 @@ func (s *Syncer) putSet(ctx context.Context, setID string, doc map[string]any) e
 		return err
 	}
 	return s.state.RecordUpload(key, setID, nil)
-}
-
-func (s *Syncer) exportGit(ctx context.Context, git state.GitState) {
-	if git.RepoID == "" || git.Head == "" {
-		return
-	}
-	done, err := s.state.GitExported(git.RepoID, git.Head)
-	if err != nil || done {
-		return
-	}
-	heads, err := s.state.GitHeads(git.RepoID)
-	if err != nil {
-		s.errorf("git export %s: %v", git.Root, err)
-		return
-	}
-	objects, err := gitinfo.Export(ctx, git, heads)
-	if err == nil {
-		for _, o := range objects {
-			if err = s.store.Put(ctx, o.Key, o.Body, map[string]string{}); err != nil {
-				break
-			}
-		}
-	}
-	if err == nil && len(objects) > 0 {
-		err = s.state.RecordGitExport(git.RepoID, git.Head)
-	}
-	if err == nil {
-		err = s.state.Flush()
-	}
-	if err != nil {
-		s.errorf("git export %s: %v", git.Root, err)
-	}
 }

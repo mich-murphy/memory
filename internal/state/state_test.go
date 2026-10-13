@@ -166,13 +166,6 @@ func TestSessionsRootsGitAndPending(t *testing.T) {
 	if roots, _ := s.ExtraRoots("pi"); len(roots) != 1 {
 		t.Errorf("ExtraRoots = %v", roots)
 	}
-	check(t, s.RecordGitExport("repo", "h1"))
-	check(t, s.RecordGitExport("repo", "h2"))
-	heads, err := s.GitHeads("repo")
-	check(t, err)
-	if done, _ := s.GitExported("repo", "h2"); !done || len(heads) != 2 {
-		t.Errorf("git exports = %v, %v", heads, done)
-	}
 
 	check(t, s.MarkManifestPending("pi", "s"))
 	check(t, s.MarkManifestPending("codex", "t"))
