@@ -3,6 +3,10 @@ package store_test
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -95,7 +99,7 @@ func TestR2AgainstAFakeS3(t *testing.T) {
 	if err := backend.CreateBucket("sessions"); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(gofakes3.New(backend).Server())
+	srv := httptest.NewServer(signedPayload(gofakes3.New(backend).Server()))
 	t.Cleanup(srv.Close)
 	s, err := store.NewR2(&config.Config{
 		R2Endpoint: srv.URL, R2Bucket: "sessions", R2AccessKeyID: "id", R2SecretAccessKey: "secret",
@@ -104,6 +108,25 @@ func TestR2AgainstAFakeS3(t *testing.T) {
 		t.Fatal(err)
 	}
 	exercise(t, s, "")
+}
+
+// signedPayload rejects a request whose signed payload hash isn't its body's, as R2 does,
+// which gofakes3 doesn't check.
+func signedPayload(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		sum := sha256.Sum256(body)
+		if got := r.Header.Get("X-Amz-Content-Sha256"); got != hex.EncodeToString(sum[:]) {
+			http.Error(w, "payload hash "+got+" doesn't match the body", http.StatusBadRequest)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		next.ServeHTTP(w, r)
+	})
 }
 
 func TestOpenNeedsR2SettingsUnlessLocal(t *testing.T) {
