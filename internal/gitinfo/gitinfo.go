@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/mich-murphy/memory/internal/fsutil"
-	"github.com/mich-murphy/memory/internal/state"
 )
 
 func git(ctx context.Context, dir string, timeout time.Duration, args ...string) ([]byte, error) {
@@ -42,13 +41,13 @@ var (
 	scpRE      = regexp.MustCompile(`^([^/:]+):(\d+/)?`)
 )
 
-func StripUserinfo(url string) string {
+func stripUserinfo(url string) string {
 	return userinfoRE.ReplaceAllString(url, "$1")
 }
 
-// NormaliseRemote turns https, ssh and scp-style remotes alike into host/owner/repo.
-func NormaliseRemote(url string) string {
-	u := StripUserinfo(strings.TrimSpace(url))
+// normalizeRemote turns https, ssh and scp-style remotes alike into host/owner/repo.
+func normalizeRemote(url string) string {
+	u := stripUserinfo(strings.TrimSpace(url))
 	u = schemeRE.ReplaceAllString(u, "")
 	u = sshUserRE.ReplaceAllString(u, "")
 	// scp-style host:path, but not host:port/path.
@@ -61,20 +60,34 @@ func NormaliseRemote(url string) string {
 	return strings.ToLower(host) + "/" + path
 }
 
-func State(ctx context.Context, cwd, machineID string) state.GitState {
+type State struct {
+	Root      string `json:"root,omitempty"`
+	CommonDir string `json:"common_dir,omitempty"`
+	Remote    string `json:"remote,omitempty"`
+	Branch    string `json:"branch,omitempty"`
+	Head      string `json:"head,omitempty"`
+	Dirty     *bool  `json:"dirty,omitempty"`
+	RepoID    string `json:"repo_id,omitempty"`
+}
+
+func (s State) IsZero() bool {
+	return s == State{}
+}
+
+func Read(ctx context.Context, cwd, machineID string) State {
 	if cwd == "" || !fsutil.IsDir(cwd) {
-		return state.GitState{}
+		return State{}
 	}
 	root := gitLine(ctx, cwd, "rev-parse", "--show-toplevel")
 	if root == "" {
-		return state.GitState{}
+		return State{}
 	}
 	common := gitLine(ctx, cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	remote := gitLine(ctx, cwd, "remote", "get-url", "origin")
-	g := state.GitState{
+	g := State{
 		Root:      root,
 		CommonDir: common,
-		Remote:    StripUserinfo(remote),
+		Remote:    stripUserinfo(remote),
 		Head:      gitLine(ctx, cwd, "rev-parse", "HEAD"),
 		Branch:    gitLine(ctx, cwd, "rev-parse", "--abbrev-ref", "HEAD"),
 	}
@@ -87,7 +100,7 @@ func State(ctx context.Context, cwd, machineID string) state.GitState {
 		key = machineID + ":" + common
 	}
 	if remote != "" {
-		key = NormaliseRemote(remote)
+		key = normalizeRemote(remote)
 	}
 	sum := sha256.Sum256([]byte(key))
 	g.RepoID = hex.EncodeToString(sum[:])[:16]

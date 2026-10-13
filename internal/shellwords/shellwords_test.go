@@ -14,8 +14,8 @@ func TestQuote(t *testing.T) {
 		"it's":              `'it'"'"'s'`,
 		"a=b,c:d@e%f+g.h-i": "a=b,c:d@e%f+g.h-i",
 	} {
-		if got := Quote(in); got != want {
-			t.Errorf("Quote(%q) = %s, want %s", in, got, want)
+		if got := quote(in); got != want {
+			t.Errorf("quote(%q) = %s, want %s", in, got, want)
 		}
 	}
 }
@@ -35,7 +35,7 @@ func TestSplit(t *testing.T) {
 		}
 	}
 	for _, in := range []string{`'open`, `"open`, `"esc\"`} {
-		if _, err := Split(in); !errors.Is(err, ErrUnterminated) {
+		if _, err := Split(in); !errors.Is(err, errUnterminated) {
 			t.Errorf("Split(%q) error = %v", in, err)
 		}
 	}

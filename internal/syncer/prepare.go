@@ -21,56 +21,25 @@ import (
 	"github.com/mich-murphy/memory/internal/state"
 )
 
-type uploadPlan int
-
-const (
-	uploadNothing uploadPlan = iota
-	uploadSegment
-	uploadWhole
-)
-
 // mtimeLastLineHeldBack is recorded instead of a file's mtime while its partial last line is
 // held back, so the next sync reads the file again.
 const mtimeLastLineHeldBack int64 = -1
 
-type versionPiece struct {
-	raw.Piece
-	copyFrom string
-}
-
 type versionPlan struct {
-	sha256      string
-	size        *int64
-	versionedAt float64
-	pieces      []versionPiece
-	index       []byte
-}
-
-func (v *versionPlan) stateVersion() *state.Version {
-	pieces := make([]raw.Piece, len(v.pieces))
-	for i, p := range v.pieces {
-		pieces[i] = p.Piece
-	}
-	return &state.Version{SHA256: v.sha256, Size: v.size, VersionedAt: v.versionedAt, Pieces: pieces}
+	state.Version
+	newBlobs []raw.Piece
+	index    []byte
 }
 
 type upload struct {
-	sf             adapters.SessionFile
-	root           string
-	key            string
-	sha            string
-	size           int64
-	mtimeNS        int64
-	lineCount      int64
-	prefixSHA      string
-	head           map[string]any
-	needsUpload    bool
-	segmentStart   int64
-	pieceSHA       string
-	body           []byte
-	bodyPath       string
-	replacedPieces []raw.Piece
-	version        *versionPlan
+	file        state.File
+	key         string
+	needsUpload bool
+	piece       raw.Piece
+	body        []byte
+	bodyPath    string
+	replaced    []raw.Piece
+	version     *versionPlan
 }
 
 func (u *upload) cleanup() {
@@ -144,79 +113,71 @@ func completeLinesEnd(path string, size int64) (int64, error) {
 	return 0, nil
 }
 
-func plan(prev *state.Upload, pieces []raw.Piece, sha string, size int64, appended, idle bool) (uploadPlan, int64) {
-	if prev != nil && prev.SHA256 == sha {
-		if idle && len(pieces) > 1 {
-			return uploadWhole, 0
-		}
-		return uploadNothing, 0
+// plan returns the offset to upload from, or false when the bucket already holds the bytes.
+func plan(prev *state.Upload, pieces []raw.Piece, c *content, idle bool) (start int64, ok bool) {
+	if prev != nil && prev.SHA256 == c.sha {
+		return 0, idle && len(pieces) > 1
 	}
-	if appended && !idle && len(pieces) > 0 && len(pieces) < maxSegments && size > *prev.Size {
-		return uploadSegment, *prev.Size
+	if c.appended && !idle && len(pieces) > 0 && len(pieces) < maxSegments && c.size > prev.Size {
+		return prev.Size, true
 	}
-	return uploadWhole, 0
+	return 0, true
 }
 
 func (s *Syncer) planVersion(sf adapters.SessionFile, key string, prev *state.Upload, pieces []raw.Piece) (*versionPlan, error) {
 	now := s.nowSeconds()
-	if sf.Role == "db" {
-		last, err := s.state.LastVersionAt(key)
+	if sf.Role == adapters.RoleDB {
+		last, err := s.db.LastVersionAt(key)
 		if err != nil {
 			return nil, err
 		}
-		if last != nil && now-*last < dbVersionEvery.Seconds() {
+		if now-last < dbVersionEvery.Seconds() {
 			return nil, nil
 		}
 	}
 	old := pieces
 	if len(old) == 0 {
-		var end int64
-		if prev.Size != nil {
-			end = *prev.Size
-		}
-		old = []raw.Piece{{Start: 0, End: end, SHA256: prev.SHA256, Object: key}}
+		old = []raw.Piece{{Start: 0, End: prev.Size, SHA256: prev.SHA256, Object: key}}
 	}
-	v := &versionPlan{sha256: prev.SHA256, size: prev.Size, versionedAt: now}
+	v := &versionPlan{SHA256: prev.SHA256, Size: prev.Size, VersionedAt: now}
 	for _, p := range old {
 		blob := raw.BlobKey(p.SHA256)
-		have, err := s.state.Uploaded(blob)
+		have, err := s.db.UploadedSHA(blob)
 		if err != nil {
 			return nil, err
 		}
-		vp := versionPiece{Start: p.Start, End: p.End, SHA256: p.SHA256, Object: blob}
-		if have == nil {
-			vp.copyFrom = p.Object
+		if have == "" {
+			v.newBlobs = append(v.newBlobs, p)
 		}
-		v.pieces = append(v.pieces, vp)
+		v.Pieces = append(v.Pieces, raw.Piece{Start: p.Start, End: p.End, SHA256: p.SHA256, Object: blob})
 	}
-	index, err := s.state.Versions(key)
+	index, err := s.db.Versions(key)
 	if err != nil {
 		return nil, err
 	}
-	index = append(index, *v.stateVersion())
-	v.index, err = jsonx.SortedIndented(map[string]any{"key": sf.Key, "versions": index})
+	v.index, err = jsonx.SortedIndented(map[string]any{"key": sf.Key, "versions": append(index, v.Version)})
 	if err != nil {
 		return nil, err
 	}
 	return v, nil
 }
 
-func (s *Syncer) prepare(sf adapters.SessionFile, root string) (*upload, error) {
+func (s *Syncer) prepare(sf adapters.SessionFile) (*upload, error) {
 	st, err := os.Stat(sf.Path)
 	if err != nil {
 		return nil, fmt.Errorf("stat: %w", err)
 	}
 	if sf.SessionKey != "" {
-		s.noteSessionRoot(sessionID{sf.Agent, sf.SessionKey}, root)
+		s.noteSessionRoot(sf.Session(), sf.Root)
 	}
 	key := s.rawKey(sf.Agent, sf.Key)
-	pieces, err := s.state.Pieces(key)
+	pieces, err := s.db.Pieces(key)
 	if err != nil {
 		return nil, err
 	}
 	age := s.nowSeconds() - fileMtime(st)
 	idle := age >= foldAfter.Seconds()
-	unchanged, err := s.state.FileUnchanged(sf.Path, st.Size(), st.ModTime().UnixNano())
+	unchanged, err := s.db.FileUnchanged(sf.Path, st.Size(), st.ModTime().UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -224,13 +185,13 @@ func (s *Syncer) prepare(sf adapters.SessionFile, root string) (*upload, error) 
 		s.Summary.Unchanged++
 		return nil, nil
 	}
-	prev, err := s.state.Uploaded(key)
+	prev, err := s.db.Uploaded(key)
 	if err != nil {
 		return nil, err
 	}
 	mayBeMidLine := filepath.Ext(sf.Path) == ".jsonl" && age < partialLineWindow.Seconds()
 	var c *content
-	if st.Size() > largeFileBytes && !sf.Zstd && !scrub.Applies(sf.Agent, filepath.Base(sf.Path)) {
+	if st.Size() > largeFileSize && !sf.Zstd && !scrub.Applies(sf.Agent, filepath.Base(sf.Path)) {
 		c, err = s.streamedContent(sf.Path, st, prev, mayBeMidLine)
 	} else {
 		c, err = inMemoryContent(sf, st, prev, mayBeMidLine)
@@ -242,7 +203,7 @@ func (s *Syncer) prepare(sf adapters.SessionFile, root string) (*upload, error) 
 		s.Summary.Skipped++
 		return nil, nil
 	}
-	return s.planUpload(sf, root, key, c, prev, pieces, idle)
+	return s.planUpload(sf, key, c, prev, pieces, idle)
 }
 
 type content struct {
@@ -264,12 +225,12 @@ func inMemoryContent(sf adapters.SessionFile, st os.FileInfo, prev *state.Upload
 	size := int64(len(data))
 	return &content{
 		sha: sha, size: size, mtimeNS: mtimeNS, lines: int64(bytes.Count(data, []byte("\n"))), first: data,
-		appended: prev != nil && prev.Size != nil && size >= *prev.Size && raw.SHA256(data[:*prev.Size]) == prev.SHA256,
+		appended: prev != nil && size >= prev.Size && raw.SHA256(data[:prev.Size]) == prev.SHA256,
 		compress: func(u *upload) error {
-			part := data[u.segmentStart:]
-			u.pieceSHA = sha
-			if u.segmentStart > 0 {
-				u.pieceSHA = raw.SHA256(part)
+			part := data[u.piece.Start:]
+			u.piece.SHA256 = sha
+			if u.piece.Start > 0 {
+				u.piece.SHA256 = raw.SHA256(part)
 			}
 			u.body = raw.Compress(part)
 			return nil
@@ -289,8 +250,8 @@ func (s *Syncer) streamedContent(path string, st os.FileInfo, prev *state.Upload
 		return nil, nil
 	}
 	oldSize := int64(-1)
-	if prev != nil && prev.Size != nil {
-		oldSize = *prev.Size
+	if prev != nil {
+		oldSize = prev.Size
 	}
 	sha, oldPrefix, read, lines, err := hashStreamed(path, limit, oldSize)
 	if err != nil {
@@ -308,31 +269,34 @@ func (s *Syncer) streamedContent(path string, st os.FileInfo, prev *state.Upload
 		sha: sha, size: read, mtimeNS: mtimeNS, lines: lines, first: first,
 		appended: oldSize >= 0 && read >= oldSize && oldPrefix == prev.SHA256,
 		compress: func(u *upload) (err error) {
-			u.bodyPath, u.pieceSHA, err = s.compressToTemp(path, u.segmentStart, u.size-u.segmentStart)
+			u.bodyPath, u.piece.SHA256, err = s.compressToTemp(path, u.piece.Start, u.piece.End-u.piece.Start)
 			return err
 		},
 	}, nil
 }
 
-func (s *Syncer) planUpload(sf adapters.SessionFile, root, key string, c *content, prev *state.Upload,
+func (s *Syncer) planUpload(sf adapters.SessionFile, key string, c *content, prev *state.Upload,
 	pieces []raw.Piece, idle bool,
 ) (*upload, error) {
-	var head map[string]any
+	u := &upload{key: key, file: state.File{
+		SessionFile: sf, Size: c.size, MtimeNS: c.mtimeNS, SHA256: c.sha, LineCount: c.lines, PrefixSHA256: prefixSHA(c.first),
+	}}
 	if transcriptRoles[sf.Role] && strings.HasSuffix(strings.TrimSuffix(sf.Path, ".zst"), ".jsonl") {
-		head = s.adapters[sf.Agent].SessionInfo(adapters.ReadHead(c.first, prefixLines))
+		u.file.Head = s.adapters[sf.Agent].SessionInfo(adapters.ReadHead(c.first, prefixLines))
 	}
-	mode, start := plan(prev, pieces, c.sha, c.size, c.appended, idle)
-	u := &upload{
-		sf: sf, root: root, key: key, sha: c.sha, size: c.size, mtimeNS: c.mtimeNS, lineCount: c.lines,
-		prefixSHA: prefixSHA(c.first), head: head, needsUpload: mode != uploadNothing, segmentStart: start,
-	}
-	if mode == uploadNothing {
+	start, ok := plan(prev, pieces, c, idle)
+	if !ok {
 		return u, nil
+	}
+	u.needsUpload = true
+	u.piece = raw.Piece{Start: start, End: c.size, Object: key}
+	if start > 0 {
+		u.piece.Object = raw.SegmentKey(key, start, c.size)
 	}
 	if err := c.compress(u); err != nil {
 		return nil, err
 	}
-	if mode == uploadWhole {
+	if start == 0 {
 		if err := s.planReplace(u, prev, pieces, c.appended); err != nil {
 			u.cleanup()
 			return nil, err
@@ -342,11 +306,11 @@ func (s *Syncer) planUpload(sf adapters.SessionFile, root, key string, c *conten
 }
 
 func (s *Syncer) planReplace(u *upload, prev *state.Upload, pieces []raw.Piece, appended bool) error {
-	u.replacedPieces = pieces
+	u.replaced = pieces
 	if prev == nil || appended {
 		return nil
 	}
-	v, err := s.planVersion(u.sf, u.key, prev, pieces)
+	v, err := s.planVersion(u.file.SessionFile, u.key, prev, pieces)
 	u.version = v
 	return err
 }
@@ -396,9 +360,9 @@ func headLines(path string, limit int64) ([]byte, error) {
 	return out, nil
 }
 
-func readLine(r *bufio.Reader, maxBytes int) ([]byte, error) {
+func readLine(r *bufio.Reader, maxSize int) ([]byte, error) {
 	var out []byte
-	for len(out) < maxBytes {
+	for len(out) < maxSize {
 		b, err := r.ReadByte()
 		if err != nil {
 			return out, err
@@ -448,30 +412,26 @@ func (s *Syncer) upload(ctx context.Context, u *upload) error {
 	if err := s.copyVersion(ctx, u); err != nil {
 		return err
 	}
-	target := u.key
-	if u.segmentStart > 0 {
-		target = raw.SegmentKey(u.key, u.segmentStart, u.size)
-	}
 	meta := map[string]string{
-		"sha256": u.pieceSHA, "agent": u.sf.Agent, "machine": s.cfg.MachineID, "role": string(u.sf.Role),
-		"start": strconv.FormatInt(u.segmentStart, 10), "end": strconv.FormatInt(u.size, 10),
+		"sha256": u.piece.SHA256, "agent": u.file.Agent, "machine": s.cfg.MachineID, "role": string(u.file.Role),
+		"start": strconv.FormatInt(u.piece.Start, 10), "end": strconv.FormatInt(u.piece.End, 10),
 	}
 	var err error
 	if u.bodyPath != "" {
-		err = s.store.PutFile(ctx, target, u.bodyPath, meta)
+		err = s.bucket.PutFile(ctx, u.piece.Object, u.bodyPath, meta)
 	} else {
-		err = s.store.Put(ctx, target, u.body, meta)
+		err = s.bucket.Put(ctx, u.piece.Object, u.body, meta)
 	}
 	if err != nil {
 		return err
 	}
 	if u.version != nil {
-		if err := s.store.Put(ctx, s.versionsKey(u.sf), u.version.index, map[string]string{}); err != nil {
+		if err := s.bucket.Put(ctx, s.versionsKey(u.file.SessionFile), u.version.index, map[string]string{}); err != nil {
 			return err
 		}
 	}
-	if u.segmentStart == 0 {
-		s.deleteReplacedSegments(ctx, u.replacedPieces)
+	if u.piece.Start == 0 {
+		s.deleteReplacedSegments(ctx, u.replaced)
 	}
 	return nil
 }
@@ -480,17 +440,14 @@ func (s *Syncer) copyVersion(ctx context.Context, u *upload) error {
 	if u.version == nil {
 		return nil
 	}
-	for _, p := range u.version.pieces {
-		if p.copyFrom == "" {
-			continue
-		}
-		ok, err := s.store.Copy(ctx, p.copyFrom, p.Object)
+	for _, p := range u.version.newBlobs {
+		ok, err := s.bucket.Copy(ctx, p.Object, raw.BlobKey(p.SHA256))
 		if err != nil {
 			return err
 		}
 		if !ok {
-			s.log.Warn("earlier bytes are missing from the bucket and can't be kept", "path", u.sf.Path,
-				"object", p.copyFrom)
+			s.log.Warn("earlier bytes are missing from the bucket and can't be kept", "path", u.file.Path,
+				"object", p.Object)
 			u.version = nil
 			return nil
 		}
@@ -505,14 +462,13 @@ func (s *Syncer) deleteReplacedSegments(ctx context.Context, pieces []raw.Piece)
 		if p.Start == 0 {
 			continue
 		}
-		if err := s.store.Delete(ctx, p.Object); err != nil {
+		if err := s.bucket.Delete(ctx, p.Object); err != nil {
 			s.log.Warn("could not delete a replaced segment", "object", p.Object, "error", err)
 		}
 	}
 }
 
 func (s *Syncer) finish(u *upload) error {
-	sf := u.sf
 	if u.needsUpload {
 		if err := s.recordChanged(u); err != nil {
 			return err
@@ -520,59 +476,48 @@ func (s *Syncer) finish(u *upload) error {
 	} else {
 		s.Summary.Unchanged++
 	}
-	if sf.SessionKey != "" && (u.needsUpload || u.head != nil) {
-		if err := s.markManifestPending(sessionID{sf.Agent, sf.SessionKey}); err != nil {
+	if u.file.SessionKey != "" && (u.needsUpload || u.file.Head != nil) {
+		if err := s.markManifestPending(u.file.Session()); err != nil {
 			return err
 		}
 	}
-	lines := u.lineCount
-	file := &state.File{
-		Path: sf.Path, Agent: sf.Agent, Root: u.root, Key: sf.Key, SessionKey: sf.SessionKey, Role: string(sf.Role),
-		Size: u.size, MtimeNS: u.mtimeNS, SHA256: u.sha, LineCount: &lines, PrefixSHA256: u.prefixSHA, Head: u.head,
-	}
-	if err := s.state.RecordFile(file); err != nil {
+	if err := s.db.RecordFile(&u.file); err != nil {
 		return err
 	}
-	return s.state.Flush()
+	return s.db.Flush()
 }
 
 func (s *Syncer) recordChanged(u *upload) error {
-	size := u.size
-	if err := s.state.RecordUpload(u.key, u.sha, &size); err != nil {
+	if err := s.db.RecordUpload(u.key, u.file.SHA256, u.file.Size); err != nil {
 		return err
 	}
-	if u.segmentStart > 0 {
-		obj := raw.SegmentKey(u.key, u.segmentStart, u.size)
-		if err := s.state.AddPiece(u.key, raw.Piece{Start: u.segmentStart, End: u.size, SHA256: u.pieceSHA, Object: obj}); err != nil {
+	if u.piece.Start > 0 {
+		if err := s.db.AddPiece(u.key, u.piece); err != nil {
 			return err
 		}
 		s.Summary.Segments++
 	} else {
-		if err := s.state.SetPieces(u.key, []raw.Piece{{Start: 0, End: u.size, SHA256: u.sha, Object: u.key}}); err != nil {
+		if err := s.db.SetPieces(u.key, []raw.Piece{u.piece}); err != nil {
 			return err
 		}
-		if len(u.replacedPieces) > 1 {
+		if len(u.replaced) > 1 {
 			s.Summary.Folded++
 		}
 	}
 	if u.version != nil {
-		for _, p := range u.version.pieces {
-			if p.copyFrom == "" {
-				continue
-			}
-			n := p.End - p.Start
-			if err := s.state.RecordUpload(p.Object, p.SHA256, &n); err != nil {
+		for _, p := range u.version.newBlobs {
+			if err := s.db.RecordUpload(raw.BlobKey(p.SHA256), p.SHA256, p.End-p.Start); err != nil {
 				return err
 			}
 		}
-		if err := s.state.RecordVersion(u.key, u.version.stateVersion()); err != nil {
+		if err := s.db.RecordVersion(u.key, &u.version.Version); err != nil {
 			return err
 		}
 		s.Summary.Versions++
 	}
 	s.Summary.Uploaded++
 	s.Summary.BytesUploaded += u.bodySize()
-	if u.sf.Role == adapters.RoleUnknown {
+	if u.file.Role == adapters.RoleUnknown {
 		s.Summary.Unknown++
 	}
 	return nil

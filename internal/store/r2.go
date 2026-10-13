@@ -28,7 +28,7 @@ import (
 
 // Variables so tests can shrink them.
 var (
-	singlePutMax int64 = 64 << 20
+	maxPutSize int64 = 64 << 20
 	// R2 needs every part but the last to be the same size.
 	partSize = 16 << 20
 )
@@ -101,7 +101,7 @@ func (r *R2) PutFile(ctx context.Context, key, path string, meta map[string]stri
 	if err != nil {
 		return fmt.Errorf("put %s: %w", key, err)
 	}
-	if st.Size() <= singlePutMax {
+	if st.Size() <= maxPutSize {
 		body, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("put %s: %w", key, err)

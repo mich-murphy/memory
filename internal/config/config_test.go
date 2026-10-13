@@ -67,7 +67,7 @@ func TestEnvFileAndEnvironment(t *testing.T) {
 	if cfg.R2Endpoint != "https://x.r2.example" || cfg.R2Bucket != "sessions" || cfg.R2AccessKeyID != "from-env" {
 		t.Errorf("cfg = %+v", cfg)
 	}
-	if cfg.MachineID != "My-Laptop" || cfg.StateDir != DefaultStateDir() {
+	if cfg.MachineID != "My-Laptop" || cfg.StateDir != defaultStateDir() {
 		t.Errorf("cfg = %+v", cfg)
 	}
 	if got := cfg.MissingR2Settings(); !slices.Equal(got, []string{"R2_SECRET_ACCESS_KEY"}) {

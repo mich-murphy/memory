@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/mich-murphy/memory/internal/adapters"
+	"github.com/mich-murphy/memory/internal/gitinfo"
 	"github.com/mich-murphy/memory/internal/raw"
 )
 
@@ -48,15 +50,14 @@ func TestWritesSurviveCancellationAndReopen(t *testing.T) {
 	s, err := Open(ctx, dir)
 	check(t, err)
 	cancel() // a SIGTERM mid-run must not roll back what was already uploaded
-	size := int64(3)
-	check(t, s.RecordUpload("k", "sha", &size))
+	check(t, s.RecordUpload("k", "sha", 3))
 	check(t, s.Close())
 	s, err = Open(t.Context(), dir)
 	check(t, err)
 	defer func() { check(t, s.Close()) }()
 	u, err := s.Uploaded("k")
 	check(t, err)
-	if u == nil || u.SHA256 != "sha" || *u.Size != 3 {
+	if u == nil || u.SHA256 != "sha" || u.Size != 3 {
 		t.Errorf("Uploaded = %+v", u)
 	}
 	if u, err := s.Uploaded("missing"); u != nil || err != nil {
@@ -66,15 +67,14 @@ func TestWritesSurviveCancellationAndReopen(t *testing.T) {
 
 func TestFilesKeepHeadsAndPreferTheOneOnDisk(t *testing.T) {
 	s := open(t)
-	lines := int64(2)
 	f := File{
 		Path: "/a.jsonl", Agent: "codex", Root: "/r", Key: "k", SessionKey: "s", Role: "main", Size: 10, MtimeNS: 5,
-		SHA256: "x", LineCount: &lines, PrefixSHA256: "p", Head: map[string]any{"cwd": "/w"},
+		SHA256: "x", LineCount: 2, PrefixSHA256: "p", Head: map[string]any{"cwd": "/w"},
 	}
 	check(t, s.RecordFile(&f))
 	f.Head, f.Size = nil, 20 // a later sync with no head keeps the earlier one
 	check(t, s.RecordFile(&f))
-	if prev, _ := s.SessionFiles("codex", "s"); len(prev) != 1 || prev[0].Head["cwd"] != "/w" {
+	if prev, _ := s.SessionFiles(adapters.SessionRef{Agent: "codex", Key: "s"}); len(prev) != 1 || prev[0].Head["cwd"] != "/w" {
 		t.Errorf("head not kept: %+v", prev)
 	}
 	zst := f
@@ -82,14 +82,15 @@ func TestFilesKeepHeadsAndPreferTheOneOnDisk(t *testing.T) {
 	zst.Head = map[string]any{"cwd": "/z"}
 	check(t, s.RecordFile(&zst))
 	check(t, s.MarkDeleted("/a.jsonl", 99))
-	files, err := s.SessionFiles("codex", "s")
+	files, err := s.SessionFiles(adapters.SessionRef{Agent: "codex", Key: "s"})
 	check(t, err)
-	if len(files) != 1 || files[0].DeletedAt != nil || files[0].Head["cwd"] != "/z" || files[0].Size != 20 {
+	if len(files) != 1 || files[0].DeletedAt != 0 || files[0].Head["cwd"] != "/z" || files[0].Size != 20 {
 		t.Errorf("SessionFiles = %+v", files)
 	}
 	live, err := s.LiveFiles("codex", "/r")
 	check(t, err)
-	if diff := cmp.Diff([]LiveFile{{Path: "/a.jsonl.zst", SessionKey: "s"}}, live); diff != "" {
+	want := []adapters.SessionFile{{Agent: "codex", Root: "/r", Path: "/a.jsonl.zst", Key: "k", SessionKey: "s", Role: "main"}}
+	if diff := cmp.Diff(want, live); diff != "" {
 		t.Errorf("LiveFiles:\n%s", diff)
 	}
 	same, err := s.FileUnchanged("/a.jsonl.zst", 20, 5)
@@ -121,11 +122,10 @@ func TestPiecesAndVersions(t *testing.T) {
 	if pieces, _ = s.Pieces("k"); len(pieces) != 1 {
 		t.Errorf("fold left %v", pieces)
 	}
-	if at, err := s.LastVersionAt("k"); at != nil || err != nil {
+	if at, err := s.LastVersionAt("k"); at != 0 || err != nil {
 		t.Errorf("LastVersionAt before any = %v, %v", at, err)
 	}
-	size := int64(5)
-	v := Version{SHA256: "old", Size: &size, VersionedAt: 10, Pieces: pieces}
+	v := Version{SHA256: "old", Size: 5, VersionedAt: 10, Pieces: pieces}
 	check(t, s.RecordVersion("k", &v))
 	check(t, s.RecordVersion("k", &v)) // once per sha256
 	versions, err := s.Versions("k")
@@ -133,31 +133,31 @@ func TestPiecesAndVersions(t *testing.T) {
 	if diff := cmp.Diff([]Version{v}, versions); diff != "" {
 		t.Errorf("Versions:\n%s", diff)
 	}
-	if at, _ := s.LastVersionAt("k"); at == nil || *at != 10 {
+	if at, _ := s.LastVersionAt("k"); at != 10 {
 		t.Errorf("LastVersionAt = %v", at)
 	}
 }
 
 func TestSessionsRootsGitAndPending(t *testing.T) {
 	s := open(t)
-	if sess, err := s.GetSession("pi", "s"); sess != nil || err != nil {
-		t.Errorf("GetSession(missing) = %v, %v", sess, err)
+	if sess, err := s.Session(adapters.SessionRef{Agent: "pi", Key: "s"}); sess != nil || err != nil {
+		t.Errorf("Session(missing) = %v, %v", sess, err)
 	}
 	mem := "m"
 	in := &Session{
 		Info:      map[string]any{"cwd": "/w"},
-		Snapshots: []SnapshotEntry{{ID: "set", MemoryID: &mem, Git: GitState{Head: "h"}, Timing: "post_hoc", TakenAt: 1, Mtimes: map[string]float64{"x": 2}}},
+		Snapshots: []SnapshotEntry{{ID: "set", MemoryID: &mem, Git: gitinfo.State{Head: "h"}, Timing: "post_hoc", TakenAt: 1, Mtimes: map[string]float64{"x": 2}}},
 		Launches:  []map[string]any{{"event": "SessionStart"}},
 		FirstSeen: 3,
 	}
-	check(t, s.PutSession("pi", "s", in))
-	out, err := s.GetSession("pi", "s")
+	check(t, s.PutSession(adapters.SessionRef{Agent: "pi", Key: "s"}, in))
+	out, err := s.Session(adapters.SessionRef{Agent: "pi", Key: "s"})
 	check(t, err)
 	if diff := cmp.Diff(in, out); diff != "" {
 		t.Errorf("session round trip:\n%s", diff)
 	}
-	check(t, s.PutSession("pi", "empty", &Session{}))
-	if e, _ := s.GetSession("pi", "empty"); e == nil || e.Info == nil {
+	check(t, s.PutSession(adapters.SessionRef{Agent: "pi", Key: "empty"}, &Session{}))
+	if e, _ := s.Session(adapters.SessionRef{Agent: "pi", Key: "empty"}); e == nil || e.Info == nil {
 		t.Errorf("empty session = %+v", e)
 	}
 
@@ -167,12 +167,12 @@ func TestSessionsRootsGitAndPending(t *testing.T) {
 		t.Errorf("ExtraRoots = %v", roots)
 	}
 
-	check(t, s.MarkManifestPending("pi", "s"))
-	check(t, s.MarkManifestPending("codex", "t"))
-	check(t, s.ManifestWritten("pi", "s"))
+	check(t, s.MarkManifestPending(adapters.SessionRef{Agent: "pi", Key: "s"}))
+	check(t, s.MarkManifestPending(adapters.SessionRef{Agent: "codex", Key: "t"}))
+	check(t, s.ManifestWritten(adapters.SessionRef{Agent: "pi", Key: "s"}))
 	pending, err := s.PendingManifests()
 	check(t, err)
-	if diff := cmp.Diff([]SessionRef{{"codex", "t"}}, pending); diff != "" {
+	if diff := cmp.Diff([]adapters.SessionRef{{Agent: "codex", Key: "t"}}, pending); diff != "" {
 		t.Errorf("PendingManifests:\n%s", diff)
 	}
 }
@@ -193,7 +193,7 @@ func TestClosedStateReportsErrors(t *testing.T) {
 	s, err := Open(t.Context(), t.TempDir())
 	check(t, err)
 	check(t, s.Close())
-	if err := s.RecordUpload("k", "x", nil); err == nil {
+	if err := s.RecordUpload("k", "x", 0); err == nil {
 		t.Error("write to a closed state succeeded")
 	}
 	if _, err := s.Pieces("k"); err == nil {

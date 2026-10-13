@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	maxFileBytes     = 5 << 20
+	maxFileSize      = 5 << 20
 	maxFilesPerScope = 3000
 	maxWalkDirs      = 5000
 	maxImportDepth   = 5
@@ -29,36 +29,39 @@ var (
 	settingsNames = map[string]bool{"settings.json": true, "settings.local.json": true, "hooks.json": true, "config.toml": true, "managed-settings.json": true}
 )
 
-type Entry struct {
-	Scope    string
-	Path     string
-	Body     []byte
-	Mtime    *float64
-	Target   string
-	RealPath string
+type entry struct {
+	scope string
+	path  string
+	body  []byte
+	// mtime is zero for entries that are not files on disk.
+	mtime    float64
+	target   string
+	realPath string
 }
 
-type Skipped struct {
+type SkippedFile struct {
 	Path   string `json:"path"`
 	Reason string `json:"reason"`
 	Scope  string `json:"scope"`
 	Size   int64  `json:"size"`
 }
 
+type scopedName struct{ scope, name string }
+
 type collected struct {
 	agent   string
-	entries []*Entry
-	skipped []Skipped
+	entries []*entry
+	skipped []SkippedFile
 	counts  map[string]int
-	seen    map[string]bool
+	seen    map[scopedName]bool
 }
 
 func newCollected(agent string) *collected {
-	return &collected{agent: agent, counts: map[string]int{}, seen: map[string]bool{}}
+	return &collected{agent: agent, skipped: []SkippedFile{}, counts: map[string]int{}, seen: map[scopedName]bool{}}
 }
 
-func (c *collected) add(scope, path, name string) *Entry {
-	if c.seen[scope+"\x00"+name] || adapters.IsCredential(filepath.Base(path)) {
+func (c *collected) add(scope, path, name string) *entry {
+	if c.seen[scopedName{scope, name}] || adapters.IsCredential(filepath.Base(path)) {
 		return nil
 	}
 	st, err := os.Stat(path)
@@ -66,11 +69,11 @@ func (c *collected) add(scope, path, name string) *Entry {
 		return nil
 	}
 	if c.counts[scope] >= maxFilesPerScope {
-		c.skipped = append(c.skipped, Skipped{Scope: scope, Path: name, Reason: "file_limit", Size: st.Size()})
+		c.skipped = append(c.skipped, SkippedFile{Scope: scope, Path: name, Reason: "file_limit", Size: st.Size()})
 		return nil
 	}
-	if st.Size() > maxFileBytes {
-		c.skipped = append(c.skipped, Skipped{Scope: scope, Path: name, Reason: "too_large", Size: st.Size()})
+	if st.Size() > maxFileSize {
+		c.skipped = append(c.skipped, SkippedFile{Scope: scope, Path: name, Reason: "too_large", Size: st.Size()})
 		return nil
 	}
 	body, err := os.ReadFile(path)
@@ -78,17 +81,16 @@ func (c *collected) add(scope, path, name string) *Entry {
 		return nil
 	}
 	if body, err = scrub.File(c.agent, filepath.Base(path), body); err != nil {
-		c.skipped = append(c.skipped, Skipped{Scope: scope, Path: name, Reason: "unparseable", Size: st.Size()})
+		c.skipped = append(c.skipped, SkippedFile{Scope: scope, Path: name, Reason: "unparseable", Size: st.Size()})
 		return nil
 	}
-	c.seen[scope+"\x00"+name] = true
+	c.seen[scopedName{scope, name}] = true
 	c.counts[scope]++
 	resolved := realPath(path)
 	abs, _ := filepath.Abs(path)
-	mtime := float64(st.ModTime().UnixNano()) / 1e9
-	e := &Entry{Scope: scope, Path: name, Body: body, Mtime: &mtime, RealPath: resolved}
+	e := &entry{scope: scope, path: name, body: body, mtime: float64(st.ModTime().UnixNano()) / 1e9, realPath: resolved}
 	if resolved != abs {
-		e.Target = resolved
+		e.target = resolved
 	}
 	c.entries = append(c.entries, e)
 	return e
@@ -105,7 +107,7 @@ func realPath(p string) string {
 	return a
 }
 
-func FindProjectRoot(cwd string) (root string, isRepo bool) {
+func findProjectRoot(cwd string) (root string, isRepo bool) {
 	for d := cwd; ; d = filepath.Dir(d) {
 		if _, err := os.Lstat(filepath.Join(d, ".git")); err == nil {
 			return d, true
@@ -252,7 +254,7 @@ func collect(a adapters.Adapter, root, projectRoot string, isRepo bool) *collect
 	addScripts(c, home, projectRoot)
 	addImports(c, home)
 	for _, e := range a.ExtraSnapshotEntries(root, projectRoot) {
-		c.entries = append(c.entries, &Entry{Scope: e.Scope, Path: e.Name, Body: e.Body})
+		c.entries = append(c.entries, &entry{scope: e.Scope, path: e.Name, body: e.Body})
 	}
 	sortEntries(c.entries)
 	return c
@@ -284,7 +286,7 @@ func (c *collected) addAncestors(projectRoot string) {
 
 func addScripts(c *collected, home, projectRoot string) {
 	for _, e := range slices.Clone(c.entries) {
-		if !settingsNames[filepath.Base(e.Path)] {
+		if !settingsNames[filepath.Base(e.path)] {
 			continue
 		}
 		for _, command := range commands(parseSettings(e), false) {
@@ -296,15 +298,15 @@ func addScripts(c *collected, home, projectRoot string) {
 }
 
 func addImports(c *collected, home string) {
-	var frontier []*Entry
+	var frontier []*entry
 	for _, e := range c.entries {
-		switch e.Scope {
+		switch e.scope {
 		case "user", "project", "ancestor", "managed":
 			frontier = append(frontier, e)
 		}
 	}
 	for range maxImportDepth {
-		var added []*Entry
+		var added []*entry
 		for _, e := range frontier {
 			for _, p := range imports(e, home) {
 				if ne := c.add("import", p, realPath(p)); ne != nil {
@@ -316,12 +318,12 @@ func addImports(c *collected, home string) {
 	}
 }
 
-func sortEntries(entries []*Entry) {
-	slices.SortStableFunc(entries, func(a, b *Entry) int {
-		if c := strings.Compare(a.Scope, b.Scope); c != 0 {
+func sortEntries(entries []*entry) {
+	slices.SortStableFunc(entries, func(a, b *entry) int {
+		if c := strings.Compare(a.scope, b.scope); c != 0 {
 			return c
 		}
-		return strings.Compare(a.Path, b.Path)
+		return strings.Compare(a.path, b.path)
 	})
 }
 
@@ -339,65 +341,70 @@ func collectMemory(a adapters.Adapter, root, projectRoot, sessionKey string) *co
 	return c
 }
 
-type Snapshot struct {
-	SetID     string
-	Doc       map[string]any
-	MemoryID  string
-	MemoryDoc map[string]any
-	Blobs     map[string][]byte
-	Mtimes    map[string]float64
+// Set is the document stored at snapshots/sets/<ID>.json; ID is the sha256 of its compact form.
+type Set struct {
+	ID          string        `json:"-"`
+	Kind        string        `json:"kind"`
+	Agent       string        `json:"agent"`
+	UserBase    string        `json:"user_base"`
+	ProjectRoot *string       `json:"project_root"`
+	Files       []File        `json:"files"`
+	Skipped     []SkippedFile `json:"skipped"`
 }
 
-func setDoc(kind string, a adapters.Adapter, root, projectRoot string, c *collected, blobs map[string][]byte,
-	mtimes map[string]float64,
-) (string, map[string]any, error) {
-	files := make([]map[string]any, 0, len(c.entries))
-	for _, e := range c.entries {
-		sha := raw.SHA256(e.Body)
-		blobs[sha] = e.Body
-		f := map[string]any{"scope": e.Scope, "path": e.Path, "sha256": sha, "size": len(e.Body)}
-		if e.Target != "" {
-			f["target"] = e.Target
-		}
-		files = append(files, f)
-		if e.Mtime != nil {
-			mtimes[kind+":"+e.Scope+":"+e.Path] = *e.Mtime
-		}
+type File struct {
+	Scope  string `json:"scope"`
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+	Size   int    `json:"size"`
+	Target string `json:"target,omitempty"`
+}
+
+type Snapshot struct {
+	Harness *Set
+	// Memory is nil when the agent kept no memory for the session.
+	Memory *Set
+	Blobs  map[string][]byte
+	Mtimes map[string]float64
+}
+
+func (s *Snapshot) set(kind string, a adapters.Adapter, root, projectRoot string, c *collected) (*Set, error) {
+	set := &Set{
+		Kind: kind, Agent: a.Name(), UserBase: a.UserBase(root), Files: make([]File, 0, len(c.entries)),
+		Skipped: c.skipped,
 	}
-	skipped := c.skipped
-	if skipped == nil {
-		skipped = []Skipped{}
-	}
-	var pr any
 	if projectRoot != "" {
-		pr = projectRoot
+		set.ProjectRoot = &projectRoot
 	}
-	doc := map[string]any{
-		"kind": kind, "agent": a.Name(), "user_base": a.UserBase(root), "project_root": pr,
-		"files": files, "skipped": skipped,
+	for _, e := range c.entries {
+		sha := raw.SHA256(e.body)
+		s.Blobs[sha] = e.body
+		set.Files = append(set.Files, File{Scope: e.scope, Path: e.path, SHA256: sha, Size: len(e.body), Target: e.target})
+		if e.mtime != 0 {
+			s.Mtimes[kind+":"+e.scope+":"+e.path] = e.mtime
+		}
 	}
-	body, err := jsonx.SortedCompact(doc)
+	body, err := jsonx.SortedCompact(set)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
-	return raw.SHA256(body), doc, nil
+	set.ID = raw.SHA256(body)
+	return set, nil
 }
 
 func Build(a adapters.Adapter, root, cwd, sessionKey string) (*Snapshot, error) {
 	s := &Snapshot{Blobs: map[string][]byte{}, Mtimes: map[string]float64{}}
 	projectRoot, isRepo := "", false
 	if cwd != "" && fsutil.IsDir(cwd) {
-		projectRoot, isRepo = FindProjectRoot(cwd)
+		projectRoot, isRepo = findProjectRoot(cwd)
 	}
 	var err error
-	s.SetID, s.Doc, err = setDoc("harness", a, root, projectRoot, collect(a, root, projectRoot, isRepo), s.Blobs, s.Mtimes)
-	if err != nil {
+	if s.Harness, err = s.set("harness", a, root, projectRoot, collect(a, root, projectRoot, isRepo)); err != nil {
 		return nil, err
 	}
 	memory := collectMemory(a, root, projectRoot, sessionKey)
 	if len(memory.entries) > 0 || len(memory.skipped) > 0 {
-		s.MemoryID, s.MemoryDoc, err = setDoc("memory", a, root, projectRoot, memory, s.Blobs, s.Mtimes)
-		if err != nil {
+		if s.Memory, err = s.set("memory", a, root, projectRoot, memory); err != nil {
 			return nil, err
 		}
 	}
