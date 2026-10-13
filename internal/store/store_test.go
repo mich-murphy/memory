@@ -44,12 +44,6 @@ func exercise(t *testing.T, s store.Store, prefix string) {
 	if !slices.Equal(keys, []string{k("a/one"), k("a/two")}) {
 		t.Errorf("List = %v", keys)
 	}
-	if ok, err := s.Exists(ctx, k("a/one")); !ok || err != nil {
-		t.Errorf("Exists = %v, %v", ok, err)
-	}
-	if ok, err := s.Exists(ctx, k("nope")); ok || err != nil {
-		t.Errorf("Exists(missing) = %v, %v", ok, err)
-	}
 	if ok, err := s.Copy(ctx, k("a/one"), k("c/copy")); !ok || err != nil {
 		t.Errorf("Copy = %v, %v", ok, err)
 	}

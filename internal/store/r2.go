@@ -187,19 +187,6 @@ func (r *R2) Copy(ctx context.Context, src, dst string) (srcExists bool, err err
 	return true, nil
 }
 
-func (r *R2) Exists(ctx context.Context, key string) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, opTimeout)
-	defer cancel()
-	_, err := r.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &r.bucket, Key: &key})
-	if isNotFound(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("head %s: %w", key, err)
-	}
-	return true, nil
-}
-
 func (r *R2) Delete(ctx context.Context, key string) error {
 	ctx, cancel := context.WithTimeout(ctx, opTimeout)
 	defer cancel()

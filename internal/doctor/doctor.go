@@ -40,7 +40,7 @@ const (
 	runHistory     = 500
 )
 
-var errNotFound = errors.New("test object not found after writing it")
+var errReadBack = errors.New("test object read back differs from what was written")
 
 type reporter struct {
 	w      io.Writer
@@ -106,12 +106,12 @@ func probeStore(ctx context.Context, cfg *config.Config) error {
 	if err := st.Put(ctx, key, []byte("ok"), map[string]string{}); err != nil {
 		return err
 	}
-	found, err := st.Exists(ctx, key)
+	body, err := st.Get(ctx, key)
 	if err != nil {
 		return err
 	}
-	if !found {
-		return errNotFound
+	if string(body) != "ok" {
+		return errReadBack
 	}
 	return st.Delete(ctx, key)
 }

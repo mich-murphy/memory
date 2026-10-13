@@ -20,7 +20,6 @@ type Store interface {
 	Put(ctx context.Context, key string, body []byte, meta map[string]string) error
 	PutFile(ctx context.Context, key, path string, meta map[string]string) error
 	Copy(ctx context.Context, src, dst string) (srcExists bool, err error)
-	Exists(ctx context.Context, key string) (bool, error)
 	Delete(ctx context.Context, key string) error
 	Get(ctx context.Context, key string) ([]byte, error)
 	List(ctx context.Context, prefix string) ([]string, error)
@@ -63,10 +62,6 @@ func (l *Local) Copy(ctx context.Context, src, dst string) (srcExists bool, err 
 		return false, nil
 	}
 	return true, l.PutFile(ctx, dst, l.path(src), nil)
-}
-
-func (l *Local) Exists(_ context.Context, key string) (bool, error) {
-	return fsutil.Exists(l.path(key)), nil
 }
 
 func (l *Local) Delete(_ context.Context, key string) error {
