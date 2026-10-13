@@ -90,7 +90,8 @@ func TestFilesKeepHeadsAndPreferTheOneOnDisk(t *testing.T) {
 	}
 	live, err := s.LiveFiles("codex", "/r")
 	check(t, err)
-	if diff := cmp.Diff([]LiveFile{{Path: "/a.jsonl.zst", SessionKey: "s"}}, live); diff != "" {
+	want := []adapters.SessionFile{{Agent: "codex", Root: "/r", Path: "/a.jsonl.zst", Key: "k", SessionKey: "s", Role: "main"}}
+	if diff := cmp.Diff(want, live); diff != "" {
 		t.Errorf("LiveFiles:\n%s", diff)
 	}
 	same, err := s.FileUnchanged("/a.jsonl.zst", 20, 5)

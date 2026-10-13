@@ -208,12 +208,7 @@ func (s *State) query(query string, args []any, row func(*sql.Rows) error) error
 }
 
 type File struct {
-	Path         string
-	Agent        string
-	Root         string
-	Key          string
-	SessionKey   string
-	Role         string
+	adapters.SessionFile
 	Size         int64
 	MtimeNS      int64
 	SHA256       string
@@ -299,18 +294,13 @@ func (s *State) SessionFiles(ref adapters.SessionRef) ([]File, error) {
 	return out, err
 }
 
-type LiveFile struct {
-	Path       string
-	SessionKey string
-}
-
-func (s *State) LiveFiles(agent, root string) ([]LiveFile, error) {
-	var out []LiveFile
-	err := s.query("SELECT path, session_key FROM files WHERE agent = ? AND root = ? AND deleted_at IS NULL",
+func (s *State) LiveFiles(agent, root string) ([]adapters.SessionFile, error) {
+	var out []adapters.SessionFile
+	err := s.query("SELECT path, key, session_key, role FROM files WHERE agent = ? AND root = ? AND deleted_at IS NULL",
 		[]any{agent, root}, func(rows *sql.Rows) error {
-			var f LiveFile
+			f := adapters.SessionFile{Agent: agent, Root: root}
 			var sk sql.NullString
-			if err := rows.Scan(&f.Path, &sk); err != nil {
+			if err := rows.Scan(&f.Path, &f.Key, &sk, &f.Role); err != nil {
 				return fmt.Errorf("state: %w", err)
 			}
 			f.SessionKey = sk.String

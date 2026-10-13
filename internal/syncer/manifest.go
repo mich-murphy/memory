@@ -62,7 +62,7 @@ func (s *Syncer) timing(files []state.File) string {
 	var latest int64
 	for i := range files {
 		f := &files[i]
-		if f.Role != string(adapters.RoleMain) {
+		if f.Role != adapters.RoleMain {
 			continue
 		}
 		if f.MtimeNS == mtimeLastLineHeldBack {
@@ -182,7 +182,7 @@ func (s *Syncer) buildManifest(ctx context.Context, id adapters.SessionRef) (*ma
 		return nil, err
 	}
 	for i := range files {
-		if f := &files[i]; f.Role == string(adapters.RoleMain) && len(f.Head) > 0 {
+		if f := &files[i]; f.Role == adapters.RoleMain && len(f.Head) > 0 {
 			maps.Copy(sess.Info, f.Head)
 		}
 	}

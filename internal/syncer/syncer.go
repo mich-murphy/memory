@@ -224,7 +224,7 @@ func (s *Syncer) tombstone(agent, root string, present map[string]bool) error {
 		}
 		s.Summary.Deleted++
 		if f.SessionKey != "" {
-			id := adapters.SessionRef{Agent: agent, Key: f.SessionKey}
+			id := f.Session()
 			if err := s.markManifestPending(id); err != nil {
 				return err
 			}
@@ -336,7 +336,7 @@ func (s *Syncer) Run(ctx context.Context, files []adapters.SessionFile) (*Summar
 		inflight--
 		defer r.u.cleanup()
 		if r.err != nil {
-			s.fail(r.u.sf, r.err)
+			s.fail(r.u.file.Path, r.err)
 			return nil
 		}
 		return s.finish(r.u)
@@ -351,7 +351,7 @@ func (s *Syncer) Run(ctx context.Context, files []adapters.SessionFile) (*Summar
 		case errors.Is(err, fs.ErrNotExist):
 			continue // rotated or recompressed between discovery and read
 		case err != nil:
-			s.fail(sf, err)
+			s.fail(sf.Path, err)
 			continue
 		case u == nil:
 			continue
@@ -384,8 +384,8 @@ func (s *Syncer) Run(ctx context.Context, files []adapters.SessionFile) (*Summar
 	return &s.Summary, s.state.Flush()
 }
 
-func (s *Syncer) fail(sf adapters.SessionFile, err error) {
-	s.errorf("%s: %v", sf.Path, err)
+func (s *Syncer) fail(path string, err error) {
+	s.errorf("%s: %v", path, err)
 }
 
 func (s *Syncer) rawKey(agent, key string) string {
