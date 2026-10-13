@@ -1,14 +1,11 @@
-// Package gitinfo records git state at session start and exports the repository history in
-// the format docs/storage-layout.md describes.
+// Package gitinfo records a repository's git state when a session starts.
 package gitinfo
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -16,30 +13,21 @@ import (
 	"time"
 
 	"github.com/mich-murphy/memory/internal/fsutil"
-	"github.com/mich-murphy/memory/internal/jsonx"
 	"github.com/mich-murphy/memory/internal/state"
 )
 
-const logFormat = "%x1e%H%x00%P%x00%an%x00%ae%x00%aI%x00%cI%x00%B%x00"
-
-var ErrGit = errors.New("git failed")
-
-func git(ctx context.Context, dir string, timeout time.Duration, stdin []byte, args ...string) ([]byte, error) {
+func git(ctx context.Context, dir string, timeout time.Duration, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir, "-c", "core.quotepath=off"}, args...)...)
-	if stdin != nil {
-		cmd.Stdin = bytes.NewReader(stdin)
-	}
-	out, err := cmd.Output()
+	out, err := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).Output()
 	if err != nil {
-		return nil, fmt.Errorf("%w: git %s: %w", ErrGit, strings.Join(args, " "), err)
+		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return out, nil
 }
 
 func gitLine(ctx context.Context, dir string, args ...string) string {
-	out, err := git(ctx, dir, 10*time.Second, nil, args...)
+	out, err := git(ctx, dir, 10*time.Second, args...)
 	if err != nil {
 		return ""
 	}
@@ -90,7 +78,7 @@ func State(ctx context.Context, cwd, machineID string) state.GitState {
 		Head:      gitLine(ctx, cwd, "rev-parse", "HEAD"),
 		Branch:    gitLine(ctx, cwd, "rev-parse", "--abbrev-ref", "HEAD"),
 	}
-	if status, err := git(ctx, cwd, 20*time.Second, nil, "status", "--porcelain", "--untracked-files=no"); err == nil {
+	if status, err := git(ctx, cwd, 20*time.Second, "status", "--porcelain", "--untracked-files=no"); err == nil {
 		dirty := len(bytes.TrimSpace(status)) > 0
 		g.Dirty = &dirty
 	}
@@ -104,80 +92,4 @@ func State(ctx context.Context, cwd, machineID string) state.GitState {
 	sum := sha256.Sum256([]byte(key))
 	g.RepoID = hex.EncodeToString(sum[:])[:16]
 	return g
-}
-
-type Object struct {
-	Key  string
-	Body []byte
-}
-
-func Export(ctx context.Context, g state.GitState, exportedHeads []string) ([]Object, error) {
-	if g.Root == "" || g.Head == "" || g.RepoID == "" {
-		return nil, nil
-	}
-	// Only exclude earlier heads this clone still has; an unknown sha would fail the log.
-	var known []string
-	if len(exportedHeads) > 0 {
-		out, err := git(ctx, g.Root, 30*time.Second, []byte(strings.Join(exportedHeads, "\n")+"\n"), "cat-file", "--batch-check")
-		if err == nil {
-			for line := range strings.SplitSeq(string(out), "\n") {
-				if f := strings.Fields(line); len(f) >= 2 && f[1] == "commit" {
-					known = append(known, f[0])
-				}
-			}
-		}
-	}
-	args := []string{"log", "--name-status", "--format=" + logFormat, g.Head}
-	for _, h := range known {
-		args = append(args, "^"+h)
-	}
-	log, err := git(ctx, g.Root, 5*time.Minute, nil, args...)
-	if err != nil {
-		return nil, err
-	}
-	tree, err := git(ctx, g.Root, 2*time.Minute, nil, "ls-tree", "-r", "-l", g.Head)
-	if err != nil {
-		return nil, err
-	}
-	logGz, err := gzipBytes(log)
-	if err != nil {
-		return nil, err
-	}
-	treeGz, err := gzipBytes(tree)
-	if err != nil {
-		return nil, err
-	}
-	repo := map[string]any{"repo_id": g.RepoID, "remote": nilIfEmpty(g.Remote)}
-	repoJSON, err := jsonx.Indent(repo, 1)
-	if err != nil {
-		return nil, err
-	}
-	prefix := "git/" + g.RepoID + "/"
-	return []Object{
-		{Key: prefix + "log/" + g.Head + ".txt.gz", Body: logGz},
-		{Key: prefix + "tree/" + g.Head + ".txt.gz", Body: treeGz},
-		{Key: prefix + "repo.json", Body: bytes.TrimSuffix(repoJSON, []byte("\n"))},
-	}, nil
-}
-
-func nilIfEmpty(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
-
-func gzipBytes(data []byte) ([]byte, error) {
-	var buf bytes.Buffer
-	zw, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
-	if err != nil {
-		return nil, fmt.Errorf("gzip: %w", err)
-	}
-	if _, err := zw.Write(data); err != nil {
-		return nil, fmt.Errorf("gzip: %w", err)
-	}
-	if err := zw.Close(); err != nil {
-		return nil, fmt.Errorf("gzip: %w", err)
-	}
-	return buf.Bytes(), nil
 }

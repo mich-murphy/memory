@@ -20,8 +20,6 @@ If you use Codex, open it once and approve the agent-sessions hooks in `/hooks`.
 
 That's all. `agent-sessions install` only touches agents it finds on the machine, so rerun it after installing another agent. It's safe to rerun at any time: it replaces its own entries and leaves everything else in your settings alone, backing up any file before changing it.
 
-Earlier versions also ran a sync every 10 minutes from a systemd user timer, launchd or cron. `agent-sessions install` removes it, and `agent-sessions doctor` fails while it's still there.
-
 ## How it captures sessions
 
 Each agent tells agent-sessions when a session has new content. Nothing runs on a schedule: when any session starts or ends, a sweep of every agent's files catches whatever the hooks missed.
@@ -42,8 +40,8 @@ The hook command returns within milliseconds, prints nothing and always exits 0.
 - **Only what changed is uploaded.** While a transcript grows, each sync uploads just the bytes appended since the last one, and once the session goes quiet they are folded back into one object. Objects are zstd-compressed.
 - **Earlier versions.** A file that is rewritten rather than appended to keeps its old bytes under `blobs/`, stored once by content hash however many files or machines had them. Database copies keep at most one earlier version a day. A file deleted locally is marked in its session's manifest.
 - **How each session was launched.** The agent's command line (`--model`, `--permission-mode`, `-p`, `--profile`...), its `CLAUDE_CODE_*`/`CODEX_*`/`PI_*` environment, the session-start hook's payload, and the repo's root, remote, branch, HEAD and dirty flag.
-- **The harness each session ran with.** Every CLAUDE.md and AGENTS.md in scope, `@imports`, whole skill directories, subagents, commands, rules, settings, installed plugins, the hook and status-line scripts settings point at, MCP servers and managed settings, plus a separate set for the memory agents write for themselves. Files are stored once by content hash, and the repo's git history is exported alongside.
-- **No redaction.** Only credential files are left out (logins, API keys, OAuth tokens, `primaryApiKey`); see [docs/storage-layout.md](docs/storage-layout.md). Everything else can contain anything a tool printed or a settings file holds, so keep the bucket private.
+- **The harness each session ran with.** Every CLAUDE.md and AGENTS.md in scope, `@imports`, whole skill directories, subagents, commands, rules, settings, installed plugins, the hook and status-line scripts settings point at, MCP servers and managed settings, plus a separate set for the memory agents write for themselves. Files are stored once by content hash.
+- **Secrets.** Credential files are left out (logins, API keys, OAuth tokens), and known secret values in config files, such as `primaryApiKey` and MCP server env and headers, are replaced with `[redacted]`; see [docs/storage-layout.md](docs/storage-layout.md). Everything else can contain anything a tool printed or a settings file holds, so keep the bucket private.
 
 Claude Code deletes transcripts after 30 days by default. `agent-sessions install` raises `cleanupPeriodDays` to 3650 (never lowers it) so nothing is lost while a machine is offline.
 
@@ -53,18 +51,15 @@ Claude Code deletes transcripts after 30 days by default. `agent-sessions instal
 
 | Command | What it does |
 |---|---|
-| `agent-sessions install` | Hooks, Pi extension, config file, and removes an earlier version's timer. `--dry-run` shows what would change. |
+| `agent-sessions install` | Hooks, Pi extension, config file. `--dry-run` shows what would change. |
 | `agent-sessions doctor` | Checks settings, bucket access, each hook, Codex hook trust, the last sweep and recent errors. |
 | `agent-sessions backfill` | Uploads everything already on the machine. |
 | `agent-sessions sync` | Uploads what changed. Hooks run this. |
-| `agent-sessions status` | Counts by agent, recent runs and errors. |
 | `agent-sessions uninstall` | Removes the hooks and the extension. Uploaded data stays. |
 
 Set `AGENT_SESSIONS_DISABLE=1` in an agent's environment to skip capture for that run.
 
 Logs are in `~/.local/state/agent-sessions/agent-sessions.log`.
-
-If a machine has memsync (this tool's earlier name) installed, run `memsync uninstall` first. A reinstall also replaces any memsync hook entries it finds.
 
 Rerun the install script to upgrade; it verifies each download against the release's `checksums.txt`. `VERSION=v0.1.0` picks a release. While the repo is private, the script downloads through `gh`, so log in with `gh auth login` first.
 

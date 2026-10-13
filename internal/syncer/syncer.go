@@ -39,6 +39,7 @@ const (
 	foldAfter         = inSessionWindow
 	maxSegments       = 64
 	dbVersionEvery    = 24 * time.Hour
+	recopyAfter       = time.Hour
 	uploadWorkers     = 8
 	prefixLines       = 20
 	maxErrorMsgs      = 10
@@ -88,10 +89,9 @@ type snapshotResult struct {
 }
 
 type Options struct {
-	Trigger   string
-	Snapshots bool
-	Logger    *slog.Logger
-	Version   string
+	Trigger string
+	Logger  *slog.Logger
+	Version string
 }
 
 type Syncer struct {
@@ -174,7 +174,7 @@ func (s *Syncer) excluded(path string) bool {
 	return path == s.cfg.ConfigPath || fsutil.Within(path, s.cfg.StateDir)
 }
 
-func (s *Syncer) SweepFiles(agents []string) ([]Found, error) {
+func (s *Syncer) SweepFiles(ctx context.Context, agents []string) ([]Found, error) {
 	var out []Found
 	seen := map[string]bool{}
 	for _, agent := range agents {
@@ -183,7 +183,7 @@ func (s *Syncer) SweepFiles(agents []string) ([]Found, error) {
 			return nil, err
 		}
 		for _, root := range roots {
-			present := s.sweepRoot(agent, root, seen, &out)
+			present := s.sweepRoot(ctx, agent, root, seen, &out)
 			if fsutil.IsDir(root) {
 				if err := s.tombstone(agent, root, present); err != nil {
 					return nil, err
@@ -194,18 +194,19 @@ func (s *Syncer) SweepFiles(agents []string) ([]Found, error) {
 	return out, nil
 }
 
-func (s *Syncer) sweepRoot(agent, root string, seen map[string]bool, out *[]Found) (present map[string]bool) {
+func (s *Syncer) sweepRoot(ctx context.Context, agent, root string, seen map[string]bool, out *[]Found) (present map[string]bool) {
 	a := s.adapters[agent]
 	present = map[string]bool{}
-	for _, sf := range adapters.Discover(a, root) {
+	files, databases := adapters.Discover(a, root)
+	for _, sf := range files {
 		if !s.excluded(sf.Path) && !seen[sf.Path] {
 			seen[sf.Path] = true
 			present[sf.Path] = true
 			*out = append(*out, Found{sf, root})
 		}
 	}
-	interval := time.Duration(s.cfg.DBIntervalMinutes) * time.Minute
-	for _, sf := range a.Exports(root, s.workDir, interval) {
+	exports := adapters.SQLiteExports(ctx, a, root, databases, s.workDir, recopyAfter)
+	for _, sf := range append(exports, a.Exports(root, s.workDir, recopyAfter)...) {
 		if !seen[sf.Path] {
 			seen[sf.Path] = true
 			*out = append(*out, Found{sf, root})

@@ -31,7 +31,7 @@ tidy-check:
 	go -C tools mod tidy -diff
 	go -C tools/gopls mod tidy -diff
 
-# -test: raw.Join reads manifests for later pipeline stages; only tests call it here.
+# -test: internal/testenv is only used by tests.
 deadcode:
 	@out="$$($(TOOL) deadcode -test ./...)" || { echo "$$out"; exit 1; }; \
 	if [ -n "$$out" ]; then echo "$$out"; exit 1; fi

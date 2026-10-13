@@ -10,16 +10,13 @@ raw-versions/agent=<agent>/machine=<machine>/<key>.json             which blobs 
 manifests/agent=<agent>/machine=<machine>/<session>.json            one per session
 snapshots/blobs/<sha256>                                            a harness or memory file, stored once
 snapshots/sets/<set-id>.json                                        which files made up one set
-git/<repo-id>/log/<head>.txt.gz                                     git log --name-status up to <head>
-git/<repo-id>/tree/<head>.txt.gz                                    git ls-tree -r -l <head>
-git/<repo-id>/repo.json                                             the repo's remote
 ```
 
 ## Raw files
 
 The collector walks each agent's whole directory and copies every file except:
 
-- **Credentials**, never copied: `.credentials.json` (Claude Code's login, Codex's MCP OAuth tokens), `auth.json`, `oauth.json`, `mcp-auth.json`, any `*.key` or `*.pem`, `~/.claude.json` backups, and the collector's own `config.env`. `~/.claude.json` itself is uploaded as `claude.json` without its `primaryApiKey` field.
+- **Credentials**, never copied: `.credentials.json` (Claude Code's login, Codex's MCP OAuth tokens), `auth.json`, `oauth.json`, `mcp-auth.json`, any `*.key` or `*.pem`, `~/.claude.json` backups, and the collector's own `config.env`. `~/.claude.json` itself is uploaded as `claude.json`, with the secrets below redacted and its layout kept.
 - **Noise**: locks, temp files, caches, `node_modules`, shell snapshots, executables, Claude Code's own install (`local/`, `downloads/`), plugin source checkouts, and Pi's `bin/` (fd and rg).
 - **Live SQLite files**, which are uploaded as consistent copies instead (below).
 
@@ -47,11 +44,11 @@ Nothing else is redacted: transcripts, history, logs and every other file are co
 
 A second Claude Code or Codex directory (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) or Pi agent dir (`PI_CODING_AGENT_DIR`) is keyed under `roots/<hash of dir>/…`, so it can't overwrite the default one.
 
-**Databases.** Each sweep (at every session start and end, and in `backfill`) takes a SQLite backup-API copy of every database under an agent's directory (Codex's `state_*`, `logs_*`, `memories_*`, `goals_*`, `thread_history_*`, `queue_*`). That includes rows still in the `-wal` file, which a plain file copy would miss. A database that changed is copied again once its last copy is an hour old (`AGENT_SESSIONS_DB_INTERVAL_MINUTES`). The copies live in the state directory between sweeps.
+**Databases.** Each sweep (at every session start and end, and in `backfill`) takes a SQLite backup-API copy of every database under an agent's directory (Codex's `state_*`, `logs_*`, `memories_*`, `goals_*`, `thread_history_*`, `queue_*`). That includes rows still in the `-wal` file, which a plain file copy would miss. A database that changed is copied again once its last copy is an hour old. The copies live in the state directory between sweeps.
 
 **Appends.** Transcripts and logs only grow. While a file is in use (written to in the last 15 minutes), a sync uploads only the bytes added since the last upload, as a segment `<key>.zst.d/<start>-<end>.zst` holding bytes `[start, end)`; start and end are zero-padded so the segments list in order. Once the file has been quiet for 15 minutes, or has 64 segments, the next sync uploads it whole as `<key>.zst` and deletes the segments. That fold happens once per session and compresses better than many small pieces.
 
-A file is its base object followed by its segments. The manifest lists them as `pieces`, each with `start`, `end`, `sha256` and `object`. Without a manifest, `<key>.zst` plus each segment that starts where the bytes so far end gives the same result; segments a fold failed to delete start earlier and are skipped. `agent-sessions cat <key>` prints a file rebuilt this way, using `raw.ReadKey` in `internal/raw`; `raw.Join` rebuilds one from a manifest's `pieces`.
+A file is its base object followed by its segments. The manifest lists them as `pieces`, each with `start`, `end`, `sha256` and `object`. Without a manifest, `<key>.zst` plus each segment that starts where the bytes so far end gives the same result; segments a fold failed to delete start earlier and are skipped.
 
 **Versions.** When a file changes in any way other than an append (its first `old size` bytes no longer hash to what was uploaded), each piece of its old contents is copied to `blobs/<sha256>.zst` before the new bytes are uploaded. A blob that is already there isn't copied again, so identical old contents from different files, sessions or machines are stored once. `raw-versions/…/<key>.json` lists the file's earlier versions, and the manifest lists them under `versions`; each has `sha256`, `size`, `versioned_at` and the `pieces` (in `blobs/`) that rebuild it. Database copies keep at most one version a day: an hourly refresh within a day of the last kept version replaces the copy without keeping it.
 
@@ -103,7 +100,7 @@ There's one manifest per session: a Claude Code session (`<slug>/<session id>`),
   - `env` keeps `CLAUDE_CODE_*`, `CODEX_*`, `PI_*`, `ANTHROPIC_MODEL`, `MAX_THINKING_TOKENS` and a few other variables, minus anything named like a token, key, secret or password.
   - `hook_input` is the hook's whole payload.
   - Sessions from before agent-sessions was installed have no launch.
-- **`git`** is the repo state when the session started, or at its first snapshot if there was no launch. `common_dir` points worktrees at their main repo. A token in the remote URL is dropped.
+- **`git`** is the repo state when the session started, or at its first snapshot if there was no launch. `common_dir` points worktrees at their main repo. A token in the remote URL is dropped. `repo_id` is a hash of the normalised remote URL (`github.com/owner/repo`), so clones on different machines share it; a repo with no remote is keyed by machine and git directory instead. The repository's history isn't exported: for a repo with a remote, fetch it from there when analysing.
 - **`snapshots`** get a new entry when the harness set, the memory set, the branch or HEAD changes, checked at most every 10 minutes. `timing` says how far to trust it: `pre_session` (taken at session start), `in_session` (taken while the session was running) or `post_hoc` (a sweep or backfill of a session that had already finished, so the harness may have changed since).
 
 ## Snapshot sets
@@ -138,12 +135,3 @@ File bodies are stored as they are on disk, except for the secret values in conf
 Symlinks are followed, and `target` records where a file really lives. Files over 5 MB, or past 3000 in one scope, are listed in `skipped` with the reason. Each file's mtime goes in the manifest's snapshot entry, not the set, so it doesn't change the set id.
 
 A second set of `kind: "memory"` holds memory the agent writes for itself: Claude Code's auto memory for the project (scope `auto`) and `agent-memory/` (scopes `user` and `project`), and Codex's `memories/`.
-
-## Git history
-
-For each repository a snapshot sees, the collector exports, once per HEAD:
-
-- **`log/<head>.txt.gz`**: `git log --name-status` for commits not in an earlier export from this machine. Records are separated by `\x1e`. Each starts with NUL-separated fields (sha, parents, author name, author email, author date, committer date, full message), followed by the `--name-status` lines.
-- **`tree/<head>.txt.gz`**: `git ls-tree -r -l <head>`, every file and blob id at that commit.
-
-`repo_id` is a hash of the normalised remote URL (`github.com/owner/repo`), so clones on different machines share it. A repo with no remote is keyed by machine and git directory instead.

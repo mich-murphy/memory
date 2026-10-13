@@ -73,8 +73,8 @@ func sweep(t *testing.T, st store.Store) *syncer.Summary {
 			t.Error(err)
 		}
 	}()
-	sy := syncer.New(cfg, st, s, adapters.All(cfg.Home), syncer.Options{Trigger: "sweep", Snapshots: true, Logger: slog.New(slog.DiscardHandler)})
-	files, err := sy.SweepFiles(adapters.Names)
+	sy := syncer.New(cfg, st, s, adapters.All(cfg.Home), syncer.Options{Trigger: "sweep", Logger: slog.New(slog.DiscardHandler)})
+	files, err := sy.SweepFiles(t.Context(), adapters.Names)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,11 +185,6 @@ func TestSnapshotsAreRecheckedAndOnlyAddedWhenSomethingChanged(t *testing.T) {
 	a, b := snaps[0].(map[string]any), snaps[1].(map[string]any)
 	if a["id"] == b["id"] || a["git"].(map[string]any)["head"] == b["git"].(map[string]any)["head"] {
 		t.Errorf("second snapshot didn't change: %v vs %v", a, b)
-	}
-	g := b["git"].(map[string]any)
-	log := gunzip(t, filepath.Join(e.Bucket, "git", g["repo_id"].(string), "log", g["head"].(string)+".txt.gz"))
-	if !strings.Contains(log, "second") || strings.Contains(log, "first") {
-		t.Errorf("second export should carry only the new commit:\n%s", log)
 	}
 }
 

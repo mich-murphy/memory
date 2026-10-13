@@ -28,28 +28,20 @@ const (
 	manualLockTimeout = 10 * time.Minute
 )
 
-const (
-	defaultKeepDays = 3650
-	statusRuns      = 8
-	statusErrors    = 3
-)
-
 type syncArgs struct {
-	agents      agentList
-	paths       []string
-	delay       float64
-	marker      string
-	launch      string
-	trigger     string
-	noSnapshots bool
-	quiet       bool
+	agents  agentList
+	paths   []string
+	delay   float64
+	marker  string
+	launch  string
+	trigger string
+	quiet   bool
 }
 
 func parseSync(cmd string, args []string, o IO) (*syncArgs, error) {
 	a := &syncArgs{}
 	fs := newFlags(cmd, o)
 	fs.Var(&a.agents, "agent", "limit to this agent: claude, codex or pi (repeatable)")
-	fs.BoolVar(&a.noSnapshots, "no-snapshots", false, "skip harness snapshots")
 	if cmd == "sync" {
 		fs.Func("path", "sync this session file and its related files (repeatable)", func(p string) error {
 			a.paths = append(a.paths, p)
@@ -162,12 +154,12 @@ func syncLocked(ctx context.Context, cfg *config.Config, st store.Store, a *sync
 		}
 	}()
 	sy := syncer.New(cfg, st, s, adapters.All(cfg.Home), syncer.Options{
-		Trigger: a.trigger, Snapshots: !a.noSnapshots, Logger: log, Version: version,
+		Trigger: a.trigger, Logger: log, Version: version,
 	})
 	if a.launch != "" {
 		recordLaunches(ctx, sy, a, log)
 	}
-	files, err := filesToSync(sy, a)
+	files, err := filesToSync(ctx, sy, a)
 	if err != nil {
 		return nil, err
 	}
@@ -195,10 +187,10 @@ func recordLaunches(ctx context.Context, sy *syncer.Syncer, a *syncArgs, log *sl
 	}
 }
 
-func filesToSync(sy *syncer.Syncer, a *syncArgs) ([]syncer.Found, error) {
+func filesToSync(ctx context.Context, sy *syncer.Syncer, a *syncArgs) ([]syncer.Found, error) {
 	agents := a.agents.orAll()
 	if len(a.paths) == 0 {
-		return sy.SweepFiles(agents)
+		return sy.SweepFiles(ctx, agents)
 	}
 	var files []syncer.Found
 	for _, agent := range agents {
@@ -221,18 +213,17 @@ func readLaunch(path string) map[string]any {
 	return m
 }
 
-func runInstall(ctx context.Context, args []string, o IO) (int, error) {
+func runInstall(args []string, o IO) (int, error) {
 	var agents agentList
 	fs := newFlags("install", o)
 	fs.Var(&agents, "agent", "only this agent: claude, codex or pi (repeatable; default all present)")
-	keepDays := fs.Int("keep-days", defaultKeepDays, "raise Claude Code's cleanupPeriodDays to at least this (0 leaves it)")
 	dryRun := fs.Bool("dry-run", false, "show what would change")
 	if err := parse(fs, args); err != nil {
 		return exitUsage, err
 	}
 	var log []string
 	opts := &install.Options{
-		Command: install.Command(), Home: config.Home(), DryRun: *dryRun, KeepDays: *keepDays, Log: &log,
+		Command: install.Command(), Home: config.Home(), DryRun: *dryRun, Log: &log,
 	}
 	failed := false
 	if _, err := install.WriteConfigTemplate(opts); err != nil {
@@ -257,10 +248,6 @@ func runInstall(ctx context.Context, args []string, o IO) (int, error) {
 			log = append(log, fmt.Sprintf("%s: not changed: %v", agent, err))
 		}
 	}
-	if err := install.RemoveOldTimers(ctx, opts); err != nil {
-		failed = true
-		log = append(log, fmt.Sprintf("old periodic sync: not removed: %v", err))
-	}
 	o.printf("agent-sessions command: %s\n", strings.Join(opts.Command, " "))
 	for _, line := range log {
 		o.printf("  %s\n", line)
@@ -274,7 +261,7 @@ func runInstall(ctx context.Context, args []string, o IO) (int, error) {
 	return exitOK, nil
 }
 
-func runUninstall(ctx context.Context, args []string, o IO) (int, error) {
+func runUninstall(args []string, o IO) (int, error) {
 	var agents agentList
 	fs := newFlags("uninstall", o)
 	fs.Var(&agents, "agent", "only this agent: claude, codex or pi (repeatable; default all)")
@@ -292,68 +279,11 @@ func runUninstall(ctx context.Context, args []string, o IO) (int, error) {
 			log = append(log, fmt.Sprintf("%s: not changed: %v", agent, err))
 		}
 	}
-	if err := install.RemoveOldTimers(ctx, opts); err != nil {
-		failed = true
-		log = append(log, fmt.Sprintf("old periodic sync: not removed: %v", err))
-	}
 	for _, line := range log {
 		o.printf("  %s\n", line)
 	}
 	if failed {
 		return exitFailed, nil
-	}
-	return exitOK, nil
-}
-
-func runStatus(ctx context.Context, args []string, o IO) (int, error) {
-	if err := parse(newFlags("status", o), args); err != nil {
-		return exitUsage, err
-	}
-	cfg, err := config.Load(config.FilePath())
-	if err != nil {
-		return exitFailed, err
-	}
-	s, err := state.Open(ctx, cfg.StateDir)
-	if err != nil {
-		return exitFailed, err
-	}
-	defer func() { _ = s.Close() }() // read-only use
-	o.printf("machine: %s (%s)   state: %s\n", cfg.MachineID, cfg.Hostname, cfg.StateDir)
-	totals, err := s.FileTotals()
-	if err != nil {
-		return exitFailed, err
-	}
-	for _, t := range totals {
-		o.printf("  %-22s %7d files %10.1f MB\n", t.Agent+"/"+t.Role, t.Files, float64(t.Bytes)/1e6)
-	}
-	tallies, err := s.Tallies()
-	if err != nil {
-		return exitFailed, err
-	}
-	for _, t := range tallies {
-		o.printf("  %-22s %7d\n", t.Name, t.Count)
-	}
-	for _, agent := range adapters.Names {
-		roots, err := s.ExtraRoots(agent)
-		if err != nil {
-			return exitFailed, err
-		}
-		for _, root := range roots {
-			o.printf("  extra %s root: %s\n", agent, root)
-		}
-	}
-	runs, err := s.LastRuns(statusRuns)
-	if err != nil {
-		return exitFailed, err
-	}
-	o.printf("recent runs:\n")
-	for _, run := range runs {
-		when := time.Unix(0, int64(run.FinishedAt*1e9)).Format("2006-01-02 15:04:05")
-		o.printf("  %s %-24s up %4v  errors %v\n", when, run.Trigger, run.Summary["uploaded"], run.Summary["errors"])
-		msgs, _ := run.Summary["error_messages"].([]any)
-		for _, m := range msgs[:min(len(msgs), statusErrors)] {
-			o.printf("      %v\n", m)
-		}
 	}
 	return exitOK, nil
 }

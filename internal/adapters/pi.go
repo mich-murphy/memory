@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/jsonx"
@@ -23,6 +22,7 @@ var (
 )
 
 type Pi struct {
+	noExtras
 	home string
 }
 
@@ -137,8 +137,6 @@ func (p *Pi) Classify(path, root string) (SessionFile, bool) {
 	return SessionFile{Agent: p.Name(), Path: path, Key: "dirs/" + RootTag(root) + "/" + rel, SessionKey: stem, Role: RoleMain}, true
 }
 
-func (p *Pi) Related(SessionFile, string) []string { return nil }
-
 func (p *Pi) UserBase(root string) string {
 	if p.isAgentDir(root) {
 		return root
@@ -146,15 +144,7 @@ func (p *Pi) UserBase(root string) string {
 	return p.AgentDir()
 }
 
-func (p *Pi) ExtraSnapshotEntries(string, string) []Entry { return nil }
-
 func (p *Pi) MemoryDirs(string, string, string) []ScopedDir { return nil }
-
-func (p *Pi) Plugins(string) []Plugin { return nil }
-
-func (p *Pi) Exports(root, workDir string, interval time.Duration) []SessionFile {
-	return SQLiteExports(p, root, workDir, interval)
-}
 
 func (p *Pi) SessionInfo(head []map[string]any) map[string]any {
 	for _, d := range head {

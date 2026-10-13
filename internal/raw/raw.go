@@ -3,16 +3,10 @@
 package raw
 
 import (
-	"cmp"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
-	"slices"
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
@@ -123,87 +117,4 @@ type Piece struct {
 	End    int64  `json:"end"`
 	SHA256 string `json:"sha256"`
 	Object string `json:"object"`
-}
-
-func Join(get func(key string) ([]byte, error), pieces []Piece) ([]byte, error) {
-	sorted := slices.Clone(pieces)
-	slices.SortFunc(sorted, func(a, b Piece) int { return cmp.Compare(a.Start, b.Start) })
-	var out []byte
-	for _, p := range sorted {
-		if p.Start != int64(len(out)) {
-			return nil, fmt.Errorf("gap or overlap at byte %d: next piece starts at %d", len(out), p.Start)
-		}
-		body, err := get(p.Object)
-		if err != nil {
-			return nil, err
-		}
-		data, err := Decompress(body)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", p.Object, err)
-		}
-		if int64(len(data)) != p.End-p.Start || SHA256(data) != p.SHA256 {
-			return nil, fmt.Errorf("%s does not match its sha256 or length", p.Object)
-		}
-		out = append(out, data...)
-	}
-	return out, nil
-}
-
-type Reader interface {
-	Get(ctx context.Context, key string) ([]byte, error)
-	List(ctx context.Context, prefix string) ([]string, error)
-}
-
-// ReadKey rebuilds a file without a manifest. Segments left behind by a fold that could not
-// delete them start before the bytes so far end, and are skipped.
-func ReadKey(ctx context.Context, store Reader, rawKey string) ([]byte, error) {
-	body, err := store.Get(ctx, rawKey)
-	if err != nil {
-		return nil, err
-	}
-	out, err := Decompress(body)
-	if err != nil {
-		return nil, err
-	}
-	keys, err := store.List(ctx, rawKey+".d/")
-	if err != nil {
-		return nil, err
-	}
-	slices.Sort(keys)
-	for _, key := range keys {
-		start, _, err := segmentRange(key)
-		if err != nil {
-			return nil, err
-		}
-		if start != int64(len(out)) {
-			continue
-		}
-		body, err := store.Get(ctx, key)
-		if err != nil {
-			return nil, err
-		}
-		data, err := Decompress(body)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", key, err)
-		}
-		out = append(out, data...)
-	}
-	return out, nil
-}
-
-var errSegmentName = errors.New("not a segment key")
-
-func segmentRange(key string) (start, end int64, err error) {
-	name := key[strings.LastIndexByte(key, '/')+1:]
-	a, b, ok := strings.Cut(strings.TrimSuffix(name, ".zst"), "-")
-	if !ok {
-		return 0, 0, fmt.Errorf("%s: %w", key, errSegmentName)
-	}
-	if start, err = strconv.ParseInt(a, 10, 64); err != nil {
-		return 0, 0, fmt.Errorf("%s: %w", key, errSegmentName)
-	}
-	if end, err = strconv.ParseInt(b, 10, 64); err != nil {
-		return 0, 0, fmt.Errorf("%s: %w", key, errSegmentName)
-	}
-	return start, end, nil
 }

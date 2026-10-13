@@ -229,47 +229,114 @@ func (s *Syncer) prepare(sf adapters.SessionFile, root string) (*upload, error) 
 		return nil, err
 	}
 	mayBeMidLine := filepath.Ext(sf.Path) == ".jsonl" && age < partialLineWindow.Seconds()
+	var c *content
 	if st.Size() > largeFileBytes && !sf.Zstd && !scrub.Applies(sf.Agent, filepath.Base(sf.Path)) {
-		return s.prepareStreamed(sf, root, st, key, prev, pieces, mayBeMidLine, idle)
+		c, err = s.streamedContent(sf.Path, st, prev, mayBeMidLine)
+	} else {
+		c, err = inMemoryContent(sf, st, prev, mayBeMidLine)
 	}
-	return s.prepareInMemory(sf, root, st, key, prev, pieces, mayBeMidLine, idle)
-}
-
-func (s *Syncer) prepareInMemory(sf adapters.SessionFile, root string, st os.FileInfo, key string, prev *state.Upload,
-	pieces []raw.Piece, mayBeMidLine, idle bool,
-) (*upload, error) {
-	data, mtimeNS, err := readCompleteLines(sf, st, mayBeMidLine)
 	if err != nil {
 		return nil, err
 	}
-	if len(data) == 0 {
+	if c == nil {
 		s.Summary.Skipped++
 		return nil, nil
 	}
+	return s.planUpload(sf, root, key, c, prev, pieces, idle)
+}
+
+type content struct {
+	sha      string
+	size     int64
+	mtimeNS  int64
+	lines    int64
+	first    []byte
+	appended bool
+	compress func(u *upload) error
+}
+
+func inMemoryContent(sf adapters.SessionFile, st os.FileInfo, prev *state.Upload, mayBeMidLine bool) (*content, error) {
+	data, mtimeNS, err := readCompleteLines(sf, st, mayBeMidLine)
+	if err != nil || len(data) == 0 {
+		return nil, err
+	}
 	sha := raw.SHA256(data)
-	var head map[string]any
-	if transcriptRoles[sf.Role] && (strings.HasSuffix(sf.Path, ".jsonl") || strings.HasSuffix(sf.Path, ".jsonl.zst")) {
-		head = s.adapters[sf.Agent].SessionInfo(adapters.ReadHead(data, prefixLines))
-	}
 	size := int64(len(data))
-	appended := prev != nil && prev.Size != nil && size >= *prev.Size && raw.SHA256(data[:*prev.Size]) == prev.SHA256
-	mode, start := plan(prev, pieces, sha, size, appended, idle)
-	u := &upload{
-		sf: sf, root: root, key: key, sha: sha, size: size, mtimeNS: mtimeNS,
-		lineCount: int64(bytes.Count(data, []byte("\n"))), prefixSHA: prefixSHA(data), head: head,
-		needsUpload: mode != uploadNothing, segmentStart: start,
-	}
-	switch mode {
-	case uploadSegment:
-		u.pieceSHA = raw.SHA256(data[start:])
-		u.body = raw.Compress(data[start:])
-	case uploadWhole:
-		u.pieceSHA = sha
-		u.body = raw.Compress(data)
-		if err := s.planReplace(u, prev, pieces, appended); err != nil {
+	return &content{
+		sha: sha, size: size, mtimeNS: mtimeNS, lines: int64(bytes.Count(data, []byte("\n"))), first: data,
+		appended: prev != nil && prev.Size != nil && size >= *prev.Size && raw.SHA256(data[:*prev.Size]) == prev.SHA256,
+		compress: func(u *upload) error {
+			part := data[u.segmentStart:]
+			u.pieceSHA = sha
+			if u.segmentStart > 0 {
+				u.pieceSHA = raw.SHA256(part)
+			}
+			u.body = raw.Compress(part)
+			return nil
+		},
+	}, nil
+}
+
+func (s *Syncer) streamedContent(path string, st os.FileInfo, prev *state.Upload, mayBeMidLine bool) (*content, error) {
+	limit := st.Size()
+	if mayBeMidLine {
+		var err error
+		if limit, err = completeLinesEnd(path, st.Size()); err != nil {
 			return nil, err
 		}
-	case uploadNothing:
+	}
+	if limit == 0 {
+		return nil, nil
+	}
+	oldSize := int64(-1)
+	if prev != nil && prev.Size != nil {
+		oldSize = *prev.Size
+	}
+	sha, oldPrefix, read, lines, err := hashStreamed(path, limit, oldSize)
+	if err != nil {
+		return nil, err
+	}
+	first, err := headLines(path, read)
+	if err != nil {
+		return nil, err
+	}
+	mtimeNS := mtimeLastLineHeldBack
+	if limit == st.Size() {
+		mtimeNS = st.ModTime().UnixNano()
+	}
+	return &content{
+		sha: sha, size: read, mtimeNS: mtimeNS, lines: lines, first: first,
+		appended: oldSize >= 0 && read >= oldSize && oldPrefix == prev.SHA256,
+		compress: func(u *upload) (err error) {
+			u.bodyPath, u.pieceSHA, err = s.compressToTemp(path, u.segmentStart, u.size-u.segmentStart)
+			return err
+		},
+	}, nil
+}
+
+func (s *Syncer) planUpload(sf adapters.SessionFile, root, key string, c *content, prev *state.Upload,
+	pieces []raw.Piece, idle bool,
+) (*upload, error) {
+	var head map[string]any
+	if transcriptRoles[sf.Role] && strings.HasSuffix(strings.TrimSuffix(sf.Path, ".zst"), ".jsonl") {
+		head = s.adapters[sf.Agent].SessionInfo(adapters.ReadHead(c.first, prefixLines))
+	}
+	mode, start := plan(prev, pieces, c.sha, c.size, c.appended, idle)
+	u := &upload{
+		sf: sf, root: root, key: key, sha: c.sha, size: c.size, mtimeNS: c.mtimeNS, lineCount: c.lines,
+		prefixSHA: prefixSHA(c.first), head: head, needsUpload: mode != uploadNothing, segmentStart: start,
+	}
+	if mode == uploadNothing {
+		return u, nil
+	}
+	if err := c.compress(u); err != nil {
+		return nil, err
+	}
+	if mode == uploadWhole {
+		if err := s.planReplace(u, prev, pieces, c.appended); err != nil {
+			u.cleanup()
+			return nil, err
+		}
 	}
 	return u, nil
 }
@@ -342,61 +409,6 @@ func readLine(r *bufio.Reader, maxBytes int) ([]byte, error) {
 		}
 	}
 	return out, nil
-}
-
-func (s *Syncer) prepareStreamed(sf adapters.SessionFile, root string, st os.FileInfo, key string, prev *state.Upload,
-	pieces []raw.Piece, mayBeMidLine, idle bool,
-) (*upload, error) {
-	limit := st.Size()
-	if mayBeMidLine {
-		var err error
-		if limit, err = completeLinesEnd(sf.Path, st.Size()); err != nil {
-			return nil, err
-		}
-	}
-	if limit == 0 {
-		s.Summary.Skipped++
-		return nil, nil
-	}
-	oldSize := int64(-1)
-	if prev != nil && prev.Size != nil {
-		oldSize = *prev.Size
-	}
-	sha, oldPrefix, read, lines, err := hashStreamed(sf.Path, limit, oldSize)
-	if err != nil {
-		return nil, err
-	}
-	first, err := headLines(sf.Path, read)
-	if err != nil {
-		return nil, err
-	}
-	var head map[string]any
-	if transcriptRoles[sf.Role] && filepath.Ext(sf.Path) == ".jsonl" {
-		head = s.adapters[sf.Agent].SessionInfo(adapters.ReadHead(first, prefixLines))
-	}
-	appended := oldSize >= 0 && read >= oldSize && oldPrefix == prev.SHA256
-	mode, start := plan(prev, pieces, sha, read, appended, idle)
-	mtimeNS := mtimeLastLineHeldBack
-	if limit == st.Size() {
-		mtimeNS = st.ModTime().UnixNano()
-	}
-	u := &upload{
-		sf: sf, root: root, key: key, sha: sha, size: read, mtimeNS: mtimeNS, lineCount: lines,
-		prefixSHA: prefixSHA(first), head: head, needsUpload: mode != uploadNothing, segmentStart: start,
-	}
-	if mode == uploadNothing {
-		return u, nil
-	}
-	if u.bodyPath, u.pieceSHA, err = s.compressToTemp(sf.Path, start, read-start); err != nil {
-		return nil, err
-	}
-	if mode == uploadWhole {
-		if err := s.planReplace(u, prev, pieces, appended); err != nil {
-			u.cleanup()
-			return nil, err
-		}
-	}
-	return u, nil
 }
 
 func (s *Syncer) compressToTemp(path string, start, length int64) (tmpPath, sha string, err error) {

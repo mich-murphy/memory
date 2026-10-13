@@ -8,9 +8,6 @@ waitfor bucket/manifests/agent=pi/machine=testbox/2026-10-10T10-00-00-000Z_s1.js
 # The debounce marker is gone once the sync has started reading.
 ! waitfor state/pending/[0-9a-f]*
 
-exec agent-sessions cat raw/agent=pi/machine=testbox/sessions/--w--/2026-10-10T10-00-00-000Z_s1.jsonl.zst
-cmp stdout home/.pi/agent/sessions/--w--/2026-10-10T10-00-00-000Z_s1.jsonl
-
 # Disabled: nothing happens.
 env AGENT_SESSIONS_DISABLE=1
 exec agent-sessions hook pi --path $WORK/home/.pi/agent/sessions/--w--/other.jsonl

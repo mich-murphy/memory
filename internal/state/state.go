@@ -79,12 +79,6 @@ CREATE TABLE IF NOT EXISTS roots (
     added_at REAL NOT NULL,
     PRIMARY KEY (agent, path)
 );
-CREATE TABLE IF NOT EXISTS git_exports (
-    repo_id TEXT NOT NULL,
-    head TEXT NOT NULL,
-    exported_at REAL NOT NULL,
-    PRIMARY KEY (repo_id, head)
-);
 CREATE TABLE IF NOT EXISTS pending_manifests (
     agent TEXT NOT NULL,
     session_key TEXT NOT NULL,
@@ -549,29 +543,6 @@ func (s *State) PendingManifests() ([]SessionRef, error) {
 	return out, err
 }
 
-func (s *State) GitExported(repoID, head string) (bool, error) {
-	var one int
-	return s.queryRow("SELECT 1 FROM git_exports WHERE repo_id = ? AND head = ?", []any{repoID, head}, &one)
-}
-
-func (s *State) GitHeads(repoID string) ([]string, error) {
-	var out []string
-	err := s.query("SELECT head FROM git_exports WHERE repo_id = ? ORDER BY exported_at", []any{repoID},
-		func(rows *sql.Rows) error {
-			var h string
-			if err := rows.Scan(&h); err != nil {
-				return fmt.Errorf("state: %w", err)
-			}
-			out = append(out, h)
-			return nil
-		})
-	return out, err
-}
-
-func (s *State) RecordGitExport(repoID, head string) error {
-	return s.exec("INSERT OR IGNORE INTO git_exports VALUES (?,?,?)", repoID, head, UnixNow())
-}
-
 func (s *State) ExtraRoots(agent string) ([]string, error) {
 	var out []string
 	err := s.query("SELECT path FROM roots WHERE agent = ? ORDER BY path", []any{agent}, func(rows *sql.Rows) error {
@@ -626,49 +597,4 @@ func (s *State) LastRuns(limit int) ([]Run, error) {
 			return nil
 		})
 	return out, err
-}
-
-type FileTotal struct {
-	Agent string
-	Role  string
-	Files int64
-	Bytes int64
-}
-
-func (s *State) FileTotals() ([]FileTotal, error) {
-	var out []FileTotal
-	err := s.query("SELECT agent, role, COUNT(*), SUM(size) FROM files WHERE deleted_at IS NULL "+
-		"GROUP BY agent, role ORDER BY agent, role", nil, func(rows *sql.Rows) error {
-		var t FileTotal
-		var bytes sql.NullInt64
-		if err := rows.Scan(&t.Agent, &t.Role, &t.Files, &bytes); err != nil {
-			return fmt.Errorf("state: %w", err)
-		}
-		t.Bytes = bytes.Int64
-		out = append(out, t)
-		return nil
-	})
-	return out, err
-}
-
-type Tally struct {
-	Name  string
-	Count int64
-}
-
-func (s *State) Tallies() ([]Tally, error) {
-	var out []Tally
-	for _, q := range []struct{ name, sql string }{
-		{"uploaded_objects", "SELECT COUNT(*) FROM uploads"},
-		{"earlier_versions", "SELECT COUNT(*) FROM raw_versions"},
-		{"unfolded_segments", "SELECT COUNT(*) FROM pieces WHERE start > 0"},
-		{"deleted_locally", "SELECT COUNT(*) FROM files WHERE deleted_at IS NOT NULL"},
-	} {
-		t := Tally{Name: q.name}
-		if _, err := s.queryRow(q.sql, nil, &t.Count); err != nil {
-			return nil, err
-		}
-		out = append(out, t)
-	}
-	return out, nil
 }

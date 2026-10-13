@@ -36,8 +36,6 @@ Nothing runs on a schedule. When any agent's session starts (`SessionStart`, `se
 
 One marker in the state directory's `pending/` means only one sweep is queued at a time; a session that starts or ends while one is queued doesn't add another. Hooks make capture prompt, catch short-lived files before the agent deletes them, and record what only exists at session start.
 
-Earlier versions ran this sweep every 10 minutes from a systemd user timer, launchd or cron. `agent-sessions install` and `uninstall` remove those, and `agent-sessions doctor` fails while one is still installed.
-
 ## Session start
 
 `SessionStart` (Claude Code, Codex) and `session_start` (Pi) work differently from the turn hooks. While the agent is still the hook's ancestor, the hook:
@@ -75,7 +73,7 @@ It writes that to a file and starts a detached sync with no delay and no debounc
 - **The command is in shell form, quoted with `shlex`**, so a path with spaces works on every Claude Code version.
 - **`cleanupPeriodDays`** is raised to 3650 if lower. Claude Code otherwise deletes transcripts, subagent files, tool results, plans and file history after 30 days.
 
-**Files captured:** all of `~/.claude` except credentials (`.credentials.json`, `sessions/*.key`), Claude Code's own install, caches and plugin source checkouts. See [storage-layout.md](storage-layout.md). `~/.claude.json` is uploaded without its `primaryApiKey`.
+**Files captured:** all of `~/.claude` except credentials (`.credentials.json`, `sessions/*.key`), Claude Code's own install, caches and plugin source checkouts. See [storage-layout.md](storage-layout.md). `~/.claude.json` is uploaded with its `primaryApiKey` redacted.
 
 ## Codex
 
@@ -139,5 +137,5 @@ pi.on("session_shutdown", (_e, ctx) => kick(ctx.sessionManager.getSessionFile(),
 - **Half-written lines.** A transcript written in the last minute that ends mid-line is uploaded up to its last complete line, and re-read on the next sync.
 - **Hooks and the sweep at once.** One lock serialises syncs. A hook's sync gives up after 30 s, and a sweep after 60 s, if a long backfill holds the lock, so waiting syncs can't pile up; the next hook or sweep covers it. A pending marker older than 2 minutes, left by a sync that died, is taken over.
 - **Offline machines.** A failed upload isn't recorded as done, so the session's next hook or the next sweep retries it. Nothing is lost while the transcript stays on disk, which is why `cleanupPeriodDays` is raised.
-- **Settings files.** The installer never rewrites a settings file it can't parse. It backs up every file before changing it, keeps other hooks in place, and replaces only its own entries, which it recognises by the `agent-sessions … hook <agent>` command (or `memsync … hook <agent>`, the earlier name).
+- **Settings files.** The installer never rewrites a settings file it can't parse. It backs up every file before changing it, keeps other hooks in place, and replaces only its own entries, which it recognises by the `agent-sessions … hook <agent>` command.
 - **No session, no sweep.** Without a timer, what only a sweep picks up waits for the next session to start or end on that machine. A crashed session's last turns, a failed upload from another session, or a database that changed while a long session ran stay on disk until then; `agent-sessions sync` uploads them at any time.

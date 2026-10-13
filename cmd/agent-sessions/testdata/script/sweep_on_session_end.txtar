@@ -8,8 +8,8 @@ waitfor bucket/raw/agent=pi/machine=testbox/sessions/--w--/2026-10-10T11-00-00-0
 waitfor bucket/raw/agent=pi/machine=testbox/sessions/--w--/2026-10-10T10-00-00-000Z_crashed.jsonl.zst
 waitfor bucket/manifests/agent=pi/machine=testbox/2026-10-10T10-00-00-000Z_crashed.json
 ! waitfor state/pending/[0-9a-f]*
-exec agent-sessions status
-stdout 'sweep:session_shutdown'
+! exec agent-sessions doctor
+stdout 'last sweep \(sweep:session_shutdown\)'
 
 -- home/.pi/agent/sessions/--w--/2026-10-10T10-00-00-000Z_crashed.jsonl --
 {"type":"session","version":3,"id":"crashed","cwd":"/nowhere"}

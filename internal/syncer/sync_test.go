@@ -2,13 +2,14 @@ package syncer_test
 
 import (
 	"bytes"
-	"compress/gzip"
 	"database/sql"
 	"encoding/json"
-	"io"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ import (
 
 	"github.com/mich-murphy/memory/internal/cli"
 	"github.com/mich-murphy/memory/internal/raw"
-	"github.com/mich-murphy/memory/internal/store"
+	"github.com/mich-murphy/memory/internal/scrub"
 	"github.com/mich-murphy/memory/internal/syncer"
 	"github.com/mich-murphy/memory/internal/testenv"
 )
@@ -63,14 +64,26 @@ func readFile(t *testing.T, path string) []byte {
 	return data
 }
 
-// readObject rebuilds a raw file from its base object and segments, from the bucket alone.
+// readObject rebuilds a raw file without its manifest, as docs/storage-layout.md says a reader
+// can: the base object, then each segment that starts where the bytes so far end.
 func readObject(t *testing.T, e *testenv.Env, key string) []byte {
 	t.Helper()
-	data, err := raw.ReadKey(t.Context(), store.NewLocal(e.Bucket), key)
-	if err != nil {
+	out := readBlob(t, e, key)
+	segments, err := os.ReadDir(filepath.Join(e.Bucket, filepath.FromSlash(key)+".d"))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal(err)
 	}
-	return data
+	for _, s := range segments {
+		startText, _, _ := strings.Cut(s.Name(), "-")
+		start, err := strconv.ParseInt(startText, 10, 64)
+		if err != nil {
+			t.Fatalf("segment %s: %v", s.Name(), err)
+		}
+		if start == int64(len(out)) {
+			out = append(out, readBlob(t, e, key+".d/"+s.Name())...)
+		}
+	}
+	return out
 }
 
 func readBlob(t *testing.T, e *testenv.Env, key string) []byte {
@@ -97,12 +110,18 @@ func toPieces(t *testing.T, v any) []raw.Piece {
 
 func readPieces(t *testing.T, e *testenv.Env, v any) []byte {
 	t.Helper()
-	local := store.NewLocal(e.Bucket)
-	data, err := raw.Join(func(key string) ([]byte, error) { return local.Get(t.Context(), key) }, toPieces(t, v))
-	if err != nil {
-		t.Fatal(err)
+	var out []byte
+	for _, p := range toPieces(t, v) {
+		if p.Start != int64(len(out)) {
+			t.Fatalf("gap or overlap at byte %d: next piece starts at %d", len(out), p.Start)
+		}
+		data := readBlob(t, e, p.Object)
+		if int64(len(data)) != p.End-p.Start || raw.SHA256(data) != p.SHA256 {
+			t.Fatalf("%s does not match its sha256 or length", p.Object)
+		}
+		out = append(out, data...)
 	}
-	return data
+	return out
 }
 
 func mainTranscript(t *testing.T, m map[string]any) map[string]any {
@@ -233,25 +252,14 @@ func TestSweepCapturesEveryAgentDirAndIsIdempotent(t *testing.T) {
 func decodeAny(t *testing.T, path string) []byte {
 	t.Helper()
 	data := readFile(t, path)
-	switch filepath.Ext(path) {
-	case ".zst":
-		out, err := raw.Decompress(data)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return out
-	case ".gz":
-		zr, err := gzip.NewReader(bytes.NewReader(data))
-		if err != nil {
-			t.Fatal(err)
-		}
-		out, err := io.ReadAll(zr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return out
+	if filepath.Ext(path) != ".zst" {
+		return data
 	}
-	return data
+	out, err := raw.Decompress(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 func lastRunSummary(t *testing.T, e *testenv.Env) map[string]any {
@@ -311,8 +319,8 @@ func TestCredentialsAndNoiseAreNeverCopied(t *testing.T) {
 	if err := json.Unmarshal(readObject(t, e, rawKey("claude", "claude.json")), &claudeJSON); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := claudeJSON["primaryApiKey"]; ok {
-		t.Error("claude.json kept primaryApiKey")
+	if claudeJSON["primaryApiKey"] != scrub.Redacted {
+		t.Errorf("claude.json primaryApiKey = %v", claudeJSON["primaryApiKey"])
 	}
 	if claudeJSON["oauthAccount"].(map[string]any)["emailAddress"] != "me@example.com" {
 		t.Errorf("claude.json lost oauthAccount: %v", claudeJSON)
@@ -785,16 +793,12 @@ func TestLaunchFallsBackToTheHookInputCwd(t *testing.T) {
 	}
 }
 
-func TestStatusAndBackfillCommands(t *testing.T) {
+func TestBackfillSnapshotsArePostHoc(t *testing.T) {
 	e := testenv.New(t)
 	mustRun(t, "backfill")
 	snap := list(e.Manifest("pi", piKey)["snapshots"])[0].(map[string]any)
 	if snap["timing"] != "post_hoc" {
 		t.Errorf("timing = %v", snap["timing"])
-	}
-	out := mustRun(t, "status")
-	if !strings.Contains(out, "claude/main") || !strings.Contains(out, "backfill") {
-		t.Errorf("status:\n%s", out)
 	}
 }
 
@@ -830,24 +834,6 @@ func TestCodexDatabasesAreCopiedWithTheBackupAPI(t *testing.T) {
 	if n := countRows(t, out, "SELECT COUNT(*) FROM threads WHERE id = ? AND title = 'Fix the build' AND tokens_used = 1234", codexThread); n != 1 {
 		t.Error("the copy lost the row in the WAL")
 	}
-}
-
-func TestCatRebuildsAFileFromItsSegments(t *testing.T) {
-	e := testenv.New(t)
-	mustRun(t, "sync", "--quiet")
-	path := filepath.Join(e.ClaudeSlug, claudeSID+".jsonl")
-	testenv.Append(t, path, testenv.JSONL(t, map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "more"}}))
-	testenv.Backdate(t, path, 2*time.Minute)
-	mustRun(t, "sync", "--quiet")
-	out := mustRun(t, "cat", rawKey("claude", "projects/"+slug+"/"+claudeSID+".jsonl"))
-	if out != string(readFile(t, path)) {
-		t.Errorf("cat printed %q", out)
-	}
-}
-
-func gunzip(t *testing.T, path string) string {
-	t.Helper()
-	return string(decodeAny(t, path))
 }
 
 func TestSnapshotRecordsWholeHarnessWithSecretsRedacted(t *testing.T) {
@@ -923,15 +909,7 @@ func TestSnapshotRecordsWholeHarnessWithSecretsRedacted(t *testing.T) {
 		t.Errorf("memory set = %v", memory)
 	}
 
-	git := snap["git"].(map[string]any)
-	head, repo := git["head"].(string), git["repo_id"].(string)
-	log := gunzip(t, filepath.Join(e.Bucket, "git", repo, "log", head+".txt.gz"))
-	for _, want := range []string{head, "CLAUDE.md", "first"} {
-		if !strings.Contains(log, want) {
-			t.Errorf("git log lacks %q", want)
-		}
-	}
-	if tree := gunzip(t, filepath.Join(e.Bucket, "git", repo, "tree", head+".txt.gz")); !strings.Contains(tree, "docs/conventions.md") {
-		t.Error("git tree lacks docs/conventions.md")
+	if keys := e.BucketKeys(); slices.ContainsFunc(keys, func(k string) bool { return strings.HasPrefix(k, "git/") }) {
+		t.Errorf("git history exported: %v", keys)
 	}
 }

@@ -40,7 +40,7 @@ const (
 	runHistory     = 500
 )
 
-var errNotFound = errors.New("test object not found after writing it")
+var errReadBack = errors.New("test object read back differs from what was written")
 
 type reporter struct {
 	w      io.Writer
@@ -73,10 +73,6 @@ func Run(ctx context.Context, cfg *config.Config, w io.Writer) (allPassed bool) 
 	_, lookErr := exec.LookPath(cmd[0])
 	r.reportf(pick(lookErr == nil || fsutil.Exists(cmd[0]), fail), "agent-sessions command: %s", strings.Join(cmd, " "))
 
-	if old := install.OldTimers(ctx, cfg.Home); len(old) > 0 {
-		r.reportf(fail, "an earlier version's periodic sync is still installed (%s); run agent-sessions install to remove it",
-			strings.Join(old, ", "))
-	}
 	checkRuns(ctx, cfg, r)
 	return !r.failed
 }
@@ -106,12 +102,12 @@ func probeStore(ctx context.Context, cfg *config.Config) error {
 	if err := st.Put(ctx, key, []byte("ok"), map[string]string{}); err != nil {
 		return err
 	}
-	found, err := st.Exists(ctx, key)
+	body, err := st.Get(ctx, key)
 	if err != nil {
 		return err
 	}
-	if !found {
-		return errNotFound
+	if string(body) != "ok" {
+		return errReadBack
 	}
 	return st.Delete(ctx, key)
 }

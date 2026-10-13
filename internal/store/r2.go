@@ -187,19 +187,6 @@ func (r *R2) Copy(ctx context.Context, src, dst string) (srcExists bool, err err
 	return true, nil
 }
 
-func (r *R2) Exists(ctx context.Context, key string) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, opTimeout)
-	defer cancel()
-	_, err := r.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &r.bucket, Key: &key})
-	if isNotFound(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("head %s: %w", key, err)
-	}
-	return true, nil
-}
-
 func (r *R2) Delete(ctx context.Context, key string) error {
 	ctx, cancel := context.WithTimeout(ctx, opTimeout)
 	defer cancel()
@@ -222,21 +209,6 @@ func (r *R2) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, fmt.Errorf("get %s: %w", key, err)
 	}
 	return data, nil
-}
-
-func (r *R2) List(ctx context.Context, prefix string) ([]string, error) {
-	var keys []string
-	pages := s3.NewListObjectsV2Paginator(r.client, &s3.ListObjectsV2Input{Bucket: &r.bucket, Prefix: &prefix})
-	for pages.HasMorePages() {
-		page, err := pages.NextPage(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("list %s: %w", prefix, err)
-		}
-		for _, o := range page.Contents {
-			keys = append(keys, aws.ToString(o.Key))
-		}
-	}
-	return keys, nil
 }
 
 func isNotFound(err error) bool {

@@ -13,7 +13,8 @@ import (
 func TestSnapshotDoesNotWalkHomeOutsideARepo(t *testing.T) {
 	e := testenv.New(t)
 	testenv.Write(t, filepath.Join(e.Home, "deep", "x", "CLAUDE.md"), "should not be found")
-	c := collect(adapters.NewClaude(e.Home), filepath.Join(e.Home, ".claude"), e.Home)
+	projectRoot, isRepo := FindProjectRoot(e.Home)
+	c := collect(adapters.NewClaude(e.Home), filepath.Join(e.Home, ".claude"), projectRoot, isRepo)
 	for _, entry := range c.entries {
 		if strings.Contains(entry.Path, "deep") {
 			t.Errorf("walked into %s", entry.Path)
@@ -24,7 +25,8 @@ func TestSnapshotDoesNotWalkHomeOutsideARepo(t *testing.T) {
 func TestSnapshotSkipsAConfigFileThatCannotBeCheckedForSecrets(t *testing.T) {
 	e := testenv.New(t)
 	testenv.Write(t, filepath.Join(e.Project, ".mcp.json"), `{"mcpServers": {"db": {"env": {"PW": "hunter2"`)
-	c := collect(adapters.NewClaude(e.Home), filepath.Join(e.Home, ".claude"), e.Project)
+	projectRoot, isRepo := FindProjectRoot(e.Project)
+	c := collect(adapters.NewClaude(e.Home), filepath.Join(e.Home, ".claude"), projectRoot, isRepo)
 	for _, entry := range c.entries {
 		if entry.Path == ".mcp.json" {
 			t.Errorf("kept %s: %s", entry.Path, entry.Body)

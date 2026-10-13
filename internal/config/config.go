@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"uuid"
 )
@@ -28,8 +27,7 @@ type Config struct {
 	R2SecretAccessKey string
 	R2Bucket          string
 
-	LocalStore        string
-	DBIntervalMinutes int
+	LocalStore string
 }
 
 // Home falls back to / so a hook run without $HOME still never fails.
@@ -88,13 +86,9 @@ func Load(path string) (*Config, error) {
 		R2SecretAccessKey: get("R2_SECRET_ACCESS_KEY"),
 		R2Bucket:          get("R2_BUCKET"),
 		LocalStore:        get("AGENT_SESSIONS_LOCAL_STORE"),
-		DBIntervalMinutes: 60,
 	}
 	if cfg.StateDir == "" {
 		cfg.StateDir = DefaultStateDir()
-	}
-	if n, err := strconv.Atoi(get("AGENT_SESSIONS_DB_INTERVAL_MINUTES")); err == nil {
-		cfg.DBIntervalMinutes = max(0, n)
 	}
 	if override := get("AGENT_SESSIONS_MACHINE_ID"); override != "" {
 		cfg.MachineID = sanitize(override)

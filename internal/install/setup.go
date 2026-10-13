@@ -61,8 +61,6 @@ R2_BUCKET=%s
 R2_ACCESS_KEY_ID=%s
 R2_SECRET_ACCESS_KEY=%s
 # This machine's id in object keys is a UUID kept in machine-id next to this file.
-# Minimum minutes between uploads of a changed SQLite database (Codex's state and logs).
-# AGENT_SESSIONS_DB_INTERVAL_MINUTES=60
 `
 
 // PiExtension is the extension Pi loads, running command.
