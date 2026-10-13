@@ -46,6 +46,13 @@ CREATE TABLE IF NOT EXISTS uploads (
     size INTEGER,
     uploaded_at REAL NOT NULL
 );
+-- Where hashing an object's bytes left off, so an append is hashed from there (Resume).
+CREATE TABLE IF NOT EXISTS resumes (
+    key TEXT PRIMARY KEY,
+    size INTEGER NOT NULL,
+    fast INTEGER NOT NULL,
+    sha_state BLOB NOT NULL
+);
 CREATE TABLE IF NOT EXISTS pieces (
     key TEXT NOT NULL,
     start INTEGER NOT NULL,
@@ -351,6 +358,30 @@ func (s *State) UploadedSHA(key string) (string, error) {
 
 func (s *State) RecordUpload(key, sha string, size *int64) error {
 	return s.exec("INSERT OR REPLACE INTO uploads VALUES (?,?,?,?)", key, sha, size, UnixNow())
+}
+
+// Resume is where hashing an object's first Size bytes left off: their xxhash, and the SHA-256
+// state after them. When a file's first Size bytes still have that xxhash, it only grew, and
+// its SHA-256 carries on from SHA instead of reading those bytes through SHA-256 again.
+type Resume struct {
+	Size int64
+	Fast uint64
+	SHA  []byte
+}
+
+func (s *State) Resume(key string) (*Resume, error) {
+	var r Resume
+	var fast int64
+	found, err := s.queryRow("SELECT size, fast, sha_state FROM resumes WHERE key = ?", []any{key}, &r.Size, &fast, &r.SHA)
+	if !found || err != nil {
+		return nil, err
+	}
+	r.Fast = uint64(fast)
+	return &r, nil
+}
+
+func (s *State) SetResume(key string, r *Resume) error {
+	return s.exec("INSERT OR REPLACE INTO resumes VALUES (?,?,?,?)", key, r.Size, int64(r.Fast), r.SHA)
 }
 
 func (s *State) Pieces(key string) ([]raw.Piece, error) {
