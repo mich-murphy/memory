@@ -18,26 +18,25 @@ import (
 
 // SQLiteExports copies each database through SQLite's backup API: copying the file itself would
 // miss rows still in the -wal file and can catch the database mid-write.
-func SQLiteExports(a Adapter, root, workDir string, interval time.Duration) []SessionFile {
+func SQLiteExports(ctx context.Context, a Adapter, root string, databases []string, workDir string,
+	interval time.Duration,
+) []SessionFile {
 	var out []SessionFile
-	for _, f := range Walk(a, root) {
-		if !IsSQLite(filepath.Base(f.Path)) {
-			continue
-		}
-		rel, ok := Rel(f.Path, root)
+	for _, db := range databases {
+		rel, ok := Rel(db, root)
 		if !ok {
 			continue
 		}
 		dest := filepath.Join(workDir, a.Name(), RootTag(root), filepath.FromSlash(rel))
 		sigPath := dest + ".sig"
-		sig := dbSignature(f.Path)
+		sig := dbSignature(db)
 		old, _ := os.ReadFile(sigPath)
 		due := true
 		if st, err := os.Stat(dest); err == nil {
 			due = string(old) != sig && time.Since(st.ModTime()) >= interval
 		}
 		if due {
-			if err := BackupSQLite(f.Path, dest); err != nil {
+			if err := BackupSQLite(ctx, db, dest); err != nil {
 				// Locked, or not really a database: try again next sweep.
 				continue
 			}
@@ -66,7 +65,7 @@ type backuper interface {
 	NewBackup(dstURI string) (*sqlite.Backup, error)
 }
 
-func BackupSQLite(src, dest string) error {
+func BackupSQLite(ctx context.Context, src, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return fmt.Errorf("backup %s: %w", src, err)
 	}
@@ -78,7 +77,7 @@ func BackupSQLite(src, dest string) error {
 		return fmt.Errorf("backup %s: %w", src, err)
 	}
 	defer func() { _ = db.Close() }() // read-only source
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	conn, err := db.Conn(ctx)
 	if err != nil {

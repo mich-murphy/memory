@@ -229,7 +229,7 @@ func (c *Claude) claudeJSON(root string) string {
 }
 
 func (c *Claude) Exports(root, workDir string, interval time.Duration) []SessionFile {
-	out := SQLiteExports(c, root, workDir, interval)
+	var out []SessionFile
 	data, err := os.ReadFile(c.claudeJSON(root))
 	if err != nil {
 		return out

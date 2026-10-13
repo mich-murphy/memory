@@ -167,7 +167,7 @@ func syncLocked(ctx context.Context, cfg *config.Config, st store.Store, a *sync
 	if a.launch != "" {
 		recordLaunches(ctx, sy, a, log)
 	}
-	files, err := filesToSync(sy, a)
+	files, err := filesToSync(ctx, sy, a)
 	if err != nil {
 		return nil, err
 	}
@@ -195,10 +195,10 @@ func recordLaunches(ctx context.Context, sy *syncer.Syncer, a *syncArgs, log *sl
 	}
 }
 
-func filesToSync(sy *syncer.Syncer, a *syncArgs) ([]syncer.Found, error) {
+func filesToSync(ctx context.Context, sy *syncer.Syncer, a *syncArgs) ([]syncer.Found, error) {
 	agents := a.agents.orAll()
 	if len(a.paths) == 0 {
-		return sy.SweepFiles(agents)
+		return sy.SweepFiles(ctx, agents)
 	}
 	var files []syncer.Found
 	for _, agent := range agents {

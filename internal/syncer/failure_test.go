@@ -74,7 +74,7 @@ func sweep(t *testing.T, st store.Store) *syncer.Summary {
 		}
 	}()
 	sy := syncer.New(cfg, st, s, adapters.All(cfg.Home), syncer.Options{Trigger: "sweep", Snapshots: true, Logger: slog.New(slog.DiscardHandler)})
-	files, err := sy.SweepFiles(adapters.Names)
+	files, err := sy.SweepFiles(t.Context(), adapters.Names)
 	if err != nil {
 		t.Fatal(err)
 	}

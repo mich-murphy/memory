@@ -100,9 +100,9 @@ type Adapter interface {
 	ExtraSnapshotEntries(root, projectRoot string) []Entry
 	MemoryDirs(root, projectRoot, sessionKey string) []ScopedDir
 	Plugins(root string) []Plugin
-	// Exports materialises what can't be copied as-is (live SQLite databases, files holding a
-	// credential field) under workDir.
-	Exports(root, workDir string, dbInterval time.Duration) []SessionFile
+	// Exports materialises under workDir what the walk of root can't copy as it is, apart from
+	// databases (SQLiteExports).
+	Exports(root, workDir string, interval time.Duration) []SessionFile
 	SessionInfo(head []map[string]any) map[string]any
 }
 
@@ -168,12 +168,22 @@ func KeyPrefix(a Adapter, root string) string {
 	return "roots/" + RootTag(root) + "/"
 }
 
-type WalkedFile struct {
-	Path string
-	Mode fs.FileMode
+type noExtras struct{}
+
+func (noExtras) Related(SessionFile, string) []string { return nil }
+
+func (noExtras) ExtraSnapshotEntries(string, string) []Entry { return nil }
+
+func (noExtras) Plugins(string) []Plugin { return nil }
+
+func (noExtras) Exports(string, string, time.Duration) []SessionFile { return nil }
+
+type walkedFile struct {
+	path string
+	mode fs.FileMode
 }
 
-func Walk(a Adapter, root string) []WalkedFile {
+func walk(a Adapter, root string) []walkedFile {
 	if !fsutil.IsDir(root) {
 		return nil
 	}
@@ -181,7 +191,7 @@ func Walk(a Adapter, root string) []WalkedFile {
 	for _, d := range a.SkipDirs() {
 		skip[d] = true
 	}
-	var out []WalkedFile
+	var out []walkedFile
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil //nolint:nilerr // an unreadable directory is skipped, not fatal
@@ -203,23 +213,25 @@ func Walk(a Adapter, root string) []WalkedFile {
 		if err != nil {
 			return nil //nolint:nilerr // vanished between listing and stat
 		}
-		out = append(out, WalkedFile{Path: p, Mode: info.Mode()})
+		out = append(out, walkedFile{path: p, mode: info.Mode()})
 		return nil
 	})
 	return out
 }
 
-func Discover(a Adapter, root string) []SessionFile {
-	var out []SessionFile
-	for _, f := range Walk(a, root) {
-		if IsSQLite(filepath.Base(f.Path)) || IsExecutableBinary(f.Path, f.Mode) {
-			continue
-		}
-		if sf, ok := a.Classify(f.Path, root); ok {
-			out = append(out, sf)
+func Discover(a Adapter, root string) (files []SessionFile, databases []string) {
+	for _, f := range walk(a, root) {
+		switch {
+		case IsSQLite(filepath.Base(f.path)):
+			databases = append(databases, f.path)
+		case IsExecutableBinary(f.path, f.mode):
+		default:
+			if sf, ok := a.Classify(f.path, root); ok {
+				files = append(files, sf)
+			}
 		}
 	}
-	return out
+	return files, databases
 }
 
 func FilesUnder(roots ...string) []string {

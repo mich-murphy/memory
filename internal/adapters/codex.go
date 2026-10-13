@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 )
 
 var (
@@ -24,6 +23,7 @@ var (
 )
 
 type Codex struct {
+	noExtras
 	home string
 }
 
@@ -103,20 +103,10 @@ func (c *Codex) Classify(path, root string) (SessionFile, bool) {
 	return SessionFile{Agent: c.Name(), Path: path, Key: prefix + rel, Role: role}, true
 }
 
-func (c *Codex) Related(SessionFile, string) []string { return nil }
-
 func (c *Codex) UserBase(root string) string { return root }
-
-func (c *Codex) ExtraSnapshotEntries(string, string) []Entry { return nil }
 
 func (c *Codex) MemoryDirs(root, _, _ string) []ScopedDir {
 	return []ScopedDir{{Scope: "user", Dir: filepath.Join(root, "memories")}}
-}
-
-func (c *Codex) Plugins(string) []Plugin { return nil }
-
-func (c *Codex) Exports(root, workDir string, interval time.Duration) []SessionFile {
-	return SQLiteExports(c, root, workDir, interval)
 }
 
 func (c *Codex) SessionInfo(head []map[string]any) map[string]any {
