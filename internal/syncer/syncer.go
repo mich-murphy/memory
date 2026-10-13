@@ -39,6 +39,7 @@ const (
 	foldAfter         = inSessionWindow
 	maxSegments       = 64
 	dbVersionEvery    = 24 * time.Hour
+	recopyAfter       = time.Hour
 	uploadWorkers     = 8
 	prefixLines       = 20
 	maxErrorMsgs      = 10
@@ -88,10 +89,9 @@ type snapshotResult struct {
 }
 
 type Options struct {
-	Trigger   string
-	Snapshots bool
-	Logger    *slog.Logger
-	Version   string
+	Trigger string
+	Logger  *slog.Logger
+	Version string
 }
 
 type Syncer struct {
@@ -205,9 +205,8 @@ func (s *Syncer) sweepRoot(ctx context.Context, agent, root string, seen map[str
 			*out = append(*out, Found{sf, root})
 		}
 	}
-	interval := time.Duration(s.cfg.DBIntervalMinutes) * time.Minute
-	exports := adapters.SQLiteExports(ctx, a, root, databases, s.workDir, interval)
-	for _, sf := range append(exports, a.Exports(root, s.workDir, interval)...) {
+	exports := adapters.SQLiteExports(ctx, a, root, databases, s.workDir, recopyAfter)
+	for _, sf := range append(exports, a.Exports(root, s.workDir, recopyAfter)...) {
 		if !seen[sf.Path] {
 			seen[sf.Path] = true
 			*out = append(*out, Found{sf, root})

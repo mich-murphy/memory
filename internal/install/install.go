@@ -49,12 +49,11 @@ var CodexEvents = []HookEvent{
 }
 
 type Options struct {
-	Command  []string
-	Home     string
-	DryRun   bool
-	Remove   bool
-	KeepDays int
-	Log      *[]string
+	Command []string
+	Home    string
+	DryRun  bool
+	Remove  bool
+	Log     *[]string
 }
 
 func (o *Options) logf(format string, args ...any) {
@@ -246,7 +245,7 @@ func Claude(o *Options) error {
 		command = hookCommand(o.Command, "claude")
 	}
 	MergeHooks(settings, ClaudeEvents, command)
-	if !o.Remove && o.KeepDays > 0 {
+	if !o.Remove {
 		raiseCleanupPeriod(settings, o)
 	}
 	body, err := jsonx.Indent(settings, 2)
@@ -256,6 +255,9 @@ func Claude(o *Options) error {
 	return write(path, body, o)
 }
 
+// keepDays is what cleanupPeriodDays is raised to: Claude Code deletes older transcripts.
+const keepDays = 3650
+
 func raiseCleanupPeriod(settings *jsonx.Object, o *Options) {
 	v, _ := settings.Get("cleanupPeriodDays")
 	current, isInt := int64(0), false
@@ -264,15 +266,15 @@ func raiseCleanupPeriod(settings *jsonx.Object, o *Options) {
 			current, isInt = i, true
 		}
 	}
-	if isInt && current >= int64(o.KeepDays) {
+	if isInt && current >= keepDays {
 		return
 	}
-	settings.Set("cleanupPeriodDays", o.KeepDays)
+	settings.Set("cleanupPeriodDays", keepDays)
 	shown := current
 	if shown == 0 {
 		shown = 30
 	}
-	o.logf("claude: cleanupPeriodDays %d -> %d (transcripts were being deleted after it)", shown, o.KeepDays)
+	o.logf("claude: cleanupPeriodDays %d -> %d (transcripts were being deleted after it)", shown, keepDays)
 }
 
 func Codex(o *Options) error {

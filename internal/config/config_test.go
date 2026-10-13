@@ -15,7 +15,7 @@ func clearEnv(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	for _, k := range []string{
-		"AGENT_SESSIONS_MACHINE_ID", "AGENT_SESSIONS_STATE_DIR", "AGENT_SESSIONS_LOCAL_STORE", "AGENT_SESSIONS_DB_INTERVAL_MINUTES",
+		"AGENT_SESSIONS_MACHINE_ID", "AGENT_SESSIONS_STATE_DIR", "AGENT_SESSIONS_LOCAL_STORE",
 		"R2_ENDPOINT", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
 	} {
 		t.Setenv(k, "")
@@ -54,7 +54,7 @@ func TestEnvFileAndEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := "# comment\nexport R2_ENDPOINT=\"https://x.r2.example\"\nR2_BUCKET='sessions'\nnot a setting\n" +
-		"R2_ACCESS_KEY_ID = from-file\nAGENT_SESSIONS_DB_INTERVAL_MINUTES=15\n"
+		"R2_ACCESS_KEY_ID = from-file\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestEnvFileAndEnvironment(t *testing.T) {
 	if cfg.R2Endpoint != "https://x.r2.example" || cfg.R2Bucket != "sessions" || cfg.R2AccessKeyID != "from-env" {
 		t.Errorf("cfg = %+v", cfg)
 	}
-	if cfg.DBIntervalMinutes != 15 || cfg.MachineID != "My-Laptop" || cfg.StateDir != DefaultStateDir() {
+	if cfg.MachineID != "My-Laptop" || cfg.StateDir != DefaultStateDir() {
 		t.Errorf("cfg = %+v", cfg)
 	}
 	if got := cfg.MissingR2Settings(); !slices.Equal(got, []string{"R2_SECRET_ACCESS_KEY"}) {

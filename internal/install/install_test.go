@@ -18,7 +18,7 @@ import (
 var testCmd = []string{"/opt/agent-sessions/bin/agent-sessions"}
 
 func opts(e *testenv.Env, log *[]string) *Options {
-	return &Options{Command: testCmd, Home: e.Home, KeepDays: 3650, Log: log}
+	return &Options{Command: testCmd, Home: e.Home, Log: log}
 }
 
 func readJSON(t *testing.T, path string) map[string]any {
@@ -154,7 +154,6 @@ func TestClaudeHookCommandQuotesPathsWithSpaces(t *testing.T) {
 	var log []string
 	o := opts(e, &log)
 	o.Command = []string{"/Users/me/My Tools/agent-sessions"}
-	o.KeepDays = 0
 	if err := Claude(o); err != nil {
 		t.Fatal(err)
 	}

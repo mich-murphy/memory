@@ -40,14 +40,12 @@ func (s *Syncer) RecordLaunch(ctx context.Context, agent, path string, launch ma
 	git := gitinfo.State(ctx, cwd, s.cfg.MachineID)
 	entry := maps.Clone(launch)
 	entry["git"] = git
-	if s.opts.Snapshots {
-		snap, err := s.takeSnapshot(ctx, agent, root, cwd, sf.SessionKey)
-		if err != nil {
-			return err
-		}
-		entry["snapshot"] = snap.setID
-		sess.Snapshots = addSnapshot(sess.Snapshots, snap, git, "pre_session", now)
+	snap, err := s.takeSnapshot(ctx, agent, root, cwd, sf.SessionKey)
+	if err != nil {
+		return err
 	}
+	entry["snapshot"] = snap.setID
+	sess.Snapshots = addSnapshot(sess.Snapshots, snap, git, "pre_session", now)
 	sess.Launches = append(sess.Launches, entry)
 	if err := s.state.PutSession(agent, sf.SessionKey, sess); err != nil {
 		return err
@@ -153,7 +151,7 @@ func (s *Syncer) maybeSnapshot(ctx context.Context, agent, sessionKey string, se
 ) error {
 	root, ok := s.sessionRoots[sessionID{agent, sessionKey}]
 	cwd, _ := sess.Info["cwd"].(string)
-	if !s.opts.Snapshots || !ok || cwd == "" {
+	if !ok || cwd == "" {
 		return nil
 	}
 	if n := len(sess.Snapshots); n > 0 && now-sess.Snapshots[n-1].CheckedAt < snapshotRecheck.Seconds() {

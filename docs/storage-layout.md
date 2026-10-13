@@ -44,7 +44,7 @@ Nothing else is redacted: transcripts, history, logs and every other file are co
 
 A second Claude Code or Codex directory (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) or Pi agent dir (`PI_CODING_AGENT_DIR`) is keyed under `roots/<hash of dir>/…`, so it can't overwrite the default one.
 
-**Databases.** Each sweep (at every session start and end, and in `backfill`) takes a SQLite backup-API copy of every database under an agent's directory (Codex's `state_*`, `logs_*`, `memories_*`, `goals_*`, `thread_history_*`, `queue_*`). That includes rows still in the `-wal` file, which a plain file copy would miss. A database that changed is copied again once its last copy is an hour old (`AGENT_SESSIONS_DB_INTERVAL_MINUTES`). The copies live in the state directory between sweeps.
+**Databases.** Each sweep (at every session start and end, and in `backfill`) takes a SQLite backup-API copy of every database under an agent's directory (Codex's `state_*`, `logs_*`, `memories_*`, `goals_*`, `thread_history_*`, `queue_*`). That includes rows still in the `-wal` file, which a plain file copy would miss. A database that changed is copied again once its last copy is an hour old. The copies live in the state directory between sweeps.
 
 **Appends.** Transcripts and logs only grow. While a file is in use (written to in the last 15 minutes), a sync uploads only the bytes added since the last upload, as a segment `<key>.zst.d/<start>-<end>.zst` holding bytes `[start, end)`; start and end are zero-padded so the segments list in order. Once the file has been quiet for 15 minutes, or has 64 segments, the next sync uploads it whole as `<key>.zst` and deletes the segments. That fold happens once per session and compresses better than many small pieces.
 

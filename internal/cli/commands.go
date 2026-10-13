@@ -28,24 +28,20 @@ const (
 	manualLockTimeout = 10 * time.Minute
 )
 
-const defaultKeepDays = 3650
-
 type syncArgs struct {
-	agents      agentList
-	paths       []string
-	delay       float64
-	marker      string
-	launch      string
-	trigger     string
-	noSnapshots bool
-	quiet       bool
+	agents  agentList
+	paths   []string
+	delay   float64
+	marker  string
+	launch  string
+	trigger string
+	quiet   bool
 }
 
 func parseSync(cmd string, args []string, o IO) (*syncArgs, error) {
 	a := &syncArgs{}
 	fs := newFlags(cmd, o)
 	fs.Var(&a.agents, "agent", "limit to this agent: claude, codex or pi (repeatable)")
-	fs.BoolVar(&a.noSnapshots, "no-snapshots", false, "skip harness snapshots")
 	if cmd == "sync" {
 		fs.Func("path", "sync this session file and its related files (repeatable)", func(p string) error {
 			a.paths = append(a.paths, p)
@@ -158,7 +154,7 @@ func syncLocked(ctx context.Context, cfg *config.Config, st store.Store, a *sync
 		}
 	}()
 	sy := syncer.New(cfg, st, s, adapters.All(cfg.Home), syncer.Options{
-		Trigger: a.trigger, Snapshots: !a.noSnapshots, Logger: log, Version: version,
+		Trigger: a.trigger, Logger: log, Version: version,
 	})
 	if a.launch != "" {
 		recordLaunches(ctx, sy, a, log)
@@ -221,14 +217,13 @@ func runInstall(args []string, o IO) (int, error) {
 	var agents agentList
 	fs := newFlags("install", o)
 	fs.Var(&agents, "agent", "only this agent: claude, codex or pi (repeatable; default all present)")
-	keepDays := fs.Int("keep-days", defaultKeepDays, "raise Claude Code's cleanupPeriodDays to at least this (0 leaves it)")
 	dryRun := fs.Bool("dry-run", false, "show what would change")
 	if err := parse(fs, args); err != nil {
 		return exitUsage, err
 	}
 	var log []string
 	opts := &install.Options{
-		Command: install.Command(), Home: config.Home(), DryRun: *dryRun, KeepDays: *keepDays, Log: &log,
+		Command: install.Command(), Home: config.Home(), DryRun: *dryRun, Log: &log,
 	}
 	failed := false
 	if _, err := install.WriteConfigTemplate(opts); err != nil {
