@@ -56,7 +56,7 @@ A file is its base object followed by its segments. The manifest lists them as `
 
 **Versions.** When a file changes in any way other than an append (its first `old size` bytes no longer hash to what was uploaded), each piece of its old contents is copied to `blobs/<sha256>.zst` before the new bytes are uploaded. A blob that is already there isn't copied again, so identical old contents from different files, sessions or machines are stored once. `raw-versions/…/<key>.json` lists the file's earlier versions, and the manifest lists them under `versions`; each has `sha256`, `size`, `versioned_at` and the `pieces` (in `blobs/`) that rebuild it. Database copies keep at most one version a day: an hourly refresh within a day of the last kept version replaces the copy without keeping it.
 
-Every object is zstd (level 10) with these metadata fields: `sha256` (of the uncompressed bytes the object holds), `start`, `end`, `agent`, `machine` and `role`.
+Every object is zstd (klauspost/compress's `SpeedBetterCompression`, about zstd level 7) with these metadata fields: `sha256` (of the uncompressed bytes the object holds), `start`, `end`, `agent`, `machine` and `role`.
 
 **Deletions.** When a sweep finds that an uploaded file is gone from disk, the file gets a `deleted_locally` date in its session's manifest. The object stays in the bucket.
 
