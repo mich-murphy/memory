@@ -74,8 +74,12 @@ var (
 	}
 )
 
+// backupSuffix matches the copies editors and our installer leave beside a config file, which
+// hold the same secrets.
+var backupSuffix = regexp.MustCompile(`(~|\.bak|\.orig|\.old|\.agent-sessions-backup-[0-9-]+)$`)
+
 func rulesFor(agent, name string) ([]rule, format) {
-	switch name {
+	switch backupSuffix.ReplaceAllString(name, "") {
 	case "claude.json", ".claude.json":
 		return claudeJSONRules, formatJSON
 	case "settings.json", "settings.local.json", "managed-settings.json":

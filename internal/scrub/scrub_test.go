@@ -180,6 +180,27 @@ func TestFileRefusesAConfigFileItCannotParse(t *testing.T) {
 	}
 }
 
+func TestBackupCopiesAreScrubbedLikeTheirOriginal(t *testing.T) {
+	for _, name := range []string{
+		"settings.json.agent-sessions-backup-20261014-101010", "settings.json~", "settings.json.bak",
+		"settings.local.json.orig", "managed-settings.json.old",
+	} {
+		got, err := File("claude", name, []byte(`{"env": {"KEY": "sk-1"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := `{"env": {"KEY": "[redacted]"}}`; string(got) != want {
+			t.Errorf("File(%s) = %s, want %s", name, got, want)
+		}
+		if got, err := File("claude", name, []byte(`{"env": {"KEY": "sk-`)); err == nil {
+			t.Errorf("File(%s) of a broken copy = %q, want an error", name, got)
+		}
+	}
+	if got, err := File("claude", "settings.json.bak2", []byte(`{"env": {"KEY": "sk-1"}`)); err != nil || !strings.Contains(string(got), "sk-1") {
+		t.Errorf("an unrelated name was scrubbed: %q, %v", got, err)
+	}
+}
+
 func TestApplies(t *testing.T) {
 	for _, c := range []struct {
 		agent, file string
@@ -192,6 +213,8 @@ func TestApplies(t *testing.T) {
 		{"claude", "models.json", false},
 		{"pi", "config.toml", false},
 		{"codex", "history.jsonl", false},
+		{"codex", "config.toml.agent-sessions-backup-20261014-101010", true},
+		{"pi", "models.json~", true},
 	} {
 		if got := Applies(c.agent, c.file); got != c.want {
 			t.Errorf("Applies(%s, %s) = %v", c.agent, c.file, got)
