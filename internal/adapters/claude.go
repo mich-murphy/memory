@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mich-murphy/memory/internal/capturepolicy"
+	"github.com/mich-murphy/memory/internal/config"
 	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/jsonx"
 	"github.com/mich-murphy/memory/internal/scrub"
@@ -244,7 +246,7 @@ func (c *Claude) claudeJSON(root string) string {
 func (c *Claude) Exports(root, workDir string, interval time.Duration) Discovery {
 	out := Discovery{Complete: true}
 	source := c.claudeJSON(root)
-	data, err := os.ReadFile(source)
+	data, identities, err := readClaudeConfig(source)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			out.issue(source, "read", err)
@@ -252,7 +254,7 @@ func (c *Claude) Exports(root, workDir string, interval time.Duration) Discovery
 		return out
 	}
 	// Scrubbed here as well as at upload, so the copy in the state dir holds no API key either.
-	body, err := scrub.File(c.Name(), ".claude.json", data)
+	body, err := scrub.Identities(c.Name(), identities, data)
 	if err != nil {
 		out.issue(source, "export", err)
 		return out
@@ -277,7 +279,7 @@ func (c *Claude) Exports(root, workDir string, interval time.Duration) Discovery
 func (c *Claude) ExtraSnapshotEntries(root, projectRoot string) Sources {
 	out := Sources{Complete: true}
 	source := c.claudeJSON(root)
-	data, err := snapshotSource(source)
+	data, identities, err := readClaudeConfig(source)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			out.issue(source, "read", err)
@@ -286,7 +288,7 @@ func (c *Claude) ExtraSnapshotEntries(root, projectRoot string) Sources {
 	}
 	// Validate/redact the original document before selecting a subset. Reserialisation must
 	// not conceal duplicate keys (including escaped or nested duplicates) in the source.
-	data, err = scrub.File(c.Name(), ".claude.json", data)
+	data, err = scrub.Identities(c.Name(), identities, data)
 	if err != nil {
 		out.issue(source, "unparseable", err)
 		return out
@@ -377,6 +379,24 @@ func (c *Claude) Plugins(root string) Sources {
 		}
 	}
 	return out
+}
+
+// Native .claude.json is an intentional export, not an unrestricted credential exception.
+// The shared policy checks every identity before reading its original bytes.
+func readClaudeConfig(path string) ([]byte, []string, error) {
+	policy, err := capturepolicy.New(config.FilePath(), config.StateDir())
+	if err != nil {
+		return nil, nil, err
+	}
+	resolution, err := capturepolicy.Resolve(path)
+	if policy.ExcludesClaudeConfig(resolution.Identities) {
+		return nil, nil, errors.New("claude configuration source excluded by capture policy")
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	body, err := snapshotSource(resolution.Path)
+	return body, resolution.Identities, err
 }
 
 // Snapshot configuration sources are small regular files. Bound the read before parsing,

@@ -243,3 +243,44 @@ func TestExplicitClassificationNeverTreatsLiveDatabaseAsPlainFile(t *testing.T) 
 		}
 	}
 }
+
+func TestIntentionalClaudeConfigRejectsOtherProtectedSymlinkIdentities(t *testing.T) {
+	for _, kind := range []string{"credentialHop", "backup", "config", "state"} {
+		t.Run(kind, func(t *testing.T) {
+			home := t.TempDir()
+			a := NewClaude(home)
+			root := a.CanonicalRoot()
+			source := a.claudeJSON(root)
+			dest := filepath.Join(t.TempDir(), "innocent.json")
+			writeSource(t, dest, `{"mcpServers":{"s":{"env":{"TOKEN":"secret"}}}}`)
+			protected := filepath.Join(t.TempDir(), "auth.json")
+			switch kind {
+			case "backup":
+				protected = filepath.Join(t.TempDir(), ".claude.json.bak")
+			case "config":
+				protected = filepath.Join(t.TempDir(), "private-config")
+				t.Setenv("AGENT_SESSIONS_CONFIG", protected)
+			case "state":
+				protected = filepath.Join(t.TempDir(), "state", "file")
+				t.Setenv("AGENT_SESSIONS_STATE_DIR", filepath.Dir(protected))
+			}
+			if err := os.MkdirAll(filepath.Dir(protected), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(dest, protected); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(protected, source); err != nil {
+				t.Fatal(err)
+			}
+			exported := a.Exports(root, t.TempDir(), 0)
+			if exported.Complete || len(exported.Files) != 0 || len(exported.Issues) == 0 {
+				t.Fatalf("protected export = %+v", exported)
+			}
+			extra := a.ExtraSnapshotEntries(root, "")
+			if extra.Complete || len(extra.Entries) != 0 || len(extra.Issues) == 0 {
+				t.Fatalf("protected snapshot source = %+v", extra)
+			}
+		})
+	}
+}
