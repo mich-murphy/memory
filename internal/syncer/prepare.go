@@ -33,7 +33,7 @@ const mtimeLastLineHeldBack int64 = -1
 type versionPlan struct {
 	state.Version
 	newBlobs []raw.Piece
-	index    []byte
+	earlier  []state.Version
 }
 
 type upload struct {
@@ -49,6 +49,9 @@ type upload struct {
 	leftover []string
 	version  *versionPlan
 	resume   *state.Resume
+	tail     uint64
+	// lost names the object that no longer held the earlier bytes the upload was to keep.
+	lost string
 	// compress runs on the upload pool, so backfills use every core.
 	compress func(u *upload) error
 }
@@ -174,10 +177,7 @@ func (s *Syncer) planVersion(sf adapters.SessionFile, key string, prev *state.Up
 		}
 		v.Pieces = append(v.Pieces, raw.Piece{Start: p.Start, End: p.End, SHA256: p.SHA256, Object: blob})
 	}
-	v.index, err = jsonx.SortedIndented(map[string]any{"key": sf.Key, "versions": append(index, v.Version)})
-	if err != nil {
-		return nil, err
-	}
+	v.earlier = index
 	return v, nil
 }
 
@@ -234,6 +234,7 @@ func (s *Syncer) prepare(sf adapters.SessionFile) (*upload, error) {
 type content struct {
 	hashed
 	mtimeNS  int64
+	diskSize int64
 	first    []byte
 	compress func(u *upload) error
 }
@@ -250,7 +251,7 @@ func inMemoryContent(sf adapters.SessionFile, st os.FileInfo, prev *state.Upload
 		return nil, err
 	}
 	return &content{
-		hashed: h, mtimeNS: mtimeNS, first: data,
+		hashed: h, mtimeNS: mtimeNS, diskSize: st.Size(), first: data,
 		compress: func(u *upload) error {
 			part := data[u.piece.Start:]
 			u.piece.SHA256 = h.sha
@@ -289,7 +290,7 @@ func (s *Syncer) streamedContent(path string, st os.FileInfo, prev *state.Upload
 		mtimeNS = st.ModTime().UnixNano()
 	}
 	return &content{
-		hashed: h, mtimeNS: mtimeNS, first: first,
+		hashed: h, mtimeNS: mtimeNS, diskSize: st.Size(), first: first,
 		compress: func(u *upload) error {
 			n := u.piece.End - u.piece.Start
 			h := u.pieceHash()
@@ -330,8 +331,8 @@ func readRange(path string, start, n int64) ([]byte, error) {
 func (s *Syncer) planUpload(sf adapters.SessionFile, key string, c *content, prev *state.Upload,
 	pieces []raw.Piece, idle bool,
 ) (*upload, error) {
-	u := &upload{key: key, resume: c.resume, file: state.File{
-		SessionFile: sf, Size: c.size, MtimeNS: c.mtimeNS, SHA256: c.sha, LineCount: c.lines, PrefixSHA256: prefixSHA(c.first),
+	u := &upload{key: key, resume: c.resume, tail: c.tail, file: state.File{
+		SessionFile: sf, Size: c.size, DiskSize: c.diskSize, MtimeNS: c.mtimeNS, SHA256: c.sha, LineCount: c.lines, PrefixSHA256: prefixSHA(c.first),
 	}}
 	if transcriptRoles[sf.Role] && strings.HasSuffix(strings.TrimSuffix(sf.Path, ".zst"), ".jsonl") {
 		u.file.Head = s.adapters[sf.Agent].SessionInfo(adapters.ReadHead(c.first, prefixLines))
@@ -465,8 +466,12 @@ func (s *Syncer) upload(ctx context.Context, u *upload) error {
 	if err != nil {
 		return err
 	}
-	if u.version != nil {
-		if err := s.bucket.Put(ctx, s.versionsKey(u.file.SessionFile), u.version.index, map[string]string{}); err != nil {
+	if v := u.version; v != nil {
+		index, err := jsonx.SortedIndented(map[string]any{"key": u.file.Key, "versions": append(v.earlier, v.Version)})
+		if err != nil {
+			return err
+		}
+		if err := s.bucket.Put(ctx, s.versionsKey(u.file.SessionFile), index, map[string]string{}); err != nil {
 			return err
 		}
 	}
@@ -476,21 +481,35 @@ func (s *Syncer) upload(ctx context.Context, u *upload) error {
 	return nil
 }
 
+// copyVersion keeps the version only from objects that still hold its bytes. A whole upload
+// whose answer was lost replaced the base object without being recorded: after a fold it holds
+// the whole version, which then becomes the version's one piece.
 func (s *Syncer) copyVersion(ctx context.Context, u *upload) error {
-	if u.version == nil {
+	v := u.version
+	if v == nil {
 		return nil
 	}
-	for _, p := range u.version.newBlobs {
-		ok, err := s.bucket.Copy(ctx, p.Object, raw.BlobKey(p.SHA256))
+	for _, p := range v.newBlobs {
+		ok, err := s.bucket.Copy(ctx, p.Object, raw.BlobKey(p.SHA256), p.SHA256)
 		if err != nil {
 			return err
 		}
-		if !ok {
-			s.log.Warn("earlier bytes are missing from the bucket and can't be kept", "path", u.file.Path,
-				"object", p.Object)
-			u.version = nil
-			return nil
+		if ok {
+			continue
 		}
+		if p.Object == u.key {
+			ok, err = s.bucket.Copy(ctx, u.key, raw.BlobKey(v.SHA256), v.SHA256)
+			if err != nil {
+				return err
+			}
+			if ok {
+				v.newBlobs = []raw.Piece{{End: v.Size, SHA256: v.SHA256, Object: u.key}}
+				v.Pieces = []raw.Piece{{End: v.Size, SHA256: v.SHA256, Object: raw.BlobKey(v.SHA256)}}
+				return nil
+			}
+		}
+		u.lost, u.version = p.Object, nil
+		return nil
 	}
 	return nil
 }
@@ -537,6 +556,9 @@ func (s *Syncer) finish(u *upload) error {
 }
 
 func (s *Syncer) recordChanged(u *upload) error {
+	if u.lost != "" {
+		s.errorf("%s: %s no longer holds the earlier bytes, so they can't be kept as a version", u.file.Path, u.lost)
+	}
 	if err := s.db.RecordUpload(u.key, u.file.SHA256, u.file.Size); err != nil {
 		return err
 	}

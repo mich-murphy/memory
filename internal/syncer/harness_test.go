@@ -81,7 +81,7 @@ func (m *memStore) PutFile(ctx context.Context, key, path string, meta map[strin
 	return m.Put(ctx, key, body, meta)
 }
 
-func (m *memStore) Copy(_ context.Context, src, dst string) (bool, error) {
+func (m *memStore) Copy(_ context.Context, src, dst, sha string) (bool, error) {
 	m.wait()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -89,12 +89,14 @@ func (m *memStore) Copy(_ context.Context, src, dst string) (bool, error) {
 	if _, ok := m.objects[dst]; ok {
 		return true, nil
 	}
+	m.record("head "+src, 0)
 	o, ok := m.objects[src]
-	if ok {
-		m.objects[dst] = o
+	if !ok || o.meta["sha256"] != sha {
+		return false, nil
 	}
+	m.objects[dst] = o
 	m.record("copy "+src+" "+dst, 0)
-	return ok, nil
+	return true, nil
 }
 
 func (m *memStore) Delete(_ context.Context, key string) error {

@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -96,6 +97,7 @@ func TestFilesKeepHeadsAndPreferTheOneOnDisk(t *testing.T) {
 	}
 	zst := f
 	zst.Path = "/a.jsonl.zst" // Codex recompressed it: same key, new path
+	zst.DiskSize = 7
 	zst.Head = map[string]any{"cwd": "/z"}
 	check(t, s.RecordFile(&zst))
 	check(t, s.MarkDeleted("/a.jsonl", 99))
@@ -111,12 +113,41 @@ func TestFilesKeepHeadsAndPreferTheOneOnDisk(t *testing.T) {
 		t.Errorf("LiveFiles:\n%s", diff)
 	}
 	check(t, s.SetPieces("k", []raw.Piece{{Start: 0, End: 10, SHA256: "a", Object: "k"}, {Start: 10, End: 20, SHA256: "b", Object: "k.d/1"}}))
-	same, pieces, err := s.FileUnchanged("/a.jsonl.zst", "k", 20, 5)
+	same, pieces, err := s.FileUnchanged("/a.jsonl.zst", "k", 7, 5)
 	check(t, err)
 	gone, _, err := s.FileUnchanged("/a.jsonl", "k", 20, 5)
 	check(t, err)
 	if !same || gone || pieces != 2 {
 		t.Errorf("FileUnchanged = %v, %v, %d pieces", same, gone, pieces)
+	}
+	if bySize, _, err := s.FileUnchanged("/a.jsonl.zst", "k", 20, 5); err != nil || bySize {
+		t.Errorf("FileUnchanged by the uploaded size = %v, %v, want false", bySize, err)
+	}
+}
+
+// A state written before files had a disk size gains the column, and its files count as
+// unchanged by the size it recorded, as they did then, rather than all being read again.
+func TestOpenAddsTheDiskSizeToAnOlderState(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "state.sqlite3"))
+	check(t, err)
+	_, err = db.ExecContext(t.Context(), `CREATE TABLE files (path TEXT PRIMARY KEY, agent TEXT NOT NULL,
+		root TEXT NOT NULL, key TEXT NOT NULL, session_key TEXT, role TEXT NOT NULL, size INTEGER NOT NULL,
+		mtime_ns INTEGER NOT NULL, sha256 TEXT NOT NULL, line_count INTEGER, prefix_sha256 TEXT, head TEXT,
+		deleted_at REAL);
+		INSERT INTO files VALUES ('/a', 'claude', '/r', 'k', NULL, 'aux', 10, 5, 'x', 1, NULL, NULL, NULL)`)
+	check(t, err)
+	check(t, db.Close())
+	for range 2 { // the second Open finds the column there
+		s, err := Open(t.Context(), dir)
+		check(t, err)
+		same, _, err := s.FileUnchanged("/a", "k", 10, 5)
+		check(t, err)
+		if !same {
+			t.Error("FileUnchanged = false for a file recorded before the column")
+		}
+		check(t, s.RecordFile(&File{Path: "/b", Role: "aux", DiskSize: 3, MtimeNS: 1}))
+		check(t, s.Close())
 	}
 }
 
@@ -151,5 +182,27 @@ func TestAStateThatCannotBeUsedReportsEveryFailure(t *testing.T) {
 	}
 	if _, err := s.Uploaded("k"); err == nil {
 		t.Error("a row read succeeded")
+	}
+}
+
+// A write that fails part way through recording an upload must not leave the writes before it
+// to be committed when the state is closed: the upload would look recorded without its pieces.
+func TestAFailedWriteDiscardsTheRecordItWasPartOf(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(t.Context(), dir)
+	check(t, err)
+	_, err = s.conn.ExecContext(t.Context(),
+		"CREATE TRIGGER fail BEFORE INSERT ON pieces BEGIN SELECT RAISE(ABORT, 'injected'); END")
+	check(t, err)
+	check(t, s.RecordUpload("k", "sha", 2))
+	if err := s.AddPiece("k", raw.Piece{End: 2, SHA256: "sha", Object: "k"}); err == nil {
+		t.Fatal("AddPiece succeeded despite the trigger")
+	}
+	check(t, s.Close())
+	s, err = Open(t.Context(), dir)
+	check(t, err)
+	defer func() { check(t, s.Close()) }()
+	if got, err := s.Uploaded("k"); err != nil || got != nil {
+		t.Errorf("Uploaded = %v, %v, want nothing", got, err)
 	}
 }

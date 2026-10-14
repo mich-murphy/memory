@@ -12,14 +12,16 @@ import (
 
 	"github.com/mich-murphy/memory/internal/config"
 	"github.com/mich-murphy/memory/internal/fsutil"
+	"github.com/mich-murphy/memory/internal/raw"
 )
 
 type Store interface {
 	Put(ctx context.Context, key string, body []byte, meta map[string]string) error
 	PutFile(ctx context.Context, key, path string, meta map[string]string) error
-	// Copy leaves an existing dst alone. Copies go to content-addressed keys, and a retry after
-	// an upload whose answer was lost would otherwise copy bytes that have since replaced src.
-	Copy(ctx context.Context, src, dst string) (srcExists bool, err error)
+	// Copy copies src to dst only when src holds the bytes sha names, and leaves an existing dst
+	// alone. Copies go to content-addressed keys, and src may hold bytes that replaced the ones
+	// recorded for it in an upload whose answer was lost. ok says whether dst holds them now.
+	Copy(ctx context.Context, src, dst, sha string) (ok bool, err error)
 	Delete(ctx context.Context, key string) error
 	Get(ctx context.Context, key string) ([]byte, error)
 }
@@ -56,14 +58,26 @@ func (l *Local) PutFile(_ context.Context, key, path string, _ map[string]string
 	return fsutil.WriteAtomic(l.path(key), f, 0o600)
 }
 
-func (l *Local) Copy(ctx context.Context, src, dst string) (srcExists bool, err error) {
+// Copy reads sha from src's bytes, since a local directory keeps no metadata.
+func (l *Local) Copy(ctx context.Context, src, dst, sha string) (ok bool, err error) {
 	if fsutil.IsFile(l.path(dst)) {
 		return true, nil
 	}
-	if !fsutil.IsFile(l.path(src)) {
+	body, err := os.ReadFile(l.path(src))
+	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
-	return true, l.PutFile(ctx, dst, l.path(src), nil)
+	if err != nil {
+		return false, fmt.Errorf("copy %s: %w", src, err)
+	}
+	held := ""
+	if data, err := raw.Decompress(body); err == nil {
+		held = raw.SHA256(data)
+	}
+	if held != sha {
+		return false, nil
+	}
+	return true, l.Put(ctx, dst, body, nil)
 }
 
 func (l *Local) Delete(_ context.Context, key string) error {
