@@ -159,9 +159,14 @@ func checkCodex(home string, r *reporter) {
 		r.reportf(pass, "codex: not used here (%s missing)", root)
 		return
 	}
-	configured, trusted := install.CodexTrustState(root)
 	path := filepath.Join(root, "hooks.json")
-	checkHookCoverage("codex", install.OurHandlers(readJSON(path)), install.CodexEvents, path, r)
+	doc := readJSON(path)
+	if err := install.ValidateCodexHooks(doc); err != nil {
+		r.reportf(fail, "codex: %v; hooks could not be verified", err)
+		return
+	}
+	configured, trusted := install.CodexTrustState(root)
+	checkHookCoverage("codex", install.OurHandlers(doc), install.CodexEvents, path, r)
 	if configured > 0 {
 		hint := ""
 		if trusted != configured {

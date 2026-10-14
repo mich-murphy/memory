@@ -225,7 +225,7 @@ func OurHandlers(settings *jsonx.Object) []HandlerRef {
 func CodexTrustState(root string) (configured, trusted int) {
 	hooksPath := filepath.Join(root, "hooks.json")
 	doc, err := loadJSON(hooksPath)
-	if err != nil {
+	if err != nil || ValidateCodexHooks(doc) != nil {
 		return 0, 0
 	}
 	handlers := OurHandlers(doc)

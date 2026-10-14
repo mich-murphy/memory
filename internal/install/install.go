@@ -334,6 +334,9 @@ func Codex(o *Options) error {
 	if err != nil {
 		return err
 	}
+	if err := ValidateCodexHooks(doc); err != nil {
+		return err
+	}
 	command := ""
 	if !o.Remove {
 		warnIfOffPath(o)

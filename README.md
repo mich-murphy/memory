@@ -69,6 +69,8 @@ Logs are in `~/.local/state/agent-sessions/agent-sessions.log`.
 
 Rerun the install script to upgrade; it verifies each download against the release's `checksums.txt`. `VERSION=v0.1.0` picks a release. While the repo is private, the script downloads through `gh`, so log in with `gh auth login` first.
 
+To remove the binary too, run `sh install.sh uninstall` from a local copy of the script. It removes the managed hooks and extension first, then the binary, without using the network. Config, credentials, machine identity, local state and all remote data are retained. See [docs/install.md](docs/install.md) for installation, removal and hook-trust verification details.
+
 ## Development
 
 Go 1.27 and [golangci-lint](https://golangci-lint.run) at the version in `.golangci-lint-version`.

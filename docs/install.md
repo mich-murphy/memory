@@ -24,7 +24,13 @@ the binary first. `--help` describes these commands; other arguments are rejecte
 
 ## Doctor and Codex trust
 
-Doctor counts distinct required hook events, checks the handler's type, agent,
+Doctor first checks whole-file Codex schema admission, including foreign handlers:
+unknown top-level fields and malformed known fields can prevent every hook from
+loading. Unknown nested fields and unknown events are allowed where Codex allows
+them. Unsupported MCP input representations fail closed as not verified. The
+installer refuses to rewrite a Codex document that fails this check.
+
+Doctor then counts distinct required hook events, checks the handler's type, agent,
 executable and unconditional matcher, and checks disable switches. It resolves
 executables without executing hook commands, including foreign commands.
 
