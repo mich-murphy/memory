@@ -152,3 +152,15 @@ func TestEnvFileValues(t *testing.T) {
 		})
 	}
 }
+
+func TestTheStateDirIsWhereTheHookLooks(t *testing.T) {
+	dir := clearEnv(t)
+	testenv.Write(t, filepath.Join(dir, "cfg", "config.env"), "AGENT_SESSIONS_STATE_DIR="+filepath.Join(dir, "elsewhere")+"\n")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StateDir != StateDir() {
+		t.Errorf("sync state dir %s, hook state dir %s", cfg.StateDir, StateDir())
+	}
+}
