@@ -113,3 +113,20 @@ func TestRunsKeepTheLast500(t *testing.T) {
 		t.Errorf("%d runs kept, newest %v", len(runs), runs[0])
 	}
 }
+
+// A state that can't be used must say so on every read and write, or a sync would upload
+// without recording it.
+func TestAStateThatCannotBeUsedReportsEveryFailure(t *testing.T) {
+	s, err := Open(t.Context(), t.TempDir())
+	check(t, err)
+	check(t, s.Close())
+	if err := s.RecordUpload("k", "x", 0); err == nil {
+		t.Error("a write succeeded")
+	}
+	if _, err := s.Pieces("k"); err == nil {
+		t.Error("a list read succeeded")
+	}
+	if _, err := s.Uploaded("k"); err == nil {
+		t.Error("a row read succeeded")
+	}
+}
