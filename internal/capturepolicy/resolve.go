@@ -132,8 +132,21 @@ func New(configPath, stateDir string) (*Policy, error) {
 
 // Excludes checks all supplied intermediate identities before any content is read.
 func (p *Policy) Excludes(identities []string) bool {
+	return p.excludes(identities, false)
+}
+
+// ExcludesClaudeConfig permits the primary .claude.json only for the adapter's scrubbed
+// export and MCP extraction. Backups and other credential identities remain excluded,
+// as do the collector's own config and state even when named .claude.json.
+// Callers must still apply scrubbing for every identity before publishing any bytes.
+func (p *Policy) ExcludesClaudeConfig(identities []string) bool {
+	return p.excludes(identities, true)
+}
+
+func (p *Policy) excludes(identities []string, claudeConfig bool) bool {
 	for _, identity := range identities {
-		if IsCredential(identity) {
+		primary := claudeConfig && filepath.Base(identity) == ".claude.json"
+		if IsCredential(identity) && !primary {
 			return true
 		}
 		for _, configPath := range p.configs {
