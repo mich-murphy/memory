@@ -30,7 +30,7 @@ const AGENT_SESSIONS: string[] = %s;
 
 function kick(file: string | undefined, extra: string[] = []): void {
 	// No file for --no-session runs, or before the session's first message.
-	if (!file || process.env.AGENT_SESSIONS_DISABLE) return;
+	if (!file) return;
 	try {
 		const child = spawn(AGENT_SESSIONS[0], [...AGENT_SESSIONS.slice(1), "hook", "pi", "--path", file, ...extra], {
 			detached: true,
@@ -190,6 +190,8 @@ type HandlerRef struct {
 	GroupIndex   int
 	HandlerIndex int
 	Command      string
+	Group        *jsonx.Object
+	Handler      *jsonx.Object
 }
 
 func OurHandlers(settings *jsonx.Object) []HandlerRef {
@@ -205,7 +207,12 @@ func OurHandlers(settings *jsonx.Object) []HandlerRef {
 		for gi, group := range groups {
 			for hi, h := range handlersOf(group) {
 				if c := commandOf(h); Ours.MatchString(c) {
-					out = append(out, HandlerRef{event, gi, hi, c})
+					g, _ := group.(*jsonx.Object)
+					handler, _ := h.(*jsonx.Object)
+					out = append(out, HandlerRef{
+						Event: event, GroupIndex: gi, HandlerIndex: hi, Command: c,
+						Group: g, Handler: handler,
+					})
 				}
 			}
 		}
@@ -226,7 +233,7 @@ func CodexTrustState(root string) (configured, trusted int) {
 	for _, r := range handlers {
 		key := fmt.Sprintf("%s:%s:%d:%d", hooksPath, codexEventKey(r.Event), r.GroupIndex, r.HandlerIndex)
 		entry, _ := state[key].(map[string]any)
-		if h, _ := entry["trusted_hash"].(string); h != "" {
+		if h, _ := entry["trusted_hash"].(string); h != "" && h == codexHookHash(r) && entry["enabled"] != false {
 			trusted++
 		}
 	}

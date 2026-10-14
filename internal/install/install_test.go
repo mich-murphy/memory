@@ -205,7 +205,17 @@ func TestCodexInstallWritesHooksJSONAndReportsTrust(t *testing.T) {
 		t.Helper()
 		var toml strings.Builder
 		for _, l := range labels {
-			fmt.Fprintf(&toml, "\n[hooks.state.%q]\ntrusted_hash = \"sha256:x\"\n", hooksJSON+":"+l+":0:0")
+			doc, err := loadJSON(hooksJSON)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hash := ""
+			for _, r := range OurHandlers(doc) {
+				if codexEventKey(r.Event) == l {
+					hash = codexHookHash(r)
+				}
+			}
+			fmt.Fprintf(&toml, "\n[hooks.state.%q]\ntrusted_hash = %q\n", hooksJSON+":"+l+":0:0", hash)
 		}
 		testenv.Append(t, filepath.Join(root, "config.toml"), toml.String())
 	}
