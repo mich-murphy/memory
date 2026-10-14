@@ -857,6 +857,39 @@ func TestCodexDatabasesAreCopiedWithTheBackupAPI(t *testing.T) {
 	}
 }
 
+func TestEverythingTheCollectorWritesIsPrivate(t *testing.T) {
+	e := testenv.New(t)
+	db, err := sql.Open("sqlite", filepath.Join(e.Home, ".codex", "state_5.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), "CREATE TABLE threads (id TEXT)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, "sync", "--quiet")
+	for _, root := range []string{e.State, e.Bucket} {
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			st, err := d.Info()
+			if err != nil {
+				return err
+			}
+			if st.Mode().Perm()&0o077 != 0 {
+				t.Errorf("%s is %v", path, st.Mode().Perm())
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestSnapshotRecordsWholeHarnessWithSecretsRedacted(t *testing.T) {
 	e := testenv.New(t)
 	target := filepath.Join(e.Tmp, "dotfiles", "review")

@@ -17,6 +17,8 @@ import (
 type Store interface {
 	Put(ctx context.Context, key string, body []byte, meta map[string]string) error
 	PutFile(ctx context.Context, key, path string, meta map[string]string) error
+	// Copy leaves an existing dst alone. Copies go to content-addressed keys, and a retry after
+	// an upload whose answer was lost would otherwise copy bytes that have since replaced src.
 	Copy(ctx context.Context, src, dst string) (srcExists bool, err error)
 	Delete(ctx context.Context, key string) error
 	Get(ctx context.Context, key string) ([]byte, error)
@@ -55,6 +57,9 @@ func (l *Local) PutFile(_ context.Context, key, path string, _ map[string]string
 }
 
 func (l *Local) Copy(ctx context.Context, src, dst string) (srcExists bool, err error) {
+	if fsutil.IsFile(l.path(dst)) {
+		return true, nil
+	}
 	if !fsutil.IsFile(l.path(src)) {
 		return false, nil
 	}

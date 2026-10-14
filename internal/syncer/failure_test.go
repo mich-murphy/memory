@@ -7,12 +7,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/config"
+	"github.com/mich-murphy/memory/internal/raw"
 	"github.com/mich-murphy/memory/internal/state"
 	"github.com/mich-murphy/memory/internal/store"
 	"github.com/mich-murphy/memory/internal/syncer"
@@ -21,10 +23,18 @@ import (
 
 var errInjected = errors.New("injected failure")
 
-// flakyStore fails writes to keys containing any of fail.
+// flakyStore fails writes to keys containing any of fail, and puts to keys containing any of
+// lost after they land, as when the answer to a request never arrives.
 type flakyStore struct {
 	store.Store
-	fail []string
+	fail, lost []string
+}
+
+func (f *flakyStore) answer(key string, err error) error {
+	if err == nil && slices.ContainsFunc(f.lost, func(s string) bool { return strings.Contains(key, s) }) {
+		return errInjected
+	}
+	return err
 }
 
 func (f *flakyStore) broken(key string) bool {
@@ -40,14 +50,14 @@ func (f *flakyStore) Put(ctx context.Context, key string, body []byte, meta map[
 	if f.broken(key) {
 		return errInjected
 	}
-	return f.Store.Put(ctx, key, body, meta)
+	return f.answer(key, f.Store.Put(ctx, key, body, meta))
 }
 
 func (f *flakyStore) PutFile(ctx context.Context, key, path string, meta map[string]string) error {
 	if f.broken(key) {
 		return errInjected
 	}
-	return f.Store.PutFile(ctx, key, path, meta)
+	return f.answer(key, f.Store.PutFile(ctx, key, path, meta))
 }
 
 func (f *flakyStore) Copy(ctx context.Context, src, dst string) (bool, error) {
@@ -102,6 +112,57 @@ func TestAFailedUploadIsCountedAndRetriedNextRun(t *testing.T) {
 	second := sweep(t, local)
 	if second.Errors != 0 || !e.HasKey(key) || !e.HasKey("manifests/agent=pi/machine=testbox/"+piKey+".json") {
 		t.Errorf("retry: errors %v, keys %v", second.ErrorMessages, e.BucketKeys())
+	}
+}
+
+func TestASegmentWhoseAnswerWasLostIsNotReadAsPartOfTheFile(t *testing.T) {
+	e := testenv.New(t)
+	local := store.NewLocal(e.Bucket)
+	sweep(t, local)
+	path := filepath.Join(e.ClaudeSlug, claudeSID+".jsonl")
+	key := rawKey("claude", "projects/"+slug+"/"+claudeSID+".jsonl")
+	for _, st := range []store.Store{&flakyStore{Store: local, lost: []string{key + ".d/"}}, local} {
+		testenv.Append(t, path, testenv.JSONL(t, map[string]any{"type": "user", "message": "more"}))
+		testenv.Backdate(t, path, 2*time.Minute)
+		sweep(t, st)
+	}
+	if got, want := readObject(t, e, key), readFile(t, path); !bytes.Equal(got, want) {
+		t.Errorf("the bucket rebuilds %d bytes of the file's %d", len(got), len(want))
+	}
+}
+
+func TestAFoldWhoseAnswerWasLostIsUploadedWholeAgain(t *testing.T) {
+	e := testenv.New(t)
+	local := store.NewLocal(e.Bucket)
+	sweep(t, local)
+	path := filepath.Join(e.ClaudeSlug, claudeSID+".jsonl")
+	key := rawKey("claude", "projects/"+slug+"/"+claudeSID+".jsonl")
+	testenv.Append(t, path, testenv.JSONL(t, map[string]any{"type": "user", "message": "more"}))
+	testenv.Backdate(t, path, 2*time.Minute)
+	sweep(t, local)
+	testenv.Backdate(t, path, syncer.FoldAfter+time.Minute)
+	sweep(t, &flakyStore{Store: local, lost: []string{key}})
+	testenv.Append(t, path, testenv.JSONL(t, map[string]any{"type": "user", "message": "again"}))
+	testenv.Backdate(t, path, 2*time.Minute)
+	sweep(t, local)
+	main := mainTranscript(t, e.Manifest("claude", claudeKey))
+	if !bytes.Equal(readPieces(t, e, main["pieces"]), readFile(t, path)) {
+		t.Error("the manifest's pieces don't rebuild the file")
+	}
+}
+
+func TestARewriteWhoseAnswerWasLostStillKeepsTheEarlierBytes(t *testing.T) {
+	e := testenv.New(t)
+	local := store.NewLocal(e.Bucket)
+	sweep(t, local)
+	path := filepath.Join(e.ClaudeSlug, claudeSID+".jsonl")
+	old := readFile(t, path)
+	testenv.Write(t, path, testenv.JSONL(t, map[string]any{"type": "user", "message": "rewritten"}))
+	testenv.Backdate(t, path, 2*time.Minute)
+	sweep(t, &flakyStore{Store: local, lost: []string{rawKey("claude", "projects/"+slug+"/"+claudeSID+".jsonl")}})
+	sweep(t, local)
+	if !bytes.Equal(readBlob(t, e, "blobs/"+raw.SHA256(old)+".zst"), old) {
+		t.Error("the blob doesn't hold the earlier bytes")
 	}
 }
 

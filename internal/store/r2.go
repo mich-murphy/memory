@@ -192,6 +192,13 @@ func (r *R2) uploadPart(ctx context.Context, key string, uploadID *string, n int
 func (r *R2) Copy(ctx context.Context, src, dst string) (srcExists bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, opTimeout)
 	defer cancel()
+	_, err = r.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &r.bucket, Key: &dst})
+	if err == nil {
+		return true, nil
+	}
+	if !isNotFound(err) {
+		return false, fmt.Errorf("copy %s: %w", src, err)
+	}
 	_, err = r.client.CopyObject(ctx, &s3.CopyObjectInput{Bucket: &r.bucket, Key: &dst, CopySource: aws.String(r.bucket + "/" + src)})
 	if isNotFound(err) {
 		return false, nil

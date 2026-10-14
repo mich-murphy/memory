@@ -77,6 +77,7 @@ put manifests/agent=codex/machine=bench/rollout-2026-10-01T10-00-00-753b6d12-5fc
 == rewrite and delete
 summary {"uploaded":2,"unchanged":34,"skipped":0,"errors":0,"bytes_uploaded":11204,"manifests":3,"versions":1,"segments":1,"folded":0,"deleted":1,"unknown":0,"error_messages":[]}
 copy raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.jsonl.zst blobs/537523511f8a88980c45425b163553c3f1fdaced532b1cb234a27f6e650d8112.zst
+head blobs/537523511f8a88980c45425b163553c3f1fdaced532b1cb234a27f6e650d8112.zst
 put manifests/agent=claude/machine=bench/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.json
 put manifests/agent=claude/machine=bench/-home-dev-code-proj-2/426b2564-4425-6b57-2939-85d342e21aa3.json
 put manifests/agent=pi/machine=bench/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.json

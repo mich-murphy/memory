@@ -9,7 +9,7 @@ FUZZ_TARGETS  := internal/adapters:FuzzSessionInfo internal/hook:FuzzReadInput \
                  internal/jsonx:FuzzParseObjectRoundTrip internal/raw:FuzzCompressRoundTrip \
                  internal/scrub:FuzzFile internal/shellwords:FuzzJoinSplit internal/gitinfo:FuzzStripUserinfo
 
-.PHONY: check fmt fmt-check lint lint-version tidy-check fix-check deadcode vuln test cover crap fuzz bench bench-smoke actionlint build hooks gopls clean
+.PHONY: check fmt fmt-check lint lint-version tidy-check fix-check deadcode vuln test cover crap fuzz mutation bench bench-smoke actionlint build hooks gopls clean
 
 check: fmt-check lint fix-check tidy-check deadcode vuln crap bench-smoke actionlint
 
@@ -69,6 +69,13 @@ crap: cover
 	$(TOOL) go-crap scan ./... --coverage-profile=cover.out --exclude='internal/testenv/' \
 		--missing=pessimistic --threshold=30 --fail-above --top=10 --no-progress --format=$(CRAP_FORMAT)
 
+# MUTATE_DIFF=origin/main mutates only the lines changed since that ref.
+MUTATE_DIFF ?=
+mutation:
+	$(TOOL) gremlins unleash --exclude-files='internal/testenv/' --timeout-coefficient=3 \
+		--invert-assignments --invert-bitwise --invert-bwassign --invert-logical --invert-loopctrl \
+		--remove-self-assignments --output=mutation.json $(if $(MUTATE_DIFF),--diff=$(MUTATE_DIFF))
+
 fuzz:
 	@for t in $(FUZZ_TARGETS); do \
 		pkg=$${t%%:*}; name=$${t##*:}; \
@@ -86,4 +93,4 @@ hooks:
 	$(TOOL) lefthook install
 
 clean:
-	rm -rf $(COVER_DIR) cover.out bench.txt bin dist
+	rm -rf $(COVER_DIR) cover.out bench.txt mutation.json bin dist

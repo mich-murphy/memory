@@ -6,7 +6,10 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/mich-murphy/memory/internal/testenv"
 )
 
 var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
@@ -44,6 +47,39 @@ func TestMachineIDIsAPersistentUUID(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(dir, "cfg", "machine-id"))
 	if err != nil || strings.TrimSpace(string(data)) != first.MachineID {
 		t.Errorf("machine-id file = %q, %v", data, err)
+	}
+}
+
+func TestRunsStartingTogetherShareOneMachineID(t *testing.T) {
+	for range 20 {
+		dir := t.TempDir()
+		ids := make([]string, 8)
+		var wg sync.WaitGroup
+		for i := range ids {
+			wg.Go(func() {
+				var err error
+				if ids[i], err = MachineUUID(dir); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+		wg.Wait()
+		if len(slices.Compact(slices.Clone(ids))) != 1 {
+			t.Fatalf("machine ids %v", ids)
+		}
+	}
+}
+
+func TestAnEmptyMachineIDFileGetsAnIDThatLasts(t *testing.T) {
+	dir := t.TempDir()
+	testenv.Write(t, filepath.Join(dir, "machine-id"), "")
+	first, err := MachineUUID(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := MachineUUID(dir)
+	if err != nil || first != again || !uuidRE.MatchString(first) {
+		t.Errorf("machine ids %q then %q, %v", first, again, err)
 	}
 }
 
