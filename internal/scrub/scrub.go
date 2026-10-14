@@ -227,7 +227,8 @@ func decode(f format, data []byte) (any, error) {
 	if f == formatTOML {
 		var m map[string]any
 		if _, err := toml.Decode(string(data), &m); err != nil {
-			return nil, fmt.Errorf("toml: %w", err)
+			// Parser diagnostics can echo an unquoted credential value. Callers log this error.
+			return nil, errors.New("toml: invalid document")
 		}
 		return m, nil
 	}
@@ -239,6 +240,9 @@ func decode(f format, data []byte) (any, error) {
 	}
 	if err := jsonx.Decode(data, &doc); err != nil {
 		return nil, err
+	}
+	if _, ok := doc.(map[string]any); !ok {
+		return nil, errors.New("json: protected config must be an object")
 	}
 	return doc, nil
 }
