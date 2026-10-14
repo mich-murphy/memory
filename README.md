@@ -107,3 +107,5 @@ make gopls   # the pinned gopls, for the Claude Code gopls-lsp plugin
 For Claude Code, the repo's settings turn on the `gopls-lsp` plugin and the gopls MCP server in `.mcp.json`. Install the plugin once with `claude plugin install gopls-lsp@claude-plugins-official --scope project` after `make gopls`, and approve the MCP server when asked.
 
 [docs/quality-gates.md](docs/quality-gates.md) explains each gate and its settings, and [CLAUDE.md](CLAUDE.md) has the rules for coding agents. Linux and macOS only.
+
+For executable user-path verification, use the [agent-sessions verification skill](.agents/skills/verify-agent-sessions/SKILL.md). It builds the real CLI, drives isolated local journeys and optional sandboxed real-agent hooks, and preserves evidence after cleanup. Its feature map names the remaining gaps; local-store success is not live R2 acceptance.
