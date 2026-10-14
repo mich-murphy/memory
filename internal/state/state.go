@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS files (
     line_count INTEGER,
     prefix_sha256 TEXT,
     head TEXT,
-    deleted_at REAL
+    deleted_at REAL,
+    disk_size INTEGER
 );
 CREATE INDEX IF NOT EXISTS files_session ON files(agent, session_key);
 CREATE INDEX IF NOT EXISTS files_key ON files(key);
@@ -157,11 +158,34 @@ func Open(ctx context.Context, dir string) (*State, error) {
 	if err == nil {
 		_, err = conn.ExecContext(ctx, schema)
 	}
+	if err == nil {
+		err = addDiskSize(ctx, conn)
+	}
 	if err != nil {
 		_ = db.Close() // already failing; this only frees the handle
 		return nil, fmt.Errorf("state schema: %w", err)
 	}
 	return &State{db: db, conn: conn, ctx: ctx, stmts: map[string]*sql.Stmt{}}, nil
+}
+
+// addDiskSize adds the column to a state from before it, last, where ALTER TABLE puts it. Its
+// rows take size, which the change check compared before, until each file is next recorded.
+// The write lock makes a run opening the state at the same time wait, then find the column.
+func addDiskSize(ctx context.Context, conn *sql.Conn) error {
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return err
+	}
+	var n int
+	err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('files') WHERE name = 'disk_size'").Scan(&n)
+	if err == nil && n == 0 {
+		_, err = conn.ExecContext(ctx, "ALTER TABLE files ADD COLUMN disk_size INTEGER; UPDATE files SET disk_size = size")
+	}
+	if err != nil {
+		_, rerr := conn.ExecContext(ctx, "ROLLBACK")
+		return errors.Join(err, rerr)
+	}
+	_, err = conn.ExecContext(ctx, "COMMIT")
+	return err
 }
 
 func (s *State) Close() error {
@@ -211,7 +235,11 @@ func (s *State) exec(query string, args ...any) error {
 		return err
 	}
 	if _, err := s.stmts[query].ExecContext(s.ctx, args...); err != nil {
-		return fmt.Errorf("state: %w", err)
+		// A later Flush or Close would otherwise commit the writes before this one, half a
+		// record; without them the work is simply done again.
+		s.inTx = false
+		_, rerr := s.conn.ExecContext(s.ctx, "ROLLBACK")
+		return fmt.Errorf("state: %w", errors.Join(err, rerr))
 	}
 	return nil
 }
@@ -256,7 +284,9 @@ func queryAll[T any](s *State, query string, args []any, scan func(*sql.Rows, *T
 
 type File struct {
 	adapters.SessionFile
+	// Size is of the bytes uploaded; DiskSize of the file, which is compressed or scrubbed.
 	Size         int64
+	DiskSize     int64
 	MtimeNS      int64
 	SHA256       string
 	LineCount    int64
@@ -265,11 +295,11 @@ type File struct {
 	DeletedAt    float64
 }
 
-// FileUnchanged says whether path was last recorded with this size and mtime, and how many
+// FileUnchanged says whether path was last recorded with this disk size and mtime, and how many
 // pieces key's object has, in one query since a sweep asks both of every file.
-func (s *State) FileUnchanged(path, key string, size, mtimeNS int64) (unchanged bool, pieces int, err error) {
-	_, err = s.queryRow("SELECT size = ? AND mtime_ns = ? AND deleted_at IS NULL, (SELECT COUNT(*) FROM pieces WHERE key = ?) "+
-		"FROM files WHERE path = ?", []any{size, mtimeNS, key, path}, &unchanged, &pieces)
+func (s *State) FileUnchanged(path, key string, diskSize, mtimeNS int64) (unchanged bool, pieces int, err error) {
+	_, err = s.queryRow("SELECT disk_size IS ? AND mtime_ns = ? AND deleted_at IS NULL, (SELECT COUNT(*) FROM pieces WHERE key = ?) "+
+		"FROM files WHERE path = ?", []any{diskSize, mtimeNS, key, path}, &unchanged, &pieces)
 	return unchanged, pieces, err
 }
 
@@ -284,9 +314,9 @@ func (s *State) RecordFile(f *File) error {
 		head = string(b)
 	}
 	return s.exec("INSERT OR REPLACE INTO files VALUES "+
-		"(?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, (SELECT head FROM files WHERE path = ?)),NULL)",
+		"(?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, (SELECT head FROM files WHERE path = ?)),NULL,?)",
 		f.Path, f.Agent, f.Root, f.Key, nullString(f.SessionKey), f.Role, f.Size, f.MtimeNS, f.SHA256,
-		f.LineCount, nullString(f.PrefixSHA256), head, f.Path)
+		f.LineCount, nullString(f.PrefixSHA256), head, f.Path, f.DiskSize)
 }
 
 func nullString(s string) any {

@@ -16,7 +16,7 @@ snapshots/sets/<set-id>.json                                        which files 
 
 The collector walks each agent's whole directory and copies every file except:
 
-- **Credentials**, never copied: `.credentials.json` (Claude Code's login, Codex's MCP OAuth tokens), `auth.json`, `oauth.json`, `mcp-auth.json`, any `*.key` or `*.pem`, `~/.claude.json` backups, and the collector's own `config.env`. `~/.claude.json` itself is uploaded as `claude.json`, with the secrets below redacted and its layout kept.
+- **Credentials**, never copied: `.credentials.json` (Claude Code's login, Codex's MCP OAuth tokens), `auth.json`, `oauth.json`, `mcp-auth.json`, any `*.key` or `*.pem`, `.env` and `.env.*` (Codex loads API keys from `$CODEX_HOME/.env`), `~/.claude.json` backups, and the collector's own `config.env`. `~/.claude.json` itself is uploaded as `claude.json`, with the secrets below redacted and its layout kept.
 - **Noise**: locks, temp files, caches, `node_modules`, shell snapshots, executables, Claude Code's own install (`local/`, `downloads/`), plugin source checkouts, and Pi's `bin/` (fd and rg).
 - **Live SQLite files**, which are uploaded as consistent copies instead (below).
 
@@ -24,11 +24,15 @@ The collector walks each agent's whole directory and copies every file except:
 
 | File | Values redacted |
 |---|---|
-| `~/.claude.json` (uploaded as `claude.json`) | `primaryApiKey`, `customApiKeyResponses`, and each MCP server's `env`, `headers`, `url` and `oauth.clientSecret`, at the top level and under `projects` |
-| `settings.json`, `settings.local.json`, `managed-settings.json` | `env` |
-| `.mcp.json`, `mcp.json`, `managed-mcp.json` | each MCP server's `env`, `headers`, `url` and `oauth.clientSecret` |
+| `~/.claude.json` (uploaded as `claude.json`) | `primaryApiKey`, `customApiKeyResponses`, and each MCP server's `env`, `headers`, `url`, `oauth.clientSecret` and `args`, at the top level and under `projects` |
+| `settings.json`, `settings.local.json`, `managed-settings.json` | `env`, and the `headers` of each `http` hook |
+| `.mcp.json`, `mcp.json` (Claude Code's, and Pi's `~/.pi/agent/mcp.json`), `managed-mcp.json` | each MCP server's `env`, `headers`, `url`, `oauth.clientSecret` and `args` |
 | Pi `models.json` | each provider's `apiKey` and `headers` |
-| Codex `config.toml`, `managed_config.toml` | `mcp_servers.*` `env`, `http_headers`, `url` and `bearer_token`; `model_providers.*` `http_headers`, `experimental_bearer_token` and `base_url`; `shell_environment_policy.set` |
+| Codex `config.toml`, `managed_config.toml` | `mcp_servers.*` `env`, `http_headers`, `url`, `bearer_token` and `args`; the `headers` of each `otel` exporter (`otel.<exporter>.<otlp-http or otlp-grpc>.headers`); `model_providers.*` `http_headers`, `experimental_bearer_token` and `base_url`; `shell_environment_policy.set` |
+
+In a command line (`args`), what is redacted is the value of a flag whose name says it holds a secret, as the next word or after `=` (`--api-key`, `--token`, `--auth-token`, `--client-secret`, `--password`; whole words, so `--max-tokens` is kept, and a next word starting with `-` isn't a value), the value in a `NAME=value` word with such a name (`GITHUB_TOKEN=…`, Codex's `-c mcp_servers.x.env.API_KEY=…`), the part of a `--header` or `-H` value after the header's name, and, in an argument that is inline JSON, what these rules redact in a settings or MCP file.
+
+A copy of any of these files with a backup suffix (`~`, `.bak`, `.orig`, `.old`, or the `.agent-sessions-backup-<time>` that `agent-sessions install` leaves) is redacted the same way.
 
 A value that only names a secret is kept: `${VAR}`, `$VAR`, `Bearer ${TOKEN}`, a Pi `!command`, a number or a boolean, and for Pi's `apiKey` an environment variable name. A URL keeps its scheme, host, user and path; its password is dropped and each query value redacted. The same string anywhere else in the file is redacted too. A value written in a form the collector can't find in place (a JSON `\u` escape, a TOML multi-line string) makes it rewrite the whole file from the parsed document, which loses comments and layout. A file that has these rules but doesn't parse isn't uploaded; the run counts it as an error and tries again on the next sync.
 
@@ -52,7 +56,7 @@ A file is its base object followed by its segments. The manifest lists them as `
 
 **Versions.** When a file changes in any way other than an append (its first `old size` bytes no longer hash to what was uploaded), each piece of its old contents is copied to `blobs/<sha256>.zst` before the new bytes are uploaded. A blob that is already there isn't copied again, so identical old contents from different files, sessions or machines are stored once. `raw-versions/…/<key>.json` lists the file's earlier versions, and the manifest lists them under `versions`; each has `sha256`, `size`, `versioned_at` and the `pieces` (in `blobs/`) that rebuild it. Database copies keep at most one version a day: an hourly refresh within a day of the last kept version replaces the copy without keeping it.
 
-Every object is zstd (level 10) with these metadata fields: `sha256` (of the uncompressed bytes the object holds), `start`, `end`, `agent`, `machine` and `role`.
+Every object is zstd (klauspost/compress's `SpeedBetterCompression`, about zstd level 7) with these metadata fields: `sha256` (of the uncompressed bytes the object holds), `start`, `end`, `agent`, `machine` and `role`.
 
 **Deletions.** When a sweep finds that an uploaded file is gone from disk, the file gets a `deleted_locally` date in its session's manifest. The object stays in the bucket.
 
@@ -96,8 +100,8 @@ There's one manifest per session: a Claude Code session (`<slug>/<session id>`),
 
 - **`transcripts`** lists every file of the session, with the `pieces` that make up its current bytes and its earlier `versions`. `role` is `main`, `subagent`, `tool_result`, `superseded` (an earlier transcript Claude Code set aside), `file_history`, `todo`, `task`, `session_env`, `debug` or `aux`. `line_count` and `prefix_sha256` (the hash of the first 20 lines) let the normaliser pin an input and spot a rewritten file. `head` is what the file's first lines say about it, each field taking the first non-empty value in those lines, so a Claude subagent file carries its own `agent_id`.
 - **`launch`** is recorded by the session-start hook:
-  - `process.argv` is the agent's command line, found by walking up from the hook to the agent's process. Pi hides its arguments from the process table, so its extension passes `process.argv` (`via: "extension"`).
-  - `env` keeps `CLAUDE_CODE_*`, `CODEX_*`, `PI_*`, `ANTHROPIC_MODEL`, `MAX_THINKING_TOKENS` and a few other variables, minus anything named like a token, key, secret or password.
+  - `process.argv` is the agent's command line, found by walking up from the hook to the agent's process. Pi hides its arguments from the process table, so its extension passes `process.argv` (`via: "extension"`). Secrets in it are redacted as in MCP server `args` ([Raw files](#raw-files)).
+  - `env` keeps `CLAUDE_CODE_*`, `CODEX_*`, `PI_*`, `ANTHROPIC_MODEL`, `MAX_THINKING_TOKENS` and a few other variables, minus any whose name has the word `TOKEN`, `KEY` or `AUTH`, or `SECRET`, `PASSWORD`, `CREDENTIAL` or `COOKIE` anywhere (`MAX_THINKING_TOKENS` is kept).
   - `hook_input` is the hook's whole payload.
   - Sessions from before agent-sessions was installed have no launch.
 - **`git`** is the repo state when the session started, or at its first snapshot if there was no launch. `common_dir` points worktrees at their main repo. A token in the remote URL is dropped. `repo_id` is a hash of the normalised remote URL (`github.com/owner/repo`), so clones on different machines share it; a repo with no remote is keyed by machine and git directory instead. The repository's history isn't exported: for a repo with a remote, fetch it from there when analysing.

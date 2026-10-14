@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/mich-murphy/memory/internal/adapters"
@@ -74,6 +75,21 @@ func Command() []string {
 	return []string{"agent-sessions"}
 }
 
+// warnIfOffPath warns, once, when hooks will run a binary other than the agent-sessions on
+// PATH, such as one run from a download directory: when it is deleted, every hook fails.
+func warnIfOffPath(o *Options) {
+	if p, err := exec.LookPath("agent-sessions"); err == nil {
+		if abs, err := filepath.Abs(p); err == nil && abs == o.Command[0] {
+			return
+		}
+	}
+	msg := fmt.Sprintf("warning: the hooks run %s, which isn't agent-sessions on your PATH, so they break if it moves. "+
+		"Install with install.sh, or put it on your PATH, and rerun `agent-sessions install`.", o.Command[0])
+	if !slices.Contains(o.Log, msg) {
+		o.Log = append(o.Log, msg)
+	}
+}
+
 func backup(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -91,6 +107,18 @@ func backup(path string) (string, error) {
 		return "", err
 	}
 	return name, nil
+}
+
+func remove(path string, o *Options) error {
+	if o.DryRun {
+		o.Logf("would remove: %s", path)
+		return nil
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("install: %w", err)
+	}
+	o.Logf("removed: %s", path)
+	return nil
 }
 
 func write(path string, text []byte, o *Options) error {
@@ -168,15 +196,20 @@ func handlersOf(group any) []any {
 	return handlers
 }
 
-func withoutOurs(groups []any) []any {
-	var kept []any
+// replaceOurs puts ours in place of the first of our handlers in groups and drops the rest,
+// so Codex's trust keys, which hold each handler's position, still match on a reinstall.
+func replaceOurs(groups []any, ours *jsonx.Object) (kept []any, replaced bool) {
 	for _, group := range groups {
 		g, _ := group.(*jsonx.Object)
 		handlers := handlersOf(group)
 		var others []any
 		for _, h := range handlers {
-			if !Ours.MatchString(commandOf(h)) {
+			switch {
+			case !Ours.MatchString(commandOf(h)):
 				others = append(others, h)
+			case ours != nil && !replaced:
+				others = append(others, ours)
+				replaced = true
 			}
 		}
 		switch {
@@ -188,7 +221,7 @@ func withoutOurs(groups []any) []any {
 			kept = append(kept, g)
 		}
 	}
-	return kept
+	return kept, replaced
 }
 
 func mergeHooks(doc *jsonx.Object, events []HookEvent, command string) {
@@ -197,26 +230,36 @@ func mergeHooks(doc *jsonx.Object, events []HookEvent, command string) {
 	if !ok {
 		hooks = jsonx.NewObject()
 	}
+	ours := map[string]*jsonx.Object{}
+	if command != "" {
+		for _, e := range events {
+			h := jsonx.NewObject()
+			h.Set("type", "command")
+			h.Set("command", command)
+			if e.Async {
+				h.Set("async", true)
+			}
+			h.Set("timeout", int(e.Timeout/time.Second))
+			ours[e.Name] = h
+		}
+	}
 	for _, event := range hooks.Keys() {
 		v, _ := hooks.Get(event)
 		groups, _ := v.([]any)
-		if kept := withoutOurs(groups); len(kept) > 0 {
+		kept, replaced := replaceOurs(groups, ours[event])
+		if replaced {
+			delete(ours, event)
+		}
+		if len(kept) > 0 {
 			hooks.Set(event, kept)
 		} else {
 			hooks.Delete(event)
 		}
 	}
-	if command != "" {
-		for _, e := range events {
-			handler := jsonx.NewObject()
-			handler.Set("type", "command")
-			handler.Set("command", command)
-			if e.Async {
-				handler.Set("async", true)
-			}
-			handler.Set("timeout", int(e.Timeout/time.Second))
+	for _, e := range events {
+		if h, ok := ours[e.Name]; ok {
 			group := jsonx.NewObject()
-			group.Set("hooks", []any{handler})
+			group.Set("hooks", []any{h})
 			v, _ := hooks.Get(e.Name)
 			groups, _ := v.([]any)
 			hooks.Set(e.Name, append(groups, group))
@@ -236,12 +279,16 @@ func hookCommand(cmd []string, agent string) string {
 func Claude(o *Options) error {
 	root := adapters.NewClaude(o.Home).Dir()
 	path := filepath.Join(root, "settings.json")
+	if o.Remove && !fsutil.Exists(path) {
+		return nil
+	}
 	settings, err := loadJSON(path)
 	if err != nil {
 		return err
 	}
 	command := ""
 	if !o.Remove {
+		warnIfOffPath(o)
 		command = hookCommand(o.Command, "claude")
 	}
 	mergeHooks(settings, ClaudeEvents, command)
@@ -280,26 +327,26 @@ func raiseCleanupPeriod(settings *jsonx.Object, o *Options) {
 func Codex(o *Options) error {
 	root := adapters.NewCodex(o.Home).Dir()
 	path := filepath.Join(root, "hooks.json")
+	if o.Remove && !fsutil.Exists(path) {
+		return nil
+	}
 	doc, err := loadJSON(path)
 	if err != nil {
 		return err
 	}
 	command := ""
 	if !o.Remove {
+		warnIfOffPath(o)
 		command = hookCommand(o.Command, "codex")
 	}
 	mergeHooks(doc, CodexEvents, command)
 	if o.Remove && doc.Len() == 0 {
-		if fsutil.Exists(path) && !o.DryRun {
+		if !o.DryRun {
 			if _, err := backup(path); err != nil {
 				return err
 			}
-			if err := os.Remove(path); err != nil {
-				return fmt.Errorf("install: %w", err)
-			}
 		}
-		o.Logf("removed: %s", path)
-		return nil
+		return remove(path, o)
 	}
 	body, err := jsonx.Indent(doc, 2)
 	if err != nil {

@@ -132,6 +132,52 @@ AWS_SECRET_ACCESS_KEY = "[redacted]"
 			want: "not = [toml",
 		},
 		{
+			name:  "MCP server args in claude.json at both levels",
+			agent: "claude", file: "claude.json",
+			in: `{"mcpServers": {"c7": {"command": "npx", "args": ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-1"]}},
+ "projects": {"/p": {"mcpServers": {"r": {"command": "mcp-remote", "args": ["https://h/mcp", "--header", "Authorization: Bearer t0k", "--token=t1", "--max-tokens", "9"]}}}}}`,
+			want: `{"mcpServers": {"c7": {"command": "npx", "args": ["-y", "@upstash/context7-mcp", "--api-key", "[redacted]"]}},
+ "projects": {"/p": {"mcpServers": {"r": {"command": "mcp-remote", "args": ["https://h/mcp", "--header", "Authorization: [redacted]", "--token=[redacted]", "--max-tokens", "9"]}}}}}`,
+		},
+		{
+			name:  "pi mcp.json args keep references",
+			agent: "pi", file: "mcp.json",
+			in:   `{"mcpServers": {"s": {"args": ["--api-key", "${CTX7_KEY}", "-H", "X-Key: k1"]}}}`,
+			want: `{"mcpServers": {"s": {"args": ["--api-key", "${CTX7_KEY}", "-H", "X-Key: [redacted]"]}}}`,
+		},
+		{
+			name:  "claude settings http hook headers",
+			agent: "claude", file: "settings.json",
+			in:   `{"hooks": {"Stop": [{"hooks": [{"type": "http", "url": "https://h/x", "headers": {"Authorization": "Bearer ghp_1", "X-Ref": "$MY_TOKEN"}}]}]}}`,
+			want: `{"hooks": {"Stop": [{"hooks": [{"type": "http", "url": "https://h/x", "headers": {"Authorization": "[redacted]", "X-Ref": "$MY_TOKEN"}}]}]}}`,
+		},
+		{
+			name:  "codex MCP args and otel exporter headers",
+			agent: "codex", file: "config.toml",
+			in: `[mcp_servers.c7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-1"]
+
+[otel.exporter.otlp-http]
+endpoint = "https://otel.example/v1"
+headers = { "x-otlp-api-key" = "ok1" }
+
+[otel.trace_exporter.otlp-grpc.headers]
+authorization = "Bearer ${OTEL_TOKEN}"
+`,
+			want: `[mcp_servers.c7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp", "--api-key", "[redacted]"]
+
+[otel.exporter.otlp-http]
+endpoint = "https://otel.example/v1"
+headers = { "x-otlp-api-key" = "[redacted]" }
+
+[otel.trace_exporter.otlp-grpc.headers]
+authorization = "Bearer ${OTEL_TOKEN}"
+`,
+		},
+		{
 			name:  "an empty file stays empty",
 			agent: "pi", file: "mcp.json",
 			in:   "",
@@ -180,6 +226,27 @@ func TestFileRefusesAConfigFileItCannotParse(t *testing.T) {
 	}
 }
 
+func TestBackupCopiesAreScrubbedLikeTheirOriginal(t *testing.T) {
+	for _, name := range []string{
+		"settings.json.agent-sessions-backup-20261014-101010", "settings.json~", "settings.json.bak",
+		"settings.local.json.orig", "managed-settings.json.old",
+	} {
+		got, err := File("claude", name, []byte(`{"env": {"KEY": "sk-1"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := `{"env": {"KEY": "[redacted]"}}`; string(got) != want {
+			t.Errorf("File(%s) = %s, want %s", name, got, want)
+		}
+		if got, err := File("claude", name, []byte(`{"env": {"KEY": "sk-`)); err == nil {
+			t.Errorf("File(%s) of a broken copy = %q, want an error", name, got)
+		}
+	}
+	if got, err := File("claude", "settings.json.bak2", []byte(`{"env": {"KEY": "sk-1"}`)); err != nil || !strings.Contains(string(got), "sk-1") {
+		t.Errorf("an unrelated name was scrubbed: %q, %v", got, err)
+	}
+}
+
 func TestApplies(t *testing.T) {
 	for _, c := range []struct {
 		agent, file string
@@ -192,10 +259,38 @@ func TestApplies(t *testing.T) {
 		{"claude", "models.json", false},
 		{"pi", "config.toml", false},
 		{"codex", "history.jsonl", false},
+		{"codex", "config.toml.agent-sessions-backup-20261014-101010", true},
+		{"pi", "models.json~", true},
 	} {
 		if got := Applies(c.agent, c.file); got != c.want {
 			t.Errorf("Applies(%s, %s) = %v", c.agent, c.file, got)
 		}
+	}
+}
+
+func TestArgsRedactsSecretFlagValues(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		in, want []string
+	}{
+		{"flag and value", []string{"pi", "--api-key", "sk-1", "--model", "m"}, []string{"pi", "--api-key", Redacted, "--model", "m"}},
+		{"flag=value", []string{"x", "--auth-token=t", "--client-secret=s", "--password", "p"}, []string{"x", "--auth-token=" + Redacted, "--client-secret=" + Redacted, "--password", Redacted}},
+		{"whole words only", []string{"x", "--max-tokens", "9", "--keyboard", "us", "--monkey", "y"}, []string{"x", "--max-tokens", "9", "--keyboard", "us", "--monkey", "y"}},
+		{"no value", []string{"codex", "login", "--with-api-key", "--verbose"}, []string{"codex", "login", "--with-api-key", "--verbose"}},
+		{"references", []string{"x", "--token", "$GH_TOKEN", "--api-key=${K}"}, []string{"x", "--token", "$GH_TOKEN", "--api-key=${K}"}},
+		{"headers", []string{"curl", "-H", "Authorization: Bearer t", "--header=X-Key: k", "-H", "Accept: ${A}"}, []string{"curl", "-H", "Authorization: " + Redacted, "--header=X-Key: " + Redacted, "-H", "Accept: ${A}"}},
+		{"name=value", []string{"codex", "-c", "mcp_servers.gh.env.GITHUB_TOKEN=ghp", "-c", "model=o3"}, []string{"codex", "-c", "mcp_servers.gh.env.GITHUB_TOKEN=" + Redacted, "-c", "model=o3"}},
+		{
+			"inline JSON",
+			[]string{"claude", "--mcp-config", `{"mcpServers":{"s":{"headers":{"Authorization":"Bearer t"}}}}`, "--settings", `{"env":{"API_KEY":"k"},"model":"opus"}`, "{not json"},
+			[]string{"claude", "--mcp-config", `{"mcpServers":{"s":{"headers":{"Authorization":"[redacted]"}}}}`, "--settings", `{"env":{"API_KEY":"[redacted]"},"model":"opus"}`, "{not json"},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if diff := cmp.Diff(c.want, Args(c.in)); diff != "" {
+				t.Errorf("Args(%q) (-want +got):\n%s", c.in, diff)
+			}
+		})
 	}
 }
 
@@ -226,6 +321,7 @@ func FuzzFile(f *testing.F) {
 	}
 	f.Add(uint8(0), `{"env": {"K": "v", "N": "1"}}`)
 	f.Add(uint8(2), `{"mcpServers": {"s": {"headers": {"A": "Bearer x"}, "url": "https://h/?k=v"}}}`)
+	f.Add(uint8(2), `{"mcpServers": {"s": {"args": ["--token", "t", "-H", "A: b", "{\"env\": {\"K\": \"v\"}}"]}}}`)
 	f.Add(uint8(3), `{"providers": {"p": {"apiKey": "k"}}}`)
 	f.Add(uint8(4), "[mcp_servers.s.env]\nK = 'v'\n")
 	f.Fuzz(func(t *testing.T, which uint8, in string) {

@@ -16,6 +16,12 @@ agent-sessions doctor       # checks the bucket and every hook
 agent-sessions backfill     # uploads every session already on this machine
 ```
 
+While the repo is private, `raw.githubusercontent.com` returns 404, so fetch the script through `gh` instead, logged in with `gh auth login`:
+
+```bash
+gh api -H 'Accept: application/vnd.github.raw' repos/mich-murphy/memory/contents/install.sh | sh
+```
+
 If you use Codex, open it once and approve the agent-sessions hooks in `/hooks`. Codex doesn't run a new hook until you've reviewed it, and `agent-sessions doctor` tells you whether that's done.
 
 That's all. `agent-sessions install` only touches agents it finds on the machine, so rerun it after installing another agent. It's safe to rerun at any time: it replaces its own entries and leaves everything else in your settings alone, backing up any file before changing it.
@@ -52,7 +58,7 @@ Claude Code deletes transcripts after 30 days by default. `agent-sessions instal
 | Command | What it does |
 |---|---|
 | `agent-sessions install` | Hooks, Pi extension, config file. `--dry-run` shows what would change. |
-| `agent-sessions doctor` | Checks settings, bucket access, each hook, Codex hook trust, the last sweep and recent errors. |
+| `agent-sessions doctor` | Checks settings, bucket access, each hook and the binary it runs, Codex hook trust, the last sweep and recent errors. |
 | `agent-sessions backfill` | Uploads everything already on the machine. |
 | `agent-sessions sync` | Uploads what changed. Hooks run this. |
 | `agent-sessions uninstall` | Removes the hooks and the extension. Uploaded data stays. |

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -72,6 +73,17 @@ func PiExtension(command []string) ([]byte, error) {
 	return fmt.Appendf(nil, piExtension, PiMarker, argv), nil
 }
 
+var piCommandRE = regexp.MustCompile(`(?m)^const AGENT_SESSIONS: string\[\] = (.*);$`)
+
+// PiCommand is the command line the Pi extension ext runs, or nil.
+func PiCommand(ext []byte) []string {
+	var argv []string
+	if m := piCommandRE.FindSubmatch(ext); len(m) < 2 || jsonx.Decode(m[1], &argv) != nil {
+		return nil
+	}
+	return argv
+}
+
 func PiExtensionPath(home string) string {
 	return filepath.Join(adapters.NewPi(home).Dir(), "extensions", "agent-sessions.ts")
 }
@@ -83,14 +95,12 @@ func Pi(o *Options) error {
 		return nil
 	}
 	if o.Remove {
-		if fsutil.Exists(path) && !o.DryRun {
-			if err := os.Remove(path); err != nil {
-				return fmt.Errorf("install: %w", err)
-			}
+		if !fsutil.Exists(path) {
+			return nil
 		}
-		o.Logf("removed: %s", path)
-		return nil
+		return remove(path, o)
 	}
+	warnIfOffPath(o)
 	body, err := PiExtension(o.Command)
 	if err != nil {
 		return err
@@ -179,6 +189,7 @@ type HandlerRef struct {
 	Event        string
 	GroupIndex   int
 	HandlerIndex int
+	Command      string
 }
 
 func OurHandlers(settings *jsonx.Object) []HandlerRef {
@@ -193,8 +204,8 @@ func OurHandlers(settings *jsonx.Object) []HandlerRef {
 		groups, _ := gv.([]any)
 		for gi, group := range groups {
 			for hi, h := range handlersOf(group) {
-				if Ours.MatchString(commandOf(h)) {
-					out = append(out, HandlerRef{event, gi, hi})
+				if c := commandOf(h); Ours.MatchString(c) {
+					out = append(out, HandlerRef{event, gi, hi, c})
 				}
 			}
 		}

@@ -2,7 +2,9 @@ package adapters
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -74,6 +76,29 @@ func TestClassifyRoles(t *testing.T) {
 		if !ok || sf.Role != tc.role || sf.SessionKey != tc.session {
 			t.Errorf("%s %s = %q %q %v, want %q %q", tc.agent, tc.rel, sf.Role, sf.SessionKey, ok, tc.role, tc.session)
 		}
+	}
+}
+
+func TestDiscoverLeavesOutCredentialFiles(t *testing.T) {
+	a := NewCodex(t.TempDir())
+	root := a.CanonicalRoot()
+	for _, name := range []string{"config.toml", "env.md", ".env", ".env.local", "auth.json", "sessions/x.pem"} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("OPENAI_API_KEY=sk-1\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, _ := Discover(a, root)
+	var keys []string
+	for _, sf := range files {
+		keys = append(keys, sf.Key)
+	}
+	slices.Sort(keys)
+	if diff := cmp.Diff([]string{"config.toml", "env.md"}, keys); diff != "" {
+		t.Errorf("Discover keys (-want +got):\n%s", diff)
 	}
 }
 

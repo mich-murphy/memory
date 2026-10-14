@@ -153,7 +153,7 @@ func hasAnySuffix(name string, suffixes []string) bool {
 
 func IsCredential(name string) bool {
 	return credentialNames[name] || strings.HasSuffix(name, ".key") || strings.HasSuffix(name, ".pem") ||
-		strings.HasPrefix(name, ".claude.json")
+		strings.HasPrefix(name, ".claude.json") || name == ".env" || strings.HasPrefix(name, ".env.")
 }
 
 func skipped(name string) bool {

@@ -52,7 +52,8 @@ func defaultStateDir() string {
 	return filepath.Join(Home(), ".local", "state", "agent-sessions")
 }
 
-// StateDir skips the env file, for the hook's fast path.
+// StateDir skips the env file, for the hook's fast path, so every run reads it this way: the hook
+// leaves its markers and launches where the sync looks for them.
 func StateDir() string {
 	if d := os.Getenv("AGENT_SESSIONS_STATE_DIR"); d != "" {
 		return d
@@ -80,7 +81,7 @@ func Load(path string) (*Config, error) {
 	}
 	cfg := &Config{
 		Hostname:          hostname,
-		StateDir:          get("AGENT_SESSIONS_STATE_DIR"),
+		StateDir:          StateDir(),
 		Home:              Home(),
 		Path:              path,
 		R2Endpoint:        get("R2_ENDPOINT"),
@@ -88,9 +89,6 @@ func Load(path string) (*Config, error) {
 		R2SecretAccessKey: get("R2_SECRET_ACCESS_KEY"),
 		R2Bucket:          get("R2_BUCKET"),
 		LocalStore:        get("AGENT_SESSIONS_LOCAL_STORE"),
-	}
-	if cfg.StateDir == "" {
-		cfg.StateDir = defaultStateDir()
 	}
 	if override := get("AGENT_SESSIONS_MACHINE_ID"); override != "" {
 		cfg.MachineID = sanitize(override)

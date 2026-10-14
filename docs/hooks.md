@@ -23,6 +23,7 @@ Why each part matters:
 | Codex kills the hook's process group on timeout, and waits for the hook's stdout to close | `command_runner.rs:339`, `:413`, wait_with_output | Own session, so the group kill misses it; stdio detached, so Codex isn't left waiting. Codex's own comment at `:281`: "Successfully completed hooks may intentionally leave detached helpers running" |
 | The transcript can lag the in-memory conversation when a hook fires | hooks docs, `transcript_path` field | The sync waits 3 s before reading. The next turn's hook or the next sweep catches anything later |
 | Stop fires after every turn | all three | Debounce: a marker per transcript means only one sync is queued at a time. The queued one reads the file after its delay, so it includes the turns that arrived meanwhile |
+| A parent can leave the hook's stdin open, and a read deadline can't be set on a blocking pipe | Codex `SessionEnd` is synchronous | Stop reading at the end of the JSON payload, and give up after 2 s if none arrives |
 
 ## The sweep at session start and end
 
@@ -40,8 +41,8 @@ One marker in the state directory's `pending/` means only one sweep is queued at
 
 `SessionStart` (Claude Code, Codex) and `session_start` (Pi) work differently from the turn hooks. While the agent is still the hook's ancestor, the hook:
 
-- walks up the process tree to the agent's process and records its command line (`/proc/<pid>/cmdline` on Linux, the `kern.procargs2` sysctl on macOS). Pi renames its process, which hides its arguments, so the Pi extension passes `process.argv` itself.
-- keeps allowlisted environment variables (`CLAUDE_CODE_*`, `CODEX_*`, `PI_*`, `ANTHROPIC_MODEL`, `MAX_THINKING_TOKENS`...), dropping any whose name looks like a token, key, secret or password.
+- walks up the process tree to the agent's process and records its command line (`/proc/<pid>/cmdline` on Linux, the `kern.procargs2` sysctl on macOS). Pi renames its process, which hides its arguments, so the Pi extension passes `process.argv` itself. Secrets in it, such as the value of `--api-key` or the headers in an inline `--mcp-config`, are redacted as in MCP server `args` ([storage-layout.md](storage-layout.md#raw-files)).
+- keeps allowlisted environment variables (`CLAUDE_CODE_*`, `CODEX_*`, `PI_*`, `ANTHROPIC_MODEL`, `MAX_THINKING_TOKENS`...), dropping any with a word in its name that marks a secret (`TOKEN`, `KEY`, `AUTH`, or `SECRET`, `PASSWORD`, `CREDENTIAL`, `COOKIE` anywhere). Whole words only, so limits such as `MAX_THINKING_TOKENS` are kept.
 - saves the hook's whole payload (`source`, `cwd`, `permission_mode`, `model`...).
 
 It writes that to a file and starts a detached sync with no delay and no debounce. The sync snapshots the harness and the repo's git state before the first prompt (`timing: pre_session`) and stores the launch in the session's manifest. A resumed session gets another launch entry.
@@ -88,7 +89,7 @@ It writes that to a file and starts a detached sync with no delay and no debounc
 
 **Trust.** Codex skips a user hook until it has been reviewed. Its trust record is a hash in `config.toml` under `[hooks.state."<hooks.json path>:<event>:<group>:<handler>"]`, written when you approve it in `/hooks` (`discovery.rs:715`, `:796`). agent-sessions deliberately leaves that review to you. `agent-sessions doctor` reads `config.toml` and reports how many agent-sessions hooks are trusted.
 
-The trust hash covers the command string, so a hook that changes needs approving again. The installer uses the `agent-sessions` binary on your `PATH` (`~/.local/bin/agent-sessions` from `install.sh`), whose path survives upgrades, so an upgrade doesn't need a new review.
+The trust hash covers the command string, so a hook that changes needs approving again. The installer uses the `agent-sessions` binary on your `PATH` (`~/.local/bin/agent-sessions` from `install.sh`), whose path survives upgrades, so an upgrade doesn't need a new review. Without one, it writes the path of the binary it was run as and warns, since hooks pointing at a download directory break when that is cleaned up. `agent-sessions doctor` fails any agent's hooks whose binary can't be run.
 
 **Other details:**
 
@@ -96,7 +97,7 @@ The trust hash covers the command string, so a hook that changes needs approving
 - **Hooks run through `$SHELL -lc`** (`command_runner.rs:399`), so your login profile runs first. That's another reason the turn hooks are async.
 - **Transcripts.** The hook's `transcript_path` is null for sessions Codex doesn't persist, and there is nothing to capture for those.
 
-**Files captured:** all of `$CODEX_HOME` except `auth.json`, `.credentials.json` (MCP OAuth tokens when there's no keyring), locks, temp files, caches and shell snapshots.
+**Files captured:** all of `$CODEX_HOME` except `auth.json`, `.credentials.json` (MCP OAuth tokens when there's no keyring), `.env` (API keys Codex loads at start), locks, temp files, caches and shell snapshots.
 
 - `sessions/YYYY/MM/DD/rollout-*.jsonl` and `archived_sessions/`.
   - **Recompression.** Rollouts untouched for 7 days are recompressed to `.jsonl.zst` (`rollout/src/compression.rs:364`), and resuming one decompresses it again (`:121`). agent-sessions keys rollouts without the date folder or `.zst`, and hashes the decompressed bytes. So recompression, archiving and resuming never cause a re-upload.
@@ -135,7 +136,7 @@ pi.on("session_shutdown", (_e, ctx) => kick(ctx.sessionManager.getSessionFile(),
 
 - **Config dirs set only in your shell.** `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and Pi's session dir settings can differ between shells. Hooks run with the agent's environment, so the first hook from a non-default directory teaches agent-sessions that root, and later sweeps include it, whichever agent's hook starts them.
 - **Half-written lines.** A transcript written in the last minute that ends mid-line is uploaded up to its last complete line, and re-read on the next sync.
-- **Hooks and the sweep at once.** One lock serialises syncs. A hook's sync gives up after 30 s, and a sweep after 60 s, if a long backfill holds the lock, so waiting syncs can't pile up; the next hook or sweep covers it. A pending marker older than 2 minutes, left by a sync that died, is taken over.
+- **Hooks and the sweep at once.** One lock serialises syncs. A hook's sync gives up after 30 s, and a sweep after 60 s, if a long backfill holds the lock, so waiting syncs can't pile up; the next hook or sweep covers it, and records any session-start launch the one that gave up left behind. A pending marker older than 2 minutes, left by a sync that died, is taken over.
 - **Offline machines.** A failed upload isn't recorded as done, so the session's next hook or the next sweep retries it. Nothing is lost while the transcript stays on disk, which is why `cleanupPeriodDays` is raised.
-- **Settings files.** The installer never rewrites a settings file it can't parse. It backs up every file before changing it, keeps other hooks in place, and replaces only its own entries, which it recognises by the `agent-sessions … hook <agent>` command.
+- **Settings files.** The installer never rewrites a settings file it can't parse. It backs up every file before changing it, keeps other hooks in place, and replaces only its own entries, which it recognises by the `agent-sessions … hook <agent>` command. It replaces each one where it is, so a reinstall moves no hook: Codex keys each trust record by the hook's position, and would skip a moved hook, ours or yours, until it was approved again.
 - **No session, no sweep.** Without a timer, what only a sweep picks up waits for the next session to start or end on that machine. A crashed session's last turns, a failed upload from another session, or a database that changed while a long session ran stay on disk until then; `agent-sessions sync` uploads them at any time.

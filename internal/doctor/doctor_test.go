@@ -5,12 +5,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/mich-murphy/memory/internal/config"
+	"github.com/mich-murphy/memory/internal/install"
 	"github.com/mich-murphy/memory/internal/state"
+	"github.com/mich-murphy/memory/internal/testenv"
 )
 
 func recordRuns(t *testing.T, dir string, runs ...state.Run) {
@@ -72,6 +75,41 @@ func TestCheckRunsWithoutASweep(t *testing.T) {
 	want := "[warn] no sweep in the last 500 runs; one runs when a session starts or ends\n"
 	if diff := cmp.Diff(want, runsReport(t, cfg)); diff != "" {
 		t.Errorf("report (-want +got):\n%s", diff)
+	}
+}
+
+func TestHooksWhoseBinaryIsGoneFail(t *testing.T) {
+	e := testenv.New(t)
+	bin := filepath.Join(t.TempDir(), "Downloads", "agent-sessions")
+	testenv.Write(t, bin, "#!/bin/sh\n")
+	if err := os.Chmod(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	o := &install.Options{Command: []string{bin}, Home: e.Home}
+	for _, installer := range []func(*install.Options) error{install.Claude, install.Codex, install.Pi} {
+		if err := installer(o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report := func() string {
+		var out bytes.Buffer
+		r := &reporter{w: &out}
+		checkClaude(e.Home, r)
+		checkCodex(e.Home, r)
+		checkPi(e.Home, r)
+		return out.String()
+	}
+	if got := report(); strings.Contains(got, "can't be run") {
+		t.Errorf("hooks with their binary in place:\n%s", got)
+	}
+	if err := os.Remove(bin); err != nil {
+		t.Fatal(err)
+	}
+	got := report()
+	for _, agent := range []string{"claude", "codex", "pi"} {
+		if want := "[FAIL] " + agent + ": hooks run " + bin + ", which can't be run"; !strings.Contains(got, want) {
+			t.Errorf("report lacks %q:\n%s", want, got)
+		}
 	}
 }
 

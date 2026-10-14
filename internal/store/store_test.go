@@ -10,12 +10,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
 	"github.com/mich-murphy/memory/internal/config"
+	"github.com/mich-murphy/memory/internal/raw"
 	"github.com/mich-murphy/memory/internal/store"
 )
 
@@ -24,9 +26,15 @@ func exercise(t *testing.T, s store.Store, prefix string) {
 	t.Helper()
 	ctx := t.Context()
 	k := func(name string) string { return prefix + name }
-	if err := s.Put(ctx, k("a/one"), []byte("1"), map[string]string{"sha256": "x"}); err != nil {
-		t.Fatal(err)
+	// put stores text as the collector does: compressed, with its sha256.
+	put := func(key, text string) []byte {
+		body := raw.Compress([]byte(text))
+		if err := s.Put(ctx, key, body, map[string]string{"sha256": raw.SHA256([]byte(text))}); err != nil {
+			t.Fatal(err)
+		}
+		return body
 	}
+	one := put(k("a/one"), "1")
 	if err := s.Put(ctx, k("a/two"), []byte("22"), map[string]string{}); err != nil {
 		t.Fatal(err)
 	}
@@ -39,20 +47,42 @@ func exercise(t *testing.T, s store.Store, prefix string) {
 	if _, err := s.Get(ctx, k("missing")); err == nil {
 		t.Error("Get of a missing key succeeded")
 	}
-	if ok, err := s.Copy(ctx, k("a/one"), k("c/copy")); !ok || err != nil {
+	sha1 := raw.SHA256([]byte("1"))
+	if ok, err := s.Copy(ctx, k("a/one"), k("c/copy"), sha1); !ok || err != nil {
 		t.Errorf("Copy = %v, %v", ok, err)
 	}
-	if got, _ := s.Get(ctx, k("c/copy")); string(got) != "1" {
+	if got, _ := s.Get(ctx, k("c/copy")); !bytes.Equal(got, one) {
 		t.Errorf("copy holds %q", got)
 	}
-	if ok, err := s.Copy(ctx, k("nope"), k("c/none")); ok || err != nil {
+	if ok, err := s.Copy(ctx, k("nope"), k("c/none"), sha1); ok || err != nil {
 		t.Errorf("Copy(missing) = %v, %v", ok, err)
 	}
-	if ok, err := s.Copy(ctx, k("a/two"), k("c/copy")); !ok || err != nil {
+	if ok, err := s.Copy(ctx, k("a/one"), k("c/other"), raw.SHA256([]byte("2"))); ok || err != nil {
+		t.Errorf("Copy of other bytes than named = %v, %v", ok, err)
+	}
+	if _, err := s.Get(ctx, k("c/other")); err == nil {
+		t.Error("Copy of other bytes than named wrote them")
+	}
+	if ok, err := s.Copy(ctx, k("a/two"), k("c/copy"), "any"); !ok || err != nil {
 		t.Errorf("Copy onto an existing key = %v, %v", ok, err)
 	}
-	if got, _ := s.Get(ctx, k("c/copy")); string(got) != "1" {
+	if got, _ := s.Get(ctx, k("c/copy")); !bytes.Equal(got, one) {
 		t.Errorf("Copy replaced an existing key with %q", got)
+	}
+	for i, name := range []string{"100% done.md", "what?.md", "a+b.md", "a b.md", "café.md"} {
+		src, dst := k("odd/"+name), k("odd-copy/"+strconv.Itoa(i))
+		body := put(src, name)
+		if ok, err := s.Copy(ctx, src, dst, raw.SHA256([]byte(name))); !ok || err != nil {
+			t.Errorf("Copy(%q) = %v, %v", name, ok, err)
+		}
+		if got, _ := s.Get(ctx, dst); !bytes.Equal(got, body) {
+			t.Errorf("copy of %q holds %q", name, got)
+		}
+		for _, key := range []string{src, dst} {
+			if err := s.Delete(ctx, key); err != nil {
+				t.Errorf("Delete %s: %v", key, err)
+			}
+		}
 	}
 
 	big := make([]byte, 11<<20+123)

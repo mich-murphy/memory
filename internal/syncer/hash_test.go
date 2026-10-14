@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/mich-murphy/memory/internal/raw"
@@ -52,6 +53,9 @@ func TestHashContentMatchesAFullReadWithOrWithoutAResume(t *testing.T) {
 				sha: raw.SHA256([]byte(c.data)), size: int64(len(c.data)), lines: int64(strings.Count(c.data, "\n")),
 				appended: c.wantAppended,
 			}
+			if len(c.data) >= len(before) {
+				want.tail = xxhash.Sum64String(c.data[len(before):])
+			}
 			if diff := cmp.Diff(want, got, cmp.AllowUnexported(hashed{}), cmp.FilterPath(func(p cmp.Path) bool {
 				return p.Last().String() == ".resume"
 			}, cmp.Ignore())); diff != "" {
@@ -77,48 +81,60 @@ type failingReader struct{}
 func (failingReader) ReadAt([]byte, int64) (int, error) { return 0, bytes.ErrTooLarge }
 
 // TestCompressChecksTheBytesItHashed rewrites a file between hashing and compressing it, which
-// must fail the upload rather than send bytes that don't match the recorded sha256.
+// must fail the upload rather than send bytes that don't match the recorded sha256. A segment
+// is read again from where the last upload ended, so a change there must be caught too.
 func TestCompressChecksTheBytesItHashed(t *testing.T) {
 	defer func(old int64) { largeFileSize = old }(largeFileSize)
-	const before, after = "line one\nline two\n", "line ONE\nline two\n"
+	const before, after, added = "line one\nline two\n", "line ONE\nline two\n", "line three\n"
+	prev := &state.Upload{SHA256: raw.SHA256([]byte(before)), Size: int64(len(before))}
 	for _, large := range []int64{1 << 20, 4} {
-		for _, rewrite := range []bool{false, true} {
-			t.Run(fmt.Sprintf("large=%d/rewrite=%v", large, rewrite), func(t *testing.T) {
-				largeFileSize = large
-				path := filepath.Join(t.TempDir(), "s.jsonl")
-				if err := os.WriteFile(path, []byte(before), 0o600); err != nil {
-					t.Fatal(err)
-				}
-				st, err := os.Stat(path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				s := &Syncer{tmpDir: t.TempDir()}
-				c, err := s.streamedContent(path, st, nil, nil, false)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if rewrite {
-					if err := os.WriteFile(path, []byte(after), 0o600); err != nil {
+		for _, segment := range []bool{false, true} {
+			for _, rewrite := range []bool{false, true} {
+				t.Run(fmt.Sprintf("large=%d/segment=%v/rewrite=%v", large, segment, rewrite), func(t *testing.T) {
+					largeFileSize = large
+					text, changed, last := before, after, (*state.Upload)(nil)
+					if segment {
+						text, changed, last = before+added, before+strings.ToUpper(added), prev
+					}
+					path := filepath.Join(t.TempDir(), "s.jsonl")
+					if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 						t.Fatal(err)
 					}
-				}
-				u := &upload{file: state.File{SHA256: c.sha, Size: c.size}, piece: raw.Piece{End: c.size}, resume: c.resume}
-				defer u.cleanup()
-				err = c.compress(u)
-				if rewrite {
-					if !errors.Is(err, errRewritten) {
-						t.Errorf("compress after a rewrite = %v, want errRewritten", err)
+					st, err := os.Stat(path)
+					if err != nil {
+						t.Fatal(err)
 					}
-					return
-				}
-				if err != nil {
-					t.Fatal(err)
-				}
-				if u.piece.SHA256 != raw.SHA256([]byte(before)) {
-					t.Errorf("piece sha256 %s, want the file's", u.piece.SHA256)
-				}
-			})
+					s := &Syncer{tmpDir: t.TempDir()}
+					c, err := s.streamedContent(path, st, last, nil, false)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if rewrite {
+						if err := os.WriteFile(path, []byte(changed), 0o600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					piece := raw.Piece{End: c.size}
+					if segment {
+						piece.Start = prev.Size
+					}
+					u := &upload{file: state.File{SHA256: c.sha, Size: c.size}, piece: piece, resume: c.resume, tail: c.tail}
+					defer u.cleanup()
+					err = c.compress(u)
+					if rewrite {
+						if !errors.Is(err, errRewritten) {
+							t.Errorf("compress after a rewrite = %v, want errRewritten", err)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					if want := raw.SHA256([]byte(text[piece.Start:])); u.piece.SHA256 != want {
+						t.Errorf("piece sha256 %s, want %s", u.piece.SHA256, want)
+					}
+				})
+			}
 		}
 	}
 }

@@ -27,6 +27,7 @@ const (
 	keepNothing
 	keepReferencesAndEnvNames
 	keepURLWithoutCredentials
+	keepArgs // a command line: redacts what Args does
 )
 
 type rule struct {
@@ -51,6 +52,7 @@ func mcpRules(prefix string) []rule {
 		r(prefix+"mcpServers.*.headers.*", keepReferences),
 		r(prefix+"mcpServers.*.url", keepURLWithoutCredentials),
 		r(prefix+"mcpServers.*.oauth.clientSecret", keepNothing),
+		r(prefix+"mcpServers.*.args", keepArgs),
 	}
 }
 
@@ -59,7 +61,7 @@ var (
 		r("primaryApiKey", keepNothing),
 		r("customApiKeyResponses.*", keepNothing), // suffixes of approved and rejected API keys
 	}, mcpRules(""), mcpRules("projects.*."), mcpRules("project.")) // "project." is the snapshot's MCP extract
-	settingsRules  = []rule{r("env.*", keepReferences)}
+	settingsRules  = []rule{r("env.*", keepReferences), r("hooks.*.*.hooks.*.headers.*", keepReferences)}
 	mcpFileRules   = mcpRules("")
 	piModelsRules  = []rule{r("providers.*.apiKey", keepReferencesAndEnvNames), r("providers.*.headers.*", keepReferences)}
 	codexTOMLRules = []rule{
@@ -67,15 +69,23 @@ var (
 		r("mcp_servers.*.http_headers.*", keepReferences),
 		r("mcp_servers.*.url", keepURLWithoutCredentials),
 		r("mcp_servers.*.bearer_token", keepNothing),
+		r("mcp_servers.*.args", keepArgs),
 		r("model_providers.*.http_headers.*", keepReferences),
 		r("model_providers.*.experimental_bearer_token", keepNothing),
 		r("model_providers.*.base_url", keepURLWithoutCredentials),
 		r("shell_environment_policy.set.*", keepReferences),
+		r("otel.*.*.headers.*", keepReferences), // otel.<exporter>.<otlp-http|otlp-grpc>.headers
 	}
+	// Claude Code's --settings and --mcp-config take a file or inline JSON.
+	jsonArgRules = slices.Concat(settingsRules, mcpFileRules)
 )
 
+// backupSuffix matches the copies editors and our installer leave beside a config file, which
+// hold the same secrets.
+var backupSuffix = regexp.MustCompile(`(~|\.bak|\.orig|\.old|\.agent-sessions-backup-[0-9-]+)$`)
+
 func rulesFor(agent, name string) ([]rule, format) {
-	switch name {
+	switch backupSuffix.ReplaceAllString(name, "") {
 	case "claude.json", ".claude.json":
 		return claudeJSONRules, formatJSON
 	case "settings.json", "settings.local.json", "managed-settings.json":
@@ -106,9 +116,17 @@ func File(agent, name string, data []byte) ([]byte, error) {
 	if rs == nil || len(bytes.TrimSpace(data)) == 0 {
 		return data, nil
 	}
-	doc, err := decode(f, data)
+	out, err := scrubDoc(f, data, rs)
 	if err != nil {
 		return nil, fmt.Errorf("scrub %s: %w", name, err)
+	}
+	return out, nil
+}
+
+func scrubDoc(f format, data []byte, rs []rule) ([]byte, error) {
+	doc, err := decode(f, data)
+	if err != nil {
+		return nil, err
 	}
 	redactions := map[string]string{}
 	doc = walk(doc, nil, rs, redactions)
@@ -119,11 +137,59 @@ func File(agent, name string, data []byte) ([]byte, error) {
 		return out, nil
 	}
 	// Escaped and multi-line strings aren't found in place; re-encoding loses layout and comments.
-	out, err := encode(f, doc)
-	if err != nil {
-		return nil, fmt.Errorf("scrub %s: %w", name, err)
+	return encode(f, doc)
+}
+
+var (
+	nameRE = regexp.MustCompile(`^-{0,2}[A-Za-z0-9][\w.-]*$`)
+	// Matched as whole words, so MAX_TOKENS and --max-tokens hold no secret.
+	secretWords = []string{"token", "key", "auth"}
+	// Matched anywhere in a name: --client-secret, SECRETKEY.
+	secretParts = []string{"secret", "passw", "passphrase", "credential", "cookie", "apikey", "authorization"}
+)
+
+// IsSecretName reports whether a flag, environment variable or dotted setting name says it
+// holds a secret, judging a dotted name by its last part.
+func IsSecretName(name string) bool {
+	name = strings.ToLower(name[strings.LastIndexByte(name, '.')+1:])
+	words := strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' })
+	return slices.ContainsFunc(words, func(w string) bool { return slices.Contains(secretWords, w) }) ||
+		slices.ContainsFunc(secretParts, func(p string) bool { return strings.Contains(name, p) })
+}
+
+// Args returns argv with the values of secret-looking flags and NAME=value words redacted, the
+// value of each -H or --header after its name, and secrets in inline JSON scrubbed as a
+// settings or MCP file is. A value that only names a secret, such as $VAR, is kept.
+func Args(argv []string) []string {
+	out := slices.Clone(argv)
+	for i, a := range out {
+		name, v, hasValue := strings.Cut(a, "=")
+		switch {
+		case strings.HasPrefix(strings.TrimSpace(a), "{"):
+			if scrubbed, err := scrubDoc(formatJSON, []byte(a), jsonArgRules); err == nil {
+				out[i] = string(scrubbed)
+			}
+		case hasValue && nameRE.MatchString(name):
+			out[i] = name + "=" + redactFlagValue(name, v)
+		case strings.HasPrefix(a, "-") && nameRE.MatchString(a) && i+1 < len(out) && !strings.HasPrefix(out[i+1], "-"):
+			out[i+1] = redactFlagValue(a, out[i+1])
+		}
 	}
-	return out, nil
+	return out
+}
+
+func redactFlagValue(flag, v string) string {
+	if flag == "-H" || flag == "--header" {
+		name, value, ok := strings.Cut(v, ":")
+		if !ok || holdsNoSecret(strings.TrimSpace(value)) {
+			return v
+		}
+		return name + ": " + Redacted
+	}
+	if IsSecretName(flag) {
+		return redact(v, keepReferences)
+	}
+	return v
 }
 
 func decode(f format, data []byte) (any, error) {
@@ -198,6 +264,9 @@ func walk(node any, path []string, rs []rule, redactions map[string]string) any 
 }
 
 func redactAll(node any, k keep, redactions map[string]string) any {
+	if args, ok := node.([]any); ok && k == keepArgs {
+		return redactArgs(args, redactions)
+	}
 	switch n := node.(type) {
 	case string:
 		out := redact(n, k)
@@ -219,6 +288,20 @@ func redactAll(node any, k keep, redactions map[string]string) any {
 		}
 	}
 	return node
+}
+
+func redactArgs(args []any, redactions map[string]string) []any {
+	argv := make([]string, len(args))
+	for i, a := range args {
+		argv[i], _ = a.(string)
+	}
+	for i, a := range Args(argv) {
+		if a != argv[i] {
+			redactions[argv[i]] = a
+			args[i] = a
+		}
+	}
+	return args
 }
 
 var (
@@ -263,6 +346,8 @@ func redact(s string, k keep) string {
 		if holdsNoSecret(s) || strings.HasPrefix(s, "!") {
 			return s
 		}
+	case keepArgs:
+		return Args([]string{s})[0]
 	}
 	return Redacted
 }

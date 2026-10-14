@@ -3,17 +3,16 @@
 package hook
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,7 +20,9 @@ import (
 	"time"
 
 	"github.com/mich-murphy/memory/internal/config"
+	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/jsonx"
+	"github.com/mich-murphy/memory/internal/scrub"
 )
 
 const (
@@ -41,7 +42,6 @@ var (
 		"ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "MAX_THINKING_TOKENS", "CLAUDE_CONFIG_DIR",
 		"MAX_MCP_OUTPUT_TOKENS", "DISABLE_PROMPT_CACHING",
 	}
-	secretEnv    = regexp.MustCompile(`(?i)TOKEN|KEY|SECRET|PASSWORD|AUTH|CREDENTIAL|COOKIE`)
 	agentMarkers = map[string]struct{ bin, pkg string }{
 		"claude": {"claude", "@anthropic-ai/claude-code"},
 		"codex":  {"codex", "@openai/codex"},
@@ -61,16 +61,25 @@ func readInput(f *os.File) map[string]any {
 	if err != nil || st.Mode()&os.ModeCharDevice != 0 {
 		return map[string]any{}
 	}
-	_ = f.SetReadDeadline(time.Now().Add(stdinTimeout)) // fails for regular files, which never block
-	data, _ := io.ReadAll(io.LimitReader(f, maxStdinSize))
-	if len(bytes.TrimSpace(data)) == 0 {
+	// Decoding stops at the end of the object, so a parent that writes it and never closes stdin
+	// doesn't hold the hook. A deadline can't be set on a blocking pipe, so a parent that writes
+	// nothing is timed out here, leaving the reader to end with the process.
+	read := make(chan map[string]any, 1)
+	go func() {
+		var m map[string]any
+		dec := json.NewDecoder(io.LimitReader(f, maxStdinSize))
+		dec.UseNumber()
+		if dec.Decode(&m) != nil || m == nil {
+			m = map[string]any{}
+		}
+		read <- m
+	}()
+	select {
+	case m := <-read:
+		return m
+	case <-time.After(stdinTimeout):
 		return map[string]any{}
 	}
-	m, ok := jsonx.Map(data)
-	if !ok {
-		return map[string]any{}
-	}
-	return m
 }
 
 func pathsFromInput(data map[string]any) []string {
@@ -159,7 +168,7 @@ func launchProcess(agent string) map[string]any {
 		}
 		chain = append(chain, name)
 		if isAgent(agent, argv) {
-			return map[string]any{"argv": argv, "pid": pid, "ancestry": chain}
+			return map[string]any{"argv": scrub.Args(argv), "pid": pid, "ancestry": chain}
 		}
 		pid = ppid
 	}
@@ -174,7 +183,7 @@ func processFromExtension(argvJSON string) map[string]any {
 	if err := jsonx.Decode([]byte(argvJSON), &argv); err != nil || argv == nil {
 		return nil
 	}
-	return map[string]any{"argv": argv, "pid": parentPID(), "via": "extension"}
+	return map[string]any{"argv": scrub.Args(argv), "pid": parentPID(), "via": "extension"}
 }
 
 func launchEnv(environ []string) map[string]any {
@@ -183,7 +192,7 @@ func launchEnv(environ []string) map[string]any {
 		k, v, _ := strings.Cut(kv, "=")
 		allowed := slices.Contains(envNames, k) ||
 			slices.ContainsFunc(envPrefixes, func(p string) bool { return strings.HasPrefix(k, p) })
-		if allowed && !secretEnv.MatchString(k) {
+		if allowed && !scrub.IsSecretName(k) {
 			out[k] = v
 		}
 	}
@@ -225,22 +234,16 @@ func recordSessionStart(ctx context.Context, stateDir, agent, path string, data 
 		"hook_input":      hookInput,
 		"process":         process,
 		"env":             launchEnv(os.Environ()),
+		"agent":           agent,
+		"path":            path,
 	}
 	body, err := jsonx.Compact(launch)
 	if err != nil {
 		return err
 	}
-	pending := filepath.Join(stateDir, "pending")
-	if err := os.MkdirAll(pending, 0o700); err != nil {
-		return err
-	}
-	launchFile := filepath.Join(pending, "launch-"+rand.Text()+".json")
-	f, err := os.OpenFile(launchFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	_, werr := f.Write(body)
-	if err := errors.Join(werr, f.Close()); err != nil {
+	// Written whole, since any sync may read it: one that can't get the lock leaves it to the next.
+	launchFile := filepath.Join(stateDir, "pending", "launch-"+rand.Text()+".json")
+	if err := fsutil.WriteFileAtomic(launchFile, body, 0o600); err != nil {
 		return err
 	}
 	return startSync(ctx, "sync", "--agent", agent, "--path", path, "--launch", launchFile, "--trigger", "hook:"+event)

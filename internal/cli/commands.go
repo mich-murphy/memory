@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -33,7 +36,6 @@ type syncFlags struct {
 	paths        []string
 	delaySeconds float64
 	marker       string
-	launch       string
 	trigger      string
 	quiet        bool
 }
@@ -49,7 +51,7 @@ func parseSync(cmd string, args []string, o IO) (*syncFlags, error) {
 		})
 		fs.Float64Var(&flags.delaySeconds, "delay", 0, "wait this many seconds first (lets transcripts flush)")
 		fs.StringVar(&flags.marker, "pending-marker", "", "internal: the hook's debounce marker")
-		fs.StringVar(&flags.launch, "launch", "", "internal: launch details recorded by a session-start hook")
+		fs.String("launch", "", "internal: the launch a session-start hook left; every sync records all of them")
 		fs.StringVar(&flags.trigger, "trigger", "manual", "internal: what started this run")
 		fs.BoolVar(&flags.quiet, "quiet", false, "print nothing; exit 0 when another run holds the lock")
 	}
@@ -156,9 +158,7 @@ func syncLocked(ctx context.Context, cfg *config.Config, bucket store.Store, fla
 	sy := syncer.New(cfg, bucket, db, adapters.All(cfg.Home), syncer.Options{
 		Trigger: flags.trigger, Logger: log, Version: version,
 	})
-	if flags.launch != "" {
-		recordLaunches(ctx, sy, flags, log)
-	}
+	recordLaunches(ctx, sy, cfg.StateDir, log)
 	files, err := filesToSync(ctx, sy, flags)
 	if err != nil {
 		return nil, err
@@ -173,17 +173,63 @@ func syncLocked(ctx context.Context, cfg *config.Config, bucket store.Store, fla
 	return summary, nil
 }
 
-func recordLaunches(ctx context.Context, sy *syncer.Syncer, flags *syncFlags, log *slog.Logger) {
-	launch := readLaunch(flags.launch)
-	if launch == nil || len(flags.paths) == 0 {
-		return
-	}
-	for _, agent := range flags.agents.orAll() {
-		if err := sy.RecordLaunch(ctx, agent, flags.paths[0], launch); err != nil {
-			sy.Summary.Errors++
-			sy.Summary.ErrorMessages = append(sy.Summary.ErrorMessages, fmt.Sprintf("launch %s: %v", agent, err))
-			log.Error("recording launch", "agent", agent, "error", err)
+type pendingLaunch struct {
+	file, agent, path string
+	launch            map[string]any
+}
+
+// recordLaunches records every launch session-start hooks left, oldest first, not only this
+// run's: a sync that never got the lock leaves its launch for the next one that does. A launch
+// that fails to record stays for the next run.
+func recordLaunches(ctx context.Context, sy *syncer.Syncer, stateDir string, log *slog.Logger) {
+	files, _ := filepath.Glob(filepath.Join(stateDir, "pending", "launch-*.json")) // the pattern is valid
+	var launches []pendingLaunch
+	for _, f := range files {
+		l, err := readLaunch(f)
+		if err != nil {
+			log.Warn("dropping an unreadable launch", "file", f, "error", err)
+			removeLaunch(f, log)
+			continue
 		}
+		launches = append(launches, l)
+	}
+	slices.SortFunc(launches, func(a, b pendingLaunch) int {
+		at, _ := a.launch["recorded_at"].(float64)
+		bt, _ := b.launch["recorded_at"].(float64)
+		return cmp.Compare(at, bt)
+	})
+	for _, l := range launches {
+		if err := sy.RecordLaunch(ctx, l.agent, l.path, l.launch); err != nil {
+			sy.Summary.Errors++
+			sy.Summary.ErrorMessages = append(sy.Summary.ErrorMessages, fmt.Sprintf("launch %s: %v", l.agent, err))
+			log.Error("recording launch", "agent", l.agent, "error", err)
+			continue
+		}
+		removeLaunch(l.file, log)
+	}
+}
+
+func readLaunch(file string) (pendingLaunch, error) {
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return pendingLaunch{}, err
+	}
+	m, _ := jsonx.Map(data) // a file that isn't one has no agent, below
+	l := pendingLaunch{file: file, launch: m}
+	l.agent, _ = m["agent"].(string)
+	l.path, _ = m["path"].(string)
+	if !slices.Contains(adapters.Names, l.agent) || l.path == "" {
+		return pendingLaunch{}, errors.New("no agent or path")
+	}
+	// They say where the launch goes; the manifest's launch is what the hook saw.
+	delete(m, "agent")
+	delete(m, "path")
+	return l, nil
+}
+
+func removeLaunch(file string, log *slog.Logger) {
+	if err := os.Remove(file); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		log.Error("a recorded launch could not be removed, so it will be recorded again", "file", file, "error", err)
 	}
 }
 
@@ -201,16 +247,6 @@ func filesToSync(ctx context.Context, sy *syncer.Syncer, flags *syncFlags) ([]ad
 		files = append(files, found...)
 	}
 	return files, nil
-}
-
-func readLaunch(path string) map[string]any {
-	data, err := os.ReadFile(path)
-	_ = os.Remove(path) // one use only; a leftover is harmless
-	if err != nil {
-		return nil
-	}
-	m, _ := jsonx.Map(data)
-	return m
 }
 
 var installers = map[string]func(*install.Options) error{"claude": install.Claude, "codex": install.Codex, "pi": install.Pi}

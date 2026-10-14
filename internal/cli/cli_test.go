@@ -200,18 +200,54 @@ func TestASyncThatCannotGetTheLockLeavesTheBucketAlone(t *testing.T) {
 // manifest and removes the file.
 func TestSyncRecordsTheLaunchTheHookLeft(t *testing.T) {
 	e := testenv.New(t)
-	launch := filepath.Join(e.State, "pending", "launch-test.json")
-	testenv.Write(t, launch, `{"event": "session_start", "source": "startup", "cwd": "`+e.Project+`"}`)
 	transcript := filepath.Join(e.PiDir, testenv.PiKey+".jsonl")
+	launch := writeLaunch(t, e, "test", transcript)
 	code, out, errOut := run("sync", "--agent", "pi", "--path", transcript, "--launch", launch, "--trigger", "hook:session_start")
 	if code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
 	got, _ := e.Manifest("pi", testenv.PiKey)["launch"].(map[string]any)
-	if got["source"] != "startup" || got["event"] != "session_start" {
+	if got["source"] != "startup" || got["event"] != "session_start" || got["agent"] != nil || got["path"] != nil {
 		t.Errorf("manifest launch = %v", got)
 	}
 	if _, err := os.Stat(launch); !os.IsNotExist(err) {
 		t.Errorf("launch file left behind: %v", err)
+	}
+}
+
+func writeLaunch(t *testing.T, e *testenv.Env, name, transcript string) string {
+	t.Helper()
+	launch := filepath.Join(e.State, "pending", "launch-"+name+".json")
+	testenv.Write(t, launch, `{"event": "session_start", "source": "startup", "cwd": "`+e.Project+`", "recorded_at": 1, `+
+		`"agent": "pi", "path": "`+transcript+`"}`)
+	return launch
+}
+
+// A session-start sync gives up when another run holds the lock for long; its launch is the
+// only record of how the session started, so the next run to get the lock records it.
+func TestALaunchWhoseSyncCouldNotGetTheLockIsRecordedByTheNextRun(t *testing.T) {
+	e := testenv.New(t)
+	transcript := filepath.Join(e.PiDir, testenv.PiKey+".jsonl")
+	launch := writeLaunch(t, e, "test", transcript)
+	testenv.Write(t, filepath.Join(e.State, "pending", "launch-garbage.json"), "not json")
+	unlock, err := state.Lock(t.Context(), e.State, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	code, _, _ := runCtx(ctx, "sync", "--quiet", "--agent", "pi", "--path", transcript, "--launch", launch)
+	cancel()
+	unlock()
+	if code != 0 {
+		t.Fatalf("locked sync: exit %d", code)
+	}
+	if code, out, errOut := run("sync", "--quiet"); code != 0 {
+		t.Fatalf("sweep: exit %d\n%s%s", code, out, errOut)
+	}
+	if got, _ := e.Manifest("pi", testenv.PiKey)["launch"].(map[string]any); got["source"] != "startup" {
+		t.Errorf("manifest launch = %v", got)
+	}
+	if left, _ := filepath.Glob(filepath.Join(e.State, "pending", "launch-*")); len(left) != 0 {
+		t.Errorf("launch files left behind: %v", left)
 	}
 }

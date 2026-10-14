@@ -22,6 +22,7 @@ import (
 	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/install"
 	"github.com/mich-murphy/memory/internal/jsonx"
+	"github.com/mich-murphy/memory/internal/shellwords"
 	"github.com/mich-murphy/memory/internal/state"
 	"github.com/mich-murphy/memory/internal/store"
 )
@@ -132,8 +133,10 @@ func checkClaude(home string, r *reporter) {
 	}
 	path := filepath.Join(root, "settings.json")
 	settings := readJSON(path)
-	n, want := len(install.OurHandlers(settings)), len(install.ClaudeEvents)
+	handlers := install.OurHandlers(settings)
+	n, want := len(handlers), len(install.ClaudeEvents)
 	r.reportf(pick(n >= want, fail), "claude: %d/%d agent-sessions hooks in %s", n, want, path)
+	checkHookCommands("claude", handlers, r)
 	if v, _ := settings.Get("disableAllHooks"); v == true {
 		r.reportf(fail, "claude: disableAllHooks is set, so no hooks run")
 	}
@@ -159,6 +162,7 @@ func checkCodex(home string, r *reporter) {
 	want := len(install.CodexEvents)
 	r.reportf(pick(configured >= want, fail), "codex: %d/%d agent-sessions hooks in %s", configured, want,
 		filepath.Join(root, "hooks.json"))
+	checkHookCommands("codex", install.OurHandlers(readJSON(filepath.Join(root, "hooks.json"))), r)
 	if configured > 0 {
 		hint := ""
 		if trusted != configured {
@@ -194,6 +198,37 @@ func checkPi(home string, r *reporter) {
 		r.reportf(warn, "pi: extension at %s is out of date (run agent-sessions install)", ext)
 	default:
 		r.reportf(pass, "pi: extension installed at %s", ext)
+	}
+	if err == nil && bytes.Contains(data, []byte(install.PiMarker)) {
+		checkRunnable("pi", install.PiCommand(data), r)
+	}
+}
+
+func checkHookCommands(agent string, handlers []install.HandlerRef, r *reporter) {
+	seen := map[string]bool{}
+	for _, h := range handlers {
+		if seen[h.Command] {
+			continue
+		}
+		seen[h.Command] = true
+		argv, err := shellwords.Split(h.Command)
+		if err != nil {
+			r.reportf(fail, "%s: hook command %q: %v", agent, h.Command, err)
+			continue
+		}
+		checkRunnable(agent, argv, r)
+	}
+}
+
+// checkRunnable fails a hook whose binary is gone, as when it was installed from a download
+// directory since deleted: the hook would exit 127 at every event without a word.
+func checkRunnable(agent string, argv []string, r *reporter) {
+	if len(argv) == 0 {
+		r.reportf(fail, "%s: a hook has no command", agent)
+		return
+	}
+	if _, err := exec.LookPath(argv[0]); err != nil {
+		r.reportf(fail, "%s: hooks run %s, which can't be run (rerun `agent-sessions install`): %v", agent, argv[0], err)
 	}
 }
 
