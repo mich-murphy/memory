@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/mich-murphy/memory/internal/config"
+	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/jsonx"
 )
 
@@ -225,22 +226,16 @@ func recordSessionStart(ctx context.Context, stateDir, agent, path string, data 
 		"hook_input":      hookInput,
 		"process":         process,
 		"env":             launchEnv(os.Environ()),
+		"agent":           agent,
+		"path":            path,
 	}
 	body, err := jsonx.Compact(launch)
 	if err != nil {
 		return err
 	}
-	pending := filepath.Join(stateDir, "pending")
-	if err := os.MkdirAll(pending, 0o700); err != nil {
-		return err
-	}
-	launchFile := filepath.Join(pending, "launch-"+rand.Text()+".json")
-	f, err := os.OpenFile(launchFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	_, werr := f.Write(body)
-	if err := errors.Join(werr, f.Close()); err != nil {
+	// Written whole, since any sync may read it: one that can't get the lock leaves it to the next.
+	launchFile := filepath.Join(stateDir, "pending", "launch-"+rand.Text()+".json")
+	if err := fsutil.WriteFileAtomic(launchFile, body, 0o600); err != nil {
 		return err
 	}
 	return startSync(ctx, "sync", "--agent", agent, "--path", path, "--launch", launchFile, "--trigger", "hook:"+event)

@@ -819,9 +819,9 @@ func TestMissingOrForeignHookPathIsHarmless(t *testing.T) {
 	}
 	notYet := filepath.Join(e.PiDir, "2026-10-10T13-00-00-000Z_0199a1b2-1111-7bbb-8ccc-dddddddddddd.jsonl")
 	mustRun(t, "sync", "--quiet", "--agent", "pi", "--path", notYet)
-	launch := filepath.Join(e.Tmp, "launch.json")
-	testenv.Write(t, launch, `{"event": "SessionStart", "cwd": "`+e.Project+`"}`)
-	mustRun(t, "sync", "--quiet", "--agent", "claude", "--path", filepath.Join(e.Claude, "history.jsonl"), "--launch", launch)
+	history := filepath.Join(e.Claude, "history.jsonl")
+	launch := leaveLaunch(t, e, "claude", history, `{"event": "SessionStart", "cwd": "`+e.Project+`"}`)
+	mustRun(t, "sync", "--quiet", "--agent", "claude", "--path", history, "--launch", launch)
 	var manifests []string
 	for _, k := range e.BucketKeys() {
 		if strings.HasPrefix(k, "manifests/") {
@@ -854,13 +854,29 @@ func TestHookPathUnderTildeOrRelativeIsResolved(t *testing.T) {
 	}
 }
 
+// leaveLaunch leaves a launch where a session-start hook does, for the sync it starts.
+func leaveLaunch(t *testing.T, e *testenv.Env, agent, path, launch string) string {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal([]byte(launch), &m); err != nil {
+		t.Fatal(err)
+	}
+	m["agent"], m["path"] = agent, path
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(e.State, "pending", "launch-test.json")
+	testenv.Write(t, file, string(b))
+	return file
+}
+
 func TestLaunchIsRecordedWithAPreSessionSnapshot(t *testing.T) {
 	e := testenv.New(t)
-	launch := filepath.Join(e.Tmp, "launch.json")
-	testenv.Write(t, launch, `{"event": "SessionStart", "source": "startup", "cwd": "`+e.Project+`",
+	path := filepath.Join(e.ClaudeSlug, claudeSID+".jsonl")
+	launch := leaveLaunch(t, e, "claude", path, `{"event": "SessionStart", "source": "startup", "cwd": "`+e.Project+`",
 		"permission_mode": "plan", "process": {"argv": ["claude", "--model", "opus"]},
 		"env": {"CLAUDE_CODE_ENTRYPOINT": "cli"}}`)
-	path := filepath.Join(e.ClaudeSlug, claudeSID+".jsonl")
 	mustRun(t, "sync", "--quiet", "--agent", "claude", "--path", path, "--launch", launch, "--trigger", "hook:SessionStart")
 	if _, err := os.Stat(launch); !os.IsNotExist(err) {
 		t.Error("launch file left behind")
@@ -885,8 +901,7 @@ func TestLaunchIsRecordedWithAPreSessionSnapshot(t *testing.T) {
 
 func TestLaunchFallsBackToTheHookInputCwd(t *testing.T) {
 	e := testenv.New(t)
-	launch := filepath.Join(e.Tmp, "launch.json")
-	testenv.Write(t, launch, `{"event": "SessionStart", "cwd": null, "hook_input": {"cwd": "`+e.Project+`"}}`)
+	launch := leaveLaunch(t, e, "codex", e.CodexRollout, `{"event": "SessionStart", "cwd": null, "hook_input": {"cwd": "`+e.Project+`"}}`)
 	mustRun(t, "sync", "--quiet", "--agent", "codex", "--path", e.CodexRollout, "--launch", launch)
 	m := e.Manifest("codex", codexKey)
 	snaps := list(m["snapshots"])
@@ -903,9 +918,8 @@ func TestLaunchFallsBackToTheHookInputCwd(t *testing.T) {
 func TestALaunchBeforeTheTranscriptExistsGivesTheSessionItsCwd(t *testing.T) {
 	e := testenv.New(t)
 	sid := "22222222-2222-3333-4444-555555555555"
-	launch := filepath.Join(e.Tmp, "launch.json")
-	testenv.Write(t, launch, `{"event": "SessionStart", "cwd": "`+e.Project+`"}`)
 	path := filepath.Join(e.ClaudeSlug, sid+".jsonl")
+	launch := leaveLaunch(t, e, "claude", path, `{"event": "SessionStart", "cwd": "`+e.Project+`"}`)
 	mustRun(t, "sync", "--quiet", "--agent", "claude", "--path", path, "--launch", launch, "--trigger", "hook:SessionStart")
 	if info := e.Manifest("claude", slug+"/"+sid)["info"].(map[string]any); info["cwd"] != e.Project {
 		t.Errorf("info = %v", info)
