@@ -36,7 +36,7 @@ Each agent tells agent-sessions when a session has new content. Nothing runs on 
 | Codex | `SessionStart`, `Stop`, `SubagentStop`, `PreCompact`, `Interrupt`, `SessionEnd` hooks | `~/.codex/hooks.json` |
 | Pi | an extension handling `session_start`, `agent_settled` and `session_shutdown` | `~/.pi/agent/extensions/agent-sessions.ts` |
 
-The hook command returns within milliseconds, prints nothing and always exits 0. It hands the upload to a detached process that waits a few seconds for the transcript to flush, so a slow network never slows an agent down and capture never interrupts one. At session start it also records the agent's command line and settings environment, and the sync snapshots the harness and git state before the first prompt. The sweep covers crashes, killed terminals, user interrupts, failed uploads and anything from before agent-sessions was installed, at the next session start or end on that machine.
+The hook command returns within milliseconds, prints nothing and always exits 0. It hands the upload to a detached process that waits a few seconds for the transcript to flush, so a slow network never slows an agent down and capture never interrupts one. At session start it also records the agent's command line and settings environment. The detached sync snapshots the harness and git state when it actually runs; the session-start event alone does not prove that capture preceded the first prompt. The sweep covers crashes, killed terminals, user interrupts, failed uploads and anything from before agent-sessions was installed, at the next session start or end on that machine.
 
 [docs/hooks.md](docs/hooks.md) has the details for each agent, with the docs and source lines they were checked against, and the edge cases handled.
 
@@ -51,6 +51,8 @@ The hook command returns within milliseconds, prints nothing and always exits 0.
 
 Claude Code deletes transcripts after 30 days by default. `agent-sessions install` raises `cleanupPeriodDays` to 3650 (never lowers it) so nothing is lost while a machine is offline.
 
+Capture can be partial: unreadable sources, failed SQLite exports, malformed config and traversal limits are reported rather than treated as missing files. Partial discovery must not imply local deletion. Snapshot sets expose `complete` and list skipped entries; harness and memory bodies share a 64 MiB budget, with 5 MiB per-file and 3000-files-per-scope limits. FIFOs and devices are not read.
+
 [docs/storage-layout.md](docs/storage-layout.md) describes the bucket layout, the manifest format and exactly what is skipped.
 
 ## Commands
@@ -63,7 +65,9 @@ Claude Code deletes transcripts after 30 days by default. `agent-sessions instal
 | `agent-sessions sync` | Uploads what changed. Hooks run this. |
 | `agent-sessions uninstall` | Removes the hooks and the extension. Uploaded data stays. |
 
-Set `AGENT_SESSIONS_DISABLE=1` in an agent's environment to skip capture for that run.
+Set `AGENT_SESSIONS_DISABLE=1` in an agent's environment to persist a session opt-out. The hook still obtains the session path and writes a private exclusion record, but starts no capture or sweep. Later enabled hooks and sweeps do not re-enable that session. If the agent supplies no session path, the collector cannot guarantee future exclusion; recording failures are best-effort logged and never fail an agent.
+
+The conservative policy also withholds agent-wide files in that source root (shared history, logs, databases, memory and settings), plus its user harness and generated memory snapshots, even for an allowed sibling session. It is not universal DLP for content copied elsewhere. Existing remote bytes are never removed. Opt-outs have no automatic expiry: deleting only a local record cannot clear the archive's monotonic exclusion union. A deliberate archive-identity reset or a future explicit revocation mechanism is required to re-enable capture; changing state directory alone is not a reset, and recovered exclusions must be restored before capture.
 
 Logs are in `~/.local/state/agent-sessions/agent-sessions.log`.
 

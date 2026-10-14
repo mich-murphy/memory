@@ -284,3 +284,59 @@ func TestIntentionalClaudeConfigRejectsOtherProtectedSymlinkIdentities(t *testin
 		})
 	}
 }
+
+func TestClaudeConfigChecksDirectoryStateAliasesBeforeOutsideLeaf(t *testing.T) {
+	a := NewClaude(t.TempDir())
+	root := a.CanonicalRoot()
+	state := t.TempDir()
+	t.Setenv("AGENT_SESSIONS_STATE_DIR", state)
+	outside := filepath.Join(t.TempDir(), "innocent.json")
+	writeSource(t, outside, `{"mcpServers":{"s":{"env":{"TOKEN":"private"}}}}`)
+	if err := os.Symlink(outside, filepath.Join(state, "file")); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "state-alias")
+	if err := os.Symlink(state, alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(alias, "file"), a.claudeJSON(root)); err != nil {
+		t.Fatal(err)
+	}
+	exported := a.Exports(root, t.TempDir(), 0)
+	if exported.Complete || len(exported.Files) != 0 || len(exported.Issues) == 0 {
+		t.Fatalf("state directory alias export = %+v", exported)
+	}
+	extra := a.ExtraSnapshotEntries(root, "")
+	if extra.Complete || len(extra.Entries) != 0 || len(extra.Issues) == 0 {
+		t.Fatalf("state directory alias snapshot = %+v", extra)
+	}
+}
+
+func TestClaudeConfigScrubsEveryIntermediateConfigSchema(t *testing.T) {
+	a := NewClaude(t.TempDir())
+	root := a.CanonicalRoot()
+	outside := filepath.Join(t.TempDir(), "innocent.json")
+	writeSource(t, outside, `{"env":{"API_KEY":"settings-secret"},"mcpServers":{"s":{"env":{"TOKEN":"mcp-secret"}}}}`)
+	settings := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.Symlink(outside, settings); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(settings, a.claudeJSON(root)); err != nil {
+		t.Fatal(err)
+	}
+	exported := a.Exports(root, t.TempDir(), 0)
+	if !exported.Complete || len(exported.Files) != 1 {
+		t.Fatalf("legitimate config schema alias = %+v", exported)
+	}
+	body, err := os.ReadFile(exported.Files[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "settings-secret") || strings.Contains(string(body), "mcp-secret") {
+		t.Fatalf("config identity secret retained: %s", body)
+	}
+	extra := a.ExtraSnapshotEntries(root, "")
+	if !extra.Complete || len(extra.Entries) != 1 || strings.Contains(string(extra.Entries[0].Body), "mcp-secret") {
+		t.Fatalf("config schema snapshot = %+v", extra)
+	}
+}
