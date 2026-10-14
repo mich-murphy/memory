@@ -254,6 +254,60 @@ func TestCodexUninstallKeepsOtherHooks(t *testing.T) {
 	}
 }
 
+// Codex's trust keys hold each handler's position, so a reinstall must not move any hook.
+func TestCodexReinstallKeepsEveryHookInPlace(t *testing.T) {
+	e := testenv.New(t)
+	hooksJSON := filepath.Join(e.Home, ".codex", "hooks.json")
+	if err := Codex(opts(e)); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(hooksJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := jsonx.ParseObject(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hooks, _ := doc.Get("hooks")
+	stop, _ := hooks.(*jsonx.Object).Get("Stop")
+	theirs := jsonx.NewObject()
+	theirs.Set("type", "command")
+	theirs.Set("command", "notify-send done")
+	group := jsonx.NewObject()
+	group.Set("hooks", []any{theirs})
+	hooks.(*jsonx.Object).Set("Stop", append(stop.([]any), group))
+	before, err := jsonx.Indent(doc, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testenv.Write(t, hooksJSON, string(before))
+
+	o := opts(e)
+	if err := Codex(o); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := os.ReadFile(hooksJSON); !bytes.Equal(after, before) {
+		t.Errorf("an unchanged reinstall rewrote hooks.json:\n%s", cmp.Diff(string(before), string(after)))
+	}
+	if !slices.Contains(o.Log, "unchanged: "+hooksJSON) {
+		t.Errorf("log = %v", o.Log)
+	}
+
+	o = opts(e)
+	o.Command = []string{"/new/agent-sessions"}
+	if err := Codex(o); err != nil {
+		t.Fatal(err)
+	}
+	var commands []any
+	for _, g := range readJSON(t, hooksJSON)["hooks"].(map[string]any)["Stop"].([]any) {
+		commands = append(commands, g.(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"])
+	}
+	if diff := cmp.Diff([]any{"/new/agent-sessions hook codex", "notify-send done"}, commands); diff != "" {
+		t.Errorf("Stop commands after a new install path (-want +got):\n%s", diff)
+	}
+}
+
 func TestPiInstallWritesExtensionAndRespectsForeignFile(t *testing.T) {
 	e := testenv.New(t)
 	if err := Pi(opts(e)); err != nil {

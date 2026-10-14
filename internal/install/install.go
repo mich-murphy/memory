@@ -168,15 +168,20 @@ func handlersOf(group any) []any {
 	return handlers
 }
 
-func withoutOurs(groups []any) []any {
-	var kept []any
+// replaceOurs puts ours in place of the first of our handlers in groups and drops the rest,
+// so Codex's trust keys, which hold each handler's position, still match on a reinstall.
+func replaceOurs(groups []any, ours *jsonx.Object) (kept []any, replaced bool) {
 	for _, group := range groups {
 		g, _ := group.(*jsonx.Object)
 		handlers := handlersOf(group)
 		var others []any
 		for _, h := range handlers {
-			if !Ours.MatchString(commandOf(h)) {
+			switch {
+			case !Ours.MatchString(commandOf(h)):
 				others = append(others, h)
+			case ours != nil && !replaced:
+				others = append(others, ours)
+				replaced = true
 			}
 		}
 		switch {
@@ -188,7 +193,7 @@ func withoutOurs(groups []any) []any {
 			kept = append(kept, g)
 		}
 	}
-	return kept
+	return kept, replaced
 }
 
 func mergeHooks(doc *jsonx.Object, events []HookEvent, command string) {
@@ -197,26 +202,36 @@ func mergeHooks(doc *jsonx.Object, events []HookEvent, command string) {
 	if !ok {
 		hooks = jsonx.NewObject()
 	}
+	ours := map[string]*jsonx.Object{}
+	if command != "" {
+		for _, e := range events {
+			h := jsonx.NewObject()
+			h.Set("type", "command")
+			h.Set("command", command)
+			if e.Async {
+				h.Set("async", true)
+			}
+			h.Set("timeout", int(e.Timeout/time.Second))
+			ours[e.Name] = h
+		}
+	}
 	for _, event := range hooks.Keys() {
 		v, _ := hooks.Get(event)
 		groups, _ := v.([]any)
-		if kept := withoutOurs(groups); len(kept) > 0 {
+		kept, replaced := replaceOurs(groups, ours[event])
+		if replaced {
+			delete(ours, event)
+		}
+		if len(kept) > 0 {
 			hooks.Set(event, kept)
 		} else {
 			hooks.Delete(event)
 		}
 	}
-	if command != "" {
-		for _, e := range events {
-			handler := jsonx.NewObject()
-			handler.Set("type", "command")
-			handler.Set("command", command)
-			if e.Async {
-				handler.Set("async", true)
-			}
-			handler.Set("timeout", int(e.Timeout/time.Second))
+	for _, e := range events {
+		if h, ok := ours[e.Name]; ok {
 			group := jsonx.NewObject()
-			group.Set("hooks", []any{handler})
+			group.Set("hooks", []any{h})
 			v, _ := hooks.Get(e.Name)
 			groups, _ := v.([]any)
 			hooks.Set(e.Name, append(groups, group))
