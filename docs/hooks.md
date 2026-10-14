@@ -96,7 +96,7 @@ The trust hash covers the command string, so a hook that changes needs approving
 - **Hooks run through `$SHELL -lc`** (`command_runner.rs:399`), so your login profile runs first. That's another reason the turn hooks are async.
 - **Transcripts.** The hook's `transcript_path` is null for sessions Codex doesn't persist, and there is nothing to capture for those.
 
-**Files captured:** all of `$CODEX_HOME` except `auth.json`, `.credentials.json` (MCP OAuth tokens when there's no keyring), locks, temp files, caches and shell snapshots.
+**Files captured:** all of `$CODEX_HOME` except `auth.json`, `.credentials.json` (MCP OAuth tokens when there's no keyring), `.env` (API keys Codex loads at start), locks, temp files, caches and shell snapshots.
 
 - `sessions/YYYY/MM/DD/rollout-*.jsonl` and `archived_sessions/`.
   - **Recompression.** Rollouts untouched for 7 days are recompressed to `.jsonl.zst` (`rollout/src/compression.rs:364`), and resuming one decompresses it again (`:121`). agent-sessions keys rollouts without the date folder or `.zst`, and hashes the decompressed bytes. So recompression, archiving and resuming never cause a re-upload.
