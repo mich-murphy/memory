@@ -69,6 +69,7 @@ func TestWritesSurviveCancellationAndReopen(t *testing.T) {
 	check(t, err)
 	cancel() // a SIGTERM mid-run must not roll back what was already uploaded
 	check(t, s.RecordUpload("k", "sha", 3))
+	check(t, s.Flush()) // durable records require an explicit commit, never Close
 	check(t, s.Close())
 	s, err = Open(t.Context(), dir)
 	check(t, err)

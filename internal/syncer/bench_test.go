@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -36,10 +37,11 @@ var (
 // benchHome is a workload and the state dir a backfill of it left, built once per test binary
 // and copied by each benchmark, since a typical home takes seconds to write.
 type benchHome struct {
-	w      *testenv.Workload
-	synced string
-	sizes  map[string]int64
-	at     time.Time
+	w       *testenv.Workload
+	synced  string
+	sizes   map[string]int64
+	at      time.Time
+	objects map[string]memObject
 }
 
 var (
@@ -78,9 +80,8 @@ func home(b *testing.B, pr profile) *benchHome {
 	h := &benchHome{w: w, synced: filepath.Join(dir, "synced"), sizes: map[string]int64{}, at: w.Start.Add(2 * time.Hour)}
 	r := newRig(b, w, h.synced)
 	r.now = h.at
-	if sum := r.sync(""); sum.Errors > 0 {
-		b.Fatalf("backfill: %v", sum.ErrorMessages)
-	}
+	benchSync(b, r, "")
+	h.objects = maps.Clone(r.bucket.objects)
 	for _, p := range w.Mains {
 		st, err := os.Stat(p)
 		if err != nil {
@@ -105,6 +106,9 @@ func (h *benchHome) reset(b *testing.B, stateDir string) *rig {
 	h.w.Touch(b, h.w.Start)
 	copyDir(b, h.synced, stateDir)
 	r := newRig(b, h.w, stateDir)
+	// The bound cache and its matching remote archive are one fixture snapshot. Bodies
+	// are immutable; only the map needs copying before a benchmark adds publications.
+	r.bucket.objects = maps.Clone(h.objects)
 	r.now = h.at.Add(time.Minute)
 	return r
 }
@@ -123,6 +127,15 @@ func (t *tally) report(b *testing.B) {
 	b.ReportMetric(float64(t.sent)/float64(b.N), "sent-B/op")
 }
 
+func benchSync(b *testing.B, r *rig, agent string, paths ...string) *Summary {
+	b.Helper()
+	sum := r.sync(agent, paths...)
+	if sum.Errors != 0 {
+		b.Fatalf("sync: %v", sum.ErrorMessages)
+	}
+	return sum
+}
+
 func BenchmarkBackfill(b *testing.B) {
 	for _, pr := range []profile{small, typical, many, large, huge} {
 		b.Run(pr.name, func(b *testing.B) {
@@ -139,7 +152,9 @@ func BenchmarkBackfill(b *testing.B) {
 				}
 				r.bucket.objects = map[string]memObject{}
 				b.StartTimer()
-				r.sync("")
+				if sum := benchSync(b, r, ""); sum.Uploaded == 0 || sum.Manifests == 0 {
+					b.Fatalf("backfill did not capture workload: %+v", sum)
+				}
 				t.add(r.bucket)
 			}
 			t.report(b)
@@ -153,7 +168,9 @@ func BenchmarkSweepIdle(b *testing.B) {
 			r := home(b, pr).reset(b, filepath.Join(b.TempDir(), "state"))
 			var t tally
 			for b.Loop() {
-				r.sync("")
+				if sum := benchSync(b, r, ""); sum.Uploaded != 0 {
+					b.Fatalf("idle sweep uploaded %d files", sum.Uploaded)
+				}
 				t.add(r.bucket)
 			}
 			t.report(b)
@@ -181,7 +198,9 @@ func BenchmarkSweepAfterTurns(b *testing.B) {
 					h.w.AppendTurn(b, p, turnSize, r.now.Add(-2*time.Minute))
 				}
 				b.StartTimer()
-				r.sync("")
+				if sum := benchSync(b, r, ""); sum.Segments != len(active) {
+					b.Fatalf("busy sweep captured %d segments, want %d", sum.Segments, len(active))
+				}
 				t.add(r.bucket)
 			}
 			t.report(b)
@@ -210,7 +229,9 @@ func BenchmarkHookTurn(b *testing.B) {
 				r.bucket.latency = c.rtt
 				h.w.AppendTurn(b, path, turnSize, r.now.Add(-5*time.Second))
 				b.StartTimer()
-				r.sync("claude", path)
+				if sum := benchSync(b, r, "claude", path); sum.Segments != 1 {
+					b.Fatalf("hook turn captured %d segments, want 1", sum.Segments)
+				}
 				t.add(r.bucket)
 			}
 			t.report(b)
@@ -222,11 +243,12 @@ func BenchmarkHookTurn(b *testing.B) {
 // turns: the transcript at its longest, and per number of turns, its size, the state and the
 // clock after that turn.
 type segmented struct {
-	h      *benchHome
-	full   []byte
-	sizes  map[int]int64
-	states map[int]string
-	at     map[int]time.Time
+	h       *benchHome
+	full    []byte
+	sizes   map[int]int64
+	states  map[int]string
+	at      map[int]time.Time
+	objects map[int]map[string]memObject
 }
 
 var (
@@ -238,7 +260,7 @@ func segmentedSession(b *testing.B, turns []int) *segmented {
 	b.Helper()
 	segmentedOnce.Do(func() {
 		h := home(b, profile{"segmented", testenv.Profile{Sessions: 1, Largest: 12 << 20}})
-		s := &segmented{h: h, sizes: map[int]int64{}, states: map[int]string{}, at: map[int]time.Time{}}
+		s := &segmented{h: h, sizes: map[int]int64{}, states: map[int]string{}, at: map[int]time.Time{}, objects: map[int]map[string]memObject{}}
 		dir := filepath.Join(filepath.Dir(h.synced), "turns")
 		r := h.reset(b, filepath.Join(dir, "work"))
 		path := h.w.Mains[0]
@@ -247,8 +269,8 @@ func segmentedSession(b *testing.B, turns []int) *segmented {
 			for ; done < k; done++ {
 				r.now = r.now.Add(10 * time.Second)
 				h.w.AppendTurn(b, path, turnSize, r.now.Add(-5*time.Second))
-				if sum := r.sync("claude", path); sum.Errors > 0 {
-					b.Fatalf("turn %d: %v", done, sum.ErrorMessages)
+				if sum := benchSync(b, r, "claude", path); sum.Segments != 1 {
+					b.Fatalf("turn %d captured %d segments, want 1", done, sum.Segments)
 				}
 			}
 			st, err := os.Stat(path)
@@ -258,6 +280,7 @@ func segmentedSession(b *testing.B, turns []int) *segmented {
 			s.states[k] = filepath.Join(dir, strconv.Itoa(k))
 			copyDir(b, filepath.Join(dir, "work"), s.states[k])
 			s.sizes[k], s.at[k] = st.Size(), r.now
+			s.objects[k] = maps.Clone(r.bucket.objects)
 		}
 		full, err := os.ReadFile(path)
 		if err != nil {
@@ -291,11 +314,12 @@ func BenchmarkHookTurnAfterSegments(b *testing.B) {
 				}
 				copyDir(b, s.states[k], stateDir)
 				r := newRig(b, s.h.w, stateDir)
+				r.bucket.objects = maps.Clone(s.objects[k])
 				r.now = s.at[k].Add(10 * time.Second)
 				s.h.w.AppendTurn(b, path, turnSize, r.now.Add(-5*time.Second))
 				b.StartTimer()
-				if sum := r.sync("claude", path); sum.Errors > 0 {
-					b.Fatal(sum.ErrorMessages)
+				if sum := benchSync(b, r, "claude", path); sum.Segments != 1 {
+					b.Fatalf("segmented hook captured %d segments, want 1", sum.Segments)
 				}
 				t.add(r.bucket)
 			}
@@ -315,11 +339,15 @@ func BenchmarkFold(b *testing.B) {
 		b.StopTimer()
 		r := h.reset(b, stateDir)
 		h.w.AppendTurn(b, path, turnSize, r.now.Add(-5*time.Second))
-		r.sync("claude", path)
+		if sum := benchSync(b, r, "claude", path); sum.Segments != 1 {
+			b.Fatalf("fold setup captured %d segments, want 1", sum.Segments)
+		}
 		r.bucket.takeOps()
 		r.now = r.now.Add(time.Hour)
 		b.StartTimer()
-		r.sync("claude", path)
+		if sum := benchSync(b, r, "claude", path); sum.Folded != 1 {
+			b.Fatalf("idle sweep folded %d files, want 1", sum.Folded)
+		}
 		t.add(r.bucket)
 	}
 	t.report(b)

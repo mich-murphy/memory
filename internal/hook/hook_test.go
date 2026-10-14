@@ -144,7 +144,9 @@ func readLaunchFile(t *testing.T, args []string) map[string]any {
 	if err := json.Unmarshal(testReadFile(t, args[i+1]), &launch); err != nil {
 		t.Fatal(err)
 	}
-	return launch
+	payload := launch["payload"].(map[string]any)
+	payload["recorded_at"] = launch["recorded_at"]
+	return payload
 }
 
 func testReadFile(t *testing.T, path string) []byte {
@@ -415,4 +417,29 @@ func FuzzReadInput(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestDisabledHookReadsPathsAndPersistsExclusionWithoutLaunching(t *testing.T) {
+	e := testenv.New(t)
+	calls := fakeSpawn(t)
+	t.Setenv("AGENT_SESSIONS_DISABLE", "1")
+	path := filepath.Join(e.PiDir, testenv.PiKey+".jsonl")
+	payload := mustJSON(t, map[string]any{"transcript_path": path, "hook_event_name": "SessionStart"})
+	withStdin(t, payload, func() { Run(t.Context(), "pi", nil, "", ExtensionArgs{}) })
+	files, err := filepath.Glob(filepath.Join(e.State, "exclusions", "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || len(*calls) != 0 {
+		t.Fatalf("exclusions = %v, launched = %v", files, *calls)
+	}
+	t.Setenv("AGENT_SESSIONS_DISABLE", "")
+	Run(t.Context(), "pi", []string{path}, "agent_settled", ExtensionArgs{})
+	files, err = filepath.Glob(filepath.Join(e.State, "exclusions", "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 {
+		t.Fatal("enabled hook cleared opt-out")
+	}
 }

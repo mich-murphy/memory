@@ -67,7 +67,7 @@ func TestClassifyRoles(t *testing.T) {
 		{"pi", "themes", RoleUnknown, ""},
 		{"pi", "extensions/e.ts", RoleConfig, ""},
 		{"pi", "experimental/x.json", RoleExperimental, ""},
-		{"pi", "sessions/--w--/s.jsonl", RoleMain, "s"},
+		{"pi", "sessions/--w--/s.jsonl", RoleMain, "--w--/s"},
 		{"pi", "sessions/--w--/notes.txt", RoleUnknown, ""},
 	} {
 		a := all[tc.agent]
@@ -91,9 +91,9 @@ func TestDiscoverLeavesOutCredentialFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	files, _ := Discover(a, root)
+	discovery := Discover(a, root)
 	var keys []string
-	for _, sf := range files {
+	for _, sf := range discovery.Files {
 		keys = append(keys, sf.Key)
 	}
 	slices.Sort(keys)

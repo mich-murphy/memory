@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -13,8 +14,10 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/mich-murphy/memory/internal/cli"
+	"github.com/mich-murphy/memory/internal/config"
 	"github.com/mich-murphy/memory/internal/install"
 	"github.com/mich-murphy/memory/internal/state"
+	"github.com/mich-murphy/memory/internal/syncer"
 	"github.com/mich-murphy/memory/internal/testenv"
 )
 
@@ -172,7 +175,7 @@ func TestSyncFailsCleanlyWithoutR2Settings(t *testing.T) {
 
 func TestASyncThatCannotGetTheLockLeavesTheBucketAlone(t *testing.T) {
 	e := testenv.New(t)
-	unlock, err := state.Lock(t.Context(), e.State, time.Second)
+	unlock, err := state.Lock(t.Context(), archiveLockDir(t), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +209,8 @@ func TestSyncRecordsTheLaunchTheHookLeft(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
-	got, _ := e.Manifest("pi", testenv.PiKey)["launch"].(map[string]any)
+	record := e.Manifest("pi", testenv.PiSessionKey)["launch"].(map[string]any)
+	got := record["envelope"].(map[string]any)["payload"].(map[string]any)
 	if got["source"] != "startup" || got["event"] != "session_start" || got["agent"] != nil || got["path"] != nil {
 		t.Errorf("manifest launch = %v", got)
 	}
@@ -230,7 +234,7 @@ func TestALaunchWhoseSyncCouldNotGetTheLockIsRecordedByTheNextRun(t *testing.T) 
 	transcript := filepath.Join(e.PiDir, testenv.PiKey+".jsonl")
 	launch := writeLaunch(t, e, "test", transcript)
 	testenv.Write(t, filepath.Join(e.State, "pending", "launch-garbage.json"), "not json")
-	unlock, err := state.Lock(t.Context(), e.State, time.Second)
+	unlock, err := state.Lock(t.Context(), archiveLockDir(t), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,13 +245,136 @@ func TestALaunchWhoseSyncCouldNotGetTheLockIsRecordedByTheNextRun(t *testing.T) 
 	if code != 0 {
 		t.Fatalf("locked sync: exit %d", code)
 	}
-	if code, out, errOut := run("sync", "--quiet"); code != 0 {
+	if code, out, errOut := run("sync", "--quiet"); code != 1 {
 		t.Fatalf("sweep: exit %d\n%s%s", code, out, errOut)
 	}
-	if got, _ := e.Manifest("pi", testenv.PiKey)["launch"].(map[string]any); got["source"] != "startup" {
+	if got := e.Manifest("pi", testenv.PiSessionKey)["launch"].(map[string]any)["envelope"].(map[string]any)["payload"].(map[string]any); got["source"] != "startup" {
 		t.Errorf("manifest launch = %v", got)
 	}
-	if left, _ := filepath.Glob(filepath.Join(e.State, "pending", "launch-*")); len(left) != 0 {
-		t.Errorf("launch files left behind: %v", left)
+	if left, _ := filepath.Glob(filepath.Join(e.State, "pending", "launch-*")); len(left) != 1 || filepath.Base(left[0]) != "launch-garbage.json" {
+		t.Errorf("retained failed launch entries: %v", left)
+	}
+}
+
+func TestQueuedLaunchesAreChronologicalWithStableTies(t *testing.T) {
+	e := testenv.New(t)
+	path := filepath.Join(e.PiDir, testenv.PiKey+".jsonl")
+	for _, c := range []struct {
+		name   string
+		at     float64
+		source string
+	}{{"a", 30, "late"}, {"b", 10, "first"}, {"c", 20, "middle"}, {"d", 30, "tie"}} {
+		body := fmt.Sprintf(`{"schema":1,"id":%q,"agent":"pi","path":%q,"recorded_at":%g,"payload":{"event":"session_start","source":%q}}`, c.name, path, c.at, c.source)
+		testenv.Write(t, filepath.Join(e.State, "pending", "launch-"+c.name+".json"), body)
+	}
+	if code, out, errOut := run("sync", "--agent", "pi"); code != 0 {
+		t.Fatalf("sync: %d %s %s", code, out, errOut)
+	}
+	manifest := e.Manifest("pi", testenv.PiSessionKey)
+	launches := manifest["launches"].([]any)
+	var got []string
+	for _, l := range launches {
+		got = append(got, l.(map[string]any)["envelope"].(map[string]any)["payload"].(map[string]any)["source"].(string))
+	}
+	if diff := cmp.Diff([]string{"first", "middle", "late", "tie"}, got); diff != "" {
+		t.Fatalf("launches (-want +got): %s", diff)
+	}
+}
+
+func TestDisabledSessionRemainsExcludedFromEnabledSweepsAndLaunches(t *testing.T) {
+	e := testenv.New(t)
+	path := filepath.Join(e.PiDir, testenv.PiKey+".jsonl")
+	t.Setenv("AGENT_SESSIONS_DISABLE", "1")
+	if code, _, _ := run("hook", "pi", "--path", path); code != 0 {
+		t.Fatal(code)
+	}
+	t.Setenv("AGENT_SESSIONS_DISABLE", "")
+	queued := writeLaunch(t, e, "excluded", path)
+	if code, out, errOut := run("sync", "--agent", "pi"); code != 0 {
+		t.Fatalf("sync: %d %s %s", code, out, errOut)
+	}
+	assertNoArchivedContent(t, e)
+	if _, err := os.Stat(queued); !os.IsNotExist(err) {
+		t.Fatalf("excluded launch left: %v", err)
+	}
+	if code, out, errOut := run("sync", "--agent", "pi", "--path", path); code != 0 {
+		t.Fatalf("hook sync: %d %s %s", code, out, errOut)
+	}
+	assertNoArchivedContent(t, e)
+}
+
+func TestUnreadablePendingLaunchIsRetainedAndRetried(t *testing.T) {
+	e := testenv.New(t)
+	path := filepath.Join(e.PiDir, testenv.PiKey+".jsonl")
+	queued := writeLaunch(t, e, "unreadable", path)
+	original, err := os.ReadFile(queued)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(queued, 0); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errOut := run("sync", "--agent", "pi"); code != 1 || !strings.Contains(errOut, "launch") {
+		t.Fatalf("unreadable sync = %d %s", code, errOut)
+	}
+	if _, err := os.Stat(queued); err != nil {
+		t.Fatalf("pending launch was erased: %v", err)
+	}
+	if err := os.Chmod(queued, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(queued)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(string(original), string(got)); diff != "" {
+		t.Fatalf("pending bytes changed: %s", diff)
+	}
+	if code, out, errOut := run("sync", "--agent", "pi"); code != 0 {
+		t.Fatalf("retry = %d %s %s", code, out, errOut)
+	}
+	if _, err := os.Stat(queued); !os.IsNotExist(err) {
+		t.Fatalf("successful launch queue remains: %v", err)
+	}
+}
+
+func TestMalformedPendingLaunchPreservesExactBytesAndReportsError(t *testing.T) {
+	e := testenv.New(t)
+	path := filepath.Join(e.State, "pending", "launch-malformed.json")
+	const original = `{"agent":"pi","path":"/p","recorded_at":"bad"}`
+	testenv.Write(t, path, original)
+	for range 2 {
+		if code, _, errOut := run("sync", "--agent", "pi"); code != 1 || !strings.Contains(errOut, "launch") {
+			t.Fatalf("malformed sync = %d %s", code, errOut)
+		}
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != original {
+			t.Fatalf("queue bytes = %q", got)
+		}
+	}
+}
+
+func archiveLockDir(t *testing.T) string {
+	t.Helper()
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := syncer.LockDir(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func assertNoArchivedContent(t *testing.T, e *testenv.Env) {
+	t.Helper()
+	for _, key := range e.BucketKeys() {
+		if strings.Contains(key, "/records/") || strings.HasPrefix(key, "v3/blobs/") || strings.HasPrefix(key, "v3/snapshots/") {
+			t.Errorf("excluded session archived content: %s", key)
+		}
 	}
 }

@@ -8,10 +8,12 @@ import (
 	"flag"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"io/fs"
 	"maps"
 	"math/rand/v2"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -20,12 +22,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mich-murphy/memory/internal/store"
+
 	"github.com/mich-murphy/memory/internal/fsutil"
+	"github.com/mich-murphy/memory/internal/jsonx"
 	"github.com/mich-murphy/memory/internal/raw"
 	"github.com/mich-murphy/memory/internal/testenv"
 )
 
-var simulations = flag.Int("simulations", 8, "seeded session histories TestSimulatedSessions plays")
+var (
+	simulations      = flag.Int("simulations", 8, "seeded session histories TestSimulatedSessions plays")
+	simulationWorker = flag.Bool("simulation-worker", false, "run a simulation in this isolated test process")
+)
 
 const simSteps = 40
 
@@ -36,17 +44,65 @@ const simSteps = 40
 // docs/storage-layout.md describes, and every earlier upload a change replaced must be kept as a
 // version.
 func TestSimulatedSessions(t *testing.T) {
+	slots := make(chan struct{}, 4)
 	for seed := range *simulations {
-		t.Run(strconv.Itoa(seed), func(t *testing.T) { newSim(t, uint64(seed)).play() })
+		t.Run(strconv.Itoa(seed), func(t *testing.T) {
+			if *simulationWorker {
+				newSim(t, uint64(seed)).play()
+				return
+			}
+			// Fixtures alter process-wide environment, so only subprocess orchestration
+			// runs in parallel. Each child owns its fake home, clock, SQLite and bucket.
+			t.Parallel()
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			runSimulationProcess(t, seed)
+		})
 	}
 }
 
+func runSimulationProcess(t *testing.T, seed int) {
+	t.Helper()
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-test.run=^TestSimulatedSessions$/^" + strconv.Itoa(seed) + "$", "-simulation-worker", "-simulations=" + strconv.Itoa(*simulations)}
+	if deadline, ok := t.Deadline(); ok {
+		args = append(args, "-test.timeout="+time.Until(deadline).String())
+	}
+	// A coverage-instrumented test binary writes its counters only when given the
+	// real coverage destination. Preserve the final flag value, including make cover's
+	// override, so child production coverage is merged alongside the parent's data.
+	coverage := flag.Lookup("test.gocoverdir")
+	if coverage != nil && coverage.Value.String() != "" {
+		args = append(args, "-test.gocoverdir="+coverage.Value.String())
+	}
+	cmd := exec.CommandContext(t.Context(), binary, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("simulation seed %d child: %v\n%s", seed, err, output)
+	}
+	if coverage != nil && coverage.Value.String() != "" {
+		pattern := filepath.Join(coverage.Value.String(), "covcounters.*."+strconv.Itoa(cmd.Process.Pid)+".*")
+		counters, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(counters) == 0 {
+			t.Fatalf("simulation seed %d child emitted no coverage counters in %s", seed, coverage.Value.String())
+		}
+	}
+	t.Logf("simulation seed %d child pid %d: %s", seed, cmd.Process.Pid, bytes.TrimSpace(output))
+}
+
 type sim struct {
-	t      *testing.T
-	rng    *rand.Rand
-	w      *testenv.Workload
-	r      *rig
-	faults *faultyStore
+	t       *testing.T
+	rng     *rand.Rand
+	w       *testenv.Workload
+	r       *rig
+	faults  *faultyStore
+	archive *testenv.Archive
 	// tracked are the files whose bytes the bucket must hold; deleted those it must tombstone.
 	tracked map[string]bool
 	deleted map[string]bool
@@ -71,6 +127,7 @@ func newSim(t *testing.T, seed uint64) *sim {
 		tracked: map[string]bool{}, deleted: map[string]bool{}, uploaded: map[string][]byte{},
 		secrets: []string{"sk-ant-not-a-real-key", "ghp_not_a_real_token"},
 	}
+	s.archive = testenv.NewArchive()
 	s.faults = &faultyStore{memStore: r.bucket}
 	r.store = s.faults
 	for _, p := range w.Mains {
@@ -384,7 +441,22 @@ func (s *sim) sync(name string, paths []string) {
 		s.t.Fatalf("step %d %s: %d errors: %v", s.n, name, sum.Errors, sum.ErrorMessages)
 	}
 	if len(paths) > 0 {
-		return // a hook's sync only covers its own session
+		s.audit(name)
+		// Other sessions may have unsynced turns, but the hook's selected transcript
+		// must match even when its expected content is empty.
+		for _, path := range paths {
+			key := s.keyOf(path)
+			got, err := s.rebuild(key)
+			want := s.expected(path)
+			if err != nil || !bytes.Equal(got, want) {
+				s.t.Fatalf("step %d %s hook: %s holds %d bytes (%v), file %d", s.n, name, key, len(got), err, len(want))
+			}
+			if old, ok := s.uploaded[key]; ok && !bytes.HasPrefix(want, old) && !s.hasVersion(key, old) {
+				s.t.Fatalf("step %d %s hook replaced earlier bytes without history", s.n, name)
+			}
+			s.uploaded[key] = want
+		}
+		return
 	}
 	s.check(name)
 	if again := s.run(nil); again.Uploaded != 0 {
@@ -424,27 +496,37 @@ func (s *sim) keyOf(path string) string {
 		if agent == "codex" && strings.HasPrefix(rel, "sessions/") {
 			rel = "rollouts/" + strings.TrimSuffix(filepath.Base(rel), ".zst")
 		}
-		return "raw/agent=" + agent + "/machine=bench/" + rel
+		return testenv.Stream("bench", "file", agent, rel)
 	}
 	s.t.Fatalf("%s is under no agent directory", path)
 	return ""
 }
 
+func (s *sim) audit(name string) {
+	s.t.Helper()
+	b := s.r.bucket
+	if len(s.faults.deletes) > 0 {
+		s.t.Fatalf("remote deletion attempted: %v", s.faults.deletes)
+	}
+	if err := s.archive.Audit(slices.Collect(maps.Keys(b.objects)), memRead(b)); err != nil {
+		s.t.Fatalf("step %d %s archive audit: %v", s.n, name, err)
+	}
+}
+
 func (s *sim) check(name string) {
 	s.t.Helper()
 	b := s.r.bucket
+	s.audit(name)
 	for _, path := range slices.Sorted(maps.Keys(s.tracked)) {
 		want := s.expected(path)
-		if len(want) == 0 {
-			continue
-		}
+
 		key := s.keyOf(path)
-		got, err := rebuild(b, key)
+		got, err := s.rebuild(key)
 		if err != nil || !bytes.Equal(got, want) {
-			s.t.Fatalf("step %d %s: %s holds %d bytes (%v), the file %d", s.n, name, key, len(got), err, len(want))
+			s.t.Fatalf("step %d %s: %s (%s) holds %d bytes (%v), the file %d", s.n, name, key, path, len(got), err, len(want))
 		}
 		if old, ok := s.uploaded[key]; ok && !bytes.HasPrefix(want, old) {
-			if !hasVersion(b, key, old) {
+			if !s.hasVersion(key, old) {
 				s.t.Fatalf("step %d %s: %s was replaced without keeping its %d earlier bytes", s.n, name, key, len(old))
 			}
 		}
@@ -452,7 +534,8 @@ func (s *sim) check(name string) {
 	}
 	s.checkManifests(name)
 	for path := range s.deleted {
-		if _, err := os.Stat(path); err == nil || s.uploaded[s.keyOf(path)] == nil {
+		_, known := s.uploaded[s.keyOf(path)]
+		if _, err := os.Stat(path); err == nil || !known {
 			continue
 		}
 		s.checkTombstone(name, path)
@@ -460,7 +543,11 @@ func (s *sim) check(name string) {
 	for k, o := range b.objects {
 		body := o.body
 		if strings.HasSuffix(k, ".zst") {
-			body, _ = raw.Decompress(body)
+			var err error
+			body, err = raw.Decompress(body)
+			if err != nil {
+				s.t.Fatal(err)
+			}
 		}
 		for _, secret := range s.secrets {
 			if bytes.Contains(body, []byte(secret)) {
@@ -472,158 +559,124 @@ func (s *sim) check(name string) {
 
 // checkManifests rebuilds every transcript a manifest lists from its pieces, each of which must
 // hold the bytes its sha256 names, and compares those still on disk with the file.
+func memRead(b *memStore) func(string) ([]byte, error) {
+	return func(key string) ([]byte, error) {
+		o, ok := b.objects[key]
+		if !ok {
+			return nil, fmt.Errorf("%s missing", key)
+		}
+		return o.body, nil
+	}
+}
+
 func (s *sim) checkManifests(name string) {
 	s.t.Helper()
 	files := map[string]string{}
 	for path := range s.tracked {
-		files[s.keyOf(path)+".zst"] = path
+		files[s.keyOf(path)] = path
 	}
-	for k, o := range s.r.bucket.objects {
-		if !strings.HasPrefix(k, "manifests/") {
-			continue
+	prefixes := map[string]bool{}
+	for key := range s.r.bucket.objects {
+		if strings.Contains(key, "/records/manifest/") && strings.Contains(key, "/commits/") {
+			prefix, _, _ := strings.Cut(key, "commits/")
+			prefixes[prefix] = true
 		}
-		var m struct {
-			Transcripts []struct {
-				Object string      `json:"object"`
-				Pieces []raw.Piece `json:"pieces"`
-			} `json:"transcripts"`
-		}
-		if err := json.Unmarshal(o.body, &m); err != nil {
+	}
+	for prefix := range prefixes {
+		records, err := s.archive.Chain(prefix)
+		if err != nil {
 			s.t.Fatal(err)
 		}
-		for _, tr := range m.Transcripts {
-			got, err := fromPieces(s.r.bucket, tr.Pieces)
-			if err != nil {
-				s.t.Fatalf("step %d %s: %s in %s: %v", s.n, name, tr.Object, k, err)
-			}
-			path, ok := files[tr.Object]
-			if !ok {
+		// Historical manifests are fully checked by the immutable archive audit;
+		// only the current manifest is comparable to the current disk.
+		for i := range records {
+			if i != len(records)-1 {
 				continue
 			}
-			if want := s.expected(path); len(want) > 0 && !bytes.Equal(got, want) {
-				s.t.Fatalf("step %d %s: %s lists %d bytes for %s, the file %d", s.n, name, k, len(got), tr.Object, len(want))
+			r := &records[i]
+			for _, v := range listManifest(r.Manifest["transcripts"]) {
+				tr := v.(map[string]any)
+				body, err := s.archive.Pieces(decodePieces(s.t, tr["pieces"]))
+				if err != nil {
+					s.t.Fatal(err)
+				}
+				if int64(len(body)) != int64(tr["size"].(float64)) || raw.SHA256(body) != tr["sha256"] {
+					s.t.Fatalf("%s transcript full hash/size mismatch", r.Object)
+				}
+				// Earlier immutable manifests describe earlier content, not the current disk.
+				if r.ID != records[len(records)-1].ID {
+					continue
+				}
+				path, ok := files[strings.TrimSuffix(tr["history"].(string), "commits/")]
+				if !ok {
+					continue
+				}
+				if want := s.expected(path); !bytes.Equal(body, want) {
+					s.t.Fatalf("step %d %s: %s lists %d bytes for %s, file %d", s.n, name, r.Object, len(body), path, len(want))
+				}
 			}
 		}
 	}
 }
 
-func fromPieces(b *memStore, pieces []raw.Piece) ([]byte, error) {
-	var out []byte
-	for _, p := range pieces {
-		o, ok := b.objects[p.Object]
-		if !ok {
-			return nil, fmt.Errorf("%s is missing", p.Object)
-		}
-		data, err := raw.Decompress(o.body)
-		if err != nil {
-			return nil, err
-		}
-		if int64(len(out)) != p.Start || raw.SHA256(data) != p.SHA256 {
-			return nil, fmt.Errorf("%s doesn't hold bytes %d-%d", p.Object, p.Start, p.End)
-		}
-		out = append(out, data...)
+func listManifest(v any) []any { out, _ := v.([]any); return out }
+
+func decodePieces(t *testing.T, v any) []raw.Piece {
+	t.Helper()
+	body, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return out, nil
+	var pieces []raw.Piece
+	if err := json.Unmarshal(body, &pieces); err != nil {
+		t.Fatal(err)
+	}
+	return pieces
 }
 
 func (s *sim) checkTombstone(name, path string) {
-	if !isTranscript(path) || !strings.HasSuffix(path, ".jsonl") {
-		return
+	records, err := s.archive.Chain(s.keyOf(path))
+	if err != nil {
+		s.t.Fatal(err)
 	}
-	key := strings.TrimPrefix(s.keyOf(path), "raw/agent="+s.agentOf(path)+"/machine=bench/")
-	for k, o := range s.r.bucket.objects {
-		if !strings.HasPrefix(k, "manifests/agent="+s.agentOf(path)+"/") {
-			continue
-		}
-		var m struct {
-			Deleted []struct {
-				Key string `json:"key"`
-			} `json:"deleted_locally"`
-		}
-		if err := json.Unmarshal(o.body, &m); err != nil {
-			s.t.Fatal(err)
-		}
-		for _, d := range m.Deleted {
-			if d.Key == key {
-				return
-			}
-		}
+	if len(records) == 0 || records[len(records)-1].File.Kind != "delete" || records[len(records)-1].File.DeletedAt <= 0 {
+		s.t.Fatalf("step %d %s: no file deletion commit for %s", s.n, name, path)
 	}
-	s.t.Fatalf("step %d %s: no manifest says %s was deleted", s.n, name, key)
+	// Deleted content must still be readable, including nontranscript auxiliary files.
+	if _, err := s.archive.Content(records[len(records)-1].File); err != nil {
+		s.t.Fatal(err)
+	}
 }
 
 func isTranscript(path string) bool {
 	return strings.Contains(path, "/projects/") || strings.Contains(path, "/sessions/")
 }
 
-// rebuild reads a raw file without its manifest: the base object, then each segment that
-// starts where the bytes so far end.
-func rebuild(b *memStore, key string) ([]byte, error) {
-	base, ok := b.objects[key+".zst"]
-	if !ok {
-		return nil, errors.New("no base object")
-	}
-	out, err := raw.Decompress(base.body)
+// rebuild selects the unique file commit chain without manifest or local-state evidence.
+func (s *sim) rebuild(prefix string) ([]byte, error) {
+	records, err := s.archive.Chain(prefix)
 	if err != nil {
 		return nil, err
 	}
-	var segments []string
-	for k := range b.objects {
-		if strings.HasPrefix(k, key+".zst.d/") {
-			segments = append(segments, k)
-		}
+	if len(records) == 0 {
+		return nil, errors.New("no file commits")
 	}
-	slices.Sort(segments)
-	for _, k := range segments {
-		var start, end int64
-		if _, err := fmt.Sscanf(strings.TrimPrefix(k, key+".zst.d/"), "%d-%d.zst", &start, &end); err != nil {
-			return nil, err
-		}
-		if start != int64(len(out)) {
-			continue
-		}
-		data, err := raw.Decompress(b.objects[k].body)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, data...)
-	}
-	return out, nil
+	return s.archive.Content(records[len(records)-1].File)
 }
 
-// hasVersion says whether one of the key's versions, rebuilt from its blobs, starts with old:
-// appends a hook uploaded after old was checked are part of the version that replaced it.
-func hasVersion(b *memStore, key string, old []byte) bool {
-	index, ok := b.objects["raw-versions/"+strings.TrimPrefix(key, "raw/")+".json"]
-	if !ok {
+// hasVersion checks earlier immutable generations. A hook may have appended after the
+// last sweep oracle, so a retained generation containing that prefix is sufficient.
+func (s *sim) hasVersion(prefix string, old []byte) bool {
+	records, err := s.archive.Chain(prefix)
+	if err != nil {
 		return false
 	}
-	var doc struct {
-		Versions []struct {
-			SHA256 string      `json:"sha256"`
-			Pieces []raw.Piece `json:"pieces"`
-		} `json:"versions"`
-	}
-	if err := json.Unmarshal(index.body, &doc); err != nil {
-		return false
-	}
-	for _, v := range doc.Versions {
-		var got []byte
-		for _, p := range v.Pieces {
-			o, ok := b.objects[p.Object]
-			if !ok {
-				return false
-			}
-			data, err := raw.Decompress(o.body)
-			if err != nil || raw.SHA256(data) != p.SHA256 {
-				return false
-			}
-			got = append(got, data...)
-		}
-		if raw.SHA256(got) != v.SHA256 {
+	for i := range max(0, len(records)-1) {
+		body, err := s.archive.Content(records[i].File)
+		if err != nil {
 			return false
 		}
-		if bytes.HasPrefix(got, old) {
+		if bytes.HasPrefix(body, old) {
 			return true
 		}
 	}
@@ -640,10 +693,11 @@ type faultyStore struct {
 	round      uint64
 	fail, lose int // out of 100
 	// At request killAt, onKill runs and the process dies: no request from then on is sent.
-	mu     sync.Mutex
-	killAt int
-	sent   int
-	onKill func()
+	mu      sync.Mutex
+	killAt  int
+	sent    int
+	onKill  func()
+	deletes []string
 }
 
 func (f *faultyStore) reset() {
@@ -699,6 +753,112 @@ func (f *faultyStore) Copy(ctx context.Context, src, dst, sha string) (bool, err
 	return ok, err
 }
 
-func (f *faultyStore) Delete(ctx context.Context, key string) error {
-	return f.fault("delete "+key, func() error { return f.memStore.Delete(ctx, key) })
+func (f *faultyStore) Delete(_ context.Context, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deletes = append(f.deletes, key)
+	return errors.New("v3 archive attempted remote deletion")
+}
+
+func (f *faultyStore) Create(ctx context.Context, key string, body []byte) error {
+	return f.fault("create "+key, func() error { return f.memStore.Create(ctx, key, body) })
+}
+
+func (f *faultyStore) Head(ctx context.Context, key string) (store.Object, error) {
+	var object store.Object
+	err := f.fault("head "+key, func() error { var err error; object, err = f.memStore.Head(ctx, key); return err })
+	return object, err
+}
+
+func (f *faultyStore) List(ctx context.Context, prefix, token string, limit int) (store.Page, error) {
+	var page store.Page
+	err := f.fault("list "+prefix+" "+token, func() error { var err error; page, err = f.memStore.List(ctx, prefix, token, limit); return err })
+	return page, err
+}
+
+func (f *faultyStore) OpenReader(ctx context.Context, key string) (io.ReadCloser, error) {
+	var reader io.ReadCloser
+	err := f.fault("open "+key, func() error { var err error; reader, err = f.memStore.OpenReader(ctx, key); return err })
+	if err != nil {
+		if reader != nil {
+			_ = reader.Close() /* read-only failed response */
+		}
+		return nil, err
+	}
+	return &faultReader{ReadCloser: reader, f: f, key: key}, nil
+}
+
+type faultReader struct {
+	io.ReadCloser
+	f   *faultyStore
+	key string
+}
+
+func (r *faultReader) Read(p []byte) (int, error) {
+	var n int
+	err := r.f.fault("read "+r.key, func() error { var err error; n, err = r.ReadCloser.Read(p); return err })
+	return n, err
+}
+
+// Oracle caching is an optimisation, not permission to accept mutated immutable objects
+// or dishonest piece metadata after an earlier successful reconstruction.
+func TestArchiveOracleRejectsCachedMutationAndMetadataMismatch(t *testing.T) {
+	data := []byte("a\n")
+	encoded := raw.Compress(data)
+	piece := raw.Piece{Start: 0, End: int64(len(data)), SHA256: raw.SHA256(data), EncodedSHA256: raw.SHA256(encoded), EncodedSize: int64(len(encoded)), Object: raw.EncodedKey(raw.SHA256(encoded))}
+	generation := raw.Generation{Schema: 3, Identity: raw.Identity{Agent: "claude", MachineID: "bench", Key: "plan.md", Root: "/root"}, Sequence: 1, Kind: "capture", Sources: []raw.Source{{Path: "/source", Encoding: "plain"}}, Size: int64(len(data)), SHA256: raw.SHA256(data), Pieces: []raw.Piece{piece}}
+	record := testenv.Record{Schema: 3, MachineID: "bench", Kind: "file", Agent: "claude", Key: "plan.md", Sequence: 1, File: &generation, Dependencies: []testenv.Dependency{{Object: piece.Object, SHA256: piece.EncodedSHA256, Size: piece.EncodedSize, Encoding: "zstd", RawSHA256: piece.SHA256, RawSize: piece.End - piece.Start}}}
+	body, err := jsonx.SortedCompact(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := testenv.Stream("bench", "file", "claude", "plan.md")
+	name := fmt.Sprintf("%020d-%s.json", 1, raw.SHA256(body))
+	for _, mode := range []string{"encodedSize", "encodedHash", "rawHash", "blobMutation", "blobDeletion", "recordMutation"} {
+		t.Run(mode, func(t *testing.T) {
+			objects := map[string][]byte{piece.Object: slices.Clone(encoded), prefix + "plans/" + name: slices.Clone(body), prefix + "commits/" + name: slices.Clone(body)}
+			read := func(key string) ([]byte, error) {
+				body, ok := objects[key]
+				if !ok {
+					return nil, store.ErrNotFound
+				}
+				return body, nil
+			}
+			archive := testenv.NewArchive()
+			if err := archive.Audit(slices.Collect(maps.Keys(objects)), read); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := archive.Content(&generation); err != nil || !bytes.Equal(got, data) {
+				t.Fatalf("first reconstruction = %q %v", got, err)
+			}
+			changed := generation
+			changed.Pieces = slices.Clone(generation.Pieces)
+			switch mode {
+			case "encodedSize":
+				changed.Pieces[0].EncodedSize++
+			case "encodedHash":
+				changed.Pieces[0].EncodedSHA256 = raw.SHA256([]byte("other"))
+			case "rawHash":
+				changed.Pieces[0].SHA256 = raw.SHA256([]byte("other"))
+			case "blobMutation":
+				objects[piece.Object][0] ^= 1
+			case "blobDeletion":
+				delete(objects, piece.Object)
+			case "recordMutation":
+				objects[prefix+"commits/"+name][0] ^= 1
+			}
+			if strings.HasSuffix(mode, "Mutation") || mode == "blobDeletion" {
+				if err := archive.Audit(slices.Collect(maps.Keys(objects)), read); err == nil {
+					t.Fatal("cached audit accepted immutable mutation/deletion")
+				}
+			} else {
+				if _, err := archive.Pieces(changed.Pieces); err == nil {
+					t.Fatal("cached pieces accepted dishonest metadata")
+				}
+				if _, err := archive.Content(&changed); err == nil {
+					t.Fatal("cached content accepted dishonest metadata")
+				}
+			}
+		})
+	}
 }

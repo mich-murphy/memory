@@ -91,16 +91,15 @@ func (p *Pi) InferRoot(path string) string {
 
 func (p *Pi) Classify(path, root string) (SessionFile, bool) {
 	rel, ok := relative(path, root)
-	if !ok {
+	if !ok || isSQLite(filepath.Base(path)) || skipped(filepath.Base(path)) {
 		return SessionFile{}, false
 	}
 	parts := strings.Split(rel, "/")
-	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	isJSONL := filepath.Ext(path) == ".jsonl"
 	if p.isAgentDir(root) {
 		prefix := keyPrefix(p, root)
 		if parts[0] == "sessions" && isJSONL && len(parts) <= 3 {
-			return SessionFile{Agent: p.Name(), Root: root, Path: path, Key: prefix + rel, SessionKey: stem, Role: RoleMain}, true
+			return SessionFile{Agent: p.Name(), Root: root, Path: path, Key: prefix + rel, SessionKey: prefix + strings.TrimSuffix(strings.TrimPrefix(rel, "sessions/"), ".jsonl"), Role: RoleMain}, true
 		}
 		role := topRole(piRoles, rel)
 		if len(parts) == 1 && strings.HasSuffix(rel, ".log") {
@@ -111,7 +110,7 @@ func (p *Pi) Classify(path, root string) (SessionFile, bool) {
 	if !isJSONL || len(parts) > 2 {
 		return SessionFile{}, false
 	}
-	return SessionFile{Agent: p.Name(), Root: root, Path: path, Key: "dirs/" + rootTag(root) + "/" + rel, SessionKey: stem, Role: RoleMain}, true
+	return SessionFile{Agent: p.Name(), Root: root, Path: path, Key: "dirs/" + rootTag(root) + "/" + rel, SessionKey: "dirs/" + rootTag(root) + "/" + strings.TrimSuffix(rel, ".jsonl"), Role: RoleMain}, true
 }
 
 func (p *Pi) UserBase(root string) string {

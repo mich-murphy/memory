@@ -2,8 +2,10 @@ package syncer
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,6 +16,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/mich-murphy/memory/internal/jsonx"
+	launchpkg "github.com/mich-murphy/memory/internal/launch"
 	"github.com/mich-murphy/memory/internal/raw"
 	"github.com/mich-murphy/memory/internal/testenv"
 )
@@ -41,6 +44,12 @@ func TestBucketMatchesGolden(t *testing.T) {
 	step := func(name string, at time.Time, sync func() *Summary) {
 		r.now = at
 		sum := sync()
+		if sum.Errors != 0 {
+			t.Fatalf("%s: %v", name, sum.ErrorMessages)
+		}
+		if err := testenv.Audit(slices.Collect(maps.Keys(r.bucket.objects)), memRead(r.bucket)); err != nil {
+			t.Fatalf("%s independent archive audit: %v", name, err)
+		}
 		ops, _ := r.bucket.takeOps()
 		body, err := jsonx.Compact(sum.Trimmed())
 		if err != nil {
@@ -70,7 +79,9 @@ func TestBucketMatchesGolden(t *testing.T) {
 		"hook_input": map[string]any{"session_id": "x", "transcript_path": codex},
 	}
 	step("launch", t0.Add(10*time.Minute), func() *Summary {
-		return r.syncWith(func(s *Syncer) error { return s.RecordLaunch(t.Context(), "codex", codex, launch) })
+		return r.syncWith(func(s *Syncer) error {
+			return s.RecordEnvelope(t.Context(), launchpkg.Envelope{Schema: 1, ID: "golden-launch", Agent: "codex", Path: codex, RecordedAt: 1.5e9, Payload: launch})
+		})
 	})
 
 	rewrite(t, w.Mains[2*n+1], t0.Add(10*time.Minute))
@@ -79,8 +90,9 @@ func TestBucketMatchesGolden(t *testing.T) {
 
 	step("fold once idle", t0.Add(40*time.Minute), sweep)
 
-	out = append(out, section{"== bucket", bucketDigest(t, r.bucket)})
-	got := render(out, w, dir, setIDs(r.bucket, w, dir))
+	ids, bodies := archiveIDs(t, r.bucket, w, dir)
+	out = append(out, section{"== bucket", bucketDigest(t, r.bucket, bodies)})
+	got := render(out, w, dir, ids)
 
 	golden := filepath.Join("testdata", "golden.txt")
 	if *update {
@@ -126,22 +138,111 @@ func normalise(b []byte, w *testenv.Workload, dir string) string {
 	return strings.NewReplacer(w.Home, "$HOME", dir, "$DIR").Replace(string(b))
 }
 
-// setIDs replaces snapshot set ids, which hash a set that holds the temp directory's path, by
-// the set's place among the sets sorted by their normalised bodies.
-func setIDs(m *memStore, w *testenv.Workload, dir string) *strings.Replacer {
-	type set struct{ id, body string }
-	var sets []set
-	for k, o := range m.objects {
-		if id, ok := strings.CutPrefix(k, "snapshots/sets/"); ok {
-			sets = append(sets, set{strings.TrimSuffix(id, ".json"), normalise(o.body, w, dir)})
+// archiveIDs names only path-derived hashes and nondeterministic coordination IDs.
+// Descriptor bodies remain fully visible. The physical originals were independently
+// audited before normalization, including their true byte sizes and SHA-256 identities.
+func archiveIDs(t *testing.T, m *memStore, w *testenv.Workload, dir string) (*strings.Replacer, map[string]string) {
+	t.Helper()
+	type item struct {
+		key, id, sort string
+		rank          int
+	}
+	var items []item
+	var pairs []string
+	for key, o := range m.objects {
+		if strings.Contains(key, "/records/") && strings.Contains(key, "/commits/") {
+			r, err := testenv.DecodeRecord(key, o.body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rank := 0
+			if r.Kind == "launch" {
+				rank = 1
+			}
+			if r.Kind == "manifest" {
+				rank = 2
+			}
+			items = append(items, item{key, r.ID, fmt.Sprintf("%s/%s/%s/%020d", r.Kind, r.Agent, normalise([]byte(r.Key), w, dir), r.Sequence), rank})
+			if r.File != nil {
+				root := r.File.Identity.Root
+				pairs = append(pairs, raw.SHA256([]byte(root))[:10], raw.SHA256([]byte(normalise([]byte(root), w, dir)))[:10])
+			}
+			oldPrefix := testenv.Stream(r.MachineID, r.Kind, r.Agent, r.Key)
+			normalizedKey := normalise([]byte(r.Key), w, dir)
+			if r.Root != nil {
+				path := r.Root["path"].(string)
+				normalizedKey = raw.SHA256([]byte(r.Agent + "\x00" + normalise([]byte(path), w, dir)))
+				pairs = append(pairs, r.Key, normalizedKey)
+			}
+			newPrefix := testenv.Stream(r.MachineID, r.Kind, r.Agent, normalizedKey)
+			if oldPrefix != newPrefix {
+				pairs = append(pairs, oldPrefix, newPrefix)
+			}
+		}
+		if strings.HasPrefix(key, "v3/snapshots/sets/") {
+			items = append(items, item{key, raw.SHA256(o.body), "set/" + normalise(o.body, w, dir), 0})
 		}
 	}
-	slices.SortFunc(sets, func(a, b set) int { return strings.Compare(a.body, b.body) })
-	var pairs []string
-	for i, s := range sets {
-		pairs = append(pairs, s.id, fmt.Sprintf("set-%d", i))
+	slices.SortFunc(items, func(a, b item) int { return strings.Compare(a.sort, b.sort) })
+	for i, item := range items {
+		pairs = append(pairs, item.id, fmt.Sprintf("$descriptor-%03d", i))
 	}
-	return strings.NewReplacer(pairs...)
+	// Store UUID and machine checkpoint token are coordination identities, not election rules.
+	for key, o := range m.objects {
+		if key == "v3/store.json" || strings.HasSuffix(key, "/checkpoint.json") {
+			var document map[string]any
+			if err := json.Unmarshal(o.body, &document); err != nil {
+				t.Fatal(err)
+			}
+			for _, field := range []string{"id", "token"} {
+				if id, ok := document[field].(string); ok {
+					pairs = append(pairs, id, "$"+field)
+				}
+			}
+		}
+	}
+	ids := strings.NewReplacer(pairs...)
+	normalize := func(body []byte) string { return ids.Replace(normalise(body, w, dir)) }
+	bodies := map[string]string{}
+	// Dependencies point from manifests to file/launch descriptors and sets, and from
+	// launches to sets. Normalize in that topological order to recompute path-only sizes.
+	slices.SortStableFunc(items, func(a, b item) int { return a.rank - b.rank })
+	for _, item := range items {
+		text := normalize(m.objects[item.key].body)
+		var document map[string]any
+		if err := json.Unmarshal([]byte(text), &document); err != nil {
+			t.Fatal(err)
+		}
+		dependencies := listManifest(document["dependencies"])
+		if document["kind"] != "file" {
+			// The real record's set ordering was asserted by DecodeRecord and Audit.
+			// Remapping path-derived object hashes may change lexical order, so sort
+			// only the normalized set view; never reorder content pieces.
+			slices.SortFunc(dependencies, func(a, b any) int {
+				return strings.Compare(a.(map[string]any)["object"].(string), b.(map[string]any)["object"].(string))
+			})
+		}
+		for _, v := range dependencies {
+			dep := v.(map[string]any)
+			if body, ok := bodies[dep["object"].(string)]; ok {
+				dep["size"] = len(body)
+			}
+		}
+		body, err := jsonx.Compact(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bodies[normalize([]byte(item.key))] = string(body)
+		if strings.Contains(item.key, "/commits/") {
+			bodies[normalize([]byte(strings.Replace(item.key, "/commits/", "/plans/", 1)))] = string(body)
+		}
+	}
+	for key, o := range m.objects {
+		if key == "v3/store.json" || strings.HasSuffix(key, "/checkpoint.json") {
+			bodies[normalize([]byte(key))] = normalize(o.body)
+		}
+	}
+	return ids, bodies
 }
 
 // section is a heading and lines that are sorted once set ids are replaced, since uploads run
@@ -170,12 +271,13 @@ func render(sections []section, w *testenv.Workload, dir string, ids *strings.Re
 // bucketDigest lists every object with its metadata and the sha256 of its stored and its
 // uncompressed bytes. Manifests, snapshot sets and version lists hold the temp directory's
 // path, so they are shown whole instead, to be normalised.
-func bucketDigest(t *testing.T, m *memStore) []string {
+func bucketDigest(t *testing.T, m *memStore, bodies map[string]string) []string {
 	t.Helper()
 	var out []string
 	for k, o := range m.objects {
-		if strings.HasPrefix(k, "manifests/") || strings.HasPrefix(k, "snapshots/sets/") || strings.HasPrefix(k, "raw-versions/") {
-			out = append(out, k+"\n"+string(o.body))
+		if strings.Contains(k, "/records/") || strings.HasPrefix(k, "v3/snapshots/sets/") || k == "v3/store.json" || strings.HasSuffix(k, "/checkpoint.json") {
+			// render normalizes the key; lookup must use the same normalized key.
+			// Bodies are supplied below as separate entries so no real metadata bytes vanish.
 			continue
 		}
 		meta, err := jsonx.Compact(o.meta)
@@ -192,5 +294,38 @@ func bucketDigest(t *testing.T, m *memStore) []string {
 		}
 		out = append(out, line)
 	}
+	for key, body := range bodies {
+		if strings.Contains(key, "/plans/") {
+			out = append(out, fmt.Sprintf("%s size=%d same-descriptor=%s", key, len(body), strings.Replace(key, "/plans/", "/commits/", 1)))
+		} else {
+			out = append(out, key+"\n"+body)
+		}
+	}
 	return out
+}
+
+// Golden may reorder a normalized dependency set only after the actual wire bytes
+// prove sorted uniqueness. These records must fail before normalization can hide them.
+func TestGoldenRejectsUnsortedAndDuplicateWireDependencies(t *testing.T) {
+	a := testenv.Dependency{Object: "v3/blobs/plain/a", SHA256: raw.SHA256([]byte("a")), Size: 1, Encoding: "plain"}
+	b := testenv.Dependency{Object: "v3/blobs/plain/b", SHA256: raw.SHA256([]byte("b")), Size: 1, Encoding: "plain"}
+	for _, c := range []struct {
+		name         string
+		dependencies []testenv.Dependency
+	}{
+		{"unsorted", []testenv.Dependency{b, a}},
+		{"duplicate", []testenv.Dependency{a, a}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			record := testenv.Record{Schema: 3, MachineID: "bench", Kind: "root", Agent: "claude", Key: "root", Sequence: 1, Root: map[string]any{"path": "/root", "agent": "claude"}, Dependencies: c.dependencies}
+			body, err := jsonx.SortedCompact(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := testenv.Stream("bench", "root", "claude", "root") + fmt.Sprintf("commits/%020d-%s.json", 1, raw.SHA256(body))
+			if _, err := testenv.DecodeRecord(key, body); err == nil {
+				t.Fatal("wire dependency disorder accepted before normalization")
+			}
+		})
+	}
 }

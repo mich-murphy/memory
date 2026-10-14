@@ -66,6 +66,9 @@ func Run(ctx context.Context, cfg *config.Config, w io.Writer) (allPassed bool) 
 	r := &reporter{w: w}
 	r.reportf(pass, "machine id: %s (hostname %s)", cfg.MachineID, cfg.Hostname)
 	checkStore(ctx, cfg, r)
+	if os.Getenv("AGENT_SESSIONS_DISABLE") != "" {
+		r.reportf(fail, "AGENT_SESSIONS_DISABLE is set, so capture is disabled")
+	}
 	checkClaude(cfg.Home, r)
 	checkCodex(cfg.Home, r)
 	checkPi(cfg.Home, r)
@@ -134,9 +137,7 @@ func checkClaude(home string, r *reporter) {
 	path := filepath.Join(root, "settings.json")
 	settings := readJSON(path)
 	handlers := install.OurHandlers(settings)
-	n, want := len(handlers), len(install.ClaudeEvents)
-	r.reportf(pick(n >= want, fail), "claude: %d/%d agent-sessions hooks in %s", n, want, path)
-	checkHookCommands("claude", handlers, r)
+	checkHookCoverage("claude", handlers, install.ClaudeEvents, path, r)
 	if v, _ := settings.Get("disableAllHooks"); v == true {
 		r.reportf(fail, "claude: disableAllHooks is set, so no hooks run")
 	}
@@ -158,11 +159,14 @@ func checkCodex(home string, r *reporter) {
 		r.reportf(pass, "codex: not used here (%s missing)", root)
 		return
 	}
+	path := filepath.Join(root, "hooks.json")
+	doc := readJSON(path)
+	if err := install.ValidateCodexHooks(doc); err != nil {
+		r.reportf(fail, "codex: %v; hooks could not be verified", err)
+		return
+	}
 	configured, trusted := install.CodexTrustState(root)
-	want := len(install.CodexEvents)
-	r.reportf(pick(configured >= want, fail), "codex: %d/%d agent-sessions hooks in %s", configured, want,
-		filepath.Join(root, "hooks.json"))
-	checkHookCommands("codex", install.OurHandlers(readJSON(filepath.Join(root, "hooks.json"))), r)
+	checkHookCoverage("codex", install.OurHandlers(doc), install.CodexEvents, path, r)
 	if configured > 0 {
 		hint := ""
 		if trusted != configured {
@@ -204,19 +208,41 @@ func checkPi(home string, r *reporter) {
 	}
 }
 
-func checkHookCommands(agent string, handlers []install.HandlerRef, r *reporter) {
-	seen := map[string]bool{}
+// Count distinct required events, not entries: eight Stop handlers cannot cover
+// SessionEnd. Only enabled, unconditional command handlers for this agent count.
+func checkHookCoverage(agent string, handlers []install.HandlerRef, events []install.HookEvent, path string, r *reporter) {
+	covered := map[string]bool{}
 	for _, h := range handlers {
-		if seen[h.Command] {
-			continue
-		}
-		seen[h.Command] = true
 		argv, err := shellwords.Split(h.Command)
 		if err != nil {
 			r.reportf(fail, "%s: hook command %q: %v", agent, h.Command, err)
 			continue
 		}
+		kind, _ := h.Handler.Get("type")
+		matcher, _ := h.Group.Get("matcher")
+		disabled, _ := h.Handler.Get("disabled")
+		if kind != "command" || disabled == true || (matcher != nil && matcher != "" && matcher != "*") {
+			r.reportf(fail, "%s: %s handler is not an enabled, unconditional command hook", agent, h.Event)
+			continue
+		}
+		if len(argv) != 3 || argv[1] != "hook" || argv[2] != agent {
+			r.reportf(fail, "%s: %s has the wrong hook command: %q", agent, h.Event, h.Command)
+			continue
+		}
 		checkRunnable(agent, argv, r)
+		if _, err := exec.LookPath(argv[0]); err == nil {
+			covered[h.Event] = true
+		}
+	}
+	var missing []string
+	for _, event := range events {
+		if !covered[event.Name] {
+			missing = append(missing, event.Name)
+		}
+	}
+	r.reportf(pick(len(missing) == 0, fail), "%s: %d/%d agent-sessions hooks in %s (distinct usable required events)", agent, len(events)-len(missing), len(events), path)
+	if len(missing) > 0 {
+		r.reportf(fail, "%s: missing usable hooks for %s", agent, strings.Join(missing, ", "))
 	}
 }
 

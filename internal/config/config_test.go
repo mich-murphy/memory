@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,9 +32,16 @@ func clearEnv(t *testing.T) string {
 
 func TestMachineIDIsAPersistentUUID(t *testing.T) {
 	dir := clearEnv(t)
+	id, err := CreateMachineID("")
+	if err != nil {
+		t.Fatal(err)
+	}
 	first, err := Load("")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if first.MachineID != id {
+		t.Errorf("Load identity = %q, want created %q", first.MachineID, id)
 	}
 	if !uuidRE.MatchString(first.MachineID) {
 		t.Errorf("machine id %q is not a v4 UUID", first.MachineID)
@@ -50,7 +59,8 @@ func TestMachineIDIsAPersistentUUID(t *testing.T) {
 	}
 }
 
-func TestRunsStartingTogetherShareOneMachineID(t *testing.T) {
+func TestExplicitCreationsStartingTogetherShareOneMachineID(t *testing.T) {
+	clearEnv(t)
 	for range 20 {
 		dir := t.TempDir()
 		ids := make([]string, 8)
@@ -58,7 +68,7 @@ func TestRunsStartingTogetherShareOneMachineID(t *testing.T) {
 		for i := range ids {
 			wg.Go(func() {
 				var err error
-				if ids[i], err = MachineUUID(dir); err != nil {
+				if ids[i], err = CreateMachineID(filepath.Join(dir, "config.env")); err != nil {
 					t.Error(err)
 				}
 			})
@@ -70,16 +80,47 @@ func TestRunsStartingTogetherShareOneMachineID(t *testing.T) {
 	}
 }
 
-func TestAnEmptyMachineIDFileGetsAnIDThatLasts(t *testing.T) {
-	dir := t.TempDir()
-	testenv.Write(t, filepath.Join(dir, "machine-id"), "")
-	first, err := MachineUUID(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	again, err := MachineUUID(dir)
-	if err != nil || first != again || !uuidRE.MatchString(first) {
-		t.Errorf("machine ids %q then %q, %v", first, again, err)
+func TestMissingAndEmptyIdentityRequireOperatorChoice(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		body   string
+		exists bool
+	}{
+		{name: "missing"},
+		{name: "empty", exists: true},
+		{name: "whitespace", body: " \n\t", exists: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := clearEnv(t)
+			path := filepath.Join(dir, "cfg", "machine-id")
+			if tc.exists {
+				testenv.Write(t, path, tc.body)
+			}
+			for range 2 {
+				cfg, err := Load("")
+				var missing *MissingMachineIDError
+				if cfg != nil || !errors.As(err, &missing) {
+					t.Fatalf("Load = %v, %v, want typed missing identity error", cfg, err)
+				}
+				if missing.Path != path || missing.Empty != tc.exists {
+					t.Errorf("missing error = %+v, want path %q, empty %v", missing, path, tc.exists)
+				}
+				if !strings.Contains(err.Error(), "AGENT_SESSIONS_MACHINE_ID") || !strings.Contains(err.Error(), "machine-id --new") {
+					t.Errorf("missing identity error is not actionable: %v", err)
+				}
+			}
+			if tc.exists {
+				if _, err := CreateMachineID(""); err == nil {
+					t.Fatal("CreateMachineID replaced an empty existing identity")
+				}
+				data, err := os.ReadFile(path)
+				if err != nil || string(data) != tc.body {
+					t.Errorf("identity file = %q, %v, want unchanged %q", data, err, tc.body)
+				}
+			} else if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("Load created config directory: %v", err)
+			}
+		})
 	}
 }
 
@@ -95,6 +136,9 @@ func TestEnvFileAndEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("R2_ACCESS_KEY_ID", "from-env")
+	if _, err := CreateMachineID(""); err != nil {
+		t.Fatal(err)
+	}
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatal(err)
@@ -142,6 +186,9 @@ func TestEnvFileValues(t *testing.T) {
 			dir := clearEnv(t)
 			path := filepath.Join(dir, "config.env")
 			testenv.Write(t, path, c.body)
+			if _, err := CreateMachineID(path); err != nil {
+				t.Fatal(err)
+			}
 			cfg, err := Load(path)
 			if err != nil {
 				t.Fatal(err)
@@ -156,11 +203,125 @@ func TestEnvFileValues(t *testing.T) {
 func TestTheStateDirIsWhereTheHookLooks(t *testing.T) {
 	dir := clearEnv(t)
 	testenv.Write(t, filepath.Join(dir, "cfg", "config.env"), "AGENT_SESSIONS_STATE_DIR="+filepath.Join(dir, "elsewhere")+"\n")
+	if _, err := CreateMachineID(""); err != nil {
+		t.Fatal(err)
+	}
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.StateDir != StateDir() {
 		t.Errorf("sync state dir %s, hook state dir %s", cfg.StateDir, StateDir())
+	}
+}
+
+func TestExplicitCreationIsIdempotentAndPrivate(t *testing.T) {
+	dir := clearEnv(t)
+	first, err := CreateMachineID("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := CreateMachineID("")
+	if err != nil || again != first || !uuidRE.MatchString(first) {
+		t.Fatalf("CreateMachineID = %q then %q, %v", first, again, err)
+	}
+	for path, want := range map[string]fs.FileMode{
+		filepath.Join(dir, "cfg"):               0o700,
+		filepath.Join(dir, "cfg", "machine-id"): 0o600,
+	} {
+		st, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Mode().Perm() != want {
+			t.Errorf("%s permissions = %o, want %o", path, st.Mode().Perm(), want)
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "cfg"))
+	if err != nil || len(entries) != 1 || entries[0].Name() != "machine-id" {
+		t.Errorf("config directory = %v, %v, want only machine-id", entries, err)
+	}
+}
+
+func TestIdentityOverridesPreservePersistedIdentity(t *testing.T) {
+	dir := clearEnv(t)
+	path := filepath.Join(dir, "cfg", "config.env")
+	original := "c295cbba-2677-4421-b67e-1193ef6144fa"
+	testenv.Write(t, filepath.Join(dir, "cfg", "machine-id"), original+"\n")
+	testenv.Write(t, path, "AGENT_SESSIONS_MACHINE_ID=from-file\n")
+	for _, tc := range []struct{ name, env, want string }{
+		{"configFile", "", "from-file"},
+		{"environment", "from-env", "from-env"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AGENT_SESSIONS_MACHINE_ID", tc.env)
+			cfg, err := Load("")
+			if err != nil || cfg.MachineID != tc.want {
+				t.Fatalf("Load identity = %v, %v, want %q", cfg, err, tc.want)
+			}
+			id, err := CreateMachineID("")
+			if err != nil || id != tc.want {
+				t.Errorf("CreateMachineID = %q, %v, want override %q", id, err, tc.want)
+			}
+		})
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	id, err := CreateMachineID("")
+	if err != nil || id != original {
+		t.Errorf("CreateMachineID = %q, %v, want persisted %q", id, err, original)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "cfg", "machine-id"))
+	if err != nil || string(data) != original+"\n" {
+		t.Errorf("machine-id = %q, %v, want unchanged original", data, err)
+	}
+}
+
+func TestIdentityReadAndCreationErrorsDoNotReplaceFiles(t *testing.T) {
+	for _, name := range []string{"configIsDirectory", "identityIsDirectory", "parentIsFile"} {
+		t.Run(name, func(t *testing.T) {
+			dir := clearEnv(t)
+			path := filepath.Join(dir, "cfg", "config.env")
+			switch name {
+			case "configIsDirectory":
+				if err := os.MkdirAll(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			case "identityIsDirectory":
+				if err := os.MkdirAll(filepath.Join(dir, "cfg", "machine-id"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			case "parentIsFile":
+				testenv.Write(t, filepath.Join(dir, "cfg"), "not a directory")
+			}
+			if cfg, err := Load(path); cfg != nil || err == nil {
+				t.Errorf("Load = %v, %v, want read failure", cfg, err)
+			}
+			if id, err := CreateMachineID(path); id != "" || err == nil {
+				t.Errorf("CreateMachineID = %q, %v, want failure", id, err)
+			}
+		})
+	}
+}
+
+func TestOverrideDoesNotCreateMissingMachineID(t *testing.T) {
+	for _, name := range []string{"environment", "configFile"} {
+		t.Run(name, func(t *testing.T) {
+			dir := clearEnv(t)
+			path := filepath.Join(dir, "cfg", "config.env")
+			if name == "environment" {
+				t.Setenv("AGENT_SESSIONS_MACHINE_ID", "known-id")
+			} else {
+				testenv.Write(t, path, "AGENT_SESSIONS_MACHINE_ID=known-id\n")
+			}
+			id, err := CreateMachineID(path)
+			if err != nil || id != "known-id" {
+				t.Errorf("CreateMachineID = %q, %v, want known-id", id, err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "cfg", "machine-id")); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("override created machine-id: %v", err)
+			}
+		})
 	}
 }

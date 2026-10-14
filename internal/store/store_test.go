@@ -144,6 +144,7 @@ func TestR2AgainstAFakeS3(t *testing.T) {
 		t.Fatal(err)
 	}
 	exercise(t, s, "")
+	catalog(t, s)
 }
 
 // signedPayload rejects a request whose signed payload hash isn't its body's, as R2 does,

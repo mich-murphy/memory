@@ -16,14 +16,15 @@ import (
 )
 
 const (
-	ClaudeSID   = "11111111-2222-3333-4444-555555555555"
-	CodexThread = "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
-	PiSID       = "0199a1b2-aaaa-7bbb-8ccc-dddddddddddd"
-	MachineID   = "testbox"
-	Slug        = "-home-code-proj"
-	ClaudeKey   = Slug + "/" + ClaudeSID
-	CodexKey    = "rollout-2026-10-10T10-00-00-" + CodexThread
-	PiKey       = "2026-10-10T10-00-00-000Z_" + PiSID
+	ClaudeSID    = "11111111-2222-3333-4444-555555555555"
+	CodexThread  = "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
+	PiSID        = "0199a1b2-aaaa-7bbb-8ccc-dddddddddddd"
+	MachineID    = "testbox"
+	Slug         = "-home-code-proj"
+	ClaudeKey    = Slug + "/" + ClaudeSID
+	CodexKey     = "rollout-2026-10-10T10-00-00-" + CodexThread
+	PiSessionKey = "--home-code-proj--/" + PiKey
+	PiKey        = "2026-10-10T10-00-00-000Z_" + PiSID
 )
 
 type Env struct {
@@ -289,13 +290,14 @@ func (e *Env) HasKey(key string) bool {
 	return err == nil
 }
 
-func Raw(agent, key string) string {
-	return "raw/agent=" + agent + "/machine=" + MachineID + "/" + key + ".zst"
-}
-
+// Manifest resolves the authoritative immutable chain and returns its current typed payload.
 func (e *Env) Manifest(agent, sessionKey string) map[string]any {
 	e.T.Helper()
-	return e.ReadJSON("manifests/agent=" + agent + "/machine=" + MachineID + "/" + sessionKey + ".json")
+	records := e.Records(Stream(MachineID, "manifest", agent, sessionKey))
+	if len(records) == 0 {
+		e.T.Fatalf("no manifest commits for %s %s", agent, sessionKey)
+	}
+	return records[len(records)-1].Manifest
 }
 
 func (e *Env) ReadJSON(key string) map[string]any {

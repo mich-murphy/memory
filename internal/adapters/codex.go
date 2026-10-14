@@ -64,7 +64,7 @@ func (c *Codex) InferRoot(path string) string {
 
 func (c *Codex) Classify(path, root string) (SessionFile, bool) {
 	rel, ok := relative(path, root)
-	if !ok {
+	if !ok || isSQLite(filepath.Base(path)) || skipped(filepath.Base(path)) {
 		return SessionFile{}, false
 	}
 	prefix := keyPrefix(c, root)
@@ -76,7 +76,7 @@ func (c *Codex) Classify(path, root string) (SessionFile, bool) {
 		uncompressed, zstd := strings.CutSuffix(name, ".zst")
 		return SessionFile{
 			Agent: c.Name(), Root: root, Path: path, Key: prefix + "rollouts/" + uncompressed,
-			SessionKey: strings.TrimSuffix(uncompressed, ".jsonl"), Role: RoleMain, Zstd: zstd,
+			SessionKey: prefix + strings.TrimSuffix(uncompressed, ".jsonl"), Role: RoleMain, Zstd: zstd,
 		}, true
 	}
 	return SessionFile{Agent: c.Name(), Root: root, Path: path, Key: prefix + rel, Role: topRole(codexRoles, rel)}, true

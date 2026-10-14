@@ -155,39 +155,56 @@ func sanitize(name string) string {
 	return s
 }
 
-// MachineUUID is used in object keys instead of the hostname, because hostnames collide (two
-// laptops called "macbook", VMs rebuilt from one image).
+// MissingMachineIDError requires an operator choice: a missing identity might be a lost
+// identity, not a fresh install. Hostnames cannot safely identify an old archive namespace.
+type MissingMachineIDError struct {
+	Path  string
+	Empty bool
+}
+
+func (e *MissingMachineIDError) Error() string {
+	return fmt.Sprintf("config: machine identity missing or empty at %s; restore the original machine-id file or set AGENT_SESSIONS_MACHINE_ID to the known previous ID; only for a deliberately new machine, run `agent-sessions machine-id --new` (an empty existing file must first be deliberately removed)", e.Path)
+}
+
+// MachineUUID reads the persistent identity used in object keys instead of the hostname.
+// It never creates or replaces an identity, including during install or config loading.
 func MachineUUID(configDir string) (string, error) {
-	path := filepath.Join(configDir, "machine-id")
-	if id, err := readMachineID(path); id != "" || err != nil {
-		return id, err
+	return readMachineID(filepath.Join(configDir, "machine-id"))
+}
+
+// CreateMachineID is exclusively for an explicit operator request to start a new machine.
+// An existing identity (including an env/file override) is returned, never rotated. An empty
+// existing file is refused: the operator must restore it or deliberately remove it first.
+func CreateMachineID(configPath string) (string, error) {
+	cfg, err := Load(configPath)
+	if err == nil {
+		return cfg.MachineID, nil
 	}
-	// Written whole under another name and linked into place, so runs starting together all
-	// read one id and a crash can't leave the file empty.
+	var missing *MissingMachineIDError
+	if !errors.As(err, &missing) {
+		return "", err
+	}
+	if missing.Empty {
+		return "", fmt.Errorf("config: refusing to replace an existing machine-id file: %w", err)
+	}
+	// Written whole under another name and linked exclusively into place, so simultaneous
+	// explicit requests all read one id and a crash cannot leave the identity file empty.
 	id := uuid.New().String()
-	tmp := path + "." + id
+	tmp := missing.Path + "." + id
 	if err := fsutil.WriteFileAtomic(tmp, []byte(id+"\n"), 0o600); err != nil {
 		return "", fmt.Errorf("machine id: %w", err)
 	}
 	defer func() { _ = os.Remove(tmp) }() // a leftover holds only an unused id
-	err := os.Link(tmp, path)
-	if errors.Is(err, fs.ErrExist) {
-		var existing string
-		if existing, err = readMachineID(path); existing == "" && err == nil {
-			err = os.Rename(tmp, path) // left empty by an earlier version that wrote it in place
-		}
-	}
-	if err != nil {
+	if err := os.Link(tmp, missing.Path); err != nil && !errors.Is(err, fs.ErrExist) {
 		return "", fmt.Errorf("machine id: %w", err)
 	}
-	return readMachineID(path)
+	return readMachineID(missing.Path)
 }
 
-// readMachineID returns "" for a missing or empty file.
 func readMachineID(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return "", nil
+		return "", &MissingMachineIDError{Path: path}
 	}
 	if err != nil {
 		return "", fmt.Errorf("machine id: %w", err)
@@ -195,5 +212,5 @@ func readMachineID(path string) (string, error) {
 	if id := strings.TrimSpace(string(data)); id != "" {
 		return sanitize(id), nil
 	}
-	return "", nil
+	return "", &MissingMachineIDError{Path: path, Empty: true}
 }

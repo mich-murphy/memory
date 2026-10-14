@@ -139,12 +139,18 @@ func TestClaudeInstallNeverLowersRetentionAndRefusesBrokenJSON(t *testing.T) {
 	if got := readJSON(t, path)["cleanupPeriodDays"]; got != 9999.0 {
 		t.Errorf("cleanupPeriodDays = %v", got)
 	}
-	testenv.Write(t, path, "{ not json")
-	if err := Claude(opts(e)); err == nil {
-		t.Error("installed over a broken settings.json")
-	}
-	if data, _ := os.ReadFile(path); string(data) != "{ not json" {
-		t.Errorf("broken settings.json rewritten: %q", data)
+	for _, body := range []string{"{ not json", `{"hooks":{},"hooks":{"Stop":[]}}`} {
+		testenv.Write(t, path, body)
+		if err := Claude(opts(e)); err == nil {
+			t.Errorf("Claude accepted invalid settings: %s", body)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != body {
+			t.Errorf("settings.json = %q, want unchanged %q", data, body)
+		}
 	}
 }
 
@@ -205,7 +211,17 @@ func TestCodexInstallWritesHooksJSONAndReportsTrust(t *testing.T) {
 		t.Helper()
 		var toml strings.Builder
 		for _, l := range labels {
-			fmt.Fprintf(&toml, "\n[hooks.state.%q]\ntrusted_hash = \"sha256:x\"\n", hooksJSON+":"+l+":0:0")
+			doc, err := loadJSON(hooksJSON)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hash := ""
+			for _, r := range OurHandlers(doc) {
+				if codexEventKey(r.Event) == l {
+					hash = codexHookHash(r)
+				}
+			}
+			fmt.Fprintf(&toml, "\n[hooks.state.%q]\ntrusted_hash = %q\n", hooksJSON+":"+l+":0:0", hash)
 		}
 		testenv.Append(t, filepath.Join(root, "config.toml"), toml.String())
 	}

@@ -35,7 +35,11 @@ func TestObjectKeepsKeyOrderAndDoesNotEscapeHTML(t *testing.T) {
 }
 
 func TestParseObjectRejects(t *testing.T) {
-	for _, in := range []string{`[1]`, `{"a": 1} x`, `{"a": }`, `{1: 2}`, `{"a": [1,}`} {
+	for _, in := range []string{
+		`[1]`, `{"a": 1} x`, `{"a": }`, `{1: 2}`, `{"a": [1,}`,
+		`{"hooks":{},"hooks":{}}`, `{"hooks":{},"\u0068ooks":{}}`,
+		`{"nested":{"command":"first","command":"second"}}`, `{"command":"\ud800"}`,
+	} {
 		if _, err := ParseObject([]byte(in)); err == nil {
 			t.Errorf("ParseObject(%s) succeeded", in)
 		}

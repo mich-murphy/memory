@@ -19,9 +19,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/config"
+	"github.com/mich-murphy/memory/internal/exclusion"
 	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/jsonx"
+	"github.com/mich-murphy/memory/internal/launch"
+	"github.com/mich-murphy/memory/internal/logging"
 	"github.com/mich-murphy/memory/internal/scrub"
 )
 
@@ -225,24 +229,28 @@ func recordSessionStart(ctx context.Context, stateDir, agent, path string, data 
 	if process == nil {
 		process = launchProcess(agent)
 	}
-	launch := map[string]any{
+	payload := map[string]any{
 		"event":           event,
-		"recorded_at":     float64(time.Now().UnixNano()) / 1e9,
 		"source":          firstString(data["source"], extra.Source),
 		"cwd":             firstString(data["cwd"], extra.Cwd),
 		"permission_mode": data["permission_mode"],
 		"hook_input":      hookInput,
 		"process":         process,
 		"env":             launchEnv(os.Environ()),
-		"agent":           agent,
-		"path":            path,
 	}
-	body, err := jsonx.Compact(launch)
+	envelope := launch.Envelope{
+		Schema: launch.Schema, ID: rand.Text(), Agent: agent, Path: path,
+		RecordedAt: float64(time.Now().UnixNano()) / 1e9, Payload: payload,
+	}
+	if err := envelope.Validate(); err != nil {
+		return err
+	}
+	body, err := jsonx.Compact(envelope)
 	if err != nil {
 		return err
 	}
 	// Written whole, since any sync may read it: one that can't get the lock leaves it to the next.
-	launchFile := filepath.Join(stateDir, "pending", "launch-"+rand.Text()+".json")
+	launchFile := filepath.Join(stateDir, "pending", "launch-"+envelope.ID+".json")
 	if err := fsutil.WriteFileAtomic(launchFile, body, 0o600); err != nil {
 		return err
 	}
@@ -283,9 +291,6 @@ func spawnDetached(ctx context.Context, args ...string) error {
 }
 
 func Run(ctx context.Context, agent string, explicitPaths []string, event string, extra ExtensionArgs) {
-	if os.Getenv("AGENT_SESSIONS_DISABLE") != "" {
-		return
-	}
 	stateDir := config.StateDir()
 	data := map[string]any{}
 	if len(explicitPaths) == 0 {
@@ -297,6 +302,10 @@ func Run(ctx context.Context, agent string, explicitPaths []string, event string
 	}
 	if e, ok := data["hook_event_name"].(string); ok {
 		event = e
+	}
+	if os.Getenv("AGENT_SESSIONS_DISABLE") != "" {
+		recordExclusions(stateDir, agent, paths)
+		return
 	}
 	if slices.Contains(sessionStartEvents, event) {
 		if len(paths) > 0 {
@@ -317,5 +326,31 @@ func Run(ctx context.Context, agent string, explicitPaths []string, event string
 		if marker := claimPending(stateDir, path); marker != "" {
 			_ = spawnSync(ctx, agent, path, marker, event) // never break the agent
 		}
+	}
+}
+
+// Errors never escape a hook. The log is best effort, opened quietly and without loading
+// collector configuration or R2 credentials.
+func recordExclusions(stateDir, agent string, paths []string) {
+	a := adapters.All(config.Home())[agent]
+	var errs []error
+	if len(paths) == 0 {
+		errs = append(errs, errors.New("exclusion: disabled session has no path; future capture cannot be suppressed"))
+	}
+	for _, path := range paths {
+		if _, err := exclusion.RecordPath(stateDir, a, path); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) == 0 {
+		return
+	}
+	log, closeLog, err := logging.Open(stateDir, true)
+	if err != nil {
+		return
+	} // nowhere safe to report a hook log failure
+	defer closeLog()
+	for _, err := range errs {
+		log.Error("recording disabled session", "agent", agent, "error", err)
 	}
 }

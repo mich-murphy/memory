@@ -1,7 +1,9 @@
 package syncer
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"io/fs"
 	"log/slog"
 	"maps"
@@ -159,7 +161,7 @@ func (r *rig) sync(agent string, hookPaths ...string) *Summary {
 			return s.SweepFiles(context.Background(), adapters.Names)
 		}
 		s.opts.Trigger = "hook:test"
-		return s.HookFiles(agent, hookPaths)
+		return s.HookFilesContext(context.Background(), agent, hookPaths)
 	})
 }
 
@@ -189,13 +191,19 @@ func (r *rig) run(files func(*Syncer) ([]adapters.SessionFile, error)) *Summary 
 		Trigger: "sweep:test", Logger: slog.New(slog.DiscardHandler), Version: "test",
 	})
 	s.clock = func() time.Time { return r.now }
+	if err := s.Recover(ctx); err != nil {
+		s.errorf("recovery: %v", err)
+		return &s.Summary
+	}
 	found, err := files(s)
 	if err != nil {
-		r.tb.Fatal(err)
+		s.errorf("discovery: %v", err)
+		return &s.Summary
 	}
 	sum, err := s.Run(ctx, found)
 	if err != nil {
-		r.tb.Fatal(err)
+		s.errorf("run: %v", err)
+		return &s.Summary
 	}
 	return sum
 }
@@ -233,4 +241,61 @@ func resolvedTempDir(tb testing.TB) string {
 		tb.Fatal(err)
 	}
 	return dir
+}
+
+func (m *memStore) Head(_ context.Context, key string) (store.Object, error) {
+	m.wait()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record("head "+key, 0)
+	obj, ok := m.objects[key]
+	if !ok {
+		return store.Object{}, store.ErrNotFound
+	}
+	return store.Object{Key: key, Size: int64(len(obj.body)), Metadata: maps.Clone(obj.meta)}, nil
+}
+
+func (m *memStore) List(_ context.Context, prefix, token string, limit int) (store.Page, error) {
+	m.wait()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record("list "+prefix, 0)
+	var keys []string
+	for key := range m.objects {
+		if strings.HasPrefix(key, prefix) && key > token {
+			keys = append(keys, key)
+		}
+	}
+	slices.Sort(keys)
+	page := store.Page{}
+	if len(keys) > limit {
+		page.Next = keys[limit-1]
+		keys = keys[:limit]
+	}
+	for _, key := range keys {
+		page.Objects = append(page.Objects, store.Object{Key: key, Size: int64(len(m.objects[key].body))})
+	}
+	return page, nil
+}
+
+func (m *memStore) OpenReader(ctx context.Context, key string) (io.ReadCloser, error) {
+	if _, err := m.Head(ctx, key); err != nil {
+		return nil, err
+	}
+	body, err := m.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	return io.NopCloser(bytes.NewReader(body)), nil
+}
+
+func (m *memStore) Create(_ context.Context, key string, body []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.objects[key]; ok {
+		return store.ErrExists
+	}
+	m.objects[key] = memObject{body: slices.Clone(body)}
+	m.record("create "+key, len(body))
+	return nil
 }

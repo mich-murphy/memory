@@ -2,14 +2,20 @@ package adapters
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/mich-murphy/memory/internal/capturepolicy"
+	"github.com/mich-murphy/memory/internal/config"
 	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/jsonx"
 	"github.com/mich-murphy/memory/internal/scrub"
@@ -86,12 +92,12 @@ func (c *Claude) InferRoot(path string) string {
 
 func (c *Claude) Classify(path, root string) (SessionFile, bool) {
 	rel, ok := relative(path, root)
-	if !ok {
+	if !ok || isSQLite(filepath.Base(path)) || skipped(filepath.Base(path)) {
 		return SessionFile{}, false
 	}
 	parts := strings.Split(rel, "/")
 	sf := func(sessionKey string, role Role) (SessionFile, bool) {
-		return SessionFile{Agent: c.Name(), Root: root, Path: path, Key: keyPrefix(c, root) + rel, SessionKey: sessionKey, Role: role}, true
+		return SessionFile{Agent: c.Name(), Root: root, Path: path, Key: keyPrefix(c, root) + rel, SessionKey: prefixedSession(c, root, sessionKey), Role: role}, true
 	}
 	top := parts[0]
 	if len(parts) == 1 && hasAnySuffix(top, []string{".sh", ".py", ".js", ".ts"}) {
@@ -171,39 +177,59 @@ func sessionSlugs(projects string) map[string]string {
 
 // Related includes the per-session files (file history, todos, tasks, team mailboxes) that
 // Claude Code deletes once the session or team is done.
-func (c *Claude) Related(sf SessionFile) []string {
-	root := sf.Root
-	slug, sid, ok := strings.Cut(sf.SessionKey, "/")
-	if !ok {
-		return nil
+func (c *Claude) Related(sf SessionFile) Discovery {
+	out := Discovery{Complete: true}
+	localKey := strings.TrimPrefix(sf.SessionKey, keyPrefix(c, sf.Root))
+	slug, sid, ok := strings.Cut(localKey, "/")
+	if !ok || slug == "" || sid == "" {
+		return out
 	}
-	projectDir := filepath.Join(root, "projects", slug)
-	main := filepath.Join(projectDir, sid+".jsonl")
-	var out []string
-	if fsutil.IsFile(main) {
-		out = append(out, main)
+	project := filepath.Join(sf.Root, "projects", slug)
+	sources := []string{
+		filepath.Join(project, sid+".jsonl"), filepath.Join(project, sid),
+		filepath.Join(sf.Root, "file-history", sid), filepath.Join(sf.Root, "session-env", sid),
+		filepath.Join(sf.Root, "tasks"), filepath.Join(sf.Root, "teams"), filepath.Join(sf.Root, "debug", sid+".txt"),
 	}
-	out = append(out, filesUnder(filepath.Join(projectDir, sid))...)
-	if matches, err := filepath.Glob(filepath.Join(projectDir, globEscape(sid)+".*")); err == nil {
-		for _, p := range matches {
-			if p != main && fsutil.IsFile(p) {
-				out = append(out, p)
-			}
+	for _, matched := range []struct{ dir, pattern string }{
+		{project, globEscape(sid) + ".*"}, {filepath.Join(sf.Root, "todos"), globEscape(sid) + "*"},
+	} {
+		sources = append(sources, out.matches(matched.dir, matched.pattern)...)
+	}
+	seen := map[string]bool{}
+	for _, source := range sources {
+		if seen[source] {
+			continue
 		}
-	}
-	out = append(out, filesUnder(filepath.Join(root, "file-history", sid), filepath.Join(root, "session-env", sid),
-		filepath.Join(root, "tasks"), filepath.Join(root, "teams"))...)
-	if matches, err := filepath.Glob(filepath.Join(root, "todos", globEscape(sid)+"*")); err == nil {
-		for _, p := range matches {
-			if fsutil.IsFile(p) {
-				out = append(out, p)
-			}
-		}
-	}
-	if debug := filepath.Join(root, "debug", sid+".txt"); fsutil.IsFile(debug) {
-		out = append(out, debug)
+		seen[source] = true
+		found := discoverUnder(c, sf.Root, source)
+		out.Files = append(out.Files, found.Files...)
+		out.Issues = append(out.Issues, found.Issues...)
+		out.Complete = out.Complete && found.Complete
 	}
 	return out
+}
+
+// Unlike filepath.Glob, matching related source names must report directory read failures.
+func (d *Discovery) matches(dir, pattern string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			d.issue(dir, "read", err)
+		}
+		return nil
+	}
+	var paths []string
+	for _, entry := range entries {
+		match, err := filepath.Match(pattern, entry.Name())
+		if err != nil {
+			d.issue(dir, "walk", err)
+			return paths
+		}
+		if match {
+			paths = append(paths, filepath.Join(dir, entry.Name()))
+		}
+	}
+	return paths
 }
 
 func globEscape(s string) string {
@@ -217,15 +243,20 @@ func (c *Claude) claudeJSON(root string) string {
 	return filepath.Join(c.home, ".claude.json")
 }
 
-func (c *Claude) Exports(root, workDir string, interval time.Duration) []SessionFile {
-	var out []SessionFile
-	data, err := os.ReadFile(c.claudeJSON(root))
+func (c *Claude) Exports(root, workDir string, interval time.Duration) Discovery {
+	out := Discovery{Complete: true}
+	source := c.claudeJSON(root)
+	data, identities, err := readClaudeConfig(source)
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			out.issue(source, "read", err)
+		}
 		return out
 	}
 	// Scrubbed here as well as at upload, so the copy in the state dir holds no API key either.
-	body, err := scrub.File(c.Name(), ".claude.json", data)
+	body, err := scrub.Identities(c.Name(), identities, data)
 	if err != nil {
+		out.issue(source, "export", err)
 		return out
 	}
 	dest := filepath.Join(workDir, c.Name(), rootTag(root), "claude.json")
@@ -234,23 +265,38 @@ func (c *Claude) Exports(root, workDir string, interval time.Duration) []Session
 	old, rerr := os.ReadFile(dest)
 	st, serr := os.Stat(dest)
 	if rerr != nil || serr != nil || (!bytes.Equal(old, body) && time.Since(st.ModTime()) >= interval) {
-		if fsutil.WriteFileAtomic(dest, body, 0o600) != nil {
+		if err := fsutil.WriteFileAtomic(dest, body, 0o600); err != nil {
+			out.issue(source, "export", err)
 			return out
 		}
 	}
-	return append(out, SessionFile{Agent: c.Name(), Root: root, Path: dest, Key: keyPrefix(c, root) + "claude.json", Role: RoleConfig})
+	out.Files = append(out.Files, SessionFile{Agent: c.Name(), Root: root, Path: dest, SourcePath: source, Key: keyPrefix(c, root) + "claude.json", Role: RoleConfig})
+	return out
 }
 
 // ExtraSnapshotEntries records only the MCP parts of ~/.claude.json, whose UI state changes
 // every run.
-func (c *Claude) ExtraSnapshotEntries(root, projectRoot string) []Entry {
-	data, err := os.ReadFile(c.claudeJSON(root))
+func (c *Claude) ExtraSnapshotEntries(root, projectRoot string) Sources {
+	out := Sources{Complete: true}
+	source := c.claudeJSON(root)
+	data, identities, err := readClaudeConfig(source)
 	if err != nil {
-		return nil
+		if !errors.Is(err, os.ErrNotExist) {
+			out.issue(source, "read", err)
+		}
+		return out
+	}
+	// Validate/redact the original document before selecting a subset. Reserialisation must
+	// not conceal duplicate keys (including escaped or nested duplicates) in the source.
+	data, err = scrub.Identities(c.Name(), identities, data)
+	if err != nil {
+		out.issue(source, "unparseable", err)
+		return out
 	}
 	m, ok := jsonx.Map(data)
 	if !ok {
-		return nil
+		out.issue(source, "unparseable", errors.New("expected JSON object"))
+		return out
 	}
 	servers := m["mcpServers"]
 	if !truthy(servers) {
@@ -270,17 +316,16 @@ func (c *Claude) ExtraSnapshotEntries(root, projectRoot string) []Entry {
 	}
 	body, err := jsonx.Indent(picked, 1)
 	if err != nil {
-		return nil
+		out.issue(source, "export", err)
+		return out
 	}
-	if body, err = scrub.File(c.Name(), ".claude.json", body); err != nil {
-		return nil
-	}
-	return []Entry{{Scope: "user", Name: ".claude.json#mcp", Body: bytes.TrimSuffix(body, []byte("\n"))}}
+	out.Entries = []Entry{{Scope: "user", Name: ".claude.json#mcp", Body: bytes.TrimSuffix(body, []byte("\n"))}}
+	return out
 }
 
 func (c *Claude) MemoryDirs(root, projectRoot, sessionKey string) []ScopedDir {
 	out := []ScopedDir{{Scope: "user", Dir: filepath.Join(root, "agent-memory")}}
-	if slug, _, ok := strings.Cut(sessionKey, "/"); ok {
+	if slug, _, ok := strings.Cut(strings.TrimPrefix(sessionKey, keyPrefix(c, root)), "/"); ok {
 		out = append(out, ScopedDir{Scope: "auto", Dir: filepath.Join(root, "projects", slug, "memory")})
 	}
 	if projectRoot != "" {
@@ -289,17 +334,26 @@ func (c *Claude) MemoryDirs(root, projectRoot, sessionKey string) []ScopedDir {
 	return out
 }
 
-func (c *Claude) Plugins(root string) []Plugin {
-	data, err := os.ReadFile(filepath.Join(root, "plugins", "installed_plugins.json"))
+func (c *Claude) Plugins(root string) Sources {
+	out := Sources{Complete: true}
+	source := filepath.Join(root, "plugins", "installed_plugins.json")
+	data, err := snapshotSource(source)
 	if err != nil {
-		return nil
+		if !errors.Is(err, os.ErrNotExist) {
+			out.issue(source, "read", err)
+		}
+		return out
 	}
 	m, ok := jsonx.Map(data)
 	if !ok {
-		return nil
+		out.issue(source, "unparseable", errors.New("expected JSON object"))
+		return out
 	}
-	plugins, _ := m["plugins"].(map[string]any)
-	var out []Plugin
+	plugins, ok := m["plugins"].(map[string]any)
+	if !ok {
+		out.issue(source, "unparseable", errors.New("expected plugins object"))
+		return out
+	}
 	for _, name := range slices.Sorted(maps.Keys(plugins)) {
 		installs, ok := plugins[name].([]any)
 		if !ok {
@@ -307,12 +361,71 @@ func (c *Claude) Plugins(root string) []Plugin {
 		}
 		for _, inst := range installs {
 			im, _ := inst.(map[string]any)
-			if p := str(im, "installPath"); p != "" && fsutil.IsDir(p) {
-				out = append(out, Plugin{Name: name, Dir: p})
+			p := str(im, "installPath")
+			if p == "" {
+				out.issue(source, "unparseable", fmt.Errorf("plugin %s has no install path", name))
+				continue
 			}
+			st, err := os.Stat(p)
+			if err != nil {
+				out.issue(p, "stat", err)
+				continue
+			}
+			if !st.IsDir() {
+				out.issue(p, "stat", errors.New("plugin is not a directory"))
+				continue
+			}
+			out.Plugins = append(out.Plugins, Plugin{Name: name, Dir: p})
 		}
 	}
 	return out
+}
+
+// Native .claude.json is an intentional export, not an unrestricted credential exception.
+// The shared policy checks every identity before reading its original bytes.
+func readClaudeConfig(path string) ([]byte, []string, error) {
+	policy, err := capturepolicy.New(config.FilePath(), config.StateDir())
+	if err != nil {
+		return nil, nil, err
+	}
+	resolution, err := capturepolicy.Resolve(path)
+	if policy.ExcludesClaudeConfig(resolution.Identities) {
+		return nil, nil, errors.New("claude configuration source excluded by capture policy")
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	body, err := snapshotSource(resolution.Path)
+	return body, resolution.Identities, err
+}
+
+// Snapshot configuration sources are small regular files. Bound the read before parsing,
+// including sources replaced with a FIFO or grown between stat and read.
+func snapshotSource(path string) ([]byte, error) {
+	const limit = 5 << 20
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }() // read-only
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, errors.New("snapshot source is not a regular file")
+	}
+	if st.Size() > limit {
+		return nil, errors.New("snapshot source exceeds size limit")
+	}
+	body, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > limit {
+		return nil, errors.New("snapshot source exceeds size limit")
+	}
+	return body, nil
 }
 
 var claudeInfo = map[string]string{

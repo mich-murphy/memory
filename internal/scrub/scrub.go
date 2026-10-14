@@ -6,6 +6,8 @@ package scrub
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/json/jsontext"
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/mich-murphy/memory/internal/capturepolicy"
 	"github.com/mich-murphy/memory/internal/jsonx"
 )
 
@@ -26,6 +29,7 @@ const (
 	keepReferences keep = iota
 	keepNothing
 	keepReferencesAndEnvNames
+	keepReferencesAndCommands
 	keepURLWithoutCredentials
 	keepArgs // a command line: redacts what Args does
 )
@@ -63,7 +67,7 @@ var (
 	}, mcpRules(""), mcpRules("projects.*."), mcpRules("project.")) // "project." is the snapshot's MCP extract
 	settingsRules  = []rule{r("env.*", keepReferences), r("hooks.*.*.hooks.*.headers.*", keepReferences)}
 	mcpFileRules   = mcpRules("")
-	piModelsRules  = []rule{r("providers.*.apiKey", keepReferencesAndEnvNames), r("providers.*.headers.*", keepReferences)}
+	piModelsRules  = []rule{r("providers.*.apiKey", keepReferencesAndEnvNames), r("providers.*.headers.*", keepReferencesAndCommands)}
 	codexTOMLRules = []rule{
 		r("mcp_servers.*.env.*", keepReferences),
 		r("mcp_servers.*.http_headers.*", keepReferences),
@@ -80,12 +84,10 @@ var (
 	jsonArgRules = slices.Concat(settingsRules, mcpFileRules)
 )
 
-// backupSuffix matches the copies editors and our installer leave beside a config file, which
-// hold the same secrets.
-var backupSuffix = regexp.MustCompile(`(~|\.bak|\.orig|\.old|\.agent-sessions-backup-[0-9-]+)$`)
-
-func rulesFor(agent, name string) ([]rule, format) {
-	switch backupSuffix.ReplaceAllString(name, "") {
+// rulesFor selects the union of supported schemas for this filename, not the collecting agent.
+// Shared settings filenames retain their supported dialect rules; unknown filenames are not DLP.
+func rulesFor(name string) ([]rule, format) {
+	switch capturepolicy.BaseName(name) {
 	case "claude.json", ".claude.json":
 		return claudeJSONRules, formatJSON
 	case "settings.json", "settings.local.json", "managed-settings.json":
@@ -93,27 +95,32 @@ func rulesFor(agent, name string) ([]rule, format) {
 	case ".mcp.json", "mcp.json", "managed-mcp.json":
 		return mcpFileRules, formatJSON
 	case "models.json":
-		if agent == "pi" {
-			return piModelsRules, formatJSON
-		}
+		return piModelsRules, formatJSON
 	case "config.toml", "managed_config.toml":
-		if agent == "codex" {
-			return codexTOMLRules, formatTOML
-		}
+		return codexTOMLRules, formatTOML
 	}
 	return nil, formatJSON
 }
 
-func Applies(agent, name string) bool {
-	r, _ := rulesFor(agent, name)
-	return r != nil
+// Recognizes reports whether a path names a supported protected config, including backups.
+// Streaming capture must check every resolved identity: a config must never take a raw-byte path,
+// even when it belongs to a different agent or has an unrecognised logical alias.
+func Recognizes(path string) bool {
+	rs, _ := rulesFor(path)
+	return rs != nil
 }
 
-// File fails when a file it has rules for doesn't parse: such a file can't be checked, so it
-// mustn't be uploaded.
-func File(agent, name string, data []byte) ([]byte, error) {
-	rs, f := rulesFor(agent, name)
-	if rs == nil || len(bytes.TrimSpace(data)) == 0 {
+// Applies is the compatibility form of Recognizes. The collecting agent does not limit protection.
+func Applies(_, name string) bool {
+	return Recognizes(name)
+}
+
+// File applies the supported schemas for name regardless of the collecting agent. It fails when
+// a protected config doesn't parse: such a file can't be checked, so it mustn't be uploaded.
+// The agent argument is retained for compatibility.
+func File(_, name string, data []byte) ([]byte, error) {
+	rs, f := rulesFor(name)
+	if rs == nil {
 		return data, nil
 	}
 	out, err := scrubDoc(f, data, rs)
@@ -121,6 +128,34 @@ func File(agent, name string, data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("scrub %s: %w", name, err)
 	}
 	return out, nil
+}
+
+// Paths scrubs both logical and resolved recognised filenames. An unrecognised alias cannot
+// bypass the target's schema, and a recognised alias stays protected even if its target is unknown.
+// This compatibility helper only knows two identities. New capture paths should use
+// capturepolicy.Resolve, Policy.Excludes before reading, and Identities after reading.
+func Paths(agent, logical, resolved string, data []byte) ([]byte, error) {
+	return Identities(agent, []string{logical, resolved}, data)
+}
+
+// Identities applies all recognised schemas encountered by capturepolicy.Resolve, including
+// intermediate config symlinks and other agents' configs. Schemas are selected by each identity's
+// filename, never by the collecting agent. Check a capturepolicy.Policy before reading the data.
+func Identities(agent string, identities []string, data []byte) ([]byte, error) {
+	seen := map[string]bool{}
+	for _, identity := range identities {
+		name := capturepolicy.BaseName(identity)
+		if seen[name] || !Recognizes(name) {
+			continue
+		}
+		seen[name] = true
+		out, err := File(agent, name, data)
+		if err != nil {
+			return nil, err
+		}
+		data = out
+	}
+	return data, nil
 }
 
 func scrubDoc(f format, data []byte, rs []rule) ([]byte, error) {
@@ -133,11 +168,12 @@ func scrubDoc(f format, data []byte, rs []rule) ([]byte, error) {
 	if len(redactions) == 0 {
 		return data, nil
 	}
-	if out, ok := replaceInPlace(f, data, redactions); ok && nothingLeftToRedact(f, out, rs) {
+	if out, ok := replaceInPlace(f, data, redactions); ok && noSecretCopies(f, out, redactions) {
 		return out, nil
 	}
 	// Escaped and multi-line strings aren't found in place; re-encoding loses layout and comments.
-	return encode(f, doc)
+	// Replace all equivalent decoded values, not only schema-selected values.
+	return encode(f, replaceCopies(doc, redactions))
 }
 
 var (
@@ -168,6 +204,8 @@ func Args(argv []string) []string {
 		case strings.HasPrefix(strings.TrimSpace(a), "{"):
 			if scrubbed, err := scrubDoc(formatJSON, []byte(a), jsonArgRules); err == nil {
 				out[i] = string(scrubbed)
+			} else {
+				out[i] = Redacted
 			}
 		case hasValue && nameRE.MatchString(name):
 			out[i] = name + "=" + redactFlagValue(name, v)
@@ -197,12 +235,22 @@ func decode(f format, data []byte) (any, error) {
 	if f == formatTOML {
 		var m map[string]any
 		if _, err := toml.Decode(string(data), &m); err != nil {
-			return nil, fmt.Errorf("toml: %w", err)
+			// Parser diagnostics can echo an unquoted credential value. Callers log this error.
+			return nil, errors.New("toml: invalid document")
 		}
 		return m, nil
 	}
+	// encoding/json v1 silently replaces duplicate keys, losing earlier secrets. Go 1.27's
+	// jsontext rejects duplicate decoded names (including escapes), invalid Unicode and trailing
+	// data before the compatibility decoder sees the document.
+	if !jsontext.Value(data).IsValid() {
+		return nil, errors.New("json: invalid document or duplicate object names")
+	}
 	if err := jsonx.Decode(data, &doc); err != nil {
 		return nil, err
+	}
+	if _, ok := doc.(map[string]any); !ok {
+		return nil, errors.New("json: protected config must be an object")
 	}
 	return doc, nil
 }
@@ -305,7 +353,7 @@ func redactArgs(args []any, redactions map[string]string) []any {
 }
 
 var (
-	referenceRE = regexp.MustCompile(`\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*`)
+	referenceRE = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*`)
 	numberRE    = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?$`)
 	envNameRE   = regexp.MustCompile(`^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$`)
 	authWords   = map[string]bool{"bearer": true, "basic": true, "token": true}
@@ -342,8 +390,12 @@ func redact(s string, k keep) string {
 		if holdsNoSecret(s) || strings.HasPrefix(s, "!") || envNameRE.MatchString(s) {
 			return s
 		}
-	case keepReferences:
+	case keepReferencesAndCommands:
 		if holdsNoSecret(s) || strings.HasPrefix(s, "!") {
+			return s
+		}
+	case keepReferences:
+		if holdsNoSecret(s) {
 			return s
 		}
 	case keepArgs:
@@ -448,7 +500,7 @@ func replaceNonKeys(f format, data, lit, repl []byte) ([]byte, int) {
 			out.Write(data)
 			return out.Bytes(), n
 		}
-		rest := bytes.TrimLeft(data[i+len(lit):], " \t")
+		rest := bytes.TrimLeft(data[i+len(lit):], " \t\r\n")
 		isKey := len(rest) > 0 && (rest[0] == ':' && f == formatJSON || (rest[0] == '=' || rest[0] == '.') && f == formatTOML)
 		out.Write(data[:i])
 		if isKey {

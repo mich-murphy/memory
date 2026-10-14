@@ -4,9 +4,9 @@ age 3600 home/.pi/agent/sessions/--w--/2026-10-10T10-00-00-000Z_crashed.jsonl
 exec agent-sessions hook pi --path $WORK/home/.pi/agent/sessions/--w--/2026-10-10T11-00-00-000Z_ended.jsonl --event session_shutdown
 ! stdout .
 ! stderr .
-waitfor bucket/raw/agent=pi/machine=testbox/sessions/--w--/2026-10-10T11-00-00-000Z_ended.jsonl.zst
-waitfor bucket/raw/agent=pi/machine=testbox/sessions/--w--/2026-10-10T10-00-00-000Z_crashed.jsonl.zst
-waitfor bucket/manifests/agent=pi/machine=testbox/2026-10-10T10-00-00-000Z_crashed.json
+waitfor bucket/v3/machines/testbox/records/file/b230815be409a354093c34c474f4a03104f675da83e0b55a5d6d2de2a23283d4/commits/00000000000000000001-*.json
+waitfor bucket/v3/machines/testbox/records/file/40b57dafef7b6a0af6331bbdbdaed3be6f58899327cf54b7bf4690b798c160ec/commits/00000000000000000001-*.json
+waitfor bucket/v3/machines/testbox/records/manifest/ef08ae020fa1b232e27b7a9041c3ba909661fd2f17537ea3442381bf80fa3700/commits/00000000000000000001-*.json
 ! waitfor state/pending/[0-9a-f]*
 ! exec agent-sessions doctor
 stdout 'last sweep \(sweep:session_shutdown\)'
