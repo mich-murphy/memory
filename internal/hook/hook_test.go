@@ -201,6 +201,39 @@ func TestSessionStartRecordsLaunchContext(t *testing.T) {
 	}
 }
 
+func TestLaunchEnvKeepsTokenLimitsAndDropsSecrets(t *testing.T) {
+	got := launchEnv([]string{
+		"MAX_THINKING_TOKENS=9000", "MAX_MCP_OUTPUT_TOKENS=5", "CLAUDE_CODE_MAX_OUTPUT_TOKENS=1", "CLAUDE_CODE_OAUTH_TOKEN=s",
+		"CODEX_API_KEY=s", "PI_SECRET=s", "CLAUDE_CODE_ENTRYPOINT=cli", "HOME=/h",
+	})
+	want := map[string]any{
+		"MAX_THINKING_TOKENS": "9000", "MAX_MCP_OUTPUT_TOKENS": "5", "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "1",
+		"CLAUDE_CODE_ENTRYPOINT": "cli",
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("launchEnv (-want +got):\n%s", diff)
+	}
+}
+
+func TestRecordedCommandLinesHaveTheirSecretsRedacted(t *testing.T) {
+	process := processFromExtension(`["node", "/usr/lib/pi/dist/cli.js", "--api-key", "sk-1", "--model", "m"]`)
+	want := []string{"node", "/usr/lib/pi/dist/cli.js", "--api-key", "[redacted]", "--model", "m"}
+	if diff := cmp.Diff(want, process["argv"]); diff != "" {
+		t.Errorf("extension argv (-want +got):\n%s", diff)
+	}
+
+	oldProc, oldPPID := readProc, parentPID
+	readProc = func(int) ([]string, int, bool) {
+		return []string{"claude", "--mcp-config", `{"mcpServers":{"s":{"headers":{"Authorization":"Bearer t"}}}}`}, 1, true
+	}
+	parentPID = func() int { return 10 }
+	t.Cleanup(func() { readProc, parentPID = oldProc, oldPPID })
+	want = []string{"claude", "--mcp-config", `{"mcpServers":{"s":{"headers":{"Authorization":"[redacted]"}}}}`}
+	if diff := cmp.Diff(want, launchProcess("claude")["argv"]); diff != "" {
+		t.Errorf("process table argv (-want +got):\n%s", diff)
+	}
+}
+
 func TestSessionStartsAndEndsQueueOneSweepAtATime(t *testing.T) {
 	e := testenv.New(t)
 	calls := fakeSpawn(t)

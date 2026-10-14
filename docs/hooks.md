@@ -40,8 +40,8 @@ One marker in the state directory's `pending/` means only one sweep is queued at
 
 `SessionStart` (Claude Code, Codex) and `session_start` (Pi) work differently from the turn hooks. While the agent is still the hook's ancestor, the hook:
 
-- walks up the process tree to the agent's process and records its command line (`/proc/<pid>/cmdline` on Linux, the `kern.procargs2` sysctl on macOS). Pi renames its process, which hides its arguments, so the Pi extension passes `process.argv` itself.
-- keeps allowlisted environment variables (`CLAUDE_CODE_*`, `CODEX_*`, `PI_*`, `ANTHROPIC_MODEL`, `MAX_THINKING_TOKENS`...), dropping any whose name looks like a token, key, secret or password.
+- walks up the process tree to the agent's process and records its command line (`/proc/<pid>/cmdline` on Linux, the `kern.procargs2` sysctl on macOS). Pi renames its process, which hides its arguments, so the Pi extension passes `process.argv` itself. Secrets in it, such as the value of `--api-key` or the headers in an inline `--mcp-config`, are redacted as in MCP server `args` ([storage-layout.md](storage-layout.md#raw-files)).
+- keeps allowlisted environment variables (`CLAUDE_CODE_*`, `CODEX_*`, `PI_*`, `ANTHROPIC_MODEL`, `MAX_THINKING_TOKENS`...), dropping any with a word in its name that marks a secret (`TOKEN`, `KEY`, `AUTH`, or `SECRET`, `PASSWORD`, `CREDENTIAL`, `COOKIE` anywhere). Whole words only, so limits such as `MAX_THINKING_TOKENS` are kept.
 - saves the hook's whole payload (`source`, `cwd`, `permission_mode`, `model`...).
 
 It writes that to a file and starts a detached sync with no delay and no debounce. The sync snapshots the harness and the repo's git state before the first prompt (`timing: pre_session`) and stores the launch in the session's manifest. A resumed session gets another launch entry.

@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,6 +21,7 @@ import (
 
 	"github.com/mich-murphy/memory/internal/config"
 	"github.com/mich-murphy/memory/internal/jsonx"
+	"github.com/mich-murphy/memory/internal/scrub"
 )
 
 const (
@@ -41,7 +41,6 @@ var (
 		"ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "MAX_THINKING_TOKENS", "CLAUDE_CONFIG_DIR",
 		"MAX_MCP_OUTPUT_TOKENS", "DISABLE_PROMPT_CACHING",
 	}
-	secretEnv    = regexp.MustCompile(`(?i)TOKEN|KEY|SECRET|PASSWORD|AUTH|CREDENTIAL|COOKIE`)
 	agentMarkers = map[string]struct{ bin, pkg string }{
 		"claude": {"claude", "@anthropic-ai/claude-code"},
 		"codex":  {"codex", "@openai/codex"},
@@ -159,7 +158,7 @@ func launchProcess(agent string) map[string]any {
 		}
 		chain = append(chain, name)
 		if isAgent(agent, argv) {
-			return map[string]any{"argv": argv, "pid": pid, "ancestry": chain}
+			return map[string]any{"argv": scrub.Args(argv), "pid": pid, "ancestry": chain}
 		}
 		pid = ppid
 	}
@@ -174,7 +173,7 @@ func processFromExtension(argvJSON string) map[string]any {
 	if err := jsonx.Decode([]byte(argvJSON), &argv); err != nil || argv == nil {
 		return nil
 	}
-	return map[string]any{"argv": argv, "pid": parentPID(), "via": "extension"}
+	return map[string]any{"argv": scrub.Args(argv), "pid": parentPID(), "via": "extension"}
 }
 
 func launchEnv(environ []string) map[string]any {
@@ -183,7 +182,7 @@ func launchEnv(environ []string) map[string]any {
 		k, v, _ := strings.Cut(kv, "=")
 		allowed := slices.Contains(envNames, k) ||
 			slices.ContainsFunc(envPrefixes, func(p string) bool { return strings.HasPrefix(k, p) })
-		if allowed && !secretEnv.MatchString(k) {
+		if allowed && !scrub.IsSecretName(k) {
 			out[k] = v
 		}
 	}
