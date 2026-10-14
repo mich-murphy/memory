@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/mich-murphy/memory/internal/raw"
 	"github.com/mich-murphy/memory/internal/shellwords"
 )
@@ -621,7 +623,7 @@ func liveObserve() error {
 	if err != nil {
 		return err
 	}
-	if err := syscall.Dup2(int(input.Fd()), 0); err != nil {
+	if err := unix.Dup2(int(input.Fd()), 0); err != nil {
 		_ = input.Close()
 		return err
 	} // read-only on error
