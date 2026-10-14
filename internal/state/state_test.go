@@ -153,3 +153,25 @@ func TestAStateThatCannotBeUsedReportsEveryFailure(t *testing.T) {
 		t.Error("a row read succeeded")
 	}
 }
+
+// A write that fails part way through recording an upload must not leave the writes before it
+// to be committed when the state is closed: the upload would look recorded without its pieces.
+func TestAFailedWriteDiscardsTheRecordItWasPartOf(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(t.Context(), dir)
+	check(t, err)
+	_, err = s.conn.ExecContext(t.Context(),
+		"CREATE TRIGGER fail BEFORE INSERT ON pieces BEGIN SELECT RAISE(ABORT, 'injected'); END")
+	check(t, err)
+	check(t, s.RecordUpload("k", "sha", 2))
+	if err := s.AddPiece("k", raw.Piece{End: 2, SHA256: "sha", Object: "k"}); err == nil {
+		t.Fatal("AddPiece succeeded despite the trigger")
+	}
+	check(t, s.Close())
+	s, err = Open(t.Context(), dir)
+	check(t, err)
+	defer func() { check(t, s.Close()) }()
+	if got, err := s.Uploaded("k"); err != nil || got != nil {
+		t.Errorf("Uploaded = %v, %v, want nothing", got, err)
+	}
+}

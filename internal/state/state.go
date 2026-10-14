@@ -211,7 +211,11 @@ func (s *State) exec(query string, args ...any) error {
 		return err
 	}
 	if _, err := s.stmts[query].ExecContext(s.ctx, args...); err != nil {
-		return fmt.Errorf("state: %w", err)
+		// A later Flush or Close would otherwise commit the writes before this one, half a
+		// record; without them the work is simply done again.
+		s.inTx = false
+		_, rerr := s.conn.ExecContext(s.ctx, "ROLLBACK")
+		return fmt.Errorf("state: %w", errors.Join(err, rerr))
 	}
 	return nil
 }
