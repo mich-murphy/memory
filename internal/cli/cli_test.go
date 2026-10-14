@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -206,7 +207,7 @@ func TestSyncRecordsTheLaunchTheHookLeft(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
-	got, _ := e.Manifest("pi", testenv.PiKey)["launch"].(map[string]any)
+	got, _ := e.Manifest("pi", "--home-code-proj--/"+testenv.PiKey)["launch"].(map[string]any)
 	if got["source"] != "startup" || got["event"] != "session_start" || got["agent"] != nil || got["path"] != nil {
 		t.Errorf("manifest launch = %v", got)
 	}
@@ -241,13 +242,118 @@ func TestALaunchWhoseSyncCouldNotGetTheLockIsRecordedByTheNextRun(t *testing.T) 
 	if code != 0 {
 		t.Fatalf("locked sync: exit %d", code)
 	}
-	if code, out, errOut := run("sync", "--quiet"); code != 0 {
+	if code, out, errOut := run("sync", "--quiet"); code != 1 {
 		t.Fatalf("sweep: exit %d\n%s%s", code, out, errOut)
 	}
-	if got, _ := e.Manifest("pi", testenv.PiKey)["launch"].(map[string]any); got["source"] != "startup" {
+	if got, _ := e.Manifest("pi", "--home-code-proj--/"+testenv.PiKey)["launch"].(map[string]any); got["source"] != "startup" {
 		t.Errorf("manifest launch = %v", got)
 	}
-	if left, _ := filepath.Glob(filepath.Join(e.State, "pending", "launch-*")); len(left) != 0 {
-		t.Errorf("launch files left behind: %v", left)
+	if left, _ := filepath.Glob(filepath.Join(e.State, "pending", "launch-*")); len(left) != 1 || filepath.Base(left[0]) != "launch-garbage.json" {
+		t.Errorf("retained failed launch entries: %v", left)
+	}
+}
+
+func TestQueuedLaunchesAreChronologicalWithStableTies(t *testing.T) {
+	e := testenv.New(t)
+	path := filepath.Join(e.PiDir, testenv.PiKey+".jsonl")
+	for _, c := range []struct {
+		name   string
+		at     float64
+		source string
+	}{{"a", 30, "late"}, {"b", 10, "first"}, {"c", 20, "middle"}, {"d", 30, "tie"}} {
+		body := fmt.Sprintf(`{"agent":"pi","path":%q,"recorded_at":%g,"event":"session_start","source":%q}`, path, c.at, c.source)
+		testenv.Write(t, filepath.Join(e.State, "pending", "launch-"+c.name+".json"), body)
+	}
+	if code, out, errOut := run("sync", "--agent", "pi"); code != 0 {
+		t.Fatalf("sync: %d %s %s", code, out, errOut)
+	}
+	manifest := e.Manifest("pi", "--home-code-proj--/"+testenv.PiKey)
+	launches := manifest["launches"].([]any)
+	var got []string
+	for _, l := range launches {
+		got = append(got, l.(map[string]any)["source"].(string))
+	}
+	if diff := cmp.Diff([]string{"first", "middle", "late", "tie"}, got); diff != "" {
+		t.Fatalf("launches (-want +got): %s", diff)
+	}
+}
+
+func TestDisabledSessionRemainsExcludedFromEnabledSweepsAndLaunches(t *testing.T) {
+	e := testenv.New(t)
+	path := filepath.Join(e.PiDir, testenv.PiKey+".jsonl")
+	t.Setenv("AGENT_SESSIONS_DISABLE", "1")
+	if code, _, _ := run("hook", "pi", "--path", path); code != 0 {
+		t.Fatal(code)
+	}
+	t.Setenv("AGENT_SESSIONS_DISABLE", "")
+	queued := writeLaunch(t, e, "excluded", path)
+	if code, out, errOut := run("sync", "--agent", "pi"); code != 0 {
+		t.Fatalf("sync: %d %s %s", code, out, errOut)
+	}
+	if keys := e.BucketKeys(); len(keys) != 0 {
+		t.Fatalf("excluded root uploaded: %v", keys)
+	}
+	if _, err := os.Stat(queued); !os.IsNotExist(err) {
+		t.Fatalf("excluded launch left: %v", err)
+	}
+	if code, out, errOut := run("sync", "--agent", "pi", "--path", path); code != 0 {
+		t.Fatalf("hook sync: %d %s %s", code, out, errOut)
+	}
+	if keys := e.BucketKeys(); len(keys) != 0 {
+		t.Fatalf("excluded hook uploaded: %v", keys)
+	}
+}
+
+func TestUnreadablePendingLaunchIsRetainedAndRetried(t *testing.T) {
+	e := testenv.New(t)
+	path := filepath.Join(e.PiDir, testenv.PiKey+".jsonl")
+	queued := writeLaunch(t, e, "unreadable", path)
+	original, err := os.ReadFile(queued)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(queued, 0); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errOut := run("sync", "--agent", "pi"); code != 1 || !strings.Contains(errOut, "launch") {
+		t.Fatalf("unreadable sync = %d %s", code, errOut)
+	}
+	if _, err := os.Stat(queued); err != nil {
+		t.Fatalf("pending launch was erased: %v", err)
+	}
+	if err := os.Chmod(queued, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(queued)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(string(original), string(got)); diff != "" {
+		t.Fatalf("pending bytes changed: %s", diff)
+	}
+	if code, out, errOut := run("sync", "--agent", "pi"); code != 0 {
+		t.Fatalf("retry = %d %s %s", code, out, errOut)
+	}
+	if _, err := os.Stat(queued); !os.IsNotExist(err) {
+		t.Fatalf("successful launch queue remains: %v", err)
+	}
+}
+
+func TestMalformedPendingLaunchPreservesExactBytesAndReportsError(t *testing.T) {
+	e := testenv.New(t)
+	path := filepath.Join(e.State, "pending", "launch-malformed.json")
+	const original = `{"agent":"pi","path":"/p","recorded_at":"bad"}`
+	testenv.Write(t, path, original)
+	for range 2 {
+		if code, _, errOut := run("sync", "--agent", "pi"); code != 1 || !strings.Contains(errOut, "launch") {
+			t.Fatalf("malformed sync = %d %s", code, errOut)
+		}
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != original {
+			t.Fatalf("queue bytes = %q", got)
+		}
 	}
 }

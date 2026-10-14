@@ -15,8 +15,10 @@ import (
 
 	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/config"
+	"github.com/mich-murphy/memory/internal/exclusion"
 	"github.com/mich-murphy/memory/internal/install"
 	"github.com/mich-murphy/memory/internal/jsonx"
+	"github.com/mich-murphy/memory/internal/launch"
 	"github.com/mich-murphy/memory/internal/logging"
 	"github.com/mich-murphy/memory/internal/state"
 	"github.com/mich-murphy/memory/internal/store"
@@ -155,14 +157,19 @@ func syncLocked(ctx context.Context, cfg *config.Config, bucket store.Store, fla
 			log.Error("closing state", "error", cerr)
 		}
 	}()
+	excluded, err := exclusion.Load(cfg.StateDir)
+	if err != nil {
+		return nil, err
+	}
 	sy := syncer.New(cfg, bucket, db, adapters.All(cfg.Home), syncer.Options{
-		Trigger: flags.trigger, Logger: log, Version: version,
+		Trigger: flags.trigger, Logger: log, Version: version, Exclusions: excluded,
 	})
-	recordLaunches(ctx, sy, cfg.StateDir, log)
+	recordLaunches(ctx, sy, cfg.StateDir, excluded, adapters.All(cfg.Home), log)
 	files, err := filesToSync(ctx, sy, flags)
 	if err != nil {
 		return nil, err
 	}
+	files = slices.DeleteFunc(files, excluded.Excludes)
 	summary, err := sy.Run(ctx, files)
 	if err != nil {
 		return nil, err
@@ -174,35 +181,39 @@ func syncLocked(ctx context.Context, cfg *config.Config, bucket store.Store, fla
 }
 
 type pendingLaunch struct {
-	file, agent, path string
-	launch            map[string]any
+	file     string
+	envelope launch.Envelope
 }
 
 // recordLaunches records every launch session-start hooks left, oldest first, not only this
 // run's: a sync that never got the lock leaves its launch for the next one that does. A launch
 // that fails to record stays for the next run.
-func recordLaunches(ctx context.Context, sy *syncer.Syncer, stateDir string, log *slog.Logger) {
+func recordLaunches(ctx context.Context, sy *syncer.Syncer, stateDir string, excluded exclusion.Registry, ads map[string]adapters.Adapter, log *slog.Logger) {
 	files, _ := filepath.Glob(filepath.Join(stateDir, "pending", "launch-*.json")) // the pattern is valid
 	var launches []pendingLaunch
 	for _, f := range files {
 		l, err := readLaunch(f)
 		if err != nil {
-			log.Warn("dropping an unreadable launch", "file", f, "error", err)
-			removeLaunch(f, log)
+			sy.Summary.Errors++
+			sy.Summary.ErrorMessages = append(sy.Summary.ErrorMessages, fmt.Sprintf("launch %s: %v", f, err))
+			log.Error("pending launch retained for retry", "file", f, "error", err)
 			continue
 		}
 		launches = append(launches, l)
 	}
-	slices.SortFunc(launches, func(a, b pendingLaunch) int {
-		at, _ := a.launch["recorded_at"].(float64)
-		bt, _ := b.launch["recorded_at"].(float64)
-		return cmp.Compare(at, bt)
+	slices.SortStableFunc(launches, func(a, b pendingLaunch) int {
+		return cmp.Compare(a.envelope.RecordedAt, b.envelope.RecordedAt)
 	})
 	for _, l := range launches {
-		if err := sy.RecordLaunch(ctx, l.agent, l.path, l.launch); err != nil {
+		e := l.envelope
+		if excluded.ExcludesPath(ads[e.Agent], e.Path) {
+			removeLaunch(l.file, log)
+			continue
+		}
+		if err := sy.RecordLaunch(ctx, e.Agent, e.Path, e.Map()); err != nil {
 			sy.Summary.Errors++
-			sy.Summary.ErrorMessages = append(sy.Summary.ErrorMessages, fmt.Sprintf("launch %s: %v", l.agent, err))
-			log.Error("recording launch", "agent", l.agent, "error", err)
+			sy.Summary.ErrorMessages = append(sy.Summary.ErrorMessages, fmt.Sprintf("launch %s: %v", e.Agent, err))
+			log.Error("recording launch", "agent", e.Agent, "error", err)
 			continue
 		}
 		removeLaunch(l.file, log)
@@ -214,17 +225,11 @@ func readLaunch(file string) (pendingLaunch, error) {
 	if err != nil {
 		return pendingLaunch{}, err
 	}
-	m, _ := jsonx.Map(data) // a file that isn't one has no agent, below
-	l := pendingLaunch{file: file, launch: m}
-	l.agent, _ = m["agent"].(string)
-	l.path, _ = m["path"].(string)
-	if !slices.Contains(adapters.Names, l.agent) || l.path == "" {
-		return pendingLaunch{}, errors.New("no agent or path")
+	envelope, err := launch.Decode(data)
+	if err != nil {
+		return pendingLaunch{}, err
 	}
-	// They say where the launch goes; the manifest's launch is what the hook saw.
-	delete(m, "agent")
-	delete(m, "path")
-	return l, nil
+	return pendingLaunch{file: file, envelope: envelope}, nil
 }
 
 func removeLaunch(file string, log *slog.Logger) {

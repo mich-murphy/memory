@@ -20,11 +20,12 @@ import (
 // miss rows still in the -wal file and can catch the database mid-write.
 func SQLiteExports(ctx context.Context, a Adapter, root string, databases []string, workDir string,
 	interval time.Duration,
-) []SessionFile {
-	var out []SessionFile
+) Discovery {
+	out := Discovery{Complete: true}
 	for _, src := range databases {
 		rel, ok := relative(src, root)
 		if !ok {
+			out.issue(src, "export", errors.New("database outside root"))
 			continue
 		}
 		dest := filepath.Join(workDir, a.Name(), rootTag(root), filepath.FromSlash(rel))
@@ -37,13 +38,15 @@ func SQLiteExports(ctx context.Context, a Adapter, root string, databases []stri
 		}
 		if due {
 			if err := backupSQLite(ctx, src, dest); err != nil {
-				// Locked, or not really a database: try again next sweep.
+				out.issue(src, "sqlite_export", err)
 				continue
 			}
-			_ = os.WriteFile(sigPath, []byte(sig), 0o600) // without it the next sweep just copies again
+			if err := os.WriteFile(sigPath, []byte(sig), 0o600); err != nil {
+				out.issue(src, "export_signature", err)
+			}
 		}
 		if fsutil.IsFile(dest) {
-			out = append(out, SessionFile{Agent: a.Name(), Root: root, Path: dest, Key: keyPrefix(a, root) + "db/" + rel, Role: RoleDB})
+			out.Files = append(out.Files, SessionFile{Agent: a.Name(), Root: root, Path: dest, SourcePath: src, Key: keyPrefix(a, root) + "db/" + rel, Role: RoleDB})
 		}
 	}
 	return out

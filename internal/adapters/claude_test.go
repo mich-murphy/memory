@@ -34,7 +34,7 @@ func TestClaudePluginsReadsBothFileVersions(t *testing.T) {
 		"v1-format": {"installPath": "`+v1+`"}
 	}}`)
 	want := []Plugin{{Name: "docs@official", Dir: docs}, {Name: "lsp@official", Dir: lsp}, {Name: "v1-format", Dir: v1}}
-	if diff := cmp.Diff(want, NewClaude(t.TempDir()).Plugins(root)); diff != "" {
+	if diff := cmp.Diff(want, NewClaude(t.TempDir()).Plugins(root).Plugins); diff != "" {
 		t.Errorf("plugins (-want +got):\n%s", diff)
 	}
 }
@@ -42,12 +42,12 @@ func TestClaudePluginsReadsBothFileVersions(t *testing.T) {
 func TestClaudePluginsWithoutAUsableFile(t *testing.T) {
 	c := NewClaude(t.TempDir())
 	root := t.TempDir()
-	if got := c.Plugins(root); got != nil {
+	if got := c.Plugins(root); len(got.Plugins) != 0 || !got.Complete {
 		t.Errorf("no file: %v", got)
 	}
 	for _, body := range []string{`{"plugins": `, `[1, 2]`, `{"plugins": []}`} {
 		writePlugins(t, root, body)
-		if got := c.Plugins(root); got != nil {
+		if got := c.Plugins(root); len(got.Plugins) != 0 || got.Complete || len(got.Issues) == 0 {
 			t.Errorf("%s: %v", body, got)
 		}
 	}
@@ -78,14 +78,14 @@ func TestClaudeKeysPerSessionFilesByTheSessionsProject(t *testing.T) {
 		}
 		return sf.SessionKey
 	}
-	if got := key("file-history/" + a + "/x@v1"); got != "-a-proj/"+a {
+	if got := key("file-history/" + a + "/x@v1"); got != keyPrefix(c, root)+"-a-proj/"+a {
 		t.Errorf("indexed session: %q", got)
 	}
 	if got := key("todos/" + b + "-agent.json"); got != "" {
 		t.Errorf("unknown session: %q", got)
 	}
 	touch("projects/-m-proj/" + b + ".jsonl")
-	if got := key("todos/" + b + "-agent.json"); got != "-m-proj/"+b {
+	if got := key("todos/" + b + "-agent.json"); got != keyPrefix(c, root)+"-m-proj/"+b {
 		t.Errorf("session started after the index was read: %q", got)
 	}
 }

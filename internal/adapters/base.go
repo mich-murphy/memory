@@ -8,6 +8,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -16,7 +18,6 @@ import (
 	"time"
 
 	"github.com/mich-murphy/memory/internal/capturepolicy"
-	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/jsonx"
 )
 
@@ -53,6 +54,8 @@ type SessionFile struct {
 	Agent string
 	Root  string
 	Path  string
+	// SourcePath is the original source when Path is a generated export.
+	SourcePath string
 	// Key is relative to raw/agent=<agent>/machine=<machine>/, without .zst.
 	Key string
 	// SessionKey is empty for agent-wide files like history.
@@ -94,6 +97,20 @@ type Plugin struct {
 	Dir  string
 }
 
+// Sources describes adapter-generated snapshot entries and installed plugin roots,
+// including failures that must not become a false claim of snapshot completeness.
+type Sources struct {
+	Entries  []Entry
+	Plugins  []Plugin
+	Complete bool
+	Issues   []Issue
+}
+
+func (s *Sources) issue(path, kind string, err error) {
+	s.Complete = false
+	s.Issues = append(s.Issues, Issue{Path: path, Kind: kind, Err: err})
+}
+
 type Adapter interface {
 	Name() string
 	Home() string
@@ -109,14 +126,14 @@ type Adapter interface {
 	CanonicalRoot() string
 	InferRoot(path string) string
 	Classify(path, root string) (SessionFile, bool)
-	Related(sf SessionFile) []string
+	Related(sf SessionFile) Discovery
 	UserBase(root string) string
-	ExtraSnapshotEntries(root, projectRoot string) []Entry
+	ExtraSnapshotEntries(root, projectRoot string) Sources
 	MemoryDirs(root, projectRoot, sessionKey string) []ScopedDir
-	Plugins(root string) []Plugin
+	Plugins(root string) Sources
 	// Exports materialises under workDir what the walk of root can't copy as it is, apart from
 	// databases (SQLiteExports).
-	Exports(root, workDir string, interval time.Duration) []SessionFile
+	Exports(root, workDir string, interval time.Duration) Discovery
 	SessionInfo(head []map[string]any) map[string]any
 }
 
@@ -151,9 +168,7 @@ func hasAnySuffix(name string, suffixes []string) bool {
 	return slices.ContainsFunc(suffixes, func(s string) bool { return strings.HasSuffix(name, s) })
 }
 
-func IsCredential(name string) bool {
-	return capturepolicy.IsCredential(name)
-}
+func IsCredential(name string) bool { return capturepolicy.IsCredential(name) }
 
 func skipped(name string) bool {
 	return IsCredential(name) || hasAnySuffix(name, skipSuffixes)
@@ -189,6 +204,13 @@ func keyPrefix(a Adapter, root string) string {
 	return "roots/" + rootTag(root) + "/"
 }
 
+func prefixedSession(a Adapter, root, key string) string {
+	if key == "" {
+		return ""
+	}
+	return keyPrefix(a, root) + key
+}
+
 // layout is what an adapter knows about its agent before reading a file.
 type layout struct {
 	name string
@@ -221,84 +243,113 @@ func (l *layout) UserBase(root string) string { return root }
 
 type noExtras struct{}
 
-func (noExtras) Related(SessionFile) []string { return nil }
+func (noExtras) Related(SessionFile) Discovery { return Discovery{Complete: true} }
 
-func (noExtras) ExtraSnapshotEntries(string, string) []Entry { return nil }
+func (noExtras) ExtraSnapshotEntries(string, string) Sources { return Sources{Complete: true} }
 
-func (noExtras) Plugins(string) []Plugin { return nil }
+func (noExtras) Plugins(string) Sources { return Sources{Complete: true} }
 
-func (noExtras) Exports(string, string, time.Duration) []SessionFile { return nil }
+func (noExtras) Exports(string, string, time.Duration) Discovery { return Discovery{Complete: true} }
 
-type walkedFile struct {
-	path string
-	mode fs.FileMode
+// Issue describes a source failure; absent optional roots are not issues.
+type Issue struct {
+	Path string
+	Kind string
+	Err  error
 }
 
-func walk(a Adapter, root string) []walkedFile {
-	if !fsutil.IsDir(root) {
-		return nil
+func (i Issue) Error() string { return fmt.Sprintf("%s %s: %v", i.Kind, i.Path, i.Err) }
+
+// Discovery preserves useful partial results without asserting authoritative absence.
+type Discovery struct {
+	Files     []SessionFile
+	Databases []string
+	Complete  bool
+	Issues    []Issue
+}
+
+func (d *Discovery) issue(path, kind string, err error) {
+	d.Complete = false
+	d.Issues = append(d.Issues, Issue{Path: path, Kind: kind, Err: err})
+}
+
+func Discover(a Adapter, root string) Discovery { return discoverUnder(a, root, root) }
+
+// discoverUnder shares the sweep's policy and failure reporting, while allowing hook syncs
+// to visit only their session's sources. Namespace root and traversal top are distinct.
+func discoverUnder(a Adapter, root, top string) Discovery {
+	out := Discovery{Complete: true}
+	// WalkDir does not follow its root symlink. Resolve it for traversal only: keys and
+	// recorded paths must still use the caller's logical namespace.
+	resolved, err := filepath.EvalSymlinks(top)
+	if err != nil {
+		// A genuinely absent optional source is normal; a dangling root alias is not.
+		if _, lerr := os.Lstat(top); !errors.Is(lerr, os.ErrNotExist) {
+			out.issue(top, "root", err)
+		}
+		return out
+	}
+	st, err := os.Stat(resolved)
+	if err != nil {
+		out.issue(top, "stat", err)
+		return out
+	}
+	if top == root && !st.IsDir() {
+		out.issue(root, "root", errors.New("not a directory"))
+		return out
 	}
 	skip := map[string]bool{}
-	for _, d := range a.SkipDirs() {
-		skip[d] = true
+	for _, dir := range a.SkipDirs() {
+		skip[dir] = true
 	}
-	var out []walkedFile
-	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil //nolint:nilerr // an unreadable directory is skipped, not fatal
-		}
-		if d.IsDir() {
-			if p == root {
-				return nil
-			}
-			rel, _ := filepath.Rel(root, p)
-			if skipDirNames[d.Name()] || skip[filepath.ToSlash(rel)] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !d.Type().IsRegular() || skipped(d.Name()) {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil {
-			return nil //nolint:nilerr // vanished between listing and stat
-		}
-		out = append(out, walkedFile{path: p, mode: info.Mode()})
-		return nil
+	err = filepath.WalkDir(resolved, func(p string, d fs.DirEntry, err error) error {
+		return out.visit(a, root, top, resolved, p, d, err, skip)
 	})
+	if err != nil {
+		out.issue(top, "walk", err)
+	}
 	return out
 }
 
-func Discover(a Adapter, root string) (files []SessionFile, databases []string) {
-	for _, f := range walk(a, root) {
-		switch {
-		case isSQLite(filepath.Base(f.path)):
-			databases = append(databases, f.path)
-		case IsExecutableBinary(f.path, f.mode):
-		default:
-			if sf, ok := a.Classify(f.path, root); ok {
-				files = append(files, sf)
-			}
+// visit applies the layout's directory and file policy to one logical walk entry.
+func (d *Discovery) visit(a Adapter, root, top, resolved, p string, entry fs.DirEntry, err error, skip map[string]bool) error {
+	rel, rerr := filepath.Rel(resolved, p)
+	if rerr != nil {
+		return rerr
+	}
+	logical := filepath.Join(top, rel)
+	if err != nil {
+		d.issue(logical, "walk", err)
+		return nil
+	}
+	if entry.IsDir() {
+		namespaceRel, err := filepath.Rel(root, logical)
+		if err != nil {
+			return err
+		}
+		if logical != root && (skipDirNames[entry.Name()] || skip[filepath.ToSlash(namespaceRel)]) {
+			return filepath.SkipDir
+		}
+		return nil
+	}
+	if !entry.Type().IsRegular() || skipped(entry.Name()) {
+		return nil
+	}
+	info, err := entry.Info()
+	if err != nil {
+		d.issue(logical, "stat", err)
+		return nil
+	}
+	switch {
+	case isSQLite(entry.Name()):
+		d.Databases = append(d.Databases, logical)
+	case IsExecutableBinary(logical, info.Mode()):
+	default:
+		if sf, ok := a.Classify(logical, root); ok {
+			d.Files = append(d.Files, sf)
 		}
 	}
-	return files, databases
-}
-
-func filesUnder(roots ...string) []string {
-	var out []string
-	for _, root := range roots {
-		if !fsutil.IsDir(root) {
-			continue
-		}
-		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-			if err == nil && d.Type().IsRegular() && !skipped(d.Name()) {
-				out = append(out, p)
-			}
-			return nil
-		})
-	}
-	return out
+	return nil
 }
 
 func ReadHead(data []byte, maxLines int) []map[string]any {

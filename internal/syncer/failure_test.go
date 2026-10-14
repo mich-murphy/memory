@@ -133,7 +133,7 @@ func TestAFailedUploadIsCountedAndRetriedNextRun(t *testing.T) {
 	if !e.HasKey(rawKey("claude", "history.jsonl")) {
 		t.Error("one failure stopped the other uploads")
 	}
-	if first.Manifests != 1 || !e.HasKey(manifest("pi", piKey)) {
+	if first.Manifests != 1 || !e.HasKey(manifest("pi", "--home-code-proj--/"+piKey)) {
 		t.Errorf("manifests written = %d, keys %v", first.Manifests, e.BucketKeys())
 	}
 	second := sweep(t, local)

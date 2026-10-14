@@ -21,6 +21,7 @@ import (
 
 	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/config"
+	"github.com/mich-murphy/memory/internal/exclusion"
 	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/state"
 	"github.com/mich-murphy/memory/internal/store"
@@ -77,9 +78,10 @@ func (s *Summary) Trimmed() Summary {
 type snapshotKey struct{ session, root, cwd string }
 
 type Options struct {
-	Trigger string
-	Logger  *slog.Logger
-	Version string
+	Exclusions exclusion.Registry
+	Trigger    string
+	Logger     *slog.Logger
+	Version    string
 }
 
 type Syncer struct {
@@ -172,8 +174,9 @@ func (s *Syncer) SweepFiles(ctx context.Context, agents []string) ([]adapters.Se
 			return nil, err
 		}
 		for _, root := range roots {
-			files := s.sweepRoot(ctx, agent, root)
-			if fsutil.IsDir(root) {
+			discovery := s.sweepRoot(ctx, agent, root)
+			files := discovery.Files
+			if discovery.Complete && fsutil.IsDir(root) {
 				if err := s.tombstone(agent, root, files); err != nil {
 					return nil, err
 				}
@@ -194,12 +197,33 @@ func uniqueByPath(files []adapters.SessionFile) []adapters.SessionFile {
 }
 
 // sweepRoot leaves the exports in, although they live under the state dir.
-func (s *Syncer) sweepRoot(ctx context.Context, agent, root string) []adapters.SessionFile {
+func (s *Syncer) sweepRoot(ctx context.Context, agent, root string) adapters.Discovery {
 	a := s.adapters[agent]
-	files, databases := adapters.Discover(a, root)
-	files = slices.DeleteFunc(files, func(sf adapters.SessionFile) bool { return s.excluded(sf.Path) })
-	return slices.Concat(files, adapters.SQLiteExports(ctx, a, root, databases, s.workDir, recopyAfter),
-		a.Exports(root, s.workDir, recopyAfter))
+	out := adapters.Discover(a, root)
+	out.Files = slices.DeleteFunc(out.Files, func(sf adapters.SessionFile) bool { return s.excluded(sf.Path) || s.opts.Exclusions.Excludes(sf) })
+	out.Databases = slices.DeleteFunc(out.Databases, func(path string) bool {
+		return s.opts.Exclusions.Excludes(adapters.SessionFile{Agent: agent, Root: root, Path: path})
+	})
+	exports := adapters.Discovery{Complete: true}
+	if !s.opts.Exclusions.Excludes(adapters.SessionFile{Agent: agent, Root: root}) {
+		exports = a.Exports(root, s.workDir, recopyAfter)
+	}
+	for _, exported := range []adapters.Discovery{
+		adapters.SQLiteExports(ctx, a, root, out.Databases, s.workDir, recopyAfter),
+		exports,
+	} {
+		out.Files = append(out.Files, exported.Files...)
+		out.Issues = append(out.Issues, exported.Issues...)
+		out.Complete = out.Complete && exported.Complete
+	}
+	s.discoveryIssues(out)
+	return out
+}
+
+func (s *Syncer) discoveryIssues(discovery adapters.Discovery) {
+	for _, issue := range discovery.Issues {
+		s.errorf("discovery: %s", issue.Error())
+	}
 }
 
 func (s *Syncer) tombstone(agent, root string, onDisk []adapters.SessionFile) error {
@@ -213,7 +237,7 @@ func (s *Syncer) tombstone(agent, root string, onDisk []adapters.SessionFile) er
 	}
 	now := s.nowSeconds()
 	for _, f := range live {
-		if present[f.Path] || fsutil.Exists(f.Path) {
+		if s.opts.Exclusions.Excludes(adapters.SessionFile{Agent: agent, Root: root, Path: f.Path, SessionKey: f.SessionKey}) || present[f.Path] || fsutil.Exists(f.Path) {
 			continue
 		}
 		if err := s.db.MarkDeleted(f.Path, now); err != nil {
@@ -298,9 +322,11 @@ func (s *Syncer) HookFiles(agent string, paths []string) ([]adapters.SessionFile
 		if !ok {
 			continue
 		}
-		for _, p := range append([]string{sf.Path}, a.Related(sf)...) {
-			if related, ok := a.Classify(p, sf.Root); ok && !s.excluded(p) {
-				out = append(out, related)
+		related := a.Related(sf)
+		s.discoveryIssues(related)
+		for _, candidate := range append([]adapters.SessionFile{sf}, related.Files...) {
+			if !s.excluded(candidate.Path) && !s.opts.Exclusions.Excludes(candidate) {
+				out = append(out, candidate)
 			}
 		}
 	}

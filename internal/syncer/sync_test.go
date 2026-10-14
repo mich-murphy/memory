@@ -188,7 +188,7 @@ func TestSweepCapturesEveryAgentDirAndIsIdempotent(t *testing.T) {
 		rawKey("pi", "AGENTS.md"),
 		"manifests/agent=claude/machine=testbox/" + claudeKey + ".json",
 		"manifests/agent=codex/machine=testbox/" + codexKey + ".json",
-		"manifests/agent=pi/machine=testbox/" + piKey + ".json",
+		"manifests/agent=pi/machine=testbox/--home-code-proj--/" + piKey + ".json",
 	} {
 		if !e.HasKey(k) {
 			t.Errorf("missing %s", k)
@@ -236,7 +236,7 @@ func TestSweepCapturesEveryAgentDirAndIsIdempotent(t *testing.T) {
 	if codex["session_id"] != codexThread || codex["git_branch"] != "main" || codex["agent_version"] != "0.162.1" {
 		t.Errorf("codex info = %v", codex)
 	}
-	pi := e.Manifest("pi", piKey)["info"].(map[string]any)
+	pi := e.Manifest("pi", "--home-code-proj--/"+piKey)["info"].(map[string]any)
 	if pi["session_id"] != testenv.PiSID || pi["format_version"] != 3.0 {
 		t.Errorf("pi info = %v", pi)
 	}
@@ -613,7 +613,7 @@ func TestLargeFilesStreamAndKeepVersions(t *testing.T) {
 	testenv.Write(t, path, strings.Repeat(`{"type":"session","version":3,"id":"replaced"}`+"\n", 3))
 	testenv.Backdate(t, path, 2*time.Minute)
 	mustRun(t, "sync", "--quiet")
-	main := mainTranscript(t, e.Manifest("pi", piKey))
+	main := mainTranscript(t, e.Manifest("pi", "--home-code-proj--/"+piKey))
 	if main["line_count"] != 3.0 {
 		t.Errorf("line_count = %v", main["line_count"])
 	}
@@ -942,7 +942,7 @@ func TestASessionWithNoKnownCwdGetsNoSnapshot(t *testing.T) {
 func TestBackfillSnapshotsArePostHoc(t *testing.T) {
 	e := testenv.New(t)
 	mustRun(t, "backfill")
-	snap := list(e.Manifest("pi", piKey)["snapshots"])[0].(map[string]any)
+	snap := list(e.Manifest("pi", "--home-code-proj--/"+piKey)["snapshots"])[0].(map[string]any)
 	if snap["timing"] != "post_hoc" {
 		t.Errorf("timing = %v", snap["timing"])
 	}

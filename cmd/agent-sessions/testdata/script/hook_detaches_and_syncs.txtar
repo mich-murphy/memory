@@ -4,7 +4,7 @@ exec agent-sessions hook pi --path $WORK/home/.pi/agent/sessions/--w--/2026-10-1
 ! stdout .
 ! stderr .
 waitfor bucket/raw/agent=pi/machine=testbox/sessions/--w--/2026-10-10T10-00-00-000Z_s1.jsonl.zst
-waitfor bucket/manifests/agent=pi/machine=testbox/2026-10-10T10-00-00-000Z_s1.json
+waitfor bucket/manifests/agent=pi/machine=testbox/--w--/2026-10-10T10-00-00-000Z_s1.json
 # The debounce marker is gone once the sync has started reading.
 ! waitfor state/pending/[0-9a-f]*
 

@@ -6,9 +6,9 @@ put manifests/agent=claude/machine=bench/-home-dev-code-proj-2/426b2564-4425-6b5
 put manifests/agent=codex/machine=bench/rollout-2026-10-01T08-00-00-b469f990-ccf4-c276-f720-398c84ff96c4.json
 put manifests/agent=codex/machine=bench/rollout-2026-10-01T09-00-00-6b9acc15-2c47-b679-3c3c-bb5a1c20dceb.json
 put manifests/agent=codex/machine=bench/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.json
-put manifests/agent=pi/machine=bench/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.json
-put manifests/agent=pi/machine=bench/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.json
-put manifests/agent=pi/machine=bench/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.json
+put manifests/agent=pi/machine=bench/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.json
+put manifests/agent=pi/machine=bench/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.json
+put manifests/agent=pi/machine=bench/--home-dev-code-proj-2--/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.json
 put raw/agent=claude/machine=bench/CLAUDE.md.zst raw=ccd3ce6367b61d9cfad88882c21c8226a2ebddf57e6cfcc57a1dc7d6845e8b93
 put raw/agent=claude/machine=bench/claude.json.zst raw=35b314cd2a700704d9335afddcd7af3694aa5dc21715c2a0b2a1eb17ae903823
 put raw/agent=claude/machine=bench/debug/426b2564-4425-6b57-2939-85d342e21aa3.txt.zst raw=6dbe824135c2fccf228b5c1eabf49860f9e6331ab25dba40b968b937982ce4d2
@@ -63,7 +63,7 @@ summary {"uploaded":0,"unchanged":37,"skipped":0,"errors":0,"bytes_uploaded":0,"
 summary {"uploaded":3,"unchanged":34,"skipped":0,"errors":0,"bytes_uploaded":27349,"manifests":3,"versions":0,"segments":3,"folded":0,"deleted":0,"unknown":0,"error_messages":[]}
 put manifests/agent=claude/machine=bench/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.json
 put manifests/agent=codex/machine=bench/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.json
-put manifests/agent=pi/machine=bench/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.json
+put manifests/agent=pi/machine=bench/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.json
 put raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.jsonl.zst.d/000000000164672-000000000196231.zst raw=0c80a377492ba2fae2b03a979ea215194b83d043e6d36be9b4d2c6f33606cbca
 put raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.jsonl.zst.d/000000000175129-000000000204559.zst raw=15fa2a0f44a45ec416127001c4aaae0a9361c9f762f3bf591c304114aec3168f
 put raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.jsonl.zst.d/000000000175280-000000000197435.zst raw=bbbe65ee8d2cc2b247e9723ef0ead6bd4a265f0d3dacee562f9027c4065dbcb0
@@ -81,7 +81,7 @@ head blobs/537523511f8a88980c45425b163553c3f1fdaced532b1cb234a27f6e650d8112.zst
 head raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.jsonl.zst
 put manifests/agent=claude/machine=bench/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.json
 put manifests/agent=claude/machine=bench/-home-dev-code-proj-2/426b2564-4425-6b57-2939-85d342e21aa3.json
-put manifests/agent=pi/machine=bench/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.json
+put manifests/agent=pi/machine=bench/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.json
 put raw-versions/agent=pi/machine=bench/sessions/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.jsonl.json
 put raw/agent=claude/machine=bench/projects/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.jsonl.zst.d/000000000071832-000000000071887.zst raw=4db733d822492fc81b2272ebfd583ca4558faa68744afeac75a06756a5ab9eba
 put raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.jsonl.zst raw=7a322afd5de01e205d3b56db56934d2828c66a7b494006c1b371751d55e6020f
@@ -95,7 +95,7 @@ delete raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-0--/2026-10-01T1
 put manifests/agent=claude/machine=bench/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.json
 put manifests/agent=claude/machine=bench/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.json
 put manifests/agent=codex/machine=bench/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.json
-put manifests/agent=pi/machine=bench/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.json
+put manifests/agent=pi/machine=bench/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.json
 put raw/agent=claude/machine=bench/projects/-home-dev-code-proj-0/d3347d6d-4d5a-8c60-aef0-9601215332b5.jsonl.zst raw=bf6d4bd0ba6c54e202a2316662063f0a7e8e1dcdd288fe253c35d3af61f72c9e
 put raw/agent=claude/machine=bench/projects/-home-dev-code-proj-1/b70b9078-c52a-d556-19fa-f1c1ea7d61c2.jsonl.zst raw=9fa048467a2c80fadd11767be70a216c70dc96d2c9d1f3bd10ad2aaf3cbb5847
 put raw/agent=codex/machine=bench/rollouts/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3ce2-846d-d752b7190682.jsonl.zst raw=37aa4650df16bcacce891b80d5be3946748d7168cc1118c7434ba1ee96ae5478
@@ -818,7 +818,7 @@ manifests/agent=codex/machine=bench/rollout-2026-10-01T10-00-00-753b6d12-5fc4-3c
   }
  ]
 }
-manifests/agent=pi/machine=bench/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.json
+manifests/agent=pi/machine=bench/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.json
 {
  "agent": "pi",
  "collector_version": "test",
@@ -827,16 +827,16 @@ manifests/agent=pi/machine=bench/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493
  "git": {},
  "hostname": "bench",
  "info": {
-  "cwd": "/home/dev/code/proj-2",
+  "cwd": "/home/dev/code/proj-0",
   "format_version": 3,
-  "session_id": "d4c2eef2-e35f-f68f-493e-8c5734c3f357",
+  "session_id": "82b05ea5-6550-93e4-c2a3-44abfd10b810",
   "source_root": "$HOME/.pi/agent"
  },
  "launch": null,
  "launches": [],
  "machine_id": "bench",
  "schema": 2,
- "session_key": "2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357",
+ "session_key": "--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810",
  "snapshots": [
   {
    "git": {},
@@ -850,34 +850,34 @@ manifests/agent=pi/machine=bench/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493
    "timing": "post_hoc"
   }
  ],
- "synced_at": 1790856000,
+ "synced_at": 1790858400,
  "transcripts": [
   {
    "head": {
-    "cwd": "/home/dev/code/proj-2",
+    "cwd": "/home/dev/code/proj-0",
     "format_version": 3,
-    "session_id": "d4c2eef2-e35f-f68f-493e-8c5734c3f357"
+    "session_id": "82b05ea5-6550-93e4-c2a3-44abfd10b810"
    },
-   "key": "sessions/--home-dev-code-proj-2--/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.jsonl",
-   "line_count": 48,
-   "object": "raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-2--/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.jsonl.zst",
+   "key": "sessions/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.jsonl",
+   "line_count": 128,
+   "object": "raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.jsonl.zst",
    "pieces": [
     {
-     "end": 65986,
-     "object": "raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-2--/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.jsonl.zst",
-     "sha256": "5aa6383fed532b77737052176391034e9af8036c102f0fd70181d3a7b510f8a5",
+     "end": 197435,
+     "object": "raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.jsonl.zst",
+     "sha256": "7a4bacdf9febdb8823a2f8dee1f78ef5816d2f44da36650e17a564d60b9f2d4b",
      "start": 0
     }
    ],
-   "prefix_sha256": "2b0d896cdf5edd414503114b76fc65a2dfa394a00d101158e4e115dd9f96ac8c",
+   "prefix_sha256": "d3885d6bf9586eb2fbadaf04fb52742efdcfb4459c3435bbe34620ba8b93c305",
    "role": "main",
-   "sha256": "5aa6383fed532b77737052176391034e9af8036c102f0fd70181d3a7b510f8a5",
-   "size": 65986,
+   "sha256": "7a4bacdf9febdb8823a2f8dee1f78ef5816d2f44da36650e17a564d60b9f2d4b",
+   "size": 197435,
    "versions": []
   }
  ]
 }
-manifests/agent=pi/machine=bench/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.json
+manifests/agent=pi/machine=bench/--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e.json
 {
  "agent": "pi",
  "collector_version": "test",
@@ -895,7 +895,7 @@ manifests/agent=pi/machine=bench/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b
  "launches": [],
  "machine_id": "bench",
  "schema": 2,
- "session_key": "2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e",
+ "session_key": "--home-dev-code-proj-1--/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b4-ba6b82040c4e",
  "snapshots": [
   {
    "git": {},
@@ -950,7 +950,7 @@ manifests/agent=pi/machine=bench/2026-10-01T09-00-00-000Z_eae4580b-696c-ea92-88b
   }
  ]
 }
-manifests/agent=pi/machine=bench/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.json
+manifests/agent=pi/machine=bench/--home-dev-code-proj-2--/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.json
 {
  "agent": "pi",
  "collector_version": "test",
@@ -959,16 +959,16 @@ manifests/agent=pi/machine=bench/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a
  "git": {},
  "hostname": "bench",
  "info": {
-  "cwd": "/home/dev/code/proj-0",
+  "cwd": "/home/dev/code/proj-2",
   "format_version": 3,
-  "session_id": "82b05ea5-6550-93e4-c2a3-44abfd10b810",
+  "session_id": "d4c2eef2-e35f-f68f-493e-8c5734c3f357",
   "source_root": "$HOME/.pi/agent"
  },
  "launch": null,
  "launches": [],
  "machine_id": "bench",
  "schema": 2,
- "session_key": "2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810",
+ "session_key": "--home-dev-code-proj-2--/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357",
  "snapshots": [
   {
    "git": {},
@@ -982,29 +982,29 @@ manifests/agent=pi/machine=bench/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a
    "timing": "post_hoc"
   }
  ],
- "synced_at": 1790858400,
+ "synced_at": 1790856000,
  "transcripts": [
   {
    "head": {
-    "cwd": "/home/dev/code/proj-0",
+    "cwd": "/home/dev/code/proj-2",
     "format_version": 3,
-    "session_id": "82b05ea5-6550-93e4-c2a3-44abfd10b810"
+    "session_id": "d4c2eef2-e35f-f68f-493e-8c5734c3f357"
    },
-   "key": "sessions/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.jsonl",
-   "line_count": 128,
-   "object": "raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.jsonl.zst",
+   "key": "sessions/--home-dev-code-proj-2--/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.jsonl",
+   "line_count": 48,
+   "object": "raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-2--/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.jsonl.zst",
    "pieces": [
     {
-     "end": 197435,
-     "object": "raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-0--/2026-10-01T10-00-00-000Z_82b05ea5-6550-93e4-c2a3-44abfd10b810.jsonl.zst",
-     "sha256": "7a4bacdf9febdb8823a2f8dee1f78ef5816d2f44da36650e17a564d60b9f2d4b",
+     "end": 65986,
+     "object": "raw/agent=pi/machine=bench/sessions/--home-dev-code-proj-2--/2026-10-01T08-00-00-000Z_d4c2eef2-e35f-f68f-493e-8c5734c3f357.jsonl.zst",
+     "sha256": "5aa6383fed532b77737052176391034e9af8036c102f0fd70181d3a7b510f8a5",
      "start": 0
     }
    ],
-   "prefix_sha256": "d3885d6bf9586eb2fbadaf04fb52742efdcfb4459c3435bbe34620ba8b93c305",
+   "prefix_sha256": "2b0d896cdf5edd414503114b76fc65a2dfa394a00d101158e4e115dd9f96ac8c",
    "role": "main",
-   "sha256": "7a4bacdf9febdb8823a2f8dee1f78ef5816d2f44da36650e17a564d60b9f2d4b",
-   "size": 197435,
+   "sha256": "5aa6383fed532b77737052176391034e9af8036c102f0fd70181d3a7b510f8a5",
+   "size": 65986,
    "versions": []
   }
  ]
@@ -1076,6 +1076,7 @@ snapshots/blobs/f89d649dae913fb9b9b7e6e8b0c5113a1b0d496085155779d606754b10f20c42
 snapshots/sets/set-0.json
 {
  "agent": "claude",
+ "complete": true,
  "files": [
   {
    "path": ".claude.json#mcp",
@@ -1110,6 +1111,7 @@ snapshots/sets/set-0.json
 snapshots/sets/set-1.json
 {
  "agent": "codex",
+ "complete": true,
  "files": [
   {
    "path": "AGENTS.md",
@@ -1132,6 +1134,7 @@ snapshots/sets/set-1.json
 snapshots/sets/set-2.json
 {
  "agent": "pi",
+ "complete": true,
  "files": [
   {
    "path": "AGENTS.md",
