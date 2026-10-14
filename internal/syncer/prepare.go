@@ -234,6 +234,7 @@ func (s *Syncer) prepare(sf adapters.SessionFile) (*upload, error) {
 type content struct {
 	hashed
 	mtimeNS  int64
+	diskSize int64
 	first    []byte
 	compress func(u *upload) error
 }
@@ -250,7 +251,7 @@ func inMemoryContent(sf adapters.SessionFile, st os.FileInfo, prev *state.Upload
 		return nil, err
 	}
 	return &content{
-		hashed: h, mtimeNS: mtimeNS, first: data,
+		hashed: h, mtimeNS: mtimeNS, diskSize: st.Size(), first: data,
 		compress: func(u *upload) error {
 			part := data[u.piece.Start:]
 			u.piece.SHA256 = h.sha
@@ -289,7 +290,7 @@ func (s *Syncer) streamedContent(path string, st os.FileInfo, prev *state.Upload
 		mtimeNS = st.ModTime().UnixNano()
 	}
 	return &content{
-		hashed: h, mtimeNS: mtimeNS, first: first,
+		hashed: h, mtimeNS: mtimeNS, diskSize: st.Size(), first: first,
 		compress: func(u *upload) error {
 			n := u.piece.End - u.piece.Start
 			h := u.pieceHash()
@@ -331,7 +332,7 @@ func (s *Syncer) planUpload(sf adapters.SessionFile, key string, c *content, pre
 	pieces []raw.Piece, idle bool,
 ) (*upload, error) {
 	u := &upload{key: key, resume: c.resume, file: state.File{
-		SessionFile: sf, Size: c.size, MtimeNS: c.mtimeNS, SHA256: c.sha, LineCount: c.lines, PrefixSHA256: prefixSHA(c.first),
+		SessionFile: sf, Size: c.size, DiskSize: c.diskSize, MtimeNS: c.mtimeNS, SHA256: c.sha, LineCount: c.lines, PrefixSHA256: prefixSHA(c.first),
 	}}
 	if transcriptRoles[sf.Role] && strings.HasSuffix(strings.TrimSuffix(sf.Path, ".zst"), ".jsonl") {
 		u.file.Head = s.adapters[sf.Agent].SessionInfo(adapters.ReadHead(c.first, prefixLines))

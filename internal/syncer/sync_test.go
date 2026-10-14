@@ -690,6 +690,31 @@ func TestCodexRecompressionKeepsKeyAndSkipsReupload(t *testing.T) {
 	}
 }
 
+// A compressed rollout uploads more bytes than it holds on disk, so whether it changed is
+// judged by its size on disk. The file is overwritten here keeping its size and mtime, which a
+// sweep that read it again would fail to decompress.
+func TestASweepDoesNotReadAnUnchangedCompressedRolloutAgain(t *testing.T) {
+	e := testenv.New(t)
+	zst := e.CodexRollout + ".zst"
+	testenv.Write(t, zst, string(raw.Compress(readFile(t, e.CodexRollout))))
+	if err := os.Remove(e.CodexRollout); err != nil {
+		t.Fatal(err)
+	}
+	testenv.Backdate(t, zst, time.Hour)
+	mustRun(t, "sync", "--quiet")
+	st, err := os.Stat(zst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testenv.Write(t, zst, strings.Repeat("z", int(st.Size())))
+	if err := os.Chtimes(zst, st.ModTime(), st.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := run(t, "sync"); code != 0 {
+		t.Errorf("sync read the unchanged rollout again: exit %d\n%s", code, out)
+	}
+}
+
 func TestHookPathOutsideDefaultRootsIsRememberedForSweeps(t *testing.T) {
 	e := testenv.New(t)
 	custom := filepath.Join(e.Tmp, "pi-custom-sessions")
