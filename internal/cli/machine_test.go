@@ -166,6 +166,9 @@ func TestInstallAndReinstallDoNotCreateIdentity(t *testing.T) {
 		if code != exitOK {
 			t.Fatalf("install = %d, %q, %q", code, out, errOut)
 		}
+		if !strings.Contains(out, "machine-id --new") {
+			t.Errorf("install did not explain the required identity choice: %s", out)
+		}
 		if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("install created identity: %v", err)
 		}

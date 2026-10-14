@@ -274,6 +274,8 @@ func runInstall(args []string, o IO) (int, error) {
 		dir := filepath.Dir(config.FilePath())
 		if id, err := config.MachineUUID(dir); err == nil {
 			opts.Logf("machine id: %s (kept in %s)", id, filepath.Join(dir, "machine-id"))
+		} else {
+			opts.Logf("machine id unavailable: %v", err)
 		}
 	}
 	present := install.AgentsPresent(opts.Home)
