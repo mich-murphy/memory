@@ -108,4 +108,4 @@ For Claude Code, the repo's settings turn on the `gopls-lsp` plugin and the gopl
 
 [docs/quality-gates.md](docs/quality-gates.md) explains each gate and its settings, and [CLAUDE.md](CLAUDE.md) has the rules for coding agents. Linux and macOS only.
 
-For executable user-path verification, use the [agent-sessions verification skill](.agents/skills/verify-agent-sessions/SKILL.md). It builds the real CLI, drives isolated local journeys and optional sandboxed real-agent hooks, and preserves evidence after cleanup. Its feature map names the remaining gaps; local-store success is not live R2 acceptance.
+For executable user-path verification, use the [agent-sessions verification skill](.agents/skills/verify-agent-sessions/SKILL.md). It builds the real CLI, drives isolated local journeys and optional sandboxed real-agent hooks, and preserves evidence after cleanup. Its feature map names the remaining gaps; local-store success is not live R2 acceptance. Separately authorised [live R2 acceptance](docs/r2-acceptance.md) exercises the actual backend and archive engine inside a disposable key namespace, with verified cleanup.
