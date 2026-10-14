@@ -79,26 +79,13 @@ func (d *digest) result(appended bool) hashed {
 // last uploaded (prev). With saved left by hashing prev, those bytes are checked by xxhash and
 // only the appended ones go through SHA-256, so a sync after one turn of a long session reads
 // the session at memory speed rather than SHA-256 speed.
-func hashContent(src io.ReaderAt, size int64, prev *state.Upload, saved *state.Resume) (hashed, error) {
+func hashContent(src io.ReaderAt, size int64, prev *state.Upload, _ *state.Resume) (hashed, error) {
 	old := int64(-1)
 	if prev != nil && prev.Size <= size {
 		old = prev.Size
 	}
 	buf := make([]byte, min(max(size, 1), chunkSize))
-	if saved != nil && saved.Size == old {
-		d := newDigest(buf)
-		if err := d.read(src, old, false); err != nil {
-			return hashed{}, err
-		}
-		if u, ok := d.sha.(encoding.BinaryUnmarshaler); ok && d.n == old && d.fast.Sum64() == saved.Fast &&
-			u.UnmarshalBinary(saved.SHA) == nil {
-			d.tail = xxhash.New()
-			if err := d.read(src, size, true); err != nil {
-				return hashed{}, err
-			}
-			return d.result(true), nil
-		}
-	}
+
 	d := newDigest(buf)
 	appended := false
 	if old >= 0 {
@@ -114,43 +101,14 @@ func hashContent(src io.ReaderAt, size int64, prev *state.Upload, saved *state.R
 	return d.result(appended), nil
 }
 
-// pieceHash checks the bytes an upload compresses against the xxhash taken when they were
-// hashed, at a fraction of SHA-256's cost. A segment also needs its own SHA-256.
-func (u *upload) pieceHash() hash.Hash {
-	switch {
-	case u.piece.Start > 0:
-		return segmentHash{sha256.New(), xxhash.New()}
-	case u.resume != nil:
-		return xxhash.New()
-	}
-	return sha256.New()
-}
-
-type segmentHash struct {
-	hash.Hash
-	fast *xxhash.Digest
-}
-
-func (h segmentHash) Write(p []byte) (int, error) {
-	_, _ = h.fast.Write(p) // hash writes never fail
-	return h.Hash.Write(p)
-}
-
+// Compression checks the cryptographic digest of the bytes prepared for this piece.
 func (u *upload) setPieceSHA(h hash.Hash) error {
-	switch h := h.(type) {
-	case *xxhash.Digest:
-		if h.Sum64() != u.resume.Fast {
-			return errRewritten
-		}
-		u.piece.SHA256 = u.file.SHA256
-		return nil
-	case segmentHash:
-		if h.fast.Sum64() != u.tail {
-			return errRewritten
-		}
-	}
 	u.piece.SHA256 = hex.EncodeToString(h.Sum(nil))
-	if u.piece.Start == 0 && u.piece.SHA256 != u.file.SHA256 {
+	expected := u.expectedSHA
+	if expected == "" && u.piece.Start == 0 {
+		expected = u.file.SHA256
+	}
+	if expected != "" && u.piece.SHA256 != expected {
 		return errRewritten
 	}
 	return nil

@@ -3,8 +3,9 @@ age 3600 home/.pi/agent/sessions/--w--/2026-10-10T10-00-00-000Z_s1.jsonl
 exec agent-sessions hook pi --path $WORK/home/.pi/agent/sessions/--w--/2026-10-10T10-00-00-000Z_s1.jsonl
 ! stdout .
 ! stderr .
-waitfor bucket/raw/agent=pi/machine=testbox/sessions/--w--/2026-10-10T10-00-00-000Z_s1.jsonl.zst
-waitfor bucket/manifests/agent=pi/machine=testbox/--w--/2026-10-10T10-00-00-000Z_s1.json
+waitfor bucket/v3/machines/testbox/records/file/a4a2af754d75015c1ae28b83f1db04122f945a238589231f9f47165d2a52c105/commits/00000000000000000001-*.json
+waitfor bucket/v3/machines/testbox/records/manifest/b09f15326717aef9952cf34e009e21fb0258a5f2c30e717a4fed7abc8b8dc66c/commits/00000000000000000001-*.json
+# Commit discovery uses SHA256(agent NUL logical key), not mutable file objects.
 # The debounce marker is gone once the sync has started reading.
 ! waitfor state/pending/[0-9a-f]*
 

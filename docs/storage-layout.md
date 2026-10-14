@@ -1,26 +1,55 @@
 # Bucket layout
 
-This is layers 0 and 1 of the session data contract (v2): raw files, and the collector's metadata about them. Everything one machine writes is under its machine id, a UUID that `agent-sessions install` creates and keeps in `~/.config/agent-sessions/machine-id`. Hostnames collide, so the hostname is only a label in manifests.
+The authoritative archive contract is **v3**. The collector never deletes or modifies legacy
+v2 archive objects. A configured machine ID is an explicit identity, not a hostname guess.
 
 ```
-raw/agent=<agent>/machine=<machine>/<key>.zst                       a local file, zstd, bytes unchanged
-raw/agent=<agent>/machine=<machine>/<key>.zst.d/<start>-<end>.zst   bytes appended since, until folded
-blobs/<sha256>.zst                                                  bytes a rewrite replaced, stored once
-raw-versions/agent=<agent>/machine=<machine>/<key>.json             which blobs hold each earlier version
-manifests/agent=<agent>/machine=<machine>/<session>.json            one per session
-snapshots/blobs/<sha256>                                            a harness or memory file, stored once
-snapshots/sets/<set-id>.json                                        which files made up one set
+v3/store.json
+v3/machines/<machine>/checkpoint.json
+v3/machines/<machine>/exclusions/<record-sha256>.json
+v3/machines/<machine>/records/<kind>/<stream-id>/plans/<sequence>-<descriptor-sha256>.json
+v3/machines/<machine>/records/<kind>/<stream-id>/commits/<sequence>-<descriptor-sha256>.json
+v3/blobs/zstd/<encoded-sha256>.zst
+v3/blobs/plain/<sha256>
+v3/snapshots/sets/<set-id>.json
 ```
+
+`kind` is `file`, `manifest`, `launch` or `root`. `stream-id` is SHA-256 of the agent name,
+a NUL byte, and the logical key. Sequences have 20 decimal digits. A descriptor hash is of its
+exact sorted compact JSON bytes; the plan and commit contain **identical bytes**. Nonfile
+dependency sets are sorted by object key and deduplicated before publication. File dependencies
+retain decoded piece order. Generic JSON numbers in launch payloads, file heads and manifest
+info retain their original numeric spelling through decoding (including integers above
+2^53 and scaled decimals), so canonical record bytes and descriptor hashes remain stable.
+
+A file key mirrors its logical agent-relative location (the table below). Session keys include
+custom-root and Pi session-directory namespaces. Launch streams use the durable envelope ID;
+root streams use SHA-256 of agent, NUL, and the absolute root path as their logical key.
+
+A plan is written before any new dependency. A commit is written only after all dependencies
+are confirmed durable. Immutable commits, not SQLite or checkpoint timestamps, are authoritative.
+A stream's unique complete parent chain selects current; conflicting children fail closed.
+
+`store.json` contains schema 3 and a random store ID. SQLite is bound to format, canonical
+nonsecret destination, store ID and machine ID; incompatible reuse requires a separate state
+directory. On the first v3 binding, unbound legacy local upload/session projections are cleared
+and the file projection is recreated with its agent/key/path identity. Roots and run summaries
+remain; legacy remote data is neither migrated nor deleted. `checkpoint.json` is only a warm-cache hint: a random token and `complete` flag.
+The local and remote tokens become dirty before publication; only an entirely successful run
+marks both clean. Lost acknowledgements, crashes and stale restored SQLite require full remote
+reconciliation. Checkpoints never replace immutable records or elect a chain winner.
+
+See [archive-design.md](archive-design.md) for durability boundaries and failure behaviour.
 
 ## Raw files
 
 The collector walks each agent's whole directory and copies every file except:
 
-- **Credentials**, never copied: `.credentials.json` (Claude Code's login, Codex's MCP OAuth tokens), `auth.json`, `oauth.json`, `mcp-auth.json`, any `*.key` or `*.pem`, `.env` and `.env.*` (Codex loads API keys from `$CODEX_HOME/.env`), `~/.claude.json` backups, and the collector's own `config.env` (including its configured path) and state directory. Known backup suffixes are stripped repeatedly before credential checks. These exclusions apply to snapshots and external exports too, checking the logical path, every intermediate symlink identity (including directory aliases), and the resolved target before reading. Missing, cyclic or excessive file symlink chains are not read. Collector config and state locations retain all their own logical and resolved identities, so aliases through them cannot bypass exclusion. `~/.claude.json` itself is uploaded as `claude.json`, with the secrets below redacted and its layout kept.
+- **Credentials**, never copied: `.credentials.json` (Claude Code's login, Codex's MCP OAuth tokens), `auth.json`, `oauth.json`, `mcp-auth.json`, any `*.key` or `*.pem`, `.env` and `.env.*` (Codex loads API keys from `$CODEX_HOME/.env`), `~/.claude.json` backups, and the collector's own `config.env` (including its configured path) and state directory. Known backup suffixes are stripped repeatedly before credential checks. These exclusions apply to snapshots and external exports too, checking both the logical path and resolved symlink target before reading. `~/.claude.json` itself is uploaded as `claude.json`, with the secrets below redacted and its layout kept.
 - **Noise**: locks, temp files, caches, `node_modules`, shell snapshots, executables, Claude Code's own install (`local/`, `downloads/`), plugin source checkouts, and Pi's `bin/` (fd and rg).
 - **Live SQLite files**, which are uploaded as consistent copies instead (below).
 
-**Secrets inside config files** are redacted before upload, by `internal/scrub`. Credential files are left out whole, but some config files hold a secret beside settings worth keeping, so only those values are replaced with `"[redacted]"`. Every other byte of the file, keys included, is kept as it was:
+**Secrets inside config files** are redacted before upload, by `internal/scrub`. Credential files are left out whole, but some config files hold a secret beside settings worth keeping, so only those values are replaced with `"[redacted]"`. Where possible, every other byte of the file, keys included, is kept as it was; fallback reserialization is described below:
 
 | File | Values redacted |
 |---|---|
@@ -32,9 +61,9 @@ The collector walks each agent's whole directory and copies every file except:
 
 In a command line (`args`), what is redacted is the value of a flag whose name says it holds a secret, as the next word or after `=` (`--api-key`, `--token`, `--auth-token`, `--client-secret`, `--password`; whole words, so `--max-tokens` is kept, and a next word starting with `-` isn't a value), the value in a `NAME=value` word with such a name (`GITHUB_TOKEN=…`, Codex's `-c mcp_servers.x.env.API_KEY=…`), the part of a `--header` or `-H` value after the header's name, and, in an argument that is inline JSON, what these rules redact in a settings or MCP file.
 
-A copy of any of these files with a backup suffix (`~`, `.bak`, `.orig`, `.old`, or the `.agent-sessions-backup-<time>` that `agent-sessions install` leaves) is redacted the same way.
+Filename checks fold case and repeatedly strip explicit known backup suffixes: editor (`~`, `.~<number>~`), backup (`.bak`, `.backup`, `.orig`, `.old`), dated (`-<YYYYMMDD>`), installer (`.agent-sessions-backup-<time>`) and compressed/archive (`.gz`, `.bz2`, `.xz`, `.zst`, `.zstd`, `.zip`, `.7z`, `.rar`, `.tar`, `.tgz`). Credential copies are excluded without decoding. Recognised config copies must still parse through the protected scrub path; an unsupported compressed encoding is withheld, never sent as raw bytes. Unrelated names such as `auth.json.example` and `notes.key.txt` are not credential-copy matches. See [security.md](security.md).
 
-A value that only names a secret is kept: `${VAR}`, `$VAR`, `Bearer ${TOKEN}`, a Pi `!command` only in `models.json` provider `apiKey` and `headers`, a number or a boolean, and for Pi's `apiKey` an environment variable name. Only a simple environment variable name is supported inside `${…}`: shell defaults such as `${VAR:-literal-secret}` are not pure references and are redacted. A URL keeps its scheme, host, user and path; its password is dropped and each query value redacted. The same decoded string value anywhere else in the file is redacted too, including equivalent Unicode escapes; object keys are kept. A value written in a form the collector can't find in place (a JSON `\u` escape, a TOML multi-line string) makes it rewrite the whole file from the parsed document, which loses comments and layout. JSON config documents with duplicate object names (including equivalent escaped names), invalid Unicode, empty contents or trailing data are rejected before decoding; TOML duplicate definitions are rejected too. Logical, intermediate and resolved recognised filenames all contribute scrubbing rules. Malformed inline JSON arguments are replaced wholesale. A file that has these rules but doesn't parse isn't uploaded; the run counts it as an error and tries again on the next sync.
+A value that only names a secret is kept: `${VAR}`, `$VAR`, `Bearer ${TOKEN}`, a Pi `!command` only in `models.json` provider `apiKey` and `headers`, a number or a boolean, and for Pi's `apiKey` an environment variable name. Only a simple environment variable name is supported inside `${…}`: shell defaults such as `${VAR:-literal-secret}` are not pure references and are redacted. A URL keeps its scheme, host, user and path; its password is dropped and each query value redacted. The same decoded string value anywhere else in the file is redacted too, including equivalent Unicode escapes; object keys are kept. A value written in a form the collector can't find in place (a JSON `\u` escape, a TOML multi-line string) makes it rewrite the whole file from the parsed document, which loses comments and layout. JSON config documents with duplicate object names (including equivalent escaped names), invalid Unicode, empty contents or trailing data are rejected before decoding; TOML duplicate definitions are rejected too. All recognised filenames encountered along the symlink chain—logical, intermediate and final resolved identities—contribute scrubbing rules. Malformed inline JSON arguments are replaced wholesale. A file that has these rules but doesn't parse isn't uploaded; the run counts it as an error and tries again on the next sync.
 
 Nothing else is redacted: transcripts, history, logs and every other file are copied as they are. Files the collector doesn't recognise are uploaded with role `unknown` and counted in each run's summary.
 
@@ -50,62 +79,91 @@ A second Claude Code or Codex directory (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) or P
 
 **Databases.** Each sweep (at every session start and end, and in `backfill`) takes a SQLite backup-API copy of every database under an agent's directory (Codex's `state_*`, `logs_*`, `memories_*`, `goals_*`, `thread_history_*`, `queue_*`). That includes rows still in the `-wal` file, which a plain file copy would miss. A database that changed is copied again once its last copy is an hour old. The copies live in the state directory between sweeps.
 
-**Appends.** Transcripts and logs only grow. While a file is in use (written to in the last 15 minutes), a sync uploads only the bytes added since the last upload, as a segment `<key>.zst.d/<start>-<end>.zst` holding bytes `[start, end)`; start and end are zero-padded so the segments list in order. Once the file has been quiet for 15 minutes, or is in 64 pieces (its base object and 63 segments), the next sync uploads it whole as `<key>.zst` and deletes the segments. That fold happens once per session and compresses better than many small pieces.
+**Capture and appends.** Captured bytes are hashed cryptographically. Plain and zstd source
+files stream through private staging for large/encoded captures; compression hashes the staged
+bytes, not an earlier mutable-source scan. Appends inherit immutable pieces and upload only the
+new tail. A fold captures one consolidated piece after 15 minutes idle or at 64 pieces. The
+previous pieces and commits remain. A rewrite creates new pieces without copying or overwriting
+the old ones. Every captured database generation is retained; capture frequency may be throttled,
+not acknowledged history. The collector performs no remote garbage collection.
 
-A file is its base object followed by its segments. The manifest lists them as `pieces`, each with `start`, `end`, `sha256` and `object`. Without a manifest, `<key>.zst` plus each segment that starts where the bytes so far end gives the same result; segments a fold failed to delete start earlier and are skipped. A segment that reached the bucket without its upload being recorded (the answer was lost, or the sync was killed) is deleted at the start of the next sync, before that file uploads again, so it can't stand in for the bytes after its start; if it can't be deleted, the file is uploaded whole instead.
+A file generation records schema, identity (`agent`, `machine_id`, `key`, `session_key`, `root`),
+sequence, parent descriptor hash, kind (`capture`, `fold`, `delete`), source aliases, role, decoded
+size/SHA-256, line count, prefix hash, head, pieces and observation/deletion times. Each piece
+records `[start,end)`, decoded SHA-256, encoded SHA-256, encoded size and its immutable object key.
+Authoritative keys, roots, launch paths, source aliases, exclusion identities and snapshot filesystem labels must be valid UTF-8. Unsupported Unix byte names are reported before a plan is uploaded, not silently renamed by JSON encoding.
+The prefix covers at most the first 20 lines and 1 MiB. A real empty file has a committed empty
+piece; a deferred first partial plaintext transcript line does not create an empty capture.
+Complete zstd frames are closed artifacts: all decoded bytes, including a final fragment
+without a newline, are captured rather than held back as a live plaintext write.
 
-**Versions.** When a file changes in any way other than an append (its first `old size` bytes no longer hash to what was uploaded), each piece of its old contents is copied to `blobs/<sha256>.zst` before the new bytes are uploaded. A blob that is already there isn't copied again, so identical old contents from different files, sessions or machines are stored once. `raw-versions/…/<key>.json` lists the file's earlier versions, and the manifest lists them under `versions`; each has `sha256`, `size`, `versioned_at` and the `pieces` (in `blobs/`) that rebuild it. Database copies keep at most one version a day: an hourly refresh within a day of the last kept version replaces the copy without keeping it.
+**Aliases.** Candidates are grouped by agent and logical file key before preparation. Equal
+decoded bytes are aliases; a cryptographically proven prefix may choose the longer candidate.
+Divergent candidates report a conflict without selecting an arbitrary source or response order.
 
-Every object is zstd (klauspost/compress's `SpeedBetterCompression`, about zstd level 7) with these metadata fields: `sha256` (of the uncompressed bytes the object holds), `start`, `end`, `agent`, `machine` and `role`.
+**Deletions.** Only complete discovery can publish a delete generation. All aliases must be
+absent; generated exports use their original source paths. The generation retains its content
+pieces and observation time. Incomplete discovery never implies deletion.
 
-**Deletions.** When a sweep finds that an uploaded file is gone from disk, the file gets a `deleted_locally` date in its session's manifest. The object stays in the bucket.
+**Integrity and bounds.** Dependency existence, encoded lengths and checksum identities are
+validated before reconstruction/publication. Cold recovery downloads metadata, not transcript
+bodies. Streamed restore separately verifies encoded, decoded-piece and whole-file checksums.
+A metadata record is limited to 16 MiB; recognised config parsing is similarly bounded.
+LIST pages contain at most 1000 objects; historical descriptors are replayed one at a time
+from SQLite cursors, not retained as an all-history array of JSON bodies. Recovery disk,
+requests and CPU grow with historical metadata. Stream-ID lists, per-session launch/snapshot
+projections and manifest version references also grow with their cardinalities: the record
+limit is not a fixed total-machine memory guarantee. Manifests exceeding the record limit
+fail explicitly without deleting their underlying history. Staging,
+state and export files are private (0600, directories 0700). Unknown acknowledgements are
+reconciled by exact record read-back or streamed dependency verification, never destructive cleanup.
 
-**Large files.** Files over 64 MB are hashed and compressed in a stream and uploaded from a temp file (multipart on R2).
+## Manifests and launches
 
-## Manifests
+Every publication has schema, machine ID, kind, agent, logical key, sequence, parent, exactly
+one typed payload (`file`, `manifest`, `launch` or `root`) and explicit dependencies. Dependencies
+include immutable object key, encoded/body SHA-256, length and encoding; compressed dependencies
+also name decoded SHA-256 and length. References must match their typed committed payloads.
 
-There's one manifest per session: a Claude Code session (`<slug>/<session id>`), a Codex rollout, or a Pi session file. It's rewritten whenever one of the session's files changes.
+A manifest payload has schema 3, agent, machine ID, hostname, namespaced session key, info,
+transcripts, launch/launches, git, snapshots, local deletions, first-seen/sync times and collector
+version. Each transcript contains its file key/role, size/SHA-256, line count/prefix/head, current
+commit key, immutable pieces, deduplicated previous captured-content versions and history prefix.
+The manifest is a valid captured view, not an atomic snapshot of a live filesystem. A failed file
+capture may retain its previous committed entry beside unrelated successful captures.
 
-```json
-{
-  "schema": 2,
-  "agent": "claude",
-  "machine_id": "48b3b69a-a5a9-4d31-9a9c-25564d5ae786",
-  "hostname": "laptop",
-  "session_key": "-home-me-code-proj/11111111-…",
-  "info": {"session_id": "…", "cwd": "/home/me/code/proj", "git_branch": "main", "agent_version": "2.1.296",
-           "entrypoint": "cli", "source_root": "/home/me/.claude"},
-  "transcripts": [{"key": "projects/…/11111111-….jsonl", "role": "main", "size": 48213, "sha256": "…",
-                   "line_count": 212, "prefix_sha256": "…", "head": {"session_id": "…", "cwd": "…"},
-                   "object": "raw/agent=claude/machine=…/projects/…/11111111-….jsonl.zst",
-                   "pieces": [{"start": 0, "end": 40110, "sha256": "…", "object": "raw/…/11111111-….jsonl.zst"},
-                              {"start": 40110, "end": 48213, "sha256": "…",
-                               "object": "raw/…/11111111-….jsonl.zst.d/000000000040110-000000000048213.zst"}],
-                   "versions": []}],
-  "launch": {"event": "SessionStart", "source": "startup", "cwd": "/home/me/code/proj", "permission_mode": "default",
-             "process": {"argv": ["claude", "--model", "opus"], "pid": 4242, "ancestry": ["sh", "claude"]},
-             "env": {"CLAUDE_CODE_ENTRYPOINT": "cli"}, "hook_input": {"…": "…"}, "recorded_at": 1791634550.2,
-             "git": {"…": "…"}, "snapshot": "<set-id>"},
-  "launches": ["…every SessionStart, including resumes…"],
-  "git": {"root": "/home/me/code/proj", "common_dir": "/home/me/code/proj/.git", "remote": "https://github.com/me/proj.git",
-          "branch": "main", "head": "…", "dirty": false, "repo_id": "401e2f7a41fe430b"},
-  "snapshots": [{"id": "<set-id>", "memory_id": "<set-id>", "timing": "pre_session", "taken_at": 1791634550.4,
-                 "git": {"…": "…"}, "mtimes": {"harness:user:CLAUDE.md": 1791000000.0}}],
-  "deleted_locally": [{"key": "…", "at": 1791700000.0}],
-  "first_seen": 1791634550.4,
-  "synced_at": 1791634560.1,
-  "collector_version": "0.3.0"
-}
-```
+A launch payload contains a typed durable envelope (`schema`, `id`, `agent`, `path`, `recorded_at`,
+`payload`), namespaced session key, source root, git state and snapshot entry. The envelope ID is
+assigned before queue persistence and survives retries. The queue is removed only after remote
+launch durability is confirmed, or when a persistent exclusion intentionally suppresses capture.
+Malformed/unreadable queued launches are retained and reported, not silently discarded.
 
-- **`transcripts`** lists every file of the session, with the `pieces` that make up its current bytes and its earlier `versions`. `role` is `main`, `subagent`, `tool_result`, `superseded` (an earlier transcript Claude Code set aside), `file_history`, `todo`, `task`, `session_env`, `debug` or `aux`. `line_count` and `prefix_sha256` (the hash of the first 20 lines) let the normaliser pin an input and spot a rewritten file. `head` is what the file's first lines say about it, each field taking the first non-empty value in those lines, so a Claude subagent file carries its own `agent_id`.
-- **`launch`** is recorded by the session-start hook:
-  - `process.argv` is the agent's command line, found by walking up from the hook to the agent's process. Pi hides its arguments from the process table, so its extension passes `process.argv` (`via: "extension"`). Secrets in it are redacted as in MCP server `args` ([Raw files](#raw-files)).
-  - `env` keeps `CLAUDE_CODE_*`, `CODEX_*`, `PI_*`, `ANTHROPIC_MODEL`, `MAX_THINKING_TOKENS` and a few other variables, minus any whose name has the word `TOKEN`, `KEY` or `AUTH`, or `SECRET`, `PASSWORD`, `CREDENTIAL` or `COOKIE` anywhere (`MAX_THINKING_TOKENS` is kept).
-  - `hook_input` is the hook's whole payload.
-  - Sessions from before agent-sessions was installed have no launch.
-- **`git`** is the repo state when the session started, or at its first snapshot if there was no launch. `common_dir` points worktrees at their main repo. A token in the remote URL is dropped. `repo_id` is a hash of the normalised remote URL (`github.com/owner/repo`), so clones on different machines share it; a repo with no remote is keyed by machine and git directory instead. The repository's history isn't exported: for a repo with a remote, fetch it from there when analysing.
-- **`snapshots`** get a new entry when the harness set, the memory set, the branch or HEAD changes, checked at most every 10 minutes. `timing` says how far to trust it: `pre_session` (taken at session start), `in_session` (taken while the session was running) or `post_hoc` (a sweep or backfill of a session that had already finished, so the harness may have changed since).
+Launch snapshots use `timing: "captured"` with the actual capture time, **not** an unconditional
+`pre_session` claim. Later captures use `in_session` or `post_hoc`. Snapshot entries include set ID,
+optional memory set ID, git, taken-at and mtimes. `checked_at` is a disposable local recheck hint
+and is zero/omitted in immutable manifest views.
+
+`git` records root/common directory, redacted remote, branch, HEAD, dirty flag and repository ID;
+a repo without a remote is keyed by machine/git directory. Repository history is not exported.
+Launch process/env/hook payload sanitisation is described in [hooks.md](hooks.md); transcript
+contents are not general-purpose secret-scanned.
+
+Session `info` uses the current main-file head where present. Otherwise launch cwd/root
+metadata comes from canonical event order (`recorded_at`, then envelope ID), never catalog
+replay order; the latest event carrying a cwd supplies that fallback. Main-file observations
+also override an older manifest replay. Launch snapshot transitions instead use actual
+`taken_at` order with stable ID ties, before adjacent deduplication; these two orders are
+intentionally independent.
+
+## Persistent exclusions
+
+Exclusions are immutable typed records under the machine, content-addressed by exact JSON body.
+They contain schema, stable exclusion ID, agent, logical/resolved root, namespaced session key,
+source aliases and recorded-at. Recovery restores their monotonic union before launches,
+discovery, exports, snapshots or pending-plan completion. Excluded pending plans are never
+promoted; existing archived history is retained. Shared root-wide files and shared snapshot
+scopes are conservatively withheld for opted-out roots. There is no automatic reactivation or
+remote deletion. See [hooks.md](hooks.md) for local opt-out persistence.
 
 ## Snapshot sets
 
@@ -136,6 +194,6 @@ File bodies are stored as they are on disk, except for the secret values in conf
 - **`script`**: hook, status-line and `notify` scripts named in any settings file in the set.
 - **`import`**: files a CLAUDE.md or AGENTS.md pulls in with `@path`, followed five levels deep.
 
-Symlinks are followed, and `target` records where a file really lives. Security checks retain every intermediate path, not only the final target; symlink chains are bounded at 255 links. This protects known filenames and collector locations, not arbitrary transcript secrets, and does not guarantee protection against hostile concurrent filesystem replacement. Files over 5 MB, or past 3000 in one scope, are listed in `skipped` with the reason. Each file's mtime goes in the manifest's snapshot entry, not the set, so it doesn't change the set id.
+Symlinks are followed, and `target` records where a file really lives. Files over 5 MB, or past 3000 in one scope, are listed in `skipped` with the reason. Each file's mtime goes in the manifest's snapshot entry, not the set, so it doesn't change the set id.
 
 A second set of `kind: "memory"` holds memory the agent writes for itself: Claude Code's auto memory for the project (scope `auto`) and `agent-memory/` (scopes `user` and `project`), and Codex's `memories/`.

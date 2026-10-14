@@ -21,12 +21,27 @@ import (
 	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/gitinfo"
 	"github.com/mich-murphy/memory/internal/jsonx"
+	"github.com/mich-murphy/memory/internal/launch"
 	"github.com/mich-murphy/memory/internal/raw"
 )
 
 const schema = `
+CREATE TABLE IF NOT EXISTS binding (
+ singleton INTEGER PRIMARY KEY CHECK(singleton=1), schema INTEGER NOT NULL,
+ destination TEXT NOT NULL, store_id TEXT NOT NULL, machine_id TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS observations(path TEXT NOT NULL,key TEXT NOT NULL,disk_size INTEGER NOT NULL,mtime_ns INTEGER NOT NULL,sha256 TEXT NOT NULL,PRIMARY KEY(path,key));
+CREATE TABLE IF NOT EXISTS archive_scan(key TEXT PRIMARY KEY,token TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS archive_checkpoint(singleton INTEGER PRIMARY KEY CHECK(singleton=1),token TEXT NOT NULL,clean INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS archive_applied (key TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS archive_records (
+ key TEXT PRIMARY KEY, kind TEXT NOT NULL, stream TEXT NOT NULL, id TEXT NOT NULL,
+ parent TEXT NOT NULL, sequence INTEGER NOT NULL, committed INTEGER NOT NULL, body BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS archive_stream ON archive_records(kind,stream,sequence);
+
 CREATE TABLE IF NOT EXISTS files (
-    path TEXT PRIMARY KEY,
+    path TEXT NOT NULL,
     agent TEXT NOT NULL,
     root TEXT NOT NULL,
     key TEXT NOT NULL,
@@ -39,7 +54,8 @@ CREATE TABLE IF NOT EXISTS files (
     prefix_sha256 TEXT,
     head TEXT,
     deleted_at REAL,
-    disk_size INTEGER
+    disk_size INTEGER,
+ PRIMARY KEY(agent,key,path)
 );
 CREATE INDEX IF NOT EXISTS files_session ON files(agent, session_key);
 CREATE INDEX IF NOT EXISTS files_key ON files(key);
@@ -165,6 +181,11 @@ func Open(ctx context.Context, dir string) (*State, error) {
 		_ = db.Close() // already failing; this only frees the handle
 		return nil, fmt.Errorf("state schema: %w", err)
 	}
+	if _, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO observations SELECT path,key,COALESCE(disk_size,size),mtime_ns,sha256 FROM files"); err != nil {
+		_ = conn.Close()
+		_ = db.Close()
+		return nil, fmt.Errorf("state observations: %w", err)
+	} // failed open cleanup
 	return &State{db: db, conn: conn, ctx: ctx, stmts: map[string]*sql.Stmt{}}, nil
 }
 
@@ -189,7 +210,7 @@ func addDiskSize(ctx context.Context, conn *sql.Conn) error {
 }
 
 func (s *State) Close() error {
-	errs := []error{s.Flush()}
+	errs := []error{s.Rollback()}
 	for _, st := range s.stmts {
 		errs = append(errs, st.Close())
 	}
@@ -211,14 +232,8 @@ func (s *State) Flush() error {
 	return nil
 }
 
-// prepare leaves query's statement in s.stmts and opens a transaction if none is open.
+// prepare caches a statement without beginning a write transaction.
 func (s *State) prepare(query string) error {
-	if !s.inTx {
-		if _, err := s.conn.ExecContext(s.ctx, "BEGIN"); err != nil {
-			return fmt.Errorf("state: %w", err)
-		}
-		s.inTx = true
-	}
 	if _, ok := s.stmts[query]; ok {
 		return nil
 	}
@@ -231,6 +246,13 @@ func (s *State) prepare(query string) error {
 }
 
 func (s *State) exec(query string, args ...any) error {
+	if !s.inTx {
+		if _, err := s.conn.ExecContext(s.ctx, "BEGIN"); err != nil {
+			return fmt.Errorf("state: %w", err)
+		}
+		s.inTx = true
+	}
+
 	if err := s.prepare(query); err != nil {
 		return err
 	}
@@ -298,8 +320,7 @@ type File struct {
 // FileUnchanged says whether path was last recorded with this disk size and mtime, and how many
 // pieces key's object has, in one query since a sweep asks both of every file.
 func (s *State) FileUnchanged(path, key string, diskSize, mtimeNS int64) (unchanged bool, pieces int, err error) {
-	_, err = s.queryRow("SELECT disk_size IS ? AND mtime_ns = ? AND deleted_at IS NULL, (SELECT COUNT(*) FROM pieces WHERE key = ?) "+
-		"FROM files WHERE path = ?", []any{diskSize, mtimeNS, key, path}, &unchanged, &pieces)
+	_, err = s.queryRow("SELECT disk_size=? AND mtime_ns=? AND sha256=COALESCE((SELECT sha256 FROM uploads WHERE key=?),sha256),(SELECT COUNT(*) FROM pieces WHERE key=?) FROM observations WHERE path=? AND key=?", []any{diskSize, mtimeNS, key, key, path, key}, &unchanged, &pieces)
 	return unchanged, pieces, err
 }
 
@@ -313,10 +334,14 @@ func (s *State) RecordFile(f *File) error {
 		}
 		head = string(b)
 	}
-	return s.exec("INSERT OR REPLACE INTO files VALUES "+
-		"(?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, (SELECT head FROM files WHERE path = ?)),NULL,?)",
+	err := s.exec("INSERT OR REPLACE INTO files VALUES "+
+		"(?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, (SELECT head FROM files WHERE agent=? AND key=? AND path=?)),NULL,?)",
 		f.Path, f.Agent, f.Root, f.Key, nullString(f.SessionKey), f.Role, f.Size, f.MtimeNS, f.SHA256,
-		f.LineCount, nullString(f.PrefixSHA256), head, f.Path, f.DiskSize)
+		f.LineCount, nullString(f.PrefixSHA256), head, f.Agent, f.Key, f.Path, f.DiskSize)
+	if err != nil {
+		return err
+	}
+	return s.recordObservation(f.Key, f)
 }
 
 func nullString(s string) any {
@@ -330,11 +355,11 @@ func nullString(s string) any {
 // .jsonl.zst); the one still on disk wins.
 func (s *State) SessionFiles(ref adapters.SessionRef) ([]File, error) {
 	files, err := queryAll(s, "SELECT key, role, size, sha256, line_count, COALESCE(prefix_sha256, ''), "+
-		"COALESCE(head, ''), COALESCE(deleted_at, 0), mtime_ns FROM files "+
+		"COALESCE(head, ''), COALESCE(deleted_at, 0), mtime_ns, root FROM files "+
 		"WHERE agent = ? AND session_key = ? ORDER BY key, deleted_at IS NOT NULL", []any{ref.Agent, ref.Key},
 		func(rows *sql.Rows, f *File) error {
 			var head string
-			err := rows.Scan(&f.Key, &f.Role, &f.Size, &f.SHA256, &f.LineCount, &f.PrefixSHA256, &head, &f.DeletedAt, &f.MtimeNS)
+			err := rows.Scan(&f.Key, &f.Role, &f.Size, &f.SHA256, &f.LineCount, &f.PrefixSHA256, &head, &f.DeletedAt, &f.MtimeNS, &f.Root)
 			f.Head, _ = jsonx.Map([]byte(head))
 			return err
 		})
@@ -368,12 +393,6 @@ func (s *State) Uploaded(key string) (*Upload, error) {
 	return &u, nil
 }
 
-func (s *State) UploadedSHA(key string) (string, error) {
-	var sha string
-	_, err := s.queryRow("SELECT sha256 FROM uploads WHERE key = ?", []any{key}, &sha)
-	return sha, err
-}
-
 func (s *State) RecordUpload(key, sha string, size int64) error {
 	return s.exec("INSERT OR REPLACE INTO uploads VALUES (?,?,?,?)", key, sha, size, UnixNow())
 }
@@ -385,21 +404,6 @@ type Resume struct {
 	Size int64
 	Fast uint64
 	SHA  []byte
-}
-
-func (s *State) Resume(key string) (*Resume, error) {
-	var r Resume
-	var fast int64
-	found, err := s.queryRow("SELECT size, fast, sha_state FROM resumes WHERE key = ?", []any{key}, &r.Size, &fast, &r.SHA)
-	if !found || err != nil {
-		return nil, err
-	}
-	r.Fast = uint64(fast)
-	return &r, nil
-}
-
-func (s *State) SetResume(key string, r *Resume) error {
-	return s.exec("INSERT OR REPLACE INTO resumes VALUES (?,?,?,?)", key, r.Size, int64(r.Fast), r.SHA)
 }
 
 func (s *State) Pieces(key string) ([]raw.Piece, error) {
@@ -421,35 +425,6 @@ func (s *State) SetPieces(key string, pieces []raw.Piece) error {
 
 func (s *State) AddPiece(key string, p raw.Piece) error {
 	return s.exec("INSERT OR REPLACE INTO pieces VALUES (?,?,?,?,?)", key, p.Start, p.End, p.SHA256, p.Object)
-}
-
-type Stray struct {
-	Key, Object string
-}
-
-func (s *State) Strays() ([]Stray, error) {
-	return queryAll(s, "SELECT key, object FROM strays ORDER BY key, object", nil,
-		func(rows *sql.Rows, x *Stray) error { return rows.Scan(&x.Key, &x.Object) })
-}
-
-func (s *State) AddStray(x Stray) error {
-	return s.exec("INSERT OR IGNORE INTO strays VALUES (?,?)", x.Key, x.Object)
-}
-
-func (s *State) RemoveStray(x Stray) error {
-	return s.exec("DELETE FROM strays WHERE key = ? AND object = ?", x.Key, x.Object)
-}
-
-func (s *State) SetStrays(key string, objects []string) error {
-	if err := s.exec("DELETE FROM strays WHERE key = ?", key); err != nil {
-		return err
-	}
-	for _, o := range objects {
-		if err := s.AddStray(Stray{key, o}); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 type Version struct {
@@ -481,17 +456,19 @@ func (s *State) Versions(key string) ([]Version, error) {
 		})
 }
 
-func (s *State) LastVersionAt(key string) (float64, error) {
-	var at float64
-	_, err := s.queryRow("SELECT COALESCE(MAX(versioned_at), 0) FROM raw_versions WHERE key = ?", []any{key}, &at)
-	return at, err
-}
-
 type Session struct {
 	Info      map[string]any
 	Snapshots []SnapshotEntry
-	Launches  []map[string]any
+	Launches  []Launch
 	FirstSeen float64
+}
+
+type Launch struct {
+	Envelope   launch.Envelope `json:"envelope"`
+	SessionKey string          `json:"session_key"`
+	Root       string          `json:"root"`
+	Git        gitinfo.State   `json:"git"`
+	Snapshot   SnapshotEntry   `json:"snapshot"`
 }
 
 type SnapshotEntry struct {
@@ -611,4 +588,8 @@ func (s *State) LastRuns(limit int) ([]Run, error) {
 			r.Summary, _ = jsonx.Map([]byte(summary))
 			return err
 		})
+}
+
+func (s *State) recordObservation(key string, file *File) error {
+	return s.exec("INSERT OR REPLACE INTO observations VALUES(?,?,?,?,?)", file.Path, key, file.DiskSize, file.MtimeNS, file.SHA256)
 }

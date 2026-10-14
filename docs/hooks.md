@@ -6,7 +6,7 @@ Checked on 2026-10-10 against:
 - **Codex** source at [openai/codex@806d973](https://github.com/openai/codex/tree/806d9732c974bc8a51b8317c1bd8985544fe627c), and the released CLI 0.162.1.
 - **Pi** source and docs at [earendil-works/pi@42a3497](https://github.com/earendil-works/pi/tree/42a3497d03ad17e308a2299fa824727894f2c0ec) (formerly badlogic/pi-mono; `packages/coding-agent`), and the released `@earendil-works/pi-coding-agent` 1.1.0.
 
-All three were also run for real (Claude Code 2.1.296, Codex 0.162.1, Pi 1.1.0) against a local fake model server, with agent-sessions installed into a scratch home, most recently on 2026-10-11. Each one's session-start hook recorded the agent's command line and queued a harness snapshot, and its turn hooks landed the session in the store byte for byte.
+All three were also run for real (Claude Code 2.1.296, Codex 0.162.1, Pi 1.1.0) against a local fake model server, with agent-sessions installed into a scratch home, most recently on 2026-10-11. Each one's session-start hook recorded the agent's command line and a pre-session snapshot, and its turn hooks landed the session in the store byte for byte.
 
 ## One rule for every agent
 
@@ -27,7 +27,7 @@ Why each part matters:
 
 ## The sweep at session start and end
 
-Nothing runs on a schedule. When any agent's session starts (`SessionStart`, `session_start`) or ends (`SessionEnd`, `session_shutdown`), the hook also starts a sweep: `agent-sessions sync --trigger sweep:<event>` over every agent's directories, 3 s later so a session-start sync gets the lock first. Together with `agent-sessions backfill` once at install, it provides coverage beyond individual hook paths; failures and limits can still make a run partial. It picks up:
+Nothing runs on a schedule. When any agent's session starts (`SessionStart`, `session_start`) or ends (`SessionEnd`, `session_shutdown`), the hook also starts a sweep: `agent-sessions sync --trigger sweep:<event>` over every agent's directories, 3 s later so a session-start sync gets the lock first. It is what makes capture complete, together with `agent-sessions backfill` once at install. It picks up:
 
 - the end of a session that crashed, was killed or was interrupted after its last hook;
 - uploads and manifests that failed, for example while the machine was offline;
@@ -45,23 +45,7 @@ One marker in the state directory's `pending/` means only one sweep is queued at
 - keeps allowlisted environment variables (`CLAUDE_CODE_*`, `CODEX_*`, `PI_*`, `ANTHROPIC_MODEL`, `MAX_THINKING_TOKENS`...), dropping any with a word in its name that marks a secret (`TOKEN`, `KEY`, `AUTH`, or `SECRET`, `PASSWORD`, `CREDENTIAL`, `COOKIE` anywhere). Whole words only, so limits such as `MAX_THINKING_TOKENS` are kept.
 - saves the hook's whole payload (`source`, `cwd`, `permission_mode`, `model`...).
 
-It writes a typed launch envelope with a stable ID and starts a detached sync with no delay and no debounce. `recorded_at` is when the hook recorded the event; a snapshot's `taken_at` is its actual collection time, not the hook timestamp. An asynchronous session-start event does not establish that the snapshot preceded the first prompt, so it must not by itself justify `pre_session` provenance. A resumed session gets another launch entry.
-
-Every enabled sync processes queued launches in chronological order, preserving filename order for equal timestamps. A failed read, malformed envelope or publication failure leaves the original queue entry for retry and counts an error. The queue is removed only after durable archive acknowledgement, except that an explicitly opted-out session's launch may be discarded.
-
-## Partial capture and snapshot limits
-
-Absent optional roots are normal. Unreadable roots or related session directories, failed exports, malformed SQLite and malformed snapshot configuration are explicit issues; useful partial results remain available. A partial traversal cannot establish that earlier files were deleted. Claude turn syncs walk only the named session's related directories and the ephemeral tasks/teams sources, not the entire agent root. Root symlinks are followed for traversal while logical paths and namespaces are retained.
-
-Snapshot sets expose `complete` and `skipped`, including read/stat/resolve/walk failures and resource limits. Harness and memory sets share a 64 MiB retained-body budget, in addition to 5 MiB per file and 3000 files per scope. Traversal shares a budget of 5000 directories and 12000 entries; diagnostics retain at most 3000 entries plus an aggregate omitted count. FIFOs and devices are not read. Credential, collector-config and collector-state boundaries are checked across intermediate symlink identities before reading; recognised config schemas are scrubbed across those identities. Partial snapshots are evidence of what was captured, not proof of a complete harness.
-
-## Persistent session opt-out
-
-With `AGENT_SESSIONS_DISABLE` set, the hook still reads the payload or explicit paths and writes private exclusion records under `exclusions/` in the state directory before returning 0. It does not read collector credentials or start capture/sweeps. Pi must invoke the hook even when disabled so that the opt-out can be persisted. Recording errors are quietly best-effort logged; without a supplied session identity/path, future exclusion cannot be guaranteed.
-
-An enabled hook never clears an earlier opt-out. Exclusion matches logical/canonical root aliases and related session files. The conservative known-shared-source policy also withholds all agent-wide files in the root, its user harness and generated memory snapshots, including when another allowed session is captured. This covers shared history/log/database/memory sources, not arbitrary future copies of their content elsewhere; it is not universal DLP.
-
-Existing remote bytes are never deleted on opt-out. Records are separate from the disposable SQLite upload cache; archive recovery restores the monotonic remote exclusion union before launch processing or discovery. Changing the local state directory therefore must not re-enable a session. Opt-outs persist indefinitely until a deliberate operator-level archive-identity reset or a future explicit revocation design; removing only a local exclusion file cannot clear the remote union. There is no automatic expiry or simple local-delete re-enable command.
+It writes that to a file and starts a detached sync with no delay and no debounce. The sync snapshots the harness and the repo's git state before the first prompt (`timing: pre_session`) and stores the launch in the session's manifest. A resumed session gets another launch entry.
 
 ## Claude Code
 

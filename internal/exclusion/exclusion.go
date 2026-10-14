@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/fsutil"
@@ -119,6 +120,11 @@ func RecordPath(stateDir string, a adapters.Adapter, path string) (Record, error
 }
 
 func (r Record) validate() error {
+	for _, identity := range append([]string{r.Root, r.ResolvedRoot, r.SessionKey}, r.Paths...) {
+		if !utf8.ValidString(identity) {
+			return errors.New("exclusion: unsupported non-UTF-8 identity or path")
+		}
+	}
 	if r.Schema != schema || !slices.Contains(adapters.Names, r.Agent) || (!filepath.IsAbs(r.Root) || !filepath.IsAbs(r.ResolvedRoot)) || r.SessionKey == "" || len(r.Paths) == 0 || r.ID != recordID(r.Agent, r.ResolvedRoot, r.SessionKey) {
 		return errors.New("exclusion: invalid record")
 	}

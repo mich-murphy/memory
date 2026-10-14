@@ -107,7 +107,7 @@ func runSync(ctx context.Context, cmd string, args []string, version string, o I
 		}
 		return exitUsage, nil
 	}
-	unlock, err := state.Lock(ctx, cfg.StateDir, flags.lockTimeout())
+	unlock, err := lockSync(ctx, cfg, flags.lockTimeout())
 	if errors.Is(err, state.ErrLocked) {
 		log.Warn("another run holds the lock; a later hook will catch up")
 		if flags.quiet {
@@ -157,13 +157,16 @@ func syncLocked(ctx context.Context, cfg *config.Config, bucket store.Store, fla
 			log.Error("closing state", "error", cerr)
 		}
 	}()
+	sy := syncer.New(cfg, bucket, db, adapters.All(cfg.Home), syncer.Options{
+		Trigger: flags.trigger, Logger: log, Version: version,
+	})
+	if err := sy.Recover(ctx); err != nil {
+		return &sy.Summary, err
+	}
 	excluded, err := exclusion.Load(cfg.StateDir)
 	if err != nil {
-		return nil, err
+		return &sy.Summary, err
 	}
-	sy := syncer.New(cfg, bucket, db, adapters.All(cfg.Home), syncer.Options{
-		Trigger: flags.trigger, Logger: log, Version: version, Exclusions: excluded,
-	})
 	recordLaunches(ctx, sy, cfg.StateDir, excluded, adapters.All(cfg.Home), log)
 	files, err := filesToSync(ctx, sy, flags)
 	if err != nil {
@@ -210,7 +213,7 @@ func recordLaunches(ctx context.Context, sy *syncer.Syncer, stateDir string, exc
 			removeLaunch(l.file, log)
 			continue
 		}
-		if err := sy.RecordLaunch(ctx, e.Agent, e.Path, e.Map()); err != nil {
+		if err := sy.RecordEnvelope(ctx, e); err != nil {
 			sy.Summary.Errors++
 			sy.Summary.ErrorMessages = append(sy.Summary.ErrorMessages, fmt.Sprintf("launch %s: %v", e.Agent, err))
 			log.Error("recording launch", "agent", e.Agent, "error", err)
@@ -245,7 +248,7 @@ func filesToSync(ctx context.Context, sy *syncer.Syncer, flags *syncFlags) ([]ad
 	}
 	var files []adapters.SessionFile
 	for _, agent := range agents {
-		found, err := sy.HookFiles(agent, flags.paths)
+		found, err := sy.HookFilesContext(ctx, agent, flags.paths)
 		if err != nil {
 			return nil, err
 		}
@@ -325,4 +328,12 @@ func runUninstall(args []string, o IO) (int, error) {
 		return exitFailed, nil
 	}
 	return exitOK, nil
+}
+
+func lockSync(ctx context.Context, cfg *config.Config, timeout time.Duration) (func(), error) {
+	dir, err := syncer.LockDir(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return state.Lock(ctx, dir, timeout)
 }

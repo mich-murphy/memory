@@ -106,18 +106,11 @@ func SHA256(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// SegmentKey zero-pads the offsets so the segments list in order.
-func SegmentKey(rawKey string, start, end int64) string {
-	return fmt.Sprintf("%s.d/%015d-%015d.zst", rawKey, start, end)
-}
-
-func BlobKey(sha string) string {
-	return "blobs/" + sha + ".zst"
-}
-
 type Piece struct {
-	Start  int64  `json:"start"`
-	End    int64  `json:"end"`
-	SHA256 string `json:"sha256"`
-	Object string `json:"object"`
+	EncodedSHA256 string `json:"encoded_sha256,omitempty"`
+	EncodedSize   int64  `json:"encoded_size,omitempty"`
+	Start         int64  `json:"start"`
+	End           int64  `json:"end"`
+	SHA256        string `json:"sha256"`
+	Object        string `json:"object"`
 }

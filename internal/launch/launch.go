@@ -8,6 +8,7 @@ import (
 	"errors"
 	"maps"
 	"math"
+	"unicode/utf8"
 
 	"github.com/mich-murphy/memory/internal/jsonx"
 )
@@ -24,6 +25,9 @@ type Envelope struct {
 }
 
 func (e Envelope) Validate() error {
+	if !utf8.ValidString(e.ID) || !utf8.ValidString(e.Path) {
+		return errors.New("launch: unsupported non-UTF-8 identity or path")
+	}
 	if e.Schema != Schema || e.ID == "" || e.Path == "" || e.Payload == nil || math.IsNaN(e.RecordedAt) || math.IsInf(e.RecordedAt, 0) || e.RecordedAt < 0 {
 		return errors.New("launch: invalid envelope")
 	}

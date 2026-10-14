@@ -242,6 +242,9 @@ func recordSessionStart(ctx context.Context, stateDir, agent, path string, data 
 		Schema: launch.Schema, ID: rand.Text(), Agent: agent, Path: path,
 		RecordedAt: float64(time.Now().UnixNano()) / 1e9, Payload: payload,
 	}
+	if err := envelope.Validate(); err != nil {
+		return err
+	}
 	body, err := jsonx.Compact(envelope)
 	if err != nil {
 		return err

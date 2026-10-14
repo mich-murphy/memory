@@ -1,8 +1,4 @@
-// Package syncer uploads new or changed files, then refreshes each touched session's manifest,
-// in the layout docs/storage-layout.md describes.
-//
-// Files are read and hashed in order on the calling goroutine and uploaded on a small pool.
-// Local state is only written from the calling goroutine.
+// Package syncer publishes immutable, remotely recoverable capture records.
 package syncer
 
 import (
@@ -17,17 +13,16 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/mich-murphy/memory/internal/adapters"
+	"github.com/mich-murphy/memory/internal/capturepolicy"
 	"github.com/mich-murphy/memory/internal/config"
 	"github.com/mich-murphy/memory/internal/exclusion"
 	"github.com/mich-murphy/memory/internal/fsutil"
+	"github.com/mich-murphy/memory/internal/raw"
 	"github.com/mich-murphy/memory/internal/state"
 	"github.com/mich-murphy/memory/internal/store"
 )
 
-// Variables so tests can shrink them.
 var (
 	snapshotRecheck       = 600 * time.Second
 	largeFileSize   int64 = 64 << 20
@@ -39,7 +34,6 @@ const (
 	partialLineWindow = 60 * time.Second
 	foldAfter         = inSessionWindow
 	maxSegments       = 64
-	dbVersionEvery    = 24 * time.Hour
 	recopyAfter       = time.Hour
 	uploadWorkers     = 8
 	maxHeldSize       = 128 << 20
@@ -47,9 +41,7 @@ const (
 	maxErrorMsgs      = 10
 )
 
-var transcriptRoles = map[adapters.Role]bool{
-	adapters.RoleMain: true, adapters.RoleSubagent: true, adapters.RoleSuperseded: true,
-}
+var transcriptRoles = map[adapters.Role]bool{adapters.RoleMain: true, adapters.RoleSubagent: true, adapters.RoleSuperseded: true}
 
 type Summary struct {
 	Uploaded      int      `json:"uploaded"`
@@ -67,44 +59,46 @@ type Summary struct {
 }
 
 func (s *Summary) Trimmed() Summary {
-	t := *s
-	t.ErrorMessages = slices.Clone(s.ErrorMessages[:min(len(s.ErrorMessages), maxErrorMsgs)])
-	if t.ErrorMessages == nil {
-		t.ErrorMessages = []string{}
+	trimmed := *s
+	trimmed.ErrorMessages = slices.Clone(s.ErrorMessages[:min(len(s.ErrorMessages), maxErrorMsgs)])
+	if trimmed.ErrorMessages == nil {
+		trimmed.ErrorMessages = []string{}
 	}
-	return t
+	return trimmed
 }
 
-type snapshotKey struct{ session, root, cwd string }
-
-type Options struct {
-	Exclusions exclusion.Registry
-	Trigger    string
-	Logger     *slog.Logger
-	Version    string
-}
-
-type Syncer struct {
-	cfg      *config.Config
-	bucket   store.Store
-	db       *state.State
-	adapters map[string]adapters.Adapter
-	opts     Options
-	log      *slog.Logger
-	clock    func() time.Time
-
-	Summary Summary
-
-	sessionRoots  map[adapters.SessionRef]string
-	touched       map[adapters.SessionRef]bool
-	snapshotCache map[snapshotKey]state.SnapshotEntry
-	// strays holds, by key, the objects an earlier run left that this one couldn't delete.
-	strays  map[string][]string
-	workDir string
-	tmpDir  string
-}
+type (
+	Options struct {
+		Trigger    string
+		Logger     *slog.Logger
+		Version    string
+		Exclusions exclusion.Registry
+	}
+	Syncer struct {
+		cfg          *config.Config
+		bucket       store.Store
+		db           *state.State
+		adapters     map[string]adapters.Adapter
+		opts         Options
+		log          *slog.Logger
+		clock        func() time.Time
+		Summary      Summary
+		policy       *capturepolicy.Policy
+		policyErr    error
+		warm         bool
+		runToken     string
+		finished     bool
+		recovered    bool
+		aliases      map[string][]raw.Source
+		sessionRoots map[adapters.SessionRef]string
+		touched      map[adapters.SessionRef]bool
+		workDir      string
+		tmpDir       string
+	}
+)
 
 func New(cfg *config.Config, bucket store.Store, db *state.State, ads map[string]adapters.Adapter, opts Options) *Syncer {
+	policy, policyErr := capturepolicy.New(cfg.Path, cfg.StateDir)
 	if opts.Trigger == "" {
 		opts.Trigger = "manual"
 	}
@@ -112,30 +106,16 @@ func New(cfg *config.Config, bucket store.Store, db *state.State, ads map[string
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Syncer{
-		cfg: cfg, bucket: bucket, db: db, adapters: ads, opts: opts, log: logger, clock: time.Now,
-		Summary:       Summary{ErrorMessages: []string{}},
-		sessionRoots:  map[adapters.SessionRef]string{},
-		touched:       map[adapters.SessionRef]bool{},
-		snapshotCache: map[snapshotKey]state.SnapshotEntry{},
-		workDir:       filepath.Join(cfg.StateDir, "exports"),
-		tmpDir:        filepath.Join(cfg.StateDir, "tmp"),
-	}
+	return &Syncer{policy: policy, policyErr: policyErr, cfg: cfg, bucket: bucket, db: db, adapters: ads, opts: opts, log: logger, clock: time.Now, Summary: Summary{ErrorMessages: []string{}}, aliases: map[string][]raw.Source{}, sessionRoots: map[adapters.SessionRef]string{}, touched: map[adapters.SessionRef]bool{}, workDir: filepath.Join(cfg.StateDir, "exports"), tmpDir: filepath.Join(cfg.StateDir, "tmp")}
 }
-
-func (s *Syncer) nowSeconds() float64 {
-	return state.UnixSeconds(s.clock())
-}
-
+func (s *Syncer) nowSeconds() float64 { return state.UnixSeconds(s.clock()) }
 func (s *Syncer) errorf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	s.Summary.Errors++
 	s.Summary.ErrorMessages = append(s.Summary.ErrorMessages, msg)
 	s.log.Error("sync error", "error", msg)
 }
-
-// roots always includes the canonical root: a sweep runs with the environment of whichever
-// agent's hook started it, and CLAUDE_CONFIG_DIR and friends there would otherwise hide it.
+func (s *Syncer) fail(path string, err error) { s.errorf("%s: %v", path, err) }
 func (s *Syncer) roots(agent string) ([]string, error) {
 	extra, err := s.db.ExtraRoots(agent)
 	if err != nil {
@@ -143,17 +123,12 @@ func (s *Syncer) roots(agent string) ([]string, error) {
 	}
 	a := s.adapters[agent]
 	var out []string
-	for _, r := range slices.Concat(a.DefaultRoots(), []string{a.CanonicalRoot()}, extra) {
-		if !slices.Contains(out, r) {
-			out = append(out, r)
+	for _, root := range slices.Concat(a.DefaultRoots(), []string{a.CanonicalRoot()}, extra) {
+		if !slices.Contains(out, root) {
+			out = append(out, root)
 		}
 	}
 	return out, nil
-}
-
-func (s *Syncer) markManifestPending(ref adapters.SessionRef) error {
-	s.touched[ref] = true
-	return s.db.MarkManifestPending(ref)
 }
 
 func (s *Syncer) noteSessionRoot(ref adapters.SessionRef, root string) {
@@ -161,12 +136,14 @@ func (s *Syncer) noteSessionRoot(ref adapters.SessionRef, root string) {
 		s.sessionRoots[ref] = root
 	}
 }
-
-func (s *Syncer) excluded(path string) bool {
-	return path == s.cfg.Path || fsutil.Within(path, s.cfg.StateDir)
-}
+func (s *Syncer) excluded(path string) bool       { return s.protected(path, resolvedPath(path)) }
+func (s *Syncer) rawKey(agent, key string) string { return s.publicationPrefix("file", agent, key) }
+func fileMtime(info os.FileInfo) float64          { return state.UnixSeconds(info.ModTime()) }
 
 func (s *Syncer) SweepFiles(ctx context.Context, agents []string) ([]adapters.SessionFile, error) {
+	if err := s.Recover(ctx); err != nil {
+		return nil, err
+	}
 	var out []adapters.SessionFile
 	for _, agent := range agents {
 		roots, err := s.roots(agent)
@@ -175,13 +152,13 @@ func (s *Syncer) SweepFiles(ctx context.Context, agents []string) ([]adapters.Se
 		}
 		for _, root := range roots {
 			discovery := s.sweepRoot(ctx, agent, root)
-			files := discovery.Files
+			s.discoveryIssues(discovery)
 			if discovery.Complete && fsutil.IsDir(root) {
-				if err := s.tombstone(agent, root, files); err != nil {
+				if err := s.tombstone(ctx, agent, root, discovery.Files); err != nil {
 					return nil, err
 				}
 			}
-			out = append(out, files...)
+			out = append(out, discovery.Files...)
 		}
 	}
 	return uniqueByPath(out), nil
@@ -190,72 +167,124 @@ func (s *Syncer) SweepFiles(ctx context.Context, agents []string) ([]adapters.Se
 func uniqueByPath(files []adapters.SessionFile) []adapters.SessionFile {
 	seen := map[string]bool{}
 	return slices.DeleteFunc(files, func(sf adapters.SessionFile) bool {
-		dup := seen[sf.Path]
-		seen[sf.Path] = true
+		key := sf.Agent + "\x00" + sf.Key + "\x00" + sf.Path
+		dup := seen[key]
+		seen[key] = true
 		return dup
 	})
 }
 
-// sweepRoot leaves the exports in, although they live under the state dir.
-func (s *Syncer) sweepRoot(ctx context.Context, agent, root string) adapters.Discovery {
-	a := s.adapters[agent]
-	out := adapters.Discover(a, root)
-	out.Files = slices.DeleteFunc(out.Files, func(sf adapters.SessionFile) bool { return s.excluded(sf.Path) || s.opts.Exclusions.Excludes(sf) })
-	out.Databases = slices.DeleteFunc(out.Databases, func(path string) bool {
-		return s.opts.Exclusions.Excludes(adapters.SessionFile{Agent: agent, Root: root, Path: path})
-	})
-	exports := adapters.Discovery{Complete: true}
-	if !s.opts.Exclusions.Excludes(adapters.SessionFile{Agent: agent, Root: root}) {
-		exports = a.Exports(root, s.workDir, recopyAfter)
-	}
-	for _, exported := range []adapters.Discovery{
-		adapters.SQLiteExports(ctx, a, root, out.Databases, s.workDir, recopyAfter),
-		exports,
-	} {
-		out.Files = append(out.Files, exported.Files...)
-		out.Issues = append(out.Issues, exported.Issues...)
-		out.Complete = out.Complete && exported.Complete
-	}
-	s.discoveryIssues(out)
-	return out
-}
-
 func (s *Syncer) discoveryIssues(discovery adapters.Discovery) {
 	for _, issue := range discovery.Issues {
-		s.errorf("discovery: %s", issue.Error())
+		s.errorf("discovery %s (%s): %v", issue.Path, issue.Kind, issue.Err)
 	}
 }
 
-func (s *Syncer) tombstone(agent, root string, onDisk []adapters.SessionFile) error {
+func (s *Syncer) sweepRoot(ctx context.Context, agent, root string) adapters.Discovery {
+	a := s.adapters[agent]
+	found := adapters.Discover(a, root)
+	found.Files = slices.DeleteFunc(found.Files, s.excludedFile)
+	found.Databases = slices.DeleteFunc(found.Databases, func(path string) bool {
+		return s.opts.Exclusions.Excludes(adapters.SessionFile{Agent: agent, Root: root, Path: path}) || s.excluded(path)
+	})
+	exports := adapters.SQLiteExports(ctx, a, root, found.Databases, s.workDir, recopyAfter)
+	if !s.opts.Exclusions.Excludes(adapters.SessionFile{Agent: agent, Root: root}) {
+		extra := a.Exports(root, s.workDir, recopyAfter)
+		exports.Files = append(exports.Files, extra.Files...)
+		exports.Issues = append(exports.Issues, extra.Issues...)
+		exports.Complete = exports.Complete && extra.Complete
+	}
+	found.Files = append(found.Files, exports.Files...)
+	found.Issues = append(found.Issues, exports.Issues...)
+	found.Complete = found.Complete && exports.Complete
+	return found
+}
+
+func (s *Syncer) tombstone(ctx context.Context, agent, root string, onDisk []adapters.SessionFile) error {
 	present := map[string]bool{}
 	for _, sf := range onDisk {
-		present[sf.Path] = true
+		present[sf.Key] = true
 	}
-	live, err := s.db.LiveFiles(agent, root)
+	streams, err := s.db.ArchiveStreams("file")
 	if err != nil {
 		return err
 	}
-	now := s.nowSeconds()
-	for _, f := range live {
-		if s.opts.Exclusions.Excludes(adapters.SessionFile{Agent: agent, Root: root, Path: f.Path, SessionKey: f.SessionKey}) || present[f.Path] || fsutil.Exists(f.Path) {
-			continue
-		}
-		if err := s.db.MarkDeleted(f.Path, now); err != nil {
+	for _, stream := range streams {
+		record, err := s.db.CurrentArchive("file", stream)
+		if err != nil {
 			return err
 		}
-		s.Summary.Deleted++
-		if f.SessionKey != "" {
-			ref := f.Session()
-			if err := s.markManifestPending(ref); err != nil {
-				return err
-			}
-			s.noteSessionRoot(ref, root)
+		p, err := decodePublication(record.Body)
+		if err != nil {
+			return err
+		}
+		g := p.File
+		if p.Agent != agent || g.Identity.Root != root || g.DeletedAt > 0 || present[p.Key] || s.excludedPublication(p) {
+			continue
+		}
+		absent, err := sourcesAbsent(g.Sources)
+		if err != nil {
+			return err
+		}
+		if !absent {
+			continue
+		}
+		if err := s.publishDeletion(ctx, p, record); err != nil {
+			return err
 		}
 	}
-	return s.db.Flush()
+	return nil
 }
 
-func (s *Syncer) classifyHookPath(agent, path string) (adapters.SessionFile, bool, error) {
+func sourcesAbsent(sources []raw.Source) (bool, error) {
+	absent := true
+	for _, source := range sources {
+		path := source.Path
+		if source.SourcePath != "" {
+			path = source.SourcePath
+		}
+		if _, err := os.Stat(path); err == nil {
+			absent = false
+			break
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return false, fmt.Errorf("tombstone %s: %w", path, err)
+		}
+	}
+	return absent, nil
+}
+
+func (s *Syncer) publishDeletion(ctx context.Context, p *publication, record *state.Record) error {
+	g := p.File
+
+	previous := *g
+	next := *g
+	next.Pieces = slices.Clone(g.Pieces)
+	next.Sequence++
+	next.Parent = record.ID
+	next.Kind = "delete"
+	next.DeletedAt = s.nowSeconds()
+	next.ObservedAt = next.DeletedAt
+	deletion := &publication{Schema: 3, MachineID: s.cfg.MachineID, Kind: "file", Agent: p.Agent, Key: p.Key, Sequence: next.Sequence, Parent: next.Parent, File: &next}
+	for _, piece := range next.Pieces {
+		deletion.Dependencies = append(deletion.Dependencies, pieceDependency(piece))
+	}
+	r, err := s.publish(ctx, deletion, nil)
+	if err != nil {
+		return err
+	}
+	if err := s.db.CommitFile(r, s.rawKey(p.Agent, p.Key), &next, &previous); err != nil {
+		return err
+	}
+	s.Summary.Deleted++
+	if next.Identity.SessionKey != "" {
+		ref := adapters.SessionRef{Agent: p.Agent, Key: next.Identity.SessionKey}
+		s.touched[ref] = true
+		s.noteSessionRoot(ref, g.Identity.Root)
+	}
+	return nil
+}
+
+func (s *Syncer) classifyHookPath(ctx context.Context, agent, path string) (adapters.SessionFile, bool, error) {
 	a := s.adapters[agent]
 	if rest, ok := strings.CutPrefix(path, "~"); ok && (rest == "" || rest[0] == '/') {
 		path = a.Home() + rest
@@ -263,11 +292,14 @@ func (s *Syncer) classifyHookPath(agent, path string) (adapters.SessionFile, boo
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
 	}
+	if s.excluded(path) || s.opts.Exclusions.ExcludesPath(a, path) {
+		return adapters.SessionFile{}, false, nil
+	}
 	sf, ok, err := s.classifyReported(a, path)
 	if err != nil || !ok {
 		return sf, ok, err
 	}
-	if err := s.rememberExtraRoot(agent, sf.Root); err != nil {
+	if err := s.rememberExtraRoot(ctx, agent, sf.Root); err != nil {
 		return adapters.SessionFile{}, false, err
 	}
 	return sf, true, nil
@@ -278,12 +310,11 @@ func (s *Syncer) classifyReported(a adapters.Adapter, path string) (adapters.Ses
 	if err != nil {
 		return adapters.SessionFile{}, false, err
 	}
-	for _, r := range roots {
-		if !fsutil.Within(path, r) {
-			continue
-		}
-		if sf, ok := a.Classify(path, r); ok {
-			return sf, true, nil
+	for _, root := range roots {
+		if fsutil.Within(path, root) {
+			if sf, ok := a.Classify(path, root); ok {
+				return sf, true, nil
+			}
 		}
 	}
 	if root := a.InferRoot(path); root != "" {
@@ -291,41 +322,49 @@ func (s *Syncer) classifyReported(a adapters.Adapter, path string) (adapters.Ses
 			return sf, true, nil
 		}
 	}
-	s.log.Warn("not a recognised session file", "path", path, "agent", a.Name())
 	s.Summary.Skipped++
 	return adapters.SessionFile{}, false, nil
 }
 
-func (s *Syncer) rememberExtraRoot(agent, root string) error {
+func (s *Syncer) rememberExtraRoot(ctx context.Context, agent, root string) error {
+	if !raw.ValidPath(root) {
+		return errors.New("archive root: unsupported path identity; requires absolute UTF-8 without NUL")
+	}
 	if root == s.adapters[agent].CanonicalRoot() {
 		return nil
 	}
-	known, err := s.db.ExtraRoots(agent)
-	if err != nil || slices.Contains(known, root) {
+	key := streamID(agent, root)
+	existing, _, err := s.current("root", agent, key)
+	if err != nil || existing != nil {
 		return err
 	}
-	if err := s.db.AddExtraRoot(agent, root); err != nil {
+	p := &publication{Schema: 3, MachineID: s.cfg.MachineID, Kind: "root", Agent: agent, Key: key, Sequence: 1, Root: &rootRecord{Agent: agent, Path: root}}
+	r, err := s.publish(ctx, p, nil)
+	if err != nil {
 		return err
 	}
-	s.log.Info("remembering root", "agent", agent, "root", root)
-	return s.db.Flush()
+	return s.applyPublication(r, p, nil)
 }
 
-func (s *Syncer) HookFiles(agent string, paths []string) ([]adapters.SessionFile, error) {
+func (s *Syncer) HookFilesContext(ctx context.Context, agent string, paths []string) ([]adapters.SessionFile, error) {
+	if !s.recovered {
+		return nil, errors.New("syncer: Recover must precede HookFiles")
+	}
 	a := s.adapters[agent]
 	var out []adapters.SessionFile
 	for _, path := range paths {
-		sf, ok, err := s.classifyHookPath(agent, path)
+		sf, ok, err := s.classifyHookPath(ctx, agent, path)
 		if err != nil {
 			return nil, err
 		}
-		if !ok {
+		if !ok || s.excludedFile(sf) {
 			continue
 		}
 		related := a.Related(sf)
 		s.discoveryIssues(related)
-		for _, candidate := range append([]adapters.SessionFile{sf}, related.Files...) {
-			if !s.excluded(candidate.Path) && !s.opts.Exclusions.Excludes(candidate) {
+		related.Files = append(related.Files, sf)
+		for _, candidate := range related.Files {
+			if !s.excludedFile(candidate) {
 				out = append(out, candidate)
 			}
 		}
@@ -333,22 +372,20 @@ func (s *Syncer) HookFiles(agent string, paths []string) ([]adapters.SessionFile
 	return uniqueByPath(out), nil
 }
 
-type result struct {
-	u   *upload
-	err error
-}
-
-// pool runs uploads on uploadWorkers goroutines, with at most twice that many, holding at
-// most maxHeldSize of files, in flight. Results are handled on the caller's goroutine, which
-// alone writes local state.
-type pool struct {
-	s        *Syncer
-	ctx      context.Context
-	results  chan result
-	sem      chan struct{}
-	inflight int
-	held     int64
-}
+type (
+	result struct {
+		u   *upload
+		err error
+	}
+	pool struct {
+		s        *Syncer
+		ctx      context.Context
+		results  chan result
+		sem      chan struct{}
+		inflight int
+		held     int64
+	}
+)
 
 func (p *pool) add(u *upload) error {
 	for p.inflight >= uploadWorkers*2 || p.inflight > 0 && p.held+u.held() > maxHeldSize {
@@ -358,12 +395,7 @@ func (p *pool) add(u *upload) error {
 	}
 	p.inflight++
 	p.held += u.held()
-	go func() {
-		p.sem <- struct{}{}
-		err := p.s.upload(p.ctx, u)
-		<-p.sem
-		p.results <- result{u, err}
-	}()
+	go func() { p.sem <- struct{}{}; err := p.s.upload(p.ctx, u); <-p.sem; p.results <- result{u, err} }()
 	return nil
 }
 
@@ -379,7 +411,10 @@ func (p *pool) collect() error {
 		p.s.fail(r.u.file.Path, r.err)
 		return nil
 	}
-	return p.s.finish(r.u)
+	if err := p.s.finish(r.u); err != nil {
+		return err
+	}
+	return p.s.refreshStream(p.ctx, "file", r.u.file.Agent, r.u.file.Key)
 }
 
 func (p *pool) wait() error {
@@ -392,9 +427,18 @@ func (p *pool) wait() error {
 	return first
 }
 
+// Run is a one-shot capture lifecycle. Construct a new Syncer for a subsequent run.
 func (s *Syncer) Run(ctx context.Context, files []adapters.SessionFile) (*Summary, error) {
+	if s.finished {
+		return &s.Summary, errors.New("syncer: Run lifecycle already finished; create a new Syncer")
+	}
+	s.finished = true
+	if err := s.Recover(ctx); err != nil {
+		return &s.Summary, err
+	}
 	s.clearStaging()
-	if err := s.deleteStrays(ctx); err != nil {
+	files, err := s.groupAliases(ctx, files)
+	if err != nil {
 		return &s.Summary, err
 	}
 	pending, err := s.db.PendingManifests()
@@ -410,17 +454,17 @@ func (s *Syncer) Run(ctx context.Context, files []adapters.SessionFile) (*Summar
 		if ctx.Err() != nil || stateErr != nil {
 			break
 		}
-		u, err := s.prepare(sf)
+		u, err := s.prepare(ctx, sf)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
-			continue // rotated or recompressed between discovery and read
+			continue
 		case err != nil:
 			s.fail(sf.Path, err)
 		case u == nil:
-		case !u.needsUpload:
+		case u.outcome.Status == captureUnchanged:
 			stateErr = s.finish(u)
 		default:
-			stateErr = s.send(p, u)
+			stateErr = p.add(u)
 		}
 	}
 	if err := p.wait(); err != nil && stateErr == nil {
@@ -429,91 +473,23 @@ func (s *Syncer) Run(ctx context.Context, files []adapters.SessionFile) (*Summar
 	if stateErr != nil {
 		return &s.Summary, stateErr
 	}
+	if err := ctx.Err(); err != nil {
+		return &s.Summary, err
+	}
 	if err := s.writeManifests(ctx); err != nil {
 		return &s.Summary, err
 	}
-	return &s.Summary, s.db.Flush()
-}
-
-// send records an upload over a key's earlier pieces as a stray until its answer is recorded,
-// so a run that never hears back is cleaned up after. A first upload needs no record: with
-// nothing recorded, the next run uploads the file whole again.
-func (s *Syncer) send(p *pool, u *upload) error {
-	if u.piece.Start > 0 || len(u.replaced) > 0 {
-		if err := s.db.AddStray(state.Stray{Key: u.key, Object: u.piece.Object}); err != nil {
-			return err
-		}
-		if err := s.db.Flush(); err != nil {
-			return err
+	if s.Summary.Errors == 0 {
+		if err := s.sealCheckpoint(ctx); err != nil {
+			return &s.Summary, err
 		}
 	}
-	return p.add(u)
+	return &s.Summary, nil
 }
 
-// clearStaging removes temp copies of large files that a killed run left behind.
 func (s *Syncer) clearStaging() {
-	entries, _ := os.ReadDir(s.tmpDir) // staging reports a tmp dir it can't use
-	for _, e := range entries {
-		_ = os.Remove(filepath.Join(s.tmpDir, e.Name())) // one left now is removed by the next run
+	entries, _ := os.ReadDir(s.tmpDir)
+	for _, entry := range entries {
+		_ = os.Remove(filepath.Join(s.tmpDir, entry.Name()))
 	}
-}
-
-// deleteStrays deletes the segments earlier runs left, since a reader would take one for the
-// bytes after its start. A key whose base or a segment is still stray is uploaded whole.
-func (s *Syncer) deleteStrays(ctx context.Context) error {
-	strays, err := s.db.Strays()
-	if err != nil || len(strays) == 0 {
-		return err
-	}
-	errs := parallel(strays, func(x state.Stray) error {
-		if x.Object == x.Key {
-			return nil
-		}
-		return s.bucket.Delete(ctx, x.Object)
-	})
-	s.strays = map[string][]string{}
-	for i, x := range strays {
-		if x.Object == x.Key || errs[i] != nil {
-			s.strays[x.Key] = append(s.strays[x.Key], x.Object)
-			continue
-		}
-		if err := s.db.RemoveStray(x); err != nil {
-			return err
-		}
-	}
-	return s.db.Flush()
-}
-
-func (s *Syncer) fail(path string, err error) {
-	s.errorf("%s: %v", path, err)
-}
-
-func (s *Syncer) rawKey(agent, key string) string {
-	return "raw/agent=" + agent + "/machine=" + s.cfg.MachineID + "/" + key + ".zst"
-}
-
-func (s *Syncer) versionsKey(sf adapters.SessionFile) string {
-	return "raw-versions/agent=" + sf.Agent + "/machine=" + s.cfg.MachineID + "/" + sf.Key + ".json"
-}
-
-func (s *Syncer) manifestKey(ref adapters.SessionRef) string {
-	return "manifests/agent=" + ref.Agent + "/machine=" + s.cfg.MachineID + "/" + ref.Key + ".json"
-}
-
-func parallel[T any](items []T, fn func(T) error) []error {
-	errs := make([]error, len(items))
-	var g errgroup.Group
-	g.SetLimit(uploadWorkers)
-	for i, item := range items {
-		g.Go(func() error {
-			errs[i] = fn(item)
-			return nil
-		})
-	}
-	_ = g.Wait() // each item's error is kept in errs, so the group's is always nil
-	return errs
-}
-
-func fileMtime(st os.FileInfo) float64 {
-	return state.UnixSeconds(st.ModTime())
-}
+} // disposable staging, recaptured on retry

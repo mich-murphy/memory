@@ -55,8 +55,8 @@ The hook command returns within milliseconds, prints nothing and always exits 0.
 ## What gets captured
 
 - **Everything under each agent's directory, byte for byte.** Transcripts (main, subagent, spilled tool output, set-aside), memory, plans, prompt history, file-history backups, todos, tasks, agent-team mailboxes, debug logs, settings, skills and extensions. Codex rollouts are read through their `.zst` recompression, so they keep one key, and Codex's SQLite databases are uploaded as consistent backup copies.
-- **Only what changed is uploaded.** While a transcript grows, each sync uploads just the bytes appended since the last one, and once the session goes quiet they are folded back into one object. Objects are zstd-compressed.
-- **Earlier versions.** A file that is rewritten rather than appended to keeps its old bytes under `blobs/`, stored once by content hash however many files or machines had them. Database copies keep at most one earlier version a day. A file deleted locally is marked in its session's manifest.
+- **Only what changed is uploaded.** While a transcript grows, each sync uploads just the bytes appended since the last one, and once the session goes quiet they are folded back into one object. Raw pieces are zstd-compressed; folds add a consolidated representation without removing earlier pieces.
+- **Earlier versions.** Every acknowledged capture, including append intermediates, rewrites, empty files and database generations, remains restorable from immutable v3 records and content-addressed blobs. A file deleted locally gets a new deletion record; its captured bytes remain archived.
 - **How each session was launched.** The agent's command line (`--model`, `--permission-mode`, `-p`, `--profile`...), its `CLAUDE_CODE_*`/`CODEX_*`/`PI_*` environment, the session-start hook's payload, and the repo's root, remote, branch, HEAD and dirty flag.
 - **The harness each session ran with.** Every CLAUDE.md and AGENTS.md in scope, `@imports`, whole skill directories, subagents, commands, rules, settings, installed plugins, the hook and status-line scripts settings point at, MCP servers and managed settings, plus a separate set for the memory agents write for themselves. Files are stored once by content hash.
 - **Secrets.** Credential files are left out (logins, API keys, OAuth tokens), and known secret values in config files, such as `primaryApiKey` and MCP server env and headers, are replaced with `[redacted]`; see [docs/storage-layout.md](docs/storage-layout.md). Everything else can contain anything a tool printed or a settings file holds, so keep the bucket private.
@@ -66,6 +66,12 @@ Claude Code deletes transcripts after 30 days by default. `agent-sessions instal
 Capture can be partial: unreadable sources, failed SQLite exports, malformed config and traversal limits are reported rather than treated as missing files. Partial discovery must not imply local deletion. Snapshot sets expose `complete` and list skipped entries; harness and memory bodies share a 64 MiB budget, with 5 MiB per-file and 3000-files-per-scope limits. FIFOs and devices are not read.
 
 [docs/storage-layout.md](docs/storage-layout.md) describes the bucket layout, the manifest format and exactly what is skipped.
+
+## Archive durability and recovery
+
+The v3 archive is append-only: a typed plan precedes new dependencies and an immutable commit follows their durability. Unique parent chains select current content; conflicting writers fail closed rather than choosing by timestamp. The collector performs no remote deletion or garbage collection, so retained history grows without a fixed retention cap. Keep the bucket private and do not configure lifecycle expiry for archived objects.
+
+SQLite is a disposable cache, bound to the destination, store identity and explicit machine ID. With the same machine ID, losing the local cache triggers paginated remote-only recovery before any new capture, launch or deletion. Legacy remote data is left untouched; the first v3 binding replaces only legacy local upload/session projections. There is no automatic remote migration. One writer per machine ID is required; the local machine/destination lock is independent of the selected cache directory. See [docs/archive-design.md](docs/archive-design.md) for failure boundaries and limits.
 
 ## Commands
 
