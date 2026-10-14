@@ -13,8 +13,12 @@ not permit its backups or any other excluded identity, and still requires scrubb
 
 After reading, `scrub.Identities` applies the supported schema for **each** recognised filename in
 those identities. Protection does not depend on which agent is collecting: a Claude skill symlink
-to Pi's `models.json`, for example, must redact Pi provider credentials. Known backup suffixes are
-normalised centrally. Shared names such as `settings.json` use their supported filename's rules,
+to Pi's `models.json`, for example, must redact Pi provider credentials. Known backup suffixes are normalised centrally, as is filename case: editor copies (`~`,
+numbered tilde backups, `.bak`, `.backup`, `.orig`, `.old`), eight-digit date suffixes, installer
+backups, and common archive extensions (`gz`, `bz2`, `xz`, `zst`, `zstd`, `zip`, `7z`, `rar`,
+`tar`, `tgz`). Credential exclusion does not depend on decoding a compressed backup. A compressed
+protected config is withheld if its bytes cannot be parsed safely. Arbitrary suffixes such as
+`auth.json.example` or `notes.key.txt` remain outside this known-filename policy. Shared names such as `settings.json` use their supported filename's rules,
 not an agent-specific interpretation; distinct filenames in a symlink chain combine their rules.
 This does not apply every supported schema to every JSON document.
 

@@ -46,12 +46,14 @@ func isWithin(path, dir string) bool {
 	return err == nil && (rel == "." || filepath.IsLocal(rel))
 }
 
-// backupSuffix matches copies left by editors and the installer.
-var backupSuffix = regexp.MustCompile(`(~|\.bak|\.orig|\.old|\.agent-sessions-backup-[0-9-]+)$`)
+// backupSuffix recognises editor, dated and compressed copies without decoding their contents.
+// Do not treat every suffix as a backup: auth.json.example and notes.key.txt are unrelated names.
+var backupSuffix = regexp.MustCompile(`(\.?~[0-9]+~|~|\.bak|\.backup|\.orig|\.old|-[0-9]{8}|\.(gz|bz2|xz|zst|zstd|zip|7z|rar|tar|tgz)|\.agent-sessions-backup-[0-9-]+)$`)
 
-// BaseName strips known, possibly repeated backup suffixes from a file's basename.
+// BaseName folds filename case and strips known, possibly repeated backup suffixes.
+// Conservative case folding also protects aliases on case-insensitive filesystems.
 func BaseName(path string) string {
-	name := filepath.Base(path)
+	name := strings.ToLower(filepath.Base(path))
 	for {
 		base := backupSuffix.ReplaceAllString(name, "")
 		if base == name {
