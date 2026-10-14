@@ -5,6 +5,7 @@ package jsonx
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
@@ -102,6 +103,11 @@ func (o Object) MarshalJSON() ([]byte, error) {
 }
 
 func ParseObject(data []byte) (*Object, error) {
+	// Settings must not silently lose duplicate members or invalid Unicode when edited or
+	// checked for hook trust. The compatibility decoder alone accepts both.
+	if !jsontext.Value(data).IsValid() {
+		return nil, errors.New("json: invalid document or duplicate object names")
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	v, err := parseValue(dec)
