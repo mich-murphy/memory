@@ -10,6 +10,7 @@ You need an R2 API token scoped to the bucket with Object Read & Write. Use one 
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mich-murphy/memory/main/install.sh | sh   # into ~/.local/bin
+agent-sessions machine-id --new   # deliberate NEW machine only; for a lost ID, restore it instead (see below)
 agent-sessions install      # hooks and the Pi extension
 $EDITOR ~/.config/agent-sessions/config.env   # R2 endpoint, bucket and keys (written for you, mode 600)
 agent-sessions doctor       # checks the bucket and every hook
@@ -25,6 +26,17 @@ gh api -H 'Accept: application/vnd.github.raw' repos/mich-murphy/memory/contents
 If you use Codex, open it once and approve the agent-sessions hooks in `/hooks`. Codex doesn't run a new hook until you've reviewed it, and `agent-sessions doctor` tells you whether that's done.
 
 That's all. `agent-sessions install` only touches agents it finds on the machine, so rerun it after installing another agent. It's safe to rerun at any time: it replaces its own entries and leaves everything else in your settings alone, backing up any file before changing it.
+
+### Keep the machine identity
+
+`agent-sessions machine-id` prints the effective ID. Keep a backup of it: ordinary sync,
+backfill, doctor, install and upgrades never generate an identity. `machine-id --new` is an
+explicit new-machine choice, not a recovery command; an existing identity is printed, never
+rotated. If `machine-id` is lost or empty, restore the original file or set the known previous
+`AGENT_SESSIONS_MACHINE_ID` in `config.env` (or the agent's environment) before syncing.
+The collector cannot recover an unknown ID or select an old namespace by hostname; inspect
+remote namespaces with your bucket tools. See [docs/machine-identity.md](docs/machine-identity.md)
+for fresh-install, recovery and upgrade details.
 
 ## How it captures sessions
 
@@ -59,6 +71,7 @@ Capture can be partial: unreadable sources, failed SQLite exports, malformed con
 
 | Command | What it does |
 |---|---|
+| `agent-sessions machine-id` | Prints identity. `--new` explicitly creates one for a new machine, never replacing an existing identity. |
 | `agent-sessions install` | Hooks, Pi extension, config file. `--dry-run` shows what would change. |
 | `agent-sessions doctor` | Checks settings, bucket access, each hook and the binary it runs, Codex hook trust, the last sweep and recent errors. |
 | `agent-sessions backfill` | Uploads everything already on the machine. |

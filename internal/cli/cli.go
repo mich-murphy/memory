@@ -20,6 +20,7 @@ import (
 const usage = `agent-sessions: collect coding-agent sessions into one bucket.
 
 Usage:
+  agent-sessions machine-id   print identity; --new explicitly creates one for a new machine
   agent-sessions install      install hooks and the Pi extension
   agent-sessions backfill     upload every session already on this machine
   agent-sessions sync         upload new or changed session files
@@ -112,6 +113,8 @@ func Main(ctx context.Context, args []string, version string, o IO) int {
 	switch cmd {
 	case "sync", "backfill":
 		code, err = runSync(ctx, cmd, rest, version, o)
+	case "machine-id":
+		code, err = runMachineID(rest, o)
 	case "install":
 		code, err = runInstall(rest, o)
 	case "uninstall":
