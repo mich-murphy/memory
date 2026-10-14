@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/mich-murphy/memory/internal/adapters"
@@ -72,6 +73,21 @@ func Command() []string {
 		return []string{exe}
 	}
 	return []string{"agent-sessions"}
+}
+
+// warnIfOffPath warns, once, when hooks will run a binary other than the agent-sessions on
+// PATH, such as one run from a download directory: when it is deleted, every hook fails.
+func warnIfOffPath(o *Options) {
+	if p, err := exec.LookPath("agent-sessions"); err == nil {
+		if abs, err := filepath.Abs(p); err == nil && abs == o.Command[0] {
+			return
+		}
+	}
+	msg := fmt.Sprintf("warning: the hooks run %s, which isn't agent-sessions on your PATH, so they break if it moves. "+
+		"Install with install.sh, or put it on your PATH, and rerun `agent-sessions install`.", o.Command[0])
+	if !slices.Contains(o.Log, msg) {
+		o.Log = append(o.Log, msg)
+	}
 }
 
 func backup(path string) (string, error) {
@@ -272,6 +288,7 @@ func Claude(o *Options) error {
 	}
 	command := ""
 	if !o.Remove {
+		warnIfOffPath(o)
 		command = hookCommand(o.Command, "claude")
 	}
 	mergeHooks(settings, ClaudeEvents, command)
@@ -319,6 +336,7 @@ func Codex(o *Options) error {
 	}
 	command := ""
 	if !o.Remove {
+		warnIfOffPath(o)
 		command = hookCommand(o.Command, "codex")
 	}
 	mergeHooks(doc, CodexEvents, command)

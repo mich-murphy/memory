@@ -52,7 +52,7 @@ Claude Code deletes transcripts after 30 days by default. `agent-sessions instal
 | Command | What it does |
 |---|---|
 | `agent-sessions install` | Hooks, Pi extension, config file. `--dry-run` shows what would change. |
-| `agent-sessions doctor` | Checks settings, bucket access, each hook, Codex hook trust, the last sweep and recent errors. |
+| `agent-sessions doctor` | Checks settings, bucket access, each hook and the binary it runs, Codex hook trust, the last sweep and recent errors. |
 | `agent-sessions backfill` | Uploads everything already on the machine. |
 | `agent-sessions sync` | Uploads what changed. Hooks run this. |
 | `agent-sessions uninstall` | Removes the hooks and the extension. Uploaded data stays. |

@@ -89,7 +89,7 @@ It writes that to a file and starts a detached sync with no delay and no debounc
 
 **Trust.** Codex skips a user hook until it has been reviewed. Its trust record is a hash in `config.toml` under `[hooks.state."<hooks.json path>:<event>:<group>:<handler>"]`, written when you approve it in `/hooks` (`discovery.rs:715`, `:796`). agent-sessions deliberately leaves that review to you. `agent-sessions doctor` reads `config.toml` and reports how many agent-sessions hooks are trusted.
 
-The trust hash covers the command string, so a hook that changes needs approving again. The installer uses the `agent-sessions` binary on your `PATH` (`~/.local/bin/agent-sessions` from `install.sh`), whose path survives upgrades, so an upgrade doesn't need a new review.
+The trust hash covers the command string, so a hook that changes needs approving again. The installer uses the `agent-sessions` binary on your `PATH` (`~/.local/bin/agent-sessions` from `install.sh`), whose path survives upgrades, so an upgrade doesn't need a new review. Without one, it writes the path of the binary it was run as and warns, since hooks pointing at a download directory break when that is cleaned up. `agent-sessions doctor` fails any agent's hooks whose binary can't be run.
 
 **Other details:**
 

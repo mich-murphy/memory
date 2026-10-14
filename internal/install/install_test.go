@@ -254,6 +254,32 @@ func TestCodexUninstallKeepsOtherHooks(t *testing.T) {
 	}
 }
 
+func TestInstallWarnsOnceWhenHooksRunABinaryOffPath(t *testing.T) {
+	e := testenv.New(t)
+	dir := t.TempDir()
+	onPath := filepath.Join(dir, "agent-sessions")
+	testenv.Write(t, onPath, "#!/bin/sh\n")
+	if err := os.Chmod(onPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	warnings := func(command string) int {
+		o := &Options{Command: []string{command}, Home: e.Home}
+		for _, install := range []func(*Options) error{Claude, Codex, Pi} {
+			if err := install(o); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return len(slices.DeleteFunc(o.Log, func(l string) bool { return !strings.HasPrefix(l, "warning: the hooks run "+command) }))
+	}
+	if n := warnings(onPath); n != 0 {
+		t.Errorf("%d warnings for the agent-sessions on PATH", n)
+	}
+	if n := warnings("/home/me/Downloads/agent-sessions"); n != 1 {
+		t.Errorf("%d warnings for a binary off PATH, want 1", n)
+	}
+}
+
 func TestUninstallWithoutTheAgentsChangesAndReportsNothing(t *testing.T) {
 	for _, env := range []string{"CLAUDE_CONFIG_DIR", "CODEX_HOME", "PI_CODING_AGENT_DIR"} {
 		t.Setenv(env, "")
