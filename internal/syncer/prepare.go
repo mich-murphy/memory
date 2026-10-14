@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -43,15 +44,18 @@ type upload struct {
 	body        []byte
 	bodyPath    string
 	replaced    []raw.Piece
-	version     *versionPlan
-	resume      *state.Resume
+	strays      []string
+	// leftover is what the upload couldn't delete of replaced and strays.
+	leftover []string
+	version  *versionPlan
+	resume   *state.Resume
 	// compress runs on the upload pool, so backfills use every core.
 	compress func(u *upload) error
 }
 
 func (u *upload) cleanup() {
 	if u.bodyPath != "" {
-		_ = os.Remove(u.bodyPath) // a leftover temp file is swept with the tmp dir
+		_ = os.Remove(u.bodyPath) // the next run clears a leftover
 	}
 }
 
@@ -147,6 +151,13 @@ func (s *Syncer) planVersion(sf adapters.SessionFile, key string, prev *state.Up
 			return nil, nil
 		}
 	}
+	index, err := s.db.Versions(key)
+	if err != nil {
+		return nil, err
+	}
+	if slices.ContainsFunc(index, func(v state.Version) bool { return v.SHA256 == prev.SHA256 }) {
+		return nil, nil
+	}
 	old := pieces
 	if len(old) == 0 {
 		old = []raw.Piece{{Start: 0, End: prev.Size, SHA256: prev.SHA256, Object: key}}
@@ -162,10 +173,6 @@ func (s *Syncer) planVersion(sf adapters.SessionFile, key string, prev *state.Up
 			v.newBlobs = append(v.newBlobs, p)
 		}
 		v.Pieces = append(v.Pieces, raw.Piece{Start: p.Start, End: p.End, SHA256: p.SHA256, Object: blob})
-	}
-	index, err := s.db.Versions(key)
-	if err != nil {
-		return nil, err
 	}
 	v.index, err = jsonx.SortedIndented(map[string]any{"key": sf.Key, "versions": append(index, v.Version)})
 	if err != nil {
@@ -330,6 +337,9 @@ func (s *Syncer) planUpload(sf adapters.SessionFile, key string, c *content, pre
 		u.file.Head = s.adapters[sf.Agent].SessionInfo(adapters.ReadHead(c.first, prefixLines))
 	}
 	start, ok := plan(prev, pieces, c, idle)
+	if u.strays = s.strays[key]; len(u.strays) > 0 {
+		start, ok = 0, true
+	}
 	if !ok {
 		return u, nil
 	}
@@ -461,7 +471,7 @@ func (s *Syncer) upload(ctx context.Context, u *upload) error {
 		}
 	}
 	if u.piece.Start == 0 {
-		s.deleteReplacedSegments(ctx, u.replaced)
+		s.deleteReplaced(ctx, u)
 	}
 	return nil
 }
@@ -485,15 +495,19 @@ func (s *Syncer) copyVersion(ctx context.Context, u *upload) error {
 	return nil
 }
 
-// deleteReplacedSegments only logs failures: readers skip a leftover segment, since it starts
-// before the new base ends.
-func (s *Syncer) deleteReplacedSegments(ctx context.Context, pieces []raw.Piece) {
-	for _, p := range pieces {
-		if p.Start == 0 {
+// deleteReplaced leaves what it can't delete in u.leftover, for the next run to retry.
+func (s *Syncer) deleteReplaced(ctx context.Context, u *upload) {
+	objects := slices.Clone(u.strays)
+	for _, p := range u.replaced {
+		objects = append(objects, p.Object)
+	}
+	for _, o := range objects {
+		if o == u.key {
 			continue
 		}
-		if err := s.bucket.Delete(ctx, p.Object); err != nil {
-			s.log.Warn("could not delete a replaced segment", "object", p.Object, "error", err)
+		if err := s.bucket.Delete(ctx, o); err != nil {
+			s.log.Warn("could not delete a replaced segment", "object", o, "error", err)
+			u.leftover = append(u.leftover, o)
 		}
 	}
 }
@@ -524,6 +538,9 @@ func (s *Syncer) finish(u *upload) error {
 
 func (s *Syncer) recordChanged(u *upload) error {
 	if err := s.db.RecordUpload(u.key, u.file.SHA256, u.file.Size); err != nil {
+		return err
+	}
+	if err := s.db.SetStrays(u.key, u.leftover); err != nil {
 		return err
 	}
 	if u.piece.Start > 0 {

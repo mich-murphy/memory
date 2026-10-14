@@ -8,17 +8,23 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/mich-murphy/memory/internal/cli"
 	"github.com/mich-murphy/memory/internal/install"
+	"github.com/mich-murphy/memory/internal/state"
 	"github.com/mich-murphy/memory/internal/testenv"
 )
 
 func run(args ...string) (code int, stdout, stderr string) {
+	return runCtx(context.Background(), args...)
+}
+
+func runCtx(ctx context.Context, args ...string) (code int, stdout, stderr string) {
 	var out, errOut bytes.Buffer
-	code = cli.Main(context.Background(), args, "1.2.3", cli.IO{Stdout: &out, Stderr: &errOut})
+	code = cli.Main(ctx, args, "1.2.3", cli.IO{Stdout: &out, Stderr: &errOut})
 	return code, out.String(), errOut.String()
 }
 
@@ -69,27 +75,28 @@ func TestInstallDryRunTouchesNothing(t *testing.T) {
 func TestInstallSkipsAgentsNotOnThisMachine(t *testing.T) {
 	e := testenv.New(t)
 	onlyAgentSessionsOnPath(t)
-	if err := os.RemoveAll(filepath.Join(e.Home, ".pi")); err != nil {
+	if err := os.RemoveAll(filepath.Join(e.Home, ".codex")); err != nil {
 		t.Fatal(err)
 	}
 	code, out, _ := run("install")
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
-	if !strings.Contains(out, "pi: not used on this machine") {
+	if !strings.Contains(out, "codex: not used on this machine") {
 		t.Errorf("output:\n%s", out)
 	}
-	if _, err := os.Stat(filepath.Join(e.Home, ".pi")); !os.IsNotExist(err) {
-		t.Error("created ~/.pi")
+	if _, err := os.Stat(filepath.Join(e.Home, ".codex")); !os.IsNotExist(err) {
+		t.Error("created ~/.codex")
 	}
-	if _, err := os.Stat(filepath.Join(e.Home, ".codex", "hooks.json")); err != nil {
-		t.Error("codex hooks not installed")
+	ext := install.PiExtensionPath(e.Home)
+	if _, err := os.Stat(ext); err != nil {
+		t.Error("pi extension not installed after skipping codex")
 	}
 	if code, out, _ := run("uninstall"); code != 0 {
 		t.Fatalf("uninstall: exit %d\n%s", code, out)
 	}
-	if _, err := os.Stat(filepath.Join(e.Home, ".codex", "hooks.json")); !os.IsNotExist(err) {
-		t.Error("codex hooks.json left behind")
+	if _, err := os.Stat(ext); !os.IsNotExist(err) {
+		t.Error("pi extension left behind")
 	}
 }
 
@@ -160,5 +167,51 @@ func TestSyncFailsCleanlyWithoutR2Settings(t *testing.T) {
 	}
 	if code, _, errOut := run("sync"); code != 2 || !strings.Contains(errOut, "R2_") {
 		t.Errorf("exit %d, stderr %q", code, errOut)
+	}
+}
+
+func TestASyncThatCannotGetTheLockLeavesTheBucketAlone(t *testing.T) {
+	e := testenv.New(t)
+	unlock, err := state.Lock(t.Context(), e.State, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		args     []string
+		wantCode int
+	}{{[]string{"sync"}, 3}, {[]string{"sync", "--quiet"}, 0}} {
+		ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+		code, out, errOut := runCtx(ctx, c.args...)
+		cancel()
+		if code != c.wantCode || out != "" {
+			t.Errorf("%v while locked: exit %d, stdout %q, stderr %q", c.args, code, out, errOut)
+		}
+	}
+	if keys := e.BucketKeys(); len(keys) != 0 {
+		t.Errorf("uploaded while another run held the lock: %v", keys)
+	}
+	unlock()
+	if code, out, _ := run("sync"); code != 0 || len(e.BucketKeys()) == 0 {
+		t.Errorf("after unlock: exit %d, %s", code, out)
+	}
+}
+
+// A session-start hook leaves the launch in a file; the sync it starts puts it in the session's
+// manifest and removes the file.
+func TestSyncRecordsTheLaunchTheHookLeft(t *testing.T) {
+	e := testenv.New(t)
+	launch := filepath.Join(e.State, "pending", "launch-test.json")
+	testenv.Write(t, launch, `{"event": "session_start", "source": "startup", "cwd": "`+e.Project+`"}`)
+	transcript := filepath.Join(e.PiDir, testenv.PiKey+".jsonl")
+	code, out, errOut := run("sync", "--agent", "pi", "--path", transcript, "--launch", launch, "--trigger", "hook:session_start")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s%s", code, out, errOut)
+	}
+	got, _ := e.Manifest("pi", testenv.PiKey)["launch"].(map[string]any)
+	if got["source"] != "startup" || got["event"] != "session_start" {
+		t.Errorf("manifest launch = %v", got)
+	}
+	if _, err := os.Stat(launch); !os.IsNotExist(err) {
+		t.Errorf("launch file left behind: %v", err)
 	}
 }

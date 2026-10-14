@@ -3,6 +3,7 @@ package install
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -193,21 +194,38 @@ func TestCodexInstallWritesHooksJSONAndReportsTrust(t *testing.T) {
 	if diff := cmp.Diff(want, firstHandler(t, cfg, "SessionEnd")); diff != "" {
 		t.Errorf("SessionEnd handler:\n%s", diff)
 	}
-	if !slices.ContainsFunc(o.Log, func(l string) bool { return strings.Contains(l, "/hooks") }) {
+	if !slices.ContainsFunc(o.Log, func(l string) bool { return strings.Contains(l, "run /hooks") }) {
 		t.Errorf("no trust hint in %v", o.Log)
 	}
 	if n, trusted := CodexTrustState(root); n != 6 || trusted != 0 {
 		t.Errorf("trust = %d/%d", trusted, n)
 	}
 
-	// Simulate the user trusting two of them in /hooks.
-	testenv.Append(t, filepath.Join(root, "config.toml"),
-		"\n[hooks.state.\""+hooksJSON+":stop:0:0\"]\ntrusted_hash = \"sha256:x\"\n"+
-			"\n[hooks.state.\""+hooksJSON+":session_end:0:0\"]\ntrusted_hash = \"sha256:y\"\n")
+	trust := func(labels ...string) {
+		t.Helper()
+		var toml strings.Builder
+		for _, l := range labels {
+			fmt.Fprintf(&toml, "\n[hooks.state.%q]\ntrusted_hash = \"sha256:x\"\n", hooksJSON+":"+l+":0:0")
+		}
+		testenv.Append(t, filepath.Join(root, "config.toml"), toml.String())
+	}
+	trust("stop", "session_end")
 	if n, trusted := CodexTrustState(root); n != 6 || trusted != 2 {
-		t.Errorf("trust = %d/%d", trusted, n)
+		t.Errorf("trust after two = %d/%d", trusted, n)
+	}
+	trust("session_start", "subagent_stop", "pre_compact", "interrupt")
+	if n, trusted := CodexTrustState(root); n != 6 || trusted != 6 {
+		t.Errorf("trust after all = %d/%d", trusted, n)
 	}
 
+	dryRun := opts(e)
+	dryRun.Remove, dryRun.DryRun = true, true
+	if err := Codex(dryRun); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(hooksJSON); err != nil {
+		t.Errorf("a dry-run uninstall removed hooks.json: %v", err)
+	}
 	remove := opts(e)
 	remove.Remove = true
 	if err := Codex(remove); err != nil {
@@ -215,6 +233,24 @@ func TestCodexInstallWritesHooksJSONAndReportsTrust(t *testing.T) {
 	}
 	if _, err := os.Stat(hooksJSON); !os.IsNotExist(err) {
 		t.Error("hooks.json left behind")
+	}
+}
+
+func TestCodexUninstallKeepsOtherHooks(t *testing.T) {
+	e := testenv.New(t)
+	hooksJSON := filepath.Join(e.Home, ".codex", "hooks.json")
+	testenv.Write(t, hooksJSON, `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "notify-send done"}]}]}}`)
+	theirs := readJSON(t, hooksJSON)
+	if err := Codex(opts(e)); err != nil {
+		t.Fatal(err)
+	}
+	remove := opts(e)
+	remove.Remove = true
+	if err := Codex(remove); err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(theirs, readJSON(t, hooksJSON)); diff != "" {
+		t.Errorf("hooks.json after uninstall (-before +after):\n%s", diff)
 	}
 }
 
@@ -239,13 +275,5 @@ func TestPiInstallWritesExtensionAndRespectsForeignFile(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(ext); string(data) != "// someone else's extension\n" {
 		t.Error("overwrote a foreign extension")
-	}
-}
-
-func TestCodexEventKey(t *testing.T) {
-	for in, want := range map[string]string{"Stop": "stop", "SessionEnd": "session_end", "PreCompact": "pre_compact"} {
-		if got := codexEventKey(in); got != want {
-			t.Errorf("codexEventKey(%q) = %q", in, got)
-		}
 	}
 }

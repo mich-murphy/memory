@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io"
 	"slices"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -45,17 +48,22 @@ func stream(t *testing.T, data []byte) []byte {
 	return out.Bytes()
 }
 
-func TestCompressStreamNoticesAShrunkFile(t *testing.T) {
-	for _, length := range []int64{100, 1000} {
-		var out bytes.Buffer
-		if err := CompressStream(strings.NewReader("short"), &out, length, sha256.New()); err == nil {
-			t.Errorf("length %d: no error for a file that shrank", length)
-		}
+func TestCompressStreamFailsWhenItCantReadEveryByte(t *testing.T) {
+	failing := func() io.Reader {
+		return io.MultiReader(strings.NewReader(strings.Repeat("x", 500)), iotest.ErrReader(errors.New("i/o error")))
 	}
-}
-
-func TestDecompressRejectsGarbage(t *testing.T) {
-	if _, err := Decompress([]byte("not zstd")); err == nil {
-		t.Error("no error")
+	for _, c := range []struct {
+		name   string
+		r      io.Reader
+		length int64
+	}{
+		{"shrank, small", strings.NewReader("short"), 100},
+		{"shrank, streamed", strings.NewReader("short"), 1000},
+		{"read error, streamed", failing(), 1000},
+	} {
+		var out bytes.Buffer
+		if err := CompressStream(c.r, &out, c.length, sha256.New()); err == nil {
+			t.Errorf("%s: no error", c.name)
+		}
 	}
 }

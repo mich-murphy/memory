@@ -96,8 +96,10 @@ type Syncer struct {
 	sessionRoots  map[adapters.SessionRef]string
 	touched       map[adapters.SessionRef]bool
 	snapshotCache map[snapshotKey]state.SnapshotEntry
-	workDir       string
-	tmpDir        string
+	// strays holds, by key, the objects an earlier run left that this one couldn't delete.
+	strays  map[string][]string
+	workDir string
+	tmpDir  string
 }
 
 func New(cfg *config.Config, bucket store.Store, db *state.State, ads map[string]adapters.Adapter, opts Options) *Syncer {
@@ -365,6 +367,10 @@ func (p *pool) wait() error {
 }
 
 func (s *Syncer) Run(ctx context.Context, files []adapters.SessionFile) (*Summary, error) {
+	s.clearStaging()
+	if err := s.deleteStrays(ctx); err != nil {
+		return &s.Summary, err
+	}
 	pending, err := s.db.PendingManifests()
 	if err != nil {
 		return &s.Summary, err
@@ -388,7 +394,7 @@ func (s *Syncer) Run(ctx context.Context, files []adapters.SessionFile) (*Summar
 		case !u.needsUpload:
 			stateErr = s.finish(u)
 		default:
-			stateErr = p.add(u)
+			stateErr = s.send(p, u)
 		}
 	}
 	if err := p.wait(); err != nil && stateErr == nil {
@@ -401,6 +407,55 @@ func (s *Syncer) Run(ctx context.Context, files []adapters.SessionFile) (*Summar
 		return &s.Summary, err
 	}
 	return &s.Summary, s.db.Flush()
+}
+
+// send records an upload over a key's earlier pieces as a stray until its answer is recorded,
+// so a run that never hears back is cleaned up after. A first upload needs no record: with
+// nothing recorded, the next run uploads the file whole again.
+func (s *Syncer) send(p *pool, u *upload) error {
+	if u.piece.Start > 0 || len(u.replaced) > 0 {
+		if err := s.db.AddStray(state.Stray{Key: u.key, Object: u.piece.Object}); err != nil {
+			return err
+		}
+		if err := s.db.Flush(); err != nil {
+			return err
+		}
+	}
+	return p.add(u)
+}
+
+// clearStaging removes temp copies of large files that a killed run left behind.
+func (s *Syncer) clearStaging() {
+	entries, _ := os.ReadDir(s.tmpDir) // staging reports a tmp dir it can't use
+	for _, e := range entries {
+		_ = os.Remove(filepath.Join(s.tmpDir, e.Name())) // one left now is removed by the next run
+	}
+}
+
+// deleteStrays deletes the segments earlier runs left, since a reader would take one for the
+// bytes after its start. A key whose base or a segment is still stray is uploaded whole.
+func (s *Syncer) deleteStrays(ctx context.Context) error {
+	strays, err := s.db.Strays()
+	if err != nil || len(strays) == 0 {
+		return err
+	}
+	errs := parallel(strays, func(x state.Stray) error {
+		if x.Object == x.Key {
+			return nil
+		}
+		return s.bucket.Delete(ctx, x.Object)
+	})
+	s.strays = map[string][]string{}
+	for i, x := range strays {
+		if x.Object == x.Key || errs[i] != nil {
+			s.strays[x.Key] = append(s.strays[x.Key], x.Object)
+			continue
+		}
+		if err := s.db.RemoveStray(x); err != nil {
+			return err
+		}
+	}
+	return s.db.Flush()
 }
 
 func (s *Syncer) fail(path string, err error) {

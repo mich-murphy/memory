@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"uuid"
+
+	"github.com/mich-murphy/memory/internal/fsutil"
 )
 
 type Config struct {
@@ -159,35 +161,41 @@ func sanitize(name string) string {
 // laptops called "macbook", VMs rebuilt from one image).
 func MachineUUID(configDir string) (string, error) {
 	path := filepath.Join(configDir, "machine-id")
-	if data, err := os.ReadFile(path); err == nil {
-		if v := strings.TrimSpace(string(data)); v != "" {
-			return sanitize(v), nil
-		}
+	if id, err := readMachineID(path); id != "" || err != nil {
+		return id, err
 	}
+	// Written whole under another name and linked into place, so runs starting together all
+	// read one id and a crash can't leave the file empty.
 	id := uuid.New().String()
-	if err := os.MkdirAll(configDir, 0o700); err != nil {
+	tmp := path + "." + id
+	if err := fsutil.WriteFileAtomic(tmp, []byte(id+"\n"), 0o600); err != nil {
 		return "", fmt.Errorf("machine id: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	defer func() { _ = os.Remove(tmp) }() // a leftover holds only an unused id
+	err := os.Link(tmp, path)
 	if errors.Is(err, fs.ErrExist) {
-		data, rerr := os.ReadFile(path)
-		if rerr != nil {
-			return "", fmt.Errorf("machine id: %w", rerr)
+		var existing string
+		if existing, err = readMachineID(path); existing == "" && err == nil {
+			err = os.Rename(tmp, path) // left empty by an earlier version that wrote it in place
 		}
-		if v := strings.TrimSpace(string(data)); v != "" {
-			return sanitize(v), nil
-		}
-		return id, nil
 	}
 	if err != nil {
 		return "", fmt.Errorf("machine id: %w", err)
 	}
-	if _, err := f.WriteString(id + "\n"); err != nil {
-		_ = f.Close()
+	return readMachineID(path)
+}
+
+// readMachineID returns "" for a missing or empty file.
+func readMachineID(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
 		return "", fmt.Errorf("machine id: %w", err)
 	}
-	if err := f.Close(); err != nil {
-		return "", fmt.Errorf("machine id: %w", err)
+	if id := strings.TrimSpace(string(data)); id != "" {
+		return sanitize(id), nil
 	}
-	return id, nil
+	return "", nil
 }

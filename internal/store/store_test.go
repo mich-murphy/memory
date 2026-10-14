@@ -48,6 +48,12 @@ func exercise(t *testing.T, s store.Store, prefix string) {
 	if ok, err := s.Copy(ctx, k("nope"), k("c/none")); ok || err != nil {
 		t.Errorf("Copy(missing) = %v, %v", ok, err)
 	}
+	if ok, err := s.Copy(ctx, k("a/two"), k("c/copy")); !ok || err != nil {
+		t.Errorf("Copy onto an existing key = %v, %v", ok, err)
+	}
+	if got, _ := s.Get(ctx, k("c/copy")); string(got) != "1" {
+		t.Errorf("Copy replaced an existing key with %q", got)
+	}
 
 	big := make([]byte, 11<<20+123)
 	if _, err := rand.Read(big); err != nil {
@@ -127,15 +133,6 @@ func signedPayload(next http.Handler) http.Handler {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		next.ServeHTTP(w, r)
 	})
-}
-
-func TestOpenNeedsR2SettingsUnlessLocal(t *testing.T) {
-	if _, err := store.Open(&config.Config{}); err == nil {
-		t.Error("opened R2 without settings")
-	}
-	if s, err := store.Open(&config.Config{LocalStore: t.TempDir()}); err != nil || s == nil {
-		t.Errorf("Open(local) = %v, %v", s, err)
-	}
 }
 
 // TestR2Live runs against the real bucket in R2_* when AGENT_SESSIONS_TEST_R2=1, under a

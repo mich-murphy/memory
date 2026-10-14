@@ -111,7 +111,7 @@ func TestStalePendingMarkerIsTakenOver(t *testing.T) {
 }
 
 func TestHookNeverFails(t *testing.T) {
-	for _, payload := range []string{"", "not json", "[1,2]", `{"transcript_path": null}`} {
+	for _, payload := range []string{"", "not json", "[1,2]", `{"transcript_path": null}`, `{"transcript_path": ""}`} {
 		t.Run(payload, func(t *testing.T) {
 			testenv.New(t)
 			calls := fakeSpawn(t)
@@ -165,7 +165,9 @@ func TestSessionStartRecordsLaunchContext(t *testing.T) {
 		"hook_event_name": "SessionStart", "source": "startup", "cwd": "/w", "transcript_path": "/x/s.jsonl",
 		"permission_mode": "default",
 	})
+	before := float64(time.Now().Unix())
 	withStdin(t, payload, func() { Run(t.Context(), "claude", nil, "", ExtensionArgs{}) })
+	after := float64(time.Now().Unix() + 1)
 	if len(*calls) != 2 {
 		t.Fatalf("spawned %v", *calls)
 	}
@@ -177,6 +179,16 @@ func TestSessionStartRecordsLaunchContext(t *testing.T) {
 	env := launch["env"].(map[string]any)
 	if launch["source"] != "startup" || launch["cwd"] != "/w" || launch["permission_mode"] != "default" {
 		t.Errorf("launch = %v", launch)
+	}
+	var input map[string]any
+	if err := json.Unmarshal([]byte(payload), &input); err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(input, launch["hook_input"]); diff != "" {
+		t.Errorf("hook_input (-payload +got):\n%s", diff)
+	}
+	if at, _ := launch["recorded_at"].(float64); at < before || at > after {
+		t.Errorf("recorded_at = %v, want Unix seconds between %v and %v", launch["recorded_at"], before, after)
 	}
 	if env["CLAUDE_CODE_ENTRYPOINT"] != "cli" || env["ANTHROPIC_MODEL"] != "opus" {
 		t.Errorf("env = %v", env)
@@ -208,8 +220,9 @@ func TestSessionStartsAndEndsQueueOneSweepAtATime(t *testing.T) {
 		t.Fatalf("a turn queued a sweep: %v", s)
 	}
 
-	withStdin(t, `{"hook_event_name": "SessionStart", "transcript_path": "/x/b.jsonl"}`, func() {
-		Run(t.Context(), "claude", nil, "", ExtensionArgs{})
+	// Codex names no transcript for a session it doesn't persist; the sweep still runs.
+	withStdin(t, `{"hook_event_name": "SessionStart", "transcript_path": null}`, func() {
+		Run(t.Context(), "codex", nil, "", ExtensionArgs{})
 	})
 	s := sweeps()
 	if len(s) != 1 || s[0].event != "sweep:SessionStart" || s[0].agent != "" || s[0].path != "" ||
@@ -288,6 +301,16 @@ func TestAgentProcessIsFoundAmongAncestors(t *testing.T) {
 	tree[10] = entry{[]string{"/usr/local/bin/codex exec --full-auto"}, 1}
 	if got := launchProcess("codex")["pid"]; got != 10 {
 		t.Errorf("codex pid from a whole ps line = %v", got)
+	}
+
+	// Run by hand, not by an agent: the walk stops below init and records no command line.
+	clear(tree)
+	tree[10] = entry{[]string{"/bin/bash", "-l"}, 9}
+	tree[9] = entry{nil, 1} // a process that cleared its command line
+	tree[1] = entry{[]string{"/sbin/init"}, 0}
+	want = map[string]any{"argv": nil, "ancestry": []string{"bash", "?"}}
+	if diff := cmp.Diff(want, launchProcess("claude")); diff != "" {
+		t.Errorf("no agent:\n%s", diff)
 	}
 }
 

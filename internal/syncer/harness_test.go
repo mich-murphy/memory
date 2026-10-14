@@ -17,6 +17,7 @@ import (
 	"github.com/mich-murphy/memory/internal/config"
 	"github.com/mich-murphy/memory/internal/raw"
 	"github.com/mich-murphy/memory/internal/state"
+	"github.com/mich-murphy/memory/internal/store"
 	"github.com/mich-murphy/memory/internal/testenv"
 )
 
@@ -84,6 +85,10 @@ func (m *memStore) Copy(_ context.Context, src, dst string) (bool, error) {
 	m.wait()
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.record("head "+dst, 0)
+	if _, ok := m.objects[dst]; ok {
+		return true, nil
+	}
 	o, ok := m.objects[src]
 	if ok {
 		m.objects[dst] = o
@@ -124,7 +129,9 @@ type rig struct {
 	w      *testenv.Workload
 	cfg    *config.Config
 	bucket *memStore
-	now    time.Time
+	// store, when set, stands between the syncer and bucket.
+	store store.Store
+	now   time.Time
 }
 
 func newRig(tb testing.TB, w *testenv.Workload, stateDir string) *rig {
@@ -172,7 +179,11 @@ func (r *rig) run(files func(*Syncer) ([]adapters.SessionFile, error)) *Summary 
 			r.tb.Fatal(err)
 		}
 	}()
-	s := New(r.cfg, r.bucket, db, adapters.All(r.w.Home), Options{
+	var st store.Store = r.bucket
+	if r.store != nil {
+		st = r.store
+	}
+	s := New(r.cfg, st, db, adapters.All(r.w.Home), Options{
 		Trigger: "sweep:test", Logger: slog.New(slog.DiscardHandler), Version: "test",
 	})
 	s.clock = func() time.Time { return r.now }

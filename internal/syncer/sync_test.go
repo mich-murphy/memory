@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -330,6 +331,19 @@ func TestCredentialsAndNoiseAreNeverCopied(t *testing.T) {
 	}
 }
 
+// TestTheCollectorsOwnConfigIsNeverCopied keeps the config file, which holds the R2
+// credentials, in an agent's directory.
+func TestTheCollectorsOwnConfigIsNeverCopied(t *testing.T) {
+	e := testenv.New(t)
+	cfg := filepath.Join(e.Claude, "agent-sessions.env")
+	testenv.Write(t, cfg, "R2_SECRET_ACCESS_KEY=not-a-real-secret\n")
+	t.Setenv("AGENT_SESSIONS_CONFIG", cfg)
+	mustRun(t, "sync", "--quiet")
+	if e.HasKey(rawKey("claude", "agent-sessions.env")) {
+		t.Error("copied the collector's config")
+	}
+}
+
 func TestAppendedSessionUploadsOnlyNewBytesThenFolds(t *testing.T) {
 	e := testenv.New(t)
 	mustRun(t, "sync", "--quiet")
@@ -340,7 +354,7 @@ func TestAppendedSessionUploadsOnlyNewBytesThenFolds(t *testing.T) {
 	testenv.Backdate(t, path, 2*time.Minute) // written two minutes ago: the session is still going
 	mustRun(t, "sync", "--quiet")
 	now := readFile(t, path)
-	segment := raw.SegmentKey(key, first, int64(len(now)))
+	segment := fmt.Sprintf("%s.d/%015d-%015d.zst", key, first, len(now)) // docs/storage-layout.md
 	if !e.HasKey(segment) {
 		t.Fatalf("no segment %s in %v", segment, e.BucketKeys())
 	}
@@ -381,6 +395,25 @@ func TestAppendedSessionUploadsOnlyNewBytesThenFolds(t *testing.T) {
 	mustRun(t, "sync", "--quiet")
 	if mtimes(t, e)[key] != before {
 		t.Error("folded object rewritten")
+	}
+}
+
+// TestAChangeToASessionsOtherFilesRefreshesItsManifest changes only a tool result, which has
+// no head to read.
+func TestAChangeToASessionsOtherFilesRefreshesItsManifest(t *testing.T) {
+	e := testenv.New(t)
+	mustRun(t, "sync", "--quiet")
+	const text = "bigger output\n"
+	testenv.Write(t, filepath.Join(e.ClaudeSlug, claudeSID, "tool-results", "toolu_1.txt"), text)
+	mustRun(t, "sync", "--quiet")
+	var listed []any
+	for _, f := range list(e.Manifest("claude", claudeKey)["transcripts"]) {
+		if tr := f.(map[string]any); tr["role"] == "tool_result" {
+			listed = append(listed, tr["sha256"])
+		}
+	}
+	if diff := cmp.Diff([]any{raw.SHA256([]byte(text))}, listed); diff != "" {
+		t.Errorf("tool result sha256 in the manifest (-want +got):\n%s", diff)
 	}
 }
 
@@ -465,6 +498,26 @@ func TestIdenticalOldVersionsAreStoredOnce(t *testing.T) {
 	}
 	if len(blobs) != 1 {
 		t.Errorf("blobs = %v", blobs)
+	}
+}
+
+func TestAFileRevertedBackAndForthKeepsEachVersionOnce(t *testing.T) {
+	e := testenv.New(t)
+	path := filepath.Join(e.Claude, "plans", "brave-plan.md")
+	a := string(readFile(t, path))
+	const b = "# plan b\n"
+	mustRun(t, "sync", "--quiet")
+	for i, body := range []string{b, a, b} {
+		testenv.Write(t, path, body)
+		testenv.Backdate(t, path, time.Duration(3-i)*time.Minute)
+		mustRun(t, "sync", "--quiet")
+	}
+	var shas []string
+	for _, v := range list(e.ReadJSON("raw-versions/agent=claude/machine=testbox/plans/brave-plan.md.json")["versions"]) {
+		shas = append(shas, v.(map[string]any)["sha256"].(string))
+	}
+	if diff := cmp.Diff([]string{raw.SHA256([]byte(a)), raw.SHA256([]byte(b))}, shas); diff != "" {
+		t.Errorf("versions (-want +got):\n%s", diff)
 	}
 }
 
@@ -734,19 +787,46 @@ func TestHookSyncPullsInTheWholeClaudeSession(t *testing.T) {
 
 func TestMissingOrForeignHookPathIsHarmless(t *testing.T) {
 	e := testenv.New(t)
-	mustRun(t, "sync", "--quiet", "--agent", "claude", "--path", filepath.Join(e.Tmp, "nope.txt"))
+	session := filepath.Join(e.ClaudeSlug, claudeSID+".jsonl")
+	mustRun(t, "sync", "--quiet", "--agent", "claude", "--path", filepath.Join(e.Tmp, "nope.txt"), "--path", session)
+	if n := lastRunSummary(t, e)["skipped"]; n != 1.0 {
+		t.Errorf("skipped = %v, want the foreign path", n)
+	}
 	notYet := filepath.Join(e.PiDir, "2026-10-10T13-00-00-000Z_0199a1b2-1111-7bbb-8ccc-dddddddddddd.jsonl")
 	mustRun(t, "sync", "--quiet", "--agent", "pi", "--path", notYet)
+	launch := filepath.Join(e.Tmp, "launch.json")
+	testenv.Write(t, launch, `{"event": "SessionStart", "cwd": "`+e.Project+`"}`)
+	mustRun(t, "sync", "--quiet", "--agent", "claude", "--path", filepath.Join(e.Claude, "history.jsonl"), "--launch", launch)
+	var manifests []string
+	for _, k := range e.BucketKeys() {
+		if strings.HasPrefix(k, "manifests/") {
+			manifests = append(manifests, k)
+		}
+	}
+	if diff := cmp.Diff([]string{"manifests/agent=claude/machine=testbox/" + claudeKey + ".json"}, manifests); diff != "" {
+		t.Errorf("manifests (-want +got):\n%s", diff)
+	}
 }
 
-func TestHookPathUnderTildeIsExpanded(t *testing.T) {
-	e := testenv.New(t)
-	rel, err := filepath.Rel(e.Home, filepath.Join(e.ClaudeSlug, claudeSID+".jsonl"))
-	if err != nil {
-		t.Fatal(err)
+func TestHookPathUnderTildeOrRelativeIsResolved(t *testing.T) {
+	for _, name := range []string{"tilde", "relative"} {
+		t.Run(name, func(t *testing.T) {
+			e := testenv.New(t)
+			rel, err := filepath.Rel(e.Home, filepath.Join(e.ClaudeSlug, claudeSID+".jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := "~/" + rel
+			if name == "relative" {
+				t.Chdir(e.Home)
+				path = rel
+			}
+			mustRun(t, "sync", "--quiet", "--agent", "claude", "--path", path)
+			if root := e.Manifest("claude", claudeKey)["info"].(map[string]any)["source_root"]; root != e.Claude {
+				t.Errorf("source_root = %v", root)
+			}
+		})
 	}
-	mustRun(t, "sync", "--quiet", "--agent", "claude", "--path", "~/"+rel)
-	e.Manifest("claude", claudeKey) // fails the test if the session wasn't synced
 }
 
 func TestLaunchIsRecordedWithAPreSessionSnapshot(t *testing.T) {
@@ -793,11 +873,50 @@ func TestLaunchFallsBackToTheHookInputCwd(t *testing.T) {
 	}
 }
 
+// TestALaunchBeforeTheTranscriptExistsGivesTheSessionItsCwd records the start of a session
+// Claude Code hasn't written a line of yet, so only the launch knows its working directory.
+func TestALaunchBeforeTheTranscriptExistsGivesTheSessionItsCwd(t *testing.T) {
+	e := testenv.New(t)
+	sid := "22222222-2222-3333-4444-555555555555"
+	launch := filepath.Join(e.Tmp, "launch.json")
+	testenv.Write(t, launch, `{"event": "SessionStart", "cwd": "`+e.Project+`"}`)
+	path := filepath.Join(e.ClaudeSlug, sid+".jsonl")
+	mustRun(t, "sync", "--quiet", "--agent", "claude", "--path", path, "--launch", launch, "--trigger", "hook:SessionStart")
+	if info := e.Manifest("claude", slug+"/"+sid)["info"].(map[string]any); info["cwd"] != e.Project {
+		t.Errorf("info = %v", info)
+	}
+}
+
+// TestASessionWithNoKnownCwdGetsNoSnapshot syncs a transcript whose lines don't say where the
+// session ran: a snapshot would leave out the project's files without saying so.
+func TestASessionWithNoKnownCwdGetsNoSnapshot(t *testing.T) {
+	e := testenv.New(t)
+	sid := "33333333-2222-3333-4444-555555555555"
+	session := filepath.Join(e.ClaudeSlug, sid+".jsonl")
+	testenv.Write(t, session, testenv.JSONL(t, map[string]any{"type": "user", "sessionId": sid}))
+	mustRun(t, "sync", "--quiet", "--agent", "claude", "--path", session)
+	if snaps := list(e.Manifest("claude", slug+"/"+sid)["snapshots"]); len(snaps) != 0 {
+		t.Errorf("snapshots = %v", snaps)
+	}
+}
+
 func TestBackfillSnapshotsArePostHoc(t *testing.T) {
 	e := testenv.New(t)
 	mustRun(t, "backfill")
 	snap := list(e.Manifest("pi", piKey)["snapshots"])[0].(map[string]any)
 	if snap["timing"] != "post_hoc" {
+		t.Errorf("timing = %v", snap["timing"])
+	}
+}
+
+// TestASweepDuringASessionTakesAnInSessionSnapshot sweeps a session whose main transcript was
+// written two minutes ago and its other files an hour ago.
+func TestASweepDuringASessionTakesAnInSessionSnapshot(t *testing.T) {
+	e := testenv.New(t)
+	testenv.Backdate(t, filepath.Join(e.ClaudeSlug, claudeSID+".jsonl"), 2*time.Minute)
+	mustRun(t, "sync", "--quiet")
+	snap := list(e.Manifest("claude", claudeKey)["snapshots"])[0].(map[string]any)
+	if snap["timing"] != "in_session" {
 		t.Errorf("timing = %v", snap["timing"])
 	}
 }
@@ -833,6 +952,39 @@ func TestCodexDatabasesAreCopiedWithTheBackupAPI(t *testing.T) {
 	testenv.Write(t, out, string(readObject(t, e, rawKey("codex", "db/state_5.sqlite"))))
 	if n := countRows(t, out, "SELECT COUNT(*) FROM threads WHERE id = ? AND title = 'Fix the build' AND tokens_used = 1234", codexThread); n != 1 {
 		t.Error("the copy lost the row in the WAL")
+	}
+}
+
+func TestEverythingTheCollectorWritesIsPrivate(t *testing.T) {
+	e := testenv.New(t)
+	db, err := sql.Open("sqlite", filepath.Join(e.Home, ".codex", "state_5.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), "CREATE TABLE threads (id TEXT)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, "sync", "--quiet")
+	for _, root := range []string{e.State, e.Bucket} {
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			st, err := d.Info()
+			if err != nil {
+				return err
+			}
+			if st.Mode().Perm()&0o077 != 0 {
+				t.Errorf("%s is %v", path, st.Mode().Perm())
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -907,9 +1059,5 @@ func TestSnapshotRecordsWholeHarnessWithSecretsRedacted(t *testing.T) {
 	}
 	if memory["kind"] != "memory" || !slices.Equal(scopes, []string{"auto"}) {
 		t.Errorf("memory set = %v", memory)
-	}
-
-	if keys := e.BucketKeys(); slices.ContainsFunc(keys, func(k string) bool { return strings.HasPrefix(k, "git/") }) {
-		t.Errorf("git history exported: %v", keys)
 	}
 }

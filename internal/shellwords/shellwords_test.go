@@ -2,21 +2,21 @@ package shellwords
 
 import (
 	"errors"
+	"os/exec"
 	"slices"
+	"strings"
 	"testing"
 )
 
-func TestQuote(t *testing.T) {
-	for in, want := range map[string]string{
-		"":                  "''",
-		"/usr/bin/x":        "/usr/bin/x",
-		"My Tools":          "'My Tools'",
-		"it's":              `'it'"'"'s'`,
-		"a=b,c:d@e%f+g.h-i": "a=b,c:d@e%f+g.h-i",
-	} {
-		if got := quote(in); got != want {
-			t.Errorf("quote(%q) = %s, want %s", in, got, want)
-		}
+func TestJoinIsReadBackByAShell(t *testing.T) {
+	words := []string{"", "/usr/bin/x", "My Tools", "it's", `a"b`, "$HOME", `back\slash`, "*", "~/x", "two\nlines", "a=b,c:d@e%f+g.h-i"}
+	out, err := exec.CommandContext(t.Context(), "sh", "-c", `printf '%s\0' `+Join(words)).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
+	if !slices.Equal(got, words) {
+		t.Errorf("sh read %q back as %q", Join(words), got)
 	}
 }
 

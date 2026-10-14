@@ -64,6 +64,13 @@ CREATE TABLE IF NOT EXISTS pieces (
     object TEXT NOT NULL,
     PRIMARY KEY (key, start)
 );
+-- Objects that may be in the bucket without being among their file's pieces: an upload whose
+-- answer never came, or a replaced segment that couldn't be deleted.
+CREATE TABLE IF NOT EXISTS strays (
+    key TEXT NOT NULL,
+    object TEXT NOT NULL,
+    PRIMARY KEY (key, object)
+);
 CREATE TABLE IF NOT EXISTS raw_versions (
     key TEXT NOT NULL,
     sha256 TEXT NOT NULL,
@@ -129,7 +136,16 @@ func Open(ctx context.Context, dir string) (*State, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("state: %w", err)
 	}
-	dsn := "file:" + filepath.Join(dir, "state.sqlite3") +
+	path := filepath.Join(dir, "state.sqlite3")
+	// SQLite would create it under the umask, usually world-readable.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0o600)
+	if err == nil {
+		err = errors.Join(f.Chmod(0o600), f.Close())
+	}
+	if err != nil {
+		return nil, fmt.Errorf("state: %w", err)
+	}
+	dsn := "file:" + path +
 		"?_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -375,6 +391,35 @@ func (s *State) SetPieces(key string, pieces []raw.Piece) error {
 
 func (s *State) AddPiece(key string, p raw.Piece) error {
 	return s.exec("INSERT OR REPLACE INTO pieces VALUES (?,?,?,?,?)", key, p.Start, p.End, p.SHA256, p.Object)
+}
+
+type Stray struct {
+	Key, Object string
+}
+
+func (s *State) Strays() ([]Stray, error) {
+	return queryAll(s, "SELECT key, object FROM strays ORDER BY key, object", nil,
+		func(rows *sql.Rows, x *Stray) error { return rows.Scan(&x.Key, &x.Object) })
+}
+
+func (s *State) AddStray(x Stray) error {
+	return s.exec("INSERT OR IGNORE INTO strays VALUES (?,?)", x.Key, x.Object)
+}
+
+func (s *State) RemoveStray(x Stray) error {
+	return s.exec("DELETE FROM strays WHERE key = ? AND object = ?", x.Key, x.Object)
+}
+
+func (s *State) SetStrays(key string, objects []string) error {
+	if err := s.exec("DELETE FROM strays WHERE key = ?", key); err != nil {
+		return err
+	}
+	for _, o := range objects {
+		if err := s.AddStray(Stray{key, o}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type Version struct {

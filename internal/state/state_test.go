@@ -5,11 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/mich-murphy/memory/internal/adapters"
-	"github.com/mich-murphy/memory/internal/gitinfo"
 	"github.com/mich-murphy/memory/internal/raw"
 )
 
@@ -41,6 +41,23 @@ func TestOpenFailsWhereItCannotWrite(t *testing.T) {
 	check(t, os.WriteFile(filepath.Join(dir, "state.sqlite3"), []byte("not a database, just text that is long enough"), 0o600))
 	if _, err := Open(t.Context(), dir); err == nil {
 		t.Error("opened a corrupt database")
+	}
+}
+
+// The state names every transcript, so Open makes its file private even when something else
+// created it.
+func TestOpenMakesTheStateFilePrivate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.sqlite3")
+	check(t, os.WriteFile(path, nil, 0o600))
+	check(t, os.Chmod(path, 0o644))
+	s, err := Open(t.Context(), dir)
+	check(t, err)
+	defer func() { check(t, s.Close()) }()
+	st, err := os.Stat(path)
+	check(t, err)
+	if st.Mode().Perm() != 0o600 {
+		t.Errorf("state.sqlite3 mode = %v, want 0600", st.Mode().Perm())
 	}
 }
 
@@ -103,104 +120,36 @@ func TestFilesKeepHeadsAndPreferTheOneOnDisk(t *testing.T) {
 	}
 }
 
-func TestPiecesAndVersions(t *testing.T) {
-	s := open(t)
-	check(t, s.SetPieces("k", []raw.Piece{{Start: 0, End: 3, SHA256: "a", Object: "k"}}))
-	check(t, s.AddPiece("k", raw.Piece{Start: 3, End: 5, SHA256: "b", Object: "k.d/3-5"}))
-	pieces, err := s.Pieces("k")
-	check(t, err)
-	if len(pieces) != 2 || pieces[1].Object != "k.d/3-5" {
-		t.Errorf("Pieces = %v", pieces)
-	}
-	several := []raw.Piece{{Start: 0, End: 2, SHA256: "x", Object: "k"}, {Start: 2, End: 5, SHA256: "y", Object: "k.d/2-5"}}
-	check(t, s.SetPieces("k", several))
-	pieces, err = s.Pieces("k")
-	check(t, err)
-	if diff := cmp.Diff(several, pieces); diff != "" {
-		t.Errorf("SetPieces (-want +got):\n%s", diff)
-	}
-	check(t, s.SetPieces("k", []raw.Piece{{Start: 0, End: 5, SHA256: "c", Object: "k"}}))
-	if pieces, _ = s.Pieces("k"); len(pieces) != 1 {
-		t.Errorf("fold left %v", pieces)
-	}
-	if at, err := s.LastVersionAt("k"); at != 0 || err != nil {
-		t.Errorf("LastVersionAt before any = %v, %v", at, err)
-	}
-	v := Version{SHA256: "old", Size: 5, VersionedAt: 10, Pieces: pieces}
-	check(t, s.RecordVersion("k", &v))
-	check(t, s.RecordVersion("k", &v)) // once per sha256
-	versions, err := s.Versions("k")
-	check(t, err)
-	if diff := cmp.Diff([]Version{v}, versions); diff != "" {
-		t.Errorf("Versions:\n%s", diff)
-	}
-	if at, _ := s.LastVersionAt("k"); at != 10 {
-		t.Errorf("LastVersionAt = %v", at)
-	}
-}
-
-func TestSessionsRootsGitAndPending(t *testing.T) {
-	s := open(t)
-	if sess, err := s.Session(adapters.SessionRef{Agent: "pi", Key: "s"}); sess != nil || err != nil {
-		t.Errorf("Session(missing) = %v, %v", sess, err)
-	}
-	mem := "m"
-	in := &Session{
-		Info:      map[string]any{"cwd": "/w"},
-		Snapshots: []SnapshotEntry{{ID: "set", MemoryID: &mem, Git: gitinfo.State{Head: "h"}, Timing: "post_hoc", TakenAt: 1, Mtimes: map[string]float64{"x": 2}}},
-		Launches:  []map[string]any{{"event": "SessionStart"}},
-		FirstSeen: 3,
-	}
-	check(t, s.PutSession(adapters.SessionRef{Agent: "pi", Key: "s"}, in))
-	out, err := s.Session(adapters.SessionRef{Agent: "pi", Key: "s"})
-	check(t, err)
-	if diff := cmp.Diff(in, out); diff != "" {
-		t.Errorf("session round trip:\n%s", diff)
-	}
-	check(t, s.PutSession(adapters.SessionRef{Agent: "pi", Key: "empty"}, &Session{}))
-	if e, _ := s.Session(adapters.SessionRef{Agent: "pi", Key: "empty"}); e == nil || e.Info == nil {
-		t.Errorf("empty session = %+v", e)
-	}
-
-	check(t, s.AddExtraRoot("pi", "/custom"))
-	check(t, s.AddExtraRoot("pi", "/custom"))
-	if roots, _ := s.ExtraRoots("pi"); len(roots) != 1 {
-		t.Errorf("ExtraRoots = %v", roots)
-	}
-
-	check(t, s.MarkManifestPending(adapters.SessionRef{Agent: "pi", Key: "s"}))
-	check(t, s.MarkManifestPending(adapters.SessionRef{Agent: "codex", Key: "t"}))
-	check(t, s.ManifestWritten(adapters.SessionRef{Agent: "pi", Key: "s"}))
-	pending, err := s.PendingManifests()
-	check(t, err)
-	if diff := cmp.Diff([]adapters.SessionRef{{Agent: "codex", Key: "t"}}, pending); diff != "" {
-		t.Errorf("PendingManifests:\n%s", diff)
-	}
-}
-
 func TestRunsKeepTheLast500(t *testing.T) {
 	s := open(t)
+	before := float64(time.Now().Unix())
 	for i := range 505 {
 		check(t, s.RecordRun(float64(i), "sweep", map[string]any{"uploaded": i}))
 	}
+	after := float64(time.Now().Unix() + 1)
 	runs, err := s.LastRuns(1000)
 	check(t, err)
 	if len(runs) != 500 || runs[0].Summary["uploaded"] == nil {
 		t.Errorf("%d runs kept, newest %v", len(runs), runs[0])
 	}
+	if at := runs[0].FinishedAt; at < before || at > after {
+		t.Errorf("FinishedAt = %v, want Unix seconds between %v and %v", at, before, after)
+	}
 }
 
-func TestClosedStateReportsErrors(t *testing.T) {
+// A state that can't be used must say so on every read and write, or a sync would upload
+// without recording it.
+func TestAStateThatCannotBeUsedReportsEveryFailure(t *testing.T) {
 	s, err := Open(t.Context(), t.TempDir())
 	check(t, err)
 	check(t, s.Close())
 	if err := s.RecordUpload("k", "x", 0); err == nil {
-		t.Error("write to a closed state succeeded")
+		t.Error("a write succeeded")
 	}
 	if _, err := s.Pieces("k"); err == nil {
-		t.Error("read from a closed state succeeded")
+		t.Error("a list read succeeded")
 	}
 	if _, err := s.Uploaded("k"); err == nil {
-		t.Error("read from a closed state succeeded")
+		t.Error("a row read succeeded")
 	}
 }

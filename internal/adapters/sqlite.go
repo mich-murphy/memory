@@ -70,7 +70,11 @@ func backupSQLite(ctx context.Context, src, dest string) error {
 		return fmt.Errorf("backup %s: %w", src, err)
 	}
 	tmp := dest + ".partial"
-	_ = os.Remove(tmp)
+	_ = os.Remove(tmp) // a leftover from a run that died; WriteFile reports a real problem
+	// SQLite would create it under the umask, usually world-readable.
+	if err := os.WriteFile(tmp, nil, 0o600); err != nil {
+		return fmt.Errorf("backup %s: %w", src, err)
+	}
 	u := url.URL{Scheme: "file", Path: src, RawQuery: "mode=ro&_pragma=busy_timeout(10000)"}
 	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
