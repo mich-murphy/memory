@@ -1,9 +1,13 @@
 package fsutil
 
 import (
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 func TestWriteFileAtomic(t *testing.T) {
@@ -25,6 +29,16 @@ func TestWriteFileAtomic(t *testing.T) {
 	entries, _ := os.ReadDir(filepath.Dir(path))
 	if len(entries) != 1 {
 		t.Errorf("temp files left: %v", entries)
+	}
+	failing := io.MultiReader(strings.NewReader("partial"), iotest.ErrReader(errors.New("read failed")))
+	if err := WriteAtomic(path, failing, 0o600); err == nil {
+		t.Error("WriteAtomic succeeded with a failing reader")
+	}
+	if data, _ := os.ReadFile(path); string(data) != "two" {
+		t.Errorf("a failed write left %q", data)
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(path)); len(entries) != 1 {
+		t.Errorf("a failed write left temp files: %v", entries)
 	}
 	if err := WriteFileAtomic(filepath.Join(path, "under-a-file"), nil, 0o600); err == nil {
 		t.Error("wrote under a regular file")

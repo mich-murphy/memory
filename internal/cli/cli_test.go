@@ -75,27 +75,28 @@ func TestInstallDryRunTouchesNothing(t *testing.T) {
 func TestInstallSkipsAgentsNotOnThisMachine(t *testing.T) {
 	e := testenv.New(t)
 	onlyAgentSessionsOnPath(t)
-	if err := os.RemoveAll(filepath.Join(e.Home, ".pi")); err != nil {
+	if err := os.RemoveAll(filepath.Join(e.Home, ".codex")); err != nil {
 		t.Fatal(err)
 	}
 	code, out, _ := run("install")
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
-	if !strings.Contains(out, "pi: not used on this machine") {
+	if !strings.Contains(out, "codex: not used on this machine") {
 		t.Errorf("output:\n%s", out)
 	}
-	if _, err := os.Stat(filepath.Join(e.Home, ".pi")); !os.IsNotExist(err) {
-		t.Error("created ~/.pi")
+	if _, err := os.Stat(filepath.Join(e.Home, ".codex")); !os.IsNotExist(err) {
+		t.Error("created ~/.codex")
 	}
-	if _, err := os.Stat(filepath.Join(e.Home, ".codex", "hooks.json")); err != nil {
-		t.Error("codex hooks not installed")
+	ext := install.PiExtensionPath(e.Home)
+	if _, err := os.Stat(ext); err != nil {
+		t.Error("pi extension not installed after skipping codex")
 	}
 	if code, out, _ := run("uninstall"); code != 0 {
 		t.Fatalf("uninstall: exit %d\n%s", code, out)
 	}
-	if _, err := os.Stat(filepath.Join(e.Home, ".codex", "hooks.json")); !os.IsNotExist(err) {
-		t.Error("codex hooks.json left behind")
+	if _, err := os.Stat(ext); !os.IsNotExist(err) {
+		t.Error("pi extension left behind")
 	}
 }
 
@@ -192,5 +193,25 @@ func TestASyncThatCannotGetTheLockLeavesTheBucketAlone(t *testing.T) {
 	unlock()
 	if code, out, _ := run("sync"); code != 0 || len(e.BucketKeys()) == 0 {
 		t.Errorf("after unlock: exit %d, %s", code, out)
+	}
+}
+
+// A session-start hook leaves the launch in a file; the sync it starts puts it in the session's
+// manifest and removes the file.
+func TestSyncRecordsTheLaunchTheHookLeft(t *testing.T) {
+	e := testenv.New(t)
+	launch := filepath.Join(e.State, "pending", "launch-test.json")
+	testenv.Write(t, launch, `{"event": "session_start", "source": "startup", "cwd": "`+e.Project+`"}`)
+	transcript := filepath.Join(e.PiDir, testenv.PiKey+".jsonl")
+	code, out, errOut := run("sync", "--agent", "pi", "--path", transcript, "--launch", launch, "--trigger", "hook:session_start")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s%s", code, out, errOut)
+	}
+	got, _ := e.Manifest("pi", testenv.PiKey)["launch"].(map[string]any)
+	if got["source"] != "startup" || got["event"] != "session_start" {
+		t.Errorf("manifest launch = %v", got)
+	}
+	if _, err := os.Stat(launch); !os.IsNotExist(err) {
+		t.Errorf("launch file left behind: %v", err)
 	}
 }

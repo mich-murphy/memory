@@ -1,9 +1,12 @@
 package adapters
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 // FuzzSessionInfo feeds arbitrary transcript heads to every agent's parser: a malformed or
@@ -63,6 +66,7 @@ func TestClassifyRoles(t *testing.T) {
 		{"pi", "extensions/e.ts", RoleConfig, ""},
 		{"pi", "experimental/x.json", RoleExperimental, ""},
 		{"pi", "sessions/--w--/s.jsonl", RoleMain, "s"},
+		{"pi", "sessions/--w--/notes.txt", RoleUnknown, ""},
 	} {
 		a := all[tc.agent]
 		root := a.CanonicalRoot()
@@ -70,5 +74,57 @@ func TestClassifyRoles(t *testing.T) {
 		if !ok || sf.Role != tc.role || sf.SessionKey != tc.session {
 			t.Errorf("%s %s = %q %q %v, want %q %q", tc.agent, tc.rel, sf.Role, sf.SessionKey, ok, tc.role, tc.session)
 		}
+	}
+}
+
+// Keys are the bucket layout (docs/storage-layout.md): a second agent directory is keyed under
+// roots/, and Pi sessions from a directory outside the agent dir under dirs/, so neither can
+// overwrite the default directory's files. A path that isn't under its root gets no key.
+func TestKeysKeepEachRootApart(t *testing.T) {
+	other, sessionDir := t.TempDir(), t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", other) // an agent dir with no sessions/ yet
+	all := All(t.TempDir())
+	for _, tc := range []struct {
+		agent, root, rel string // root "" is the agent's canonical root
+		key              string // "" when the file isn't classified
+	}{
+		{"claude", "", "history.jsonl", "history.jsonl"},
+		{"claude", other, "history.jsonl", "roots/" + rootTag(other) + "/history.jsonl"},
+		{"codex", "", "history.jsonl", "history.jsonl"},
+		{"codex", other, "history.jsonl", "roots/" + rootTag(other) + "/history.jsonl"},
+		{"pi", "", "settings.json", "settings.json"},
+		{"pi", other, "settings.json", "roots/" + rootTag(other) + "/settings.json"},
+		{"pi", sessionDir, "--w--/s.jsonl", "dirs/" + rootTag(sessionDir) + "/--w--/s.jsonl"},
+		{"claude", "", "../outside.jsonl", ""},
+		{"codex", "", ".", ""},
+	} {
+		a := all[tc.agent]
+		root := tc.root
+		if root == "" {
+			root = a.CanonicalRoot()
+		}
+		sf, ok := a.Classify(filepath.Join(root, filepath.FromSlash(tc.rel)), root)
+		if sf.Key != tc.key || ok != (tc.key != "") {
+			t.Errorf("%s %s under %s: key %q, %v; want %q", tc.agent, tc.rel, root, sf.Key, ok, tc.key)
+		}
+	}
+}
+
+func TestReadHeadReadsTheFirstLinesThatAreObjects(t *testing.T) {
+	data := []byte("{\"a\": 1}\n\n  \nnot json\n[1]\n{\"b\": 2}\n{\"c\": 3}\n")
+	want := []map[string]any{{"a": json.Number("1")}, {"b": json.Number("2")}}
+	if diff := cmp.Diff(want, ReadHead(data, 6)); diff != "" {
+		t.Errorf("ReadHead (-want +got):\n%s", diff)
+	}
+}
+
+func TestPiSessionInfoComesFromTheSessionHeader(t *testing.T) {
+	head := []map[string]any{
+		{"type": "session", "version": json.Number("3"), "id": "s1", "cwd": "/w", "parentSession": ""},
+		{"type": "message", "id": "m1", "cwd": "/elsewhere"},
+	}
+	want := map[string]any{"session_id": "s1", "cwd": "/w", "format_version": json.Number("3")}
+	if diff := cmp.Diff(want, NewPi(t.TempDir()).SessionInfo(head)); diff != "" {
+		t.Errorf("SessionInfo (-want +got):\n%s", diff)
 	}
 }

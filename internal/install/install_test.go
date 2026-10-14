@@ -194,7 +194,7 @@ func TestCodexInstallWritesHooksJSONAndReportsTrust(t *testing.T) {
 	if diff := cmp.Diff(want, firstHandler(t, cfg, "SessionEnd")); diff != "" {
 		t.Errorf("SessionEnd handler:\n%s", diff)
 	}
-	if !slices.ContainsFunc(o.Log, func(l string) bool { return strings.Contains(l, "/hooks") }) {
+	if !slices.ContainsFunc(o.Log, func(l string) bool { return strings.Contains(l, "run /hooks") }) {
 		t.Errorf("no trust hint in %v", o.Log)
 	}
 	if n, trusted := CodexTrustState(root); n != 6 || trusted != 0 {
@@ -218,6 +218,14 @@ func TestCodexInstallWritesHooksJSONAndReportsTrust(t *testing.T) {
 		t.Errorf("trust after all = %d/%d", trusted, n)
 	}
 
+	dryRun := opts(e)
+	dryRun.Remove, dryRun.DryRun = true, true
+	if err := Codex(dryRun); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(hooksJSON); err != nil {
+		t.Errorf("a dry-run uninstall removed hooks.json: %v", err)
+	}
 	remove := opts(e)
 	remove.Remove = true
 	if err := Codex(remove); err != nil {
@@ -225,6 +233,24 @@ func TestCodexInstallWritesHooksJSONAndReportsTrust(t *testing.T) {
 	}
 	if _, err := os.Stat(hooksJSON); !os.IsNotExist(err) {
 		t.Error("hooks.json left behind")
+	}
+}
+
+func TestCodexUninstallKeepsOtherHooks(t *testing.T) {
+	e := testenv.New(t)
+	hooksJSON := filepath.Join(e.Home, ".codex", "hooks.json")
+	testenv.Write(t, hooksJSON, `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "notify-send done"}]}]}}`)
+	theirs := readJSON(t, hooksJSON)
+	if err := Codex(opts(e)); err != nil {
+		t.Fatal(err)
+	}
+	remove := opts(e)
+	remove.Remove = true
+	if err := Codex(remove); err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(theirs, readJSON(t, hooksJSON)); diff != "" {
+		t.Errorf("hooks.json after uninstall (-before +after):\n%s", diff)
 	}
 }
 

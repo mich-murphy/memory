@@ -96,6 +96,24 @@ AWS_SECRET_ACCESS_KEY = "[redacted]"
 			want: `{"env": {"X": "[redacted]"}, "abc": 1}`,
 		},
 		{
+			name:  "a TOML secret that is also a quoted key only changes the value",
+			agent: "codex", file: "config.toml",
+			in:   "\"abc\" = 1\n\n[mcp_servers.s.env]\nK = \"abc\"\n",
+			want: "\"abc\" = 1\n\n[mcp_servers.s.env]\nK = \"[redacted]\"\n",
+		},
+		{
+			name:  "a TOML file without a final newline",
+			agent: "codex", file: "config.toml",
+			in:   "[mcp_servers.s]\nbearer_token = \"bt\"",
+			want: "[mcp_servers.s]\nbearer_token = \"[redacted]\"",
+		},
+		{
+			name:  "a secret escaped as Go's encoder writes it is replaced in place",
+			agent: "claude", file: "settings.json",
+			in:   `{"env": {"DB": "a=1\u0026b=2"},  "model": "opus"}`,
+			want: `{"env": {"DB": "[redacted]"},  "model": "opus"}`,
+		},
+		{
 			name:  "nothing to redact leaves the bytes alone",
 			agent: "claude", file: "settings.json",
 			in:   "{\n\t\"model\": \"opus\"\n}",

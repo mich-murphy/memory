@@ -55,7 +55,7 @@ type upload struct {
 
 func (u *upload) cleanup() {
 	if u.bodyPath != "" {
-		_ = os.Remove(u.bodyPath) // a leftover temp file is swept with the tmp dir
+		_ = os.Remove(u.bodyPath) // the next run clears a leftover
 	}
 }
 

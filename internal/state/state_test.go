@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -40,6 +41,23 @@ func TestOpenFailsWhereItCannotWrite(t *testing.T) {
 	check(t, os.WriteFile(filepath.Join(dir, "state.sqlite3"), []byte("not a database, just text that is long enough"), 0o600))
 	if _, err := Open(t.Context(), dir); err == nil {
 		t.Error("opened a corrupt database")
+	}
+}
+
+// The state names every transcript, so Open makes its file private even when something else
+// created it.
+func TestOpenMakesTheStateFilePrivate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.sqlite3")
+	check(t, os.WriteFile(path, nil, 0o600))
+	check(t, os.Chmod(path, 0o644))
+	s, err := Open(t.Context(), dir)
+	check(t, err)
+	defer func() { check(t, s.Close()) }()
+	st, err := os.Stat(path)
+	check(t, err)
+	if st.Mode().Perm() != 0o600 {
+		t.Errorf("state.sqlite3 mode = %v, want 0600", st.Mode().Perm())
 	}
 }
 
@@ -104,13 +122,18 @@ func TestFilesKeepHeadsAndPreferTheOneOnDisk(t *testing.T) {
 
 func TestRunsKeepTheLast500(t *testing.T) {
 	s := open(t)
+	before := float64(time.Now().Unix())
 	for i := range 505 {
 		check(t, s.RecordRun(float64(i), "sweep", map[string]any{"uploaded": i}))
 	}
+	after := float64(time.Now().Unix() + 1)
 	runs, err := s.LastRuns(1000)
 	check(t, err)
 	if len(runs) != 500 || runs[0].Summary["uploaded"] == nil {
 		t.Errorf("%d runs kept, newest %v", len(runs), runs[0])
+	}
+	if at := runs[0].FinishedAt; at < before || at > after {
+		t.Errorf("FinishedAt = %v, want Unix seconds between %v and %v", at, before, after)
 	}
 }
 

@@ -367,6 +367,7 @@ func (p *pool) wait() error {
 }
 
 func (s *Syncer) Run(ctx context.Context, files []adapters.SessionFile) (*Summary, error) {
+	s.clearStaging()
 	if err := s.deleteStrays(ctx); err != nil {
 		return &s.Summary, err
 	}
@@ -421,6 +422,14 @@ func (s *Syncer) send(p *pool, u *upload) error {
 		}
 	}
 	return p.add(u)
+}
+
+// clearStaging removes temp copies of large files that a killed run left behind.
+func (s *Syncer) clearStaging() {
+	entries, _ := os.ReadDir(s.tmpDir) // staging reports a tmp dir it can't use
+	for _, e := range entries {
+		_ = os.Remove(filepath.Join(s.tmpDir, e.Name())) // one left now is removed by the next run
+	}
 }
 
 // deleteStrays deletes the segments earlier runs left, since a reader would take one for the

@@ -102,8 +102,11 @@ func TestEnvFileAndEnvironment(t *testing.T) {
 	if cfg.R2Endpoint != "https://x.r2.example" || cfg.R2Bucket != "sessions" || cfg.R2AccessKeyID != "from-env" {
 		t.Errorf("cfg = %+v", cfg)
 	}
-	if cfg.StateDir != defaultStateDir() {
-		t.Errorf("cfg = %+v", cfg)
+	if want := filepath.Join(dir, ".local", "state", "agent-sessions"); cfg.StateDir != want || cfg.Home != dir {
+		t.Errorf("StateDir = %s, Home = %s, want %s under %s", cfg.StateDir, cfg.Home, want, dir)
+	}
+	if want, err := os.Hostname(); err != nil || cfg.Hostname != want {
+		t.Errorf("Hostname = %q, want %q (%v)", cfg.Hostname, want, err)
 	}
 	if got := cfg.MissingR2Settings(); !slices.Equal(got, []string{"R2_SECRET_ACCESS_KEY"}) {
 		t.Errorf("missing = %v", got)
@@ -121,5 +124,31 @@ func TestMachineIDOverrideIsSafeInAnObjectKey(t *testing.T) {
 		if cfg.MachineID != want {
 			t.Errorf("machine id %q = %q, want %q", in, cfg.MachineID, want)
 		}
+	}
+}
+
+func TestEnvFileValues(t *testing.T) {
+	for _, c := range []struct{ name, body, want string }{
+		{"plain", "R2_BUCKET=sessions\n", "sessions"},
+		{"padded", "  R2_BUCKET = sessions  \n", "sessions"},
+		{"doubleQuoted", `R2_BUCKET="sessions"`, "sessions"},
+		{"singleQuotedExport", "export R2_BUCKET='sessions'\n", "sessions"},
+		{"empty", "R2_BUCKET=\n", ""},
+		{"emptyQuotes", `R2_BUCKET=""`, ""},
+		{"unmatchedQuote", `R2_BUCKET="sessions`, `"sessions`},
+		{"afterJunk", "# settings\nnot a setting\n\nR2_BUCKET=sessions\n", "sessions"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := clearEnv(t)
+			path := filepath.Join(dir, "config.env")
+			testenv.Write(t, path, c.body)
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.R2Bucket != c.want {
+				t.Errorf("R2Bucket = %q, want %q", cfg.R2Bucket, c.want)
+			}
+		})
 	}
 }
