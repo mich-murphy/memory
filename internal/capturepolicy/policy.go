@@ -3,9 +3,12 @@
 package capturepolicy
 
 import (
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/mich-murphy/memory/internal/fsutil"
 )
 
 // IsCredential reports whether a path names a known credential file, including backup copies.
@@ -35,7 +38,7 @@ func isConfig(path, configPath string) bool {
 		return false
 	}
 	return filepath.Clean(path) == filepath.Clean(configPath) ||
-		filepath.Dir(path) == filepath.Dir(configPath) && BaseName(path) == BaseName(configPath)
+		BaseName(path) == BaseName(configPath) && fsutil.SameLocation(filepath.Dir(path), filepath.Dir(configPath))
 }
 
 func isWithin(path, dir string) bool {
@@ -43,7 +46,26 @@ func isWithin(path, dir string) bool {
 		return false
 	}
 	rel, err := filepath.Rel(dir, path)
-	return err == nil && (rel == "." || filepath.IsLocal(rel))
+	if err == nil && (rel == "." || filepath.IsLocal(rel)) {
+		return true
+	}
+	// Resolved path spellings can still differ on case-insensitive filesystems. Walk
+	// ancestors by filesystem identity, including intermediate paths supplied by Resolve.
+	// Do not lowercase whole paths: distinct directories on case-sensitive volumes
+	// must remain distinct. Metadata checks do not read transcript contents.
+	root, err := os.Stat(dir)
+	if err != nil {
+		return false // An unavailable location cannot establish an additional alias.
+	}
+	for current := filepath.Clean(path); ; current = filepath.Dir(current) {
+		info, statErr := os.Stat(current)
+		if statErr == nil && os.SameFile(info, root) {
+			return true
+		}
+		if filepath.Dir(current) == current {
+			return false
+		}
+	}
 }
 
 // backupSuffix recognises editor, dated and compressed copies without decoding their contents.

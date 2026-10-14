@@ -10,6 +10,11 @@ symlink and final identity against `capturepolicy.Policy`. Known credential file
 (including backups) and collector state are excluded. The primary `.claude.json` is permitted only
 by the Claude adapter's explicit `ExcludesClaudeConfig` export/extraction path; that exception does
 not permit its backups or any other excluded identity, and still requires scrubbing.
+Configured config parents and state-directory ancestors are also compared by filesystem identity:
+case aliases remain excluded without conflating distinct directories on case-sensitive volumes.
+Persistent opt-out checks also compare existing root and recorded source-object identities.
+These checks do not provide an atomic filesystem snapshot or defend against hostile concurrent
+path replacement.
 
 After reading, `scrub.Identities` applies the supported schema for **each** recognised filename in
 those identities. Protection does not depend on which agent is collecting: a Claude skill symlink
@@ -33,3 +38,11 @@ duplicate decoded object names, invalid Unicode and trailing documents are rejec
 literal secrets and equivalent decoded string copies are redacted without rewriting object keys.
 Supported environment references and Pi secret-command references remain references. Parser
 errors must not echo credential values.
+
+## Previously archived data
+
+These checks protect new captures. Existing remote objects are not retroactively scrubbed or
+deleted: the append-only archive retains already captured history, including legacy namespaces.
+If a credential is known to have been archived, rotate or revoke it and treat those objects as
+sensitive. Updating the collector, deleting the local cache or changing a filename does not
+remove earlier remote bytes.

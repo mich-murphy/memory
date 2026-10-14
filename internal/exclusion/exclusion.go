@@ -172,7 +172,7 @@ func (r Registry) Excludes(sf adapters.SessionFile) bool {
 		if record.Agent != sf.Agent {
 			continue
 		}
-		sameRoot := record.Root == sf.Root || record.ResolvedRoot == canonical(sf.Root)
+		sameRoot := record.Root == sf.Root || fsutil.SameLocation(record.ResolvedRoot, canonical(sf.Root))
 		if sameRoot && (sf.SessionKey == "" || sessionName(sf.SessionKey) == sessionName(record.SessionKey)) {
 			return true
 		}
@@ -180,16 +180,36 @@ func (r Registry) Excludes(sf adapters.SessionFile) bool {
 		if sf.SourcePath != "" {
 			path = sf.SourcePath
 		}
-		for _, alias := range record.Paths {
-			if canonical(alias) == canonical(path) {
-				return true
-			}
+		if matchesPath(record, path) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesPath(record Record, path string) bool {
+	resolved := canonical(path)
+	for _, alias := range record.Paths {
+		if fsutil.SameLocation(canonical(alias), resolved) {
+			return true
 		}
 	}
 	return false
 }
 
 func (r Registry) ExcludesPath(a adapters.Adapter, path string) bool {
-	sf, ok := classify(a, path)
-	return ok && r.Excludes(sf)
+	if sf, ok := classify(a, path); ok {
+		return r.Excludes(sf)
+	}
+	// A filesystem alias may not retain the agent's logical directory spelling.
+	// Known opted-out objects remain excluded even when classification is unavailable.
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		path = a.Home() + strings.TrimPrefix(path, "~")
+	}
+	for _, record := range r {
+		if record.Agent == a.Name() && matchesPath(record, path) {
+			return true
+		}
+	}
+	return false
 }
