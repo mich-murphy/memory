@@ -90,22 +90,37 @@ This harness is not a replacement for the archive's hostile-store/recovery tests
 ## Keeping async hooks alive
 
 A single immediate print/exec exit can kill queued asynchronous turn hooks before
-they execute. Claude runs in print **stream-json input** mode: stdin stays open
-until an actual `Stop` is observed, then EOF ends the process. Codex runs the real
-interactive CLI through `/usr/bin/script`, with a fixed 40×120 PTY, synthetic
-terminal query responses and a delayed Enter (avoids its paste detector). It is
-asked to quit only after actual `Stop` evidence. Pi's print mode emits and awaits
-its shutdown event normally. The fake model pauses one second before responding
-so asynchronous session-start capture has a chance to run while its real agent
-ancestor is alive. This is controlled scheduling, not a claim that every
-immediate teardown is safe.
+they execute. Claude print **stream-json input** EOF is also nondeterministic for
+`SessionEnd` in 2.1.296: repeated acceptance reproduced missing end hooks even
+when EOF was withheld until both actual `Stop` and a successful final `result`.
+Native debug logs showed cancelled async Stop hooks and no SessionEnd in failed
+runs; exact v3 transcript and launch publication still succeeded. Waiting only
+for a model result therefore does not establish orderly lifecycle shutdown.
+
+Claude and Codex now run their real interactive CLIs through `/usr/bin/script`,
+with a fixed 40×120 PTY, synthetic terminal-query responses and delayed Enter
+(avoids paste detection). The harness keeps stdin open, observes actual `Stop`,
+sends Claude `/exit` or Codex `/quit`, and **waits for process exit before closing
+stdin**. It neither invokes hooks itself nor retries until a lifecycle test
+passes. Claude's onboarding, scratch-project trust and synthetic API-key approval
+fixture affect only its private config directory. Claude's native debug log is
+retained with the evidence. Pi's print mode emits and awaits shutdown normally.
+The fake model pauses one second before responding so asynchronous session-start
+capture can run while its real agent ancestor is alive. This is controlled
+scheduling, not a claim that every immediate teardown is safe.
+
+A reply assertion parses the native JSONL record and requires an **assistant**
+message containing exactly `ACCEPTANCE_OK`. A prompt echo cannot satisfy it (the
+prompt deliberately contains that same string).
 
 ## Offline regression checks and limits
 
 Normal `go test` exercises both SSE formats, rejects unexpected/missing-prompt
 requests, checks Codex identities against independent fixtures, proves the
 observer does not wait for pipe EOF, and tests the v3 committed-chain selection
-against forks, missing parents, corrupt records and uncommitted plans. Live
+against forks, missing parents, corrupt records and uncommitted plans, reconstructs
+a source/launch fixture and rejects stale generations, and distinguishes actual
+assistant replies from prompt echoes. Live
 execution remains separately opt-in.
 
 This validates one no-tool turn per agent on one machine against deterministic
@@ -114,3 +129,22 @@ acceptance, real model quality, OAuth/keychain authentication, interrupted turns
 compaction, subagents, tools, resumption, model-server TLS, or other installed
 agent versions. No isolated R2 credentials were supplied, so R2 is intentionally
 not exercised.
+
+## Repeated v3 validation
+
+After switching to orderly interactive Claude exit, one fixed-count run of
+`-count=3` passed all nine agent sessions under `-race` against the integrated v3
+worktree. Every session proved the complete lifecycle, committed byte-exact final
+source, ordered launch argv and actual capture timestamp. No lifecycle assertion
+was dropped, no explicit sync/backfill was added, and isolation was unchanged.
+Representative third repetition:
+
+| Agent | Exact source bytes | Recorded launch | Actual capture |
+|---|---:|---:|---:|
+| Claude Code 2.1.296 | 234,854 | 1791963143.406818 | 1791963144.851029 |
+| Codex 0.162.1 | 40,397 | 1791963149.608167 | 1791963150.369030 |
+| Pi 1.1.0 | 3,362 | 1791963152.899059 | 1791963153.868039 |
+
+All reported times are Unix seconds, not a claim of pre-prompt capture. Full
+development evidence: `/tmp/memory-v3-live-interactive-three.log`; the invocation
+can be reproduced with the command above and `-count=3` instead of `-count=1`.

@@ -332,8 +332,14 @@ func TestLiveAgents(t *testing.T) {
 			var args []string
 			switch agent {
 			case "claude":
-				liveWrite(t, filepath.Join(l.root, "home", ".claude.json"), `{"hasCompletedOnboarding":true}`, 0o600)
-				args = []string{"--print", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--model", "claude-sonnet-4-6", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--"}
+				// Claude 2.1.296 remembers API-key approval by its last 20 characters.
+				// This approves only the synthetic fixture key, in the scratch config.
+				onboarding, err := json.Marshal(map[string]any{"hasCompletedOnboarding": true, "theme": "dark", "customApiKeyResponses": map[string]any{"approved": []string{"hetic-acceptance-key"}, "rejected": []string{}}, "projects": map[string]any{l.work: map[string]any{"hasTrustDialogAccepted": true}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				liveWrite(t, filepath.Join(l.root, "claude", ".claude.json"), string(onboarding), 0o600)
+				args = []string{"--debug-file", filepath.Join(l.root, "claude-debug.log"), "--permission-mode", "default", "--model", "claude-sonnet-4-6", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--", livePrompt}
 			case "codex":
 				l.trustCodex(t, server.URL)
 				args = []string{"--no-alt-screen", "--sandbox", "read-only", "--disable", "shell_tool", "-c", `web_search="disabled"`}
@@ -515,7 +521,7 @@ func liveVerifyArchive(t *testing.T, root, agent string, args []string, started,
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !bytes.Contains(want, []byte(liveReply)) {
+			if !liveHasAssistantReply(want, agent) {
 				continue
 			}
 			var got []byte
@@ -624,16 +630,14 @@ func liveObserve() error {
 	return syscall.Exec(binary, append([]string{binary}, args...), os.Environ())
 }
 
-// exec tears down asynchronous Stop hooks immediately; a real interactive CLI is
-// held open until Stop has actually executed, then asked to exit normally.
+// Print/exec teardown can cancel async hooks even after a successful result.
+// Keep real interactive CLIs open through Stop, issue /exit or /quit, and wait
+// for orderly process exit before closing input. Never manufacture an end hook.
 func (l liveRun) runHeld(t *testing.T, agent, binary string, args []string) []byte {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
-	cmd := l.command(ctx, binary, args...)
-	if agent == "codex" {
-		cmd = l.command(ctx, "/usr/bin/script", "-q", "/dev/null", "/bin/sh", "-c", "/bin/stty rows 40 cols 120; exec "+shellwords.Join(append([]string{binary}, args...)))
-	}
+	cmd := l.command(ctx, "/usr/bin/script", "-q", "/dev/null", "/bin/sh", "-c", "/bin/stty rows 40 cols 120; exec "+shellwords.Join(append([]string{binary}, args...)))
 	outputPath := filepath.Join(l.root, agent+"-interactive.output")
 	output, err := os.OpenFile(outputPath, os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -654,25 +658,17 @@ func (l liveRun) runHeld(t *testing.T, agent, binary string, args []string) []by
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
+	time.Sleep(time.Second)
+	if _, err := io.WriteString(input, "\x1b[1;1R\x1b[?1;2c"); err != nil {
+		t.Fatal(err)
+	}
 	if agent == "codex" {
-		time.Sleep(time.Second)
-		if _, err := io.WriteString(input, "\x1b[1;1R\x1b[?1;2c"); err != nil {
-			t.Fatal(err)
-		}
 		time.Sleep(time.Second)
 		if _, err := io.WriteString(input, livePrompt); err != nil {
 			t.Fatal(err)
 		}
 		time.Sleep(500 * time.Millisecond)
 		if _, err := io.WriteString(input, "\r"); err != nil {
-			t.Fatal(err)
-		}
-	} else {
-		message, err := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": livePrompt}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := input.Write(append(message, '\n')); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -691,6 +687,7 @@ func (l liveRun) runHeld(t *testing.T, agent, binary string, args []string) []by
 				stopped = true
 			}
 		}
+
 		if stopped {
 			break
 		}
@@ -698,9 +695,10 @@ func (l liveRun) runHeld(t *testing.T, agent, binary string, args []string) []by
 	if !stopped {
 		cancel()
 	}
-	if stopped && agent == "codex" {
+
+	if stopped {
 		time.Sleep(300 * time.Millisecond)
-		if _, err := io.WriteString(input, "/quit"); err != nil {
+		if _, err := io.WriteString(input, map[string]string{"claude": "/exit", "codex": "/quit"}[agent]); err != nil {
 			t.Fatal(err)
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -708,10 +706,8 @@ func (l liveRun) runHeld(t *testing.T, agent, binary string, args []string) []by
 			t.Fatal(err)
 		}
 	}
-	if err := input.Close(); err != nil {
-		t.Error(err)
-	}
 	err = <-done
+	_ = input.Close() // Wait closed the read/write pipe after the real agent exited.
 	out, readErr := os.ReadFile(outputPath)
 	if readErr != nil {
 		t.Fatal(readErr)
@@ -866,7 +862,7 @@ func liveVerifyV3(t *testing.T, root, agent string, args []string, started, ende
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Contains(want, []byte(liveReply)) || p.File.SHA256 != liveDigest(want) || p.File.Size != int64(len(want)) {
+		if !liveHasAssistantReply(want, agent) || p.File.SHA256 != liveDigest(want) || p.File.Size != int64(len(want)) {
 			continue
 		}
 		var got []byte
@@ -1037,7 +1033,7 @@ func TestLiveV3ReconstructsFinalSourceAndLaunch(t *testing.T) {
 	root := t.TempDir()
 	bucket := filepath.Join(root, "bucket")
 	source := filepath.Join(root, "pi", "sessions", "session.jsonl")
-	original := `{"role":"user","text":"acceptance"}` + "\n" + `{"role":"assistant","text":"ACCEPTANCE_OK"}` + "\n"
+	original := `{"type":"message","message":{"role":"user","content":[{"type":"text","text":"acceptance"}]}}` + "\n" + `{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"ACCEPTANCE_OK"}]}}` + "\n"
 	liveWrite(t, source, original, 0o600)
 	var pieces []map[string]any
 	start := 0
@@ -1079,5 +1075,65 @@ func TestLiveV3ReconstructsFinalSourceAndLaunch(t *testing.T) {
 	liveWrite(t, source, original+"{\"late\":true}\n", 0o600)
 	if liveVerifyV3(t, root, "pi", []string{"--print", "prompt"}, time.Unix(10, 0), time.Unix(20, 0)) {
 		t.Fatal("stale generation accepted after final source grew")
+	}
+}
+
+// The prompt itself contains ACCEPTANCE_OK. Only an actual assistant response
+// proves the real agent consumed the fake model stream; string search is not enough.
+func liveHasAssistantReply(source []byte, agent string) bool {
+	type message struct {
+		Role    string `json:"role"`
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	for line := range bytes.SplitSeq(source, []byte{'\n'}) {
+		var record struct {
+			Type    string  `json:"type"`
+			Message message `json:"message"`
+			Payload message `json:"payload"`
+		}
+		if json.Unmarshal(line, &record) != nil {
+			continue
+		}
+		reply := record.Message
+		if agent == "codex" {
+			if record.Type != "response_item" {
+				continue
+			}
+			reply = record.Payload
+		}
+		if reply.Role != "assistant" {
+			continue
+		}
+		for _, content := range reply.Content {
+			if content.Text == liveReply {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestLiveReplyRequiresAssistantNotPromptEcho(t *testing.T) {
+	for _, agent := range []string{"claude", "codex", "pi"} {
+		t.Run(agent, func(t *testing.T) {
+			field, kind := "message", "message"
+			if agent == "claude" {
+				kind = "assistant"
+			}
+			if agent == "codex" {
+				field, kind = "payload", "response_item"
+			}
+			for _, role := range []string{"user", "assistant"} {
+				record := fmt.Sprintf(`{"type":%q,%q:{"role":%q,"content":[{"type":"text","text":"ACCEPTANCE_OK"}]}}`, kind, field, role)
+				if got := liveHasAssistantReply([]byte(record+"\n"), agent); got != (role == "assistant") {
+					t.Fatalf("assistant reply(%s) = %t", role, got)
+				}
+			}
+			if liveHasAssistantReply([]byte(`{"type":"assistant","message":{"role":"assistant","content":[{"text":"wrong"}]}}`), agent) {
+				t.Fatal("wrong reply accepted")
+			}
+		})
 	}
 }
