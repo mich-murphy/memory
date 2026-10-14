@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/mich-murphy/memory/internal/adapters"
+	"github.com/mich-murphy/memory/internal/capturepolicy"
+	"github.com/mich-murphy/memory/internal/config"
 	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/jsonx"
 	"github.com/mich-murphy/memory/internal/raw"
@@ -49,22 +51,39 @@ type SkippedFile struct {
 type scopedName struct{ scope, name string }
 
 type collected struct {
-	agent   string
-	entries []*entry
-	skipped []SkippedFile
-	counts  map[string]int
-	seen    map[scopedName]bool
+	agent        string
+	entries      []*entry
+	skipped      []SkippedFile
+	counts       map[string]int
+	seen         map[scopedName]bool
+	configPath   string
+	configTarget string
+	stateDir     string
+	statePath    string
 }
 
 func newCollected(agent string) *collected {
-	return &collected{agent: agent, skipped: []SkippedFile{}, counts: map[string]int{}, seen: map[scopedName]bool{}}
+	statePath, err := filepath.Abs(config.StateDir())
+	if err != nil {
+		statePath = config.StateDir()
+	}
+	return &collected{
+		agent: agent, skipped: []SkippedFile{}, counts: map[string]int{}, seen: map[scopedName]bool{},
+		configPath:   filepath.Join(realPath(filepath.Dir(config.FilePath())), filepath.Base(config.FilePath())),
+		configTarget: realPath(config.FilePath()), stateDir: realPath(config.StateDir()), statePath: statePath,
+	}
 }
 
 func (c *collected) add(scope, path, name string) *entry {
-	if c.seen[scopedName{scope, name}] || adapters.IsCredential(filepath.Base(path)) {
+	if c.seen[scopedName{scope, name}] {
 		return nil
 	}
-	st, err := os.Stat(path)
+	resolved := realPath(path)
+	abs, err := filepath.Abs(path)
+	if err != nil || capturepolicy.Excludes(abs, resolved, c.configPath, c.stateDir) || capturepolicy.Excludes(abs, resolved, c.configTarget, c.statePath) {
+		return nil
+	}
+	st, err := os.Stat(resolved)
 	if err != nil {
 		return nil
 	}
@@ -76,18 +95,16 @@ func (c *collected) add(scope, path, name string) *entry {
 		c.skipped = append(c.skipped, SkippedFile{Scope: scope, Path: name, Reason: "too_large", Size: st.Size()})
 		return nil
 	}
-	body, err := os.ReadFile(path)
+	body, err := os.ReadFile(resolved)
 	if err != nil {
 		return nil
 	}
-	if body, err = scrub.File(c.agent, filepath.Base(path), body); err != nil {
+	if body, err = scrub.Paths(c.agent, path, resolved, body); err != nil {
 		c.skipped = append(c.skipped, SkippedFile{Scope: scope, Path: name, Reason: "unparseable", Size: st.Size()})
 		return nil
 	}
 	c.seen[scopedName{scope, name}] = true
 	c.counts[scope]++
-	resolved := realPath(path)
-	abs, _ := filepath.Abs(path)
 	e := &entry{scope: scope, path: name, body: body, mtime: float64(st.ModTime().UnixNano()) / 1e9, realPath: resolved}
 	if resolved != abs {
 		e.target = resolved

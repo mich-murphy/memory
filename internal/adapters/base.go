@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mich-murphy/memory/internal/capturepolicy"
 	"github.com/mich-murphy/memory/internal/fsutil"
 	"github.com/mich-murphy/memory/internal/jsonx"
 )
@@ -128,8 +129,7 @@ func All(home string) map[string]Adapter {
 }
 
 var (
-	credentialNames = map[string]bool{".credentials.json": true, "auth.json": true, "oauth.json": true, "mcp-auth.json": true}
-	skipDirNames    = map[string]bool{
+	skipDirNames = map[string]bool{
 		"node_modules": true, ".git": true, "__pycache__": true, ".venv": true, "venv": true, "cache": true,
 		".cache": true, "tmp": true, ".tmp": true, "temp": true, "shell-snapshots": true, "shell_snapshots": true,
 	}
@@ -152,8 +152,7 @@ func hasAnySuffix(name string, suffixes []string) bool {
 }
 
 func IsCredential(name string) bool {
-	return credentialNames[name] || strings.HasSuffix(name, ".key") || strings.HasSuffix(name, ".pem") ||
-		strings.HasPrefix(name, ".claude.json") || name == ".env" || strings.HasPrefix(name, ".env.")
+	return capturepolicy.IsCredential(name)
 }
 
 func skipped(name string) bool {

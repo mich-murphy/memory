@@ -6,8 +6,11 @@ package scrub
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/json/jsontext"
+	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -15,6 +18,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/mich-murphy/memory/internal/capturepolicy"
 	"github.com/mich-murphy/memory/internal/jsonx"
 )
 
@@ -26,6 +30,7 @@ const (
 	keepReferences keep = iota
 	keepNothing
 	keepReferencesAndEnvNames
+	keepReferencesAndCommands
 	keepURLWithoutCredentials
 	keepArgs // a command line: redacts what Args does
 )
@@ -63,7 +68,7 @@ var (
 	}, mcpRules(""), mcpRules("projects.*."), mcpRules("project.")) // "project." is the snapshot's MCP extract
 	settingsRules  = []rule{r("env.*", keepReferences), r("hooks.*.*.hooks.*.headers.*", keepReferences)}
 	mcpFileRules   = mcpRules("")
-	piModelsRules  = []rule{r("providers.*.apiKey", keepReferencesAndEnvNames), r("providers.*.headers.*", keepReferences)}
+	piModelsRules  = []rule{r("providers.*.apiKey", keepReferencesAndEnvNames), r("providers.*.headers.*", keepReferencesAndCommands)}
 	codexTOMLRules = []rule{
 		r("mcp_servers.*.env.*", keepReferences),
 		r("mcp_servers.*.http_headers.*", keepReferences),
@@ -80,12 +85,8 @@ var (
 	jsonArgRules = slices.Concat(settingsRules, mcpFileRules)
 )
 
-// backupSuffix matches the copies editors and our installer leave beside a config file, which
-// hold the same secrets.
-var backupSuffix = regexp.MustCompile(`(~|\.bak|\.orig|\.old|\.agent-sessions-backup-[0-9-]+)$`)
-
 func rulesFor(agent, name string) ([]rule, format) {
-	switch backupSuffix.ReplaceAllString(name, "") {
+	switch capturepolicy.BaseName(name) {
 	case "claude.json", ".claude.json":
 		return claudeJSONRules, formatJSON
 	case "settings.json", "settings.local.json", "managed-settings.json":
@@ -113,7 +114,7 @@ func Applies(agent, name string) bool {
 // mustn't be uploaded.
 func File(agent, name string, data []byte) ([]byte, error) {
 	rs, f := rulesFor(agent, name)
-	if rs == nil || len(bytes.TrimSpace(data)) == 0 {
+	if rs == nil {
 		return data, nil
 	}
 	out, err := scrubDoc(f, data, rs)
@@ -121,6 +122,17 @@ func File(agent, name string, data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("scrub %s: %w", name, err)
 	}
 	return out, nil
+}
+
+// Paths scrubs both logical and resolved recognised filenames. An unrecognised alias cannot
+// bypass the target's schema, and a recognised alias stays protected even if its target is unknown.
+// Callers must check capturepolicy.Excludes before reading the data.
+func Paths(agent, logical, resolved string, data []byte) ([]byte, error) {
+	out, err := File(agent, filepath.Base(logical), data)
+	if err != nil {
+		return nil, err
+	}
+	return File(agent, filepath.Base(resolved), out)
 }
 
 func scrubDoc(f format, data []byte, rs []rule) ([]byte, error) {
@@ -133,11 +145,12 @@ func scrubDoc(f format, data []byte, rs []rule) ([]byte, error) {
 	if len(redactions) == 0 {
 		return data, nil
 	}
-	if out, ok := replaceInPlace(f, data, redactions); ok && nothingLeftToRedact(f, out, rs) {
+	if out, ok := replaceInPlace(f, data, redactions); ok && noSecretCopies(f, out, redactions) {
 		return out, nil
 	}
 	// Escaped and multi-line strings aren't found in place; re-encoding loses layout and comments.
-	return encode(f, doc)
+	// Replace all equivalent decoded values, not only schema-selected values.
+	return encode(f, replaceCopies(doc, redactions))
 }
 
 var (
@@ -168,6 +181,8 @@ func Args(argv []string) []string {
 		case strings.HasPrefix(strings.TrimSpace(a), "{"):
 			if scrubbed, err := scrubDoc(formatJSON, []byte(a), jsonArgRules); err == nil {
 				out[i] = string(scrubbed)
+			} else {
+				out[i] = Redacted
 			}
 		case hasValue && nameRE.MatchString(name):
 			out[i] = name + "=" + redactFlagValue(name, v)
@@ -200,6 +215,12 @@ func decode(f format, data []byte) (any, error) {
 			return nil, fmt.Errorf("toml: %w", err)
 		}
 		return m, nil
+	}
+	// encoding/json v1 silently replaces duplicate keys, losing earlier secrets. Go 1.27's
+	// jsontext rejects duplicate decoded names (including escapes), invalid Unicode and trailing
+	// data before the compatibility decoder sees the document.
+	if !jsontext.Value(data).IsValid() {
+		return nil, errors.New("json: invalid document or duplicate object names")
 	}
 	if err := jsonx.Decode(data, &doc); err != nil {
 		return nil, err
@@ -305,7 +326,7 @@ func redactArgs(args []any, redactions map[string]string) []any {
 }
 
 var (
-	referenceRE = regexp.MustCompile(`\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*`)
+	referenceRE = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*`)
 	numberRE    = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?$`)
 	envNameRE   = regexp.MustCompile(`^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$`)
 	authWords   = map[string]bool{"bearer": true, "basic": true, "token": true}
@@ -342,8 +363,12 @@ func redact(s string, k keep) string {
 		if holdsNoSecret(s) || strings.HasPrefix(s, "!") || envNameRE.MatchString(s) {
 			return s
 		}
-	case keepReferences:
+	case keepReferencesAndCommands:
 		if holdsNoSecret(s) || strings.HasPrefix(s, "!") {
+			return s
+		}
+	case keepReferences:
+		if holdsNoSecret(s) {
 			return s
 		}
 	case keepArgs:
