@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -354,6 +355,38 @@ func TestProcReadsThisProcess(t *testing.T) {
 	}
 	if _, _, ok := proc(-1); ok {
 		t.Error("proc found pid -1")
+	}
+}
+
+// An agent's stdin is a blocking pipe, which takes no read deadline, and a parent may leave it
+// open after writing the payload, or without writing one.
+func TestReadInputDoesNotWaitForStdinToClose(t *testing.T) {
+	for payload, want := range map[string]map[string]any{
+		`{"transcript_path": "/x/a.jsonl"}`: {"transcript_path": "/x/a.jsonl"},
+		"":                                  {},
+	} {
+		var fds [2]int
+		if err := syscall.Pipe(fds[:]); err != nil {
+			t.Fatal(err)
+		}
+		r, w := os.NewFile(uintptr(fds[0]), "stdin"), os.NewFile(uintptr(fds[1]), "parent")
+		t.Cleanup(func() {
+			_ = w.Close() // ends the reader readInput left behind
+			_ = r.Close()
+		})
+		if _, err := w.WriteString(payload); err != nil {
+			t.Fatal(err)
+		}
+		got := make(chan map[string]any, 1)
+		go func() { got <- readInput(r) }()
+		select {
+		case m := <-got:
+			if diff := cmp.Diff(want, m); diff != "" {
+				t.Errorf("readInput(%q) (-want +got):\n%s", payload, diff)
+			}
+		case <-time.After(stdinTimeout + 2*time.Second):
+			t.Fatalf("readInput(%q) still waiting for stdin to close", payload)
+		}
 	}
 }
 

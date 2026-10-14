@@ -3,11 +3,11 @@
 package hook
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -60,16 +60,25 @@ func readInput(f *os.File) map[string]any {
 	if err != nil || st.Mode()&os.ModeCharDevice != 0 {
 		return map[string]any{}
 	}
-	_ = f.SetReadDeadline(time.Now().Add(stdinTimeout)) // fails for regular files, which never block
-	data, _ := io.ReadAll(io.LimitReader(f, maxStdinSize))
-	if len(bytes.TrimSpace(data)) == 0 {
+	// Decoding stops at the end of the object, so a parent that writes it and never closes stdin
+	// doesn't hold the hook. A deadline can't be set on a blocking pipe, so a parent that writes
+	// nothing is timed out here, leaving the reader to end with the process.
+	read := make(chan map[string]any, 1)
+	go func() {
+		var m map[string]any
+		dec := json.NewDecoder(io.LimitReader(f, maxStdinSize))
+		dec.UseNumber()
+		if dec.Decode(&m) != nil || m == nil {
+			m = map[string]any{}
+		}
+		read <- m
+	}()
+	select {
+	case m := <-read:
+		return m
+	case <-time.After(stdinTimeout):
 		return map[string]any{}
 	}
-	m, ok := jsonx.Map(data)
-	if !ok {
-		return map[string]any{}
-	}
-	return m
 }
 
 func pathsFromInput(data map[string]any) []string {

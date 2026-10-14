@@ -23,6 +23,7 @@ Why each part matters:
 | Codex kills the hook's process group on timeout, and waits for the hook's stdout to close | `command_runner.rs:339`, `:413`, wait_with_output | Own session, so the group kill misses it; stdio detached, so Codex isn't left waiting. Codex's own comment at `:281`: "Successfully completed hooks may intentionally leave detached helpers running" |
 | The transcript can lag the in-memory conversation when a hook fires | hooks docs, `transcript_path` field | The sync waits 3 s before reading. The next turn's hook or the next sweep catches anything later |
 | Stop fires after every turn | all three | Debounce: a marker per transcript means only one sync is queued at a time. The queued one reads the file after its delay, so it includes the turns that arrived meanwhile |
+| A parent can leave the hook's stdin open, and a read deadline can't be set on a blocking pipe | Codex `SessionEnd` is synchronous | Stop reading at the end of the JSON payload, and give up after 2 s if none arrives |
 
 ## The sweep at session start and end
 
