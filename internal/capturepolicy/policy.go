@@ -19,7 +19,8 @@ func IsCredential(path string) bool {
 
 // Excludes checks both the logical path and its resolved target before the caller reads bytes.
 // configPath and stateDir are the active collector locations; pass empty strings if unavailable.
-// Callers must resolve symlinks (including those in parent directories) before calling this.
+// This two-identity compatibility helper cannot inspect intermediate symlink names. New capture
+// paths should use Resolve and Policy.Excludes to check every ancestor and leaf identity.
 func Excludes(logical, resolved, configPath, stateDir string) bool {
 	for _, path := range []string{logical, resolved} {
 		if IsCredential(path) || isConfig(path, configPath) || isWithin(path, stateDir) {

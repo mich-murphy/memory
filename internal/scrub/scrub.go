@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -126,13 +125,29 @@ func File(agent, name string, data []byte) ([]byte, error) {
 
 // Paths scrubs both logical and resolved recognised filenames. An unrecognised alias cannot
 // bypass the target's schema, and a recognised alias stays protected even if its target is unknown.
-// Callers must check capturepolicy.Excludes before reading the data.
+// This compatibility helper only knows two identities. New capture paths should use
+// capturepolicy.Resolve, Policy.Excludes before reading, and Identities after reading.
 func Paths(agent, logical, resolved string, data []byte) ([]byte, error) {
-	out, err := File(agent, filepath.Base(logical), data)
-	if err != nil {
-		return nil, err
+	return Identities(agent, []string{logical, resolved}, data)
+}
+
+// Identities applies all recognised schemas encountered by capturepolicy.Resolve, including
+// intermediate config symlinks. Check a capturepolicy.Policy before reading the data.
+func Identities(agent string, identities []string, data []byte) ([]byte, error) {
+	seen := map[string]bool{}
+	for _, identity := range identities {
+		name := capturepolicy.BaseName(identity)
+		if seen[name] || !Applies(agent, name) {
+			continue
+		}
+		seen[name] = true
+		out, err := File(agent, name, data)
+		if err != nil {
+			return nil, err
+		}
+		data = out
 	}
-	return File(agent, filepath.Base(resolved), out)
+	return data, nil
 }
 
 func scrubDoc(f format, data []byte, rs []rule) ([]byte, error) {
@@ -473,7 +488,7 @@ func replaceNonKeys(f format, data, lit, repl []byte) ([]byte, int) {
 			out.Write(data)
 			return out.Bytes(), n
 		}
-		rest := bytes.TrimLeft(data[i+len(lit):], " \t")
+		rest := bytes.TrimLeft(data[i+len(lit):], " \t\r\n")
 		isKey := len(rest) > 0 && (rest[0] == ':' && f == formatJSON || (rest[0] == '=' || rest[0] == '.') && f == formatTOML)
 		out.Write(data[:i])
 		if isKey {

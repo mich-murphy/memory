@@ -504,3 +504,50 @@ func FuzzEquivalentSecretCopies(f *testing.F) {
 		}
 	})
 }
+
+func TestJSONSecretNamedKeysKeepEveryWhitespaceSeparator(t *testing.T) {
+	for _, space := range []string{"", " ", "\t", "\n", "\r", "\r\n", " \t\r\n"} {
+		input := `{"env":{"KEY":"synthetic-secret"},"synthetic-secret"` + space + `:1,"nested":[{"synthetic-secret"` + space + `:"synthetic-secret"}]}`
+		output, err := File("claude", "settings.json", []byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(output, &doc); err != nil {
+			t.Fatal(err)
+		}
+		if got, ok := doc["synthetic-secret"]; !ok || got != float64(1) {
+			t.Errorf("key whitespace %q: output key/value = %v, %v", space, got, ok)
+		}
+		nested := doc["nested"].([]any)[0].(map[string]any)
+		if got, ok := nested["synthetic-secret"]; !ok || got != Redacted {
+			t.Errorf("nested key whitespace %q: output key/value = %v, %v", space, got, ok)
+		}
+		if got := doc["env"].(map[string]any)["KEY"]; got != Redacted {
+			t.Errorf("env value = %v", got)
+		}
+	}
+}
+
+func TestIdentitiesAppliesAllIntermediateConfigSchemas(t *testing.T) {
+	input := []byte(`{"env":{"KEY":"synthetic-secret"},"mcpServers":{"s":{"headers":{"X-Key":"synthetic-header"}}}}`)
+	output, err := Identities("claude", []string{"skill.md", "settings.json.old~", "mcp.json.bak", "innocent"}, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Env map[string]string `json:"env"`
+		MCP map[string]struct {
+			Headers map[string]string `json:"headers"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(output, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Env["KEY"] != Redacted || doc.MCP["s"].Headers["X-Key"] != Redacted {
+		t.Errorf("decoded identities = %+v", doc)
+	}
+	if strings.Contains(string(output), "synthetic-secret") || strings.Contains(string(output), "synthetic-header") {
+		t.Errorf("literal secret retained: %q", output)
+	}
+}

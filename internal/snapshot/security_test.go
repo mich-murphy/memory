@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,5 +109,97 @@ func TestSnapshotExcludesLogicalStateDirectoryWithExternalTarget(t *testing.T) {
 	c := newCollected("claude")
 	if e := c.add("user", inside, inside); e != nil {
 		t.Errorf("logical collector state entry captured: %+v", e)
+	}
+}
+
+func TestSnapshotStateSubtreeDirectoryAliasWithExternalLeaf(t *testing.T) {
+	d := t.TempDir()
+	state := filepath.Join(d, "state")
+	alias := filepath.Join(d, "alias")
+	outside := filepath.Join(d, "outside.md")
+	if err := os.Mkdir(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(outside, []byte("synthetic-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(state, "launch.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(state, alias); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENT_SESSIONS_STATE_DIR", state)
+	c := newCollected("claude")
+	if e := c.add("user", filepath.Join(alias, "launch.md"), "launch.md"); e != nil {
+		t.Fatalf("state-subtree alias captured: %q", e.body)
+	}
+}
+
+func TestSnapshotCredentialIdentityInSymlinkChain(t *testing.T) {
+	d := t.TempDir()
+	target := filepath.Join(d, "vault-entry")
+	credential := filepath.Join(d, "auth.json")
+	alias := filepath.Join(d, "skill.md")
+	if err := os.WriteFile(target, []byte("synthetic-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, credential); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(credential, alias); err != nil {
+		t.Fatal(err)
+	}
+	if e := newCollected("claude").add("user", alias, "skill.md"); e != nil {
+		t.Fatalf("credential symlink chain captured: %q", e.body)
+	}
+}
+
+func TestSnapshotScrubsIntermediateConfigAndRejectsCycles(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "innocent")
+	settings := filepath.Join(dir, "settings.json.bak~")
+	alias := filepath.Join(dir, "skill.md")
+	if err := os.WriteFile(target, []byte(`{"env":{"KEY":"synthetic-secret"},"copy":"\u0073ynthetic-secret"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("innocent", settings); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(settings, alias); err != nil {
+		t.Fatal(err)
+	}
+	e := newCollected("claude").add("user", alias, "skill.md")
+	if e == nil {
+		t.Fatal("config chain not captured")
+	}
+	var decoded struct {
+		Env  map[string]string `json:"env"`
+		Copy string            `json:"copy"`
+	}
+	if err := json.Unmarshal(e.body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Env["KEY"] != "[redacted]" || decoded.Copy != "[redacted]" {
+		t.Errorf("decoded chain output = %+v", decoded)
+	}
+	if strings.Contains(string(e.body), "synthetic-secret") {
+		t.Errorf("chain output has literal secret: %q", e.body)
+	}
+	a := filepath.Join(dir, "a")
+	b := filepath.Join(dir, "b")
+	if err := os.Symlink(b, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(a, b); err != nil {
+		t.Fatal(err)
+	}
+	if got := newCollected("claude").add("user", a, "a"); got != nil {
+		t.Error("cyclic input captured")
+	}
+	t.Setenv("AGENT_SESSIONS_CONFIG", a)
+	c := newCollected("claude")
+	if c.policyErr == nil || c.add("user", target, "innocent") != nil {
+		t.Error("cyclic protected location did not fail closed")
 	}
 }

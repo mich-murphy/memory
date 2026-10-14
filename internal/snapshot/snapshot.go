@@ -51,26 +51,20 @@ type SkippedFile struct {
 type scopedName struct{ scope, name string }
 
 type collected struct {
-	agent        string
-	entries      []*entry
-	skipped      []SkippedFile
-	counts       map[string]int
-	seen         map[scopedName]bool
-	configPath   string
-	configTarget string
-	stateDir     string
-	statePath    string
+	agent     string
+	entries   []*entry
+	skipped   []SkippedFile
+	counts    map[string]int
+	seen      map[scopedName]bool
+	policy    *capturepolicy.Policy
+	policyErr error
 }
 
 func newCollected(agent string) *collected {
-	statePath, err := filepath.Abs(config.StateDir())
-	if err != nil {
-		statePath = config.StateDir()
-	}
+	policy, err := capturepolicy.New(config.FilePath(), config.StateDir())
 	return &collected{
 		agent: agent, skipped: []SkippedFile{}, counts: map[string]int{}, seen: map[scopedName]bool{},
-		configPath:   filepath.Join(realPath(filepath.Dir(config.FilePath())), filepath.Base(config.FilePath())),
-		configTarget: realPath(config.FilePath()), stateDir: realPath(config.StateDir()), statePath: statePath,
+		policy: policy, policyErr: err,
 	}
 }
 
@@ -78,9 +72,16 @@ func (c *collected) add(scope, path, name string) *entry {
 	if c.seen[scopedName{scope, name}] {
 		return nil
 	}
-	resolved := realPath(path)
+	if c.policyErr != nil {
+		return nil
+	} // an unresolved protected location fails closed
+	resolution, err := capturepolicy.Resolve(path)
+	if err != nil || c.policy.Excludes(resolution.Identities) {
+		return nil
+	}
+	resolved := resolution.Path
 	abs, err := filepath.Abs(path)
-	if err != nil || capturepolicy.Excludes(abs, resolved, c.configPath, c.stateDir) || capturepolicy.Excludes(abs, resolved, c.configTarget, c.statePath) {
+	if err != nil {
 		return nil
 	}
 	st, err := os.Stat(resolved)
@@ -99,7 +100,7 @@ func (c *collected) add(scope, path, name string) *entry {
 	if err != nil {
 		return nil
 	}
-	if body, err = scrub.Paths(c.agent, path, resolved, body); err != nil {
+	if body, err = scrub.Identities(c.agent, resolution.Identities, body); err != nil {
 		c.skipped = append(c.skipped, SkippedFile{Scope: scope, Path: name, Reason: "unparseable", Size: st.Size()})
 		return nil
 	}
