@@ -84,7 +84,9 @@ var (
 	jsonArgRules = slices.Concat(settingsRules, mcpFileRules)
 )
 
-func rulesFor(agent, name string) ([]rule, format) {
+// rulesFor selects the union of supported schemas for this filename, not the collecting agent.
+// Shared settings filenames retain their supported dialect rules; unknown filenames are not DLP.
+func rulesFor(name string) ([]rule, format) {
 	switch capturepolicy.BaseName(name) {
 	case "claude.json", ".claude.json":
 		return claudeJSONRules, formatJSON
@@ -93,26 +95,31 @@ func rulesFor(agent, name string) ([]rule, format) {
 	case ".mcp.json", "mcp.json", "managed-mcp.json":
 		return mcpFileRules, formatJSON
 	case "models.json":
-		if agent == "pi" {
-			return piModelsRules, formatJSON
-		}
+		return piModelsRules, formatJSON
 	case "config.toml", "managed_config.toml":
-		if agent == "codex" {
-			return codexTOMLRules, formatTOML
-		}
+		return codexTOMLRules, formatTOML
 	}
 	return nil, formatJSON
 }
 
-func Applies(agent, name string) bool {
-	r, _ := rulesFor(agent, name)
-	return r != nil
+// Recognizes reports whether a path names a supported protected config, including backups.
+// Streaming capture must check every resolved identity: a config must never take a raw-byte path,
+// even when it belongs to a different agent or has an unrecognised logical alias.
+func Recognizes(path string) bool {
+	rs, _ := rulesFor(path)
+	return rs != nil
 }
 
-// File fails when a file it has rules for doesn't parse: such a file can't be checked, so it
-// mustn't be uploaded.
-func File(agent, name string, data []byte) ([]byte, error) {
-	rs, f := rulesFor(agent, name)
+// Applies is the compatibility form of Recognizes. The collecting agent does not limit protection.
+func Applies(_, name string) bool {
+	return Recognizes(name)
+}
+
+// File applies the supported schemas for name regardless of the collecting agent. It fails when
+// a protected config doesn't parse: such a file can't be checked, so it mustn't be uploaded.
+// The agent argument is retained for compatibility.
+func File(_, name string, data []byte) ([]byte, error) {
+	rs, f := rulesFor(name)
 	if rs == nil {
 		return data, nil
 	}
@@ -132,12 +139,13 @@ func Paths(agent, logical, resolved string, data []byte) ([]byte, error) {
 }
 
 // Identities applies all recognised schemas encountered by capturepolicy.Resolve, including
-// intermediate config symlinks. Check a capturepolicy.Policy before reading the data.
+// intermediate config symlinks and other agents' configs. Schemas are selected by each identity's
+// filename, never by the collecting agent. Check a capturepolicy.Policy before reading the data.
 func Identities(agent string, identities []string, data []byte) ([]byte, error) {
 	seen := map[string]bool{}
 	for _, identity := range identities {
 		name := capturepolicy.BaseName(identity)
-		if seen[name] || !Applies(agent, name) {
+		if seen[name] || !Recognizes(name) {
 			continue
 		}
 		seen[name] = true

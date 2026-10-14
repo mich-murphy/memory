@@ -129,10 +129,10 @@ AWS_SECRET_ACCESS_KEY = "[redacted]"
 			want: "env: sk-secret {",
 		},
 		{
-			name:  "a config.toml outside Codex has no rules",
+			name:  "a config.toml collected by Claude still has Codex rules",
 			agent: "claude", file: "config.toml",
-			in:   "not = [toml",
-			want: "not = [toml",
+			in:   "[mcp_servers.s]\nbearer_token = 'synthetic-token'\n",
+			want: "[mcp_servers.s]\nbearer_token = \"[redacted]\"\n",
 		},
 		{
 			name:  "MCP server args in claude.json at both levels",
@@ -259,8 +259,8 @@ func TestApplies(t *testing.T) {
 		{"claude", "managed-mcp.json", true},
 		{"codex", "managed_config.toml", true},
 		{"pi", "models.json", true},
-		{"claude", "models.json", false},
-		{"pi", "config.toml", false},
+		{"claude", "models.json", true},
+		{"pi", "config.toml", true},
 		{"codex", "history.jsonl", false},
 		{"codex", "config.toml.agent-sessions-backup-20261014-101010", true},
 		{"pi", "models.json~", true},
@@ -337,7 +337,7 @@ func FuzzFile(f *testing.F) {
 		if err != nil || strings.TrimSpace(in) == "" {
 			return
 		}
-		rs, form := rulesFor(file.agent, file.name)
+		rs, form := rulesFor(file.name)
 		if !nothingLeftToRedact(form, out, rs) {
 			t.Errorf("File(%s, %q) = %q, which still has secrets or doesn't parse", file.name, in, out)
 		}

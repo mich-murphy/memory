@@ -215,7 +215,7 @@ func (s *Syncer) prepare(sf adapters.SessionFile) (*upload, error) {
 	mayBeMidLine := filepath.Ext(sf.Path) == ".jsonl" && age < partialLineWindow.Seconds()
 	var c *content
 	// A file seen before is most likely an append, which needs only its new bytes in memory.
-	plain := !sf.Zstd && !scrub.Applies(sf.Agent, filepath.Base(sf.Path))
+	plain := !sf.Zstd && !scrub.Recognizes(sf.Path)
 	if plain && (prev != nil || st.Size() > largeFileSize) {
 		c, err = s.streamedContent(sf.Path, st, prev, saved, mayBeMidLine)
 	} else {
