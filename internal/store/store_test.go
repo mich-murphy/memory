@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/johannesboyne/gofakes3"
@@ -53,6 +54,23 @@ func exercise(t *testing.T, s store.Store, prefix string) {
 	}
 	if got, _ := s.Get(ctx, k("c/copy")); string(got) != "1" {
 		t.Errorf("Copy replaced an existing key with %q", got)
+	}
+	for i, name := range []string{"100% done.md", "what?.md", "a+b.md", "a b.md", "café.md"} {
+		src, dst := k("odd/"+name), k("odd-copy/"+strconv.Itoa(i))
+		if err := s.Put(ctx, src, []byte(name), nil); err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := s.Copy(ctx, src, dst); !ok || err != nil {
+			t.Errorf("Copy(%q) = %v, %v", name, ok, err)
+		}
+		if got, _ := s.Get(ctx, dst); string(got) != name {
+			t.Errorf("copy of %q holds %q", name, got)
+		}
+		for _, key := range []string{src, dst} {
+			if err := s.Delete(ctx, key); err != nil {
+				t.Errorf("Delete %s: %v", key, err)
+			}
+		}
 	}
 
 	big := make([]byte, 11<<20+123)

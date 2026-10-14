@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -199,7 +200,7 @@ func (r *R2) Copy(ctx context.Context, src, dst string) (srcExists bool, err err
 	if !isNotFound(err) {
 		return false, fmt.Errorf("copy %s: %w", src, err)
 	}
-	_, err = r.client.CopyObject(ctx, &s3.CopyObjectInput{Bucket: &r.bucket, Key: &dst, CopySource: aws.String(r.bucket + "/" + src)})
+	_, err = r.client.CopyObject(ctx, &s3.CopyObjectInput{Bucket: &r.bucket, Key: &dst, CopySource: aws.String(copySource(r.bucket, src))})
 	if isNotFound(err) {
 		return false, nil
 	}
@@ -207,6 +208,16 @@ func (r *R2) Copy(ctx context.Context, src, dst string) (srcExists bool, err err
 		return false, fmt.Errorf("copy %s: %w", src, err)
 	}
 	return true, nil
+}
+
+// copySource is bucket/key URL-encoded, as CopyObject requires: a key holding %, ? or + would
+// otherwise name another object. + is encoded too, since a decoder may read it as a space.
+func copySource(bucket, key string) string {
+	parts := strings.Split(bucket+"/"+key, "/")
+	for i, p := range parts {
+		parts[i] = strings.ReplaceAll(url.PathEscape(p), "+", "%2B")
+	}
+	return strings.Join(parts, "/")
 }
 
 func (r *R2) Delete(ctx context.Context, key string) error {
