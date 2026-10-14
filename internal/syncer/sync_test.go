@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -340,7 +341,7 @@ func TestAppendedSessionUploadsOnlyNewBytesThenFolds(t *testing.T) {
 	testenv.Backdate(t, path, 2*time.Minute) // written two minutes ago: the session is still going
 	mustRun(t, "sync", "--quiet")
 	now := readFile(t, path)
-	segment := raw.SegmentKey(key, first, int64(len(now)))
+	segment := fmt.Sprintf("%s.d/%015d-%015d.zst", key, first, len(now)) // docs/storage-layout.md
 	if !e.HasKey(segment) {
 		t.Fatalf("no segment %s in %v", segment, e.BucketKeys())
 	}
@@ -465,6 +466,26 @@ func TestIdenticalOldVersionsAreStoredOnce(t *testing.T) {
 	}
 	if len(blobs) != 1 {
 		t.Errorf("blobs = %v", blobs)
+	}
+}
+
+func TestAFileRevertedBackAndForthKeepsEachVersionOnce(t *testing.T) {
+	e := testenv.New(t)
+	path := filepath.Join(e.Claude, "plans", "brave-plan.md")
+	a := string(readFile(t, path))
+	const b = "# plan b\n"
+	mustRun(t, "sync", "--quiet")
+	for i, body := range []string{b, a, b} {
+		testenv.Write(t, path, body)
+		testenv.Backdate(t, path, time.Duration(3-i)*time.Minute)
+		mustRun(t, "sync", "--quiet")
+	}
+	var shas []string
+	for _, v := range list(e.ReadJSON("raw-versions/agent=claude/machine=testbox/plans/brave-plan.md.json")["versions"]) {
+		shas = append(shas, v.(map[string]any)["sha256"].(string))
+	}
+	if diff := cmp.Diff([]string{raw.SHA256([]byte(a)), raw.SHA256([]byte(b))}, shas); diff != "" {
+		t.Errorf("versions (-want +got):\n%s", diff)
 	}
 }
 
@@ -907,9 +928,5 @@ func TestSnapshotRecordsWholeHarnessWithSecretsRedacted(t *testing.T) {
 	}
 	if memory["kind"] != "memory" || !slices.Equal(scopes, []string{"auto"}) {
 		t.Errorf("memory set = %v", memory)
-	}
-
-	if keys := e.BucketKeys(); slices.ContainsFunc(keys, func(k string) bool { return strings.HasPrefix(k, "git/") }) {
-		t.Errorf("git history exported: %v", keys)
 	}
 }

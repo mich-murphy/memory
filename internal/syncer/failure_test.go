@@ -188,23 +188,6 @@ func TestSnapshotsAreRecheckedAndOnlyAddedWhenSomethingChanged(t *testing.T) {
 	}
 }
 
-func TestSyncWaitsForTheLockThenGivesUp(t *testing.T) {
-	e := testenv.New(t)
-	unlock, err := state.Lock(t.Context(), e.State, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer unlock()
-	if _, err := state.Lock(t.Context(), e.State, 300*time.Millisecond); !errors.Is(err, state.ErrLocked) {
-		t.Errorf("second lock: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
-	defer cancel()
-	if _, err := state.Lock(ctx, e.State, time.Minute); err == nil {
-		t.Error("lock taken while held")
-	}
-}
-
 func TestARewriteIsHeldBackUntilItsOldBytesAreKept(t *testing.T) {
 	e := testenv.New(t)
 	local := store.NewLocal(e.Bucket)

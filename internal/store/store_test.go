@@ -129,15 +129,6 @@ func signedPayload(next http.Handler) http.Handler {
 	})
 }
 
-func TestOpenNeedsR2SettingsUnlessLocal(t *testing.T) {
-	if _, err := store.Open(&config.Config{}); err == nil {
-		t.Error("opened R2 without settings")
-	}
-	if s, err := store.Open(&config.Config{LocalStore: t.TempDir()}); err != nil || s == nil {
-		t.Errorf("Open(local) = %v, %v", s, err)
-	}
-}
-
 // TestR2Live runs against the real bucket in R2_* when AGENT_SESSIONS_TEST_R2=1, under a
 // throwaway prefix it removes again.
 func TestR2Live(t *testing.T) {

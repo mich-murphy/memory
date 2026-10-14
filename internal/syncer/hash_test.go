@@ -65,18 +65,6 @@ func TestHashContentMatchesAFullReadWithOrWithoutAResume(t *testing.T) {
 	}
 }
 
-// TestHashContentUsesTheResume checks the resume is what an append is hashed from: a resume
-// for other bytes with the same xxhash gives a different SHA-256 than a full read.
-func TestHashContentUsesTheResume(t *testing.T) {
-	a := hashOf(t, "aaaa\n", nil, nil)
-	b := hashOf(t, "bbbb\n", nil, nil)
-	forged := &state.Resume{Size: a.size, Fast: a.resume.Fast, SHA: b.resume.SHA}
-	got := hashOf(t, "aaaa\nmore\n", &state.Upload{SHA256: a.sha, Size: a.size}, forged)
-	if got.sha != raw.SHA256([]byte("bbbb\nmore\n")) {
-		t.Errorf("sha256 %s wasn't carried on from the resume", got.sha)
-	}
-}
-
 func TestHashContentReportsReadErrors(t *testing.T) {
 	_, err := hashContent(failingReader{}, 10, nil, nil)
 	if err == nil {

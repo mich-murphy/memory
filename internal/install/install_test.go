@@ -3,6 +3,7 @@ package install
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -200,12 +201,21 @@ func TestCodexInstallWritesHooksJSONAndReportsTrust(t *testing.T) {
 		t.Errorf("trust = %d/%d", trusted, n)
 	}
 
-	// Simulate the user trusting two of them in /hooks.
-	testenv.Append(t, filepath.Join(root, "config.toml"),
-		"\n[hooks.state.\""+hooksJSON+":stop:0:0\"]\ntrusted_hash = \"sha256:x\"\n"+
-			"\n[hooks.state.\""+hooksJSON+":session_end:0:0\"]\ntrusted_hash = \"sha256:y\"\n")
+	trust := func(labels ...string) {
+		t.Helper()
+		var toml strings.Builder
+		for _, l := range labels {
+			fmt.Fprintf(&toml, "\n[hooks.state.%q]\ntrusted_hash = \"sha256:x\"\n", hooksJSON+":"+l+":0:0")
+		}
+		testenv.Append(t, filepath.Join(root, "config.toml"), toml.String())
+	}
+	trust("stop", "session_end")
 	if n, trusted := CodexTrustState(root); n != 6 || trusted != 2 {
-		t.Errorf("trust = %d/%d", trusted, n)
+		t.Errorf("trust after two = %d/%d", trusted, n)
+	}
+	trust("session_start", "subagent_stop", "pre_compact", "interrupt")
+	if n, trusted := CodexTrustState(root); n != 6 || trusted != 6 {
+		t.Errorf("trust after all = %d/%d", trusted, n)
 	}
 
 	remove := opts(e)
@@ -239,13 +249,5 @@ func TestPiInstallWritesExtensionAndRespectsForeignFile(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(ext); string(data) != "// someone else's extension\n" {
 		t.Error("overwrote a foreign extension")
-	}
-}
-
-func TestCodexEventKey(t *testing.T) {
-	for in, want := range map[string]string{"Stop": "stop", "SessionEnd": "session_end", "PreCompact": "pre_compact"} {
-		if got := codexEventKey(in); got != want {
-			t.Errorf("codexEventKey(%q) = %q", in, got)
-		}
 	}
 }

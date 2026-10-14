@@ -5,12 +5,6 @@ stdout 'uploaded 2 files'
 exec agent-sessions sync
 stdout 'uploaded 0 files'
 
-exec agent-sessions --version
-stdout 'dev'
-
-! exec agent-sessions frobnicate
-stderr 'unknown command'
-
 -- home/.claude/projects/-w/11111111-2222-3333-4444-555555555555.jsonl --
 {"type":"user","sessionId":"11111111-2222-3333-4444-555555555555","message":{"role":"user","content":"hi"}}
 -- home/.claude/settings.json --

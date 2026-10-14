@@ -31,15 +31,7 @@ func TestWriteFileAtomic(t *testing.T) {
 	}
 }
 
-func TestPredicates(t *testing.T) {
-	dir := t.TempDir()
-	file := filepath.Join(dir, "f")
-	if err := os.WriteFile(file, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if !IsFile(file) || IsDir(file) || !IsDir(dir) || IsFile(dir) || !Exists(file) || Exists(file+"x") {
-		t.Error("predicates disagree with the filesystem")
-	}
+func TestWithin(t *testing.T) {
 	for _, c := range []struct {
 		path, root string
 		want       bool

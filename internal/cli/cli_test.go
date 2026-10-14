@@ -8,17 +8,23 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/mich-murphy/memory/internal/cli"
 	"github.com/mich-murphy/memory/internal/install"
+	"github.com/mich-murphy/memory/internal/state"
 	"github.com/mich-murphy/memory/internal/testenv"
 )
 
 func run(args ...string) (code int, stdout, stderr string) {
+	return runCtx(context.Background(), args...)
+}
+
+func runCtx(ctx context.Context, args ...string) (code int, stdout, stderr string) {
 	var out, errOut bytes.Buffer
-	code = cli.Main(context.Background(), args, "1.2.3", cli.IO{Stdout: &out, Stderr: &errOut})
+	code = cli.Main(ctx, args, "1.2.3", cli.IO{Stdout: &out, Stderr: &errOut})
 	return code, out.String(), errOut.String()
 }
 
@@ -160,5 +166,31 @@ func TestSyncFailsCleanlyWithoutR2Settings(t *testing.T) {
 	}
 	if code, _, errOut := run("sync"); code != 2 || !strings.Contains(errOut, "R2_") {
 		t.Errorf("exit %d, stderr %q", code, errOut)
+	}
+}
+
+func TestASyncThatCannotGetTheLockLeavesTheBucketAlone(t *testing.T) {
+	e := testenv.New(t)
+	unlock, err := state.Lock(t.Context(), e.State, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		args     []string
+		wantCode int
+	}{{[]string{"sync"}, 3}, {[]string{"sync", "--quiet"}, 0}} {
+		ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+		code, out, errOut := runCtx(ctx, c.args...)
+		cancel()
+		if code != c.wantCode || out != "" {
+			t.Errorf("%v while locked: exit %d, stdout %q, stderr %q", c.args, code, out, errOut)
+		}
+	}
+	if keys := e.BucketKeys(); len(keys) != 0 {
+		t.Errorf("uploaded while another run held the lock: %v", keys)
+	}
+	unlock()
+	if code, out, _ := run("sync"); code != 0 || len(e.BucketKeys()) == 0 {
+		t.Errorf("after unlock: exit %d, %s", code, out)
 	}
 }

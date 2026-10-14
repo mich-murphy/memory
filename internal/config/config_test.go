@@ -59,7 +59,6 @@ func TestEnvFileAndEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("R2_ACCESS_KEY_ID", "from-env")
-	t.Setenv("AGENT_SESSIONS_MACHINE_ID", "My Laptop!")
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +66,7 @@ func TestEnvFileAndEnvironment(t *testing.T) {
 	if cfg.R2Endpoint != "https://x.r2.example" || cfg.R2Bucket != "sessions" || cfg.R2AccessKeyID != "from-env" {
 		t.Errorf("cfg = %+v", cfg)
 	}
-	if cfg.MachineID != "My-Laptop" || cfg.StateDir != defaultStateDir() {
+	if cfg.StateDir != defaultStateDir() {
 		t.Errorf("cfg = %+v", cfg)
 	}
 	if got := cfg.MissingR2Settings(); !slices.Equal(got, []string{"R2_SECRET_ACCESS_KEY"}) {
@@ -75,10 +74,16 @@ func TestEnvFileAndEnvironment(t *testing.T) {
 	}
 }
 
-func TestSanitize(t *testing.T) {
-	for in, want := range map[string]string{"a b/c": "a-b-c", "---": "unknown", "ok.name_1": "ok.name_1"} {
-		if got := sanitize(in); got != want {
-			t.Errorf("sanitize(%q) = %q", in, got)
+func TestMachineIDOverrideIsSafeInAnObjectKey(t *testing.T) {
+	clearEnv(t)
+	for in, want := range map[string]string{"My Laptop!": "My-Laptop", "a b/c": "a-b-c", "---": "unknown", "ok.name_1": "ok.name_1"} {
+		t.Setenv("AGENT_SESSIONS_MACHINE_ID", in)
+		cfg, err := Load("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.MachineID != want {
+			t.Errorf("machine id %q = %q, want %q", in, cfg.MachineID, want)
 		}
 	}
 }

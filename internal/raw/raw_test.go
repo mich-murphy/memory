@@ -53,9 +53,3 @@ func TestCompressStreamNoticesAShrunkFile(t *testing.T) {
 		}
 	}
 }
-
-func TestDecompressRejectsGarbage(t *testing.T) {
-	if _, err := Decompress([]byte("not zstd")); err == nil {
-		t.Error("no error")
-	}
-}

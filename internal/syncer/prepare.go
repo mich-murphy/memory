@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -147,6 +148,13 @@ func (s *Syncer) planVersion(sf adapters.SessionFile, key string, prev *state.Up
 			return nil, nil
 		}
 	}
+	index, err := s.db.Versions(key)
+	if err != nil {
+		return nil, err
+	}
+	if slices.ContainsFunc(index, func(v state.Version) bool { return v.SHA256 == prev.SHA256 }) {
+		return nil, nil
+	}
 	old := pieces
 	if len(old) == 0 {
 		old = []raw.Piece{{Start: 0, End: prev.Size, SHA256: prev.SHA256, Object: key}}
@@ -162,10 +170,6 @@ func (s *Syncer) planVersion(sf adapters.SessionFile, key string, prev *state.Up
 			v.newBlobs = append(v.newBlobs, p)
 		}
 		v.Pieces = append(v.Pieces, raw.Piece{Start: p.Start, End: p.End, SHA256: p.SHA256, Object: blob})
-	}
-	index, err := s.db.Versions(key)
-	if err != nil {
-		return nil, err
 	}
 	v.index, err = jsonx.SortedIndented(map[string]any{"key": sf.Key, "versions": append(index, v.Version)})
 	if err != nil {
