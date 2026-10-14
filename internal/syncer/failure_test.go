@@ -62,11 +62,11 @@ func (f *flakyStore) PutFile(ctx context.Context, key, path string, meta map[str
 	return f.answer(key, f.Store.PutFile(ctx, key, path, meta))
 }
 
-func (f *flakyStore) Copy(ctx context.Context, src, dst string) (bool, error) {
+func (f *flakyStore) Copy(ctx context.Context, src, dst, sha string) (bool, error) {
 	if f.broken(dst) {
 		return false, errInjected
 	}
-	return f.Store.Copy(ctx, src, dst)
+	return f.Store.Copy(ctx, src, dst, sha)
 }
 
 func (f *flakyStore) Delete(ctx context.Context, key string) error {
@@ -233,6 +233,66 @@ func TestARewriteWhoseAnswerWasLostStillKeepsTheEarlierBytes(t *testing.T) {
 	}
 }
 
+// A whole upload whose answer was lost leaves the base object holding bytes the state doesn't
+// know of. A rewrite after it must keep the earlier bytes only from objects that hold them: a
+// blob named for bytes it doesn't hold would corrupt every version that shares it.
+func TestAVersionAfterALostWholeUploadKeepsOnlyTheRightBytes(t *testing.T) {
+	cases := []struct {
+		name string
+		// segment uploads the append as a segment first, so the whole upload is a fold.
+		segment bool
+		lost    bool
+		kept    string
+	}{
+		{"foldLanded", true, true, "a\nb\n"},
+		{"foldFailed", true, false, "a\nb\n"},
+		{"appendLanded", false, true, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := testenv.New(t)
+			local := store.NewLocal(e.Bucket)
+			path := filepath.Join(e.Claude, "plans", "p.md")
+			testenv.Write(t, path, "a\n")
+			testenv.Backdate(t, path, time.Hour)
+			sweep(t, local)
+			testenv.Append(t, path, "b\n")
+			if c.segment {
+				sweep(t, local)
+			}
+			testenv.Backdate(t, path, time.Hour)
+			flaky := &flakyStore{Store: local, fail: []string{"plans/p.md.zst"}}
+			if c.lost {
+				flaky = &flakyStore{Store: local, lost: []string{"plans/p.md.zst"}}
+			}
+			sweep(t, flaky)
+			testenv.Write(t, path, "X\n")
+			testenv.Backdate(t, path, time.Hour)
+			s := sweep(t, local)
+
+			for _, k := range e.BucketKeys() {
+				if sha, ok := strings.CutPrefix(k, "blobs/"); ok && raw.SHA256(readBlob(t, e, k))+".zst" != sha {
+					t.Errorf("%s holds other bytes than it is named for", k)
+				}
+			}
+			index := "raw-versions/agent=claude/machine=testbox/plans/p.md.json"
+			if c.kept == "" {
+				if e.HasKey(index) || s.Errors != 1 {
+					t.Errorf("kept a version of bytes it no longer had, or didn't say so: %d errors", s.Errors)
+				}
+				return
+			}
+			versions := list(e.ReadJSON(index)["versions"])
+			if s.Errors != 0 || len(versions) != 1 {
+				t.Fatalf("%d errors %v, versions %v", s.Errors, s.ErrorMessages, versions)
+			}
+			if got := readPieces(t, e, versions[0].(map[string]any)["pieces"]); string(got) != c.kept {
+				t.Errorf("version holds %q, want %q", got, c.kept)
+			}
+		})
+	}
+}
+
 func TestRewriteWhoseOldObjectIsGoneStillUploads(t *testing.T) {
 	e := testenv.New(t)
 	mustRun(t, "sync", "--quiet")
@@ -243,7 +303,12 @@ func TestRewriteWhoseOldObjectIsGoneStillUploads(t *testing.T) {
 	path := filepath.Join(e.Claude, "plans", "brave-plan.md")
 	testenv.Write(t, path, "# new plan\n")
 	testenv.Backdate(t, path, 2*time.Minute)
-	mustRun(t, "sync", "--quiet")
+	if code, _ := run(t, "sync", "--quiet"); code == 0 {
+		t.Error("losing the earlier bytes went unreported")
+	}
+	if msgs := fmt.Sprint(lastRunSummary(t, e)["error_messages"]); !strings.Contains(msgs, key) {
+		t.Errorf("error messages %s don't name %s", msgs, key)
+	}
 	if string(readBlob(t, e, key)) != "# new plan\n" {
 		t.Error("rewrite not uploaded")
 	}

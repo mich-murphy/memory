@@ -689,11 +689,11 @@ func (f *faultyStore) PutFile(ctx context.Context, key, path string, meta map[st
 	return f.fault("put "+key, func() error { return f.memStore.PutFile(ctx, key, path, meta) })
 }
 
-func (f *faultyStore) Copy(ctx context.Context, src, dst string) (bool, error) {
+func (f *faultyStore) Copy(ctx context.Context, src, dst, sha string) (bool, error) {
 	var ok bool
 	err := f.fault("copy "+dst, func() error {
 		var err error
-		ok, err = f.memStore.Copy(ctx, src, dst)
+		ok, err = f.memStore.Copy(ctx, src, dst, sha)
 		return err
 	})
 	return ok, err

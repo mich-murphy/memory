@@ -190,7 +190,7 @@ func (r *R2) uploadPart(ctx context.Context, key string, uploadID *string, n int
 	return types.CompletedPart{ETag: out.ETag, PartNumber: aws.Int32(n)}, nil
 }
 
-func (r *R2) Copy(ctx context.Context, src, dst string) (srcExists bool, err error) {
+func (r *R2) Copy(ctx context.Context, src, dst, sha string) (ok bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, opTimeout)
 	defer cancel()
 	_, err = r.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &r.bucket, Key: &dst})
@@ -200,7 +200,19 @@ func (r *R2) Copy(ctx context.Context, src, dst string) (srcExists bool, err err
 	if !isNotFound(err) {
 		return false, fmt.Errorf("copy %s: %w", src, err)
 	}
-	_, err = r.client.CopyObject(ctx, &s3.CopyObjectInput{Bucket: &r.bucket, Key: &dst, CopySource: aws.String(copySource(r.bucket, src))})
+	head, err := r.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &r.bucket, Key: &src})
+	if isNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("copy %s: %w", src, err)
+	}
+	if head.Metadata["sha256"] != sha {
+		return false, nil
+	}
+	_, err = r.client.CopyObject(ctx, &s3.CopyObjectInput{
+		Bucket: &r.bucket, Key: &dst, CopySource: aws.String(copySource(r.bucket, src)), CopySourceIfMatch: head.ETag,
+	})
 	if isNotFound(err) {
 		return false, nil
 	}
