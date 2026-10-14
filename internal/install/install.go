@@ -93,6 +93,18 @@ func backup(path string) (string, error) {
 	return name, nil
 }
 
+func remove(path string, o *Options) error {
+	if o.DryRun {
+		o.Logf("would remove: %s", path)
+		return nil
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("install: %w", err)
+	}
+	o.Logf("removed: %s", path)
+	return nil
+}
+
 func write(path string, text []byte, o *Options) error {
 	old, err := os.ReadFile(path)
 	exists := err == nil
@@ -251,6 +263,9 @@ func hookCommand(cmd []string, agent string) string {
 func Claude(o *Options) error {
 	root := adapters.NewClaude(o.Home).Dir()
 	path := filepath.Join(root, "settings.json")
+	if o.Remove && !fsutil.Exists(path) {
+		return nil
+	}
 	settings, err := loadJSON(path)
 	if err != nil {
 		return err
@@ -295,6 +310,9 @@ func raiseCleanupPeriod(settings *jsonx.Object, o *Options) {
 func Codex(o *Options) error {
 	root := adapters.NewCodex(o.Home).Dir()
 	path := filepath.Join(root, "hooks.json")
+	if o.Remove && !fsutil.Exists(path) {
+		return nil
+	}
 	doc, err := loadJSON(path)
 	if err != nil {
 		return err
@@ -305,16 +323,12 @@ func Codex(o *Options) error {
 	}
 	mergeHooks(doc, CodexEvents, command)
 	if o.Remove && doc.Len() == 0 {
-		if fsutil.Exists(path) && !o.DryRun {
+		if !o.DryRun {
 			if _, err := backup(path); err != nil {
 				return err
 			}
-			if err := os.Remove(path); err != nil {
-				return fmt.Errorf("install: %w", err)
-			}
 		}
-		o.Logf("removed: %s", path)
-		return nil
+		return remove(path, o)
 	}
 	body, err := jsonx.Indent(doc, 2)
 	if err != nil {

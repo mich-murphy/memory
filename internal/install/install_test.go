@@ -254,6 +254,25 @@ func TestCodexUninstallKeepsOtherHooks(t *testing.T) {
 	}
 }
 
+func TestUninstallWithoutTheAgentsChangesAndReportsNothing(t *testing.T) {
+	for _, env := range []string{"CLAUDE_CONFIG_DIR", "CODEX_HOME", "PI_CODING_AGENT_DIR"} {
+		t.Setenv(env, "")
+	}
+	home := t.TempDir()
+	o := &Options{Command: testCmd, Home: home, Remove: true}
+	for _, uninstall := range []func(*Options) error{Claude, Codex, Pi} {
+		if err := uninstall(o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(o.Log) > 0 {
+		t.Errorf("log = %q, want nothing", o.Log)
+	}
+	if entries, err := os.ReadDir(home); err != nil || len(entries) > 0 {
+		t.Errorf("home after uninstall = %v, %v; want it empty", entries, err)
+	}
+}
+
 // Codex's trust keys hold each handler's position, so a reinstall must not move any hook.
 func TestCodexReinstallKeepsEveryHookInPlace(t *testing.T) {
 	e := testenv.New(t)

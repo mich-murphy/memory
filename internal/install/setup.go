@@ -83,13 +83,10 @@ func Pi(o *Options) error {
 		return nil
 	}
 	if o.Remove {
-		if fsutil.Exists(path) && !o.DryRun {
-			if err := os.Remove(path); err != nil {
-				return fmt.Errorf("install: %w", err)
-			}
+		if !fsutil.Exists(path) {
+			return nil
 		}
-		o.Logf("removed: %s", path)
-		return nil
+		return remove(path, o)
 	}
 	body, err := PiExtension(o.Command)
 	if err != nil {
