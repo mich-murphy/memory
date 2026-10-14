@@ -21,11 +21,14 @@ type hashed struct {
 	lines    int64
 	appended bool
 	resume   *state.Resume
+	// tail is the xxhash of the bytes after the last upload, which a segment holds.
+	tail uint64
 }
 
 type digest struct {
 	sha   hash.Hash
 	fast  *xxhash.Digest
+	tail  *xxhash.Digest
 	lines int64
 	n     int64
 	buf   []byte
@@ -41,6 +44,9 @@ func (d *digest) read(src io.ReaderAt, end int64, withSHA bool) error {
 		n, err := src.ReadAt(d.buf[:min(int64(len(d.buf)), end-d.n)], d.n)
 		p := d.buf[:n]
 		_, _ = d.fast.Write(p) // hash writes never fail
+		if d.tail != nil {
+			_, _ = d.tail.Write(p)
+		}
 		if withSHA {
 			_, _ = d.sha.Write(p)
 		}
@@ -58,6 +64,9 @@ func (d *digest) read(src io.ReaderAt, end int64, withSHA bool) error {
 
 func (d *digest) result(appended bool) hashed {
 	h := hashed{sha: hex.EncodeToString(d.sha.Sum(nil)), size: d.n, lines: d.lines, appended: appended}
+	if d.tail != nil {
+		h.tail = d.tail.Sum64()
+	}
 	if m, ok := d.sha.(encoding.BinaryMarshaler); ok {
 		if mid, err := m.MarshalBinary(); err == nil {
 			h.resume = &state.Resume{Size: d.n, Fast: d.fast.Sum64(), SHA: mid}
@@ -83,6 +92,7 @@ func hashContent(src io.ReaderAt, size int64, prev *state.Upload, saved *state.R
 		}
 		if u, ok := d.sha.(encoding.BinaryUnmarshaler); ok && d.n == old && d.fast.Sum64() == saved.Fast &&
 			u.UnmarshalBinary(saved.SHA) == nil {
+			d.tail = xxhash.New()
 			if err := d.read(src, size, true); err != nil {
 				return hashed{}, err
 			}
@@ -96,6 +106,7 @@ func hashContent(src io.ReaderAt, size int64, prev *state.Upload, saved *state.R
 			return hashed{}, err
 		}
 		appended = d.n == old && hex.EncodeToString(d.sha.Sum(nil)) == prev.SHA256
+		d.tail = xxhash.New()
 	}
 	if err := d.read(src, size, true); err != nil {
 		return hashed{}, err
@@ -103,22 +114,40 @@ func hashContent(src io.ReaderAt, size int64, prev *state.Upload, saved *state.R
 	return d.result(appended), nil
 }
 
-// pieceHash checks the bytes an upload compresses. A whole file is checked against the xxhash
-// taken when it was hashed, at a fraction of SHA-256's cost; a segment needs its own SHA-256.
+// pieceHash checks the bytes an upload compresses against the xxhash taken when they were
+// hashed, at a fraction of SHA-256's cost. A segment also needs its own SHA-256.
 func (u *upload) pieceHash() hash.Hash {
-	if u.piece.Start == 0 && u.resume != nil {
+	switch {
+	case u.piece.Start > 0:
+		return segmentHash{sha256.New(), xxhash.New()}
+	case u.resume != nil:
 		return xxhash.New()
 	}
 	return sha256.New()
 }
 
+type segmentHash struct {
+	hash.Hash
+	fast *xxhash.Digest
+}
+
+func (h segmentHash) Write(p []byte) (int, error) {
+	_, _ = h.fast.Write(p) // hash writes never fail
+	return h.Hash.Write(p)
+}
+
 func (u *upload) setPieceSHA(h hash.Hash) error {
-	if x, ok := h.(*xxhash.Digest); ok {
-		if x.Sum64() != u.resume.Fast {
+	switch h := h.(type) {
+	case *xxhash.Digest:
+		if h.Sum64() != u.resume.Fast {
 			return errRewritten
 		}
 		u.piece.SHA256 = u.file.SHA256
 		return nil
+	case segmentHash:
+		if h.fast.Sum64() != u.tail {
+			return errRewritten
+		}
 	}
 	u.piece.SHA256 = hex.EncodeToString(h.Sum(nil))
 	if u.piece.Start == 0 && u.piece.SHA256 != u.file.SHA256 {

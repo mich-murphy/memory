@@ -49,6 +49,7 @@ type upload struct {
 	leftover []string
 	version  *versionPlan
 	resume   *state.Resume
+	tail     uint64
 	// compress runs on the upload pool, so backfills use every core.
 	compress func(u *upload) error
 }
@@ -331,7 +332,7 @@ func readRange(path string, start, n int64) ([]byte, error) {
 func (s *Syncer) planUpload(sf adapters.SessionFile, key string, c *content, prev *state.Upload,
 	pieces []raw.Piece, idle bool,
 ) (*upload, error) {
-	u := &upload{key: key, resume: c.resume, file: state.File{
+	u := &upload{key: key, resume: c.resume, tail: c.tail, file: state.File{
 		SessionFile: sf, Size: c.size, DiskSize: c.diskSize, MtimeNS: c.mtimeNS, SHA256: c.sha, LineCount: c.lines, PrefixSHA256: prefixSHA(c.first),
 	}}
 	if transcriptRoles[sf.Role] && strings.HasSuffix(strings.TrimSuffix(sf.Path, ".zst"), ".jsonl") {
