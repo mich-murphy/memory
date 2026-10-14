@@ -132,6 +132,52 @@ AWS_SECRET_ACCESS_KEY = "[redacted]"
 			want: "not = [toml",
 		},
 		{
+			name:  "MCP server args in claude.json at both levels",
+			agent: "claude", file: "claude.json",
+			in: `{"mcpServers": {"c7": {"command": "npx", "args": ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-1"]}},
+ "projects": {"/p": {"mcpServers": {"r": {"command": "mcp-remote", "args": ["https://h/mcp", "--header", "Authorization: Bearer t0k", "--token=t1", "--max-tokens", "9"]}}}}}`,
+			want: `{"mcpServers": {"c7": {"command": "npx", "args": ["-y", "@upstash/context7-mcp", "--api-key", "[redacted]"]}},
+ "projects": {"/p": {"mcpServers": {"r": {"command": "mcp-remote", "args": ["https://h/mcp", "--header", "Authorization: [redacted]", "--token=[redacted]", "--max-tokens", "9"]}}}}}`,
+		},
+		{
+			name:  "pi mcp.json args keep references",
+			agent: "pi", file: "mcp.json",
+			in:   `{"mcpServers": {"s": {"args": ["--api-key", "${CTX7_KEY}", "-H", "X-Key: k1"]}}}`,
+			want: `{"mcpServers": {"s": {"args": ["--api-key", "${CTX7_KEY}", "-H", "X-Key: [redacted]"]}}}`,
+		},
+		{
+			name:  "claude settings http hook headers",
+			agent: "claude", file: "settings.json",
+			in:   `{"hooks": {"Stop": [{"hooks": [{"type": "http", "url": "https://h/x", "headers": {"Authorization": "Bearer ghp_1", "X-Ref": "$MY_TOKEN"}}]}]}}`,
+			want: `{"hooks": {"Stop": [{"hooks": [{"type": "http", "url": "https://h/x", "headers": {"Authorization": "[redacted]", "X-Ref": "$MY_TOKEN"}}]}]}}`,
+		},
+		{
+			name:  "codex MCP args and otel exporter headers",
+			agent: "codex", file: "config.toml",
+			in: `[mcp_servers.c7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-1"]
+
+[otel.exporter.otlp-http]
+endpoint = "https://otel.example/v1"
+headers = { "x-otlp-api-key" = "ok1" }
+
+[otel.trace_exporter.otlp-grpc.headers]
+authorization = "Bearer ${OTEL_TOKEN}"
+`,
+			want: `[mcp_servers.c7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp", "--api-key", "[redacted]"]
+
+[otel.exporter.otlp-http]
+endpoint = "https://otel.example/v1"
+headers = { "x-otlp-api-key" = "[redacted]" }
+
+[otel.trace_exporter.otlp-grpc.headers]
+authorization = "Bearer ${OTEL_TOKEN}"
+`,
+		},
+		{
 			name:  "an empty file stays empty",
 			agent: "pi", file: "mcp.json",
 			in:   "",
@@ -222,6 +268,32 @@ func TestApplies(t *testing.T) {
 	}
 }
 
+func TestArgsRedactsSecretFlagValues(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		in, want []string
+	}{
+		{"flag and value", []string{"pi", "--api-key", "sk-1", "--model", "m"}, []string{"pi", "--api-key", Redacted, "--model", "m"}},
+		{"flag=value", []string{"x", "--auth-token=t", "--client-secret=s", "--password", "p"}, []string{"x", "--auth-token=" + Redacted, "--client-secret=" + Redacted, "--password", Redacted}},
+		{"whole words only", []string{"x", "--max-tokens", "9", "--keyboard", "us", "--monkey", "y"}, []string{"x", "--max-tokens", "9", "--keyboard", "us", "--monkey", "y"}},
+		{"no value", []string{"codex", "login", "--with-api-key", "--verbose"}, []string{"codex", "login", "--with-api-key", "--verbose"}},
+		{"references", []string{"x", "--token", "$GH_TOKEN", "--api-key=${K}"}, []string{"x", "--token", "$GH_TOKEN", "--api-key=${K}"}},
+		{"headers", []string{"curl", "-H", "Authorization: Bearer t", "--header=X-Key: k", "-H", "Accept: ${A}"}, []string{"curl", "-H", "Authorization: " + Redacted, "--header=X-Key: " + Redacted, "-H", "Accept: ${A}"}},
+		{"name=value", []string{"codex", "-c", "mcp_servers.gh.env.GITHUB_TOKEN=ghp", "-c", "model=o3"}, []string{"codex", "-c", "mcp_servers.gh.env.GITHUB_TOKEN=" + Redacted, "-c", "model=o3"}},
+		{
+			"inline JSON",
+			[]string{"claude", "--mcp-config", `{"mcpServers":{"s":{"headers":{"Authorization":"Bearer t"}}}}`, "--settings", `{"env":{"API_KEY":"k"},"model":"opus"}`, "{not json"},
+			[]string{"claude", "--mcp-config", `{"mcpServers":{"s":{"headers":{"Authorization":"[redacted]"}}}}`, "--settings", `{"env":{"API_KEY":"[redacted]"},"model":"opus"}`, "{not json"},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if diff := cmp.Diff(c.want, Args(c.in)); diff != "" {
+				t.Errorf("Args(%q) (-want +got):\n%s", c.in, diff)
+			}
+		})
+	}
+}
+
 func TestRedactURL(t *testing.T) {
 	for in, want := range map[string]string{
 		"https://api.example.com/mcp":                "https://api.example.com/mcp",
@@ -249,6 +321,7 @@ func FuzzFile(f *testing.F) {
 	}
 	f.Add(uint8(0), `{"env": {"K": "v", "N": "1"}}`)
 	f.Add(uint8(2), `{"mcpServers": {"s": {"headers": {"A": "Bearer x"}, "url": "https://h/?k=v"}}}`)
+	f.Add(uint8(2), `{"mcpServers": {"s": {"args": ["--token", "t", "-H", "A: b", "{\"env\": {\"K\": \"v\"}}"]}}}`)
 	f.Add(uint8(3), `{"providers": {"p": {"apiKey": "k"}}}`)
 	f.Add(uint8(4), "[mcp_servers.s.env]\nK = 'v'\n")
 	f.Fuzz(func(t *testing.T, which uint8, in string) {

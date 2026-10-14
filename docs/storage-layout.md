@@ -24,11 +24,13 @@ The collector walks each agent's whole directory and copies every file except:
 
 | File | Values redacted |
 |---|---|
-| `~/.claude.json` (uploaded as `claude.json`) | `primaryApiKey`, `customApiKeyResponses`, and each MCP server's `env`, `headers`, `url` and `oauth.clientSecret`, at the top level and under `projects` |
-| `settings.json`, `settings.local.json`, `managed-settings.json` | `env` |
-| `.mcp.json`, `mcp.json`, `managed-mcp.json` | each MCP server's `env`, `headers`, `url` and `oauth.clientSecret` |
+| `~/.claude.json` (uploaded as `claude.json`) | `primaryApiKey`, `customApiKeyResponses`, and each MCP server's `env`, `headers`, `url`, `oauth.clientSecret` and `args`, at the top level and under `projects` |
+| `settings.json`, `settings.local.json`, `managed-settings.json` | `env`, and the `headers` of each `http` hook |
+| `.mcp.json`, `mcp.json` (Claude Code's, and Pi's `~/.pi/agent/mcp.json`), `managed-mcp.json` | each MCP server's `env`, `headers`, `url`, `oauth.clientSecret` and `args` |
 | Pi `models.json` | each provider's `apiKey` and `headers` |
-| Codex `config.toml`, `managed_config.toml` | `mcp_servers.*` `env`, `http_headers`, `url` and `bearer_token`; `model_providers.*` `http_headers`, `experimental_bearer_token` and `base_url`; `shell_environment_policy.set` |
+| Codex `config.toml`, `managed_config.toml` | `mcp_servers.*` `env`, `http_headers`, `url`, `bearer_token` and `args`; the `headers` of each `otel` exporter (`otel.<exporter>.<otlp-http or otlp-grpc>.headers`); `model_providers.*` `http_headers`, `experimental_bearer_token` and `base_url`; `shell_environment_policy.set` |
+
+In a command line (`args`), what is redacted is the value of a flag whose name says it holds a secret, as the next word or after `=` (`--api-key`, `--token`, `--auth-token`, `--client-secret`, `--password`; whole words, so `--max-tokens` is kept, and a next word starting with `-` isn't a value), the value in a `NAME=value` word with such a name (`GITHUB_TOKEN=…`, Codex's `-c mcp_servers.x.env.API_KEY=…`), the part of a `--header` or `-H` value after the header's name, and, in an argument that is inline JSON, what these rules redact in a settings or MCP file.
 
 A copy of any of these files with a backup suffix (`~`, `.bak`, `.orig`, `.old`, or the `.agent-sessions-backup-<time>` that `agent-sessions install` leaves) is redacted the same way.
 
