@@ -36,4 +36,4 @@ Preconditions:
 - Lost cache is not a reason to generate a new machine ID. There is no auto discovery of unknown identity by hostname.
 - Helper independent decoding validates fixture bytes, not all fork/hostile-store behavior. Existing internal boundary tests and gates cover additional failure seams.
 - Backfill's selected-agent entry, repeated paths/agents, quiet/delay manual flags, folds, live SQLite WAL exports, zstd source recompression, external roots and partial plaintext lines are not all automated here. Do not claim them passed from all-agent backfill.
-- Local backend is the production boundary stand-in; real R2 network/multipart/corruption/lifecycle behavior remains unverified. Runtime on one OS does not prove another OS.
+- Local backend is the production boundary stand-in; this journey does not verify real R2. Separately authorised backend-plus-engine R2 coverage and its executed result are documented in [r2-acceptance.md](../../../../docs/r2-acceptance.md); it does not establish every network failure, lifecycle policy or full-scale throughput. Runtime on one OS does not prove another OS.

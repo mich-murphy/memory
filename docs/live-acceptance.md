@@ -127,8 +127,9 @@ This validates one no-tool turn per agent on one machine against deterministic
 synthetic model replies and a local store. It does **not** claim live R2
 acceptance, real model quality, OAuth/keychain authentication, interrupted turns,
 compaction, subagents, tools, resumption, model-server TLS, or other installed
-agent versions. No isolated R2 credentials were supplied, so R2 is intentionally
-not exercised.
+agent versions. This native-agent harness intentionally does not exercise R2.
+Separately authorised, namespace-isolated live R2 backend and archive-engine validation
+is documented in [r2-acceptance.md](r2-acceptance.md).
 
 ## Repeated v3 validation
 
