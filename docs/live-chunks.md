@@ -2,7 +2,8 @@
 
 The existing `internal/store/TestR2LiveAcceptance` and `TestR2AcceptanceFake`
 include the same synthetic database-role scenario through normal `syncer.New`.
-This document describes the probe, not an executed live result or a readiness claim.
+This document describes the probe and its bounded executed result below, not an overall
+release-readiness claim.
 
 ## Scenario and oracles
 
@@ -67,4 +68,21 @@ phase measures discovery/export, remote recovery and publication together; it is
 not a microbenchmark and has **no timing pass/fail budget**. The fake backend is
 not R2 latency/throughput evidence. Logs and failures must not reveal fixture
 bodies, paths, credentials or SDK errors. Review live proof and successful cleanup
-separately; this document does not assert a run passed.
+separately; timings alone cannot establish a pass.
+
+## Executed result (2026-10-15)
+
+The exact race-enabled live test passed on candidate Go source `a95976a` in **218.61 s**.
+The scenario's asserted unique PUT counts and observed bytes/times were:
+
+| Phase | New blob PUTs | New encoded bytes | Publish seconds |
+| --- | ---: | ---: | ---: |
+| Cold | 21 | 22,020,957 | 6.936 |
+| Identical export | 0 | 0 | 1.111 |
+| Header-like change | 1 | 1,048,617 | 2.574 |
+
+Both historical generations and current bytes restored exactly after two complete cache
+losses with the source absent. Overall acceptance cleanup deleted **72 owned objects**,
+then verified **zero remaining objects and zero multipart uploads**. The earlier protocol
+multipart checks also passed. These are synthetic, bounded R2 observations, not private
+SQLite measurements or native-hook-to-R2 throughput benchmarks.

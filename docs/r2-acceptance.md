@@ -46,7 +46,18 @@ AGENT_SESSIONS_TEST_R2=0 go test -race -count=1 -timeout=3m \
 The live test skips without the exact flag `AGENT_SESSIONS_TEST_R2=1`. No production
 CLI option, archive format, bucket-global identity or existing archive is changed.
 
-## Executed live result
+## Production-fix live result (2026-10-15)
+
+The exact command passed again on candidate Go source `a95976a` in **218.61 seconds**,
+after the final offline `make check` passed at **89.2% coverage**. This run includes
+all earlier protocol/history/exclusion assertions plus the fixed-chunk database-role
+scenario in [live-chunks.md](live-chunks.md): 21 unique cold chunk PUTs, zero for an
+identical export, one for the header-like update, and exact historical restores after
+two complete additional cache losses. Cleanup deleted **72 owned objects** and verified
+zero objects and multipart uploads remaining. No production archive was reset or installed
+as part of this acceptance test.
+
+## Earlier executed live result
 
 With the operator-provided credentials, the exact race-enabled acceptance command
 passed in **85.33 seconds**, then passed again on the final test-only layout in

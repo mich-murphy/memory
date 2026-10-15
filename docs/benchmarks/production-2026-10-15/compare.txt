@@ -1,0 +1,175 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/mich-murphy/memory/internal/store
+cpu: Apple M2
+                        │ docs/benchmarks/production-2026-10-15/before.txt │ docs/benchmarks/production-2026-10-15/after.txt │
+                        │                      sec/op                      │         sec/op           vs base                │
+R2Put/put/1KiB-8                                             268.8µ ± 446%              172.7µ ±  6%  -35.77% (p=0.002 n=10)
+R2Put/put/64KiB-8                                            233.7µ ±  27%              217.1µ ± 10%   -7.10% (p=0.005 n=10)
+R2Put/put/4096KiB-8                                          4.710m ±   7%              4.817m ±  1%        ~ (p=0.529 n=10)
+R2Put/multipart/80MiB-8                                      225.4m ±   2%              220.9m ±  1%   -2.00% (p=0.003 n=10)
+geomean                                                      2.858m                     2.513m        -12.06%
+
+                        │ docs/benchmarks/production-2026-10-15/before.txt │ docs/benchmarks/production-2026-10-15/after.txt │
+                        │                       B/s                        │           B/s            vs base                │
+R2Put/put/1KiB-8                                             3.967Mi ± 83%              5.655Mi ± 6%  +42.55% (p=0.002 n=10)
+R2Put/put/64KiB-8                                            267.5Mi ± 21%              287.9Mi ± 9%   +7.63% (p=0.005 n=10)
+R2Put/put/4096KiB-8                                          849.7Mi ±  7%              830.5Mi ± 2%        ~ (p=0.529 n=10)
+R2Put/multipart/80MiB-8                                      354.9Mi ±  2%              362.2Mi ± 1%   +2.05% (p=0.003 n=10)
+geomean                                                      133.8Mi                    148.8Mi       +11.22%
+
+                        │ docs/benchmarks/production-2026-10-15/before.txt │ docs/benchmarks/production-2026-10-15/after.txt │
+                        │                       B/op                       │           B/op            vs base               │
+R2Put/put/1KiB-8                                              165.4Ki ± 1%               165.9Ki ± 0%       ~ (p=0.529 n=10)
+R2Put/put/64KiB-8                                             197.9Ki ± 0%               197.7Ki ± 0%       ~ (p=0.436 n=10)
+R2Put/put/4096KiB-8                                           190.4Ki ± 0%               190.6Ki ± 0%       ~ (p=0.280 n=10)
+R2Put/multipart/80MiB-8                                       17.22Mi ± 0%               17.22Mi ± 0%       ~ (p=0.912 n=10)
+geomean                                                       575.7Ki                    576.1Ki       +0.08%
+
+                        │ docs/benchmarks/production-2026-10-15/before.txt │ docs/benchmarks/production-2026-10-15/after.txt │
+                        │                    allocs/op                     │        allocs/op          vs base               │
+R2Put/put/1KiB-8                                               1.786k ± 0%                1.786k ± 0%       ~ (p=0.211 n=10)
+R2Put/put/64KiB-8                                              1.787k ± 0%                1.787k ± 0%       ~ (p=1.000 n=10)
+R2Put/put/4096KiB-8                                            1.791k ± 0%                1.791k ± 0%       ~ (p=0.628 n=10)
+R2Put/multipart/80MiB-8                                        12.24k ± 0%                12.24k ± 0%       ~ (p=1.000 n=10)
+geomean                                                        2.892k                     2.892k       -0.00%
+
+pkg: github.com/mich-murphy/memory/internal/syncer
+                                    │ docs/benchmarks/production-2026-10-15/before.txt │ docs/benchmarks/production-2026-10-15/after.txt │
+                                    │                      sec/op                      │         sec/op           vs base                │
+Backfill/small-8                                                         220.3m ±   2%               243.6m ± 1%  +10.56% (p=0.000 n=10)
+Backfill/typical-8                                                        1.447 ±  11%                1.914 ± 2%  +32.28% (p=0.000 n=10)
+Backfill/many-8                                                           44.94 ±  51%                36.16 ± 4%  -19.54% (p=0.000 n=10)
+Backfill/large-8                                                          3.447 ±  20%                1.169 ± 6%  -66.09% (p=0.000 n=10)
+Backfill/huge-8                                                           9.407 ±  49%                4.107 ± 2%  -56.34% (p=0.000 n=10)
+SweepIdle/small-8                                                        29.75m ±  12%               16.66m ± 2%  -44.00% (p=0.000 n=10)
+SweepIdle/typical-8                                                      484.7m ±  35%               249.1m ± 1%  -48.61% (p=0.000 n=10)
+SweepIdle/many-8                                                          2.232 ±  64%                1.565 ± 2%  -29.87% (p=0.000 n=10)
+SweepAfterTurns/typical/rtt=0s-8                                         349.4m ±  10%               269.6m ± 3%  -22.83% (p=0.000 n=10)
+SweepAfterTurns/typical/rtt=30ms-8                                        2.209 ±   6%                1.526 ± 1%  -30.91% (p=0.000 n=10)
+HookTurn/small/rtt=0s-8                                                 22.803m ±  32%               9.531m ± 4%  -58.20% (p=0.000 n=10)
+HookTurn/typical/rtt=0s-8                                                24.59m ± 119%               23.03m ± 2%        ~ (p=0.247 n=10)
+HookTurn/typical/rtt=30ms-8                                             1101.0m ±   1%               676.3m ± 1%  -38.58% (p=0.000 n=10)
+HookTurn/many/rtt=0s-8                                                   49.52m ± 102%               38.73m ± 1%        ~ (p=0.481 n=10)
+HookTurn/large/rtt=0s-8                                                 178.67m ±  39%               91.73m ± 3%  -48.66% (p=0.000 n=10)
+HookTurn/huge/rtt=0s-8                                                   678.4m ±  46%               286.2m ± 1%  -57.81% (p=0.000 n=10)
+HookTurnAfterSegments/segments=1-8                                       34.35m ±  17%               20.82m ± 2%  -39.39% (p=0.000 n=10)
+HookTurnAfterSegments/segments=16-8                                      52.88m ±  14%               29.32m ± 3%  -44.56% (p=0.000 n=10)
+HookTurnAfterSegments/segments=62-8                                     159.86m ±  25%               75.96m ± 2%  -52.49% (p=0.000 n=10)
+Fold-8                                                                   187.2m ±  16%               125.9m ± 1%  -32.75% (p=0.000 n=10)
+PublicationSnapshotFanout/rtt=0s-8                                                                   6.955m ± 1%
+PublicationSnapshotFanout/rtt=1ms-8                                                                  114.1m ± 2%
+geomean                                                                  370.1m                      190.9m       -37.53%
+
+                   │ docs/benchmarks/production-2026-10-15/before.txt │ docs/benchmarks/production-2026-10-15/after.txt │
+                   │                       B/s                        │          B/s            vs base                 │
+Backfill/small-8                                        4.544Mi ±  2%             4.110Mi ± 1%    -9.55% (p=0.000 n=10)
+Backfill/typical-8                                      63.20Mi ± 10%             58.87Mi ± 2%         ~ (p=0.123 n=10)
+Backfill/many-8                                         1.779Mi ± 34%             2.203Mi ± 4%   +23.86% (p=0.000 n=10)
+Backfill/large-8                                        74.87Mi ± 18%            220.76Mi ± 5%  +194.87% (p=0.000 n=10)
+Backfill/huge-8                                         97.54Mi ± 48%            223.38Mi ± 2%  +129.02% (p=0.000 n=10)
+geomean                                                 20.62Mi                   30.48Mi        +47.77%
+
+                                    │ docs/benchmarks/production-2026-10-15/before.txt │ docs/benchmarks/production-2026-10-15/after.txt │
+                                    │                       B/op                       │          B/op           vs base                 │
+Backfill/small-8                                                          15.45Mi ± 2%             43.21Mi ± 1%  +179.61% (p=0.000 n=10)
+Backfill/typical-8                                                        456.1Mi ± 0%            1240.9Mi ± 0%  +172.09% (p=0.000 n=10)
+Backfill/many-8                                                           1.529Gi ± 0%             2.769Gi ± 0%   +81.05% (p=0.000 n=10)
+Backfill/large-8                                                          223.1Mi ± 0%             324.7Mi ± 0%   +45.54% (p=0.000 n=10)
+Backfill/huge-8                                                           333.9Mi ± 0%             411.6Mi ± 0%   +23.28% (p=0.000 n=10)
+SweepIdle/small-8                                                         3.625Mi ± 0%             6.884Mi ± 0%   +89.91% (p=0.000 n=10)
+SweepIdle/typical-8                                                       39.62Mi ± 0%            194.69Mi ± 0%  +391.43% (p=0.000 n=10)
+SweepIdle/many-8                                                          360.1Mi ± 0%             634.5Mi ± 0%   +76.22% (p=0.000 n=10)
+SweepAfterTurns/typical/rtt=0s-8                                          45.85Mi ± 0%            208.24Mi ± 0%  +354.23% (p=0.000 n=10)
+SweepAfterTurns/typical/rtt=30ms-8                                        45.90Mi ± 0%            208.29Mi ± 0%  +353.74% (p=0.000 n=10)
+HookTurn/small/rtt=0s-8                                                   2.496Mi ± 0%             5.162Mi ± 0%  +106.86% (p=0.000 n=10)
+HookTurn/typical/rtt=0s-8                                                 27.50Mi ± 0%             31.56Mi ± 0%   +14.77% (p=0.000 n=10)
+HookTurn/typical/rtt=30ms-8                                               27.59Mi ± 0%             31.59Mi ± 0%   +14.50% (p=0.000 n=10)
+HookTurn/many/rtt=0s-8                                                    5.315Mi ± 0%            16.700Mi ± 0%  +214.23% (p=0.000 n=10)
+HookTurn/large/rtt=0s-8                                                   4.509Mi ± 1%            10.204Mi ± 0%  +126.27% (p=0.000 n=10)
+HookTurn/huge/rtt=0s-8                                                    4.565Mi ± 1%            10.004Mi ± 0%  +119.18% (p=0.000 n=10)
+HookTurnAfterSegments/segments=1-8                                        27.50Mi ± 0%             31.90Mi ± 0%   +15.99% (p=0.000 n=10)
+HookTurnAfterSegments/segments=16-8                                       39.57Mi ± 0%             43.71Mi ± 0%   +10.48% (p=0.000 n=10)
+HookTurnAfterSegments/segments=62-8                                       95.53Mi ± 0%             89.33Mi ± 0%    -6.49% (p=0.000 n=10)
+Fold-8                                                                    31.71Mi ± 0%             93.00Mi ± 0%  +193.32% (p=0.000 n=10)
+PublicationSnapshotFanout/rtt=0s-8                                                                 5.502Mi ± 0%
+PublicationSnapshotFanout/rtt=1ms-8                                                                5.500Mi ± 1%
+geomean                                                                   38.84Mi                  61.55Mi       +101.74%
+
+                                    │ docs/benchmarks/production-2026-10-15/before.txt │ docs/benchmarks/production-2026-10-15/after.txt │
+                                    │                    allocs/op                     │       allocs/op        vs base                  │
+Backfill/small-8                                                           122.4k ± 0%             230.1k ± 0%    +87.94% (p=0.000 n=10)
+Backfill/typical-8                                                         1.488M ± 0%             6.246M ± 0%   +319.71% (p=0.000 n=10)
+Backfill/many-8                                                            13.15M ± 0%             22.95M ± 0%    +74.54% (p=0.000 n=10)
+Backfill/large-8                                                           65.80k ± 0%            163.72k ± 0%   +148.83% (p=0.000 n=10)
+Backfill/huge-8                                                            65.79k ± 0%            164.13k ± 0%   +149.47% (p=0.000 n=10)
+SweepIdle/small-8                                                          36.08k ± 0%             74.48k ± 0%   +106.47% (p=0.000 n=10)
+SweepIdle/typical-8                                                        356.3k ± 0%            2042.0k ± 0%   +473.18% (p=0.000 n=10)
+SweepIdle/many-8                                                           3.420M ± 0%             7.134M ± 0%   +108.61% (p=0.000 n=10)
+SweepAfterTurns/typical/rtt=0s-8                                           379.6k ± 0%            2096.2k ± 0%   +452.25% (p=0.000 n=10)
+SweepAfterTurns/typical/rtt=30ms-8                                         379.7k ± 0%            2096.4k ± 0%   +452.06% (p=0.000 n=10)
+HookTurn/small/rtt=0s-8                                                    15.66k ± 0%             39.06k ± 0%   +149.42% (p=0.000 n=10)
+HookTurn/typical/rtt=0s-8                                                  16.12k ± 0%             46.89k ± 0%   +190.84% (p=0.000 n=10)
+HookTurn/typical/rtt=30ms-8                                                16.29k ± 1%             46.91k ± 0%   +187.88% (p=0.000 n=10)
+HookTurn/many/rtt=0s-8                                                     18.15k ± 0%            124.47k ± 0%   +585.64% (p=0.000 n=10)
+HookTurn/large/rtt=0s-8                                                    15.77k ± 1%             48.39k ± 0%   +206.86% (p=0.000 n=10)
+HookTurn/huge/rtt=0s-8                                                     15.89k ± 1%             48.07k ± 0%   +202.57% (p=0.000 n=10)
+HookTurnAfterSegments/segments=1-8                                         16.64k ± 0%             50.78k ± 0%   +205.15% (p=0.000 n=10)
+HookTurnAfterSegments/segments=16-8                                        39.44k ± 0%             73.32k ± 0%    +85.92% (p=0.000 n=10)
+HookTurnAfterSegments/segments=62-8                                        224.9k ± 0%             253.9k ± 0%    +12.87% (p=0.000 n=10)
+Fold-8                                                                     18.97k ± 0%            248.83k ± 0%  +1211.80% (p=0.000 n=10)
+PublicationSnapshotFanout/rtt=0s-8                                                                 39.64k ± 0%
+PublicationSnapshotFanout/rtt=1ms-8                                                                39.63k ± 0%
+geomean                                                                    94.81k                  245.7k        +211.04%
+
+                                    │ docs/benchmarks/production-2026-10-15/before.txt │ docs/benchmarks/production-2026-10-15/after.txt │
+                                    │                   requests/op                    │     requests/op       vs base                   │
+Backfill/small-8                                                            397.0 ± 0%             318.0 ± 0%   -19.90% (p=0.000 n=10)
+Backfill/typical-8                                                         4.711k ± 0%            3.006k ± 0%   -36.19% (p=0.000 n=10)
+Backfill/many-8                                                            41.06k ± 0%            28.57k ± 0%   -30.42% (p=0.000 n=10)
+Backfill/large-8                                                            215.0 ± 0%             195.0 ± 0%    -9.30% (p=0.000 n=10)
+Backfill/huge-8                                                             215.0 ± 0%             195.0 ± 0%    -9.30% (p=0.000 n=10)
+SweepIdle/small-8                                                           6.103 ± 0%             6.060 ± 0%    -0.70% (p=0.000 n=10)
+SweepIdle/typical-8                                                         7.333 ± 9%             6.800 ± 3%    -7.27% (p=0.000 n=10)
+SweepIdle/many-8                                                            10.00 ± 0%             10.00 ± 0%         ~ (p=1.000 n=10) ¹
+SweepAfterTurns/typical/rtt=0s-8                                            76.00 ± 0%             60.00 ± 0%   -21.05% (p=0.000 n=10)
+SweepAfterTurns/typical/rtt=30ms-8                                          76.00 ± 0%             60.00 ± 0%   -21.05% (p=0.000 n=10)
+HookTurn/small/rtt=0s-8                                                     32.00 ± 0%             23.00 ± 0%   -28.12% (p=0.000 n=10)
+HookTurn/typical/rtt=0s-8                                                   35.00 ± 0%             26.00 ± 0%   -25.71% (p=0.000 n=10)
+HookTurn/typical/rtt=30ms-8                                                 35.00 ± 0%             26.00 ± 0%   -25.71% (p=0.000 n=10)
+HookTurn/many/rtt=0s-8                                                      32.00 ± 0%             23.00 ± 0%   -28.12% (p=0.000 n=10)
+HookTurn/large/rtt=0s-8                                                     32.00 ± 0%             23.00 ± 0%   -28.12% (p=0.000 n=10)
+HookTurn/huge/rtt=0s-8                                                      32.00 ± 0%             23.00 ± 0%   -28.12% (p=0.000 n=10)
+HookTurnAfterSegments/segments=1-8                                          34.00 ± 0%             24.00 ± 0%   -29.41% (p=0.000 n=10)
+HookTurnAfterSegments/segments=16-8                                         64.00 ± 0%             39.00 ± 0%   -39.06% (p=0.000 n=10)
+HookTurnAfterSegments/segments=62-8                                        156.00 ± 0%             85.00 ± 0%   -45.51% (p=0.000 n=10)
+Fold-8                                                                      41.00 ± 0%             85.00 ± 0%  +107.32% (p=0.000 n=10)
+PublicationSnapshotFanout/rtt=0s-8                                                                 190.0 ± 0%
+PublicationSnapshotFanout/rtt=1ms-8                                                                190.0 ± 0%
+geomean                                                                     81.42                  71.93        -19.83%
+¹ all samples are equal
+
+                                    │ docs/benchmarks/production-2026-10-15/before.txt │ docs/benchmarks/production-2026-10-15/after.txt │
+                                    │                    sent-B/op                     │       sent-B/op        vs base                  │
+Backfill/small-8                                                          483.5Ki ± 0%            466.7Ki ± 0%   -3.46% (p=0.000 n=10)
+Backfill/typical-8                                                        18.11Mi ± 0%            21.50Mi ± 0%  +18.71% (p=0.000 n=10)
+Backfill/many-8                                                           44.81Mi ± 0%            43.46Mi ± 0%   -3.01% (p=0.000 n=10)
+Backfill/large-8                                                          36.50Mi ± 0%            36.49Mi ± 0%   -0.03% (p=0.000 n=10)
+Backfill/huge-8                                                           128.0Mi ± 0%            128.0Mi ± 0%   -0.01% (p=0.000 n=10)
+SweepIdle/small-8                                                           173.0 ± 0%              173.0 ± 0%        ~ (p=1.000 n=10) ¹
+SweepIdle/typical-8                                                         173.0 ± 0%              173.0 ± 0%        ~ (p=1.000 n=10) ¹
+SweepIdle/many-8                                                            173.0 ± 0%              173.0 ± 0%        ~ (p=1.000 n=10) ¹
+SweepAfterTurns/typical/rtt=0s-8                                          88.70Ki ± 0%            87.24Ki ± 0%   -1.65% (p=0.000 n=10)
+SweepAfterTurns/typical/rtt=30ms-8                                        88.70Ki ± 0%            87.24Ki ± 0%   -1.65% (p=0.000 n=10)
+HookTurn/small/rtt=0s-8                                                   37.90Ki ± 0%            37.74Ki ± 0%   -0.43% (p=0.000 n=10)
+HookTurn/typical/rtt=0s-8                                                 45.49Ki ± 0%            40.68Ki ± 0%  -10.58% (p=0.000 n=10)
+HookTurn/typical/rtt=30ms-8                                               45.49Ki ± 0%            40.68Ki ± 0%  -10.58% (p=0.000 n=10)
+HookTurn/many/rtt=0s-8                                                    38.14Ki ± 0%            37.98Ki ± 0%   -0.44% (p=0.000 n=10)
+HookTurn/large/rtt=0s-8                                                   38.39Ki ± 0%            38.22Ki ± 0%   -0.46% (p=0.000 n=10)
+HookTurn/huge/rtt=0s-8                                                    40.43Ki ± 0%            40.26Ki ± 0%   -0.43% (p=0.000 n=10)
+HookTurnAfterSegments/segments=1-8                                        43.64Ki ± 0%            42.89Ki ± 0%   -1.72% (p=0.000 n=10)
+HookTurnAfterSegments/segments=16-8                                       166.1Ki ± 0%            156.6Ki ± 0%   -5.74% (p=0.000 n=10)
+HookTurnAfterSegments/segments=62-8                                       1.349Mi ± 0%            1.313Mi ± 0%   -2.64% (p=0.000 n=10)
+Fold-8                                                                    902.7Ki ± 0%           1691.4Ki ± 0%  +87.36% (p=0.000 n=10)
+geomean                                                                   133.5Ki                 135.8Ki        +1.79%
+¹ all samples are equal

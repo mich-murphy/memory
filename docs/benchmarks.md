@@ -69,6 +69,53 @@ Selected final medians (allocation figures elsewhere in benchstat are cumulative
 
 Apparent large/huge backfill improvements are not claimed because the before samples were noisy. The unchanged R2 PUT primitive remains a more comparable control: medians changed from 152.0 to 147.1 µs (1 KiB), 196.8 to 186.0 µs (64 KiB), 4.146 to 4.834 ms (4 MiB), and 214.7 to 221.6 ms (80 MiB multipart). These mixed shifts, with essentially unchanged allocation counts, are not credited to archive optimisation. Deterministic request/integrity tests above establish the bounded warm-path properties independently of timing noise.
 
+## Production-fix comparison (2026-10-15)
+
+Ten-sample `make bench` runs completed on the same Apple M2 / Darwin arm64 / Go 1.27.2:
+`3a59dd8` before, `a95976a` Go sources after. The after run had no competing builds,
+tests, native-agent runs, live R2 or private sizing experiments. Raw results and benchstat:
+[before](benchmarks/production-2026-10-15/before.txt),
+[after](benchmarks/production-2026-10-15/after.txt),
+[comparison](benchmarks/production-2026-10-15/compare.txt).
+
+Selected medians (in-memory backend, zero added RTT unless stated):
+
+| Operation | Before | After | Requests before → after |
+| --- | ---: | ---: | ---: |
+| Small backfill | 220.3 ms | 243.6 ms | 397 → 318 |
+| Many-session backfill | 44.94 s | 36.16 s | 41,056 → 28,566 |
+| Large backfill | 3.447 s | 1.169 s | 215 → 195 |
+| Huge backfill | 9.407 s | 4.107 s | 215 → 195 |
+| Small idle sweep | 29.75 ms | 16.66 ms | approximately 6 → 6 |
+| Small session turn | 22.80 ms | 9.53 ms | 32 → 23 |
+| Turn after 16 pieces | 52.88 ms | 29.32 ms | 64 → 39 |
+| Turn after 62 pieces | 159.86 ms | 75.96 ms | 156 → 85 |
+
+This is **not an across-the-board CPU/allocation improvement**. Small cold backfill
+regresses 10.6%. Cumulative allocations rise: small backfill 15.45 → 43.21 MiB,
+many-session backfill 1.529 → 2.769 GiB, huge backfill 333.9 → 411.6 MiB. These are
+allocated bytes over an operation, not peak resident heap. Bounded metadata parsing,
+local staged-body verification and confirmation bookkeeping add work. Baseline timing
+variance is substantial (for example many backfill ±51%, huge backfill ±49%); prefer
+request-count evidence and the full confidence intervals over universal speed claims.
+
+Two exclusions are essential:
+
+- `Fold` changed from obsolete idle folding to a real 64-piece retained-base fold;
+  its before/after timings, bytes and allocations are **not equivalent workloads**.
+- The `typical` profile uses real temporary project paths. Their length changes line
+  generation thresholds and the shared RNG's subsequent consumption: observed generated
+  sizes were approximately 96 MB before and 118 MB after. All `typical` rows are retained
+  as observations, not used here for causal speedup claims. Decoupling fixture generation
+  from temporary path spelling is future benchmark work; the other selected profiles use
+  fixed logical cwd strings for their principal transcripts.
+
+Do not interpret benchstat's mixed/unpaired geomean as an overall speedup. The new
+snapshot-fanout diagnostic reports 190 requests and 114.1 ms at 1 ms injected RTT
+(6.955 ms at zero RTT); it has no row in the original full-suite baseline. The separate
+isolated fanout investigation measured 2,725 requests before caching. Fake RTT is not R2.
+Actual bounded R2 chunk-publication evidence is in [live-chunks.md](live-chunks.md).
+
 ## The golden test
 
 `TestBucketMatchesGolden` (`internal/syncer/golden_test.go`) runs a small home through a backfill, idle and busy sweeps, a hook sync, a launch record, a rewrite and a later idle sweep that must not time-fold, and compares every request and the final bucket with `internal/syncer/testdata/golden.txt`: keys, metadata, sizes, the SHA-256 of each object and of the bytes inside each zstd object, and the full text of manifests and snapshot sets. A change that alters what reaches the bucket fails it. When the change is meant to, regenerate the file with `go test ./internal/syncer -run Golden -update` and explain the diff in the pull request; a change to keys, fields or formats also needs `docs/storage-layout.md` updated.

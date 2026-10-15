@@ -1,0 +1,685 @@
+diff --git a/cmd/agent-sessions/live_boundary_routes_test.go b/cmd/agent-sessions/live_boundary_routes_test.go
+new file mode 100644
+index 0000000..8291ca5
+--- /dev/null
++++ b/cmd/agent-sessions/live_boundary_routes_test.go
+@@ -0,0 +1,28 @@
++package main
++
++import "testing"
++
++func TestLiveLinuxRoutesRejectExternalRoutes(t *testing.T) {
++	for _, tt := range []struct {
++		name string
++		path string
++		body string
++		ok   bool
++	}{
++		{"empty", "/proc/net/route", "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\n", true},
++		{"loopback4", "/proc/net/route", "lo 0000007F 00000000 0001 0 0 0 000000FF 0 0 0\n", true},
++		{"external4", "/proc/net/route", "eth0 00000000 0100000A 0003 0 0 0 00000000 0 0 0\n", false},
++		{"default4", "/proc/net/route", "lo 0000007F 00000000 0001 0 0 0 00000000 0 0 0\n", false},
++		{"loopback6", "/proc/net/ipv6_route", "00000000000000000000000000000001 80 00000000000000000000000000000000 00 00000000000000000000000000000000 00000000 00000000 00000000 80200001 lo\n", true},
++		{"unreachable6", "/proc/net/ipv6_route", "00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 ffffffff 00000001 00000000 00200200 lo\n", true},
++		{"default6", "/proc/net/ipv6_route", "00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 00000000 00000000 00000000 00000001 lo\n", false},
++		{"malformed", "/proc/net/ipv6_route", "lo\n", false},
++	} {
++		t.Run(tt.name, func(t *testing.T) {
++			err := liveLinuxRoutes(tt.path, tt.body)
++			if (err == nil) != tt.ok {
++				t.Fatalf("route validation = %v, want accepted=%t", err, tt.ok)
++			}
++		})
++	}
++}
+diff --git a/cmd/agent-sessions/live_boundary_test.go b/cmd/agent-sessions/live_boundary_test.go
+new file mode 100644
+index 0000000..c5b1d90
+--- /dev/null
++++ b/cmd/agent-sessions/live_boundary_test.go
+@@ -0,0 +1,281 @@
++package main
++
++// Private Linux acceptance fixture, not a general-purpose sandbox abstraction.
++// All Go (including TestMain), the model server, agents and detached hooks must
++// already be inside the operator's outer bubblewrap before this code is loaded.
++import (
++	"context"
++	"encoding/hex"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"net"
++	"net/http"
++	"os"
++	"path/filepath"
++	"strconv"
++	"strings"
++	"syscall"
++	"testing"
++	"time"
++)
++
++type liveLinuxFixture struct {
++	Marker     string            `json:"marker"`
++	Host       map[string]string `json:"host"`
++	Agents     map[string]string `json:"agents"`
++	CanarySHA  string            `json:"canary_sha256"`
++	Outside    string            `json:"outside"`
++	OutsideSHA string            `json:"outside_sha256"`
++}
++
++func liveReadLinuxProof() (liveLinuxFixture, error) {
++	var proof liveLinuxFixture
++	body, err := os.ReadFile("/proof/manifest.json")
++	if err != nil {
++		return proof, err
++	}
++	if err := json.Unmarshal(body, &proof); err != nil {
++		return proof, err
++	}
++	if proof.Marker != "private-bc01-linux-native-v1" || len(proof.Host) != 3 || len(proof.Agents) != 3 || len(proof.CanarySHA) != 64 || len(proof.OutsideSHA) != 64 || !strings.HasPrefix(proof.Outside, "/") || strings.Contains(proof.Outside, "..") || !strings.HasSuffix(proof.Outside, "/unmounted/canary") {
++		return proof, errors.New("missing or invalid private Linux launcher fixture")
++	}
++	for _, agent := range []string{"claude", "codex", "pi"} {
++		path := proof.Agents[agent]
++		if !strings.HasPrefix(path, "/assets/") || filepath.Clean(path) != path || (agent == "pi" && !strings.Contains(path, "/pi-coding-agent/")) {
++			return proof, fmt.Errorf("unreviewed %s executable path %q", agent, path)
++		}
++	}
++	return proof, nil
++}
++
++func liveLinuxNamespaces(proof liveLinuxFixture) (map[string]string, error) {
++	actual := map[string]string{}
++	for _, name := range []string{"net", "pid", "mnt"} {
++		id, err := os.Readlink("/proc/self/ns/" + name)
++		if err != nil {
++			return nil, err
++		}
++		if !strings.HasPrefix(proof.Host[name], name+":[") {
++			return nil, fmt.Errorf("missing host %s namespace identity", name)
++		}
++		if id == proof.Host[name] {
++			return nil, fmt.Errorf("%s namespace still equals host %s", name, id)
++		}
++		actual[name] = id
++	}
++	pid1, err := os.Readlink("/proc/1/ns/pid")
++	if err != nil {
++		return nil, err
++	}
++	if pid1 != actual["pid"] {
++		return nil, errors.New("proc was not mounted for the inner PID namespace")
++	}
++	return actual, nil
++}
++
++func liveLinuxProof(t *testing.T) liveLinuxFixture {
++	t.Helper()
++	proof, err := liveReadLinuxProof()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if _, err := liveLinuxNamespaces(proof); err != nil {
++		t.Fatal(err)
++	}
++	return proof
++}
++
++// Probe init deliberately precedes TestMain: this descendant must not start a
++// compiler. It is a real setsid child, not a simulated detached-hook result.
++func init() {
++	if os.Getenv("MEMORY_LIVE_LINUX_PROBE") != "1" {
++		return
++	}
++	proof, err := liveReadLinuxProof()
++	if err == nil {
++		err = liveProbeLinux(proof, os.Getenv("MEMORY_LIVE_PROBE_ROOT"), os.Getenv("MEMORY_LIVE_PROBE_URL"), os.Getenv("MEMORY_LIVE_PROBE_NAMESPACES"))
++	}
++	if err != nil {
++		fmt.Fprintln(os.Stderr, err)
++		os.Exit(1)
++	}
++	os.Exit(0)
++}
++
++func liveVerifyLinux(t *testing.T, l liveRun, port string) {
++	t.Helper()
++	proof := liveLinuxProof(t)
++	actual, err := liveLinuxNamespaces(proof)
++	if err != nil {
++		t.Fatal(err)
++	}
++	namespaces, err := json.Marshal(actual)
++	if err != nil {
++		t.Fatal(err)
++	}
++	url := "http://127.0.0.1:" + port + "/health"
++	if err := liveProbeLinux(proof, l.root, url, string(namespaces)); err != nil {
++		t.Fatal(err)
++	}
++	executable, err := os.Executable()
++	if err != nil {
++		t.Fatal(err)
++	}
++	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
++	defer cancel()
++	cmd := l.command(ctx, executable)
++	cmd.Env = append(cmd.Env, "MEMORY_LIVE_LINUX_PROBE=1", "MEMORY_LIVE_PROBE_ROOT="+l.root, "MEMORY_LIVE_PROBE_URL="+url, "MEMORY_LIVE_PROBE_NAMESPACES="+string(namespaces))
++	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
++	out, err := cmd.CombinedOutput()
++	liveWrite(t, filepath.Join(l.root, "linux-setsid-preflight.output"), string(out), 0o600)
++	if err != nil {
++		t.Fatalf("setsid boundary probe: %v\n%s", err, out)
++	}
++	t.Logf("Linux preflight and setsid descendant passed: host=%v actual=%v; network is namespace-local, NOT macOS exact-port isolation", proof.Host, actual)
++}
++
++func liveProbeLinux(proof liveLinuxFixture, root, url, expected string) error {
++	actual, err := liveLinuxNamespaces(proof)
++	if err != nil {
++		return err
++	}
++	var inherited map[string]string
++	if err := json.Unmarshal([]byte(expected), &inherited); err != nil {
++		return err
++	}
++	for name, id := range actual {
++		if inherited[name] != id {
++			return fmt.Errorf("descendant changed %s namespace", name)
++		}
++	}
++	interfaces, err := net.Interfaces()
++	if err != nil {
++		return err
++	}
++	if len(interfaces) != 1 || interfaces[0].Name != "lo" || interfaces[0].Flags&(net.FlagLoopback|net.FlagUp) != net.FlagLoopback|net.FlagUp {
++		return fmt.Errorf("interfaces = %v, want only active loopback", interfaces)
++	}
++	addresses, err := interfaces[0].Addrs()
++	if err != nil {
++		return err
++	}
++	for _, address := range addresses {
++		ip, _, err := net.ParseCIDR(address.String())
++		if err != nil || !ip.IsLoopback() {
++			return fmt.Errorf("non-loopback interface address %v", address)
++		}
++	}
++	for _, path := range []string{"/proc/net/route", "/proc/net/ipv6_route"} {
++		body, err := os.ReadFile(path)
++		if err != nil {
++			return err
++		}
++		if err := liveLinuxRoutes(path, string(body)); err != nil {
++			return err
++		}
++		fmt.Printf("%s:\n%s\n", path, body)
++	}
++	// These are numeric documentation addresses: no DNS, curl, proxy, or timeout
++	// can stand in for the kernel's positive ENETUNREACH result.
++	for _, address := range []string{"192.0.2.1:443", "[2001:db8::1]:443"} {
++		conn, err := net.DialTimeout("tcp", address, time.Second)
++		if err == nil {
++			if err := conn.Close(); err != nil {
++				return err
++			}
++			return fmt.Errorf("external connection succeeded: %s", address)
++		}
++		if !errors.Is(err, syscall.ENETUNREACH) {
++			return fmt.Errorf("external %s: %w; want ENETUNREACH", address, err)
++		}
++		fmt.Printf("external %s: %v\n", address, err)
++	}
++	client := &http.Client{
++		Timeout:   3 * time.Second,
++		Transport: &http.Transport{Proxy: nil},
++		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
++			return errors.New("unexpected redirect")
++		},
++	}
++	defer client.CloseIdleConnections()
++	response, err := client.Get(url)
++	if err != nil {
++		return err
++	}
++	if err := response.Body.Close(); err != nil {
++		return err
++	}
++	if response.StatusCode != http.StatusOK {
++		return fmt.Errorf("loopback health = %d", response.StatusCode)
++	}
++	if !strings.HasPrefix(root, "/run/live/tmp/memory-live-") {
++		return fmt.Errorf("scratch outside owned mount: %q", root)
++	}
++	path := filepath.Join(root, "boundary-positive")
++	if err := os.WriteFile(path, []byte("scratch control\n"), 0o600); err != nil {
++		return err
++	}
++	body, err := os.ReadFile(path)
++	if err != nil || string(body) != "scratch control\n" {
++		return fmt.Errorf("scratch readback = %q: %v", body, err)
++	}
++	for path, want := range map[string]string{"/proof/canary": proof.CanarySHA, "/proof/manifest.json": ""} {
++		before, err := os.ReadFile(path)
++		if err != nil {
++			return err
++		}
++		if want != "" && liveDigest(before) != want {
++			return errors.New("read-only canary differs from launcher digest")
++		}
++		err = os.WriteFile(path, []byte("forbidden\n"), 0o600)
++		if !errors.Is(err, syscall.EROFS) && !errors.Is(err, os.ErrPermission) {
++			return fmt.Errorf("write %s = %v, want EROFS/permission", path, err)
++		}
++		after, err := os.ReadFile(path)
++		if err != nil {
++			return err
++		}
++		if liveDigest(before) != liveDigest(after) {
++			return errors.New("read-only fixture changed")
++		}
++		fmt.Printf("readonly %s: write denied; before=%s after=%s\n", path, liveDigest(before), liveDigest(after))
++	}
++	if _, err := os.ReadFile(proof.Outside); !errors.Is(err, os.ErrNotExist) && !errors.Is(err, os.ErrPermission) {
++		return fmt.Errorf("unmounted synthetic canary read = %v, want absent/permission", err)
++	}
++	fmt.Printf("boundary controls passed: namespaces=%v interfaces=%v addresses=%v\n", actual, interfaces, addresses)
++	return nil
++}
++
++func liveLinuxRoutes(path, body string) error {
++	for line := range strings.SplitSeq(strings.TrimSpace(body), "\n") {
++		fields := strings.Fields(line)
++		if len(fields) == 0 || fields[0] == "Iface" {
++			continue
++		}
++		if strings.HasSuffix(path, "ipv6_route") {
++			if len(fields) != 10 || fields[9] != "lo" || fields[4] != strings.Repeat("0", 32) {
++				return fmt.Errorf("unexpected IPv6 route: %s", line)
++			}
++			flags, err := strconv.ParseUint(fields[8], 16, 32)
++			if err != nil {
++				return err
++			}
++			address, err := hex.DecodeString(fields[0])
++			if err != nil {
++				return err
++			}
++			// Linux may expose namespace-local unreachable default entries on lo.
++			if flags&0x200 == 0 && (!net.IP(address).IsLoopback() || fields[1] != "80") {
++				return fmt.Errorf("non-loopback IPv6 route: %s", line)
++			}
++		} else {
++			if len(fields) != 11 || fields[0] != "lo" || !strings.HasSuffix(strings.ToUpper(fields[1]), "7F") || fields[2] != "00000000" || !strings.HasSuffix(strings.ToUpper(fields[7]), "FF") {
++				return fmt.Errorf("non-loopback IPv4 route: %s", line)
++			}
++		}
++	}
++	return nil
++}
+diff --git a/cmd/agent-sessions/live_test.go b/cmd/agent-sessions/live_test.go
+index 5b2a792..9622851 100644
+--- a/cmd/agent-sessions/live_test.go
++++ b/cmd/agent-sessions/live_test.go
+@@ -164 +164,6 @@ func (l liveRun) command(ctx context.Context, binary string, args ...string) *ex
+-	cmd := exec.CommandContext(ctx, "/usr/bin/sandbox-exec", append([]string{"-f", l.profile, binary}, args...)...)
++	cmd := exec.CommandContext(ctx, binary, args...)
++	if runtime.GOOS != "linux" {
++		cmd = exec.CommandContext(ctx, "/usr/bin/sandbox-exec", append([]string{"-f", l.profile, binary}, args...)...)
++	}
++	// Linux inherits the outer launcher's already-proved namespaces. Do not
++	// unshare again: the model server must remain in the same network namespace.
+@@ -213,0 +219,5 @@ func newLiveRun(t *testing.T, port string) liveRun {
++	if runtime.GOOS == "linux" {
++		// Only staged public runtimes; never borrow a host HOME or its PATH.
++		l.env[0] = "PATH=" + filepath.Join(root, "bin") + ":/assets/bin:/usr/bin:/bin"
++		l.env[2] = "LANG=C.UTF-8"
++	}
+@@ -243,0 +254,4 @@ func (l liveRun) verifyIsolation(t *testing.T, port string) {
++	if runtime.GOOS == "linux" {
++		liveVerifyLinux(t, l, port)
++		return
++	}
+@@ -313,5 +327,11 @@ func TestLiveAgents(t *testing.T) {
+-	if runtime.GOOS != "darwin" {
+-		t.Fatal("live acceptance requires the macOS sandbox-exec profile; do not run unsandboxed")
+-	}
+-	if _, err := os.Stat("/usr/bin/sandbox-exec"); err != nil {
+-		t.Fatal(err)
++	switch runtime.GOOS {
++	case "linux":
++		// A flag alone is not permission to launch agents. Validate the outer
++		// fixture and real namespace boundary before even starting the server.
++		liveLinuxProof(t)
++	case "darwin":
++		if _, err := os.Stat("/usr/bin/sandbox-exec"); err != nil {
++			t.Fatal(err)
++		}
++	default:
++		t.Fatal("live acceptance requires the macOS sandbox or the private Linux launcher")
+@@ -332 +352,10 @@ func TestLiveAgents(t *testing.T) {
++			if runtime.GOOS == "linux" {
++				binary = liveLinuxProof(t).Agents[agent]
++			}
+-			version := strings.TrimSpace(string(l.run(t, binary, "--version")))
++			version := strings.TrimSpace(string(l.run(t, binary, "--version")))
++			if runtime.GOOS == "linux" {
++				want := map[string]string{"claude": "2.1.296 (Claude Code)", "codex": "codex-cli 0.162.0", "pi": "1.2.0"}[agent]
++				if version != want {
++					t.Fatalf("%s version = %q, want %q; stop rather than adapt the protocol", agent, version, want)
++				}
++			}
+@@ -642 +671,6 @@ func (l liveRun) runHeld(t *testing.T, agent, binary string, args []string) []by
+-	cmd := l.command(ctx, "/usr/bin/script", "-q", "/dev/null", "/bin/sh", "-c", "/bin/stty rows 40 cols 120; exec "+shellwords.Join(append([]string{binary}, args...)))
++	command := "/bin/stty rows 40 cols 120; exec " + shellwords.Join(append([]string{binary}, args...))
++	cmd := l.command(ctx, "/usr/bin/script", "-q", "/dev/null", "/bin/sh", "-c", command)
++	if runtime.GOOS == "linux" {
++		command = "/assets/bin/stty rows 40 cols 120; exec " + shellwords.Join(append([]string{binary}, args...))
++		cmd = l.command(ctx, "/assets/bin/script", "-q", "-e", "-f", "-c", command, "/dev/null")
++	}
+diff --git a/private/linux-native/README.md b/private/linux-native/README.md
+new file mode 100644
+index 0000000..c814e77
+--- /dev/null
++++ b/private/linux-native/README.md
+@@ -0,0 +1,149 @@
++# Private bc01 native acceptance prototype — UNVERIFIED
++
++Base: `a95976a`; private branch `test/linux-native-acceptance`.
++This is a test-only adaptation, not a supported public Linux sandbox framework.
++**No Linux execution or pass is claimed. Parent/operator review precedes execution.**
++Nothing here installs agents, accesses SSH/production/R2, or reads host agent
++configuration, credentials or package source. The host launcher reads only the
++explicit public inputs' metadata, `/proc/self/ns/{net,pid,mnt}` symlink identities,
++and its own newly created synthetic proof files. The operator stages packages;
++the launcher never binds a host home, including the home from which a public
++package was copied. Do not transfer home/config trees as "assets".
++
++## Required inputs (operator supplies; no discovery/download)
++
++- Linux bubblewrap with functional `--unshare-all`, fresh `--proc /proc`, minimal
++  `--dev /dev` PTYs, `--clearenv`, `--remount-ro /` and unprivileged execution.
++  The reported `/nix/store` `true` smoke test is a prerequisite, **not** evidence
++  that this acceptance or its preflight passed.
++- An existing **empty, owned 0700** run directory, and the reviewed private source
++  tree, outside that directory. Only `run/scratch` is mounted writable.
++- Explicitly staged **public** actual Claude Code **2.1.296**, Codex **0.162.0**,
++  Pi **1.2.0** packages and runtime closure under an owned assets directory.
++  Pass exact relative executable paths; do not replace them with mock CLIs or
++  version wrappers. Pi must retain its actual `.../pi-coding-agent/...` script
++  pathname and executable bit. Preserve its package dependencies and metadata.
++  Symlinks may reference only other staged assets or explicitly mounted public
++  runtime outputs; a symlink back into host home intentionally fails.
++- `assets/bin/{sh,env,script,stty,node,cc}`: public real runtime executables or
++  links into explicitly approved public closures. `script` must be util-linux.
++  `cc` plus its complete public compiler/linker closure is needed for `-race`.
++  Stage any further dependencies needed by the actual CLI distributions, too.
++- Exact public Go **1.27.2** toolchain directory (`go.mod` requires Go 1.27),
++  and an already-populated module cache matching `go.sum`, mounted read-only.
++  No network/module/toolchain download: `GOPROXY=off`, `GOSUMDB=off`,
++  `GOTOOLCHAIN=local`, `GOENV=off`. Go's writable cache is fresh owned scratch.
++  `-buildvcs=false` prevents the private worktree's external `.git` pointer from
++  requiring any host repository access; no Git executable is needed inside.
++- Enumerate every approved public runtime closure output with `--runtime`.
++  Prefer individual `/nix/store/<hash>-<name>` roots, **not** all `/nix/store`.
++  Narrow system-library paths are accepted, but their loader aliases must also
++  be available inside the namespace: do not solve missing libraries by binding
++  the host root, `/usr`, `/bin`, `/etc`, `/proc` or a home. The template resolves
++  input symlinks. The bc-01-specific launcher provides Debian x86_64 `/lib` and
++  `/lib64` loader aliases into `/usr/lib`; the operator must bind the approved
++  public `/usr/lib/x86_64-linux-gnu` library directory when staging its unchanged
++  Node/Claude ELF files. This is public runtime code, not host configuration.
++  Do not mount Nix outputs containing private material. No host agent source
++  or private SDK inspection is required or authorised.
++
++The template deliberately fails on incomplete closures, disabled IPv6 with a
++non-ENETUNREACH probe result, non-loopback interfaces/routes, protocol/flag
++changes, or version mismatch. Fix staging only; do not add an unsandboxed
++fallback. If trust/protocol/lifecycle differs, preserve evidence and **stop and
++report the gap**. In particular Codex 0.162.0 is not assumed equivalent to the
++Mac 0.162.1: scratch trust still uses the existing independently pinned identity
++fixtures, never the collector's trust implementation.
++
++## Review, then authorised Linux command template
++
++Paths below are placeholders for existing approved inputs, not host-discovery
++commands. `python3 -I -S` avoids Python user-site/environment startup behavior.
++Use an absolute public Python interpreter path on the authorised host.
++
++```sh
++/public/python3 -I -S /reviewed/source/private/linux-native/launch.py \
++  --bwrap /public/bwrap \
++  --run /owned/empty-run \
++  --source /reviewed/source \
++  --assets /owned/public-assets \
++  --modulecache /public/populated-modulecache \
++  --gotoolchain /public/go1.27.2 \
++  --claude packages/claude/claude \
++  --codex packages/codex/codex \
++  --pi packages/pi-coding-agent/dist/cli.js \
++  --runtime /nix/store/EXACT-public-runtime-output
++# Repeat --runtime for the complete approved public closure.
++```
++
++The outer launcher uses an empty inherited environment, bubblewrap clearenv and
++an explicit synthetic environment. It builds a read-only synthetic root, binds
++only the inputs above, supplies synthetic passwd/group, and mounts fresh proc
++for its new PID namespace. No host `/etc`, `/proc`, socket, home or credentials
++are exposed. All Go invocations, `TestMain`'s collector build, the fake server,
++real agents, observers and detached collectors run **inside that one outer
++NET/PID/mount namespace boundary**. No agent-level sandbox flag substitutes for
++this boundary; direct child execution inherits it without making a second netns.
++The existing Codex `--sandbox read-only` argument remains unchanged.
++
++The only invocation inside the outer offline shell is:
++
++```sh
++go test -race ./cmd/agent-sessions -run '^TestLiveAgents$' -count=1 -v
++```
++
++Before **any** agent (including `--version`), mandatory Go preflight:
++
++- Requires the private read-only manifest, and compares actual NET/PID/mount
++  identities to the host identities captured by the outer launcher. Verifies
++  `/proc/1/ns/pid` agrees with the inner PID namespace.
++- Requires only an active `lo`, loopback addresses and loopback-only routes
++  (Linux unreachable IPv6 default entries on `lo` are allowed).
++- Requires real HTTP loopback health and scratch write/readback success.
++- Requires numeric IPv4 `192.0.2.1` and IPv6 `2001:db8::1` TCP probes to return
++  kernel **ENETUNREACH**, not timeout, unavailable curl, proxy or DNS failure.
++- Attempts writes to existing read-only synthetic canary and manifest; requires
++  EROFS/permission and unchanged hashes. Requires the known owned synthetic
++  external canary (not mounted) to be unreadable; no actual host config is probed.
++- Repeats **all** controls in a real `setsid` descendant and requires it to retain
++  the exact same confined namespaces. The child exits in init before TestMain.
++
++**Linux permits namespace-local networking to any loopback port**, unlike the
++Mac sandbox's single exact-port rule. This is stated in the test log, not hidden
++behind a fake sandbox flag. There is no external network interface or route.
++
++The existing fake SSE server, observer, scratch installer and archive verifier
++are reused unchanged. Lifecycle still requires all three real events, assistant
++reply, actual ordered argv/time and byte-exact final source with no explicit
++sync/backfill. Interactive Claude/Codex preserve Stop/held-input/orderly-exit
++behavior; only `script` argument syntax changes to Linux
++`-q -e -f -c COMMAND /dev/null`. Pi loads only the existing generated extension.
++Version output is asserted exactly, not used to infer protocol compatibility.
++
++## Evidence / disposition
++
++`run/acceptance.log` contains the outer exit and full Go output, preflight
++namespace/route/probe details and parent controls. `run/proof` contains the
++synthetic host identity fixture; `run/unmounted/canary` is never bound.
++`run/scratch/tmp/memory-live-*` retains every agent's normal acceptance evidence,
++including `linux-setsid-preflight.output`. All created files/directories use
++0600/0700 via umask; retain privately. The host launcher also verifies both owned
++canary hashes after execution. An outer zero exit alone is not a claimed pass:
++review actual subtest results and all unchanged lifecycle/archive assertions.
++Do not reuse a nonempty run directory or retry away a compatibility failure.
++
++## Local patch checks (macOS only; not native acceptance)
++
++After the parent lifted the local CPU restriction, this command passed:
++
++```sh
++go test -race ./cmd/agent-sessions \
++  -run '^TestLive(ModelProtocols|CodexIdentitiesMatchIndependentRust|ObserverDoesNotWaitForEOF|CommittedChainRejectsBranchesAndOrphans|V3ReconstructsFinalSourceAndLaunch|ReplyRequiresAssistantNotPromptEcho|LinuxRoutesRejectExternalRoutes)$' \
++  -count=1
++```
++
++`gofmt`, `git diff --check` and Python AST syntax parsing passed. The launcher
++was **not executed**. No native agents were launched. `golangci-lint` was not
++available on PATH; full `make check` was not run on this private adaptation.
++These helper checks are **not Linux native acceptance**; Linux execution remains
++the parent's separately authorised responsibility.
+diff --git a/private/linux-native/launch.py b/private/linux-native/launch.py
+new file mode 100644
+index 0000000..fda0e83
+--- /dev/null
++++ b/private/linux-native/launch.py
+@@ -0,0 +1,143 @@
++#!/usr/bin/env python3
++"""UNVERIFIED operator template. Review, then run ONLY on the authorised Linux host.
++Invoke with python3 -I -S launch.py --help. Does not install or discover agents.
++All supplied assets/runtimes must be independently approved PUBLIC files.
++"""
++import argparse
++import hashlib
++import json
++import os
++from pathlib import Path
++import stat
++import subprocess
++import sys
++
++
++def existing(value):
++    return Path(value).resolve(strict=True)
++
++
++def digest(path):
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    for name in ("bwrap", "run", "source", "assets", "modulecache", "gotoolchain"):
++        parser.add_argument("--" + name, type=existing, required=True)
++    for agent in ("claude", "codex", "pi"):
++        parser.add_argument("--" + agent, required=True,
++                            help="exact executable path relative to staged assets")
++    parser.add_argument("--runtime", type=existing, action="append", default=[],
++                        help="approved public Nix closure root or system library path; repeat")
++    args = parser.parse_args()
++    if sys.platform != "linux":
++        parser.error("Linux only; no fallback")
++    run = args.run
++    st = run.stat()
++    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode) != 0o700 or any(run.iterdir()):
++        parser.error("run must be an existing EMPTY owned 0700 directory")
++    for path in (args.source, args.assets, args.modulecache, args.gotoolchain, *args.runtime):
++        if path == run or run in path.parents or path in run.parents:
++            parser.error("public read-only inputs must not overlap owned run")
++    agents = {}
++    for agent in ("claude", "codex", "pi"):
++        relative = Path(getattr(args, agent))
++        if relative.is_absolute() or ".." in relative.parts:
++            parser.error("agent paths must be relative to assets without '..'")
++        executable = args.assets / relative
++        if not executable.is_file() or not os.access(executable, os.X_OK):
++            parser.error("missing staged executable: " + str(executable))
++        # Keep the actual script's package pathname visible to collector ancestry.
++        if agent == "pi" and "pi-coding-agent" not in relative.parts:
++            parser.error("Pi must use the actual pi-coding-agent script pathname")
++        agents[agent] = "/assets/" + relative.as_posix()
++    for name in ("sh", "env", "script", "stty", "node", "cc"):
++        path = args.assets / "bin" / name
++        if not path.is_file() or not os.access(path, os.X_OK):
++            parser.error("stage public runtime executable/closure for assets/bin/" + name)
++    # No broad root, /home, /proc, /etc, /usr, /bin, or Nix-store mounts.
++    # Individual public Nix output directories can contain further references;
++    # the operator must enumerate their complete PUBLIC closure explicitly.
++    for path in args.runtime:
++        nix_output = path.parent == Path("/nix/store")
++        library = any(base in path.parents for base in (Path("/usr/lib"), Path("/lib"), Path("/lib64")))
++        if not nix_output and not library:
++            parser.error("runtime must be an individual public Nix output or system library path: " + str(path))
++    os.umask(0o077)
++    proof = run / "proof"
++    scratch = run / "scratch"
++    outside = run / "unmounted" / "canary"
++    for path in (proof, proof / "etc", scratch, scratch / "home", scratch / "tmp", scratch / "gocache", scratch / "gopath", outside.parent):
++        path.mkdir(mode=0o700)
++    (proof / "canary").write_text("owned synthetic readonly canary\n")
++    outside.write_text("owned synthetic UNMOUNTED canary\n")
++    manifest = {
++        "marker": "private-bc01-linux-native-v1",
++        "host": {name: os.readlink("/proc/self/ns/" + name) for name in ("net", "pid", "mnt")},
++        "agents": agents,
++        "canary_sha256": digest(proof / "canary"),
++        "outside": str(outside),
++        "outside_sha256": digest(outside),
++    }
++    (proof / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
++    # Synthetic NSS data only. No host /etc or user config is read or mounted.
++    (proof / "etc" / "passwd").write_text(
++        f"live:x:{os.getuid()}:{os.getgid()}:synthetic:/run/live/home:/bin/sh\n")
++    (proof / "etc" / "group").write_text(f"live:x:{os.getgid()}:\n")
++    command = [str(args.bwrap), "--unshare-all", "--die-with-parent", "--new-session",
++               "--cap-drop", "ALL", "--clearenv", "--tmpfs", "/",
++               "--dir", "/run", "--dir", "/usr", "--dir", "/usr/bin", "--dir", "/bin",
++               # bc-01's unchanged public Node/Claude binaries use Debian's
++               # x86_64 ELF interpreter. Only public libraries are bound below;
++               # these aliases do not expose any host directory or /etc cache.
++               "--symlink", "usr/lib", "/lib",
++               "--symlink", "usr/lib/x86_64-linux-gnu", "/lib64",
++               "--ro-bind", str(args.source), "/src",
++               "--ro-bind", str(args.assets), "/assets",
++               "--ro-bind", str(args.modulecache), "/modules",
++               "--ro-bind", str(args.gotoolchain), "/toolchain",
++               "--ro-bind", str(proof), "/proof",
++               "--ro-bind", str(proof / "etc"), "/etc",
++               "--bind", str(scratch), "/run/live",
++               "--symlink", "/run/live/tmp", "/tmp",
++               "--symlink", "/assets/bin/sh", "/bin/sh",
++               "--symlink", "/assets/bin/env", "/usr/bin/env",
++               "--proc", "/proc", "--dev", "/dev"]
++    for path in args.runtime:
++        command += ["--ro-bind", str(path), str(path)]
++    environment = {
++        "PATH": "/toolchain/bin:/assets/bin:/usr/bin:/bin",
++        "HOME": "/run/live/home", "USER": "live", "LOGNAME": "live",
++        "SHELL": "/bin/sh", "LANG": "C.UTF-8", "TMPDIR": "/run/live/tmp",
++        "XDG_CONFIG_HOME": "/run/live/home/.config", "XDG_CACHE_HOME": "/run/live/home/.cache",
++        "GOCACHE": "/run/live/gocache", "GOPATH": "/run/live/gopath",
++        "GOMODCACHE": "/modules", "GOROOT": "/toolchain", "GOTOOLCHAIN": "local",
++        "GOPROXY": "off", "GOSUMDB": "off", "GOTELEMETRY": "off",
++        "GOENV": "off", "GOFLAGS": "-mod=readonly -buildvcs=false", "CGO_ENABLED": "1", "CC": "/assets/bin/cc",
++        "AGENT_SESSIONS_LIVE": "1", "AGENT_SESSIONS_LIVE_KEEP": "1",
++    }
++    for key, value in environment.items():
++        command += ["--setenv", key, value]
++    # Root is read-only after constructing synthetic mountpoints. Only the owned
++    # scratch bind, fresh proc and minimal synthetic /dev (including PTYs) remain
++    # writable. No host /proc, home, config, sockets or credentials are mounted.
++    command += ["--remount-ro", "/", "--chdir", "/src", "/bin/sh", "-c",
++                "umask 077; exec /toolchain/bin/go test -race ./cmd/agent-sessions "
++                "-run '^TestLiveAgents$' -count=1 -v"]
++    log = run / "acceptance.log"
++    print("UNVERIFIED until reviewed Linux execution; evidence:", log, flush=True)
++    with log.open("xb") as output:
++        result = subprocess.run(command, env={}, stdin=subprocess.DEVNULL,
++                                stdout=output, stderr=subprocess.STDOUT, check=False)
++        output.write(("\nouter exit: " + str(result.returncode) + "\n").encode())
++    # The known external synthetic file is checked after all confined work; never
++    # read a real host config as a negative control.
++    if digest(outside) != manifest["outside_sha256"] or digest(proof / "canary") != manifest["canary_sha256"]:
++        raise RuntimeError("synthetic host canary changed")
++    print("outer exit:", result.returncode, "(review full evidence; not a claimed pass)")
++    return result.returncode
++
++
++if __name__ == "__main__":
++    sys.exit(main())
