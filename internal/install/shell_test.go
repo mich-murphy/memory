@@ -13,8 +13,8 @@ import (
 // Every external installer dependency is either a fixture or a basic filesystem
 // tool in a private PATH. No command can download a release or touch real hooks.
 type shellEnv struct {
-	root, tools, bin, downloads, script string
-	env                                 []string
+	root, tools, bin, downloads, attested, script string
+	env                                           []string
 }
 
 const fakeBinary = `#!/bin/sh
@@ -29,84 +29,91 @@ uninstall)
 esac
 `
 
-func shellFixture(t *testing.T) *shellEnv {
-	t.Helper()
-	root := t.TempDir()
-	e := &shellEnv{root: root, tools: filepath.Join(root, "tools"), bin: filepath.Join(root, "bin with spaces"), downloads: filepath.Join(root, "downloads")}
-	var err error
-	e.script, err = filepath.Abs("../../install.sh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, dir := range []string{e.tools, e.bin, e.downloads} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, name := range []string{"cat", "mktemp", "rm", "mkdir", "grep", "cp", "chmod", "mv"} {
-		path, err := exec.LookPath(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(path, filepath.Join(e.tools, name)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// Use the real checksum tool against fake local assets, never fake verification.
-	if path, err := exec.LookPath("sha256sum"); err == nil {
-		if err := os.Symlink(path, filepath.Join(e.tools, "sha256sum")); err != nil {
-			t.Fatal(err)
-		}
-	} else {
-		path, err := exec.LookPath("shasum")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(path, filepath.Join(e.tools, "shasum")); err != nil {
-			t.Fatal(err)
-		}
-	}
-	e.write(t, filepath.Join(e.downloads, "agent-sessions_linux_amd64"), fakeBinary)
-	sha := sha256.Sum256([]byte(fakeBinary))
-	e.write(t, filepath.Join(e.downloads, "checksums.txt"), fmt.Sprintf("%x  agent-sessions_linux_amd64\n", sha))
-	e.tool(t, "uname", `case "$1" in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 1 ;; esac`)
-	e.tool(t, "gh", `printf 'gh %s\n' "$*" >> "$TEST_ROOT/network.log"
+const asset = "agent-sessions_linux_amd64"
+
+// fakeGH serves release v1.2.3 from downloads/. Its attestation covers the bytes in
+// attested/, which is what was published, so a download that differs fails verify-asset.
+const fakeGH = `printf 'gh %s\n' "$*" >> "$TEST_ROOT/network.log"
 case "$1 $2" in
-'auth status') [ "${USE_GH:-0}" = 1 ] ;;
-'release view') echo v1.2.3 ;;
+'auth status') [ "${GH_LOGGED_OUT:-0}" = 0 ] ;;
+'release verify') [ "$3" = v1.2.3 ] && [ "${NOT_IMMUTABLE:-0}" = 0 ] ;;
+'release verify-asset') [ "$3" = v1.2.3 ] && "$CMP" -s "$4" "$TEST_ROOT/attested/` + asset + `" ;;
 'release download')
  [ "$3" = v1.2.3 ] || exit 1
  while [ "$#" -gt 0 ]; do
   if [ "$1" = --dir ]; then shift; dest=$1; fi
   shift
  done
- cp "$TEST_ROOT/downloads/agent-sessions_linux_amd64" "$dest/agent-sessions_linux_amd64"
+ cp "$TEST_ROOT/downloads/` + asset + `" "$dest/` + asset + `"
  cp "$TEST_ROOT/downloads/checksums.txt" "$dest/checksums.txt"
  ;;
 *) exit 1 ;;
-esac`)
-	e.tool(t, "curl", `printf 'curl %s\n' "$*" >> "$TEST_ROOT/network.log"
-[ "$2" = -o ] || exit 1
-out=$3
-if [ "$out" = /dev/null ]; then
- printf '%s' https://github.com/mich-murphy/memory/releases/tag/v1.2.3
- exit 0
-fi
-case "$4" in
-https://github.com/mich-murphy/memory/releases/download/v1.2.3/agent-sessions_linux_amd64) cp "$TEST_ROOT/downloads/agent-sessions_linux_amd64" "$out" ;;
-https://github.com/mich-murphy/memory/releases/download/v1.2.3/checksums.txt) cp "$TEST_ROOT/downloads/checksums.txt" "$out" ;;
-*) exit 1 ;;
-esac`)
+esac`
+
+func shellFixture(t *testing.T) *shellEnv {
+	t.Helper()
+	root := t.TempDir()
+	e := &shellEnv{
+		root: root, tools: filepath.Join(root, "tools"), bin: filepath.Join(root, "bin with spaces"),
+		downloads: filepath.Join(root, "downloads"), attested: filepath.Join(root, "attested"),
+	}
+	var err error
+	e.script, err = filepath.Abs("../../install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{e.tools, e.bin, e.downloads, e.attested} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"cat", "mktemp", "rm", "mkdir", "grep", "cp", "chmod", "mv"} {
+		e.link(t, name)
+	}
+	// Use the real checksum tool against fake local assets, never fake verification.
+	if _, err := exec.LookPath("sha256sum"); err == nil {
+		e.link(t, "sha256sum")
+	} else {
+		e.link(t, "shasum")
+	}
+	cmp, err := exec.LookPath("cmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.publish(t, fakeBinary)
+	e.write(t, filepath.Join(e.attested, asset), fakeBinary)
+	e.tool(t, "uname", `case "$1" in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 1 ;; esac`)
+	e.tool(t, "gh", fakeGH)
 	for _, variable := range os.Environ() {
 		name, _, _ := strings.Cut(variable, "=")
 		switch name {
-		case "HOME", "PATH", "TMPDIR", "BIN_DIR", "VERSION", "TEST_ROOT", "USE_GH", "FAIL_UNINSTALL":
+		case "HOME", "PATH", "TMPDIR", "BIN_DIR", "VERSION", "TEST_ROOT", "CMP", "GH_LOGGED_OUT", "NOT_IMMUTABLE", "FAIL_UNINSTALL":
 		default:
 			e.env = append(e.env, variable)
 		}
 	}
-	e.env = append(e.env, "HOME="+root, "PATH="+e.tools, "TMPDIR="+root, "BIN_DIR="+e.bin, "TEST_ROOT="+root)
+	e.env = append(e.env, "HOME="+root, "PATH="+e.tools, "TMPDIR="+root, "BIN_DIR="+e.bin, "TEST_ROOT="+root,
+		"CMP="+cmp, "VERSION=v1.2.3")
 	return e
+}
+
+func (e *shellEnv) link(t *testing.T, name string) {
+	t.Helper()
+	path, err := exec.LookPath(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(path, filepath.Join(e.tools, name)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// publish puts body up for download with a checksums.txt that matches it.
+func (e *shellEnv) publish(t *testing.T, body string) {
+	t.Helper()
+	e.write(t, filepath.Join(e.downloads, asset), body)
+	sha := sha256.Sum256([]byte(body))
+	e.write(t, filepath.Join(e.downloads, "checksums.txt"), fmt.Sprintf("%x  %s\n", sha, asset))
 }
 
 func (e *shellEnv) write(t *testing.T, path, content string) {
@@ -141,6 +148,23 @@ func (e *shellEnv) run(t *testing.T, success bool, args ...string) {
 	}
 }
 
+func (e *shellEnv) ghCalls(t *testing.T) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(e.root, "network.log"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []string
+	for line := range strings.Lines(string(data)) {
+		f := strings.Fields(line)
+		calls = append(calls, strings.Join(f[1:min(3, len(f))], " "))
+	}
+	return calls
+}
+
 func (e *shellEnv) noTemporaryFiles(t *testing.T) {
 	t.Helper()
 	for _, dir := range []string{e.root, e.bin} {
@@ -156,28 +180,25 @@ func (e *shellEnv) noTemporaryFiles(t *testing.T) {
 	}
 }
 
-func TestShellInstallUsesOneReleaseAndIgnoresPredictableSymlink(t *testing.T) {
-	for _, method := range []string{"curl", "gh"} {
-		t.Run(method, func(t *testing.T) {
-			e := shellFixture(t)
-			if method == "gh" {
-				e.env = append(e.env, "USE_GH=1")
-			}
-			victim := filepath.Join(e.root, "unrelated")
-			e.write(t, victim, "keep me")
-			if err := os.Symlink(victim, filepath.Join(e.bin, ".agent-sessions.new")); err != nil {
-				t.Fatal(err)
-			}
-			e.run(t, true)
-			if got, err := os.ReadFile(victim); err != nil || string(got) != "keep me" {
-				t.Fatalf("unrelated file = %q, %v", got, err)
-			}
-			if got, err := os.ReadFile(filepath.Join(e.bin, "agent-sessions")); err != nil || string(got) != fakeBinary {
-				t.Fatalf("installed binary = %q, %v", got, err)
-			}
-			e.noTemporaryFiles(t)
-		})
+func TestShellInstallVerifiesTheReleaseAndIgnoresPredictableSymlink(t *testing.T) {
+	e := shellFixture(t)
+	victim := filepath.Join(e.root, "unrelated")
+	e.write(t, victim, "keep me")
+	if err := os.Symlink(victim, filepath.Join(e.bin, ".agent-sessions.new")); err != nil {
+		t.Fatal(err)
 	}
+	e.run(t, true)
+	if got, err := os.ReadFile(victim); err != nil || string(got) != "keep me" {
+		t.Fatalf("unrelated file = %q, %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(e.bin, "agent-sessions")); err != nil || string(got) != fakeBinary {
+		t.Fatalf("installed binary = %q, %v", got, err)
+	}
+	want := []string{"auth status", "release verify", "release download", "release verify-asset"}
+	if got := e.ghCalls(t); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("gh calls = %q, want %q", got, want)
+	}
+	e.noTemporaryFiles(t)
 }
 
 func TestShellConcurrentInstallsUseIndependentStagingFiles(t *testing.T) {
@@ -202,14 +223,26 @@ func TestShellConcurrentInstallsUseIndependentStagingFiles(t *testing.T) {
 }
 
 func TestShellInstallFailuresCleanUpAndPreserveInstalledBinary(t *testing.T) {
-	for _, failure := range []string{"checksum", "copy", "signal", "chmod", "rename"} {
+	failures := []string{"nogh", "loggedout", "mutable", "tampered", "checksum", "copy", "signal", "chmod", "rename"}
+	for _, failure := range failures {
 		t.Run(failure, func(t *testing.T) {
 			e := shellFixture(t)
 			binary := filepath.Join(e.bin, "agent-sessions")
 			e.write(t, binary, "old binary")
 			switch failure {
+			case "nogh":
+				if err := os.Remove(filepath.Join(e.tools, "gh")); err != nil {
+					t.Fatal(err)
+				}
+			case "loggedout":
+				e.env = append(e.env, "GH_LOGGED_OUT=1")
+			case "mutable":
+				e.env = append(e.env, "NOT_IMMUTABLE=1")
+			case "tampered":
+				// Both assets replaced together: the checksum agrees, only the attestation can't.
+				e.publish(t, "#!/bin/sh\necho tampered\n")
 			case "checksum":
-				e.write(t, filepath.Join(e.downloads, "checksums.txt"), strings.Repeat("0", 64)+"  agent-sessions_linux_amd64\n")
+				e.write(t, filepath.Join(e.downloads, "checksums.txt"), strings.Repeat("0", 64)+"  "+asset+"\n")
 			case "copy", "signal":
 				cp, err := exec.LookPath("cp")
 				if err != nil {
@@ -244,7 +277,7 @@ func TestShellUninstallIsOfflineAndPreservesData(t *testing.T) {
 			for _, name := range []string{"config", "machine-id", "state.sqlite", "remote-data", "unrelated"} {
 				e.write(t, filepath.Join(e.root, name), "preserve "+name)
 			}
-			for _, name := range []string{"curl", "gh", "uname", "mkdir", "mktemp"} {
+			for _, name := range []string{"gh", "uname", "mkdir", "mktemp"} {
 				e.tool(t, name, `echo unexpected >> "$TEST_ROOT/unexpected"; exit 1`)
 			}
 			// Uninstall must not even validate the platform or release version.
@@ -278,16 +311,39 @@ func TestShellInstallerValidatesArgumentsAndVersion(t *testing.T) {
 	for _, args := range [][]string{{"--help"}, {"unexpected"}, {"install", "uninstall"}} {
 		e := shellFixture(t)
 		e.run(t, len(args) == 1 && args[0] == "--help", args...)
-		if _, err := os.Stat(filepath.Join(e.root, "network.log")); !os.IsNotExist(err) {
-			t.Errorf("argument validation used network: %v", err)
+		if calls := e.ghCalls(t); calls != nil {
+			t.Errorf("argument validation ran gh: %q", calls)
 		}
 	}
-	for _, version := range []string{"--repo=foreign", "v1.2.3 with spaces", "v1/../../other", "$(touch victim)", "v1.2.3;false"} {
+	// An empty VERSION is a missing one: there is no implicit latest release.
+	for _, version := range []string{"", "latest", "--repo=foreign", "v1.2.3 with spaces", "v1/../../other", "$(touch victim)", "v1.2.3;false"} {
 		e := shellFixture(t)
 		e.env = append(e.env, "VERSION="+version)
 		e.run(t, false)
-		if _, err := os.Stat(filepath.Join(e.root, "network.log")); !os.IsNotExist(err) {
-			t.Errorf("invalid VERSION used network: %v", err)
+		if calls := e.ghCalls(t); calls != nil {
+			t.Errorf("VERSION %q ran gh: %q", version, calls)
 		}
+	}
+}
+
+// A download cut short must run nothing, so a partial script can't act on half its logic.
+func TestShellTruncatedInstallerRunsNothing(t *testing.T) {
+	e := shellFixture(t)
+	full, err := os.ReadFile(e.script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cut := strings.LastIndex(string(full), "main \"$@\"")
+	if cut < 0 {
+		t.Fatal(`install.sh doesn't end by calling main "$@"`)
+	}
+	e.script = filepath.Join(e.root, "truncated.sh")
+	e.write(t, e.script, string(full[:cut]))
+	e.run(t, true)
+	if calls := e.ghCalls(t); calls != nil {
+		t.Errorf("truncated installer ran gh: %q", calls)
+	}
+	if _, err := os.Stat(filepath.Join(e.bin, "agent-sessions")); !os.IsNotExist(err) {
+		t.Errorf("truncated installer installed a binary: %v", err)
 	}
 }

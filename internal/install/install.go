@@ -84,7 +84,7 @@ func warnIfOffPath(o *Options) {
 		}
 	}
 	msg := fmt.Sprintf("warning: the hooks run %s, which isn't agent-sessions on your PATH, so they break if it moves. "+
-		"Install with install.sh, or put it on your PATH, and rerun `agent-sessions install`.", o.Command[0])
+		"Install it with Nix or a release's install.sh, or put it on your PATH, and rerun `agent-sessions install`.", o.Command[0])
 	if !slices.Contains(o.Log, msg) {
 		o.Log = append(o.Log, msg)
 	}

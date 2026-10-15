@@ -8,19 +8,23 @@ The first piece is **agent-sessions**, a small collector that copies everything 
 
 You need an R2 API token scoped to the bucket with Object Read & Write. Use one token per machine so any machine can be revoked on its own. Nothing else: agent-sessions is a single binary for Linux and macOS (13 or later) on amd64 or arm64.
 
+Install the binary pinned to a release tag, either with Nix (built from source; see [docs/install.md](docs/install.md#nix-built-from-source)) or from the release itself. The release route needs the GitHub CLI, logged in with `gh auth login`:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mich-murphy/memory/main/install.sh | sh   # into ~/.local/bin
+gh release download v0.3.0 -R mich-murphy/memory -p install.sh
+gh release verify-asset v0.3.0 install.sh -R mich-murphy/memory   # GitHub's attestation of the published file
+less install.sh                                                   # read it before running it
+VERSION=v0.3.0 sh install.sh                                      # verifies the binary the same way, into ~/.local/bin
+```
+
+Then set the machine up:
+
+```bash
 agent-sessions machine-id --new   # deliberate NEW machine only; for a lost ID, restore it instead (see below)
 agent-sessions install      # hooks and the Pi extension
 $EDITOR ~/.config/agent-sessions/config.env   # R2 endpoint, bucket and keys (written for you, mode 600)
 agent-sessions doctor       # checks the bucket and every hook
 agent-sessions backfill     # uploads every session already on this machine
-```
-
-While the repo is private, `raw.githubusercontent.com` returns 404, so fetch the script through `gh` instead, logged in with `gh auth login`:
-
-```bash
-gh api -H 'Accept: application/vnd.github.raw' repos/mich-murphy/memory/contents/install.sh | sh
 ```
 
 If you use Codex, open it once and approve the agent-sessions hooks in `/hooks`. Codex doesn't run a new hook until you've reviewed it, and `agent-sessions doctor` tells you whether that's done.
@@ -90,13 +94,23 @@ The conservative policy also withholds agent-wide files in that source root (sha
 
 Logs are in `~/.local/state/agent-sessions/agent-sessions.log`.
 
-Rerun the install script to upgrade; it verifies each download against the release's `checksums.txt`. `VERSION=v0.1.0` picks a release. While the repo is private, the script downloads through `gh`, so log in with `gh auth login` first.
+To upgrade, change the tag in your flake input and rebuild, or download and verify the new release's `install.sh` and run it with the new `VERSION`. Releases are immutable, and the script refuses one that GitHub hasn't attested.
 
 To remove the binary too, run `sh install.sh uninstall` from a local copy of the script. It removes the managed hooks and extension first, then the binary, without using the network. Config, credentials, machine identity, local state and all remote data are retained. See [docs/install.md](docs/install.md) for installation, removal and hook-trust verification details.
 
 ## Development
 
-Go 1.27 and [golangci-lint](https://golangci-lint.run) at the version in `.golangci-lint-version`.
+Use the locked Nix development shell on Linux (amd64/arm64) or macOS (arm64):
+
+```bash
+nix develop
+# Or, with direnv and nix-direnv configured:
+direnv allow
+```
+
+The shell supplies Go 1.27, [golangci-lint](https://golangci-lint.run) at the version in `.golangci-lint-version`, a C compiler for race tests, Make, Git, jq for the Claude hooks, Python 3.14 for verification, ShellCheck/zizmor for workflow checks, and GoReleaser/Syft for releases. Other Go tools stay pinned in `tools/go.mod` and `tools/gopls/go.mod`; Go downloads them on first use. Agent CLIs and live-test credentials are not provisioned.
+
+Commit `flake.lock` when updating dependencies with `nix flake update`; keep Go aligned with `go.mod` and golangci-lint with `.golangci-lint-version`. Without Nix, install those versions and a C compiler manually. `nix fmt flake.nix` formats the flake.
 
 ```bash
 make hooks   # git hooks: format and lint on commit, tests on push

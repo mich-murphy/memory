@@ -1,4 +1,5 @@
 .cover/
+.direnv/
 cover.out
 bin/
 dist/
@@ -7,3 +8,4 @@ mutation.json
 
 # Local live-test credentials; never commit secrets.
 .env
+.envrc

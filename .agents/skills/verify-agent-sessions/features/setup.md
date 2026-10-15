@@ -17,7 +17,7 @@ A user explicitly chooses a new machine identity, installs agent hooks without d
 - Select known ID via `AGENT_SESSIONS_MACHINE_ID` environment/config or restore original private identity file; never use a new ID to recover history.
 - `agent-sessions install`, `install --agent claude --agent codex`, `install --agent pi`, with optional `--dry-run`.
 - `agent-sessions uninstall` and selected `--agent`/`--dry-run`.
-- `sh install.sh [install]`, `sh install.sh uninstall`, `BIN_DIR`, `VERSION`: release script entry points, not automated here.
+- `VERSION=vX.Y.Z sh install.sh [install]`, `sh install.sh uninstall`, `BIN_DIR`: release script entry points, not automated here (`internal/install/shell_test.go` covers them with a fake `gh`).
 
 ## Driving it with verify.py
 
@@ -35,5 +35,5 @@ Preconditions:
 
 - Synthetic config directories make agents “present”; installation does not require executing a real agent. Real Codex approval belongs to `/hooks` and is intentionally not forged locally.
 - Environment overrides take precedence over file values. Only the environment override recovery entry is automated; direct restored identity-file and config override journeys remain unverified here.
-- Release download/checksum/authenticated `gh`/upgrade and release-script uninstall are unverified; never reach out to real release/config/credentials from this skill.
+- Real release download, attestation verification, upgrade and release-script uninstall are unverified here; never reach out to real release/config/credentials from this skill.
 - Malformed existing settings, symlink installs and other variants are project regression coverage, not claims from this seed journey.

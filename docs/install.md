@@ -1,13 +1,56 @@
 # Installation and removal
 
-Run `sh install.sh` (or `sh install.sh install`) to install/upgrade a checksum-verified
-release into `~/.local/bin`. `BIN_DIR` selects another directory, including one with
-spaces. `VERSION=v0.1.0` selects a release; the default `latest` resolves to a single
-release tag before downloading either the binary or its checksum. Authenticated
-`gh` is preferred; otherwise the installer uses `curl`. Checksum verification is
-integrity checking against the same release, not a separate signature guarantee.
+There are two supported ways to install, both pinned to a release tag you choose.
 
-Each installation exclusively creates its own temporary sibling binary, copies
+## Nix (built from source)
+
+The flake's `packages.<system>.default` builds the binary from source with `CGO_ENABLED=0`
+and the commit as its version. Add the repo as a flake input pinned to a tag, and install
+`inputs.agent-sessions.packages.${system}.default` with nix-darwin's
+`environment.systemPackages` or home-manager's `home.packages`:
+
+```nix
+inputs.agent-sessions.url = "git+ssh://git@github.com/mich-murphy/memory?ref=refs/tags/v0.3.0";
+```
+
+While the repo is private, Nix fetches over SSH with a key GitHub accepts (or set a GitHub
+token in `access-tokens` and use `github:mich-murphy/memory/v0.3.0`). Your `flake.lock`
+records the exact commit and its content hash, and the Go dependencies are checked against
+`vendorHash`. Upgrade by changing the tag and running `nix flake update agent-sessions`,
+then rebuild: the lock diff shows what changed. After changing `go.mod` or `go.sum`, update
+`vendorHash` in `flake.nix` (set `lib.fakeHash`, build, copy the reported hash).
+
+The hooks run the profile path on `PATH` (for example `/etc/profiles/per-user/$USER/bin`
+on nix-darwin, `~/.nix-profile/bin` with standalone home-manager), not the store path, so
+an upgrade keeps Codex's hook trust valid. Run `agent-sessions install` once after the
+first rebuild.
+
+## Release binary (`install.sh`)
+
+Releases are immutable: once published, GitHub locks the tag and every asset, and signs a
+release attestation of the tag, commit and asset digests. Download the script from the
+release you chose, verify it, read it, then run it:
+
+```bash
+gh release download v0.3.0 -R mich-murphy/memory -p install.sh
+gh release verify-asset v0.3.0 install.sh -R mich-murphy/memory
+less install.sh
+VERSION=v0.3.0 sh install.sh
+```
+
+The script requires `VERSION` (there is no implicit latest) and a logged-in `gh`. It
+refuses to install unless `gh release verify` confirms the release is immutable and
+attested, `gh release verify-asset` matches the downloaded binary to that attestation,
+and the binary matches `checksums.txt`. The checksum alone only shows the two downloads
+agree; the attestation is what catches a binary and checksum replaced together. All of its
+logic runs from a `main` function called on the last line, so a truncated download runs
+nothing. `BIN_DIR` selects another directory than `~/.local/bin`, including one with spaces.
+
+This proves the files are exactly what was published under that tag. Releases are built
+locally (see [quality-gates.md](quality-gates.md#ci-and-releases)), so it does not prove
+the binary was built from the tagged commit; the Nix route does.
+
+Each `install.sh` installation exclusively creates its own temporary sibling binary, copies
 and chmods it before atomic rename, and removes temporary files on failures and
 HUP/INT/TERM. Concurrent installs do not share staging paths. SIGKILL cannot run
 cleanup; abandoned uniquely named temporary files can be removed manually.

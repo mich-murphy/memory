@@ -22,6 +22,16 @@ archives:
 
 checksum:
   name_template: checksums.txt
+  extra_files:
+    - glob: ./install.sh
+
+# Release immutability locks a release's assets and tag when it's published, so every asset
+# goes up to a draft first; publish it with `gh release edit <tag> --draft=false` once checked.
+release:
+  draft: true
+  replace_existing_draft: true
+  extra_files:
+    - glob: ./install.sh
 
 sboms:
   - artifacts: binary
