@@ -126,7 +126,7 @@ func (p *Pi) packageRevision(root, repo string) (packageRevision, error) {
 	if _, err := hex.DecodeString(id); err != nil || len(id) != 40 && len(id) != 64 {
 		return packageRevision{}, errors.New("invalid package commit identity")
 	}
-	status, err := packageGit(repo, "status", "--porcelain", "--untracked-files=normal")
+	status, err := passivePackageStatus(repo, id)
 	if err != nil {
 		return packageRevision{}, err
 	}
@@ -138,23 +138,91 @@ func (p *Pi) packageRevision(root, repo string) (packageRevision, error) {
 }
 
 // Git status can print arbitrarily many filenames; only its nonemptiness is needed.
-type packageOutput struct{ body []byte }
+// A positive limit instead requires complete bounded output (used for object/index paths).
+type packageOutput struct {
+	body  []byte
+	limit int
+}
 
 func (o *packageOutput) Write(p []byte) (int, error) {
-	o.body = append(o.body, p[:min(len(p), 128-len(o.body))]...)
+	limit := 128
+	if o.limit > 0 {
+		limit = o.limit
+		if len(p) > limit-len(o.body) {
+			return 0, errors.New("package observation output limit exceeded")
+		}
+	}
+	o.body = append(o.body, p[:min(len(p), limit-len(o.body))]...)
 	return len(p), nil
 }
 
 func packageGit(dir string, args ...string) ([]byte, error) {
+	return runPackageGit(dir, nil, 0, args...)
+}
+
+// Inherited Git identity/config overrides must not redirect an observation (or its tests).
+func packageGitEnvironment(extra []string) []string {
+	env := make([]string, 0, len(os.Environ())+len(extra)+4)
+	for _, value := range os.Environ() {
+		if !strings.HasPrefix(value, "GIT_") {
+			env = append(env, value)
+		}
+	}
+	return append(append(env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_TERMINAL_PROMPT=0", "GIT_ATTR_NOSYSTEM=1"), extra...)
+}
+
+func runPackageGit(dir string, env []string, limit int, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	// In particular, disable fsmonitor: status must not execute a package-supplied command.
-	argv := append([]string{"--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-C", dir}, args...)
+	argv := append([]string{"--no-pager", "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=" + os.DevNull, "-C", dir}, args...)
 	cmd := exec.CommandContext(ctx, "git", argv...)
-	out := &packageOutput{}
+	cmd.Env = packageGitEnvironment(env)
+	out := &packageOutput{limit: limit}
 	cmd.Stdout = out
 	if err := cmd.Run(); err != nil {
 		return nil, errors.New("package git observation failed")
 	}
 	return out.body, nil
+}
+
+// Status can execute clean/process filters even with hooks and fsmonitor disabled.
+// Observe the original index/objects through a disposable, configuration-free repository:
+// neither .git/config nor .git/info/attributes can select executable package code. Working
+// tree attributes without configured filters are inert. Dirty describes raw bytes, not a
+// package-defined clean-filter transformation. No original index/ref/config is written.
+func passivePackageStatus(repo, commit string) (body []byte, err error) {
+	objects, err := runPackageGit(repo, nil, 64<<10, "rev-parse", "--path-format=absolute", "--git-path", "objects")
+	if err != nil {
+		return nil, err
+	}
+	index, err := runPackageGit(repo, nil, 64<<10, "rev-parse", "--path-format=absolute", "--git-path", "index")
+	if err != nil {
+		return nil, err
+	}
+	dir, err := os.MkdirTemp("", "agent-sessions-git-")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, os.RemoveAll(dir)) }()
+	for _, name := range []string{"objects", "refs"} {
+		if err := os.Mkdir(filepath.Join(dir, name), 0o700); err != nil {
+			return nil, err
+		}
+	}
+	configuration := "[core]\nrepositoryformatversion = 0\nbare = false\n"
+	if len(commit) == 64 {
+		configuration = "[core]\nrepositoryformatversion = 1\nbare = false\n[extensions]\nobjectformat = sha256\n"
+	}
+	for name, content := range map[string]string{"HEAD": commit + "\n", "config": configuration} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			return nil, err
+		}
+	}
+	env := []string{
+		"GIT_DIR=" + dir, "GIT_WORK_TREE=" + repo,
+		"GIT_OBJECT_DIRECTORY=" + strings.TrimSuffix(string(objects), "\n"),
+		"GIT_INDEX_FILE=" + strings.TrimSuffix(string(index), "\n"),
+	}
+	return runPackageGit(repo, env, 0, "status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=all", "--no-renames")
 }
