@@ -12,6 +12,10 @@ func TestAcceptanceAssignmentSyntaxNeverReachesArchiveOrLogs(t *testing.T) {
 	r := newAcceptanceRun(t)
 	root := filepath.Join(r.home, ".pi", "agent")
 	fixtures := []struct{ name, body, literal string }{
+		{"fishQuotedFlags", "set '-gx' 'API_KEY' review-fish-quoted-flags-secret", "review-fish-quoted-flags-secret"},
+		{"fishQuotedLongFlags", `set '--global' "--export" API_KEY review-fish-quoted-long-secret`, "review-fish-quoted-long-secret"},
+		{"fishQuotedCommand", "'set' -gx API_KEY review-fish-quoted-command-secret", "review-fish-quoted-command-secret"},
+		{"fishJoinedExport", "ex'port' API_KEY=review-fish-joined-export-secret", "review-fish-joined-export-secret"},
 		{"fishQuotedName", "set -gx 'API_KEY' review-fish-name-secret", "review-fish-name-secret"},
 		{"fishReordered", "set -xg API_KEY review-fish-reordered-secret", "review-fish-reordered-secret"},
 		{"fishSeparate", "set -g -x API_KEY review-fish-separate-secret", "review-fish-separate-secret"},
@@ -36,6 +40,12 @@ func TestAcceptanceAssignmentSyntaxNeverReachesArchiveOrLogs(t *testing.T) {
 	}
 	reference := []byte("export API_KEY=\"${CONTROL_TOKEN}\"\n" +
 		"set -gx PASSWORD $CONTROL_PASSWORD\n" +
+		"set '-gx' 'API_KEY' $CONTROL_TOKEN\n" +
+		"set '--global' \"--export\" API_KEY $CONTROL_TOKEN\n" +
+		"'set' -gx API_KEY $CONTROL_TOKEN\n" +
+		"ex'port' API_KEY=$CONTROL_TOKEN\n" +
+		"true;'and' export API_KEY=fixture-value\n" +
+		"ex'port' 'API_KEY=fixture-value'\n" +
 		"set -gx 'API_KEY' $CONTROL_TOKEN\n" +
 		"set -xg API_KEY $CONTROL_TOKEN\n" +
 		"set -g -x API_KEY $CONTROL_TOKEN\n" +

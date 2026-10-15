@@ -59,10 +59,13 @@ func literalCommand(words []shellWord) bool {
 	if len(words) > 0 && (words[0].raw == "and" || words[0].raw == "or") {
 		words = words[1:]
 	}
-	if len(words) > 0 && words[0].raw == "set" {
+	// Builtin names and flags are static words, so complete quoted spellings
+	// have the same meaning. Keywords above and shell assignment positions below
+	// deliberately retain raw syntax; quoted `and` and quoted names aren't those forms.
+	if len(words) > 0 && words[0].complete && words[0].value == "set" {
 		return literalFish(fishSetArgs(words[1:]))
 	}
-	if len(words) > 0 && words[0].raw == "export" {
+	if len(words) > 0 && words[0].complete && words[0].value == "export" {
 		words = words[1:]
 	}
 	for _, word := range words {
@@ -83,7 +86,10 @@ func literalCommand(words []shellWord) bool {
 func fishSetArgs(words []shellWord) []shellWord {
 	var global, export bool
 	for i, word := range words {
-		switch word.raw {
+		if !word.complete {
+			return nil
+		}
+		switch word.value {
 		case "-g", "--global":
 			global = true
 		case "-x", "--export":
@@ -96,7 +102,7 @@ func fishSetArgs(words []shellWord) []shellWord {
 			}
 			return nil
 		default:
-			if global && export && !strings.HasPrefix(word.raw, "-") {
+			if global && export && !strings.HasPrefix(word.value, "-") {
 				return words[i:]
 			}
 			return nil

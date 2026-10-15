@@ -118,20 +118,24 @@ func TestProjectSnapshotWithholdingAppearsInRunSummary(t *testing.T) {
 
 func TestRawGuardRejectsQuotedAndMalformedAssignments(t *testing.T) {
 	for name, body := range map[string]string{
-		"fishQuotedName": "set -gx 'API_KEY' fixture-secret",
-		"fishReordered":  "set -xg API_KEY fixture-secret",
-		"fishSplit":      "set -g -x API_KEY fixture-secret",
-		"fishLong":       "set --global --export API_KEY fixture-secret",
-		"fishAndExport":  "true;and export API_KEY=fixture-secret",
-		"fishOrExport":   "false;or export API_KEY=fixture-secret",
-		"fishHash":       "set -gx PASSWORD '#fixture-secret'",
-		"separator":      "OTHER=ok;API_KEY=fixture-secret",
-		"fishSeparator":  "set -gx OTHER ok;set -gx API_KEY fixture-secret",
-		"malformed":      "OTHER=ok API_KEY=fixture-secret CMD='",
-		"singleQuoted":   "API_KEY='${TOKEN}'",
-		"escaped":        `API_KEY=\$TOKEN`,
-		"fishQuoted":     "set -gx API_KEY '${TOKEN}'",
-		"fishEscaped":    `set -gx API_KEY \$TOKEN`,
+		"fishQuotedFlags":     "set '-gx' 'API_KEY' fixture-secret",
+		"fishQuotedLongFlags": `set '--global' "--export" API_KEY fixture-secret`,
+		"fishQuotedCommand":   "'set' -gx API_KEY fixture-secret",
+		"fishJoinedExport":    "ex'port' API_KEY=fixture-secret",
+		"fishQuotedName":      "set -gx 'API_KEY' fixture-secret",
+		"fishReordered":       "set -xg API_KEY fixture-secret",
+		"fishSplit":           "set -g -x API_KEY fixture-secret",
+		"fishLong":            "set --global --export API_KEY fixture-secret",
+		"fishAndExport":       "true;and export API_KEY=fixture-secret",
+		"fishOrExport":        "false;or export API_KEY=fixture-secret",
+		"fishHash":            "set -gx PASSWORD '#fixture-secret'",
+		"separator":           "OTHER=ok;API_KEY=fixture-secret",
+		"fishSeparator":       "set -gx OTHER ok;set -gx API_KEY fixture-secret",
+		"malformed":           "OTHER=ok API_KEY=fixture-secret CMD='",
+		"singleQuoted":        "API_KEY='${TOKEN}'",
+		"escaped":             `API_KEY=\$TOKEN`,
+		"fishQuoted":          "set -gx API_KEY '${TOKEN}'",
+		"fishEscaped":         `set -gx API_KEY \$TOKEN`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
@@ -161,15 +165,21 @@ func TestRawGuardRejectsQuotedAndMalformedAssignments(t *testing.T) {
 
 func TestRawGuardKeepsFishReferencesAndUnrelatedCommands(t *testing.T) {
 	for name, body := range map[string]string{
-		"quotedName":  "set -gx 'API_KEY' $TOKEN",
-		"reordered":   "set -xg API_KEY \"${TOKEN}\"",
-		"split":       "set -g -x API_KEY $TOKEN",
-		"long":        "set --global --export API_KEY $TOKEN",
-		"andExport":   "true;and export API_KEY=$TOKEN",
-		"orExport":    "false;or export API_KEY=$TOKEN",
-		"query":       "set -q API_KEY fixture-value",
-		"prose":       "For example, set -xg API_KEY fixture-value",
-		"invalidName": "set -gx 'PASSWORD NAME' fixture-value",
+		"quotedFlags":      "set '-gx' 'API_KEY' $TOKEN",
+		"quotedLongFlags":  `set '--global' "--export" API_KEY "${TOKEN}"`,
+		"quotedCommand":    "'set' -gx API_KEY $TOKEN",
+		"joinedExport":     "ex'port' API_KEY=$TOKEN",
+		"quotedAnd":        "true;'and' export API_KEY=fixture-value",
+		"quotedAssignment": "ex'port' 'API_KEY=fixture-value'",
+		"quotedName":       "set -gx 'API_KEY' $TOKEN",
+		"reordered":        "set -xg API_KEY \"${TOKEN}\"",
+		"split":            "set -g -x API_KEY $TOKEN",
+		"long":             "set --global --export API_KEY $TOKEN",
+		"andExport":        "true;and export API_KEY=$TOKEN",
+		"orExport":         "false;or export API_KEY=$TOKEN",
+		"query":            "set -q API_KEY fixture-value",
+		"prose":            "For example, set -xg API_KEY fixture-value",
+		"invalidName":      "set -gx 'PASSWORD NAME' fixture-value",
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "script.sh")
