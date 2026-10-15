@@ -17,7 +17,6 @@ import (
 	"github.com/mich-murphy/memory/internal/raw"
 	"github.com/mich-murphy/memory/internal/snapshot"
 	"github.com/mich-murphy/memory/internal/state"
-	"github.com/mich-murphy/memory/internal/store"
 )
 
 func (s *Syncer) RecordEnvelope(ctx context.Context, envelope launch.Envelope) error {
@@ -468,6 +467,9 @@ func (s *Syncer) snapshotDependencies(ctx context.Context, id string, bodies map
 	key := snapshotKeyFor(id)
 	body, ok := bodies[key]
 	if !ok {
+		body = s.cachedSnapshot(key)
+	}
+	if body == nil {
 		var err error
 		body, err = s.readRecord(ctx, key)
 		if err != nil {
@@ -491,6 +493,7 @@ func (s *Syncer) snapshotDependencies(ctx context.Context, id string, bodies map
 		}
 		deps = append(deps, dependency{Object: plainKey(file.SHA256), SHA256: file.SHA256, Size: int64(file.Size), Encoding: "plain"})
 	}
+	s.cacheSnapshot(key, body)
 	return deps, nil
 }
 
@@ -518,10 +521,8 @@ func (s *Syncer) publish(ctx context.Context, p *publication, bodies map[string]
 	if err := s.putRecord(ctx, s.publicationKey(p, false, id), body); err != nil {
 		return state.Record{}, err
 	}
-	for _, dependency := range p.dependencies() {
-		if err := s.ensureDependency(ctx, dependency, bodies); err != nil {
-			return state.Record{}, err
-		}
+	if err := s.ensureDependencies(ctx, p.dependencies(), bodies); err != nil {
+		return state.Record{}, err
 	}
 	if err := s.verifyWriter(ctx); err != nil {
 		return state.Record{}, err
@@ -531,21 +532,6 @@ func (s *Syncer) publish(ctx context.Context, p *publication, bodies map[string]
 		return state.Record{}, err
 	}
 	return recordFor(key, id, p, body, true), nil
-}
-
-func (s *Syncer) ensureDependency(ctx context.Context, d dependency, bodies map[string][]byte) error {
-	if body, ok := bodies[d.Object]; ok {
-		_, err := s.bucket.Head(ctx, d.Object)
-		if errors.Is(err, store.ErrNotFound) {
-			err = s.bucket.Put(ctx, d.Object, body, map[string]string{"sha256": d.SHA256})
-		}
-		if err != nil {
-			if verify := verifyDependency(ctx, s.bucket, d); verify != nil {
-				return errors.Join(err, verify)
-			}
-		}
-	}
-	return verifyDependencyMetadata(ctx, s.bucket, d)
 }
 
 // snapshotSkips makes deliberate snapshot privacy omissions visible in run history and doctor,

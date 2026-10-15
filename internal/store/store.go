@@ -22,6 +22,10 @@ type Store interface {
 	Head(ctx context.Context, key string) (Object, error)
 	OpenReader(ctx context.Context, key string) (io.ReadCloser, error)
 	Create(ctx context.Context, key string, body []byte) error
+	// Put and PutFile return nil only after the complete bytes and supplied metadata
+	// are durable and visible to subsequent reads. Local stores may derive metadata
+	// from bytes instead. Any non-nil error is an unknown acknowledgement: callers
+	// must read back to establish durability, never infer absence or partial success.
 	Put(ctx context.Context, key string, body []byte, meta map[string]string) error
 	PutFile(ctx context.Context, key, path string, meta map[string]string) error
 	// Copy copies src to dst only when src holds the bytes sha names, and leaves an existing dst

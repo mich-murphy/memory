@@ -265,12 +265,7 @@ func (s *Syncer) verifyPublication(ctx context.Context, p *publication) error {
 	if err := s.verifyReferences(ctx, p, nil); err != nil {
 		return err
 	}
-	for _, d := range p.dependencies() {
-		if err := verifyDependencyMetadata(ctx, s.bucket, d); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.ensureDependencies(ctx, p.dependencies(), nil)
 }
 
 func (s *Syncer) excludedPublication(p *publication) bool {

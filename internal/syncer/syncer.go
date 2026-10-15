@@ -95,6 +95,7 @@ type (
 		touched      map[adapters.SessionRef]bool
 		workDir      string
 		tmpDir       string
+		dependencies dependencyCache
 	}
 )
 

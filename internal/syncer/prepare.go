@@ -659,6 +659,9 @@ func (s *Syncer) upload(ctx context.Context, u *upload) error {
 		}
 		u.sent += part.bodySize()
 	}
+	if err := s.ensureDependencies(ctx, p.dependencies(), nil); err != nil {
+		return err
+	}
 	if err := s.verifyWriter(ctx); err != nil {
 		return err
 	}
@@ -666,22 +669,6 @@ func (s *Syncer) upload(ctx context.Context, u *upload) error {
 		return err
 	}
 	u.outcome.Status = captureCommitted
-	return nil
-}
-
-func (s *Syncer) putPiece(ctx context.Context, u *upload) error {
-	meta := map[string]string{"sha256": u.piece.SHA256, "encoded_sha256": u.piece.EncodedSHA256}
-	var err error
-	if u.bodyPath != "" {
-		err = s.bucket.PutFile(ctx, u.piece.Object, u.bodyPath, meta)
-	} else {
-		err = s.bucket.Put(ctx, u.piece.Object, u.body, meta)
-	}
-	if err != nil {
-		if verify := verifyDependency(ctx, s.bucket, pieceDependency(u.piece)); verify != nil {
-			return errors.Join(err, verify)
-		}
-	}
 	return nil
 }
 

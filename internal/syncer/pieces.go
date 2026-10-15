@@ -42,7 +42,7 @@ func (s *Syncer) preparePieces(ctx context.Context, u *upload) error {
 	// are checked for reuse in chunkDatabase, including repeats within this generation.
 	if !u.database {
 		for _, piece := range u.publication.File.Pieces[:len(u.publication.File.Pieces)-1] {
-			if err := verifyDependencyMetadata(ctx, s.bucket, pieceDependency(piece)); err != nil {
+			if err := s.ensureDependency(ctx, pieceDependency(piece), nil); err != nil {
 				return err
 			}
 		}
@@ -78,7 +78,7 @@ func (s *Syncer) chunkDatabase(ctx context.Context, u *upload) error {
 		u.publication.File.Pieces = append(u.publication.File.Pieces, part.piece)
 		missing := false
 		if !seen[part.piece.Object] {
-			err := verifyDependencyMetadata(ctx, s.bucket, pieceDependency(part.piece))
+			err := s.ensureDependency(ctx, pieceDependency(part.piece), nil)
 			if err != nil && !errors.Is(err, store.ErrNotFound) {
 				return err
 			}

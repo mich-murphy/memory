@@ -232,6 +232,9 @@ func (s *Syncer) current(kind, agent, key string) (*publication, *state.Record, 
 		return nil, r, err
 	}
 	p, err := decodePublication(r.Body)
+	if err == nil {
+		s.confirmBaseline(p, r)
+	}
 	return p, r, err
 }
 
@@ -256,10 +259,12 @@ func (s *Syncer) readRecord(ctx context.Context, key string) ([]byte, error) {
 func (s *Syncer) putRecord(ctx context.Context, key string, body []byte) error {
 	err := s.bucket.Put(ctx, key, body, map[string]string{"sha256": raw.SHA256(body)})
 	if err == nil {
+		s.confirmRecord(key, body)
 		return nil
 	}
 	held, rerr := s.readRecord(ctx, key)
 	if rerr == nil && bytes.Equal(held, body) {
+		s.confirmRecord(key, body)
 		return nil
 	}
 	return errors.Join(err, rerr)
@@ -332,6 +337,10 @@ func verifyDependencyMetadata(ctx context.Context, bucket store.Store, d depende
 	if err != nil {
 		return err
 	}
+	return validateDependencyMetadata(d, object)
+}
+
+func validateDependencyMetadata(d dependency, object store.Object) error {
 	if object.Size != d.Size {
 		return fmt.Errorf("archive dependency %s: size mismatch", d.Object)
 	}
