@@ -283,9 +283,14 @@ func verifyDependency(ctx context.Context, bucket store.Store, d dependency) err
 		return err
 	}
 	defer func() { _ = reader.Close() }() // read-only; io.Copy reports transport errors
+	return verifyDependencyContent(reader, d)
+}
+
+func verifyDependencyContent(reader io.Reader, d dependency) error {
 	encoded := sha256.New()
 	src := io.TeeReader(io.LimitReader(reader, d.Size+1), encoded)
 	var count int64
+	var err error
 	if d.Encoding == "zstd" {
 		decoder, err := zstd.NewReader(src, zstd.WithDecoderConcurrency(1), zstd.WithDecoderLowmem(true), zstd.WithDecoderMaxMemory(128<<20))
 		if err != nil {

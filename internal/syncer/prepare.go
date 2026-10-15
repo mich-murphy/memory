@@ -637,6 +637,12 @@ func (s *Syncer) upload(ctx context.Context, u *upload) error {
 		}
 		return err
 	}
+	return s.publishCapture(ctx, u)
+}
+
+// publishCapture consumes sealed private pieces. No dependency write precedes
+// the canonical plan, and every piece worker joins before confirmation/commit.
+func (s *Syncer) publishCapture(ctx context.Context, u *upload) error {
 	p := u.publication
 	if err := validateFileTransition(p, u.previous); err != nil {
 		return err
@@ -652,11 +658,8 @@ func (s *Syncer) upload(ctx context.Context, u *upload) error {
 		return err
 	}
 	u.outcome = uploadOutcome{Status: captureUnknown, GenerationID: id}
-	for _, part := range u.parts {
-		if err := s.putPiece(ctx, part); err != nil {
-			return err
-		}
-		u.sent += part.bodySize()
+	if err := s.putPieces(ctx, u); err != nil {
+		return err
 	}
 	if err := s.ensureDependencies(ctx, p.dependencies(), nil); err != nil {
 		return err

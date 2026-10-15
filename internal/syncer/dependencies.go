@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -124,14 +125,20 @@ func (s *Syncer) ensureDependency(ctx context.Context, d dependency, bodies map[
 		return err
 	}
 	err = s.checkDependency(ctx, d, body, supplied)
+	c.finish(d, done, err)
+	return err
+}
+
+// finish releases an exclusive HEAD or PUT lease. Failures wake waiters without
+// publishing a confirmation; they may independently retry their own operation.
+func (c *dependencyCache) finish(d dependency, done chan struct{}, err error) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	if err == nil {
 		c.remember(d)
 	}
 	delete(c.flights, d.Object)
 	close(done)
-	c.mu.Unlock()
-	return err
 }
 
 // acquire separates cache coordination from store I/O. A non-nil channel is an
@@ -183,26 +190,106 @@ func (s *Syncer) dependencySlot(ctx context.Context) (func(), error) {
 	}
 }
 
-// putPiece shares the global dependency limit with inherited-piece HEAD checks.
+// putPiece uses the same identity lease as HEAD verification, acquired before
+// the global request slot. A cache hit skips only the write, never body validation.
 func (s *Syncer) putPiece(ctx context.Context, u *upload) error {
+	u.sent = 0
+	d := pieceDependency(u.piece)
+	if err := validateSealedPiece(ctx, u, d); err != nil {
+		return err
+	}
+	c := &s.dependencies
+	done, err := c.acquire(ctx, d)
+	if err != nil || done == nil {
+		return err
+	}
+	err = s.writePiece(ctx, u, d)
+	c.finish(d, done, err)
+	if err == nil {
+		u.sent = d.Size
+	}
+	return err
+}
+
+func validateSealedPiece(ctx context.Context, u *upload, d dependency) error {
+	var reader io.Reader = bytes.NewReader(u.body)
+	size := int64(len(u.body))
+	if u.bodyPath != "" {
+		f, err := os.Open(u.bodyPath)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = f.Close() }() // read-only; verification reports read errors
+		st, err := f.Stat()
+		if err != nil {
+			return err
+		}
+		reader, size = f, st.Size()
+	}
+	if size != d.Size {
+		return fmt.Errorf("archive dependency %s: supplied encoded size mismatch", d.Object)
+	}
+	return verifyDependencyContent(contextReader{ctx: ctx, reader: reader}, d)
+}
+
+func (s *Syncer) writePiece(ctx context.Context, u *upload, d dependency) error {
 	release, err := s.dependencySlot(ctx)
 	if err != nil {
 		return err
 	}
 	defer release()
-	meta := map[string]string{"sha256": u.piece.SHA256, "encoded_sha256": u.piece.EncodedSHA256}
+	meta := map[string]string{"sha256": d.RawSHA256, "encoded_sha256": d.SHA256}
 	if u.bodyPath != "" {
-		err = s.bucket.PutFile(ctx, u.piece.Object, u.bodyPath, meta)
+		err = s.bucket.PutFile(ctx, d.Object, u.bodyPath, meta)
 	} else {
-		err = s.bucket.Put(ctx, u.piece.Object, u.body, meta)
+		err = s.bucket.Put(ctx, d.Object, u.body, meta)
 	}
 	if err != nil {
-		if verify := verifyDependency(ctx, s.bucket, pieceDependency(u.piece)); verify != nil {
+		if verify := verifyDependency(ctx, s.bucket, d); verify != nil {
 			return errors.Join(err, verify)
 		}
 	}
-	s.confirmDependency(pieceDependency(u.piece))
 	return nil
+}
+
+// The plan is already durable before this phase. Every worker joins, including
+// on cancellation/failure, before byte accounting or descriptor-order error selection.
+func (s *Syncer) putPieces(ctx context.Context, u *upload) error {
+	u.sent = 0
+	for _, part := range u.parts {
+		part.sent = 0
+	}
+	if len(u.parts) == 1 {
+		err := s.putPiece(ctx, u.parts[0])
+		u.sent = u.parts[0].sent
+		return err
+	}
+	errs := make([]error, len(u.parts))
+	var next atomic.Uint64
+	var workers sync.WaitGroup
+	for range min(dependencyWorkers, len(u.parts)) {
+		workers.Go(func() {
+			for ctx.Err() == nil {
+				i := int(next.Add(1) - 1)
+				if i >= len(u.parts) {
+					return
+				}
+				errs[i] = s.putPiece(ctx, u.parts[i])
+			}
+		})
+	}
+	workers.Wait()
+	var first error
+	for i, part := range u.parts {
+		u.sent += part.sent
+		if first == nil && errs[i] != nil {
+			first = errs[i]
+		}
+	}
+	if first != nil {
+		return first
+	}
+	return ctx.Err()
 }
 
 func (s *Syncer) checkDependency(ctx context.Context, d dependency, body []byte, supplied bool) error {
