@@ -381,8 +381,9 @@ func TestAppendedSessionUploadsOnlyNewBytesThenFolds(t *testing.T) {
 	if !bytes.Equal(e.GenerationContent(history[len(history)-1].File), now) {
 		t.Error("folded content differs")
 	}
+	after := mtimes(t, e)
 	for object, mtime := range before {
-		if mtimes(t, e)[object] != mtime {
+		if after[object] != mtime {
 			t.Errorf("fold removed or rewrote %s", object)
 		}
 	}

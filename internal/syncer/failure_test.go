@@ -234,8 +234,9 @@ func TestLostAppendAnswersNeverRequireRemoteDeletion(t *testing.T) {
 				t.Errorf("round %d: rebuilt content differs for %s", round, path)
 			}
 		}
+		after := mtimes(t, e)
 		for key, mtime := range before {
-			if mtimes(t, e)[key] != mtime {
+			if after[key] != mtime {
 				t.Errorf("round %d: removed or rewrote %s", round, key)
 			}
 		}
