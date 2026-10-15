@@ -129,7 +129,7 @@ func piNamespaceRoot(root string) string {
 
 var (
 	piSessionDirRE = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T[0-9:.Z+-]+_([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`)
-	piRunRE        = regexp.MustCompile(`^run-[1-9][0-9]*$`)
+	piRunRE        = regexp.MustCompile(`^run-(0|[1-9][0-9]*)$`)
 )
 
 func piCWD(name string) bool {

@@ -35,6 +35,7 @@ func TestPiChildLayoutsKeepParentNamespace(t *testing.T) {
 			{"task", piParent + "/tasks/task-1.jsonl", RoleSubagent, true},
 			{"fork", piParent + "/forks/fork-1.jsonl", RoleSubagent, true},
 			{"run", piParent + "/" + childID + "/run-2/session.jsonl", RoleSubagent, true},
+			{"runZero", piParent + "/" + childID + "/run-0/session.jsonl", RoleSubagent, true},
 			{"taskOutput", piParent + "/tasks/task-1.md", RoleAux, true},
 			{"runOutput", piParent + "/" + childID + "/run-2/stderr.txt", RoleAux, true},
 			{"nested", piParent + "/arbitrary/nested.jsonl", RoleAux, true},
@@ -58,6 +59,9 @@ func TestPiChildLayoutsKeepParentNamespace(t *testing.T) {
 					}
 					info := SessionHead(p, sf, []map[string]any{{"type": "session", "id": childID}}, nil)
 					relation := tc.name
+					if tc.name == "runZero" {
+						relation = "run"
+					}
 					want := map[string]any{"relation": relation, "parent_session_id": "11111111-2222-3333-4444-555555555555"}
 					if diff := cmp.Diff(want, info["lineage"]); diff != "" {
 						t.Errorf("lineage (-want +got):\n%s", diff)
