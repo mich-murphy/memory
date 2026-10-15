@@ -47,6 +47,12 @@ but an explicit legacy list must still match every field in piece order.
 The native observer also checks encoded lengths. Supplemental decoder tests run
 offline, without launching actual agents. Metadata dependencies are not omitted.
 
+Directory/dangling symlink skips fence deletion observations only at the skipped logical
+path and its descendants; unrelated absent siblings can still receive tombstones, including
+after cold recovery. Any fenced historical source alias retains the whole generation.
+Actual discovery/read/export failures still make the root incomplete and block its deletions.
+Snapshot traversal policy is unchanged.
+
 ## Must-test before release / gaps
 
 1. **False deletion:** transition previously captured files into each noise or

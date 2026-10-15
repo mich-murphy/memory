@@ -272,6 +272,8 @@ type SkippedFile struct {
 }
 
 // Discovery preserves useful partial results without asserting authoritative absence.
+// Actual failures make the whole root incomplete. Directory and dangling aliases instead
+// populate Skipped; consumers must fence absence at and below those logical paths.
 type Discovery struct {
 	Files     []SessionFile
 	Databases []string
@@ -456,7 +458,6 @@ func (d *Discovery) fileInfo(logical string, entry fs.DirEntry) (os.FileInfo, er
 		if resolveErr != nil {
 			// A dangling target might have been a directory. Never infer deletions from it.
 			if errors.Is(resolveErr, os.ErrNotExist) {
-				d.Complete = false
 				d.Skipped = append(d.Skipped, SkippedFile{Path: logical, Reason: "symlink_unresolved"})
 			} else {
 				d.issue(logical, "symlink_resolve", resolveErr)
@@ -468,7 +469,6 @@ func (d *Discovery) fileInfo(logical string, entry fs.DirEntry) (os.FileInfo, er
 		}
 		info, err = os.Stat(resolution.Path)
 		if err == nil && info.IsDir() {
-			d.Complete = false
 			d.Skipped = append(d.Skipped, SkippedFile{Path: logical, Reason: "symlink_directory"})
 			return nil, nil
 		}

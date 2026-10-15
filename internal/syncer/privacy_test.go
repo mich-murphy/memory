@@ -181,3 +181,31 @@ func TestRawGuardKeepsFishReferencesAndUnrelatedCommands(t *testing.T) {
 		})
 	}
 }
+
+func TestDeletionFencesUseLogicalSourcePrefixes(t *testing.T) {
+	root := t.TempDir()
+	fence := filepath.Join(root, "skills", "archive.lock")
+	for name, tc := range map[string]struct {
+		sources []raw.Source
+		reason  string
+		want    bool
+	}{
+		"exact":           {[]raw.Source{{Path: fence}}, "symlink_unresolved", true},
+		"child":           {[]raw.Source{{Path: filepath.Join(fence, "source.ts")}}, "symlink_directory", true},
+		"siblingPrefix":   {[]raw.Source{{Path: fence + "-sibling.ts"}}, "symlink_directory", false},
+		"outside":         {[]raw.Source{{Path: filepath.Join(root, "other.ts")}}, "symlink_directory", false},
+		"oneUnknownAlias": {[]raw.Source{{Path: filepath.Join(root, "missing.ts")}, {Path: filepath.Join(fence, "source.ts")}}, "symlink_directory", true},
+		"exportSource":    {[]raw.Source{{Path: filepath.Join(root, "staging.sqlite"), SourcePath: filepath.Join(fence, "source.sqlite")}}, "symlink_unresolved", true},
+		"stagingOnly":     {[]raw.Source{{Path: filepath.Join(fence, "staging.sqlite"), SourcePath: filepath.Join(root, "source.sqlite")}}, "symlink_directory", false},
+		"otherSkip":       {[]raw.Source{{Path: fence}}, "literal_secret_assignment", false},
+		"incomparable":    {[]raw.Source{{Path: "relative.ts"}}, "symlink_directory", true},
+		"noSources":       {nil, "symlink_directory", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := hasFencedSource(tc.sources, []adapters.SkippedFile{{Path: fence, Reason: tc.reason}})
+			if got != tc.want {
+				t.Fatalf("hasFencedSource = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

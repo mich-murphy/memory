@@ -156,7 +156,7 @@ func (s *Syncer) SweepFiles(ctx context.Context, agents []string) ([]adapters.Se
 			discovery := s.sweepRoot(ctx, agent, root)
 			s.discoveryIssues(discovery)
 			if discovery.Complete && fsutil.IsDir(root) {
-				if err := s.tombstone(ctx, agent, root, discovery.Files); err != nil {
+				if err := s.tombstone(ctx, agent, root, discovery.Files, discovery.Skipped); err != nil {
 					return nil, err
 				}
 			}
@@ -215,7 +215,7 @@ func (s *Syncer) sweepRoot(ctx context.Context, agent, root string) adapters.Dis
 	return found
 }
 
-func (s *Syncer) tombstone(ctx context.Context, agent, root string, onDisk []adapters.SessionFile) error {
+func (s *Syncer) tombstone(ctx context.Context, agent, root string, onDisk []adapters.SessionFile, skipped []adapters.SkippedFile) error {
 	present := map[string]bool{}
 	for _, sf := range onDisk {
 		present[sf.Key] = true
@@ -234,7 +234,7 @@ func (s *Syncer) tombstone(ctx context.Context, agent, root string, onDisk []ada
 			return err
 		}
 		g := p.File
-		if p.Agent != agent || g.Identity.Root != root || g.DeletedAt > 0 || present[p.Key] || s.excludedPublication(p) {
+		if p.Agent != agent || g.Identity.Root != root || g.DeletedAt > 0 || present[p.Key] || hasFencedSource(g.Sources, skipped) || s.excludedPublication(p) {
 			continue
 		}
 		absent, err := s.sourcesAbsent(g.Sources)
@@ -249,6 +249,26 @@ func (s *Syncer) tombstone(ctx context.Context, agent, root string, onDisk []ada
 		}
 	}
 	return nil
+}
+
+// hasFencedSource checks stored logical source paths without resolving today's links.
+// One unobserved alias retains the whole generation, including an exported source whose
+// disposable staging path no longer exists. Other skip reasons aren't traversal fences.
+func hasFencedSource(sources []raw.Source, skipped []adapters.SkippedFile) bool {
+	for _, skip := range skipped {
+		if skip.Reason != "symlink_directory" && skip.Reason != "symlink_unresolved" {
+			continue
+		}
+		for _, source := range sources {
+			path := cmp.Or(source.SourcePath, source.Path)
+			rel, err := filepath.Rel(skip.Path, path)
+			// Incomparable namespaces cannot prove that a source is outside the fence.
+			if err != nil || filepath.IsLocal(rel) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *Syncer) sourcesAbsent(sources []raw.Source) (bool, error) {

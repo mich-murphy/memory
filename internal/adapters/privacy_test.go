@@ -39,7 +39,7 @@ func TestDiscoveryCapturesRegularSymlinksAndReportsDirectoryUncertainty(t *testi
 		}
 	}
 	got = Discover(a, root)
-	if got.Complete || len(got.Issues) != 0 || len(got.Skipped) != 2 {
+	if !got.Complete || len(got.Issues) != 0 || len(got.Skipped) != 2 {
 		t.Fatalf("Discover aliases = %+v", got)
 	}
 	for _, reason := range []string{"symlink_directory", "symlink_unresolved"} {
