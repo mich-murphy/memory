@@ -118,14 +118,20 @@ func TestProjectSnapshotWithholdingAppearsInRunSummary(t *testing.T) {
 
 func TestRawGuardRejectsQuotedAndMalformedAssignments(t *testing.T) {
 	for name, body := range map[string]string{
-		"fishHash":      "set -gx PASSWORD '#fixture-secret'",
-		"separator":     "OTHER=ok;API_KEY=fixture-secret",
-		"fishSeparator": "set -gx OTHER ok;set -gx API_KEY fixture-secret",
-		"malformed":     "OTHER=ok API_KEY=fixture-secret CMD='",
-		"singleQuoted":  "API_KEY='${TOKEN}'",
-		"escaped":       `API_KEY=\$TOKEN`,
-		"fishQuoted":    "set -gx API_KEY '${TOKEN}'",
-		"fishEscaped":   `set -gx API_KEY \$TOKEN`,
+		"fishQuotedName": "set -gx 'API_KEY' fixture-secret",
+		"fishReordered":  "set -xg API_KEY fixture-secret",
+		"fishSplit":      "set -g -x API_KEY fixture-secret",
+		"fishLong":       "set --global --export API_KEY fixture-secret",
+		"fishAndExport":  "true;and export API_KEY=fixture-secret",
+		"fishOrExport":   "false;or export API_KEY=fixture-secret",
+		"fishHash":       "set -gx PASSWORD '#fixture-secret'",
+		"separator":      "OTHER=ok;API_KEY=fixture-secret",
+		"fishSeparator":  "set -gx OTHER ok;set -gx API_KEY fixture-secret",
+		"malformed":      "OTHER=ok API_KEY=fixture-secret CMD='",
+		"singleQuoted":   "API_KEY='${TOKEN}'",
+		"escaped":        `API_KEY=\$TOKEN`,
+		"fishQuoted":     "set -gx API_KEY '${TOKEN}'",
+		"fishEscaped":    `set -gx API_KEY \$TOKEN`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
@@ -148,6 +154,29 @@ func TestRawGuardRejectsQuotedAndMalformedAssignments(t *testing.T) {
 			}
 			if logs.Len() != 0 {
 				t.Fatal("withheld assignment reached logs")
+			}
+		})
+	}
+}
+
+func TestRawGuardKeepsFishReferencesAndUnrelatedCommands(t *testing.T) {
+	for name, body := range map[string]string{
+		"quotedName":  "set -gx 'API_KEY' $TOKEN",
+		"reordered":   "set -xg API_KEY \"${TOKEN}\"",
+		"split":       "set -g -x API_KEY $TOKEN",
+		"long":        "set --global --export API_KEY $TOKEN",
+		"andExport":   "true;and export API_KEY=$TOKEN",
+		"orExport":    "false;or export API_KEY=$TOKEN",
+		"query":       "set -q API_KEY fixture-value",
+		"prose":       "For example, set -xg API_KEY fixture-value",
+		"invalidName": "set -gx 'PASSWORD NAME' fixture-value",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "script.sh")
+			testenv.Write(t, path, body)
+			got, err := readFile(adapters.SessionFile{Agent: "pi", Path: path, Role: adapters.RoleUnknown})
+			if err != nil || !bytes.Equal(got, []byte(body)) {
+				t.Fatalf("readFile = %v, want unchanged allowed text", err)
 			}
 		})
 	}

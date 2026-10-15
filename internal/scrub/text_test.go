@@ -89,6 +89,66 @@ func TestTextKeepsReferencesAndNonAssignments(t *testing.T) {
 	}
 }
 
+func TestTextRecognizesEquivalentFishAssignments(t *testing.T) {
+	for name, prefix := range map[string]string{
+		"quotedName":     "set -gx 'API_KEY' ",
+		"doubleQuoted":   `set -gx "API_KEY" `,
+		"joinedName":     "set -gx A'PI'_KEY ",
+		"reordered":      "set -xg API_KEY ",
+		"separate":       "set -g -x API_KEY ",
+		"reverseFlags":   "set -x -g API_KEY ",
+		"longFlags":      "set --global --export API_KEY ",
+		"reverseLong":    "set --export --global API_KEY ",
+		"mixedFlags":     "set -g --export API_KEY ",
+		"flagTerminator": "set -gx -- 'API_KEY' ",
+		"andSet":         "true;and set -xg 'API_KEY' ",
+		"orSet":          "false;or set --global --export API_KEY ",
+		"andExport":      "true;and export API_KEY=",
+		"orExport":       "false;or export API_KEY=",
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, value := range []string{"fixture-fish-secret", "'${TOKEN}'", `\$TOKEN`, "'fixture-fish-secret"} {
+				if err := Text([]byte(prefix + value)); !errors.Is(err, ErrLiteralSecret) || err.Error() != "literal_secret_assignment" {
+					t.Fatal("Text did not safely withhold literal assignment")
+				}
+			}
+			for _, value := range []string{"$TOKEN", `"${TOKEN}"`, "'[redacted]'"} {
+				if err := Text([]byte(prefix + value)); err != nil {
+					t.Fatalf("Text = %v, want allowed reference or redaction", err)
+				}
+			}
+		})
+	}
+}
+
+func TestTextDoesNotTreatUnrelatedSetCommandsAsAssignments(t *testing.T) {
+	for name, line := range map[string]string{
+		"plainSet":       "set API_KEY fixture-private-value",
+		"globalOnly":     "set -g API_KEY fixture-private-value",
+		"exportOnly":     "set -x API_KEY fixture-private-value",
+		"query":          "set -q API_KEY fixture-private-value",
+		"erase":          "set -gx --erase API_KEY fixture-private-value",
+		"unknownFlag":    "set --other -gx API_KEY fixture-private-value",
+		"invalidName":    "set -gx 'PASSWORD NAME' fixture-private-value",
+		"dashedName":     "set -gx 'API-KEY' fixture-private-value",
+		"expandedName":   "set -gx $API_KEY fixture-private-value",
+		"incompleteName": "set -gx 'API_KEY fixture-private-value",
+		"noName":         "set --global --export",
+		"terminatorOnly": "set -- API_KEY fixture-private-value",
+		"nonsecret":      "set -xg MAX_TOKENS fixture-private-value",
+		"prose":          "For example, set -xg API_KEY fixture-private-value",
+		"echo":           "echo set -gx API_KEY fixture-private-value",
+		"quotedPrefix":   "'and' export API_KEY=fixture-private-value",
+		"exportSet":      "export set -gx API_KEY fixture-private-value",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := Text([]byte(line)); err != nil {
+				t.Fatalf("Text = %v, want unrelated command allowed", err)
+			}
+		})
+	}
+}
+
 func FuzzText(f *testing.F) {
 	for _, seed := range []string{"API_KEY=fixture", "export TOKEN=$TOKEN", "set -gx PASSWORD 'fixture'", "# API_KEY=example", "API_KEY='", "\xff"} {
 		f.Add([]byte(seed))

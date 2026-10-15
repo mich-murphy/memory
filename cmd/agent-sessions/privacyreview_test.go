@@ -12,6 +12,12 @@ func TestAcceptanceAssignmentSyntaxNeverReachesArchiveOrLogs(t *testing.T) {
 	r := newAcceptanceRun(t)
 	root := filepath.Join(r.home, ".pi", "agent")
 	fixtures := []struct{ name, body, literal string }{
+		{"fishQuotedName", "set -gx 'API_KEY' review-fish-name-secret", "review-fish-name-secret"},
+		{"fishReordered", "set -xg API_KEY review-fish-reordered-secret", "review-fish-reordered-secret"},
+		{"fishSeparate", "set -g -x API_KEY review-fish-separate-secret", "review-fish-separate-secret"},
+		{"fishLong", "set --global --export API_KEY review-fish-long-secret", "review-fish-long-secret"},
+		{"fishAndExport", "true;and export API_KEY=review-fish-and-secret", "review-fish-and-secret"},
+		{"fishOrExport", "false;or export API_KEY=review-fish-or-secret", "review-fish-or-secret"},
 		{"fishHash", "set -gx PASSWORD '#review-fish-secret'", "#review-fish-secret"},
 		{"separator", "OTHER=ok;API_KEY=review-shell-secret", "review-shell-secret"},
 		{"fishSeparator", "set -gx OTHER ok;set -gx API_KEY review-separated-secret", "review-separated-secret"},
@@ -28,8 +34,19 @@ func TestAcceptanceAssignmentSyntaxNeverReachesArchiveOrLogs(t *testing.T) {
 		}
 		literals = append(literals, fixture.literal)
 	}
-	reference := []byte("export API_KEY=\"${CONTROL_TOKEN}\"\nset -gx PASSWORD $CONTROL_PASSWORD\n")
+	reference := []byte("export API_KEY=\"${CONTROL_TOKEN}\"\n" +
+		"set -gx PASSWORD $CONTROL_PASSWORD\n" +
+		"set -gx 'API_KEY' $CONTROL_TOKEN\n" +
+		"set -xg API_KEY $CONTROL_TOKEN\n" +
+		"set -g -x API_KEY $CONTROL_TOKEN\n" +
+		"set --global --export API_KEY $CONTROL_TOKEN\n" +
+		"true;and export API_KEY=$CONTROL_TOKEN\n" +
+		"false;or export API_KEY=$CONTROL_TOKEN\n" +
+		"set -q API_KEY fixture-value\n" +
+		"set -gx 'PASSWORD NAME' fixture-value\n" +
+		"For example, set -xg API_KEY fixture-value\n")
 	r.write(filepath.Join(root, "extensions", "reference.sh"), reference)
+	r.write(filepath.Join(r.work, ".pi", "extensions", "reference.sh"), reference)
 	r.write(filepath.Join(root, "sessions", "--acceptance--", acceptancePiName+".jsonl"), acceptancePiBody(r.work))
 	cmd := exec.CommandContext(t.Context(), filepath.Join(binDir, "agent-sessions"), "backfill", "--agent", "pi")
 	cmd.Env, cmd.Dir = r.env, r.work
@@ -56,13 +73,18 @@ func TestAcceptanceAssignmentSyntaxNeverReachesArchiveOrLogs(t *testing.T) {
 	if !bytes.Equal(r.content(r.latest("file", "pi", "extensions/reference.sh")), reference) {
 		t.Error("supported pure references changed")
 	}
-	foundReason := false
+	foundReason, foundSnapshotReference := false, false
 	for key := range r.inventory() {
 		body, err := r.object(key)
 		if err != nil {
 			t.Fatal(err)
 		}
 		foundReason = foundReason || bytes.Contains(body, []byte("literal_secret_assignment"))
+		// Snapshot blobs are plain; raw file pieces are zstd objects.
+		foundSnapshotReference = foundSnapshotReference || bytes.Equal(body, reference)
+	}
+	if !foundSnapshotReference {
+		t.Error("snapshot did not preserve references and unrelated commands")
 	}
 	if !foundReason {
 		t.Error("snapshot withholding did not archive the fixed skip reason")
