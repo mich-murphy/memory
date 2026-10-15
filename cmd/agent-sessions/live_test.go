@@ -723,13 +723,14 @@ func (l liveRun) runHeld(t *testing.T, agent, binary string, args []string) []by
 // Deliberately decode the wire format, not syncer/state's private Go types. The
 // same harness can be cherry-picked before or after archive v3 integration.
 type livePublication struct {
-	Schema   int    `json:"schema"`
-	Kind     string `json:"kind"`
-	Agent    string `json:"agent"`
-	Key      string `json:"key"`
-	Sequence uint64 `json:"sequence"`
-	Parent   string `json:"parent"`
-	File     *struct {
+	Schema       int             `json:"schema"`
+	Kind         string          `json:"kind"`
+	Agent        string          `json:"agent"`
+	Key          string          `json:"key"`
+	Sequence     uint64          `json:"sequence"`
+	Parent       string          `json:"parent"`
+	Dependencies json.RawMessage `json:"dependencies"`
+	File         *struct {
 		Identity struct {
 			Agent      string `json:"agent"`
 			SessionKey string `json:"session_key"`
@@ -746,6 +747,7 @@ type livePublication struct {
 			End           int64  `json:"end"`
 			SHA256        string `json:"sha256"`
 			EncodedSHA256 string `json:"encoded_sha256"`
+			EncodedSize   int64  `json:"encoded_size"`
 		} `json:"pieces"`
 	} `json:"file"`
 	Launch *struct {
@@ -764,6 +766,37 @@ type livePublication struct {
 			TakenAt float64 `json:"taken_at"`
 		} `json:"snapshot"`
 	} `json:"launch"`
+}
+
+type liveDependency struct {
+	Object    string `json:"object"`
+	SHA256    string `json:"sha256"`
+	Size      int64  `json:"size"`
+	Encoding  string `json:"encoding"`
+	RawSHA256 string `json:"raw_sha256"`
+	RawSize   int64  `json:"raw_size"`
+}
+
+// File descriptors can omit their redundant list, but a legacy explicit list
+// must exactly match every piece, in order, including repeated objects.
+func liveValidateFileDependencies(p livePublication) error {
+	if p.File == nil {
+		return nil
+	}
+	derived := make([]liveDependency, 0, len(p.File.Pieces))
+	for _, piece := range p.File.Pieces {
+		derived = append(derived, liveDependency{Object: piece.Object, SHA256: piece.EncodedSHA256, Size: piece.EncodedSize, Encoding: "zstd", RawSHA256: piece.SHA256, RawSize: piece.End - piece.Start})
+	}
+	if p.Dependencies != nil {
+		var explicit []liveDependency
+		if err := json.Unmarshal(p.Dependencies, &explicit); err != nil {
+			return err
+		}
+		if !slices.Equal(explicit, derived) {
+			return errors.New("explicit file dependencies differ from pieces")
+		}
+	}
+	return nil
 }
 
 func liveDigest(body []byte) string {
@@ -790,6 +823,9 @@ func liveCommittedTips(bucket string) ([]livePublication, error) {
 		}
 		if p.Schema != 3 || p.Sequence == 0 {
 			return nil, errors.New("invalid v3 publication")
+		}
+		if err := liveValidateFileDependencies(p); err != nil {
+			return nil, err
 		}
 		id := liveDigest(body)
 		if filepath.Base(path) != fmt.Sprintf("%020d-%s.json", p.Sequence, id) {
@@ -876,8 +912,8 @@ func liveVerifyV3(t *testing.T, root, agent string, args []string, started, ende
 			if err != nil {
 				t.Fatal(err)
 			}
-			if liveDigest(encoded) != piece.EncodedSHA256 {
-				t.Fatal("encoded piece checksum differs")
+			if liveDigest(encoded) != piece.EncodedSHA256 || int64(len(encoded)) != piece.EncodedSize {
+				t.Fatal("encoded piece checksum/size differs")
 			}
 			decoded, err := raw.Decompress(encoded)
 			if err != nil {
@@ -1053,7 +1089,7 @@ func TestLiveV3ReconstructsFinalSourceAndLaunch(t *testing.T) {
 		if err := os.WriteFile(path, encoded, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		pieces = append(pieces, map[string]any{"object": object, "start": start, "end": start + len(chunk), "sha256": liveDigest([]byte(chunk)), "encoded_sha256": sha})
+		pieces = append(pieces, map[string]any{"object": object, "start": start, "end": start + len(chunk), "sha256": liveDigest([]byte(chunk)), "encoded_sha256": sha, "encoded_size": len(encoded)})
 		start += len(chunk)
 	}
 	publish := func(kind, key string, payload map[string]any) {

@@ -37,6 +37,17 @@ def sha(body):
     return hashlib.sha256(body).hexdigest()
 
 
+def file_dependencies(record):
+    """New FILE records derive dependencies; old explicit lists remain strict."""
+    derived = [{"object": piece["object"], "sha256": piece["encoded_sha256"],
+                "size": piece["encoded_size"], "encoding": "zstd",
+                "raw_sha256": piece["sha256"], "raw_size": piece["end"] - piece["start"]}
+               for piece in record["file"]["pieces"]]
+    if "dependencies" in record:
+        require(record["dependencies"] == derived, "explicit file dependencies differ from pieces")
+    return derived
+
+
 def write(path, body):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     path.write_bytes(body.encode() if isinstance(body, str) else body)
@@ -320,6 +331,7 @@ class Run:
                         and identity["key"] == record["key"] and identity["machine_id"] == record["machine_id"]
                         and generation["sequence"] == record["sequence"]
                         and generation.get("parent", "") == record.get("parent", ""), "typed file identity differs")
+                file_dependencies(record)  # Omission is valid, explicit corruption is not.
             streams.setdefault(stream, []).append((record, record_id))
             records.append(record)
         for stream, chain in streams.items():
@@ -768,8 +780,13 @@ def hooks(run):
 
 def regression(run):
     # Existing TestMain builds its own instrumented binary; this is NOT make cover/gates.
-    out, _ = run.command("regression", [run.meta["go"], "test", "./cmd/agent-sessions", "-run", "^TestScripts$", "-count=1", "-v"], timeout=300, cwd=REPO)
-    require("--- PASS: TestScripts" in out and "--- SKIP:" not in out, "existing CLI e2e incomplete")
+    out, _ = run.command("regression", [run.meta["go"], "test", "./cmd/agent-sessions", "-run", "^(TestScripts|TestAcceptance.*)$", "-count=1", "-v"], timeout=300, cwd=REPO)
+    for name in ("TestScripts", "TestAcceptanceAppendHistoryAndIdle", "TestAcceptanceAppendFoldRetainsFirstBase",
+                 "TestAcceptancePiChildAndLateMetadata", "TestAcceptanceLiteralGuardAndProvenance",
+                 "TestAcceptanceRegularSymlinkCapture", "TestAcceptanceSQLiteChangedChunksAndWAL",
+                 "TestAcceptanceGuardReclassificationRetainsHistory"):
+        require("--- PASS: " + name in out, "CLI acceptance incomplete: " + name)
+    require("--- SKIP:" not in out, "CLI acceptance skipped (not a pass)")
     pattern = "^(TestImmutableFileHistoryRecoversAfterCacheAndSourceLoss|TestStreamedRestoreValidatesWholeContentAndRejectsCorruption|TestArchiveRemoteExclusionRestoresBeforeRawExportsAndSnapshots)$"
     out, _ = run.command("regression", [run.meta["go"], "test", "./internal/syncer", "-run", pattern, "-count=1", "-v"], timeout=300, cwd=REPO)
     for name in pattern[2:-2].split("|"):

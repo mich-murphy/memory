@@ -37,3 +37,15 @@ Preconditions:
 - Helper independent decoding validates fixture bytes, not all fork/hostile-store behavior. Existing internal boundary tests and gates cover additional failure seams.
 - Backfill's selected-agent entry, repeated paths/agents, quiet/delay manual flags, folds, live SQLite WAL exports, zstd source recompression, external roots and partial plaintext lines are not all automated here. Do not claim them passed from all-agent backfill.
 - Local backend is the production boundary stand-in; this journey does not verify real R2. Separately authorised backend-plus-engine R2 coverage and its executed result are documented in [r2-acceptance.md](../../../../docs/r2-acceptance.md); it does not establish every network failure, lifecycle policy or full-scale throughput. Runtime on one OS does not prove another OS.
+
+## New-design CLI acceptance
+
+The regression drive also requires seven `TestAcceptance*` CLI journeys: append
+kind/one-tail/idle invariance, 64-chain consolidation retaining the first base,
+Pi child membership and late model metadata, decoded-archive literal guard and
+noise/provenance controls, regular symlink capture, and live-WAL fixed-1-MiB
+changed-chunk reuse with cold history recovery. These are unconditional assertions,
+not skips when implementation is missing. See [acceptance-review.md](../../../../docs/acceptance-review.md)
+for commands and explicit pending integration/gaps. FILE dependency omission is
+accepted; any legacy explicit dependency array remains strictly checked against
+pieces. No acceptance is established until the integrated journeys pass.
