@@ -53,6 +53,25 @@ bucket descriptor chains, pieces, whole-content checksums, secret exclusions, da
 integrity, child-session manifest membership and package provenance. Remove private
 analysis copies only after the final evidence has been retained safely.
 
+## Local merge acceptance (2026-10-15)
+
+The operator explicitly accepted local CI in place of unavailable hosted CI for merging.
+On the unchanged `c88e190` Go source, a fresh Darwin arm64 / Go 1.27.2 run passed:
+
+- `go mod verify` and the complete `make check`, with the original execution settings:
+  **89.2% coverage (5,675/6,363)**, zero CRAP >30 (combined 3,597.29, average 5.54);
+  syncer race/coverage 501.555 s, plus the complete benchmark smoke run.
+- All nine `make fuzz FUZZTIME=30s` targets.
+- Zizmor 1.30.1, pedantic persona, no findings. Its default offline mode does not
+  establish provider-dependent online audit results.
+
+Linux coverage remains **incomplete**, not silently green: the isolated amd64 run hit
+600 s both with two Go CPUs and with the four-core host's normal allocation. A diagnostic
+20-minute package window also timed out; that unsuccessful Makefile experiment was fully
+reverted. No timeout, test assertion, race flag, scenario or quality threshold was changed
+for the merge. This is local macOS merge evidence, not a complete hosted OS-matrix pass.
+Release/rollout remains a separate decision; no archive reset or installation occurred.
+
 ## Publication hold (2026-10-15)
 
 The `v0.2.0` tag points to `acf839d`; **no release was published**. Its GitHub Linux
