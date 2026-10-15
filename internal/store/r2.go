@@ -35,12 +35,11 @@ var (
 	maxPutSize int64 = 64 << 20
 	// R2 needs every part but the last to be the same size.
 	partSize = 16 << 20
+	// Bounds each R2 request, retries included, so a hung connection can't hold the sync lock.
+	opTimeout = 10 * time.Minute
 )
 
-const (
-	opTimeout  = 10 * time.Minute
-	maxRetries = 5
-)
+const maxRetries = 5
 
 type R2 struct {
 	client *s3.Client
@@ -133,7 +132,9 @@ func (r *R2) putMultipart(ctx context.Context, key, path string, meta map[string
 		return fmt.Errorf("put %s: %w", key, err)
 	}
 	defer func() { _ = f.Close() }() // read-only
-	up, err := r.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{Bucket: &r.bucket, Key: &key, Metadata: meta})
+	createCtx, cancel := context.WithTimeout(ctx, opTimeout)
+	defer cancel()
+	up, err := r.client.CreateMultipartUpload(createCtx, &s3.CreateMultipartUploadInput{Bucket: &r.bucket, Key: &key, Metadata: meta})
 	if err != nil {
 		return fmt.Errorf("put %s: %w", key, err)
 	}

@@ -83,6 +83,8 @@ func (r *R2) List(ctx context.Context, prefix, token string, limit int) (Page, e
 	if token != "" {
 		input.ContinuationToken = &token
 	}
+	ctx, cancel := context.WithTimeout(ctx, opTimeout)
+	defer cancel()
 	out, err := r.client.ListObjectsV2(ctx, input)
 	if err != nil {
 		return Page{}, fmt.Errorf("store list: %w", err)
@@ -124,6 +126,8 @@ func (l *Local) Head(ctx context.Context, key string) (Object, error) {
 }
 
 func (r *R2) Head(ctx context.Context, key string) (Object, error) {
+	ctx, cancel := context.WithTimeout(ctx, opTimeout)
+	defer cancel()
 	out, err := r.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &r.bucket, Key: &key})
 	if isNotFound(err) {
 		return Object{}, ErrNotFound
@@ -148,15 +152,28 @@ func (l *Local) OpenReader(ctx context.Context, key string) (io.ReadCloser, erro
 	return f, err
 }
 
+// OpenReader's deadline covers reading the body too, so it ends when the caller closes it.
 func (r *R2) OpenReader(ctx context.Context, key string) (io.ReadCloser, error) {
+	ctx, cancel := context.WithTimeout(ctx, opTimeout)
 	out, err := r.client.GetObject(ctx, &s3.GetObjectInput{Bucket: &r.bucket, Key: &key})
-	if isNotFound(err) {
-		return nil, ErrNotFound
-	}
 	if err != nil {
+		cancel()
+		if isNotFound(err) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("get %s: %w", key, err)
 	}
-	return out.Body, nil
+	return &cancelOnClose{ReadCloser: out.Body, cancel: cancel}, nil
+}
+
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnClose) Close() error {
+	defer c.cancel()
+	return c.ReadCloser.Close()
 }
 
 // Create publishes a small object only if absent. Local publication uses an atomic hard
@@ -198,6 +215,8 @@ func (l *Local) Create(ctx context.Context, key string, body []byte) (err error)
 }
 
 func (r *R2) Create(ctx context.Context, key string, body []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, opTimeout)
+	defer cancel()
 	_, err := r.client.PutObject(ctx, &s3.PutObjectInput{Bucket: &r.bucket, Key: &key, Body: strings.NewReader(string(body)), ContentLength: aws.Int64(int64(len(body))), IfNoneMatch: aws.String("*")})
 	if err != nil {
 		if apiErr, ok := errors.AsType[interface {
