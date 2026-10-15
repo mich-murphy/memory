@@ -118,7 +118,15 @@ func runR2Acceptance(t *testing.T, r2 *store.R2, cfg *config.Config, inspectMult
 	owned = true
 	t.Logf("acceptance prefix=%s preflight_objects=0", bucket.prefix)
 	acceptanceProtocol(ctx, t, bucket)
+	// Restore production single-PUT behaviour before engine/database publication.
+	// SetMultipart's nested cleanups restore both earlier settings on exit.
+	store.SetMultipart(t, 64<<20, 16<<20)
 	acceptanceArchive(ctx, t, bucket, cfg)
+	backend := "gofakes3"
+	if inspectMultipart {
+		backend = "r2"
+	}
+	acceptanceChunks(ctx, t, bucket, cfg, backend)
 	if inspectMultipart {
 		count, err := store.R2TestMultipart(ctx, r2, bucket.prefix, false)
 		acceptanceOK(t, "multipart completion verification", err)

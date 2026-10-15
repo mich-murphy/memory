@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"io"
+	"maps"
 	"strings"
 	"sync"
 
@@ -22,6 +23,7 @@ type namespace struct {
 	mu     sync.Mutex
 	tokens map[string]string
 	pages  int
+	puts   map[string]int // attempted blob PUTs, including redundant writes
 }
 
 var errNamespace = errors.New("test namespace: invalid or unconfined key, prefix, token or response")
@@ -40,6 +42,25 @@ func (n *namespace) continuationPages() int {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.pages
+}
+
+// blobPuts snapshots only logical blob write counts; no paths or SDK data escape.
+func (n *namespace) blobPuts() map[string]int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return maps.Clone(n.puts)
+}
+
+func (n *namespace) notePut(key string) {
+	if !strings.HasPrefix(key, "v3/blobs/") {
+		return
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.puts == nil {
+		n.puts = map[string]int{}
+	}
+	n.puts[key]++
 }
 
 func (n *namespace) key(key string) (string, error) {
@@ -153,6 +174,7 @@ func (n *namespace) Put(ctx context.Context, key string, body []byte, meta map[s
 	if err != nil {
 		return err
 	}
+	n.notePut(key)
 	return namespaceResult(n.bucket.Put(ctx, physical, body, meta))
 }
 
@@ -161,6 +183,7 @@ func (n *namespace) PutFile(ctx context.Context, key, path string, meta map[stri
 	if err != nil {
 		return err
 	}
+	n.notePut(key)
 	return namespaceResult(n.bucket.PutFile(ctx, physical, path, meta))
 }
 
