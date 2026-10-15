@@ -2,6 +2,7 @@
 package syncer
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -44,18 +45,19 @@ const (
 var transcriptRoles = map[adapters.Role]bool{adapters.RoleMain: true, adapters.RoleSubagent: true, adapters.RoleSuperseded: true}
 
 type Summary struct {
-	Uploaded      int      `json:"uploaded"`
-	Unchanged     int      `json:"unchanged"`
-	Skipped       int      `json:"skipped"`
-	Errors        int      `json:"errors"`
-	BytesUploaded int64    `json:"bytes_uploaded"`
-	Manifests     int      `json:"manifests"`
-	Versions      int      `json:"versions"`
-	Segments      int      `json:"segments"`
-	Folded        int      `json:"folded"`
-	Deleted       int      `json:"deleted"`
-	Unknown       int      `json:"unknown"`
-	ErrorMessages []string `json:"error_messages"`
+	Uploaded      int            `json:"uploaded"`
+	Unchanged     int            `json:"unchanged"`
+	Skipped       int            `json:"skipped"`
+	SkipReasons   map[string]int `json:"skip_reasons,omitempty"`
+	Errors        int            `json:"errors"`
+	BytesUploaded int64          `json:"bytes_uploaded"`
+	Manifests     int            `json:"manifests"`
+	Versions      int            `json:"versions"`
+	Segments      int            `json:"segments"`
+	Folded        int            `json:"folded"`
+	Deleted       int            `json:"deleted"`
+	Unknown       int            `json:"unknown"`
+	ErrorMessages []string       `json:"error_messages"`
 }
 
 func (s *Summary) Trimmed() Summary {
@@ -174,7 +176,18 @@ func uniqueByPath(files []adapters.SessionFile) []adapters.SessionFile {
 	})
 }
 
+func (s *Syncer) skipReason(reason string) {
+	s.Summary.Skipped++
+	if s.Summary.SkipReasons == nil {
+		s.Summary.SkipReasons = map[string]int{}
+	}
+	s.Summary.SkipReasons[reason]++
+}
+
 func (s *Syncer) discoveryIssues(discovery adapters.Discovery) {
+	for _, skipped := range discovery.Skipped {
+		s.skipReason(skipped.Reason)
+	}
 	for _, issue := range discovery.Issues {
 		s.errorf("discovery %s (%s): %v", issue.Path, issue.Kind, issue.Err)
 	}
@@ -192,10 +205,12 @@ func (s *Syncer) sweepRoot(ctx context.Context, agent, root string) adapters.Dis
 		extra := a.Exports(root, s.workDir, recopyAfter)
 		exports.Files = append(exports.Files, extra.Files...)
 		exports.Issues = append(exports.Issues, extra.Issues...)
+		exports.Skipped = append(exports.Skipped, extra.Skipped...)
 		exports.Complete = exports.Complete && extra.Complete
 	}
 	found.Files = append(found.Files, exports.Files...)
 	found.Issues = append(found.Issues, exports.Issues...)
+	found.Skipped = append(found.Skipped, exports.Skipped...)
 	found.Complete = found.Complete && exports.Complete
 	return found
 }
@@ -222,7 +237,7 @@ func (s *Syncer) tombstone(ctx context.Context, agent, root string, onDisk []ada
 		if p.Agent != agent || g.Identity.Root != root || g.DeletedAt > 0 || present[p.Key] || s.excludedPublication(p) {
 			continue
 		}
-		absent, err := sourcesAbsent(g.Sources)
+		absent, err := s.sourcesAbsent(g.Sources)
 		if err != nil {
 			return err
 		}
@@ -236,12 +251,14 @@ func (s *Syncer) tombstone(ctx context.Context, agent, root string, onDisk []ada
 	return nil
 }
 
-func sourcesAbsent(sources []raw.Source) (bool, error) {
+func (s *Syncer) sourcesAbsent(sources []raw.Source) (bool, error) {
 	absent := true
 	for _, source := range sources {
-		path := source.Path
-		if source.SourcePath != "" {
-			path = source.SourcePath
+		path := cmp.Or(source.SourcePath, source.Path)
+		// Policy exclusions withhold future captures; they must not invent a deletion
+		// of history, including exports whose disposable staging has disappeared.
+		if s.excluded(path) {
+			return false, nil
 		}
 		if _, err := os.Stat(path); err == nil {
 			absent = false

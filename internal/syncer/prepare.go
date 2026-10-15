@@ -152,7 +152,14 @@ func readFile(sf adapters.SessionFile) ([]byte, error) {
 	if protected && len(data) > maxRecordSize {
 		return nil, errors.New("archive config: exceeds bounded parse limit")
 	}
-	return scrub.Identities(sf.Agent, resolution.Identities, data)
+	data, err = scrub.Identities(sf.Agent, resolution.Identities, data)
+	if err == nil && !transcriptRoles[sf.Role] {
+		err = scrub.Text(data)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 func readCompleteLines(sf adapters.SessionFile, st os.FileInfo, mayBeMidLine bool) (data []byte, mtimeNS int64, err error) {
@@ -456,6 +463,17 @@ func (s *Syncer) prepare(ctx context.Context, sf adapters.SessionFile) (*upload,
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Recheck the guard before warm-stat/unchanged shortcuts. A previous unsafe capture
+	// is not evidence that today's policy permits the same source bytes.
+	if !transcriptRoles[sf.Role] && !sf.Zstd && st.Size() <= scrub.MaxTextSize {
+		if _, err := readFile(sf); err != nil {
+			if errors.Is(err, scrub.ErrLiteralSecret) {
+				s.skipReason("literal_secret_assignment")
+				return nil, nil
+			}
+			return nil, err
+		}
+	}
 	baseline, err := s.fileBaseline(ctx, sf, st)
 	if err != nil {
 		return nil, err
@@ -468,6 +486,10 @@ func (s *Syncer) prepare(ctx context.Context, sf adapters.SessionFile) (*upload,
 	// Only a live plaintext JSONL source needs an incomplete-line holdback.
 	partial := !sf.Zstd && strings.HasSuffix(sf.Path, ".jsonl") && s.nowSeconds()-fileMtime(st) < partialLineWindow.Seconds()
 	c, err := s.captureContent(ctx, sf, st, prev, partial)
+	if errors.Is(err, scrub.ErrLiteralSecret) {
+		s.skipReason("literal_secret_assignment")
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

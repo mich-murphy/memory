@@ -44,7 +44,7 @@ func (s *Syncer) groupAliases(ctx context.Context, files []adapters.SessionFile)
 			var err error
 			chosen, err = s.chooseAlias(ctx, candidates)
 			if err != nil {
-				s.fail(chosen.Path, err)
+				s.captureFailure(chosen.Path, err)
 				continue
 			}
 		}
@@ -80,7 +80,12 @@ func (s *Syncer) captureAlias(ctx context.Context, sf adapters.SessionFile) (ali
 	}
 	result := aliasCapture{sf: sf, path: path}
 	// Compare scrubbed bytes for every intermediate identity, independent of collecting agent.
-	if slices.ContainsFunc(resolution.Identities, scrub.Recognizes) {
+	info, err := os.Stat(path)
+	if err != nil {
+		_ = os.Remove(path) // disposable staged alias
+		return result, err
+	}
+	if slices.ContainsFunc(resolution.Identities, scrub.Recognizes) || !transcriptRoles[sf.Role] && info.Size() <= scrub.MaxTextSize {
 		body, err := readFile(sf)
 		if err != nil {
 			_ = os.Remove(path)
@@ -91,7 +96,7 @@ func (s *Syncer) captureAlias(ctx context.Context, sf adapters.SessionFile) (ali
 			return result, err
 		}
 	}
-	info, err := os.Stat(path)
+	info, err = os.Stat(path)
 	if err != nil {
 		_ = os.Remove(path)
 		return result, err
@@ -146,4 +151,13 @@ func (s *Syncer) chooseAlias(ctx context.Context, candidates []adapters.SessionF
 		}
 	}
 	return longest.sf, nil
+}
+
+// captureFailure separates intentional privacy withholding from retryable capture failures.
+func (s *Syncer) captureFailure(path string, err error) {
+	if errors.Is(err, scrub.ErrLiteralSecret) {
+		s.skipReason("literal_secret_assignment")
+		return
+	}
+	s.fail(path, err)
 }

@@ -143,6 +143,10 @@ func (c *collected) add(scope, path, name string) *entry {
 		c.skip(scope, name, "unparseable", st.Size())
 		return nil
 	}
+	if err := scrub.Text(body); err != nil {
+		c.skip(scope, name, "literal_secret_assignment", st.Size())
+		return nil
+	}
 	if int64(len(body)) > maxSnapshotSize-c.budget.held {
 		c.skip(scope, name, "memory_limit", int64(len(body)))
 		return nil
@@ -296,6 +300,7 @@ func (c *collected) walkEntry(scope, path string, d os.DirEntry, follow bool) (i
 		}
 		isDir = st.IsDir()
 		if isDir && !follow {
+			c.skip(scope, path, "symlink_directory", 0)
 			return true, false
 		}
 	}

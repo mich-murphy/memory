@@ -425,6 +425,7 @@ func (s *Syncer) stageSnapshot(ref adapters.SessionRef, root, cwd string) (state
 		sets = append(sets, snap.Memory)
 	}
 	for _, set := range sets {
+		s.snapshotSkips(set)
 		if err := validateSnapshotPaths(set); err != nil {
 			return state.SnapshotEntry{}, nil, nil, err
 		}
@@ -545,4 +546,15 @@ func (s *Syncer) ensureDependency(ctx context.Context, d dependency, bodies map[
 		}
 	}
 	return verifyDependencyMetadata(ctx, s.bucket, d)
+}
+
+// snapshotSkips makes deliberate snapshot privacy omissions visible in run history and doctor,
+// including project/import files that are not part of raw discovery.
+func (s *Syncer) snapshotSkips(set *snapshot.Set) {
+	for _, skipped := range set.Skipped {
+		switch skipped.Reason {
+		case "literal_secret_assignment", "symlink_directory":
+			s.skipReason(skipped.Reason)
+		}
+	}
 }

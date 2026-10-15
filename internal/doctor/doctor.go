@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -269,7 +271,9 @@ func checkRuns(ctx context.Context, cfg *config.Config, r *reporter) {
 		_ = db.Close()                    // read-only use
 	}
 	var errorMsgs []string
-	for _, run := range runs[:min(len(runs), recentRuns)] {
+	recent := runs[:min(len(runs), recentRuns)]
+	reportSkippedRuns(recent, r)
+	for _, run := range recent {
 		if msgs, isList := run.Summary["error_messages"].([]any); isList {
 			for _, m := range msgs {
 				errorMsgs = append(errorMsgs, fmt.Sprint(m))
@@ -284,5 +288,24 @@ func checkRuns(ctx context.Context, cfg *config.Config, r *reporter) {
 	}
 	if len(errorMsgs) > 0 {
 		r.reportf(warn, "recent errors (see %s): %s", filepath.Join(cfg.StateDir, "agent-sessions.log"), errorMsgs[0])
+	}
+}
+
+// reportSkippedRuns decodes optional persisted skip counts without treating policy omissions
+// as failed uploads. Older run summaries need not have this field.
+func reportSkippedRuns(runs []state.Run, r *reporter) {
+	skipReasons := map[string]int{}
+	for _, run := range runs {
+		if reasons, ok := run.Summary["skip_reasons"].(map[string]any); ok {
+			for reason, value := range reasons {
+				count, err := strconv.Atoi(fmt.Sprint(value))
+				if err == nil && count > 0 {
+					skipReasons[reason] += count
+				}
+			}
+		}
+	}
+	for _, reason := range slices.Sorted(maps.Keys(skipReasons)) {
+		r.reportf(warn, "recent skipped captures: %s (%d)", reason, skipReasons[reason])
 	}
 }
