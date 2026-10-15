@@ -71,7 +71,11 @@ Apparent large/huge backfill improvements are not claimed because the before sam
 
 ## The golden test
 
-`TestBucketMatchesGolden` (`internal/syncer/golden_test.go`) runs a small home through a backfill, idle and busy sweeps, a hook sync, a launch record, a rewrite and a fold, and compares every request and the final bucket with `internal/syncer/testdata/golden.txt`: keys, metadata, sizes, the SHA-256 of each object and of the bytes inside each zstd object, and the full text of manifests and snapshot sets. A change that alters what reaches the bucket fails it. When the change is meant to, regenerate the file with `go test ./internal/syncer -run Golden -update` and explain the diff in the pull request; a change to keys, fields or formats also needs `docs/storage-layout.md` updated.
+`TestBucketMatchesGolden` (`internal/syncer/golden_test.go`) runs a small home through a backfill, idle and busy sweeps, a hook sync, a launch record, a rewrite and a later idle sweep that must not time-fold, and compares every request and the final bucket with `internal/syncer/testdata/golden.txt`: keys, metadata, sizes, the SHA-256 of each object and of the bytes inside each zstd object, and the full text of manifests and snapshot sets. A change that alters what reaches the bucket fails it. When the change is meant to, regenerate the file with `go test ./internal/syncer -run Golden -update` and explain the diff in the pull request; a change to keys, fields or formats also needs `docs/storage-layout.md` updated.
+
+Actual 64-piece folding is covered by `TestAppendBoundaryFoldRetainsBaseAndEveryHistoricalVersion`,
+`TestContinuousGrowthFoldsAcknowledgedParentBeforeAppending` and the independent CLI journey,
+rather than the golden workload's obsolete idle-fold step.
 
 ## Pieces/delta fixture change
 

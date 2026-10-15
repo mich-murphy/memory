@@ -88,7 +88,13 @@ func TestBucketMatchesGolden(t *testing.T) {
 	removeTodo(t, w)
 	step("rewrite and delete", t0.Add(11*time.Minute), sweep)
 
-	step("fold once idle", t0.Add(40*time.Minute), sweep)
+	step("idle without time-based fold", t0.Add(40*time.Minute), func() *Summary {
+		sum := sweep()
+		if sum.Folded != 0 {
+			t.Fatal("idle age must not fold unchanged content")
+		}
+		return sum
+	})
 
 	ids, bodies := archiveIDs(t, r.bucket, w, dir)
 	out = append(out, section{"== bucket", bucketDigest(t, r.bucket, bodies)})

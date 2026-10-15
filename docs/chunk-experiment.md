@@ -80,7 +80,7 @@ For each scenario the benchmark reports only numeric metrics:
   uses sequence 2 and the reference descriptor's parent identity. Machine, agent,
   root, key, source and observation are fixed synthetic values. These are **not
   actual full archive metadata**: manifests, snapshots, historical version lists,
-  checkpoints, object keys, HTTP headers and R2 request overhead are not included.
+  checkpoints, plan/commit key names, HTTP headers and R2 request overhead are not included.
 - `cold-cpu-ns/op`, `update-cpu-ns/op`: process user+system CPU for the individual
   scan/hash/compress/dedup/canonical-descriptor measurement. Input validation is
   outside these intervals. CPU includes background Go runtime work in the process,

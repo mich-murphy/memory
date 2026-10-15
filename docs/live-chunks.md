@@ -55,9 +55,10 @@ Focused confinement checks can be selected with
 Normal lint and gopls diagnostics apply to the changed test files as well.
 
 Only the authorised parent/operator should run the exact live acceptance command
-in [r2-acceptance.md](r2-acceptance.md), **after the final gate**. Credentials remain
-in the child environment; do not open/source config or `.env`, dump environment,
-select legacy live tests, or run a full suite with live opt-in enabled. Existing
+in [r2-acceptance.md](r2-acceptance.md), **after the final gate**. A trusted operator
+launcher supplies credentials only in the test child's environment; the test must not
+open/source config or `.env` or dump its environment. Never select legacy live tests
+or run a full suite with live opt-in enabled. Existing
 owned-prefix and multipart cleanup requirements are unchanged.
 
 `db_chunks` logs identify `backend=gofakes3` or `backend=r2`, phase, numeric publish
