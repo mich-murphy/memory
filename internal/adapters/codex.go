@@ -88,22 +88,53 @@ func (c *Codex) MemoryDirs(root, _, _ string) []ScopedDir {
 
 func (c *Codex) SessionInfo(head []map[string]any) map[string]any {
 	info := map[string]any{}
-	for _, d := range head {
-		payload, ok := d["payload"].(map[string]any)
-		if !ok {
-			continue
-		}
-		switch d["type"] {
-		case "session_meta":
-			fill(info, payload, codexMetaInfo)
-			git, ok := payload["git"].(map[string]any)
-			if !ok || !truthy(payload["git"]) {
-				git, _ = d["git"].(map[string]any)
+	// The newest header is the fork's own metadata after replayed parent headers.
+	var own map[string]any
+	var outer map[string]any
+	ownIndex := 0
+	for i, event := range head {
+		if event["type"] == "session_meta" {
+			if payload, ok := event["payload"].(map[string]any); ok {
+				own, outer, ownIndex = payload, event, i
 			}
-			fill(info, git, codexGitInfo)
-		case "turn_context":
+		}
+	}
+	if own != nil {
+		fill(info, own, codexMetaInfo)
+		git, ok := own["git"].(map[string]any)
+		if !ok || !truthy(own["git"]) {
+			git, _ = outer["git"].(map[string]any)
+		}
+		fill(info, git, codexGitInfo)
+		setStarted(info, own["timestamp"])
+		if _, ok := info["started_at"]; !ok {
+			setStarted(info, outer["timestamp"])
+		}
+		codexLineage(info, own)
+	}
+	for _, event := range head {
+		if event["type"] == "turn_context" {
+			payload, _ := event["payload"].(map[string]any)
 			fill(info, payload, codexTurnInfo)
 		}
 	}
+	firstEvent("codex", info, head[ownIndex:])
+	observeEvents("codex", info, head)
 	return info
+}
+
+func codexLineage(info, own map[string]any) {
+	if parent := str(own, "forked_from_id"); parent != "" {
+		setLineage(info, "fork", parent)
+	}
+	parent := str(own, "parent_thread_id")
+	source, _ := own["source"].(map[string]any)
+	subagent, _ := source["subagent"].(map[string]any)
+	spawn, _ := subagent["thread_spawn"].(map[string]any)
+	if id := str(spawn, "parent_thread_id"); id != "" {
+		parent = id
+	}
+	if parent != "" {
+		setLineage(info, "child_thread", parent)
+	}
 }

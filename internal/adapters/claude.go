@@ -438,5 +438,10 @@ func (c *Claude) SessionInfo(head []map[string]any) map[string]any {
 	for _, d := range head {
 		fill(info, d, claudeInfo)
 	}
+	if parent := str(info, "session_id"); str(info, "agent_id") != "" {
+		setLineage(info, "subagent", parent)
+	}
+	firstEvent("claude", info, head)
+	observeEvents("claude", info, head)
 	return info
 }

@@ -488,12 +488,11 @@ func (s *State) projectSessionInfo(ref adapters.SessionRef, sess *Session) error
 			sess.Info["source_root"] = entry.Root
 		}
 	}
+	MergeFileInfo(sess.Info, files)
 	for i := range files {
-		if files[i].Role == adapters.RoleMain {
-			maps.Copy(sess.Info, files[i].Head)
-			if files[i].Root != "" {
-				sess.Info["source_root"] = files[i].Root
-			}
+		if files[i].Role == adapters.RoleMain && files[i].Root != "" {
+			sess.Info["source_root"] = files[i].Root
+			break
 		}
 	}
 	return nil

@@ -260,12 +260,7 @@ func (s *Syncer) newManifestDraft(ref adapters.SessionRef) (*manifestDraft, erro
 	if err != nil {
 		return nil, err
 	}
-	for i := range files {
-		file := &files[i]
-		if file.Role == adapters.RoleMain && file.Head != nil {
-			maps.Copy(sess.Info, file.Head)
-		}
-	}
+	state.MergeFileInfo(sess.Info, files)
 	if root != "" {
 		sess.Info["source_root"] = root
 	}

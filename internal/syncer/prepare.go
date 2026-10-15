@@ -205,6 +205,7 @@ type content struct {
 	mtimeNS    int64
 	diskSize   int64
 	first      []byte
+	last       []byte
 	compress   func(u *upload) error
 	stagedPath string
 }
@@ -221,7 +222,7 @@ func inMemoryContent(sf adapters.SessionFile, st os.FileInfo, prev *state.Upload
 	if err != nil {
 		return nil, err
 	}
-	return &content{hashed: h, mtimeNS: mtimeNS, diskSize: st.Size(), first: data, compress: func(u *upload) error {
+	return &content{hashed: h, mtimeNS: mtimeNS, diskSize: st.Size(), first: data, last: metadataTail(data, 0), compress: func(u *upload) error {
 		part := data[u.piece.Start:]
 		u.piece.SHA256 = raw.SHA256(part)
 		u.body = raw.Compress(part)
@@ -282,6 +283,12 @@ func (s *Syncer) streamedContent(path string, st os.FileInfo, prev *state.Upload
 	if err != nil {
 		return nil, err
 	}
+	lastStart := max(int64(0), h.size-metadataWindow-1)
+	last, err := readRange(path, lastStart, h.size-lastStart)
+	if err != nil {
+		return nil, err
+	}
+	last = metadataTail(last, lastStart)
 	mtimeNS := st.ModTime().UnixNano()
 	if limit != st.Size() {
 		mtimeNS = mtimeLastLineHeldBack
@@ -295,7 +302,7 @@ func (s *Syncer) streamedContent(path string, st os.FileInfo, prev *state.Upload
 			return nil, err
 		}
 	}
-	return &content{hashed: h, mtimeNS: mtimeNS, diskSize: st.Size(), first: first, compress: s.capturedCompressor(path, h.sha, tailSHA)}, nil
+	return &content{hashed: h, mtimeNS: mtimeNS, diskSize: st.Size(), first: first, last: last, compress: s.capturedCompressor(path, h.sha, tailSHA)}, nil
 }
 
 func hashRange(path string, start, size int64) (string, error) {
@@ -523,7 +530,7 @@ func (s *Syncer) planCaptured(sf adapters.SessionFile, c *content, baseline *fil
 	key, previous, prev, idle, r := baseline.key, baseline.previous, baseline.prev, baseline.idle, baseline.record
 	u := &upload{outcome: uploadOutcome{Status: captureUnchanged}, key: key, previous: previous, resume: c.resume, tail: c.tail, compress: c.compress, stagedPath: c.stagedPath, file: state.File{SessionFile: sf, Size: c.size, DiskSize: c.diskSize, MtimeNS: c.mtimeNS, SHA256: c.sha, LineCount: c.lines, PrefixSHA256: prefixSHA(c.first)}}
 	if transcriptRoles[sf.Role] {
-		u.file.Head = s.adapters[sf.Agent].SessionInfo(adapters.ReadHead(c.first, prefixLines))
+		u.file.Head = s.sessionHead(sf, c, previous)
 	}
 	if previous != nil && previous.SHA256 == c.sha && previous.DeletedAt == 0 && (!idle || len(previous.Pieces) <= 1) {
 		return u
