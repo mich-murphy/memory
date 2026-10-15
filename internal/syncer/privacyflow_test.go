@@ -1,6 +1,8 @@
 package syncer_test
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -153,5 +155,87 @@ func TestExcludedLinkTargetRetainsHistoryWithoutBlockingSiblingDeletion(t *testi
 	}
 	if len(e.History("claude", "skills/source.ts")) != 1 {
 		t.Fatal("excluded target caused a false tombstone")
+	}
+}
+
+// The same fixture exercises case-insensitive aliasing on macOS and the distinct
+// Archive/archive control on case-sensitive filesystems, without OS-name skips.
+func TestCaseVariantSkippedLinksFenceOnlyTheSameDirectoryEntry(t *testing.T) {
+	for _, reason := range []string{"symlink_directory", "symlink_unresolved"} {
+		t.Run(reason, func(t *testing.T) {
+			e := testenv.New(t)
+			key := "skills/Archive/source.ts"
+			oldDir := filepath.Join(e.Claude, "skills", "Archive")
+			link := filepath.Join(e.Claude, "skills", "archive")
+			testenv.Write(t, filepath.Join(oldDir, "source.ts"), "synthetic source\n")
+			st, err := os.Lstat(oldDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			other, err := os.Lstat(link)
+			folds := err == nil && os.SameFile(st, other)
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+				t.Fatal(err)
+			}
+			t.Logf("filesystem aliases Archive/archive: %v", folds)
+			for _, mode := range []string{"warm", "cold"} {
+				testenv.Write(t, link+"-"+mode+".ts", "synthetic sibling\n")
+			}
+			local := store.NewLocal(e.Bucket)
+			if first := sweep(t, local); first.Errors != 0 || len(e.History("claude", key)) != 1 {
+				t.Fatalf("initial sweep = %+v", first)
+			}
+			if err := os.RemoveAll(oldDir); err != nil {
+				t.Fatal(err)
+			}
+			target := t.TempDir()
+			if reason == "symlink_unresolved" {
+				target = filepath.Join(target, "missing")
+			}
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+			for _, mode := range []string{"warm", "cold"} {
+				sibling := link + "-" + mode + ".ts"
+				if err := os.Remove(sibling); err != nil {
+					t.Fatal(err)
+				}
+				if mode == "cold" {
+					if err := os.RemoveAll(e.State); err != nil {
+						t.Fatal(err)
+					}
+				}
+				wantDeleted, wantHistory := 1, 1
+				if !folds {
+					wantHistory = 2
+					if mode == "warm" {
+						wantDeleted++
+					}
+				}
+				summary := sweep(t, local)
+				if summary.Errors != 0 || summary.Deleted != wantDeleted || summary.SkipReasons[reason] == 0 {
+					t.Fatalf("%s sweep = %+v, want %d deletions and visible skip", mode, summary, wantDeleted)
+				}
+				if history := e.History("claude", key); len(history) != wantHistory || string(e.GenerationContent(history[0].File)) != "synthetic source\n" {
+					t.Fatalf("source history length = %d, want %d with original content", len(history), wantHistory)
+				}
+				if history := e.History("claude", "skills/archive-"+mode+".ts"); len(history) != 2 || history[1].File.Kind != "delete" {
+					t.Fatal("prefix-sharing sibling was not deleted")
+				}
+			}
+			if err := os.Remove(link); err != nil {
+				t.Fatal(err)
+			}
+			wantDeleted := 0
+			if folds {
+				wantDeleted = 1
+			}
+			if last := sweep(t, local); last.Errors != 0 || last.Deleted != wantDeleted {
+				t.Fatalf("unfenced sweep = %+v, want %d deletions", last, wantDeleted)
+			}
+			if history := e.History("claude", key); len(history) != 2 || history[1].File.Kind != "delete" {
+				t.Fatal("absent source was not eventually deleted")
+			}
+		})
 	}
 }

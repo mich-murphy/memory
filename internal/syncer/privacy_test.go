@@ -202,9 +202,9 @@ func TestDeletionFencesUseLogicalSourcePrefixes(t *testing.T) {
 		"noSources":       {nil, "symlink_directory", false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got := hasFencedSource(tc.sources, []adapters.SkippedFile{{Path: fence, Reason: tc.reason}})
+			got := newDeletionFences([]adapters.SkippedFile{{Path: fence, Reason: tc.reason}}).hasSource(tc.sources)
 			if got != tc.want {
-				t.Fatalf("hasFencedSource = %v, want %v", got, tc.want)
+				t.Fatalf("hasSource = %v, want %v", got, tc.want)
 			}
 		})
 	}
