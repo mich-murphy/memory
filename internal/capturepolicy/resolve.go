@@ -146,7 +146,7 @@ func (p *Policy) ExcludesClaudeConfig(identities []string) bool {
 func (p *Policy) excludes(identities []string, claudeConfig bool) bool {
 	for _, identity := range identities {
 		primary := claudeConfig && filepath.Base(identity) == ".claude.json"
-		if IsCredential(identity) && !primary {
+		if IsNoise(identity) || IsCredential(identity) && !primary {
 			return true
 		}
 		for _, configPath := range p.configs {

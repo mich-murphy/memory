@@ -7,7 +7,7 @@ BENCHCOUNT    ?= 10
 BENCHOUT      ?= bench.txt
 FUZZ_TARGETS  := internal/adapters:FuzzSessionInfo internal/hook:FuzzReadInput \
                  internal/jsonx:FuzzParseObjectRoundTrip internal/raw:FuzzCompressRoundTrip \
-                 internal/scrub:FuzzFile internal/shellwords:FuzzJoinSplit internal/gitinfo:FuzzStripUserinfo
+                 internal/scrub:FuzzFile internal/scrub:FuzzText internal/capturepolicy:FuzzBaseName internal/shellwords:FuzzJoinSplit internal/gitinfo:FuzzStripUserinfo
 
 .PHONY: check fmt fmt-check lint lint-version tidy-check fix-check deadcode vuln test cover crap fuzz mutation bench bench-smoke actionlint build hooks gopls clean
 

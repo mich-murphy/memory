@@ -67,7 +67,7 @@ func NewClaude(home string) *Claude {
 			User: []string{
 				"CLAUDE.md", "settings.json", "settings.local.json", "launcher-settings.json", "keybindings.json",
 				"rules/**", "skills/**", "agents/**", "commands/**", "output-styles/**", "hooks/**",
-				"plugins/installed_plugins.json", "plugins/known_marketplaces.json",
+				"plugins/installed_plugins.json",
 			},
 			Project: []string{
 				"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "**/CLAUDE.md", "**/CLAUDE.local.md", "**/AGENTS.md",
@@ -204,6 +204,7 @@ func (c *Claude) Related(sf SessionFile) Discovery {
 		found := discoverUnder(c, sf.Root, source)
 		out.Files = append(out.Files, found.Files...)
 		out.Issues = append(out.Issues, found.Issues...)
+		out.Skipped = append(out.Skipped, found.Skipped...)
 		out.Complete = out.Complete && found.Complete
 	}
 	return out

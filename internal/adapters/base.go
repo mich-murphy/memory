@@ -171,7 +171,12 @@ func hasAnySuffix(name string, suffixes []string) bool {
 func IsCredential(name string) bool { return capturepolicy.IsCredential(name) }
 
 func skipped(name string) bool {
-	return IsCredential(name) || hasAnySuffix(name, skipSuffixes)
+	// Dependency locks describe exact installed source versions, unlike live process locks.
+	switch strings.ToLower(name) {
+	case "yarn.lock", "bun.lock", "cargo.lock", "poetry.lock", "uv.lock", "composer.lock", "gemfile.lock", "flake.lock", "pdm.lock", "pipfile.lock":
+		return false
+	}
+	return IsCredential(name) || capturepolicy.IsNoise(name) || hasAnySuffix(name, skipSuffixes)
 }
 
 func isSQLite(name string) bool {
@@ -260,10 +265,17 @@ type Issue struct {
 
 func (i Issue) Error() string { return fmt.Sprintf("%s %s: %v", i.Kind, i.Path, i.Err) }
 
+// SkippedFile is a deliberate omission, not a retryable source failure.
+type SkippedFile struct {
+	Path   string
+	Reason string
+}
+
 // Discovery preserves useful partial results without asserting authoritative absence.
 type Discovery struct {
 	Files     []SessionFile
 	Databases []string
+	Skipped   []SkippedFile
 	Complete  bool
 	Issues    []Issue
 }
@@ -327,17 +339,20 @@ func (d *Discovery) visit(a Adapter, root, top, resolved, p string, entry fs.Dir
 		if err != nil {
 			return err
 		}
-		if logical != root && (skipDirNames[entry.Name()] || skip[filepath.ToSlash(namespaceRel)]) {
+		if logical != root && (skipDirNames[entry.Name()] || capturepolicy.IsNoise(entry.Name()) || skip[filepath.ToSlash(namespaceRel)]) {
 			return filepath.SkipDir
 		}
 		return nil
 	}
-	if !entry.Type().IsRegular() || skipped(entry.Name()) {
+	if skipped(entry.Name()) {
 		return nil
 	}
-	info, err := entry.Info()
+	info, err := d.fileInfo(logical, entry)
 	if err != nil {
 		d.issue(logical, "stat", err)
+		return nil
+	}
+	if info == nil || !info.Mode().IsRegular() {
 		return nil
 	}
 	switch {
@@ -431,4 +446,33 @@ func truthy(v any) bool {
 	default:
 		return true
 	}
+}
+
+// fileInfo resolves regular-file aliases without traversing directory aliases. A nil
+// result is a deliberate skip; errors remain discovery failures at the caller.
+func (d *Discovery) fileInfo(logical string, entry fs.DirEntry) (os.FileInfo, error) {
+	info, err := entry.Info()
+	if entry.Type()&os.ModeSymlink != 0 {
+		resolution, resolveErr := capturepolicy.Resolve(logical)
+		if resolveErr != nil {
+			// A dangling target might have been a directory. Never infer deletions from it.
+			if errors.Is(resolveErr, os.ErrNotExist) {
+				d.Complete = false
+				d.Skipped = append(d.Skipped, SkippedFile{Path: logical, Reason: "symlink_unresolved"})
+			} else {
+				d.issue(logical, "symlink_resolve", resolveErr)
+			}
+			return nil, nil
+		}
+		if slices.ContainsFunc(resolution.Identities, func(path string) bool { return IsCredential(path) || capturepolicy.IsNoise(path) }) {
+			return nil, nil
+		}
+		info, err = os.Stat(resolution.Path)
+		if err == nil && info.IsDir() {
+			d.Complete = false
+			d.Skipped = append(d.Skipped, SkippedFile{Path: logical, Reason: "symlink_directory"})
+			return nil, nil
+		}
+	}
+	return info, err
 }

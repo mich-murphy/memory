@@ -13,6 +13,7 @@ import (
 
 	"modernc.org/sqlite"
 
+	"github.com/mich-murphy/memory/internal/capturepolicy"
 	"github.com/mich-murphy/memory/internal/fsutil"
 )
 
@@ -23,6 +24,14 @@ func SQLiteExports(ctx context.Context, a Adapter, root string, databases []stri
 ) Discovery {
 	out := Discovery{Complete: true}
 	for _, src := range databases {
+		resolution, err := capturepolicy.Resolve(src)
+		if new(capturepolicy.Policy).Excludes(resolution.Identities) {
+			continue
+		}
+		if err != nil {
+			out.issue(src, "sqlite_resolve", err)
+			continue
+		}
 		rel, ok := relative(src, root)
 		if !ok {
 			out.issue(src, "export", errors.New("database outside root"))

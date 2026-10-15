@@ -1,5 +1,5 @@
 // Package capturepolicy applies the same known credential and config boundaries to raw files,
-// snapshots and external exports. It is not transcript DLP: unrecognised files pass unchanged.
+// snapshots and external exports. Content checks live in scrub; transcripts are not DLP-scanned.
 package capturepolicy
 
 import (
@@ -26,7 +26,7 @@ func IsCredential(path string) bool {
 // paths should use Resolve and Policy.Excludes to check every ancestor and leaf identity.
 func Excludes(logical, resolved, configPath, stateDir string) bool {
 	for _, path := range []string{logical, resolved} {
-		if IsCredential(path) || isConfig(path, configPath) || isWithin(path, stateDir) {
+		if IsCredential(path) || IsNoise(path) || isConfig(path, configPath) || isWithin(path, stateDir) {
 			return true
 		}
 	}
@@ -70,7 +70,7 @@ func isWithin(path, dir string) bool {
 
 // backupSuffix recognises editor, dated and compressed copies without decoding their contents.
 // Do not treat every suffix as a backup: auth.json.example and notes.key.txt are unrelated names.
-var backupSuffix = regexp.MustCompile(`(\.?~[0-9]+~|~|\.bak|\.backup|\.orig|\.old|-[0-9]{8}|\.(gz|bz2|xz|zst|zstd|zip|7z|rar|tar|tgz)|\.agent-sessions-backup-[0-9-]+)$`)
+var backupSuffix = regexp.MustCompile(`(\.?~[0-9]+~|~|\.bak|\.backup|\.orig|\.old|-[0-9]{8}(-[0-9]{6})?|\.before-[a-z0-9][a-z0-9_.-]*|\.(gz|bz2|xz|zst|zstd|zip|7z|rar|tar|tgz)|\.agent-sessions-backup-[0-9-]+)$`)
 
 // BaseName folds filename case and strips known, possibly repeated backup suffixes.
 // Conservative case folding also protects aliases on case-insensitive filesystems.
@@ -83,4 +83,19 @@ func BaseName(path string) string {
 		}
 		name = base
 	}
+}
+
+// IsNoise reports explicit disposable filenames and app bundles, including known backups.
+// It deliberately does not match arbitrary names containing "token", "key" or "cache".
+func IsNoise(path string) bool {
+	for part := range strings.SplitSeq(filepath.ToSlash(path), "/") {
+		if strings.HasSuffix(strings.ToLower(part), ".app") || strings.EqualFold(part, "migration-backups") {
+			return true
+		}
+	}
+	name := BaseName(path)
+	return name == ".ds_store" || name == ".codex-global-state.json" ||
+		strings.HasSuffix(name, "_cache.json") || strings.HasSuffix(name, "-cache.json") ||
+		strings.HasPrefix(name, "logs_") && strings.HasSuffix(name, ".sqlite") ||
+		strings.HasSuffix(name, ".app")
 }

@@ -29,7 +29,7 @@ type Pi struct {
 func NewPi(home string) *Pi {
 	return &Pi{
 		name: "pi", home: home, dir: filepath.Join(".pi", "agent"), dirEnv: "PI_CODING_AGENT_DIR",
-		skipDirs: []string{"bin"},
+		skipDirs: []string{"bin", "migration-backups"},
 		rules: SnapshotRules{
 			User: []string{
 				"AGENTS.override.md", "AGENTS.md", "CLAUDE.md", "SYSTEM.md", "APPEND_SYSTEM.md", "settings.json", "mcp.json",
