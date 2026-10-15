@@ -3,11 +3,10 @@ package scrub
 import (
 	"bytes"
 	"errors"
+	"iter"
 	"regexp"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/mich-murphy/memory/internal/shellwords"
 )
 
 // MaxTextSize bounds the assignment guard, not protected-config parsing. Larger files and
@@ -18,11 +17,7 @@ const MaxTextSize = 1 << 20
 // not a transient parse/upload failure. Callers must report it as a skipped capture.
 var ErrLiteralSecret = errors.New("literal_secret_assignment")
 
-var (
-	assignmentRE = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)=(.*)$`)
-	exportRE     = regexp.MustCompile(`^export[ \t]+`)
-	fishRE       = regexp.MustCompile(`^set[ \t]+-gx[ \t]+`)
-)
+var assignmentRE = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)=(.*)$`)
 
 // Text withholds small UTF-8 text containing a shell assignment or fish set -gx command
 // whose name says it holds a secret and whose value is not a supported pure reference.
@@ -42,64 +37,132 @@ func Text(data []byte) error {
 }
 
 func literalAssignment(line string) bool {
-	line = exportRE.ReplaceAllString(line, "")
-	fish := fishRE.MatchString(line)
-	if fish {
-		line = fishRE.ReplaceAllString(line, "")
-	} else if !assignmentRE.MatchString(line) {
-		return false
-	}
-	words, err := shellwords.Split(withoutComment(line))
-	if err != nil {
-		// An incomplete quoted literal cannot be proven to be a reference. Never log it.
-		name, _, _ := strings.Cut(line, "=")
-		if fish {
-			name, _, _ = strings.Cut(line, " ")
-		}
-		return IsSecretName(name)
-	}
-	for i, word := range words {
-		if strings.HasPrefix(word, "#") {
-			words = words[:i]
-			break
+	var command []shellWord
+	for word := range shellWords(line) {
+		if word.separator {
+			if literalCommand(command) {
+				return true
+			}
+			command = command[:0]
+		} else {
+			command = append(command, word)
 		}
 	}
-	if fish {
-		return len(words) > 1 && IsSecretName(words[0]) && !holdsNoSecret(strings.Join(words[1:], " "))
+	return literalCommand(command)
+}
+
+func literalCommand(words []shellWord) bool {
+	// Fish permits `and` and `or` at the start of a command after a separator.
+	if len(words) > 0 && (words[0].raw == "export" || words[0].raw == "and" || words[0].raw == "or") {
+		words = words[1:]
+	}
+	if len(words) >= 3 && words[0].raw == "set" && words[1].raw == "-gx" {
+		return literalFish(words[2:])
 	}
 	for _, word := range words {
-		match := assignmentRE.FindStringSubmatch(word)
+		match := assignmentRE.FindStringSubmatch(word.raw)
 		if match == nil {
-			break // the command or a comment, not another environment assignment
+			break // command arguments and prose aren't environment assignments
 		}
-		if IsSecretName(match[1]) && !holdsNoSecret(strings.TrimSuffix(match[2], ";")) {
+		_, value, _ := strings.Cut(word.value, "=")
+		if IsSecretName(match[1]) && (!word.complete || !holdsNoSecret(value)) {
 			return true
 		}
 	}
 	return false
 }
 
-// withoutComment keeps quote characters in shell comments from making an otherwise valid
-// reference assignment look unterminated. It does not expand or execute shell syntax.
-func withoutComment(line string) string {
-	var quote byte
-	escaped := false
-	for i := range len(line) {
-		c := line[i]
-		switch {
-		case escaped:
-			escaped = false
-		case c == '\\' && quote != '\'':
-			escaped = true
-		case c == quote:
-			quote = 0
-		case quote != 0:
-			continue
-		case c == '\'' || c == '"':
-			quote = c
-		case c == '#' && (i == 0 || line[i-1] == ' ' || line[i-1] == '\t'):
-			return line[:i]
+// literalFish checks the name and all values of a set -gx command.
+func literalFish(words []shellWord) bool {
+	if !IsSecretName(words[0].raw) || len(words) == 1 {
+		return false
+	}
+	var values []string
+	for _, word := range words[1:] {
+		if !word.complete {
+			return true
+		}
+		values = append(values, word.value)
+	}
+	return !holdsNoSecret(strings.Join(values, " "))
+}
+
+// shellWord retains syntax as well as meaning. In value, a literal dollar sign is
+// represented by NUL (excluded by Text), so it cannot masquerade as an expansion.
+// This is a bounded assignment guard, not a shell parser or an expansion evaluator.
+type shellWord struct {
+	raw, value string
+	complete   bool
+	separator  bool
+}
+
+// shellWords observes comments and command separators before removing quotes. It yields
+// completed words even when a later word is malformed, so an unrelated parse error cannot
+// hide a detectable assignment. Single quotes and escaped dollars never form references.
+func shellWords(line string) iter.Seq[shellWord] {
+	return func(yield func(shellWord) bool) {
+		for line != "" {
+			line = strings.TrimLeft(line, " \t")
+			if line == "" || line[0] == '#' {
+				return
+			}
+			var word shellWord
+			if strings.ContainsRune(";|&", rune(line[0])) {
+				word.separator = true
+				line = line[1:]
+			} else {
+				word = readShellWord(line)
+				line = line[len(word.raw):]
+			}
+			if !yield(word) {
+				return
+			}
 		}
 	}
-	return line
+}
+
+func readShellWord(line string) shellWord {
+	var value strings.Builder
+	quoted := false
+	i := 0
+	for i < len(line) {
+		c := line[i]
+		if !quoted && strings.ContainsRune(" \t;|&", rune(c)) {
+			break
+		}
+		i++
+		switch {
+		case c == '\\':
+			escaped, n := shellEscape(line[i:], quoted)
+			value.WriteString(escaped)
+			i += n
+			if n == 0 && i == len(line) {
+				return shellWord{raw: line[:i], value: value.String()}
+			}
+		case c == '"':
+			quoted = !quoted
+		case c == '\'' && !quoted:
+			end := strings.IndexByte(line[i:], '\'')
+			if end < 0 {
+				return shellWord{raw: line}
+			}
+			value.WriteString(strings.ReplaceAll(line[i:i+end], "$", "\x00"))
+			i += end + 1
+		default:
+			value.WriteByte(c)
+		}
+	}
+	return shellWord{raw: line[:i], value: value.String(), complete: !quoted}
+}
+
+// shellEscape consumes the byte following a backslash, if that byte is escapable.
+// Within double quotes only shell-special escapes lose their slash.
+func shellEscape(rest string, quoted bool) (string, int) {
+	if rest == "" || quoted && !strings.ContainsRune("\\\"$`", rune(rest[0])) {
+		return "\\", 0
+	}
+	if rest[0] == '$' {
+		return "\x00", 1
+	}
+	return rest[:1], 1
 }

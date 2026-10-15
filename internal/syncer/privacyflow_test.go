@@ -46,3 +46,41 @@ func TestDirectoryAliasesRetainHistoryUntilDiscoveryIsComplete(t *testing.T) {
 		t.Fatalf("complete sweep = %+v", fourth)
 	}
 }
+
+func TestSkippedSuffixDirectoryAliasesRetainCapturedChildren(t *testing.T) {
+	e := testenv.New(t)
+	key := "skills/archive.lock/source.ts"
+	dir := filepath.Join(e.Claude, "skills", "archive.lock")
+	testenv.Write(t, filepath.Join(dir, "source.ts"), "synthetic source\n")
+	local := store.NewLocal(e.Bucket)
+	if first := sweep(t, local); first.Errors != 0 || len(e.History("claude", key)) != 1 {
+		t.Fatalf("initial sweep = %+v", first)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []struct{ target, reason string }{
+		{t.TempDir(), "symlink_directory"},
+		{filepath.Join(t.TempDir(), "missing"), "symlink_unresolved"},
+	} {
+		if err := os.Symlink(step.target, dir); err != nil {
+			t.Fatal(err)
+		}
+		summary := sweep(t, local)
+		if summary.Errors != 0 || summary.Deleted != 0 || summary.SkipReasons[step.reason] == 0 {
+			t.Fatalf("alias sweep = %+v, want visible skip and retained history", summary)
+		}
+		if len(e.History("claude", key)) != 1 {
+			t.Fatal("uncertain discovery published a false tombstone")
+		}
+		if err := os.Remove(dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if last := sweep(t, local); last.Errors != 0 || last.Deleted != 1 {
+		t.Fatalf("complete sweep = %+v, want one deletion", last)
+	}
+	if history := e.History("claude", key); len(history) != 2 || history[1].File.Kind != "delete" {
+		t.Fatal("complete discovery did not publish the real deletion")
+	}
+}

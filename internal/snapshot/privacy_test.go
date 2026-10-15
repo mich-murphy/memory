@@ -33,3 +33,32 @@ func TestSnapshotWithholdsAssignmentsIncludingFileAliases(t *testing.T) {
 		}
 	}
 }
+
+func TestSnapshotWithholdsQuotedAndMalformedAssignments(t *testing.T) {
+	e := testenv.New(t)
+	for name, body := range map[string]string{
+		"fishHash":      "set -gx PASSWORD '#fixture-secret'",
+		"separator":     "OTHER=ok;API_KEY=fixture-secret",
+		"fishSeparator": "set -gx OTHER ok;set -gx API_KEY fixture-secret",
+		"malformed":     "OTHER=ok API_KEY=fixture-secret CMD='",
+		"singleQuoted":  "API_KEY='${TOKEN}'",
+		"escaped":       `API_KEY=\$TOKEN`,
+		"fishQuoted":    "set -gx API_KEY '${TOKEN}'",
+		"fishEscaped":   `set -gx API_KEY \$TOKEN`,
+	} {
+		path := "skills/" + name + ".sh"
+		testenv.Write(t, filepath.Join(e.Claude, filepath.FromSlash(path)), body)
+	}
+	set := build(t, e, e.Project)
+	if len(set.Skipped) != 8 {
+		t.Fatalf("skips = %+v, want 8 withheld assignments", set.Skipped)
+	}
+	for _, skipped := range set.Skipped {
+		if skipped.Reason != "literal_secret_assignment" {
+			t.Fatalf("skip reason = %s, want literal_secret_assignment", skipped.Reason)
+		}
+		if slices.ContainsFunc(set.Files, func(f File) bool { return f.Path == skipped.Path }) {
+			t.Fatal("withheld assignment retained in snapshot")
+		}
+	}
+}

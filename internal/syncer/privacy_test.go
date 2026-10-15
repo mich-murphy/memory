@@ -115,3 +115,40 @@ func TestProjectSnapshotWithholdingAppearsInRunSummary(t *testing.T) {
 		t.Fatalf("snapshot summary = %+v", s.Summary)
 	}
 }
+
+func TestRawGuardRejectsQuotedAndMalformedAssignments(t *testing.T) {
+	for name, body := range map[string]string{
+		"fishHash":      "set -gx PASSWORD '#fixture-secret'",
+		"separator":     "OTHER=ok;API_KEY=fixture-secret",
+		"fishSeparator": "set -gx OTHER ok;set -gx API_KEY fixture-secret",
+		"malformed":     "OTHER=ok API_KEY=fixture-secret CMD='",
+		"singleQuoted":  "API_KEY='${TOKEN}'",
+		"escaped":       `API_KEY=\$TOKEN`,
+		"fishQuoted":    "set -gx API_KEY '${TOKEN}'",
+		"fishEscaped":   `set -gx API_KEY \$TOKEN`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "script.sh")
+			testenv.Write(t, path, body)
+			sf := adapters.SessionFile{Agent: "pi", Root: root, Path: path, Key: "script.sh", Role: adapters.RoleUnknown}
+			got, err := readFile(sf)
+			if !errors.Is(err, scrub.ErrLiteralSecret) || got != nil {
+				t.Fatal("readFile did not withhold assignment")
+			}
+			policy, err := capturepolicy.New("", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var logs bytes.Buffer
+			s := &Syncer{policy: policy, warm: true, log: slog.New(slog.NewTextHandler(&logs, nil))}
+			u, err := s.prepare(t.Context(), sf)
+			if err != nil || u != nil || s.Summary.Errors != 0 || s.Summary.SkipReasons["literal_secret_assignment"] != 1 {
+				t.Fatalf("prepare did not report intentional withholding: %+v", s.Summary)
+			}
+			if logs.Len() != 0 {
+				t.Fatal("withheld assignment reached logs")
+			}
+		})
+	}
+}

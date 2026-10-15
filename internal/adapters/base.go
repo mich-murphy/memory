@@ -344,15 +344,14 @@ func (d *Discovery) visit(a Adapter, root, top, resolved, p string, entry fs.Dir
 		}
 		return nil
 	}
-	if skipped(entry.Name()) {
-		return nil
-	}
+	// Observe directory and dangling aliases before applying filename suffix policy:
+	// a skipped-looking link may replace a directory with previously captured children.
 	info, err := d.fileInfo(logical, entry)
 	if err != nil {
 		d.issue(logical, "stat", err)
 		return nil
 	}
-	if info == nil || !info.Mode().IsRegular() {
+	if info == nil || !info.Mode().IsRegular() || skipped(entry.Name()) {
 		return nil
 	}
 	switch {
