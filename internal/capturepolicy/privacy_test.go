@@ -42,11 +42,20 @@ func TestNoiseUsesExplicitNamesAndResolvedIdentities(t *testing.T) {
 }
 
 func FuzzBaseName(f *testing.F) {
-	for _, seed := range []string{"auth.json.before-upgrade.bak", "models.json-20260412-235959.gz", ".bak", "file.before-before-before", "AUTH.JSON~"} {
+	for _, seed := range []string{
+		"auth.json.before-upgrade.bak", "models.json-20260412-235959.gz", ".bak", "file.before-before-before", "AUTH.JSON~",
+		"auth.json.before-a.jsonl", "auth.json.before-a.sqlite", "auth.json.before-a.bak.before-b.old",
+		"auth.json.agent-sessions-backup---", "auth.json.bz2", "auth.json.~123~.tar.gz-20261014-235959.old",
+		"/dir.bak/AUTH.JSON.BEFORE-K", "AUTH.JSON.BEFORE-İ", "auth.json.before-é",
+		"auth.json\x00.bak", "auth.json.before-a\x00", "auth.json\xff.bak", "auth.json.bak\xff", "auth.json.before-a\n",
+	} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, path string) {
 		name := BaseName(path)
+		if want := regexpBaseName(path); name != want {
+			t.Fatalf("BaseName(%q) = %q, want regexp %q", path, name, want)
+		}
 		if name != "" && BaseName(name) != name {
 			t.Fatal("BaseName is not idempotent")
 		}

@@ -76,12 +76,32 @@ var backupSuffix = regexp.MustCompile(`(\.?~[0-9]+~|~|\.bak|\.backup|\.orig|\.ol
 // Conservative case folding also protects aliases on case-insensitive filesystems.
 func BaseName(path string) string {
 	name := strings.ToLower(filepath.Base(path))
-	for {
+	for mayHaveBackupSuffix(name) {
 		base := backupSuffix.ReplaceAllString(name, "")
 		if base == name {
 			return name
 		}
 		name = base
+	}
+	return name
+}
+
+// mayHaveBackupSuffix is a necessary, not sufficient check on a folded name.
+// Except .before-..., every regexp alternative ends in one of these bytes:
+// editors ~; copies k/p/g/d; dates/installers 0-9/-; archives z/2/t/d/p/r.
+// .before-... can end in any [a-z0-9_.-], so admit any occurrence of its marker.
+// When changing backupSuffix, keep this check a superset of its matches and
+// extend the regexp-oracle tests. Only the regexp decides what gets stripped.
+func mayHaveBackupSuffix(name string) bool {
+	if name == "" {
+		return false
+	}
+	switch name[len(name)-1] {
+	case '~', 'k', 'p', 'g', 'd', 'z', 't', 'r', '-',
+		'0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		return true
+	default:
+		return strings.Contains(name, ".before-")
 	}
 }
 
