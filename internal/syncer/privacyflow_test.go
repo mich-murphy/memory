@@ -161,12 +161,23 @@ func TestExcludedLinkTargetRetainsHistoryWithoutBlockingSiblingDeletion(t *testi
 // The same fixture exercises case-insensitive aliasing on macOS and the distinct
 // Archive/archive control on case-sensitive filesystems, without OS-name skips.
 func TestCaseVariantSkippedLinksFenceOnlyTheSameDirectoryEntry(t *testing.T) {
+	testSkippedLinkSpelling(t, "Archive", "archive")
+}
+
+func TestNormalizationVariantSkippedLinksFenceOnlyTheSameDirectoryEntry(t *testing.T) {
+	testSkippedLinkSpelling(t, "Caf\u00e9", "Cafe\u0301")
+}
+
+// The filesystem capability probe selects alias or distinct-name expectations:
+// neither case folding nor canonical Unicode aliasing is assumed from the OS.
+func testSkippedLinkSpelling(t *testing.T, original, replacement string) {
+	t.Helper()
 	for _, reason := range []string{"symlink_directory", "symlink_unresolved"} {
 		t.Run(reason, func(t *testing.T) {
 			e := testenv.New(t)
-			key := "skills/Archive/source.ts"
-			oldDir := filepath.Join(e.Claude, "skills", "Archive")
-			link := filepath.Join(e.Claude, "skills", "archive")
+			key := "skills/" + original + "/source.ts"
+			oldDir := filepath.Join(e.Claude, "skills", original)
+			link := filepath.Join(e.Claude, "skills", replacement)
 			testenv.Write(t, filepath.Join(oldDir, "source.ts"), "synthetic source\n")
 			st, err := os.Lstat(oldDir)
 			if err != nil {
@@ -177,7 +188,7 @@ func TestCaseVariantSkippedLinksFenceOnlyTheSameDirectoryEntry(t *testing.T) {
 			if err != nil && !errors.Is(err, fs.ErrNotExist) {
 				t.Fatal(err)
 			}
-			t.Logf("filesystem aliases Archive/archive: %v", folds)
+			t.Logf("filesystem aliases %q/%q: %v", original, replacement, folds)
 			for _, mode := range []string{"warm", "cold"} {
 				testenv.Write(t, link+"-"+mode+".ts", "synthetic sibling\n")
 			}
@@ -219,7 +230,7 @@ func TestCaseVariantSkippedLinksFenceOnlyTheSameDirectoryEntry(t *testing.T) {
 				if history := e.History("claude", key); len(history) != wantHistory || string(e.GenerationContent(history[0].File)) != "synthetic source\n" {
 					t.Fatalf("source history length = %d, want %d with original content", len(history), wantHistory)
 				}
-				if history := e.History("claude", "skills/archive-"+mode+".ts"); len(history) != 2 || history[1].File.Kind != "delete" {
+				if history := e.History("claude", "skills/"+replacement+"-"+mode+".ts"); len(history) != 2 || history[1].File.Kind != "delete" {
 					t.Fatal("prefix-sharing sibling was not deleted")
 				}
 			}

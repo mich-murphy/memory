@@ -57,3 +57,46 @@ func TestDeletionFencesKeepUnrelatedPathsLexicalAndChangedBoundariesConservative
 		t.Fatal("boundary replaced by directory did not conservatively fence")
 	}
 }
+
+func TestBoundaryAliasCandidatesRejectUnrelatedASCIIComponents(t *testing.T) {
+	for name, tc := range map[string]struct {
+		left, right string
+		want        bool
+	}{
+		"identical":                {"/home/skills/archive", "/home/skills/archive", true},
+		"case":                     {"/home/skills/Archive", "/home/skills/archive", true},
+		"asciiDistinct":            {"/home/skills/archive", "/home/skills/other", false},
+		"normalization":            {"/home/skills/Café", "/home/skills/Cafe\u0301", true},
+		"unicodeHome":              {"/Café/skills/archive", "/Cafe\u0301/skills/Archive", true},
+		"unicodeHomeDifferentTree": {"/Café/skills/archive", "/Cafe\u0301/plugins/archive", false},
+		"unicodeHomeDifferentName": {"/Café/skills/archive", "/Café/skills/other", false},
+		"differentDepth":           {"/home/skills/Café", "/home/skills/Cafe\u0301/child", false},
+		"distinctUnicodeCandidate": {"/home/skills/Café", "/home/skills/Cafè", true},
+		"mixedUnicodeASCII":        {"/home/skills/\u212a", "/home/skills/K", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := mayAliasBoundary(tc.left, tc.right); got != tc.want {
+				t.Fatalf("mayAliasBoundary = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUnicodeBoundaryCandidatesStillRequireSameLinkIdentity(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "Café")
+	ancestor := filepath.Join(root, "skills", "Café")
+	if err := os.MkdirAll(ancestor, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "skills", "Cafè")
+	if err := os.Symlink(t.TempDir(), link); err != nil {
+		t.Fatal(err)
+	}
+	f := newDeletionFences([]adapters.SkippedFile{{Path: link, Reason: "symlink_directory"}})
+	if f.hasSource([]raw.Source{{Path: filepath.Join(ancestor, "source.ts")}}) || len(f.comparisons) != 1 {
+		t.Fatal("distinct Unicode entries were fenced instead of compared by identity")
+	}
+	if f.hasSource([]raw.Source{{Path: filepath.Join(root, "plugins", "Café", "source.ts")}}) || len(f.comparisons) != 1 {
+		t.Fatal("Unicode home caused metadata comparison for unrelated ASCII subtree")
+	}
+}

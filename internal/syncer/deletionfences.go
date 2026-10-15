@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/raw"
@@ -39,18 +40,50 @@ func (f *deletionFences) hasSource(sources []raw.Source) bool {
 			if err != nil || filepath.IsLocal(rel) {
 				return true
 			}
-			// Only a case-fold-equivalent ancestor at the boundary's depth needs
+			// Only a possible spelling alias at the boundary's depth needs
 			// metadata. Unrelated paths keep the lexical, syscall-free fast path.
 			depth := strings.Count(path, string(filepath.Separator))
 			for n := strings.Count(ancestor, string(filepath.Separator)); n > depth; n-- {
 				ancestor = filepath.Dir(ancestor)
 			}
-			if strings.EqualFold(path, ancestor) && f.sameBoundary(path, ancestor) {
+			if mayAliasBoundary(path, ancestor) && f.sameBoundary(path, ancestor) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// mayAliasBoundary is only a candidate filter; filesystem identity decides whether
+// spellings alias. Non-ASCII components may be canonically equivalent (NFC/NFD),
+// but a Unicode home path must not trigger stats for unrelated ASCII subtrees.
+func mayAliasBoundary(left, right string) bool {
+	if strings.EqualFold(left, right) {
+		return true
+	}
+	if isASCII(left) && isASCII(right) {
+		return false
+	}
+	parts := strings.Split(left, string(filepath.Separator))
+	other := strings.Split(right, string(filepath.Separator))
+	if len(parts) != len(other) {
+		return false
+	}
+	for i, part := range parts {
+		if !strings.EqualFold(part, other[i]) && isASCII(part) && isASCII(other[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCII(s string) bool {
+	for i := range len(s) {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 func (f *deletionFences) sameBoundary(path, ancestor string) bool {
@@ -70,7 +103,7 @@ func (f *deletionFences) sameBoundary(path, ancestor string) bool {
 		return fenced
 	}
 	// With a stable skipped link, ENOENT means this spelling is distinct on a
-	// case-sensitive filesystem. Other lookup failures remain uncertain.
+	// case/normalization-sensitive filesystem. Other failures remain uncertain.
 	if lookupErr != nil && !errors.Is(lookupErr, fs.ErrNotExist) {
 		return fenced
 	}
