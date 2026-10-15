@@ -53,7 +53,34 @@ bucket descriptor chains, pieces, whole-content checksums, secret exclusions, da
 integrity, child-session manifest membership and package provenance. Remove private
 analysis copies only after the final evidence has been retained safely.
 
-## Evidence status
+## Publication hold (2026-10-15)
+
+The `v0.2.0` tag points to `acf839d`; **no release was published**. Its GitHub Linux
+coverage jobs reached the existing 600-second package timeout; macOS, fuzz, static and
+workflow-security jobs passed. No timeout, coverage, CRAP, lint or acceptance gate was relaxed.
+
+Follow-up Go source `c88e190` removes ordinary-filename regexp allocation churn using a
+conservative necessary-condition gate (the original regexp remains authoritative), with
+oracle/fuzz equivalence and allocation regressions. Two tests now observe immutable-object
+mtimes once per assertion phase instead of quadratically rescanning the bucket; every
+comparison, dataset, seed and scenario remains. Its local `make check` passed: **89.1%
+(5,672/6,363)**, zero CRAP >30; syncer race/coverage completed in **477.250 s**.
+
+The follow-up GitHub run **38721025170** started **zero steps** in every job because of
+an account-level CI-provider restriction requiring owner action. CI availability must be
+restored before it can establish whether the Linux timeout is resolved and the release
+workflow can publish. Do not retag the already
+pushed `v0.2.0`; use a new version for a successful follow-up candidate. Fresh final-source
+full benchmarks/native/R2 evidence still needs recording after the follow-up is frozen.
+
+Production remains unchanged: **no installation, hook rollout, reset or fresh backfill**.
+A private durable offline backup now preserves all **26,624 old objects / 1,350,478,068
+encoded bytes**, including the 392 legacy objects. All 26,623 single-part ETags matched;
+the strict v3 audit again verified all 8,296 file and 1,257 manifest generations. This copy
+must survive temporary-workspace cleanup because old versions can outlive their local
+sources. Both identities/configs and all observed opt-outs remain untouched.
+
+## Earlier candidate evidence status
 
 The unmodified baseline at commit `3a59dd8` passed `make check` before implementation.
 The final Go-source candidate `a95976a` passed `make check`: **89.2% total coverage
