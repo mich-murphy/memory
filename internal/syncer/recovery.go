@@ -265,7 +265,7 @@ func (s *Syncer) verifyPublication(ctx context.Context, p *publication) error {
 	if err := s.verifyReferences(ctx, p, nil); err != nil {
 		return err
 	}
-	for _, d := range p.Dependencies {
+	for _, d := range p.dependencies() {
 		if err := verifyDependencyMetadata(ctx, s.bucket, d); err != nil {
 			return err
 		}
@@ -350,6 +350,19 @@ func (s *Syncer) completePlan(ctx context.Context, record *state.Record) (bool, 
 	if s.excludedPublication(p) {
 		return false, nil
 	}
+	if p.File != nil {
+		parent, _, err := s.current("file", p.Agent, p.Key)
+		if err != nil {
+			return false, err
+		}
+		var previous *raw.Generation
+		if parent != nil {
+			previous = parent.File
+		}
+		if err := validateFileTransition(p, previous); err != nil {
+			return false, err
+		}
+	}
 	err = s.verifyPublication(ctx, p)
 	if errors.Is(err, store.ErrNotFound) {
 		return false, nil
@@ -365,6 +378,9 @@ func (s *Syncer) replayStream(kind, stream string) error {
 		}
 		p, err := decodePublication(record.Body)
 		if err != nil {
+			return err
+		}
+		if err := validateFileTransition(p, previous); err != nil {
 			return err
 		}
 		applied, err := s.db.ArchiveApplied(record.Key)

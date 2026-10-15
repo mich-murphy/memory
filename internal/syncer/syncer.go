@@ -33,7 +33,6 @@ var (
 const (
 	inSessionWindow   = 900 * time.Second
 	partialLineWindow = 60 * time.Second
-	foldAfter         = inSessionWindow
 	maxSegments       = 64
 	recopyAfter       = time.Hour
 	uploadWorkers     = 8
@@ -282,9 +281,6 @@ func (s *Syncer) publishDeletion(ctx context.Context, p *publication, record *st
 	next.DeletedAt = s.nowSeconds()
 	next.ObservedAt = next.DeletedAt
 	deletion := &publication{Schema: 3, MachineID: s.cfg.MachineID, Kind: "file", Agent: p.Agent, Key: p.Key, Sequence: next.Sequence, Parent: next.Parent, File: &next}
-	for _, piece := range next.Pieces {
-		deletion.Dependencies = append(deletion.Dependencies, pieceDependency(piece))
-	}
 	r, err := s.publish(ctx, deletion, nil)
 	if err != nil {
 		return err

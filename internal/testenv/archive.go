@@ -89,18 +89,34 @@ func DecodeRecord(key string, body []byte) (Record, error) {
 		}
 	}
 	if r.File != nil {
+		fields, ok := generic.(map[string]any)
+		if !ok {
+			return r, errors.New("invalid descriptor object")
+		}
+		if _, supplied := fields["dependencies"]; supplied && r.Dependencies == nil {
+			r.Dependencies = []Dependency{}
+		}
 		g := r.File
 		if err := g.Validate(r.MachineID); err != nil {
 			return r, err
 		}
-		if g.Identity.Agent != r.Agent || g.Identity.Key != r.Key || g.Sequence != r.Sequence || g.Parent != r.Parent || len(g.Pieces) != len(r.Dependencies) {
+		if g.Identity.Agent != r.Agent || g.Identity.Key != r.Key || g.Sequence != r.Sequence || g.Parent != r.Parent || r.Dependencies != nil && len(g.Pieces) != len(r.Dependencies) {
 			return r, fmt.Errorf("%s inconsistent generation", key)
 		}
 		for i, p := range g.Pieces {
+			if r.Dependencies == nil {
+				continue
+			}
 			d := r.Dependencies[i]
+
 			if d.Object != p.Object || d.SHA256 != p.EncodedSHA256 || d.Size != p.EncodedSize || d.RawSHA256 != p.SHA256 || d.RawSize != p.End-p.Start || d.Encoding != "zstd" {
 				return r, fmt.Errorf("%s dependency differs from piece", key)
 			}
+		}
+	}
+	if r.File != nil && r.Dependencies == nil {
+		for _, p := range r.File.Pieces {
+			r.Dependencies = append(r.Dependencies, Dependency{Object: p.Object, SHA256: p.EncodedSHA256, Size: p.EncodedSize, Encoding: "zstd", RawSHA256: p.SHA256, RawSize: p.End - p.Start})
 		}
 	}
 	return r, nil

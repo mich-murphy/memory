@@ -370,14 +370,15 @@ func TestAppendedSessionUploadsOnlyNewBytesThenFolds(t *testing.T) {
 	if !bytes.Equal(readPieces(t, e, main["pieces"]), now) {
 		t.Error("pieces don't rebuild the file")
 	}
+	appendArchivePieces(t, path, 62)
+	now = readFile(t, path)
 	before := mtimes(t, e)
-	testenv.Backdate(t, path, syncer.FoldAfter+time.Minute)
 	mustRun(t, "sync", "--quiet")
 	history = e.Records(key)
-	if len(history) != 3 || history[2].File.Kind != "fold" || len(history[2].File.Pieces) != 1 {
+	if len(history) != 65 || history[len(history)-1].File.Kind != "fold" || len(history[len(history)-1].File.Pieces) != 2 {
 		t.Fatalf("fold history = %v", history)
 	}
-	if !bytes.Equal(e.GenerationContent(history[2].File), now) {
+	if !bytes.Equal(e.GenerationContent(history[len(history)-1].File), now) {
 		t.Error("folded content differs")
 	}
 	for object, mtime := range before {
@@ -386,7 +387,7 @@ func TestAppendedSessionUploadsOnlyNewBytesThenFolds(t *testing.T) {
 		}
 	}
 	main = mainTranscript(t, e.Manifest("claude", claudeKey))
-	if diff := cmp.Diff(history[2].File.Pieces, toPieces(t, main["pieces"])); diff != "" {
+	if diff := cmp.Diff(history[len(history)-1].File.Pieces, toPieces(t, main["pieces"])); diff != "" {
 		t.Errorf("fold manifest pieces:\n%s", diff)
 	}
 	before = mtimes(t, e)

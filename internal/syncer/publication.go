@@ -98,6 +98,30 @@ type publication struct {
 	Dependencies []dependency    `json:"dependencies"`
 }
 
+func (p publication) MarshalJSON() ([]byte, error) {
+	type wire publication
+	if p.File == nil || p.Dependencies != nil {
+		return json.Marshal(wire(p))
+	}
+	return json.Marshal(struct {
+		wire
+		Dependencies []dependency `json:"dependencies,omitempty"`
+	}{wire: wire(p)})
+}
+
+// dependencies is the single source of dependency identities for all consumers.
+// Legacy explicit file lists are validated against pieces, never trusted in their place.
+func (p *publication) dependencies() []dependency {
+	if p.File == nil {
+		return p.Dependencies
+	}
+	deps := make([]dependency, 0, len(p.File.Pieces))
+	for _, piece := range p.File.Pieces {
+		deps = append(deps, pieceDependency(piece))
+	}
+	return deps
+}
+
 func streamID(agent, key string) string { return raw.SHA256([]byte(agent + "\x00" + key)) }
 func (s *Syncer) machinePrefix() string { return "v3/machines/" + s.cfg.MachineID + "/" }
 func (s *Syncer) publicationPrefix(kind, agent, key string) string {
@@ -129,7 +153,7 @@ func (p *publication) validate(machine string) error {
 		return err
 	}
 
-	for _, d := range p.Dependencies {
+	for _, d := range p.dependencies() {
 		if !raw.ValidKey(d.Object) || !strings.HasPrefix(d.Object, "v3/") || !raw.ValidHash(d.SHA256) || d.Size < 0 {
 			return errors.New("archive: invalid dependency")
 		}
@@ -183,6 +207,17 @@ func decodePublication(body []byte) (*publication, error) {
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return nil, errors.New("archive record: trailing data")
+	}
+	// An explicitly supplied legacy file dependency list must cover the pieces, even
+	// when encoded as null or an empty array. Absence alone selects derivation.
+	if p.File != nil && p.Dependencies == nil {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(body, &fields); err != nil {
+			return nil, err
+		}
+		if _, present := fields["dependencies"]; present {
+			p.Dependencies = []dependency{}
+		}
 	}
 	return &p, nil
 }
@@ -321,11 +356,11 @@ func (p *publication) validateFile(machine string) error {
 	if err := g.Validate(machine); err != nil {
 		return err
 	}
-	if len(p.Dependencies) != len(g.Pieces) {
+	if p.Dependencies != nil && len(p.Dependencies) != len(g.Pieces) {
 		return errors.New("archive: file dependencies do not cover pieces")
 	}
 	for i, piece := range g.Pieces {
-		if p.Dependencies[i] != pieceDependency(piece) {
+		if len(p.Dependencies) > i && p.Dependencies[i] != pieceDependency(piece) {
 			return errors.New("archive: file dependency mismatch")
 		}
 	}

@@ -251,7 +251,7 @@ func TestAFoldWhoseAnswerWasLostRemainsReadableAfterAnotherAppend(t *testing.T) 
 	testenv.Append(t, path, testenv.JSONL(t, map[string]any{"type": "user", "message": "more"}))
 	testenv.Backdate(t, path, 2*time.Minute)
 	sweep(t, local)
-	testenv.Backdate(t, path, syncer.FoldAfter+time.Minute)
+	appendArchivePieces(t, path, 62)
 	faults := &flakyStore{Store: local, lost: []string{key + "commits/", "v3/blobs/zstd/"}}
 	sweep(t, faults)
 	faults.assertFired(t)
@@ -308,7 +308,9 @@ func TestAVersionAfterALostWholeUploadKeepsOnlyTheRightBytes(t *testing.T) {
 			testenv.Append(t, path, "b\n")
 			if c.segment {
 				sweep(t, local)
+				appendArchivePieces(t, path, 62)
 			}
+			keptContent := string(readFile(t, path))
 			testenv.Backdate(t, path, time.Hour)
 			prefix := fileStream("claude", "plans/p.md")
 			flaky := &flakyStore{Store: local, fail: []string{prefix + "commits/"}}
@@ -327,12 +329,12 @@ func TestAVersionAfterALostWholeUploadKeepsOnlyTheRightBytes(t *testing.T) {
 			}
 			kept := false
 			for _, r := range history[:len(history)-1] {
-				if string(e.GenerationContent(r.File)) == c.kept {
+				if string(e.GenerationContent(r.File)) == keptContent {
 					kept = true
 				}
 			}
 			if !kept {
-				t.Errorf("history lost acknowledged %q", c.kept)
+				t.Errorf("history lost acknowledged %q", keptContent)
 			}
 			if string(e.GenerationContent(history[len(history)-1].File)) != "X\n" {
 				t.Error("rewrite not current")
@@ -559,5 +561,37 @@ func TestAConfigFileThatCannotBeCheckedForSecretsIsNotUploaded(t *testing.T) {
 	}
 	if !e.HasStream(fileStream("claude", "settings.json")) {
 		t.Error("one unparseable file stopped the others")
+	}
+}
+
+// appendArchivePieces reaches the real 64-piece boundary using ordinary publications.
+func appendArchivePieces(t *testing.T, path string, count int) {
+	t.Helper()
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := state.Open(t.Context(), cfg.StateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	ads := adapters.All(cfg.Home)
+	sf, ok := ads["claude"].Classify(path, ads["claude"].CanonicalRoot())
+	if !ok {
+		t.Fatal("cannot classify append fixture")
+	}
+	for i := range count {
+		testenv.Append(t, path, testenv.JSONL(t, map[string]any{"type": "user", "message": fmt.Sprintf("piece %d", i)}))
+		testenv.Backdate(t, path, 2*time.Minute)
+		sy := syncer.New(cfg, store.NewLocal(cfg.LocalStore), db, ads, syncer.Options{Logger: slog.New(slog.DiscardHandler)})
+		sum, err := sy.Run(t.Context(), []adapters.SessionFile{sf})
+		if err != nil || sum.Errors != 0 || sum.Segments != 1 {
+			t.Fatalf("append fixture = %+v, %v", sum, err)
+		}
 	}
 }

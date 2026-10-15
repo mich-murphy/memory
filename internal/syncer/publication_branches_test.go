@@ -103,7 +103,7 @@ func TestPublicationBranchesRejectInvalidTypedDescriptorsBeforeAnyWrite(t *testi
 		{"fileSchema", "file", func(p *publication) { p.File.Schema = 2 }, "raw generation: invalid identity"},
 		{"pieceOffset", "file", func(p *publication) { p.File.Pieces[0].Start = 1 }, "invalid piece"},
 		{"pieceKey", "file", func(p *publication) { p.File.Pieces[0].Object = "v3/blobs/zstd/wrong.zst" }, "invalid piece"},
-		{"missingPieceDependency", "file", func(p *publication) { p.Dependencies = nil }, "dependencies do not cover pieces"},
+		{"missingPieceDependency", "file", func(p *publication) { p.Dependencies = []dependency{} }, "dependencies do not cover pieces"},
 		{"pieceDependencyHash", "file", func(p *publication) { p.Dependencies[0].RawSHA256 = raw.SHA256([]byte("other")) }, "file dependency mismatch"},
 		{"fileAgent", "file", func(p *publication) { p.File.Identity.Agent = "pi" }, "file identity mismatch"},
 		{"fileKey", "file", func(p *publication) { p.File.Identity.Key = "other" }, "file identity mismatch"},

@@ -193,6 +193,12 @@ func (s *State) commitFile(record Record, key string, g, previous *raw.Generatio
 }
 
 func (s *State) projectGeneration(key string, g, previous *raw.Generation) error {
+	// Moving a file out of a session changes both manifests, including after cache loss.
+	if previous != nil && previous.Identity.SessionKey != "" && previous.Identity.SessionKey != g.Identity.SessionKey {
+		if err := s.MarkManifestPending(adapters.SessionRef{Agent: previous.Identity.Agent, Key: previous.Identity.SessionKey}); err != nil {
+			return err
+		}
+	}
 	if previous != nil && previous.SHA256 != g.SHA256 {
 		version := Version{SHA256: previous.SHA256, Size: previous.Size, Pieces: previous.Pieces, VersionedAt: g.ObservedAt}
 		if err := s.RecordVersion(key, &version); err != nil {

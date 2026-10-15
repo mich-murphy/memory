@@ -90,7 +90,7 @@ func (g *Generation) validateIdentity(machine string) error {
 		return errors.New("raw generation: invalid parent")
 	}
 	switch g.Kind {
-	case "capture", "fold", "delete":
+	case "capture", "append", "fold", "delete":
 	default:
 		return errors.New("raw generation: invalid kind")
 	}

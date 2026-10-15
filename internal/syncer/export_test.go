@@ -11,5 +11,3 @@ func SetLimits(t *testing.T, largeFile, chunk int64, recheck time.Duration) {
 	largeFileSize, chunkSize, snapshotRecheck = largeFile, chunk, recheck
 	t.Cleanup(func() { largeFileSize, chunkSize, snapshotRecheck = oldLarge, oldChunk, oldRecheck })
 }
-
-const FoldAfter = foldAfter

@@ -5,6 +5,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -258,6 +259,10 @@ var (
 
 func segmentedSession(b *testing.B, turns []int) *segmented {
 	b.Helper()
+	turns = slices.Clone(turns)
+	turns = append(turns, maxSegments-1)
+	slices.Sort(turns)
+	turns = slices.Compact(turns)
 	segmentedOnce.Do(func() {
 		h := home(b, profile{"segmented", testenv.Profile{Sessions: 1, Largest: 12 << 20}})
 		s := &segmented{h: h, sizes: map[int]int64{}, states: map[int]string{}, at: map[int]time.Time{}, objects: map[int]map[string]memObject{}}
@@ -328,25 +333,25 @@ func BenchmarkHookTurnAfterSegments(b *testing.B) {
 	}
 }
 
-// BenchmarkFold is the sweep that folds a session's segments into one object once it has been
-// idle, which every session gets once after it ends.
+// BenchmarkFold consolidates pieces 2..64 of an unchanged append chain, retaining its base.
 func BenchmarkFold(b *testing.B) {
-	h := home(b, typical)
+	s := segmentedSession(b, []int{1, 16, maxSegments - 2, maxSegments - 1})
 	stateDir := filepath.Join(b.TempDir(), "state")
-	path := h.w.Mains[0]
+	path := s.h.w.Mains[0]
+	k := maxSegments - 1
 	var t tally
 	for b.Loop() {
 		b.StopTimer()
-		r := h.reset(b, stateDir)
-		h.w.AppendTurn(b, path, turnSize, r.now.Add(-5*time.Second))
-		if sum := benchSync(b, r, "claude", path); sum.Segments != 1 {
-			b.Fatalf("fold setup captured %d segments, want 1", sum.Segments)
+		if err := os.WriteFile(path, s.full[:s.sizes[k]], 0o600); err != nil {
+			b.Fatal(err)
 		}
-		r.bucket.takeOps()
-		r.now = r.now.Add(time.Hour)
+		copyDir(b, s.states[k], stateDir)
+		r := newRig(b, s.h.w, stateDir)
+		r.bucket.objects = maps.Clone(s.objects[k])
+		r.now = s.at[k].Add(time.Hour)
 		b.StartTimer()
 		if sum := benchSync(b, r, "claude", path); sum.Folded != 1 {
-			b.Fatalf("idle sweep folded %d files, want 1", sum.Folded)
+			b.Fatalf("boundary fold = %+v", sum)
 		}
 		t.add(r.bucket)
 	}

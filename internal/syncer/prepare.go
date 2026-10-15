@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash"
@@ -16,6 +17,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/mich-murphy/memory/internal/jsonx"
 
 	"github.com/klauspost/compress/zstd"
 
@@ -45,9 +48,16 @@ type upload struct {
 	compress    func(u *upload) error
 	publication *publication
 	previous    *raw.Generation
+	parts       []*upload
+	database    bool
+	reuse       bool
+	sent        int64
 }
 
 func (u *upload) cleanup() {
+	for _, part := range u.parts {
+		part.cleanup()
+	}
 	for _, path := range []string{u.bodyPath, u.stagedPath} {
 		if path != "" {
 			_ = os.Remove(path)
@@ -230,7 +240,7 @@ func inMemoryContent(sf adapters.SessionFile, st os.FileInfo, prev *state.Upload
 		return nil, err
 	}
 	return &content{hashed: h, mtimeNS: mtimeNS, diskSize: st.Size(), first: data, last: metadataTail(data, 0), compress: func(u *upload) error {
-		part := data[u.piece.Start:]
+		part := data[u.piece.Start:u.piece.End]
 		u.piece.SHA256 = raw.SHA256(part)
 		u.body = raw.Compress(part)
 		return nil
@@ -358,7 +368,11 @@ func headLines(path string, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }() // read-only
-	reader := bufio.NewReader(io.LimitReader(f, limit))
+	return firstLines(io.LimitReader(f, limit)), nil
+}
+
+func firstLines(src io.Reader) []byte {
+	reader := bufio.NewReader(src)
 	var out []byte
 	for range prefixLines {
 		line, err := readLine(reader, min(1<<20-len(out), int(16*chunkSize)))
@@ -367,7 +381,7 @@ func headLines(path string, limit int64) ([]byte, error) {
 			break
 		}
 	}
-	return out, nil
+	return out
 }
 
 func readLine(reader *bufio.Reader, maxSize int) ([]byte, error) {
@@ -418,7 +432,7 @@ func (s *Syncer) captureContent(ctx context.Context, sf adapters.SessionFile, st
 	if protected && !sf.Zstd && st.Size() > maxRecordSize {
 		return nil, errors.New("archive config: exceeds bounded parse limit")
 	}
-	if protected || !sf.Zstd && st.Size() <= largeFileSize {
+	if protected || sf.Role != adapters.RoleDB && !sf.Zstd && st.Size() <= largeFileSize {
 		return inMemoryContent(sf, st, prev, nil, partial)
 	}
 	staged, err := s.stageDecoded(ctx, sf)
@@ -497,12 +511,19 @@ func (s *Syncer) prepare(ctx context.Context, sf adapters.SessionFile) (*upload,
 		s.Summary.Skipped++
 		return nil, nil
 	}
+	if baseline.previous != nil && foldable(baseline.previous) && c.appended && c.size > baseline.previous.Size {
+		if err := s.foldBeforeAppend(ctx, sf, c, baseline); err != nil {
+			if c.stagedPath != "" {
+				_ = os.Remove(c.stagedPath)
+			} // failed capture is not referenced
+			return nil, err
+		}
+	}
 	return s.planCaptured(sf, c, baseline), nil
 }
 
 type fileBaseline struct {
 	key      string
-	idle     bool
 	previous *raw.Generation
 	prev     *state.Upload
 	record   *state.Record
@@ -511,7 +532,6 @@ type fileBaseline struct {
 
 func (s *Syncer) fileBaseline(ctx context.Context, sf adapters.SessionFile, st os.FileInfo) (*fileBaseline, error) {
 	key := s.rawKey(sf.Agent, sf.Key)
-	idle := s.nowSeconds()-fileMtime(st) >= foldAfter.Seconds()
 	unchanged, _, err := s.db.FileUnchanged(sf.Path, key, st.Size(), st.ModTime().UnixNano())
 	if err != nil {
 		return nil, err
@@ -520,7 +540,8 @@ func (s *Syncer) fileBaseline(ctx context.Context, sf adapters.SessionFile, st o
 	if err != nil {
 		return nil, err
 	}
-	if s.warm && unchanged && p != nil && p.File.DeletedAt == 0 && (!idle || len(p.File.Pieces) <= 1) {
+	classificationSame := p != nil && sameClassification(sf, p.File) && currentMetadata(p.File)
+	if s.warm && unchanged && p != nil && p.File.DeletedAt == 0 && !foldable(p.File) && classificationSame {
 		s.Summary.Unchanged++
 		return &fileBaseline{skip: true}, nil
 	}
@@ -540,21 +561,24 @@ func (s *Syncer) fileBaseline(ctx context.Context, sf adapters.SessionFile, st o
 		previous = p.File
 		prev = &state.Upload{SHA256: previous.SHA256, Size: previous.Size}
 	}
-	if unchanged && previous != nil && previous.DeletedAt == 0 && (!idle || len(previous.Pieces) <= 1) {
+	classificationSame = previous != nil && sameClassification(sf, previous) && currentMetadata(previous)
+	if unchanged && previous != nil && previous.DeletedAt == 0 && !foldable(previous) && classificationSame {
 		s.Summary.Unchanged++
 		return &fileBaseline{skip: true}, nil
 	}
 
-	return &fileBaseline{key: key, idle: idle, previous: previous, prev: prev, record: r}, nil
+	return &fileBaseline{key: key, previous: previous, prev: prev, record: r}, nil
 }
 
 func (s *Syncer) planCaptured(sf adapters.SessionFile, c *content, baseline *fileBaseline) *upload {
-	key, previous, prev, idle, r := baseline.key, baseline.previous, baseline.prev, baseline.idle, baseline.record
+	key, previous, prev, r := baseline.key, baseline.previous, baseline.prev, baseline.record
 	u := &upload{outcome: uploadOutcome{Status: captureUnchanged}, key: key, previous: previous, resume: c.resume, tail: c.tail, compress: c.compress, stagedPath: c.stagedPath, file: state.File{SessionFile: sf, Size: c.size, DiskSize: c.diskSize, MtimeNS: c.mtimeNS, SHA256: c.sha, LineCount: c.lines, PrefixSHA256: prefixSHA(c.first)}}
 	if transcriptRoles[sf.Role] {
 		u.file.Head = s.sessionHead(sf, c, previous)
 	}
-	if previous != nil && previous.SHA256 == c.sha && previous.DeletedAt == 0 && (!idle || len(previous.Pieces) <= 1) {
+	same := previous != nil && previous.SHA256 == c.sha && previous.DeletedAt == 0
+	metadataSame := previous != nil && sameClassification(sf, previous) && equalHeads(previous.Head, u.file.Head)
+	if same && metadataSame && !foldable(previous) {
 		return u
 	}
 	u.outcome.Status = captureStaged
@@ -563,14 +587,22 @@ func (s *Syncer) planCaptured(sf adapters.SessionFile, c *content, baseline *fil
 	start := int64(0)
 	if previous != nil {
 		u.replaced = previous.Pieces
-		if previous.SHA256 == c.sha {
+		switch {
+		case same && !metadataSame:
+			pieces = slices.Clone(previous.Pieces)
+			u.reuse = true
+		case same && foldable(previous):
 			kind = "fold"
-		} else if c.appended && prev.Size > 0 && !idle && len(previous.Pieces) < maxSegments && c.size > prev.Size {
+			pieces = slices.Clone(previous.Pieces[:1])
+			start = pieces[0].End
+		case sf.Role != adapters.RoleDB && previous.DeletedAt == 0 && c.appended && prev.Size > 0 && c.size > prev.Size && (!strings.HasSuffix(sf.Key, ".jsonl") || c.prefixNewline):
+			kind = "append"
 			start = prev.Size
 			pieces = slices.Clone(previous.Pieces)
 		}
 	}
 	u.piece = raw.Piece{Start: start, End: c.size}
+	u.database = sf.Role == adapters.RoleDB
 	g := &raw.Generation{Schema: 3, Identity: raw.Identity{Agent: sf.Agent, MachineID: s.cfg.MachineID, Key: sf.Key, SessionKey: sf.SessionKey, Root: sf.Root}, Sequence: 1, Kind: kind, Sources: []raw.Source{{Path: sf.Path, SourcePath: sf.SourcePath, Encoding: "plain"}}, Role: string(sf.Role), Size: c.size, SHA256: c.sha, LineCount: c.lines, PrefixSHA256: u.file.PrefixSHA256, Head: u.file.Head, Pieces: pieces, ObservedAt: s.nowSeconds()}
 	if sf.Zstd {
 		g.Sources[0].Encoding = "zstd"
@@ -590,25 +622,25 @@ func pieceDependency(piece raw.Piece) dependency {
 	return dependency{Object: piece.Object, SHA256: piece.EncodedSHA256, Size: piece.EncodedSize, Encoding: "zstd", RawSHA256: piece.SHA256, RawSize: piece.End - piece.Start}
 }
 
+// foldable requires append lineage, not an arbitrary piece count (notably databases).
+func foldable(g *raw.Generation) bool {
+	return g.Role != string(adapters.RoleDB) && g.Kind == "append" && len(g.Pieces) >= maxSegments
+}
+
+func sameClassification(sf adapters.SessionFile, g *raw.Generation) bool {
+	return string(sf.Role) == g.Role && sf.SessionKey == g.Identity.SessionKey && sf.Root == g.Identity.Root
+}
+
 func (s *Syncer) upload(ctx context.Context, u *upload) error {
-	if err := u.compress(u); err != nil {
+	if err := s.preparePieces(ctx, u); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return errVanished
 		}
 		return err
 	}
-	if err := sealPiece(u); err != nil {
-		return err
-	}
 	p := u.publication
-	p.File.Pieces = append(p.File.Pieces, u.piece)
-	for _, piece := range p.File.Pieces {
-		p.Dependencies = append(p.Dependencies, pieceDependency(piece))
-	}
-	for _, piece := range p.File.Pieces[:len(p.File.Pieces)-1] {
-		if err := verifyDependencyMetadata(ctx, s.bucket, pieceDependency(piece)); err != nil {
-			return err
-		}
+	if err := validateFileTransition(p, u.previous); err != nil {
+		return err
 	}
 	if err := p.validate(s.cfg.MachineID); err != nil {
 		return err
@@ -621,7 +653,25 @@ func (s *Syncer) upload(ctx context.Context, u *upload) error {
 		return err
 	}
 	u.outcome = uploadOutcome{Status: captureUnknown, GenerationID: id}
+	for _, part := range u.parts {
+		if err := s.putPiece(ctx, part); err != nil {
+			return err
+		}
+		u.sent += part.bodySize()
+	}
+	if err := s.verifyWriter(ctx); err != nil {
+		return err
+	}
+	if err := s.putRecord(ctx, s.publicationKey(p, true, id), body); err != nil {
+		return err
+	}
+	u.outcome.Status = captureCommitted
+	return nil
+}
+
+func (s *Syncer) putPiece(ctx context.Context, u *upload) error {
 	meta := map[string]string{"sha256": u.piece.SHA256, "encoded_sha256": u.piece.EncodedSHA256}
+	var err error
 	if u.bodyPath != "" {
 		err = s.bucket.PutFile(ctx, u.piece.Object, u.bodyPath, meta)
 	} else {
@@ -632,13 +682,6 @@ func (s *Syncer) upload(ctx context.Context, u *upload) error {
 			return errors.Join(err, verify)
 		}
 	}
-	if err := s.verifyWriter(ctx); err != nil {
-		return err
-	}
-	if err := s.putRecord(ctx, s.publicationKey(p, true, id), body); err != nil {
-		return err
-	}
-	u.outcome.Status = captureCommitted
 	return nil
 }
 
@@ -658,8 +701,8 @@ func (s *Syncer) finish(u *upload) error {
 		return err
 	}
 	s.Summary.Uploaded++
-	s.Summary.BytesUploaded += u.bodySize()
-	if u.piece.Start > 0 {
+	s.Summary.BytesUploaded += u.sent
+	if p.File.Kind == "append" {
 		s.Summary.Segments++
 	}
 	if p.File.Kind == "fold" {
@@ -670,6 +713,11 @@ func (s *Syncer) finish(u *upload) error {
 	}
 	if u.file.Role == adapters.RoleUnknown {
 		s.Summary.Unknown++
+	}
+	if u.previous != nil && u.previous.Identity.SessionKey != "" && u.previous.Identity.SessionKey != u.file.SessionKey {
+		ref := adapters.SessionRef{Agent: u.file.Agent, Key: u.previous.Identity.SessionKey}
+		s.touched[ref] = true
+		s.noteSessionRoot(ref, u.previous.Identity.Root)
 	}
 	if u.file.SessionKey != "" {
 		s.touched[u.file.Session()] = true
@@ -684,6 +732,13 @@ func (s *Syncer) capturedCompressor(path, wholeSHA, tailSHA string) func(*upload
 		u.expectedSHA = wholeSHA
 		if u.piece.Start > 0 {
 			u.expectedSHA = tailSHA
+			if u.previous != nil && u.publication.File.Kind == "fold" {
+				var err error
+				u.expectedSHA, err = hashRange(path, u.piece.Start, n)
+				if err != nil {
+					return err
+				}
+			}
 		}
 		digest := sha256.New()
 		if n > largeFileSize {
@@ -746,5 +801,59 @@ func sealPiece(u *upload) error {
 	}
 	u.piece.EncodedSize = u.bodySize()
 	u.piece.Object = raw.EncodedKey(u.piece.EncodedSHA256)
+	return nil
+}
+
+func equalHeads(a, b map[string]any) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	left, err := jsonx.SortedCompact(a)
+	if err != nil {
+		return false
+	}
+	right, err := jsonx.SortedCompact(b)
+	return err == nil && bytes.Equal(left, right)
+}
+
+// currentMetadata is a policy-version check, not another session parser. The metadata
+// helper owns bounded head/tail parsing and writes this marker on meaningful updates.
+func currentMetadata(g *raw.Generation) bool {
+	return !transcriptRoles[adapters.Role(g.Role)] || g.Head["metadata_version"] == json.Number("1")
+}
+
+// foldBeforeAppend bounds continuously growing chains too. The fold describes exactly
+// the already acknowledged parent's bytes; the subsequent append is a separate durable
+// child. Both use the captured source snapshot, but no growing bytes enter the fold.
+func (s *Syncer) foldBeforeAppend(ctx context.Context, sf adapters.SessionFile, c *content, baseline *fileBaseline) error {
+	previous := baseline.previous
+	g := *previous
+	g.Sequence++
+	g.Parent = baseline.record.ID
+	g.Kind = "fold"
+	g.Pieces = slices.Clone(previous.Pieces[:1])
+	g.ObservedAt = s.nowSeconds()
+	sf.Role = adapters.Role(previous.Role)
+	sf.SessionKey = previous.Identity.SessionKey
+	sf.Root = previous.Identity.Root
+	u := &upload{
+		key: baseline.key, previous: previous, compress: c.compress,
+		outcome:     uploadOutcome{Status: captureStaged},
+		piece:       raw.Piece{Start: g.Pieces[0].End, End: g.Size},
+		file:        state.File{SessionFile: sf, Size: g.Size, DiskSize: -1, MtimeNS: -1, SHA256: g.SHA256, LineCount: g.LineCount, PrefixSHA256: g.PrefixSHA256, Head: g.Head},
+		publication: &publication{Schema: 3, MachineID: s.cfg.MachineID, Kind: "file", Agent: sf.Agent, Key: sf.Key, Sequence: g.Sequence, Parent: g.Parent, File: &g},
+	}
+	defer u.cleanup()
+	if err := s.upload(ctx, u); err != nil {
+		return err
+	}
+	if err := s.finish(u); err != nil {
+		return err
+	}
+	p, r, err := s.current("file", sf.Agent, sf.Key)
+	if err != nil {
+		return err
+	}
+	baseline.previous, baseline.record = p.File, r
 	return nil
 }

@@ -16,11 +16,12 @@ import (
 )
 
 type hashed struct {
-	sha      string
-	size     int64
-	lines    int64
-	appended bool
-	resume   *state.Resume
+	sha           string
+	size          int64
+	lines         int64
+	appended      bool
+	prefixNewline bool
+	resume        *state.Resume
 	// tail is the xxhash of the bytes after the last upload, which a segment holds.
 	tail uint64
 }
@@ -88,17 +89,27 @@ func hashContent(src io.ReaderAt, size int64, prev *state.Upload, _ *state.Resum
 
 	d := newDigest(buf)
 	appended := false
+	prefixNewline := false
 	if old >= 0 {
 		if err := d.read(src, old, true); err != nil {
 			return hashed{}, err
 		}
 		appended = d.n == old && hex.EncodeToString(d.sha.Sum(nil)) == prev.SHA256
+		if old > 0 {
+			var last [1]byte
+			if _, err := src.ReadAt(last[:], old-1); err != nil {
+				return hashed{}, err
+			}
+			prefixNewline = last[0] == '\n'
+		}
 		d.tail = xxhash.New()
 	}
 	if err := d.read(src, size, true); err != nil {
 		return hashed{}, err
 	}
-	return d.result(appended), nil
+	h := d.result(appended)
+	h.prefixNewline = prefixNewline
+	return h, nil
 }
 
 // Compression checks the cryptographic digest of the bytes prepared for this piece.

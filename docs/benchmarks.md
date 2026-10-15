@@ -20,7 +20,7 @@ The benchmarks run the collector the way it runs on a machine, against a generat
 | `BenchmarkHookTurnAfterSegments` | The same sync on a 12 MiB session that has gathered 1, 16 or 62 segments since its last fold (it folds at 64). |
 | `BenchmarkSweepIdle` | A sweep at session start or end when nothing has changed. |
 | `BenchmarkSweepAfterTurns` | A sweep after three sessions, one per agent, each took a turn. |
-| `BenchmarkFold` | The sweep that folds an idle session's segments into one object, once per session. |
+| `BenchmarkFold` | An unchanged 64-piece append chain: retain the first base and consolidate pieces 2..64. |
 | `BenchmarkBackfill` | The first sync on a machine. |
 | `BenchmarkR2Put` | The R2 client alone (hashing, signing, sending) against a local server that discards the body. |
 
@@ -72,3 +72,12 @@ Apparent large/huge backfill improvements are not claimed because the before sam
 ## The golden test
 
 `TestBucketMatchesGolden` (`internal/syncer/golden_test.go`) runs a small home through a backfill, idle and busy sweeps, a hook sync, a launch record, a rewrite and a fold, and compares every request and the final bucket with `internal/syncer/testdata/golden.txt`: keys, metadata, sizes, the SHA-256 of each object and of the bytes inside each zstd object, and the full text of manifests and snapshot sets. A change that alters what reaches the bucket fails it. When the change is meant to, regenerate the file with `go test ./internal/syncer -run Golden -update` and explain the diff in the pull request; a change to keys, fields or formats also needs `docs/storage-layout.md` updated.
+
+## Pieces/delta fixture change
+
+`BenchmarkFold` now starts with 64 real pieces (base plus 63 appends), not an idle
+two-piece file. Its timed operation retains the base and consolidates the tail. Old
+idle-fold timings are not an equivalent-work baseline. The segmented fixture also saves
+63 turns for this benchmark; the existing hook-turn cases remain 1, 16 and 62 turns.
+No performance comparison was run in the implementation worktree; the parent owns the
+serial before/after comparison. Unchanged chains below 64 pieces never fold on age alone.

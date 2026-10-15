@@ -157,7 +157,7 @@ func (s *sim) pause() time.Duration {
 	case 0:
 		return time.Duration(1+s.rng.IntN(50)) * time.Second // inside the partial-line window
 	case 1:
-		return foldAfter + time.Duration(s.rng.IntN(3600))*time.Second
+		return inSessionWindow + time.Duration(s.rng.IntN(3600))*time.Second
 	default:
 		return time.Duration(1+s.rng.IntN(600)) * time.Second
 	}

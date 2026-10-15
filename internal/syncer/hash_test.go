@@ -55,6 +55,7 @@ func TestHashContentMatchesAFullReadWithOrWithoutAResume(t *testing.T) {
 			}
 			if len(c.data) >= len(before) {
 				want.tail = xxhash.Sum64String(c.data[len(before):])
+				want.prefixNewline = c.data[len(before)-1] == '\n'
 			}
 			if diff := cmp.Diff(want, got, cmp.AllowUnexported(hashed{}), cmp.FilterPath(func(p cmp.Path) bool {
 				return p.Last().String() == ".resume"

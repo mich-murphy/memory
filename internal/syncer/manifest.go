@@ -518,7 +518,7 @@ func (s *Syncer) publish(ctx context.Context, p *publication, bodies map[string]
 	if err := s.putRecord(ctx, s.publicationKey(p, false, id), body); err != nil {
 		return state.Record{}, err
 	}
-	for _, dependency := range p.Dependencies {
+	for _, dependency := range p.dependencies() {
 		if err := s.ensureDependency(ctx, dependency, bodies); err != nil {
 			return state.Record{}, err
 		}

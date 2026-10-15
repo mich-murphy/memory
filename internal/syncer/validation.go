@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/jsonx"
 	"github.com/mich-murphy/memory/internal/raw"
 	"github.com/mich-murphy/memory/internal/state"
@@ -253,6 +254,35 @@ func (s *Syncer) verifyLaunchReference(ctx context.Context, parent *publication,
 	}
 	if !found {
 		return errors.New("archive: launch has no committed dependency")
+	}
+	return nil
+}
+
+// validateFileTransition checks the part of append/fold proofs available without reading
+// bodies. Appends inherit the parent's exact immutable prefix representation. Restore
+// additionally verifies every decoded byte and the declared whole-file digest.
+func validateFileTransition(p *publication, previous *raw.Generation) error {
+	g := p.File
+	if g == nil || g.Kind != "append" && g.Kind != "fold" {
+		return nil
+	}
+	if previous == nil || previous.DeletedAt != 0 || g.Parent == "" || g.Sequence != previous.Sequence+1 {
+		return errors.New("archive: append or fold has no live parent")
+	}
+	switch g.Kind {
+	case "append":
+		if g.Role == string(adapters.RoleDB) || g.Size <= previous.Size || g.SHA256 == previous.SHA256 || len(g.Pieces) != len(previous.Pieces)+1 || !slices.Equal(g.Pieces[:len(previous.Pieces)], previous.Pieces) {
+			return errors.New("archive: append does not extend parent pieces")
+		}
+	case "fold":
+		if g.Size != previous.Size || g.SHA256 != previous.SHA256 {
+			return errors.New("archive: fold changes parent content")
+		}
+		// Existing v3 explicitly serialized file dependencies and folded the entire file.
+		// Keep those historical records readable; the new format retains the first base.
+		if p.Dependencies == nil && (!foldable(previous) || len(g.Pieces) != 2 || g.Pieces[0] != previous.Pieces[0]) {
+			return errors.New("archive: fold does not retain append base")
+		}
 	}
 	return nil
 }
