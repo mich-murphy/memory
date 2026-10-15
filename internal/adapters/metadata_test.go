@@ -148,8 +148,8 @@ func TestCodexHeadRejectsReplayedParentMetadata(t *testing.T) {
 			}
 		})
 	}
-	missing := SessionHead(c, sf, []map[string]any{parent}, nil)
-	for _, key := range []string{"session_id", "cwd", "started_at", "lineage"} {
+	missing := SessionHead(c, sf, []map[string]any{parent}, []map[string]any{parent})
+	for _, key := range []string{"session_id", "cwd", "started_at", "lineage", "last_event_at", "model"} {
 		if _, ok := missing[key]; ok {
 			t.Errorf("missing own header claims %s = %v", key, missing[key])
 		}
@@ -159,6 +159,39 @@ func TestCodexHeadRejectsReplayedParentMetadata(t *testing.T) {
 	want := map[string]any{"relation": "child_thread", "parent_session_id": "thread-parent"}
 	if diff := cmp.Diff(want, got["lineage"]); diff != "" {
 		t.Error(diff)
+	}
+}
+
+func TestCodexHeadIgnoresReplayedParentTailHeaders(t *testing.T) {
+	c := NewCodex(t.TempDir())
+	path := filepath.Join(c.CanonicalRoot(), "sessions", "rollout-2026-10-11T12-00-00-"+childID+".jsonl")
+	sf, ok := c.Classify(path, c.CanonicalRoot())
+	if !ok {
+		t.Fatal("Classify rejected rollout")
+	}
+	head := ReadHead([]byte(`{"type":"session_meta","timestamp":"2026-10-11T14:00:00.123456789+02:00","payload":{"id":"`+childID+`","forked_from_id":"parent"}}
+{"type":"turn_context","timestamp":"2026-10-11T12:00:01.123456789Z","payload":{"model":"own-model"}}`), 2)
+	parent := `{"type":"session_meta","timestamp":"2020-01-01T00:00:00Z","payload":{"id":"parent","forked_from_id":"ancestor","model":"parent-model"}}` + "\n"
+	latest := `{"type":"turn_context","timestamp":9007199254740993.123456789,"payload":{"model":"latest-model"}}` + "\n"
+	for _, tc := range []struct {
+		name, tail, model string
+		last              any
+	}{
+		{"parentOnly", parent, "own-model", "2026-10-11T12:00:01.123456789Z"},
+		{"ownAfterParent", parent + latest, "latest-model", json.Number("9007199254740993.123456789")},
+		{"parentAfterOwn", latest + parent, "latest-model", json.Number("9007199254740993.123456789")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := SessionHead(c, sf, head, ReadHead([]byte(tc.tail), 2))
+			want := map[string]any{
+				"session_id": childID, "forked_from": "parent",
+				"lineage":    map[string]any{"relation": "fork", "parent_session_id": "parent"},
+				"started_at": "2026-10-11T12:00:00.123456789Z", "last_event_at": tc.last, "model": tc.model,
+			}
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Errorf("SessionHead (-want +got):\n%s", diff)
+			}
+		})
 	}
 }
 

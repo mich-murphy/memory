@@ -10,10 +10,11 @@ import (
 // SessionHead enriches bounded observations of captured bytes. Tail is a set of complete
 // lines only; it must not contain the fragment crossing the bounded window's start.
 func SessionHead(a Adapter, sf SessionFile, head, tail []map[string]any) map[string]any {
-	info := a.SessionInfo(head)
 	if sf.Agent == "codex" {
-		info = codexHead(a, sf, head, tail)
+		// codexHead observes both windows after filtering replayed parent headers.
+		return codexHead(a, sf, head, tail)
 	}
+	info := a.SessionInfo(head)
 	observeEvents(sf.Agent, info, tail)
 	if sf.Agent == "pi" && sf.Role == RoleSubagent {
 		piChildLineage(info, sf.Key)
