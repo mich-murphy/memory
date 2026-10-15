@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -287,7 +288,13 @@ func (r *acceptanceRun) absentLiterals(literals ...string) {
 
 func (r *acceptanceRun) unchanged(before map[string]string) {
 	r.t.Helper()
-	if diff := cmp.Diff(before, r.inventory()); diff != "" {
+	after := r.inventory()
+	// Each successful lifecycle rotates this disposable hint, even without new data.
+	// Everything else, including store identity, descriptors and blobs, must be identical.
+	before = maps.Clone(before)
+	delete(before, "v3/machines/acceptance/checkpoint.json")
+	delete(after, "v3/machines/acceptance/checkpoint.json")
+	if diff := cmp.Diff(before, after); diff != "" {
 		r.t.Errorf("idle sync mutated archive (-want +got):\n%s", diff)
 	}
 }

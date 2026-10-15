@@ -99,6 +99,12 @@ func TestAcceptanceAppendFoldRetainsFirstBase(t *testing.T) {
 		}
 		if len(pieces) < previousCount {
 			folded = true
+			history := r.records("file", "pi", key)
+			fold := history[len(history)-2]
+			if previousCount != 64 || fold.File.Kind != "fold" || !bytes.Equal(r.content(fold), want[len(want)-1]) {
+				t.Fatal("consolidation must retain a separate byte-identical generation of the acknowledged parent")
+			}
+			want = append(want, bytes.Clone(want[len(want)-1]))
 			if len(pieces) > 3 { // retained base + consolidated tail, optionally this append
 				t.Errorf("folded pieces = %d, want retained base and consolidated tail", len(pieces))
 			}
