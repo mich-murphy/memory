@@ -480,13 +480,14 @@ func (s *Syncer) prepare(ctx context.Context, sf adapters.SessionFile) (*upload,
 	// Recheck the guard before warm-stat/unchanged shortcuts. A previous unsafe capture
 	// is not evidence that today's policy permits the same source bytes.
 	if !transcriptRoles[sf.Role] && !sf.Zstd && st.Size() <= scrub.MaxTextSize {
-		if _, err := readFile(sf); err != nil {
-			if errors.Is(err, scrub.ErrLiteralSecret) {
-				s.skipReason("literal_secret_assignment")
-				return nil, nil
-			}
-			return nil, err
-		}
+		_, err = readFile(sf)
+	}
+	switch {
+	case errors.Is(err, scrub.ErrLiteralSecret):
+		s.skipReason("literal_secret_assignment")
+		return nil, nil
+	case err != nil:
+		return nil, err
 	}
 	baseline, err := s.fileBaseline(ctx, sf, st)
 	if err != nil {
@@ -511,13 +512,8 @@ func (s *Syncer) prepare(ctx context.Context, sf adapters.SessionFile) (*upload,
 		s.Summary.Skipped++
 		return nil, nil
 	}
-	if baseline.previous != nil && foldable(baseline.previous) && c.appended && c.size > baseline.previous.Size {
-		if err := s.foldBeforeAppend(ctx, sf, c, baseline); err != nil {
-			if c.stagedPath != "" {
-				_ = os.Remove(c.stagedPath)
-			} // failed capture is not referenced
-			return nil, err
-		}
+	if err := s.foldBeforeAppend(ctx, sf, c, baseline); err != nil {
+		return nil, err
 	}
 	return s.planCaptured(sf, c, baseline), nil
 }
@@ -812,8 +808,18 @@ func currentMetadata(g *raw.Generation) bool {
 // foldBeforeAppend bounds continuously growing chains too. The fold describes exactly
 // the already acknowledged parent's bytes; the subsequent append is a separate durable
 // child. Both use the captured source snapshot, but no growing bytes enter the fold.
-func (s *Syncer) foldBeforeAppend(ctx context.Context, sf adapters.SessionFile, c *content, baseline *fileBaseline) error {
+func (s *Syncer) foldBeforeAppend(ctx context.Context, sf adapters.SessionFile, c *content, baseline *fileBaseline) (err error) {
 	previous := baseline.previous
+	if previous == nil || !foldable(previous) || !c.appended || c.size <= previous.Size {
+		return nil
+	}
+	// The captured stream is shared with the following append only on success.
+	// On failure no descriptor references the newly captured bytes.
+	defer func() {
+		if err != nil && c.stagedPath != "" {
+			_ = os.Remove(c.stagedPath) // disposable failed capture; acknowledged blobs are elsewhere
+		}
+	}()
 	g := *previous
 	g.Sequence++
 	g.Parent = baseline.record.ID
