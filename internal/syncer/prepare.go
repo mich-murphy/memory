@@ -417,9 +417,12 @@ func (s *Syncer) compressToTemp(path string, start, length int64, h hash.Hash) (
 	}
 	err = errors.Join(err, out.Close())
 	if err != nil {
-		_ = os.Remove(out.Name())
+		if removeErr := os.Remove(out.Name()); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			// Preserve ownership when cleanup fails so the caller can retry removal.
+			return out.Name(), errors.Join(err, removeErr)
+		}
 		return "", err
-	} // failed staging cleanup
+	}
 	return out.Name(), nil
 }
 
