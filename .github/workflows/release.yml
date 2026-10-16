@@ -42,3 +42,5 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A commit can carry several tags (an rc and its release); name the one that triggered this.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
