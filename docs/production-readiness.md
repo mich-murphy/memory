@@ -26,20 +26,78 @@ below describe earlier checkpoints, not the current deployment state.
   objects and zero multipart uploads**. No remote exclusions were present.
 - Both machines' SQLite databases passed integrity checks. Their old state directories
   and stale `3a59dd8-dirty` binaries were quarantined under private
-  `~/.local/share/agent-sessions/archive-backups/cleanup-v0.3.0-*` directories; fresh
-  active state directories are empty. Identities, configs and original agent sources
-  were not changed. No persistent state exclusions were present.
+  `~/.local/share/agent-sessions/archive-backups/cleanup-v0.3.0-*` directories. Fresh
+  active state directories were empty before the production backfills below.
+  Identities, credential configs and original agent sources were not changed by
+  cleanup. No persistent state exclusions were present.
 - The complete historical archive remains at
   `~/.local/share/agent-sessions/archive-backups/before-v0.2.0` on the Mac. Preserve it:
   old generations may no longer exist in agent source directories. Cleanup inventories,
   verification results and private operation logs are also retained under that backup
   parent, outside temporary storage.
-- The Mac Nix configuration was pinned to `v0.3.0` and built without switching.
-  `machines` has an approved dev-01-only package exception; both host configurations
-  evaluate and dev-02 does not install the collector. Shared-flake operations may still
-  need private-repository access. No system activation, real hook rollout or fresh
-  production backfill has been performed. Private-repository fetch access on bc-01
-  remains a prerequisite to its Nix deployment.
+- The operator subsequently chose the verified release installer instead of Nix on
+  both machines. The collector Nix dependency was removed from `machines`; both host
+  configurations evaluate without private-repository access. The explicit post-login
+  `HOST=dev-01 just install-agent-sessions` wrapper verifies the pinned installer asset
+  before execution, installs only the binary, and refuses dev-02.
+
+### Executed production deployment and cold R2 audit
+
+The operator then authorised deployment and populated-backfill verification on the Mac
+and dev-01 only. No dev-02 connection or deployment was performed.
+
+- Both normal login shells resolve `~/.local/bin/agent-sessions`, version **0.3.0**.
+  Both installed binary SHA-256 digests match the immutable release assets. The
+  release installer itself was verified before execution. dev-01 used a credential
+  passed through encrypted stdin into the installation process environment only;
+  its existing `michaelmbc` GitHub login was not changed or supplemented on disk.
+- Immediately before capture, independent R2 listings again verified **zero objects
+  and zero multipart uploads**, and both active state directories were empty. The
+  original machine identities and R2 configs were retained.
+- Managed Claude hooks (**8/8**), Codex hooks (**6/6**) and the Pi extension were
+  installed on both machines. Claude retention was preserved/raised to 3650 days.
+  Doctor's R2 write/read/delete probes passed; its only remaining failures are Codex
+  trust (**0/6** on each machine). The operator must review `/hooks` in Codex on both
+  machines; no trust hashes were manufactured. Existing Pi processes need `/reload`.
+- The Mac's initial backfill completed in **2472.15 s**: **5,404 files / 998 manifests,
+  zero errors**. dev-01's real Pi startup sweep populated its archive first; the
+  initial explicit backfill hit lock contention, then a successful retry uploaded
+  **2 files, 3,087 unchanged, one manifest, zero errors**. Both subsequent manual
+  sweeps passed with zero errors; both local SQLite integrity checks passed and
+  neither state had pending manifests at verification.
+- Real Pi hooks produced automatic start/shutdown captures on the Mac, and
+  start/settled/shutdown captures plus sweeps on dev-01. A fresh local Pi prompt hit a
+  provider usage limit, so this is lifecycle/capture evidence, not successful
+  real-provider response evidence. Its launch and persisted session were captured.
+- Capture-policy skips were retained: literal secret assignments, symlink directories
+  and unresolved symlinks were not bypassed to inflate completeness counts.
+
+At **2026-10-16 06:18:20 UTC**, a fresh private mirror matched a stable full-bucket
+inventory across acquisition: **28,442 objects / 1,475,823,435 encoded bytes**. Every
+single-part ETag matched local bytes; there were no multipart uploads, legacy roots,
+unknown roots or unexpected machine IDs. The strict independent decoder passed all
+committed descriptor chains, plan/commit pairs, dependencies, piece hashes and
+whole-file reconstructions. Its per-agent current stream/session counts were:
+
+| Machine | Agent | File streams | Session manifests |
+| --- | --- | ---: | ---: |
+| Mac | Claude | 3,643 | 424 |
+| Mac | Codex | 132 | 18 |
+| Mac | Pi | 1,636 | 558 |
+| dev-01 | Claude | 1,483 | 78 |
+| dev-01 | Codex | 228 | 114 |
+| dev-01 | Pi | 1,390 | 66 |
+
+All child-file streams had their own-session manifest membership. Known credential-file
+and migration-backup path counters were zero (not a comprehensive transcript secret
+scan). One stable original transcript per agent per machine matched its cold R2
+reconstruction. All **12 archived Codex database copies** (seven Mac, five dev-01)
+passed SQLite integrity checks. The archive continues to grow after this snapshot.
+
+Private commands, logs, inventories, mirror, source comparisons, database checks and
+audit reports are retained on the Mac under
+`~/.local/share/agent-sessions/rollouts/v0.3.0-20261016T052823Z/`. These contain private
+session data; do not publish them. A fresh local `make check` also passed during rollout.
 
 ## Rollout gates
 
