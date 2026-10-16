@@ -7,6 +7,40 @@ snapshot dependency checks. Rotating the exposed provider keys does not replace 
 capture policy. Raw transcripts remain byte-exact: analytical de-duplication belongs in a
 rebuildable normalisation stage, not destructive filtering in the collector.
 
+## Current rollout status (2026-10-16)
+
+The operator approved local checks in place of unavailable hosted CI, publication of
+`v0.3.0`, and cleanup of the experimental archive/state. The dated evidence sections
+below describe earlier checkpoints, not the current deployment state.
+
+- `v0.3.0` points to `9ff2b42` and is published as the latest immutable release.
+  All ten uploaded asset digests matched the clean local build; GitHub release
+  attestation verification passed. This attests published content, not build provenance.
+- The tagged source passed local `make check` and all nine fuzz targets. The subsequent
+  workflow-only tag-selection fix (`032c787`) also passed a fresh `make check`.
+- Both machine configurations target the same bucket. With neither collector running
+  and no collector hooks installed, its full inventory matched the preserved offline
+  backup: **26,624 objects / 1,350,478,068 bytes**. Every backup SHA-256 and single-part
+  ETag matched; the independent v3 audit again passed before deletion.
+- Cleanup deleted only those exact inventoried keys. The bucket then contained **zero
+  objects and zero multipart uploads**. No remote exclusions were present.
+- Both machines' SQLite databases passed integrity checks. Their old state directories
+  and stale `3a59dd8-dirty` binaries were quarantined under private
+  `~/.local/share/agent-sessions/archive-backups/cleanup-v0.3.0-*` directories; fresh
+  active state directories are empty. Identities, configs and original agent sources
+  were not changed. No persistent state exclusions were present.
+- The complete historical archive remains at
+  `~/.local/share/agent-sessions/archive-backups/before-v0.2.0` on the Mac. Preserve it:
+  old generations may no longer exist in agent source directories. Cleanup inventories,
+  verification results and private operation logs are also retained under that backup
+  parent, outside temporary storage.
+- The Mac Nix configuration was pinned to `v0.3.0` and built without switching.
+  `machines` has an approved dev-01-only package exception; both host configurations
+  evaluate and dev-02 does not install the collector. Shared-flake operations may still
+  need private-repository access. No system activation, real hook rollout or fresh
+  production backfill has been performed. Private-repository fetch access on bc-01
+  remains a prerequisite to its Nix deployment.
+
 ## Rollout gates
 
 Do not reset an archive or install a candidate until the integrated candidate has passed:
@@ -92,7 +126,8 @@ workflow can publish. Do not retag the already
 pushed `v0.2.0`; use a new version for a successful follow-up candidate. Fresh final-source
 full benchmarks/native/R2 evidence still needs recording after the follow-up is frozen.
 
-Production remains unchanged: **no installation, hook rollout, reset or fresh backfill**.
+At this checkpoint production remained unchanged: **no installation, hook rollout,
+reset or fresh backfill**. The current status above supersedes this historical snapshot.
 A private durable offline backup now preserves all **26,624 old objects / 1,350,478,068
 encoded bytes**, including the 392 legacy objects. All 26,623 single-part ETags matched;
 the strict v3 audit again verified all 8,296 file and 1,257 manifest generations. This copy
@@ -151,6 +186,7 @@ Normal installed Git package layouts were observed on both machines (one reposit
 no split indexes or linked worktrees, no observation failures). Split-index, SHA-256 and
 attached linked-worktree compatibility are not established by this run.
 
-Release, real installation, archive reset and backfill have **not yet occurred**. These gate
+At this earlier checkpoint release, real installation, archive reset and backfill had
+**not yet occurred**; see the current status above for subsequent operations. These gate
 results are not a claim of real Codex hook approval, real-provider acceptance or every hook
-lifecycle edge. Deployment results will be added after execution.
+lifecycle edge.
