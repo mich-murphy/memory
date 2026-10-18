@@ -26,6 +26,10 @@ import (
 
 const maxRecordSize = 16 << 20
 
+// manifestSchema 4 references file streams. Schema 3 copied every generation into each
+// manifest under the retired records/manifest/ prefix, which the collector no longer reads.
+const manifestSchema = 4
+
 type dependency struct {
 	Object    string `json:"object"`
 	SHA256    string `json:"sha256"`
@@ -35,19 +39,12 @@ type dependency struct {
 	RawSize   int64  `json:"raw_size,omitempty"`
 }
 
+// transcript names a file stream; readers follow History to its current generation, so an
+// append to the file leaves the manifest unchanged.
 type transcript struct {
-	Key          string          `json:"key"`
-	Role         adapters.Role   `json:"role"`
-	Size         int64           `json:"size"`
-	SHA256       string          `json:"sha256"`
-	LineCount    int64           `json:"line_count"`
-	PrefixSHA256 string          `json:"prefix_sha256,omitempty"`
-	Head         map[string]any  `json:"head,omitempty"`
-	Object       string          `json:"object"`
-	Pieces       []raw.Piece     `json:"pieces"`
-	Versions     []state.Version `json:"versions"`
-	Commit       string          `json:"commit"`
-	History      string          `json:"history"`
+	Key     string        `json:"key"`
+	Role    adapters.Role `json:"role"`
+	History string        `json:"history"`
 }
 
 type deletion struct {
@@ -174,7 +171,7 @@ func (p *publication) validatePayload(machine string) error {
 			return errors.New("archive: missing file payload")
 		}
 		return p.validateFile(machine)
-	case "manifest":
+	case "session":
 		return p.validateManifest()
 	case "launch":
 		if p.Launch != nil && !utf8.ValidString(p.Launch.Root) {

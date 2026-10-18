@@ -16,7 +16,7 @@ import (
 
 func (p *publication) validateManifest() error {
 	m := p.Manifest
-	if m == nil || m.Schema != 3 || m.Agent != p.Agent || m.MachineID != p.MachineID || m.SessionKey != p.Key || !validTime(m.FirstSeen) || !validTime(m.SyncedAt) || m.Info == nil {
+	if m == nil || m.Schema != manifestSchema || m.Agent != p.Agent || m.MachineID != p.MachineID || m.SessionKey != p.Key || !validTime(m.FirstSeen) || !validTime(m.SyncedAt) || m.Info == nil {
 		return errors.New("archive: invalid manifest payload")
 	}
 	return m.validateMembers()
@@ -26,7 +26,7 @@ func (m *manifest) validateMembers() error {
 	keys := map[string]bool{}
 	for i := range m.Transcripts {
 		tr := &m.Transcripts[i]
-		if !raw.ValidKey(tr.Key) || keys[tr.Key] || !raw.ValidHash(tr.SHA256) || tr.Size < 0 || tr.Object != tr.Commit || len(tr.Pieces) == 0 {
+		if !raw.ValidKey(tr.Key) || keys[tr.Key] {
 			return errors.New("archive: invalid transcript reference")
 		}
 		keys[tr.Key] = true
@@ -212,18 +212,21 @@ func (s *Syncer) referencedPublication(ctx context.Context, key string, deps map
 }
 
 func (s *Syncer) verifyTranscriptReference(ctx context.Context, parent *publication, tr *transcript, deps map[string]dependency) error {
-	file, err := s.referencedPublication(ctx, tr.Commit, deps)
-	if err != nil {
-		return err
+	if tr.History != s.publicationPrefix("file", parent.Agent, tr.Key)+"commits/" {
+		return errors.New("archive: transcript history is not its stream")
 	}
-	if file.File == nil || file.Agent != parent.Agent || file.Key != tr.Key || file.File.Identity.SessionKey != parent.Key {
-		return errors.New("archive: transcript identity mismatch")
+	// A first commit's key names its stream and sequence, so resolving it proves the file.
+	var firsts []string
+	for key := range deps {
+		if strings.HasPrefix(key, tr.History+fmt.Sprintf("%020d-", 1)) {
+			firsts = append(firsts, key)
+		}
 	}
-	g := file.File
-	if tr.Size != g.Size || tr.SHA256 != g.SHA256 || tr.LineCount != g.LineCount || string(tr.Role) != g.Role || !slices.Equal(tr.Pieces, g.Pieces) || tr.History != s.publicationPrefix("file", parent.Agent, tr.Key)+"commits/" {
-		return errors.New("archive: transcript content differs from committed generation")
+	if len(firsts) != 1 {
+		return errors.New("archive: transcript needs exactly one first-commit dependency")
 	}
-	return nil
+	_, err := s.referencedPublication(ctx, firsts[0], deps)
+	return err
 }
 
 func (s *Syncer) verifyLaunchReference(ctx context.Context, parent *publication, record *launchRecord, deps map[string]dependency) error {

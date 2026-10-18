@@ -55,7 +55,7 @@ func TestNumericLaunchAndManifestProvenanceSurvivesColdRecovery(t *testing.T) {
 	if err != nil || sum.Errors != 0 || sum.Manifests != 1 {
 		t.Fatalf("Run = %+v, %v, want valid committed manifest", sum, err)
 	}
-	_, manifestCommit, err := sy.current("manifest", ref.Agent, ref.Key)
+	_, manifestCommit, err := sy.current("session", ref.Agent, ref.Key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestNumericLaunchAndManifestProvenanceSurvivesColdRecovery(t *testing.T) {
 	if err != nil || !bytes.Equal(recoveredLaunch.Body, launchCommit.Body) {
 		t.Fatalf("cold launch identity = %+v, %v", recoveredLaunch, err)
 	}
-	manifestView, recoveredManifest, err := sy.current("manifest", ref.Agent, ref.Key)
+	manifestView, recoveredManifest, err := sy.current("session", ref.Agent, ref.Key)
 	if err != nil || !bytes.Equal(recoveredManifest.Body, manifestCommit.Body) {
 		t.Fatalf("cold manifest identity = %+v, %v", recoveredManifest, err)
 	}

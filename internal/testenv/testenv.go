@@ -293,7 +293,7 @@ func (e *Env) HasKey(key string) bool {
 // Manifest resolves the authoritative immutable chain and returns its current typed payload.
 func (e *Env) Manifest(agent, sessionKey string) map[string]any {
 	e.T.Helper()
-	records := e.Records(Stream(MachineID, "manifest", agent, sessionKey))
+	records := e.Records(Stream(MachineID, "session", agent, sessionKey))
 	if len(records) == 0 {
 		e.T.Fatalf("no manifest commits for %s %s", agent, sessionKey)
 	}

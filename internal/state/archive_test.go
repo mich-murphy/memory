@@ -123,7 +123,7 @@ func TestSessionMetadataUsesCanonicalLaunchOrderAndMainFileEvidence(t *testing.T
 	check(t, db.CommitFile(Record{Key: "main-commit", Kind: "file", Body: []byte("main")}, "main", g, nil))
 	// An older manifest carries stale Info despite current independently committed evidence.
 	stale := &Session{Info: map[string]any{"cwd": "stale-manifest"}, Launches: entries, FirstSeen: 100}
-	check(t, db.CommitSession(Record{Key: "manifest", Kind: "manifest", Body: []byte("manifest")}, ref, stale, SessionManifestStale))
+	check(t, db.CommitSession(Record{Key: "manifest", Kind: "session", Body: []byte("manifest")}, ref, stale, SessionManifestStale))
 	got, err = db.Session(ref)
 	check(t, err)
 	if got.Info["cwd"] != "current-main" || got.Info["model"] != "observed-model" || got.Info["source_root"] != "main-root" {
@@ -137,4 +137,39 @@ func TestSessionMetadataUsesCanonicalLaunchOrderAndMainFileEvidence(t *testing.T
 	if got.Info["cwd"] != "current-main" {
 		t.Fatalf("late launch metadata = %+v, want current main-file observation", got.Info)
 	}
+}
+
+func TestOpeningForgetsRetiredManifestsAndRepublishesTheirSessions(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open(t.Context(), dir)
+	check(t, err)
+	ref := adapters.SessionRef{Agent: "claude", Key: "session"}
+	key := "v3/machines/m/records/manifest/stream/commits/00000000000000000001-x.json"
+	check(t, db.CommitSession(Record{Key: key, Kind: "manifest", Body: []byte("copied generations")}, ref, &Session{FirstSeen: 1}, SessionManifestCurrent))
+	check(t, db.MarkArchiveSeen(key, "scan"))
+	check(t, db.Close())
+
+	db, err = Open(t.Context(), dir)
+	check(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	if record, err := db.ArchiveRecord(key); record != nil || err != nil {
+		t.Fatalf("retired manifest = %v, %v; want forgotten", record, err)
+	}
+	if applied, err := db.ArchiveApplied(key); applied || err != nil {
+		t.Fatalf("retired manifest applied = %v, %v; want forgotten", applied, err)
+	}
+	pending, err := db.PendingManifests()
+	check(t, err)
+	if diff := cmp.Diff([]adapters.SessionRef{ref}, pending); diff != "" {
+		t.Fatalf("pending manifests (-want +got): %s", diff)
+	}
+	check(t, db.Atomic(func() error { return db.ManifestWritten(ref) }))
+	check(t, db.Close())
+
+	db, err = Open(t.Context(), dir)
+	check(t, err)
+	if pending, err := db.PendingManifests(); len(pending) != 0 || err != nil {
+		t.Fatalf("reopening republished again: %v, %v", pending, err)
+	}
+	check(t, db.Close())
 }

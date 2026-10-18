@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/mich-murphy/memory/internal/exclusion"
 	"github.com/mich-murphy/memory/internal/jsonx"
@@ -109,7 +110,12 @@ func (s *Syncer) refreshStream(ctx context.Context, kind, agent, key string) err
 
 func (s *Syncer) enumerateRecords(ctx context.Context, prefix string, cold bool) error {
 	token := rand.Text()
+	retired := s.machinePrefix() + "records/manifest/"
 	err := s.list(ctx, prefix, func(object store.Object) error {
+		// Schema 3 manifests, superseded by records/session/ and safe to delete.
+		if strings.HasPrefix(object.Key, retired) {
+			return nil
+		}
 		if err := s.importListedObject(ctx, object, cold); err != nil {
 			return err
 		}

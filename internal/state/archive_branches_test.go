@@ -14,7 +14,7 @@ import (
 // Fail writes at different points in one domain, including after earlier projections
 // have succeeded. A retry must see the old evidence, not a partially advanced cache.
 func TestArchiveBranchesCaptureFailureRollsBackAllProjections(t *testing.T) {
-	for _, table := range []string{"archive_records", "raw_versions", "uploads", "files", "sessions", "pending_manifests", "archive_applied"} {
+	for _, table := range []string{"archive_records", "uploads", "files", "sessions", "pending_manifests", "archive_applied"} {
 		t.Run(table, func(t *testing.T) {
 			db := open(t)
 			ref := adapters.SessionRef{Agent: "claude", Key: "session"}
@@ -54,11 +54,6 @@ func TestArchiveBranchesCaptureFailureRollsBackAllProjections(t *testing.T) {
 			check(t, err)
 			if upload == nil || upload.SHA256 != old.SHA256 || upload.Size != old.Size {
 				t.Fatalf("Uploaded = %+v, want old generation", upload)
-			}
-			versions, err := db.Versions("file")
-			check(t, err)
-			if len(versions) != 0 {
-				t.Fatalf("Versions = %+v, want no rolled-back version", versions)
 			}
 			gotFiles, err := db.SessionFiles(ref)
 			check(t, err)
@@ -175,7 +170,7 @@ func TestArchiveBranchesSessionFailureDoesNotImportEvidence(t *testing.T) {
 					return db.exec("CREATE TRIGGER fail_session BEFORE INSERT ON pending_manifests BEGIN SELECT RAISE(ABORT, 'injected session failure'); END")
 				}))
 			}
-			record := Record{Key: "failed-session", Kind: "manifest", Body: []byte("evidence")}
+			record := Record{Key: "failed-session", Kind: "session", Body: []byte("evidence")}
 			if err := db.CommitSession(record, ref, next, status); err == nil {
 				t.Fatal("CommitSession accepted invalid or failed projection")
 			}

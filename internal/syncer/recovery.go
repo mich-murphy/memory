@@ -410,7 +410,7 @@ func (s *Syncer) applyPublication(r state.Record, p *publication, previous *raw.
 		})
 	case "launch":
 		return s.applyLaunch(r, p.Launch)
-	case "manifest":
+	case "session":
 		m := p.Manifest
 		sess := &state.Session{Info: m.Info, Snapshots: m.Snapshots, FirstSeen: m.FirstSeen}
 		sess.Launches = slices.Clone(m.Launches)
@@ -434,7 +434,7 @@ func LockDir(cfg *config.Config) (string, error) {
 }
 
 func (s *Syncer) reconcileCatalog(ctx context.Context) error {
-	for _, kind := range []string{"file", "root", "launch", "manifest"} {
+	for _, kind := range []string{"file", "root", "launch", "session"} {
 		streams, err := s.db.AllArchiveStreams(kind)
 		if err != nil {
 			return err
@@ -456,18 +456,12 @@ func (s *Syncer) manifestProjectionStatus(m *manifest) (state.SessionPublication
 	if err != nil {
 		return "", err
 	}
-	if len(files) != len(m.Transcripts) {
-		return state.SessionManifestStale, nil
+	transcripts, deletions, _, err := s.fileReferences(m.Agent, files)
+	if err != nil {
+		return "", err
 	}
-	for i := range m.Transcripts {
-		tr := &m.Transcripts[i]
-		_, record, err := s.current("file", m.Agent, tr.Key)
-		if err != nil {
-			return "", err
-		}
-		if record == nil || record.Key != tr.Commit {
-			return state.SessionManifestStale, nil
-		}
+	if !slices.Equal(transcripts, m.Transcripts) || !slices.Equal(deletions, m.DeletedLocally) {
+		return state.SessionManifestStale, nil
 	}
 	return state.SessionManifestCurrent, nil
 }

@@ -152,10 +152,10 @@ type reviewCrashStore struct {
 var errReviewCrash = errors.New("review injected process death")
 
 func (b *reviewCrashStore) phaseFor(key string, body []byte) string {
-	if strings.Contains(key, "/records/manifest/") && strings.Contains(key, "/plans/") {
+	if strings.Contains(key, "/records/session/") && strings.Contains(key, "/plans/") {
 		return "manifestPlan"
 	}
-	if strings.Contains(key, "/records/manifest/") && strings.Contains(key, "/commits/") {
+	if strings.Contains(key, "/records/session/") && strings.Contains(key, "/commits/") {
 		return "manifestCommit"
 	}
 	if strings.Contains(key, "/records/launch/") && strings.Contains(key, "/plans/") {
@@ -416,7 +416,7 @@ func TestArchiveRunIsExplicitlyOneShot(t *testing.T) {
 }
 
 func TestArchiveColdRecoveryRejectsBrokenRemoteEvidence(t *testing.T) {
-	for _, damage := range []string{"none", "missingBlob", "corruptBlob", "missingParent", "branch", "unknownRecord"} {
+	for _, damage := range []string{"none", "retiredManifest", "missingBlob", "corruptBlob", "missingParent", "branch", "unknownRecord"} {
 		t.Run(damage, func(t *testing.T) {
 			home := t.TempDir()
 			cfg := &config.Config{Home: home, StateDir: t.TempDir(), LocalStore: t.TempDir(), MachineID: "review-machine"}
@@ -487,6 +487,10 @@ func TestArchiveColdRecoveryRejectsBrokenRemoteEvidence(t *testing.T) {
 				if err := bucket.Put(t.Context(), sy.publicationKey(p, true, id), body, map[string]string{"sha256": id}); err != nil {
 					t.Fatal(err)
 				}
+			case "retiredManifest":
+				if err := bucket.Put(t.Context(), sy.machinePrefix()+"records/manifest/stream/commits/00000000000000000001-x.json", []byte(`{"schema":3}`), nil); err != nil {
+					t.Fatal(err)
+				}
 			case "unknownRecord":
 				if err := bucket.Put(t.Context(), sy.machinePrefix()+"records/unknown.json", []byte(`{"schema":99}`), nil); err != nil {
 					t.Fatal(err)
@@ -512,7 +516,7 @@ func TestArchiveColdRecoveryRejectsBrokenRemoteEvidence(t *testing.T) {
 			}()
 			sy = New(cfg, bucket, db, adapters.All(home), Options{})
 			err = sy.Recover(t.Context())
-			if damage != "none" {
+			if damage != "none" && damage != "retiredManifest" {
 				if err == nil {
 					t.Fatal("Recover accepted broken evidence")
 				}
@@ -1073,7 +1077,7 @@ func TestArchiveRecoveredLateLaunchMakesManifestPending(t *testing.T) {
 	if err != nil || sum.Errors != 0 {
 		t.Fatalf("Run after recovery = %+v, %v", sum, err)
 	}
-	latest, _, err := sy.current("manifest", "claude", ref.Key)
+	latest, _, err := sy.current("session", "claude", ref.Key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1082,7 +1086,7 @@ func TestArchiveRecoveredLateLaunchMakesManifestPending(t *testing.T) {
 	}
 }
 
-func TestArchiveRecoveredNewerFileMakesManifestPending(t *testing.T) {
+func TestArchiveRecoveredNewFileMakesManifestPending(t *testing.T) {
 	home := t.TempDir()
 	cfg := &config.Config{Home: home, StateDir: t.TempDir(), LocalStore: t.TempDir(), MachineID: "review-machine"}
 	root := filepath.Join(home, ".claude")
@@ -1104,14 +1108,19 @@ func TestArchiveRecoveredNewerFileMakesManifestPending(t *testing.T) {
 	if err != nil || sum.Errors != 0 {
 		t.Fatalf("initial Run = %+v, %v", sum, err)
 	}
-	if err := os.WriteFile(path, []byte("B-longer\n"), 0o600); err != nil {
+	child := sf
+	child.Path, child.Key, child.Role = filepath.Join(root, "projects", "project", "session", "subagents", "agent-x.jsonl"), "projects/project/session/subagents/agent-x.jsonl", adapters.RoleSubagent
+	if err := os.MkdirAll(filepath.Dir(child.Path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(child.Path, []byte("B-longer\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	crashed := &reviewCrashStore{Store: underlying, phase: "manifestPlan"}
 	sy = New(cfg, crashed, db, adapters.All(home), Options{})
-	_, _ = sy.Run(t.Context(), []adapters.SessionFile{sf})
+	_, _ = sy.Run(t.Context(), []adapters.SessionFile{child})
 	if !crashed.fired {
-		t.Fatal("did not crash after newer file commit before its manifest")
+		t.Fatal("did not crash after a new file's commit before its manifest")
 	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
@@ -1119,8 +1128,10 @@ func TestArchiveRecoveredNewerFileMakesManifestPending(t *testing.T) {
 	if err := os.RemoveAll(cfg.StateDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
+	for _, p := range []string{path, child.Path} {
+		if err := os.Remove(p); err != nil {
+			t.Fatal(err)
+		}
 	}
 	db, err = state.Open(t.Context(), cfg.StateDir)
 	if err != nil {
@@ -1136,7 +1147,7 @@ func TestArchiveRecoveredNewerFileMakesManifestPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got bytes.Buffer
-	if err := sy.Restore(t.Context(), "claude", sf.Key, "", &got); err != nil {
+	if err := sy.Restore(t.Context(), "claude", child.Key, "", &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.String() != "B-longer\n" {
@@ -1146,12 +1157,12 @@ func TestArchiveRecoveredNewerFileMakesManifestPending(t *testing.T) {
 	if err != nil || sum.Errors != 0 {
 		t.Fatalf("Run after recovery = %+v, %v", sum, err)
 	}
-	latest, _, err := sy.current("manifest", "claude", sf.SessionKey)
+	latest, _, err := sy.current("session", "claude", sf.SessionKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if latest == nil || len(latest.Manifest.Transcripts) != 1 || latest.Manifest.Transcripts[0].SHA256 != raw.SHA256([]byte("B-longer\n")) {
-		t.Fatalf("current manifest did not advance to committed B after recovery: %+v", latest)
+	if latest == nil || len(latest.Manifest.Transcripts) != 2 || latest.Manifest.Transcripts[1].Key != child.Key {
+		t.Fatalf("current manifest did not list the recovered new file: %+v", latest)
 	}
 }
 

@@ -43,7 +43,7 @@ func (s *State) Bind(want Binding) error {
 	return s.Atomic(func() error {
 		// Unbound v2 evidence is not evidence of upload into v3. Keep roots and run summaries,
 		// but drop disposable upload/session projections on the explicit format transition.
-		for _, table := range []string{"observations", "files", "uploads", "resumes", "pieces", "strays", "raw_versions", "sessions", "pending_manifests"} {
+		for _, table := range []string{"observations", "files", "uploads", "resumes", "pieces", "strays", "sessions", "pending_manifests"} {
 			if err := s.exec("DELETE FROM " + table); err != nil {
 				return err
 			}
@@ -148,6 +148,16 @@ func (s *State) CurrentArchive(kind, stream string) (*Record, error) {
 	return &record, err
 }
 
+// FirstArchive returns a stream's first commit, which no later generation changes.
+func (s *State) FirstArchive(kind, stream string) (*Record, error) {
+	var r Record
+	found, err := s.queryRow("SELECT key,kind,stream,id,parent,sequence,committed,body FROM archive_records WHERE kind=? AND stream=? AND committed=1 AND sequence=1 ORDER BY key LIMIT 1", []any{kind, stream}, &r.Key, &r.Kind, &r.Stream, &r.ID, &r.Parent, &r.Sequence, &r.Committed, &r.Body)
+	if !found || err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
 func (s *State) ArchiveRecord(key string) (*Record, error) {
 	var r Record
 	found, err := s.queryRow("SELECT key,kind,stream,id,parent,sequence,committed,body FROM archive_records WHERE key=?", []any{key}, &r.Key, &r.Kind, &r.Stream, &r.ID, &r.Parent, &r.Sequence, &r.Committed, &r.Body)
@@ -196,12 +206,6 @@ func (s *State) projectGeneration(key string, g, previous *raw.Generation) error
 	// Moving a file out of a session changes both manifests, including after cache loss.
 	if previous != nil && previous.Identity.SessionKey != "" && previous.Identity.SessionKey != g.Identity.SessionKey {
 		if err := s.MarkManifestPending(adapters.SessionRef{Agent: previous.Identity.Agent, Key: previous.Identity.SessionKey}); err != nil {
-			return err
-		}
-	}
-	if previous != nil && previous.SHA256 != g.SHA256 {
-		version := Version{SHA256: previous.SHA256, Size: previous.Size, Pieces: previous.Pieces, VersionedAt: g.ObservedAt}
-		if err := s.RecordVersion(key, &version); err != nil {
 			return err
 		}
 	}

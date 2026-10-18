@@ -1,8 +1,8 @@
 package syncer
 
 import (
+	"fmt"
 	"math"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -22,8 +22,8 @@ func branchPublication(kind string) *publication {
 	case "launch":
 		p.Key = "event"
 		p.Launch = &launchRecord{Envelope: launch.Envelope{Schema: 1, ID: p.Key, Agent: p.Agent, Path: "/root/source", RecordedAt: 10, Payload: map[string]any{}}, Root: "/root", SessionKey: "session"}
-	case "manifest":
-		p.Manifest = &manifest{Schema: 3, Agent: p.Agent, MachineID: p.MachineID, SessionKey: p.Key, Info: map[string]any{}, FirstSeen: 10, SyncedAt: 20}
+	case "session":
+		p.Manifest = &manifest{Schema: manifestSchema, Agent: p.Agent, MachineID: p.MachineID, SessionKey: p.Key, Info: map[string]any{}, FirstSeen: 10, SyncedAt: 20}
 	case "file":
 		p.Key = "source"
 		body := []byte("transcript\n")
@@ -75,10 +75,10 @@ func TestPublicationBranchesRejectInvalidTypedDescriptorsBeforeAnyWrite(t *testi
 		{"missingParent", "root", func(p *publication) { p.Sequence = 2 }, "invalid publication identity"},
 		{"invalidParent", "root", func(p *publication) { p.Sequence = 2; p.Parent = "bad" }, "invalid publication identity"},
 		{"noPayload", "root", func(p *publication) { p.Root = nil }, "exactly one payload"},
-		{"twoPayloads", "root", func(p *publication) { p.Manifest = branchPublication("manifest").Manifest }, "exactly one payload"},
+		{"twoPayloads", "root", func(p *publication) { p.Manifest = branchPublication("session").Manifest }, "exactly one payload"},
 		{"unknownKind", "root", func(p *publication) { p.Kind = "unknown" }, "unknown publication kind"},
 		{"missingFile", "root", func(p *publication) { p.Kind = "file" }, "missing file payload"},
-		{"missingManifest", "root", func(p *publication) { p.Kind = "manifest" }, "invalid manifest payload"},
+		{"missingManifest", "root", func(p *publication) { p.Kind = "session" }, "invalid manifest payload"},
 		{"missingLaunch", "root", func(p *publication) { p.Kind = "launch" }, "invalid launch payload"},
 		{"missingRoot", "launch", func(p *publication) { p.Kind = "root" }, "invalid root payload"},
 		{"rootSequence", "root", func(p *publication) { p.Sequence = 2; p.Parent = raw.SHA256([]byte("parent")) }, "invalid root payload"},
@@ -93,13 +93,13 @@ func TestPublicationBranchesRejectInvalidTypedDescriptorsBeforeAnyWrite(t *testi
 		{"launchTime", "launch", func(p *publication) { p.Launch.Snapshot.TakenAt = math.Inf(1) }, "invalid launch payload"},
 		{"envelopeSchema", "launch", func(p *publication) { p.Launch.Envelope.Schema = 2 }, "launch: invalid envelope"},
 		{"memoryWithoutHarness", "launch", func(p *publication) { id := raw.SHA256([]byte("memory")); p.Launch.Snapshot.MemoryID = &id }, "memory snapshot without harness"},
-		{"manifestSchema", "manifest", func(p *publication) { p.Manifest.Schema = 2 }, "invalid manifest payload"},
-		{"manifestAgent", "manifest", func(p *publication) { p.Manifest.Agent = "pi" }, "invalid manifest payload"},
-		{"manifestMachine", "manifest", func(p *publication) { p.Manifest.MachineID = "other" }, "invalid manifest payload"},
-		{"manifestSession", "manifest", func(p *publication) { p.Manifest.SessionKey = "other" }, "invalid manifest payload"},
-		{"manifestInfo", "manifest", func(p *publication) { p.Manifest.Info = nil }, "invalid manifest payload"},
-		{"manifestFirstSeen", "manifest", func(p *publication) { p.Manifest.FirstSeen = -1 }, "invalid manifest payload"},
-		{"manifestSyncedAt", "manifest", func(p *publication) { p.Manifest.SyncedAt = math.NaN() }, "invalid manifest payload"},
+		{"manifestSchema", "session", func(p *publication) { p.Manifest.Schema = 2 }, "invalid manifest payload"},
+		{"manifestAgent", "session", func(p *publication) { p.Manifest.Agent = "pi" }, "invalid manifest payload"},
+		{"manifestMachine", "session", func(p *publication) { p.Manifest.MachineID = "other" }, "invalid manifest payload"},
+		{"manifestSession", "session", func(p *publication) { p.Manifest.SessionKey = "other" }, "invalid manifest payload"},
+		{"manifestInfo", "session", func(p *publication) { p.Manifest.Info = nil }, "invalid manifest payload"},
+		{"manifestFirstSeen", "session", func(p *publication) { p.Manifest.FirstSeen = -1 }, "invalid manifest payload"},
+		{"manifestSyncedAt", "session", func(p *publication) { p.Manifest.SyncedAt = math.NaN() }, "invalid manifest payload"},
 		{"fileSchema", "file", func(p *publication) { p.File.Schema = 2 }, "raw generation: invalid identity"},
 		{"pieceOffset", "file", func(p *publication) { p.File.Pieces[0].Start = 1 }, "invalid piece"},
 		{"pieceKey", "file", func(p *publication) { p.File.Pieces[0].Object = "v3/blobs/zstd/wrong.zst" }, "invalid piece"},
@@ -166,6 +166,7 @@ func TestPublicationBranchesRejectInvalidDependencyDescriptors(t *testing.T) {
 	}
 }
 
+// branchReference commits file and returns a manifest referencing its stream.
 func branchReference(t *testing.T, sy *Syncer, bucket *memStore, file *publication) (*publication, []byte) {
 	t.Helper()
 	body, id, err := canonicalPublication(file)
@@ -176,15 +177,14 @@ func branchReference(t *testing.T, sy *Syncer, bucket *memStore, file *publicati
 	if err := bucket.Put(t.Context(), key, body, map[string]string{"sha256": id}); err != nil {
 		t.Fatal(err)
 	}
-	p := branchPublication("manifest")
-	g := file.File
-	p.Manifest.Transcripts = []transcript{{Key: file.Key, Role: adapters.Role(g.Role), Size: g.Size, SHA256: g.SHA256, LineCount: g.LineCount, Object: key, Commit: key, Pieces: g.Pieces, History: sy.publicationPrefix("file", file.Agent, file.Key) + "commits/"}}
+	p := branchPublication("session")
+	p.Manifest.Transcripts = []transcript{{Key: file.Key, Role: adapters.Role(file.File.Role), History: sy.publicationPrefix("file", file.Agent, file.Key) + "commits/"}}
 	p.Dependencies = []dependency{{Object: key, SHA256: id, Size: int64(len(body)), Encoding: "plain"}}
 	return p, body
 }
 
-func TestPublicationBranchesTranscriptReferencesRequireExactCommittedEvidence(t *testing.T) {
-	for _, damage := range []string{"missingDependency", "planOnly", "wrongEncoding", "checksum", "size", "missingRemote", "keyIdentity", "invalidBody", "invalidPublication", "wrongSession", "wrongAgent", "wrongKey", "transcriptSize", "transcriptHash", "transcriptRole", "transcriptLines", "transcriptPieces", "transcriptHistory", "duplicateDependency", "corruptCache"} {
+func TestPublicationBranchesStreamReferencesRequireTheFirstCommit(t *testing.T) {
+	for _, damage := range []string{"missingDependency", "planOnly", "laterCommit", "secondFirstCommit", "otherStream", "wrongEncoding", "checksum", "size", "missingRemote", "keyIdentity", "invalidBody", "invalidPublication", "transcriptHistory", "duplicateDependency", "corruptCache"} {
 		t.Run(damage, func(t *testing.T) {
 			sy, bucket := branchSyncer(t)
 			file := branchPublication("file")
@@ -193,125 +193,91 @@ func TestPublicationBranchesTranscriptReferencesRequireExactCommittedEvidence(t 
 				t.Fatalf("baseline descriptor: %v", err)
 			}
 			if err := sy.verifyReferences(t.Context(), p, nil); err != nil {
-				t.Fatalf("baseline committed references: %v", err)
+				t.Fatalf("baseline references: %v", err)
 			}
-			tr := &p.Manifest.Transcripts[0]
-			want := ""
+			tr, dep := &p.Manifest.Transcripts[0], &p.Dependencies[0]
+			want := "exactly one first-commit dependency"
 			switch damage {
 			case "missingDependency":
 				p.Dependencies = nil
-				want = "missing committed metadata dependency"
 			case "planOnly":
-				tr.Commit = strings.Replace(tr.Commit, "/commits/", "/plans/", 1)
-				tr.Object = tr.Commit
-				p.Dependencies[0].Object = tr.Commit
-				if err := bucket.Put(t.Context(), tr.Commit, body, nil); err != nil {
-					t.Fatal(err)
-				}
-				want = "missing committed metadata dependency"
+				dep.Object = strings.Replace(dep.Object, "/commits/", "/plans/", 1)
+			case "laterCommit":
+				dep.Object = strings.Replace(dep.Object, fmt.Sprintf("%020d-", 1), fmt.Sprintf("%020d-", 2), 1)
+			case "secondFirstCommit":
+				second := *dep
+				second.Object = tr.History + fmt.Sprintf("%020d-%s.json", 1, raw.SHA256([]byte("other")))
+				p.Dependencies = append(p.Dependencies, second)
+			case "otherStream":
+				f := branchPublication("file")
+				f.Key, f.File.Identity.Key = "other", "other"
+				other, _ := branchReference(t, sy, bucket, f)
+				p.Dependencies = other.Dependencies
 			case "wrongEncoding":
-				p.Dependencies[0].Encoding = "zstd"
+				dep.Encoding = "zstd"
 				want = "missing committed metadata dependency"
 			case "checksum":
-				p.Dependencies[0].SHA256 = raw.SHA256([]byte("other"))
+				dep.SHA256 = raw.SHA256([]byte("other"))
 				want = "metadata dependency checksum mismatch"
 			case "size":
-				p.Dependencies[0].Size++
+				dep.Size++
 				want = "metadata dependency checksum mismatch"
 			case "missingRemote":
-				if err := bucket.Delete(t.Context(), tr.Commit); err != nil {
+				if err := bucket.Delete(t.Context(), dep.Object); err != nil {
 					t.Fatal(err)
 				}
 				want = "not found"
 			case "keyIdentity":
-				key := sy.publicationPrefix("file", "claude", "different") + "commits/" + filepath.Base(tr.Commit)
+				key := tr.History + fmt.Sprintf("%020d-%s.json", 1, raw.SHA256([]byte("other")))
 				if err := bucket.Put(t.Context(), key, body, nil); err != nil {
 					t.Fatal(err)
 				}
-				tr.Commit, tr.Object, p.Dependencies[0].Object = key, key, key
+				dep.Object = key
 				want = "referenced publication identity mismatch"
-			case "invalidBody", "invalidPublication":
-				if damage == "invalidBody" {
-					body = []byte(`{"unknown":true}`)
-					want = "unknown field"
-				} else {
-					file.Schema = 2
-					var err error
-					body, _, err = canonicalPublication(file)
-					if err != nil {
-						t.Fatal(err)
-					}
-					want = "invalid publication identity"
-				}
-				id := raw.SHA256(body)
-				key := sy.publicationKey(file, true, id)
+			case "invalidBody":
+				body = []byte(`{"unknown":true}`)
+				key := tr.History + fmt.Sprintf("%020d-%s.json", 1, raw.SHA256(body))
 				if err := bucket.Put(t.Context(), key, body, nil); err != nil {
 					t.Fatal(err)
 				}
-				tr.Commit, tr.Object = key, key
-				p.Dependencies[0] = dependency{Object: key, SHA256: id, Size: int64(len(body)), Encoding: "plain"}
-			case "wrongSession", "wrongAgent", "wrongKey":
-				switch damage {
-				case "wrongSession":
-					file.File.Identity.SessionKey = "other"
-				case "wrongAgent":
-					file.Agent = "pi"
-					file.File.Identity.Agent = "pi"
-				case "wrongKey":
-					file.Key = "other"
-					file.File.Identity.Key = "other"
+				*dep = dependency{Object: key, SHA256: raw.SHA256(body), Size: int64(len(body)), Encoding: "plain"}
+				want = "unknown field"
+			case "invalidPublication":
+				file.Schema = 2
+				var err error
+				if body, _, err = canonicalPublication(file); err != nil {
+					t.Fatal(err)
 				}
-				changed, _ := branchReference(t, sy, bucket, file)
-				tr.Commit, tr.Object = changed.Manifest.Transcripts[0].Commit, changed.Manifest.Transcripts[0].Object
-				p.Dependencies = changed.Dependencies
-				want = "transcript identity mismatch"
-			case "transcriptSize":
-				tr.Size++
-				want = "transcript content differs"
-			case "transcriptHash":
-				tr.SHA256 = raw.SHA256([]byte("other"))
-				want = "transcript content differs"
-			case "transcriptRole":
-				tr.Role = adapters.RoleAux
-				want = "transcript content differs"
-			case "transcriptLines":
-				tr.LineCount++
-				want = "transcript content differs"
-			case "transcriptPieces":
-				tr.Pieces = append([]raw.Piece(nil), tr.Pieces...)
-				tr.Pieces[0].End++
-				want = "transcript content differs"
+				key := sy.publicationKey(file, true, raw.SHA256(body))
+				if err := bucket.Put(t.Context(), key, body, nil); err != nil {
+					t.Fatal(err)
+				}
+				*dep = dependency{Object: key, SHA256: raw.SHA256(body), Size: int64(len(body)), Encoding: "plain"}
+				want = "invalid publication identity"
 			case "transcriptHistory":
 				tr.History = "v3/wrong/commits/"
-				want = "transcript content differs"
+				want = "transcript history is not its stream"
 			case "duplicateDependency":
-				p.Dependencies = append(p.Dependencies, p.Dependencies[0])
+				p.Dependencies = append(p.Dependencies, *dep)
 				want = "duplicate dependency identity"
 			case "corruptCache":
-				if err := sy.db.ImportPlan(state.Record{Key: tr.Commit, Kind: "file", Body: []byte("corrupt cached record")}); err != nil {
+				if err := sy.db.ImportPlan(state.Record{Key: dep.Object, Kind: "file", Body: []byte("corrupt cached record")}); err != nil {
 					t.Fatal(err)
 				}
 				want = "metadata dependency checksum mismatch"
 			}
 			requireBranchError(t, sy.verifyReferences(t.Context(), p, nil), want)
-			// Mutations of an otherwise valid graph must fail before even a plan is written.
-			if damage != "wrongEncoding" && damage != "duplicateDependency" {
-				if err := p.validate("machine"); err != nil {
-					t.Fatalf("mutated descriptor is structurally invalid: %v", err)
-				}
-				bucket.takeOps()
-				_, err := sy.publish(t.Context(), p, nil)
-				requireBranchError(t, err, want)
-				ops, _ := bucket.takeOps()
-				for _, op := range ops {
-					if strings.HasPrefix(op, "put ") {
-						t.Fatalf("rejected reference wrote remote metadata: %v", ops)
-					}
-				}
+			if damage == "wrongEncoding" || damage == "duplicateDependency" {
+				return // structurally invalid: publish rejects it before reading references
 			}
-			sess, err := sy.db.Session(adapters.SessionRef{Agent: p.Agent, Key: p.Key})
-			if err != nil || sess != nil {
-				t.Fatalf("rejected reference projected session = %+v, %v", sess, err)
+			bucket.takeOps()
+			_, err := sy.publish(t.Context(), p, nil)
+			requireBranchError(t, err, want)
+			ops, _ := bucket.takeOps()
+			for _, op := range ops {
+				if strings.HasPrefix(op, "put ") {
+					t.Fatalf("rejected reference wrote remote metadata: %v", ops)
+				}
 			}
 		})
 	}
@@ -324,7 +290,7 @@ func TestPublicationBranchesManifestMembersRejectInconsistentHistory(t *testing.
 		want   string
 	}{
 		{"duplicateTranscript", func(m *manifest) { m.Transcripts = append(m.Transcripts, m.Transcripts[0]) }, "invalid transcript reference"},
-		{"transcriptObject", func(m *manifest) { m.Transcripts[0].Object = "v3/other" }, "invalid transcript reference"},
+		{"schema", func(m *manifest) { m.Schema = 5 }, "invalid manifest payload"},
 		{"deletionUnknown", func(m *manifest) { m.DeletedLocally[0].Key = "other" }, "invalid deletion reference"},
 		{"deletionTime", func(m *manifest) { m.DeletedLocally[0].At = 0 }, "invalid deletion reference"},
 		{"snapshotID", func(m *manifest) { m.Snapshots[0].ID = "invalid" }, "invalid snapshot reference"},
