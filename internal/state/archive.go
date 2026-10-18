@@ -43,7 +43,7 @@ func (s *State) Bind(want Binding) error {
 	return s.Atomic(func() error {
 		// Unbound v2 evidence is not evidence of upload into v3. Keep roots and run summaries,
 		// but drop disposable upload/session projections on the explicit format transition.
-		for _, table := range []string{"observations", "files", "uploads", "resumes", "pieces", "strays", "raw_versions", "sessions", "pending_manifests"} {
+		for _, table := range []string{"observations", "files", "uploads", "resumes", "pieces", "strays", "sessions", "pending_manifests", "file_anchors"} {
 			if err := s.exec("DELETE FROM " + table); err != nil {
 				return err
 			}
@@ -148,6 +148,43 @@ func (s *State) CurrentArchive(kind, stream string) (*Record, error) {
 	return &record, err
 }
 
+// PruneCopiedManifests forgets the schema 3 manifests of sessions that have a records/session/
+// manifest, which carries everything they did, so deleting records/manifest/ from the bucket
+// leaves nothing this state expects to find there.
+func (s *State) PruneCopiedManifests() error {
+	const copied = "SELECT key FROM archive_records WHERE kind='manifest' AND stream IN (SELECT stream FROM archive_records WHERE kind='session' AND committed=1)"
+	return s.Atomic(func() error {
+		for _, table := range []string{"archive_applied", "archive_scan", "archive_records"} {
+			if err := s.exec("DELETE FROM " + table + " WHERE key IN (" + copied + ")"); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// Anchors reports whether g starts a run of generations in one session with one role. A manifest
+// depends on the commit that starts the current run, which appends leave in place.
+func Anchors(previous, g *raw.Generation) bool {
+	return previous == nil || previous.Identity.SessionKey != g.Identity.SessionKey || previous.Role != g.Role
+}
+
+// FileAnchor is the record key of the commit starting the file's current run, or "" when this
+// state hasn't recorded it.
+func (s *State) FileAnchor(key string) (string, error) {
+	var anchor string
+	_, err := s.queryRow("SELECT record FROM file_anchors WHERE key=?", []any{key}, &anchor)
+	return anchor, err
+}
+
+func (s *State) SetFileAnchor(key, record string) error {
+	return s.Atomic(func() error { return s.setFileAnchor(key, record) })
+}
+
+func (s *State) setFileAnchor(key, record string) error {
+	return s.exec("INSERT OR REPLACE INTO file_anchors VALUES(?,?)", key, record)
+}
+
 func (s *State) ArchiveRecord(key string) (*Record, error) {
 	var r Record
 	found, err := s.queryRow("SELECT key,kind,stream,id,parent,sequence,committed,body FROM archive_records WHERE key=?", []any{key}, &r.Key, &r.Kind, &r.Stream, &r.ID, &r.Parent, &r.Sequence, &r.Committed, &r.Body)
@@ -177,6 +214,11 @@ func (s *State) commitFile(record Record, key string, g, previous *raw.Generatio
 		if err := s.RecordArchive(record); err != nil {
 			return err
 		}
+		if Anchors(previous, g) {
+			if err := s.setFileAnchor(key, record.Key); err != nil {
+				return err
+			}
+		}
 		if err := s.projectGeneration(key, g, previous); err != nil {
 			return err
 		}
@@ -196,12 +238,6 @@ func (s *State) projectGeneration(key string, g, previous *raw.Generation) error
 	// Moving a file out of a session changes both manifests, including after cache loss.
 	if previous != nil && previous.Identity.SessionKey != "" && previous.Identity.SessionKey != g.Identity.SessionKey {
 		if err := s.MarkManifestPending(adapters.SessionRef{Agent: previous.Identity.Agent, Key: previous.Identity.SessionKey}); err != nil {
-			return err
-		}
-	}
-	if previous != nil && previous.SHA256 != g.SHA256 {
-		version := Version{SHA256: previous.SHA256, Size: previous.Size, Pieces: previous.Pieces, VersionedAt: g.ObservedAt}
-		if err := s.RecordVersion(key, &version); err != nil {
 			return err
 		}
 	}
@@ -463,7 +499,7 @@ func (s *State) projectSession(ref adapters.SessionRef, sess *Session, status Se
 	if err := s.projectSessionInfo(ref, sess); err != nil {
 		return false, err
 	}
-	return pending || !reflect.DeepEqual(before, sess.Info), nil
+	return pending || !reflect.DeepEqual(PublishedInfo(before), PublishedInfo(sess.Info)), nil
 }
 
 // projectSessionInfo selects metadata from evidence, never descriptor replay order. Main-file

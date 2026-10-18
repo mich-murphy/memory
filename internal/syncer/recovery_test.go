@@ -3,6 +3,7 @@ package syncer
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/config"
 	"github.com/mich-murphy/memory/internal/exclusion"
@@ -20,6 +23,7 @@ import (
 	"github.com/mich-murphy/memory/internal/raw"
 	"github.com/mich-murphy/memory/internal/state"
 	"github.com/mich-murphy/memory/internal/store"
+	"github.com/mich-murphy/memory/internal/testenv"
 )
 
 func TestArchiveColdRecoveryRetainsLaunchAfterOlderManifest(t *testing.T) {
@@ -152,10 +156,10 @@ type reviewCrashStore struct {
 var errReviewCrash = errors.New("review injected process death")
 
 func (b *reviewCrashStore) phaseFor(key string, body []byte) string {
-	if strings.Contains(key, "/records/manifest/") && strings.Contains(key, "/plans/") {
+	if strings.Contains(key, "/records/session/") && strings.Contains(key, "/plans/") {
 		return "manifestPlan"
 	}
-	if strings.Contains(key, "/records/manifest/") && strings.Contains(key, "/commits/") {
+	if strings.Contains(key, "/records/session/") && strings.Contains(key, "/commits/") {
 		return "manifestCommit"
 	}
 	if strings.Contains(key, "/records/launch/") && strings.Contains(key, "/plans/") {
@@ -1073,7 +1077,7 @@ func TestArchiveRecoveredLateLaunchMakesManifestPending(t *testing.T) {
 	if err != nil || sum.Errors != 0 {
 		t.Fatalf("Run after recovery = %+v, %v", sum, err)
 	}
-	latest, _, err := sy.current("manifest", "claude", ref.Key)
+	latest, _, err := sy.current("session", "claude", ref.Key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1082,7 +1086,7 @@ func TestArchiveRecoveredLateLaunchMakesManifestPending(t *testing.T) {
 	}
 }
 
-func TestArchiveRecoveredNewerFileMakesManifestPending(t *testing.T) {
+func TestArchiveRecoveredNewFileMakesManifestPending(t *testing.T) {
 	home := t.TempDir()
 	cfg := &config.Config{Home: home, StateDir: t.TempDir(), LocalStore: t.TempDir(), MachineID: "review-machine"}
 	root := filepath.Join(home, ".claude")
@@ -1104,14 +1108,19 @@ func TestArchiveRecoveredNewerFileMakesManifestPending(t *testing.T) {
 	if err != nil || sum.Errors != 0 {
 		t.Fatalf("initial Run = %+v, %v", sum, err)
 	}
-	if err := os.WriteFile(path, []byte("B-longer\n"), 0o600); err != nil {
+	child := sf
+	child.Path, child.Key, child.Role = filepath.Join(root, "projects", "project", "session", "subagents", "agent-x.jsonl"), "projects/project/session/subagents/agent-x.jsonl", adapters.RoleSubagent
+	if err := os.MkdirAll(filepath.Dir(child.Path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(child.Path, []byte("B-longer\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	crashed := &reviewCrashStore{Store: underlying, phase: "manifestPlan"}
 	sy = New(cfg, crashed, db, adapters.All(home), Options{})
-	_, _ = sy.Run(t.Context(), []adapters.SessionFile{sf})
+	_, _ = sy.Run(t.Context(), []adapters.SessionFile{child})
 	if !crashed.fired {
-		t.Fatal("did not crash after newer file commit before its manifest")
+		t.Fatal("did not crash after a new file's commit before its manifest")
 	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
@@ -1119,8 +1128,10 @@ func TestArchiveRecoveredNewerFileMakesManifestPending(t *testing.T) {
 	if err := os.RemoveAll(cfg.StateDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
+	for _, p := range []string{path, child.Path} {
+		if err := os.Remove(p); err != nil {
+			t.Fatal(err)
+		}
 	}
 	db, err = state.Open(t.Context(), cfg.StateDir)
 	if err != nil {
@@ -1136,7 +1147,7 @@ func TestArchiveRecoveredNewerFileMakesManifestPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got bytes.Buffer
-	if err := sy.Restore(t.Context(), "claude", sf.Key, "", &got); err != nil {
+	if err := sy.Restore(t.Context(), "claude", child.Key, "", &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.String() != "B-longer\n" {
@@ -1146,12 +1157,12 @@ func TestArchiveRecoveredNewerFileMakesManifestPending(t *testing.T) {
 	if err != nil || sum.Errors != 0 {
 		t.Fatalf("Run after recovery = %+v, %v", sum, err)
 	}
-	latest, _, err := sy.current("manifest", "claude", sf.SessionKey)
+	latest, _, err := sy.current("session", "claude", sf.SessionKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if latest == nil || len(latest.Manifest.Transcripts) != 1 || latest.Manifest.Transcripts[0].SHA256 != raw.SHA256([]byte("B-longer\n")) {
-		t.Fatalf("current manifest did not advance to committed B after recovery: %+v", latest)
+	if latest == nil || len(latest.Manifest.Transcripts) != 2 || latest.Manifest.Transcripts[1].Key != child.Key {
+		t.Fatalf("current manifest did not list the recovered new file: %+v", latest)
 	}
 }
 
@@ -1326,4 +1337,118 @@ func reviewAdapters(home string) map[string]adapters.Adapter {
 		out[name] = reviewIsolatedAdapter{Adapter: a}
 	}
 	return out
+}
+
+// A 0.3.0 collector kept post-hoc snapshots only in its copied manifests, so a cold upgrade from
+// its bucket keeps them, republishes them under records/session/, and still has them once
+// records/manifest/ is deleted.
+func TestArchiveColdUpgradeFromCopiedManifestsKeepsSnapshots(t *testing.T) {
+	bucketDir := t.TempDir()
+	if err := os.CopyFS(bucketDir, os.DirFS("testdata/v0.3.0-bucket")); err != nil {
+		t.Fatal(err)
+	}
+	bucket := store.NewLocal(bucketDir)
+	open := func(t *testing.T, stateDir string) *Syncer {
+		t.Helper()
+		cfg := &config.Config{Home: t.TempDir(), StateDir: stateDir, LocalStore: bucketDir, MachineID: testenv.MachineID}
+		db, err := state.Open(t.Context(), stateDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := db.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		return New(cfg, bucket, db, adapters.All(cfg.Home), Options{Version: "test"})
+	}
+	sessions := []adapters.SessionRef{{Agent: "claude", Key: testenv.ClaudeKey}, {Agent: "codex", Key: testenv.CodexKey}, {Agent: "pi", Key: testenv.PiSessionKey}}
+	// Each 0.3.0 manifest holds one post_hoc snapshot, which nothing else records.
+	snapshots := func(t *testing.T, sy *Syncer, ref adapters.SessionRef) []string {
+		t.Helper()
+		sess, err := sy.db.Session(ref)
+		if err != nil || sess == nil {
+			t.Fatalf("%v session = %v, %v", ref, sess, err)
+		}
+		var ids []string
+		for _, snap := range sess.Snapshots {
+			if snap.Timing == "post_hoc" {
+				ids = append(ids, snap.ID)
+			}
+		}
+		return ids
+	}
+
+	stateDir := t.TempDir()
+	sy := open(t, stateDir)
+	if err := sy.Recover(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := sy.db.PendingManifests()
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.SortFunc(pending, func(a, b adapters.SessionRef) int { return strings.Compare(a.Agent, b.Agent) })
+	if diff := cmp.Diff(sessions, pending); diff != "" {
+		t.Fatalf("pending after recovering copied manifests (-want +got): %s", diff)
+	}
+	want := map[adapters.SessionRef][]string{}
+	for _, ref := range sessions {
+		if want[ref] = snapshots(t, sy, ref); len(want[ref]) != 1 {
+			t.Fatalf("%v recovered post_hoc snapshots = %v, want the 0.3.0 one", ref, want[ref])
+		}
+	}
+
+	// Imported but never applied, as after a crash mid-recovery: the next recovery applies them.
+	db, err := sql.Open("sqlite", filepath.Join(stateDir, "state.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{"DELETE FROM archive_applied", "DELETE FROM sessions", "DELETE FROM pending_manifests", "UPDATE archive_checkpoint SET clean = 0"} {
+		if _, err := db.ExecContext(t.Context(), stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sy = open(t, stateDir)
+	if err := sy.Recover(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range sessions {
+		if got := snapshots(t, sy, ref); !slices.Equal(got, want[ref]) {
+			t.Fatalf("%v post_hoc snapshots after applying imported manifests = %v, want %v", ref, got, want[ref])
+		}
+	}
+
+	if sum, err := sy.Run(t.Context(), nil); err != nil || sum.Errors != 0 {
+		t.Fatalf("Run = %+v, %v", sum, err)
+	}
+	for _, ref := range sessions {
+		p, _, err := sy.current("session", ref.Agent, ref.Key)
+		if err != nil || p == nil || !slices.ContainsFunc(p.Manifest.Snapshots, func(s state.SnapshotEntry) bool { return s.ID == want[ref][0] }) {
+			t.Fatalf("%v republished manifest lacks snapshot %s: %v", ref, want[ref][0], err)
+		}
+	}
+
+	if err := os.RemoveAll(filepath.Join(bucketDir, "v3", "machines", testenv.MachineID, "records", "manifest")); err != nil {
+		t.Fatal(err)
+	}
+	// The upgraded state forgets the deleted manifests, warm or cold.
+	if sum, err := open(t, stateDir).Run(t.Context(), nil); err != nil || sum.Errors != 0 {
+		t.Fatalf("warm Run after deleting copied manifests = %+v, %v", sum, err)
+	}
+	cold := open(t, t.TempDir())
+	if err := cold.Recover(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range sessions {
+		if got := snapshots(t, cold, ref); !slices.Contains(got, want[ref][0]) {
+			t.Fatalf("%v post_hoc snapshots after deleting copied manifests = %v, want %v", ref, got, want[ref])
+		}
+	}
+	if pending, err := cold.db.PendingManifests(); len(pending) != 0 || err != nil {
+		t.Fatalf("pending after deleting copied manifests = %v, %v", pending, err)
+	}
 }

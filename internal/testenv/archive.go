@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 
@@ -422,38 +421,8 @@ func (a *Archive) audit(keys []string, read func(string) ([]byte, error)) error 
 					if !ok {
 						return fmt.Errorf("%s malformed transcript", key)
 					}
-					commit, ok := tr["commit"].(string)
-					if !ok {
-						return fmt.Errorf("%s missing transcript commit", key)
-					}
-					body, err := read(commit)
-					if err != nil {
-						return err
-					}
-					file, err := a.decode(commit, body)
-					if err != nil {
-						return err
-					}
-					size, ok := tr["size"].(float64)
-					if !ok {
-						return fmt.Errorf("%s missing transcript size", key)
-					}
-					if file.File == nil || file.Key != tr["key"] || tr["object"] != commit || tr["history"] != Stream(file.MachineID, "file", file.Agent, file.Key)+"commits/" || file.File.Size != int64(size) || file.File.SHA256 != tr["sha256"] {
-						return fmt.Errorf("%s transcript differs from referenced commit %s", key, commit)
-					}
-					encoded, err := json.Marshal(tr["pieces"])
-					if err != nil {
-						return err
-					}
-					var pieces []raw.Piece
-					if err := json.Unmarshal(encoded, &pieces); err != nil {
-						return err
-					}
-					if !reflect.DeepEqual(pieces, file.File.Pieces) {
-						return fmt.Errorf("%s transcript pieces differ from referenced commit", key)
-					}
-					for _, piece := range pieces {
-						referenced[piece.Object] = true
+					if err := a.checkStreamReference(r, tr, read); err != nil {
+						return fmt.Errorf("%s: %w", key, err)
 					}
 				}
 			}
@@ -483,6 +452,37 @@ func (a *Archive) audit(keys []string, read func(string) ([]byte, error)) error 
 		if strings.HasPrefix(key, "v3/blobs/") && !referenced[key] {
 			return fmt.Errorf("unattributed blob %s", key)
 		}
+	}
+	return nil
+}
+
+// checkStreamReference checks a transcript that names its file stream: the manifest must
+// depend on exactly one of that stream's commits, showing the file in this session with this role.
+func (a *Archive) checkStreamReference(r Record, tr map[string]any, read func(string) ([]byte, error)) error {
+	key, _ := tr["key"].(string)
+	history := Stream(r.MachineID, "file", r.Agent, key) + "commits/"
+	if tr["history"] != history || len(tr) != 3 {
+		return fmt.Errorf("transcript %q is not a stream reference", key)
+	}
+	var anchors []string
+	for _, d := range r.Dependencies {
+		if strings.HasPrefix(d.Object, history) {
+			anchors = append(anchors, d.Object)
+		}
+	}
+	if len(anchors) != 1 {
+		return fmt.Errorf("transcript %q has %d commit dependencies", key, len(anchors))
+	}
+	body, err := read(anchors[0])
+	if err != nil {
+		return err
+	}
+	file, err := a.decode(anchors[0], body)
+	if err != nil {
+		return err
+	}
+	if file.File == nil || file.Key != key || file.File.Identity.SessionKey != r.Key || file.File.Role != tr["role"] {
+		return fmt.Errorf("transcript %q commit is not this session's", key)
 	}
 	return nil
 }

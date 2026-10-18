@@ -26,6 +26,14 @@ import (
 
 const maxRecordSize = 16 << 20
 
+// manifestSchema 4 references file streams under records/session/. Schema 3 manifests, under
+// records/manifest/, copied every generation; the collector still reads them, so a session that
+// has only one is republished, but never writes them.
+const (
+	manifestSchema       = 4
+	copiedManifestSchema = 3
+)
+
 type dependency struct {
 	Object    string `json:"object"`
 	SHA256    string `json:"sha256"`
@@ -35,19 +43,33 @@ type dependency struct {
 	RawSize   int64  `json:"raw_size,omitempty"`
 }
 
+// transcript names a file stream; readers follow History to its current generation, so an
+// append to the file leaves the manifest unchanged.
 type transcript struct {
-	Key          string          `json:"key"`
-	Role         adapters.Role   `json:"role"`
-	Size         int64           `json:"size"`
-	SHA256       string          `json:"sha256"`
-	LineCount    int64           `json:"line_count"`
-	PrefixSHA256 string          `json:"prefix_sha256,omitempty"`
-	Head         map[string]any  `json:"head,omitempty"`
-	Object       string          `json:"object"`
-	Pieces       []raw.Piece     `json:"pieces"`
-	Versions     []state.Version `json:"versions"`
-	Commit       string          `json:"commit"`
-	History      string          `json:"history"`
+	Key     string        `json:"key"`
+	Role    adapters.Role `json:"role"`
+	History string        `json:"history"`
+	*CopiedGeneration
+}
+
+// CopiedGeneration is what a schema 3 manifest repeated beside each history.
+type CopiedGeneration struct {
+	Size         int64          `json:"size"`
+	SHA256       string         `json:"sha256"`
+	LineCount    int64          `json:"line_count"`
+	PrefixSHA256 string         `json:"prefix_sha256,omitempty"`
+	Head         map[string]any `json:"head,omitempty"`
+	Object       string         `json:"object"`
+	Pieces       []raw.Piece    `json:"pieces"`
+	Versions     []version      `json:"versions"`
+	Commit       string         `json:"commit"`
+}
+
+type version struct {
+	SHA256      string      `json:"sha256"`
+	Size        int64       `json:"size"`
+	VersionedAt float64     `json:"versioned_at"`
+	Pieces      []raw.Piece `json:"pieces"`
 }
 
 type deletion struct {
@@ -174,7 +196,7 @@ func (p *publication) validatePayload(machine string) error {
 			return errors.New("archive: missing file payload")
 		}
 		return p.validateFile(machine)
-	case "manifest":
+	case "session", "manifest":
 		return p.validateManifest()
 	case "launch":
 		if p.Launch != nil && !utf8.ValidString(p.Launch.Root) {

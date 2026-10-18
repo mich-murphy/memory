@@ -340,11 +340,11 @@ func TestMetadataOnlyReclassificationReusesPiecesAndMovesManifestMembership(t *t
 	if p.File.Kind != "capture" || p.Parent == "" || sum.BytesUploaded != 0 || !slices.Equal(p.File.Pieces, first.File.Pieces) {
 		t.Fatalf("metadata capture = %+v, %+v", p.File, sum)
 	}
-	old, _, err := f.sy.current("manifest", f.sf.Agent, "old")
+	old, _, err := f.sy.current("session", f.sf.Agent, "old")
 	if err != nil {
 		t.Fatal(err)
 	}
-	next, _, err := f.sy.current("manifest", f.sf.Agent, "new")
+	next, _, err := f.sy.current("session", f.sf.Agent, "new")
 	if err != nil {
 		t.Fatal(err)
 	}

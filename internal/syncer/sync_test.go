@@ -87,28 +87,6 @@ func readBlob(t *testing.T, e *testenv.Env, key string) []byte {
 	return data
 }
 
-func toPieces(t *testing.T, v any) []raw.Piece {
-	t.Helper()
-	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var pieces []raw.Piece
-	if err := json.Unmarshal(b, &pieces); err != nil {
-		t.Fatal(err)
-	}
-	return pieces
-}
-
-func readPieces(t *testing.T, e *testenv.Env, v any) []byte {
-	t.Helper()
-	data, err := testenv.Pieces(toPieces(t, v), e.ReadObject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return data
-}
-
 func mainTranscript(t *testing.T, m map[string]any) map[string]any {
 	t.Helper()
 	for _, f := range m["transcripts"].([]any) {
@@ -118,6 +96,30 @@ func mainTranscript(t *testing.T, m map[string]any) map[string]any {
 	}
 	t.Fatal("no main transcript")
 	return nil
+}
+
+// generations resolves a manifest transcript to its stream's history, oldest first.
+func generations(t *testing.T, e *testenv.Env, tr map[string]any) []*raw.Generation {
+	t.Helper()
+	var out []*raw.Generation
+	records := e.Records(strings.TrimSuffix(tr["history"].(string), "commits/"))
+	for i := range records {
+		out = append(out, records[i].File)
+	}
+	if len(out) == 0 {
+		t.Fatalf("no history for %v", tr["key"])
+	}
+	return out
+}
+
+func currentGeneration(t *testing.T, e *testenv.Env, tr map[string]any) *raw.Generation {
+	t.Helper()
+	history := generations(t, e, tr)
+	return history[len(history)-1]
+}
+
+func claudeManifests(e *testenv.Env) int {
+	return len(e.Records(testenv.Stream(testenv.MachineID, "session", "claude", claudeKey)))
 }
 
 func list(v any) []any {
@@ -174,9 +176,9 @@ func TestSweepCapturesEveryAgentDirAndIsIdempotent(t *testing.T) {
 		fileStream("codex", "memories/notes.md"),
 		fileStream("pi", "sessions/--home-code-proj--/"+piKey+".jsonl"),
 		fileStream("pi", "AGENTS.md"),
-		testenv.Stream(testenv.MachineID, "manifest", "claude", claudeKey),
-		testenv.Stream(testenv.MachineID, "manifest", "codex", codexKey),
-		testenv.Stream(testenv.MachineID, "manifest", "pi", testenv.PiSessionKey),
+		testenv.Stream(testenv.MachineID, "session", "claude", claudeKey),
+		testenv.Stream(testenv.MachineID, "session", "codex", codexKey),
+		testenv.Stream(testenv.MachineID, "session", "pi", testenv.PiSessionKey),
 	} {
 		if !e.HasStream(k) {
 			t.Errorf("missing %s", k)
@@ -192,7 +194,7 @@ func TestSweepCapturesEveryAgentDirAndIsIdempotent(t *testing.T) {
 
 	m := e.Manifest("claude", claudeKey)
 	info := m["info"].(map[string]any)
-	if m["schema"] != 3.0 || m["machine_id"] != "testbox" || m["hostname"] == "" {
+	if m["schema"] != 4.0 || m["machine_id"] != "testbox" || m["hostname"] == "" {
 		t.Errorf("manifest header: schema %v machine %v hostname %v", m["schema"], m["machine_id"], m["hostname"])
 	}
 	if info["session_id"] != claudeSID || info["cwd"] != e.Project {
@@ -208,11 +210,11 @@ func TestSweepCapturesEveryAgentDirAndIsIdempotent(t *testing.T) {
 		}
 	}
 	main := mainTranscript(t, m)
-	if main["line_count"] != 2.0 || main["prefix_sha256"] == nil || main["head"].(map[string]any)["session_id"] != claudeSID {
-		t.Errorf("main transcript = %v", main)
+	if g := currentGeneration(t, e, main); g.LineCount != 2 || g.PrefixSHA256 == "" || g.Head["session_id"] != claudeSID {
+		t.Errorf("main transcript = %v", g)
 	}
-	if len(list(main["versions"])) != 0 {
-		t.Errorf("versions = %v", main["versions"])
+	if len(main) != 3 {
+		t.Errorf("main transcript copies its generation: %v", main)
 	}
 	snap := list(m["snapshots"])[0].(map[string]any)
 	if snap["timing"] != "post_hoc" || snap["git"].(map[string]any)["branch"] != "main" {
@@ -360,15 +362,12 @@ func TestAppendedSessionUploadsOnlyNewBytesThenFolds(t *testing.T) {
 	if !bytes.Equal(readObject(t, e, key), now) {
 		t.Error("rebuilt object differs")
 	}
+	if n := claudeManifests(e); n != 1 {
+		t.Errorf("an append published %d manifests, want the first one only", n)
+	}
 	main := mainTranscript(t, e.Manifest("claude", claudeKey))
-	if main["size"] != float64(len(now)) || main["line_count"] != 3.0 || len(list(main["versions"])) != 1 {
-		t.Errorf("main = %v", main)
-	}
-	if starts := toPieces(t, main["pieces"]); len(starts) != 2 || starts[0].Start != 0 || starts[1].Start != first {
-		t.Errorf("pieces = %v", starts)
-	}
-	if !bytes.Equal(readPieces(t, e, main["pieces"]), now) {
-		t.Error("pieces don't rebuild the file")
+	if g := currentGeneration(t, e, main); g.Size != int64(len(now)) || g.LineCount != 3 || len(g.Pieces) != 2 || g.Pieces[1].Start != first {
+		t.Errorf("main = %v", g)
 	}
 	appendArchivePieces(t, path, 62)
 	now = readFile(t, path)
@@ -387,9 +386,8 @@ func TestAppendedSessionUploadsOnlyNewBytesThenFolds(t *testing.T) {
 			t.Errorf("fold removed or rewrote %s", object)
 		}
 	}
-	main = mainTranscript(t, e.Manifest("claude", claudeKey))
-	if diff := cmp.Diff(history[len(history)-1].File.Pieces, toPieces(t, main["pieces"])); diff != "" {
-		t.Errorf("fold manifest pieces:\n%s", diff)
+	if n := claudeManifests(e); n != 1 {
+		t.Errorf("a fold published %d manifests, want the first one only", n)
 	}
 	before = mtimes(t, e)
 	mustRun(t, "sync", "--quiet")
@@ -398,9 +396,9 @@ func TestAppendedSessionUploadsOnlyNewBytesThenFolds(t *testing.T) {
 	}
 }
 
-// TestAChangeToASessionsOtherFilesRefreshesItsManifest changes only a tool result, which has
-// no head to read.
-func TestAChangeToASessionsOtherFilesRefreshesItsManifest(t *testing.T) {
+// TestAChangeToASessionsOtherFilesReachesItsManifest changes only a tool result, which has
+// no head to read: the manifest's reference resolves to the new content without a new manifest.
+func TestAChangeToASessionsOtherFilesReachesItsManifest(t *testing.T) {
 	e := testenv.New(t)
 	mustRun(t, "sync", "--quiet")
 	const text = "bigger output\n"
@@ -409,11 +407,66 @@ func TestAChangeToASessionsOtherFilesRefreshesItsManifest(t *testing.T) {
 	var listed []any
 	for _, f := range list(e.Manifest("claude", claudeKey)["transcripts"]) {
 		if tr := f.(map[string]any); tr["role"] == "tool_result" {
-			listed = append(listed, tr["sha256"])
+			listed = append(listed, currentGeneration(t, e, tr).SHA256)
 		}
 	}
 	if diff := cmp.Diff([]any{raw.SHA256([]byte(text))}, listed); diff != "" {
-		t.Errorf("tool result sha256 in the manifest (-want +got):\n%s", diff)
+		t.Errorf("tool result sha256 through the manifest (-want +got):\n%s", diff)
+	}
+	if n := claudeManifests(e); n != 1 {
+		t.Errorf("a rewrite published %d manifests, want the first one only", n)
+	}
+}
+
+// TestANewFileInASessionRefreshesItsManifest adds a subagent transcript, which the manifest
+// has to list.
+func TestANewFileInASessionRefreshesItsManifest(t *testing.T) {
+	e := testenv.New(t)
+	mustRun(t, "sync", "--quiet")
+	key := "projects/" + slug + "/" + claudeSID + "/subagents/agent-new.jsonl"
+	testenv.Write(t, filepath.Join(e.ClaudeSlug, claudeSID, "subagents", "agent-new.jsonl"), testenv.JSONL(t, map[string]any{"type": "user", "sessionId": claudeSID, "agentId": "new"}))
+	mustRun(t, "sync", "--quiet")
+	found := false
+	for _, f := range list(e.Manifest("claude", claudeKey)["transcripts"]) {
+		found = found || f.(map[string]any)["key"] == key
+	}
+	if !found || claudeManifests(e) != 2 {
+		t.Errorf("new subagent listed %v, manifests %d, want listed in a second manifest", found, claudeManifests(e))
+	}
+}
+
+// A state from before file anchors were recorded finds them in each file's history.
+func TestAStateWithoutFileAnchorsDependsOnTheSameCommits(t *testing.T) {
+	e := testenv.New(t)
+	mustRun(t, "sync", "--quiet")
+	stream := testenv.Stream(testenv.MachineID, "session", "claude", claudeKey)
+	fileDeps := func(r testenv.Record) []string {
+		var keys []string
+		for _, d := range r.Dependencies {
+			if strings.Contains(d.Object, "/records/file/") {
+				keys = append(keys, d.Object)
+			}
+		}
+		return keys
+	}
+	before := fileDeps(e.Records(stream)[0])
+	// An append moves the main transcript's tip but not its anchor.
+	main := filepath.Join(e.ClaudeSlug, claudeSID+".jsonl")
+	testenv.Append(t, main, testenv.JSONL(t, map[string]any{"type": "user", "sessionId": claudeSID}))
+	testenv.Backdate(t, main, time.Hour)
+	mustRun(t, "sync", "--quiet")
+	execSQL(t, filepath.Join(e.State, "state.sqlite3"), "DELETE FROM file_anchors")
+	testenv.Write(t, filepath.Join(e.ClaudeSlug, claudeSID, "subagents", "agent-new.jsonl"), testenv.JSONL(t, map[string]any{"type": "user", "sessionId": claudeSID, "agentId": "new"}))
+	mustRun(t, "sync", "--quiet")
+	records := e.Records(stream)
+	after := fileDeps(records[len(records)-1])
+	if len(records) != 2 || len(after) != len(before)+1 {
+		t.Fatalf("manifests %d, file dependencies %d -> %d, want one more in a second manifest", len(records), len(before), len(after))
+	}
+	for _, key := range before {
+		if !slices.Contains(after, key) {
+			t.Errorf("rebuilt anchors dropped %s", key)
+		}
 	}
 }
 
@@ -434,12 +487,11 @@ func TestRewrittenFileKeepsItsEarlierVersion(t *testing.T) {
 	if !bytes.Equal(readObject(t, e, fileStream("claude", key)), readFile(t, path)) {
 		t.Error("object doesn't hold the new bytes")
 	}
-	versions := list(mainTranscript(t, e.Manifest("claude", claudeKey))["versions"])
-	if len(versions) != 1 {
+	versions := generations(t, e, mainTranscript(t, e.Manifest("claude", claudeKey)))
+	if len(versions) != 2 {
 		t.Fatalf("versions = %v", versions)
 	}
-	v := versions[0].(map[string]any)
-	if v["sha256"] != oldSHA || v["size"] != float64(len(old)) || !bytes.Equal(readPieces(t, e, v["pieces"]), old) {
+	if v := versions[0]; v.SHA256 != oldSHA || v.Size != int64(len(old)) || !bytes.Equal(e.GenerationContent(v), old) {
 		t.Errorf("version = %v", v)
 	}
 	if history[1].Parent != history[0].ID || history[1].File.SHA256 != raw.SHA256(readFile(t, path)) {
@@ -459,15 +511,15 @@ func TestRewriteOfAFileWithSegmentsKeepsEveryPiece(t *testing.T) {
 	testenv.Write(t, path, testenv.JSONL(t, map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "rewritten"}}))
 	testenv.Backdate(t, path, 2*time.Minute)
 	mustRun(t, "sync", "--quiet")
-	versions := list(mainTranscript(t, e.Manifest("claude", claudeKey))["versions"])
-	if len(versions) != 2 {
+	versions := generations(t, e, mainTranscript(t, e.Manifest("claude", claudeKey)))
+	if len(versions) != 3 {
 		t.Fatalf("versions = %v", versions)
 	}
-	pieces := toPieces(t, versions[1].(map[string]any)["pieces"])
+	pieces := versions[1].Pieces
 	if len(pieces) != 2 || !strings.HasPrefix(pieces[0].Object, "v3/blobs/zstd/") || !strings.HasPrefix(pieces[1].Object, "v3/blobs/zstd/") {
 		t.Errorf("version pieces = %v", pieces)
 	}
-	if !bytes.Equal(readPieces(t, e, versions[1].(map[string]any)["pieces"]), grown) {
+	if !bytes.Equal(e.GenerationContent(versions[1]), grown) {
 		t.Error("version doesn't rebuild the grown file")
 	}
 	if !bytes.Equal(readObject(t, e, key), readFile(t, path)) {
@@ -632,12 +684,8 @@ func TestLargeFilesStreamAndKeepVersions(t *testing.T) {
 	testenv.Write(t, path, strings.Repeat(`{"type":"session","version":3,"id":"replaced"}`+"\n", 3))
 	testenv.Backdate(t, path, 2*time.Minute)
 	mustRun(t, "sync", "--quiet")
-	main := mainTranscript(t, e.Manifest("pi", testenv.PiSessionKey))
-	if main["line_count"] != 3.0 {
-		t.Errorf("line_count = %v", main["line_count"])
-	}
-	versions := list(main["versions"])
-	if len(versions) != 2 || !bytes.Equal(readPieces(t, e, versions[1].(map[string]any)["pieces"]), before) {
+	versions := generations(t, e, mainTranscript(t, e.Manifest("pi", testenv.PiSessionKey)))
+	if n := len(versions); n != 3 || versions[n-1].LineCount != 3 || !bytes.Equal(e.GenerationContent(versions[n-2]), before) {
 		t.Errorf("versions = %v", versions)
 	}
 	if !bytes.Equal(readObject(t, e, key), readFile(t, path)) {
@@ -855,11 +903,11 @@ func TestMissingOrForeignHookPathIsHarmless(t *testing.T) {
 	}
 	var manifests []string
 	for _, k := range e.BucketKeys() {
-		if strings.Contains(k, "/records/manifest/") && strings.Contains(k, "/commits/") {
+		if strings.Contains(k, "/records/session/") && strings.Contains(k, "/commits/") {
 			manifests = append(manifests, k)
 		}
 	}
-	expected := e.Records(testenv.Stream(testenv.MachineID, "manifest", "claude", claudeKey))
+	expected := e.Records(testenv.Stream(testenv.MachineID, "session", "claude", claudeKey))
 	if len(manifests) != len(expected) || len(expected) == 0 {
 		t.Errorf("unexpected manifest streams: %v", manifests)
 	}

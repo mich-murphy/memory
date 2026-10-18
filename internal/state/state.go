@@ -88,14 +88,8 @@ CREATE TABLE IF NOT EXISTS strays (
     object TEXT NOT NULL,
     PRIMARY KEY (key, object)
 );
-CREATE TABLE IF NOT EXISTS raw_versions (
-    key TEXT NOT NULL,
-    sha256 TEXT NOT NULL,
-    size INTEGER,
-    pieces TEXT NOT NULL,
-    versioned_at REAL NOT NULL,
-    PRIMARY KEY (key, sha256)
-);
+DROP TABLE IF EXISTS raw_versions;
+CREATE TABLE IF NOT EXISTS file_anchors (key TEXT PRIMARY KEY, record TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (
     agent TEXT NOT NULL,
     session_key TEXT NOT NULL,
@@ -425,35 +419,6 @@ func (s *State) SetPieces(key string, pieces []raw.Piece) error {
 
 func (s *State) AddPiece(key string, p raw.Piece) error {
 	return s.exec("INSERT OR REPLACE INTO pieces VALUES (?,?,?,?,?)", key, p.Start, p.End, p.SHA256, p.Object)
-}
-
-type Version struct {
-	SHA256      string      `json:"sha256"`
-	Size        int64       `json:"size"`
-	VersionedAt float64     `json:"versioned_at"`
-	Pieces      []raw.Piece `json:"pieces"`
-}
-
-func (s *State) RecordVersion(key string, v *Version) error {
-	pieces, err := json.Marshal(v.Pieces)
-	if err != nil {
-		return fmt.Errorf("state: %w", err)
-	}
-	return s.exec("INSERT OR IGNORE INTO raw_versions VALUES (?,?,?,?,?)", key, v.SHA256, v.Size, string(pieces), v.VersionedAt)
-}
-
-func (s *State) Versions(key string) ([]Version, error) {
-	return queryAll(s, "SELECT sha256, size, pieces, versioned_at FROM raw_versions WHERE key = ? ORDER BY versioned_at",
-		[]any{key}, func(rows *sql.Rows, v *Version) error {
-			var pieces string
-			if err := rows.Scan(&v.SHA256, &v.Size, &pieces, &v.VersionedAt); err != nil {
-				return err
-			}
-			if err := json.Unmarshal([]byte(pieces), &v.Pieces); err != nil {
-				return fmt.Errorf("version pieces of %s: %w", key, err)
-			}
-			return nil
-		})
 }
 
 type Session struct {

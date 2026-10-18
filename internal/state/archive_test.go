@@ -123,7 +123,7 @@ func TestSessionMetadataUsesCanonicalLaunchOrderAndMainFileEvidence(t *testing.T
 	check(t, db.CommitFile(Record{Key: "main-commit", Kind: "file", Body: []byte("main")}, "main", g, nil))
 	// An older manifest carries stale Info despite current independently committed evidence.
 	stale := &Session{Info: map[string]any{"cwd": "stale-manifest"}, Launches: entries, FirstSeen: 100}
-	check(t, db.CommitSession(Record{Key: "manifest", Kind: "manifest", Body: []byte("manifest")}, ref, stale, SessionManifestStale))
+	check(t, db.CommitSession(Record{Key: "manifest", Kind: "session", Body: []byte("manifest")}, ref, stale, SessionManifestStale))
 	got, err = db.Session(ref)
 	check(t, err)
 	if got.Info["cwd"] != "current-main" || got.Info["model"] != "observed-model" || got.Info["source_root"] != "main-root" {
@@ -136,5 +136,60 @@ func TestSessionMetadataUsesCanonicalLaunchOrderAndMainFileEvidence(t *testing.T
 	check(t, err)
 	if got.Info["cwd"] != "current-main" {
 		t.Fatalf("late launch metadata = %+v, want current main-file observation", got.Info)
+	}
+}
+
+func TestPruningForgetsCopiedManifestsOnlyOfRepublishedSessions(t *testing.T) {
+	db := open(t)
+	republished := adapters.SessionRef{Agent: "claude", Key: "republished"}
+	waiting := adapters.SessionRef{Agent: "claude", Key: "waiting"}
+	copied := map[adapters.SessionRef]string{republished: "records/manifest/a/commits/1.json", waiting: "records/manifest/b/commits/1.json"}
+	streams := map[adapters.SessionRef]string{republished: "a", waiting: "b"}
+	for ref, key := range copied {
+		check(t, db.CommitSession(Record{Key: key, Kind: "manifest", Stream: streams[ref], Sequence: 1, Committed: true, Body: []byte("copied")}, ref, &Session{FirstSeen: 1}, SessionManifestStale))
+		check(t, db.MarkArchiveSeen(key, "scan"))
+	}
+	check(t, db.CommitSession(Record{Key: "records/session/a/commits/1.json", Kind: "session", Stream: "a", Sequence: 1, Committed: true, Body: []byte("references")}, republished, &Session{FirstSeen: 1}, SessionManifestCurrent))
+	check(t, db.PruneCopiedManifests())
+
+	if record, err := db.ArchiveRecord(copied[republished]); record != nil || err != nil {
+		t.Fatalf("republished session's copied manifest = %v, %v; want forgotten", record, err)
+	}
+	if applied, err := db.ArchiveApplied(copied[republished]); applied || err != nil {
+		t.Fatalf("republished session's copied manifest applied = %v, %v; want forgotten", applied, err)
+	}
+	if missing, err := db.MissingArchive("records/manifest/a/", "other"); missing != "" || err != nil {
+		t.Fatalf("missing after prune = %q, %v", missing, err)
+	}
+	if record, err := db.ArchiveRecord(copied[waiting]); record == nil || err != nil {
+		t.Fatalf("waiting session's copied manifest = %v, %v; want kept until it is republished", record, err)
+	}
+}
+
+func TestFileAnchorMovesOnlyWhenSessionOrRoleChanges(t *testing.T) {
+	db := open(t)
+	gen := func(session string, role adapters.Role) *raw.Generation {
+		return &raw.Generation{Identity: raw.Identity{Agent: "claude", Key: "f", SessionKey: session}, Role: string(role), Sources: []raw.Source{{Path: "/f"}}}
+	}
+	steps := []struct {
+		record string
+		g      *raw.Generation
+		want   string
+	}{
+		{"capture", gen("s", adapters.RoleMain), "capture"},
+		{"append", gen("s", adapters.RoleMain), "capture"},
+		{"role", gen("s", adapters.RoleSuperseded), "role"},
+		{"move", gen("t", adapters.RoleSuperseded), "move"},
+		{"again", gen("t", adapters.RoleSuperseded), "move"},
+	}
+	var previous *raw.Generation
+	for _, step := range steps {
+		check(t, db.CommitFile(Record{Key: step.record, Kind: "file", Body: []byte(step.record)}, "f", step.g, previous))
+		got, err := db.FileAnchor("f")
+		check(t, err)
+		if got != step.want {
+			t.Fatalf("anchor after %s = %q, want %q", step.record, got, step.want)
+		}
+		previous = step.g
 	}
 }

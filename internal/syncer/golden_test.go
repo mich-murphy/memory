@@ -165,7 +165,7 @@ func archiveIDs(t *testing.T, m *memStore, w *testenv.Workload, dir string) (*st
 			if r.Kind == "launch" {
 				rank = 1
 			}
-			if r.Kind == "manifest" {
+			if r.Kind == "session" {
 				rank = 2
 			}
 			items = append(items, item{key, r.ID, fmt.Sprintf("%s/%s/%s/%020d", r.Kind, r.Agent, normalise([]byte(r.Key), w, dir), r.Sequence), rank})

@@ -1,0 +1,3 @@
+model = "gpt-5"
+[mcp_servers.gh.env]
+GITHUB_TOKEN = "[redacted]"

@@ -3,7 +3,6 @@ package syncer
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -557,8 +556,6 @@ func (s *sim) check(name string) {
 	}
 }
 
-// checkManifests rebuilds every transcript a manifest lists from its pieces, each of which must
-// hold the bytes its sha256 names, and compares those still on disk with the file.
 func memRead(b *memStore) func(string) ([]byte, error) {
 	return func(key string) ([]byte, error) {
 		o, ok := b.objects[key]
@@ -569,6 +566,8 @@ func memRead(b *memStore) func(string) ([]byte, error) {
 	}
 }
 
+// checkManifests rebuilds the current generation of every stream a manifest lists, which must
+// hold the bytes its sha256 names, and compares those still on disk with the file.
 func (s *sim) checkManifests(name string) {
 	s.t.Helper()
 	files := map[string]string{}
@@ -577,7 +576,7 @@ func (s *sim) checkManifests(name string) {
 	}
 	prefixes := map[string]bool{}
 	for key := range s.r.bucket.objects {
-		if strings.Contains(key, "/records/manifest/") && strings.Contains(key, "/commits/") {
+		if strings.Contains(key, "/records/session/") && strings.Contains(key, "/commits/") {
 			prefix, _, _ := strings.Cut(key, "commits/")
 			prefixes[prefix] = true
 		}
@@ -596,19 +595,21 @@ func (s *sim) checkManifests(name string) {
 			r := &records[i]
 			for _, v := range listManifest(r.Manifest["transcripts"]) {
 				tr := v.(map[string]any)
-				body, err := s.archive.Pieces(decodePieces(s.t, tr["pieces"]))
+				stream := strings.TrimSuffix(tr["history"].(string), "commits/")
+				history, err := s.archive.Chain(stream)
+				if err != nil || len(history) == 0 {
+					s.t.Fatalf("%s transcript %v has no history: %v", r.Object, tr["key"], err)
+				}
+				g := history[len(history)-1].File
+				body, err := s.archive.Content(g)
 				if err != nil {
 					s.t.Fatal(err)
 				}
-				if int64(len(body)) != int64(tr["size"].(float64)) || raw.SHA256(body) != tr["sha256"] {
+				if int64(len(body)) != g.Size || raw.SHA256(body) != g.SHA256 {
 					s.t.Fatalf("%s transcript full hash/size mismatch", r.Object)
 				}
-				// Earlier immutable manifests describe earlier content, not the current disk.
-				if r.ID != records[len(records)-1].ID {
-					continue
-				}
-				path, ok := files[strings.TrimSuffix(tr["history"].(string), "commits/")]
-				if !ok {
+				path, ok := files[stream]
+				if !ok || g.DeletedAt != 0 {
 					continue
 				}
 				if want := s.expected(path); !bytes.Equal(body, want) {
@@ -620,19 +621,6 @@ func (s *sim) checkManifests(name string) {
 }
 
 func listManifest(v any) []any { out, _ := v.([]any); return out }
-
-func decodePieces(t *testing.T, v any) []raw.Piece {
-	t.Helper()
-	body, err := json.Marshal(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var pieces []raw.Piece
-	if err := json.Unmarshal(body, &pieces); err != nil {
-		t.Fatal(err)
-	}
-	return pieces
-}
 
 func (s *sim) checkTombstone(name, path string) {
 	records, err := s.archive.Chain(s.keyOf(path))

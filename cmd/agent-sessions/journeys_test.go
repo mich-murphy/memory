@@ -146,7 +146,7 @@ func TestAcceptancePiChildAndLateMetadata(t *testing.T) {
 	if !bytes.Equal(r.content(childRecord), child) {
 		t.Error("child transcript bytes differ")
 	}
-	manifest := r.latest("manifest", "pi", parent.File.Identity.SessionKey).Manifest
+	manifest := r.latest("session", "pi", parent.File.Identity.SessionKey).Manifest
 	found := slices.ContainsFunc(manifest.Transcripts, func(transcript struct {
 		Key  string `json:"key"`
 		Role string `json:"role"`
@@ -163,7 +163,7 @@ func TestAcceptancePiChildAndLateMetadata(t *testing.T) {
 	before := r.inventory()
 	r.cold()
 	r.cli("sync", "--agent", "pi")
-	recovered := r.latest("manifest", "pi", parent.File.Identity.SessionKey).Manifest
+	recovered := r.latest("session", "pi", parent.File.Identity.SessionKey).Manifest
 	if diff := cmp.Diff(manifest.Info, recovered.Info); diff != "" {
 		t.Errorf("cold manifest info differs (-want +got):\n%s", diff)
 	}

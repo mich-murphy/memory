@@ -50,6 +50,10 @@ const (
 	RoleUnknown      Role = "unknown"
 )
 
+var roles = []Role{RoleMain, RoleSubagent, RoleToolResult, RoleSuperseded, RoleAux, RoleFileHistory, RoleSessionEnv, RoleDebug, RoleTodo, RoleTask, RoleTeam, RolePlan, RolePaste, RoleUsage, RoleMemory, RoleHistory, RoleLiveness, RoleExperimental, RoleConfig, RoleLog, RoleDB, RoleUnknown}
+
+func (r Role) Valid() bool { return slices.Contains(roles, r) }
+
 type SessionFile struct {
 	Agent string
 	Root  string

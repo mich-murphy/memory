@@ -160,7 +160,7 @@ func TestAFailedUploadIsCountedAndRetriedNextRun(t *testing.T) {
 	key := fileStream("claude", "plans/brave-plan.md")
 	claudeRules := "v3/blobs/plain/" + raw.SHA256(readFile(t, filepath.Join(e.Claude, "CLAUDE.md")))
 	manifest := func(agent, session string) string {
-		return testenv.Stream(testenv.MachineID, "manifest", agent, session)
+		return testenv.Stream(testenv.MachineID, "session", agent, session)
 	}
 	faults := &flakyStore{Store: local, fail: []string{key + "plans/", claudeRules, manifest("codex", codexKey) + "plans/"}}
 	first := sweep(t, faults)
@@ -260,8 +260,8 @@ func TestAFoldWhoseAnswerWasLostRemainsReadableAfterAnotherAppend(t *testing.T) 
 	testenv.Backdate(t, path, 2*time.Minute)
 	sweep(t, local)
 	main := mainTranscript(t, e.Manifest("claude", claudeKey))
-	if !bytes.Equal(readPieces(t, e, main["pieces"]), readFile(t, path)) {
-		t.Error("the manifest's pieces don't rebuild the file")
+	if !bytes.Equal(e.GenerationContent(currentGeneration(t, e, main)), readFile(t, path)) {
+		t.Error("the manifest's stream doesn't rebuild the file")
 	}
 }
 
@@ -589,7 +589,7 @@ func appendArchivePieces(t *testing.T, path string, count int) {
 	for i := range count {
 		testenv.Append(t, path, testenv.JSONL(t, map[string]any{"type": "user", "message": fmt.Sprintf("piece %d", i)}))
 		testenv.Backdate(t, path, 2*time.Minute)
-		sy := syncer.New(cfg, store.NewLocal(cfg.LocalStore), db, ads, syncer.Options{Logger: slog.New(slog.DiscardHandler)})
+		sy := syncer.New(cfg, store.NewLocal(cfg.LocalStore), db, ads, syncer.Options{Logger: slog.New(slog.DiscardHandler), Version: "test"})
 		sum, err := sy.Run(t.Context(), []adapters.SessionFile{sf})
 		if err != nil || sum.Errors != 0 || sum.Segments != 1 {
 			t.Fatalf("append fixture = %+v, %v", sum, err)

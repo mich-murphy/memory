@@ -89,7 +89,7 @@ func TestLaunchRejectionsDoNotPublishOrProjectSession(t *testing.T) {
 				t.Fatalf("RecordEnvelope(%s) = %v, suppressed = %v", kind, err, wantSuppressed)
 			}
 			for key := range bucket.objects {
-				if strings.Contains(key, "/records/launch/") || strings.Contains(key, "/records/manifest/") {
+				if strings.Contains(key, "/records/launch/") || strings.Contains(key, "/records/session/") {
 					t.Fatalf("rejected/suppressed launch published %s", key)
 				}
 			}

@@ -60,7 +60,7 @@ func publicationFixture(tb testing.TB, count int) (*Syncer, *memStore, string, m
 func publishSnapshotFanout(tb testing.TB, sy *Syncer, id string, bodies map[string][]byte, sessions int) {
 	tb.Helper()
 	for i := range sessions {
-		p := branchPublication("manifest")
+		p := branchPublication("session")
 		p.Key = fmt.Sprintf("session%d", i)
 		p.Manifest.SessionKey = p.Key
 		p.Manifest.Snapshots = []state.SnapshotEntry{{ID: id, TakenAt: 1, Timing: "captured"}}
@@ -276,7 +276,7 @@ func TestDependencyWorkersAreGloballyBoundedAndCancelWithoutCommit(t *testing.T)
 func TestDependencyFailureWritesPlanButNeverCommit(t *testing.T) {
 	sy, bucket, id, bodies := publicationFixture(t, 40)
 	sy.bucket = &publicationProbeStore{Store: bucket, fail: true}
-	p := branchPublication("manifest")
+	p := branchPublication("session")
 	p.Manifest.Snapshots = []state.SnapshotEntry{{ID: id, TakenAt: 1, Timing: "captured"}}
 	var err error
 	p.Dependencies, err = sy.snapshotDependencies(t.Context(), id, bodies, "claude")

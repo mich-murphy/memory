@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -263,34 +264,88 @@ func (s *Syncer) newManifestDraft(ref adapters.SessionRef) (*manifestDraft, erro
 	if root != "" {
 		sess.Info["source_root"] = root
 	}
-	m := &manifest{Schema: 3, Agent: ref.Agent, MachineID: s.cfg.MachineID, Hostname: s.cfg.Hostname, SessionKey: ref.Key, Info: sess.Info, Transcripts: []transcript{}, Launches: []launchRecord{}, Snapshots: orEmpty(slices.Clone(sess.Snapshots)), DeletedLocally: []deletion{}, FirstSeen: sess.FirstSeen, CollectorVersion: s.opts.Version}
-	p := &publication{Schema: 3, MachineID: s.cfg.MachineID, Kind: "manifest", Agent: ref.Agent, Key: ref.Key, Sequence: 1, Manifest: m, Dependencies: []dependency{}}
+	m := &manifest{Schema: manifestSchema, Agent: ref.Agent, MachineID: s.cfg.MachineID, Hostname: s.cfg.Hostname, SessionKey: ref.Key, Info: state.PublishedInfo(sess.Info), Transcripts: []transcript{}, Launches: []launchRecord{}, Snapshots: orEmpty(slices.Clone(sess.Snapshots)), DeletedLocally: []deletion{}, FirstSeen: sess.FirstSeen, CollectorVersion: s.opts.Version}
+	p := &publication{Schema: 3, MachineID: s.cfg.MachineID, Kind: "session", Agent: ref.Agent, Key: ref.Key, Sequence: 1, Manifest: m, Dependencies: []dependency{}}
 	return &manifestDraft{ref: ref, root: root, files: files, session: sess, publication: p, bodies: map[string][]byte{}}, nil
 }
 
 func (s *Syncer) attachCommittedFiles(draft *manifestDraft) error {
 	p := draft.publication
-	m := p.Manifest
-	for i := range draft.files {
-		file, r, err := s.current("file", draft.ref.Agent, draft.files[i].Key)
+	transcripts, deletions, deps, err := s.fileReferences(p.Agent, draft.files)
+	if err != nil {
+		return err
+	}
+	p.Manifest.Transcripts = append(p.Manifest.Transcripts, transcripts...)
+	p.Manifest.DeletedLocally = append(p.Manifest.DeletedLocally, deletions...)
+	p.Dependencies = append(p.Dependencies, deps...)
+	return nil
+}
+
+// fileReferences depends on the commit where each file joined the session with its current role,
+// rather than its current commit, which changes with every append.
+func (s *Syncer) fileReferences(agent string, files []state.File) ([]transcript, []deletion, []dependency, error) {
+	var transcripts []transcript
+	var deletions []deletion
+	var deps []dependency
+	for i := range files {
+		key := files[i].Key
+		file, _, err := s.current("file", agent, key)
 		if err != nil {
-			return err
+			return nil, nil, nil, err
 		}
 		if file == nil {
 			continue
 		}
-		g := file.File
-		versions, err := s.db.Versions(s.rawKey(p.Agent, file.Key))
+		anchor, err := s.fileAnchor(agent, key)
 		if err != nil {
-			return err
+			return nil, nil, nil, err
 		}
-		m.Transcripts = append(m.Transcripts, transcript{Key: file.Key, Role: adapters.Role(g.Role), Size: g.Size, SHA256: g.SHA256, LineCount: g.LineCount, PrefixSHA256: g.PrefixSHA256, Head: g.Head, Object: r.Key, Pieces: g.Pieces, Versions: versions, Commit: r.Key, History: s.publicationPrefix("file", p.Agent, file.Key) + "commits/"})
-		p.Dependencies = append(p.Dependencies, metadataDependency(r))
+		g := file.File
+		transcripts = append(transcripts, transcript{Key: key, Role: adapters.Role(g.Role), History: s.publicationPrefix("file", agent, key) + "commits/"})
+		deps = append(deps, metadataDependency(anchor))
 		if g.DeletedAt > 0 {
-			m.DeletedLocally = append(m.DeletedLocally, deletion{Key: file.Key, At: g.DeletedAt})
+			deletions = append(deletions, deletion{Key: key, At: g.DeletedAt})
 		}
 	}
-	return nil
+	return transcripts, deletions, deps, nil
+}
+
+// fileAnchor finds the commit by walking the file's history when the state hasn't recorded it,
+// as after an upgrade.
+func (s *Syncer) fileAnchor(agent, key string) (*state.Record, error) {
+	rk := s.rawKey(agent, key)
+	anchor, err := s.db.FileAnchor(rk)
+	if err != nil {
+		return nil, err
+	}
+	if anchor == "" {
+		var previous *raw.Generation
+		err := s.db.WalkArchive("file", streamID(agent, key), func(r state.Record) error {
+			if !r.Committed {
+				return nil
+			}
+			p, err := decodePublication(r.Body)
+			if err != nil {
+				return err
+			}
+			if state.Anchors(previous, p.File) {
+				anchor = r.Key
+			}
+			previous = p.File
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err := s.db.SetFileAnchor(rk, anchor); err != nil {
+			return nil, err
+		}
+	}
+	record, err := s.db.ArchiveRecord(anchor)
+	if err == nil && record == nil {
+		err = fmt.Errorf("archive: missing anchor of %s", key)
+	}
+	return record, err
 }
 
 func metadataDependency(record *state.Record) dependency {
@@ -363,7 +418,7 @@ func (s *Syncer) attachSnapshotDependencies(ctx context.Context, draft *manifest
 func (s *Syncer) finalizeManifest(draft *manifestDraft) (bool, error) {
 	p := draft.publication
 	m := p.Manifest
-	previous, r, err := s.current("manifest", p.Agent, p.Key)
+	previous, r, err := s.current("session", p.Agent, p.Key)
 	if err != nil {
 		return false, err
 	}

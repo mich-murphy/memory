@@ -1,0 +1,1 @@
+{"env":{"ANTHROPIC_API_KEY":"[redacted]"},"hooks":{"PreToolUse":[{"hooks":[{"command":"~/.claude/hooks/guard.sh","type":"command"}],"matcher":"Bash"}]},"model":"opus","statusLine":{"command":"python3 /tmp/TestWriteFixture1597198558/001/home/bin/status.py","type":"command"}}
