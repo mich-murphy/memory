@@ -435,6 +435,41 @@ func TestANewFileInASessionRefreshesItsManifest(t *testing.T) {
 	}
 }
 
+// A state from before file anchors were recorded finds them in each file's history.
+func TestAStateWithoutFileAnchorsDependsOnTheSameCommits(t *testing.T) {
+	e := testenv.New(t)
+	mustRun(t, "sync", "--quiet")
+	stream := testenv.Stream(testenv.MachineID, "session", "claude", claudeKey)
+	fileDeps := func(r testenv.Record) []string {
+		var keys []string
+		for _, d := range r.Dependencies {
+			if strings.Contains(d.Object, "/records/file/") {
+				keys = append(keys, d.Object)
+			}
+		}
+		return keys
+	}
+	before := fileDeps(e.Records(stream)[0])
+	// An append moves the main transcript's tip but not its anchor.
+	main := filepath.Join(e.ClaudeSlug, claudeSID+".jsonl")
+	testenv.Append(t, main, testenv.JSONL(t, map[string]any{"type": "user", "sessionId": claudeSID}))
+	testenv.Backdate(t, main, time.Hour)
+	mustRun(t, "sync", "--quiet")
+	execSQL(t, filepath.Join(e.State, "state.sqlite3"), "DELETE FROM file_anchors")
+	testenv.Write(t, filepath.Join(e.ClaudeSlug, claudeSID, "subagents", "agent-new.jsonl"), testenv.JSONL(t, map[string]any{"type": "user", "sessionId": claudeSID, "agentId": "new"}))
+	mustRun(t, "sync", "--quiet")
+	records := e.Records(stream)
+	after := fileDeps(records[len(records)-1])
+	if len(records) != 2 || len(after) != len(before)+1 {
+		t.Fatalf("manifests %d, file dependencies %d -> %d, want one more in a second manifest", len(records), len(before), len(after))
+	}
+	for _, key := range before {
+		if !slices.Contains(after, key) {
+			t.Errorf("rebuilt anchors dropped %s", key)
+		}
+	}
+}
+
 func TestRewrittenFileKeepsItsEarlierVersion(t *testing.T) {
 	e := testenv.New(t)
 	mustRun(t, "sync", "--quiet")

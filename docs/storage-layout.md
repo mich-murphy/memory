@@ -14,7 +14,7 @@ v3/blobs/plain/<sha256>
 v3/snapshots/sets/<set-id>.json
 ```
 
-`kind` is `file`, `session`, `launch` or `root`. `stream-id` is SHA-256 of the agent name,
+`kind` is `file`, `session`, `launch` or `root`, plus the retired `manifest`, which is read but never written. `stream-id` is SHA-256 of the agent name,
 a NUL byte, and the logical key. Sequences have 20 decimal digits. A descriptor hash is of its
 exact sorted compact JSON bytes; the plan and commit contain **identical bytes**. Nonfile
 dependency sets are sorted by object key and deduplicated before publication. New file
@@ -165,7 +165,7 @@ This is not an archive audit against external mutation after a successful recove
 
 Every publication has schema, machine ID, kind, agent, logical key, sequence, parent, exactly
 one typed payload and dependencies: a `file`, `launch` or `root` record carries a payload of the
-same name, and a `session` record carries a `manifest` payload. Nonfile descriptors
+same name, and a `session` or retired `manifest` record carries a `manifest` payload. Nonfile descriptors
 store explicit dependencies; file descriptors derive them from pieces as described above.
 Dependencies include immutable object key, encoded/body SHA-256, length and encoding; compressed dependencies
 also name decoded SHA-256 and length. References must match their typed committed payloads.
@@ -173,21 +173,28 @@ also name decoded SHA-256 and length. References must match their typed committe
 Session manifests live under `records/session/`. A manifest payload has schema 4, agent, machine ID, hostname, namespaced session key, info,
 transcripts, launch/launches, git, snapshots, local deletions, first-seen/sync times and collector
 version. Each transcript is a reference to a file stream: its file `key`, `role` and `history`
-(the stream's `commits/` prefix). The manifest depends on each stream's first commit, which no
-later generation changes. To read a transcript, follow `history` to the stream's unique complete
-chain: its tip is the current generation (size, SHA-256, line count, prefix, head, pieces) and
-its earlier commits are every earlier version. An append, fold or rewrite of a listed file
-therefore publishes no manifest. A manifest is published only when the session itself changes:
-a file joins or leaves it, a file's role or local deletion changes, a launch or snapshot
-arrives, `info` changes, or the collector version changes. `info` omits `last_event_at`, which
-the main transcript's current head carries.
+(the stream's `commits/` prefix). `role` is one of the collector's roles. The manifest depends on
+exactly one commit under each `history`: the commit where the file joined this session with this
+role (the stream's first commit, unless its session or role has changed since). That commit's
+generation names the session and role, which proves membership, and no append moves it. To read
+a transcript, follow `history` to the stream's unique complete chain: its tip is the current
+generation (size, SHA-256, line count, prefix, head, pieces) and its earlier commits are every
+earlier version. An append, fold or rewrite of a listed file therefore publishes no manifest. A
+manifest is published only when the session itself changes: a file joins or leaves it, a file's
+role or local deletion changes, a launch or snapshot arrives, `info` changes, or the collector
+version changes. `info` omits `last_event_at`, which the main transcript's current head carries.
 
-Collectors up to 0.3.0 wrote schema 3 manifests under `records/manifest/`. Each copied every
-transcript's current generation and all its earlier versions, and was republished on every
-append, so the prefix grew quadratically with history. Newer collectors never read
-`records/manifest/`: on first open they forget the local copies and republish every session
-under `records/session/`. Once every machine runs a newer collector and has synced, the whole
-`records/manifest/` prefix can be deleted.
+Collectors up to 0.3.0 wrote schema 3 manifests under `records/manifest/` (kind `manifest`).
+Each copied every transcript's current generation (`size`, `sha256`, `line_count`,
+`prefix_sha256`, `head`, `object`, `pieces`, `commit`) and all its earlier versions (`versions`)
+into the manifest, depended on the current commits, and was republished on every append, so the
+prefix grew quadratically with history. Newer collectors still read them, because inferred
+snapshots and launches may exist nowhere else, but never write them. A session whose only
+manifest is schema 3 is replayed into the session projection and republished under
+`records/session/`, with every snapshot and launch it had. A collector forgets its local copy of a
+schema 3 manifest once that session has a `records/session/` manifest, before it lists the
+bucket. So `records/manifest/` can be deleted once every machine has run a newer collector and
+every stream under it has a `records/session/` counterpart.
 The manifest is a valid captured view, not an atomic snapshot of a live filesystem. A failed file
 capture leaves its stream at the previous committed generation.
 

@@ -16,7 +16,11 @@ import (
 
 func (p *publication) validateManifest() error {
 	m := p.Manifest
-	if m == nil || m.Schema != manifestSchema || m.Agent != p.Agent || m.MachineID != p.MachineID || m.SessionKey != p.Key || !validTime(m.FirstSeen) || !validTime(m.SyncedAt) || m.Info == nil {
+	schema := manifestSchema
+	if p.Kind == "manifest" {
+		schema = copiedManifestSchema
+	}
+	if m == nil || m.Schema != schema || m.Agent != p.Agent || m.MachineID != p.MachineID || m.SessionKey != p.Key || !validTime(m.FirstSeen) || !validTime(m.SyncedAt) || m.Info == nil {
 		return errors.New("archive: invalid manifest payload")
 	}
 	return m.validateMembers()
@@ -26,7 +30,8 @@ func (m *manifest) validateMembers() error {
 	keys := map[string]bool{}
 	for i := range m.Transcripts {
 		tr := &m.Transcripts[i]
-		if !raw.ValidKey(tr.Key) || keys[tr.Key] {
+		copied := tr.CopiedGeneration != nil
+		if !raw.ValidKey(tr.Key) || keys[tr.Key] || !tr.Role.Valid() || copied != (m.Schema == copiedManifestSchema) || copied && !tr.valid() {
 			return errors.New("archive: invalid transcript reference")
 		}
 		keys[tr.Key] = true
@@ -40,6 +45,10 @@ func (m *manifest) validateMembers() error {
 		}
 	}
 	return nil
+}
+
+func (c *CopiedGeneration) valid() bool {
+	return raw.ValidHash(c.SHA256) && c.Size >= 0 && c.Object == c.Commit && len(c.Pieces) > 0
 }
 
 func (m *manifest) validateLaunchSnapshots() error {
@@ -211,22 +220,48 @@ func (s *Syncer) referencedPublication(ctx context.Context, key string, deps map
 	return p, nil
 }
 
+// verifyTranscriptReference accepts the one commit under the transcript's history that the
+// manifest depends on when it shows the file in this session with this role: the commit where it
+// joined them, which appends leave in place.
 func (s *Syncer) verifyTranscriptReference(ctx context.Context, parent *publication, tr *transcript, deps map[string]dependency) error {
 	if tr.History != s.publicationPrefix("file", parent.Agent, tr.Key)+"commits/" {
 		return errors.New("archive: transcript history is not its stream")
 	}
-	// A first commit's key names its stream and sequence, so resolving it proves the file.
-	var firsts []string
+	if tr.CopiedGeneration != nil {
+		return s.verifyCopiedGeneration(ctx, parent, tr, deps)
+	}
+	var anchors []string
 	for key := range deps {
-		if strings.HasPrefix(key, tr.History+fmt.Sprintf("%020d-", 1)) {
-			firsts = append(firsts, key)
+		if strings.HasPrefix(key, tr.History) {
+			anchors = append(anchors, key)
 		}
 	}
-	if len(firsts) != 1 {
-		return errors.New("archive: transcript needs exactly one first-commit dependency")
+	if len(anchors) != 1 {
+		return errors.New("archive: transcript needs exactly one commit dependency")
 	}
-	_, err := s.referencedPublication(ctx, firsts[0], deps)
-	return err
+	file, err := s.referencedPublication(ctx, anchors[0], deps)
+	if err != nil {
+		return err
+	}
+	if file.File == nil || file.File.Identity.SessionKey != parent.Key || file.File.Role != string(tr.Role) {
+		return errors.New("archive: transcript identity mismatch")
+	}
+	return nil
+}
+
+func (s *Syncer) verifyCopiedGeneration(ctx context.Context, parent *publication, tr *transcript, deps map[string]dependency) error {
+	file, err := s.referencedPublication(ctx, tr.Commit, deps)
+	if err != nil {
+		return err
+	}
+	if file.File == nil || file.Agent != parent.Agent || file.Key != tr.Key || file.File.Identity.SessionKey != parent.Key {
+		return errors.New("archive: transcript identity mismatch")
+	}
+	g := file.File
+	if tr.Size != g.Size || tr.SHA256 != g.SHA256 || tr.LineCount != g.LineCount || string(tr.Role) != g.Role || !slices.Equal(tr.Pieces, g.Pieces) {
+		return errors.New("archive: transcript content differs from committed generation")
+	}
+	return nil
 }
 
 func (s *Syncer) verifyLaunchReference(ctx context.Context, parent *publication, record *launchRecord, deps map[string]dependency) error {

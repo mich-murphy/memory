@@ -3,6 +3,7 @@ package syncer
 import (
 	"fmt"
 	"math"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -183,8 +184,19 @@ func branchReference(t *testing.T, sy *Syncer, bucket *memStore, file *publicati
 	return p, body
 }
 
-func TestPublicationBranchesStreamReferencesRequireTheFirstCommit(t *testing.T) {
-	for _, damage := range []string{"missingDependency", "planOnly", "laterCommit", "secondFirstCommit", "otherStream", "wrongEncoding", "checksum", "size", "missingRemote", "keyIdentity", "invalidBody", "invalidPublication", "transcriptHistory", "duplicateDependency", "corruptCache"} {
+// branchCopiedReference is branchReference in the schema 3 form, which copied the generation.
+func branchCopiedReference(t *testing.T, sy *Syncer, bucket *memStore, file *publication) (*publication, []byte) {
+	t.Helper()
+	p, body := branchReference(t, sy, bucket, file)
+	g, key := file.File, p.Dependencies[0].Object
+	p.Kind = "manifest"
+	p.Manifest.Schema = copiedManifestSchema
+	p.Manifest.Transcripts[0].CopiedGeneration = &CopiedGeneration{Size: g.Size, SHA256: g.SHA256, LineCount: g.LineCount, Object: key, Commit: key, Pieces: g.Pieces, Versions: []version{}}
+	return p, body
+}
+
+func TestPublicationBranchesStreamReferencesRequireTheirSessionCommit(t *testing.T) {
+	for _, damage := range []string{"missingDependency", "planOnly", "wrongSession", "wrongRole", "secondCommit", "otherStream", "wrongEncoding", "checksum", "size", "missingRemote", "keyIdentity", "invalidBody", "invalidPublication", "transcriptHistory", "duplicateDependency", "corruptCache"} {
 		t.Run(damage, func(t *testing.T) {
 			sy, bucket := branchSyncer(t)
 			file := branchPublication("file")
@@ -196,15 +208,22 @@ func TestPublicationBranchesStreamReferencesRequireTheFirstCommit(t *testing.T) 
 				t.Fatalf("baseline references: %v", err)
 			}
 			tr, dep := &p.Manifest.Transcripts[0], &p.Dependencies[0]
-			want := "exactly one first-commit dependency"
+			want := "exactly one commit dependency"
 			switch damage {
 			case "missingDependency":
 				p.Dependencies = nil
 			case "planOnly":
 				dep.Object = strings.Replace(dep.Object, "/commits/", "/plans/", 1)
-			case "laterCommit":
-				dep.Object = strings.Replace(dep.Object, fmt.Sprintf("%020d-", 1), fmt.Sprintf("%020d-", 2), 1)
-			case "secondFirstCommit":
+			case "wrongSession", "wrongRole":
+				if damage == "wrongSession" {
+					file.File.Identity.SessionKey = "other"
+				} else {
+					file.File.Role = string(adapters.RoleAux)
+				}
+				changed, _ := branchReference(t, sy, bucket, file)
+				p.Dependencies = changed.Dependencies
+				want = "transcript identity mismatch"
+			case "secondCommit":
 				second := *dep
 				second.Object = tr.History + fmt.Sprintf("%020d-%s.json", 1, raw.SHA256([]byte("other")))
 				p.Dependencies = append(p.Dependencies, second)
@@ -283,6 +302,162 @@ func TestPublicationBranchesStreamReferencesRequireTheFirstCommit(t *testing.T) 
 	}
 }
 
+func TestPublicationBranchesCopiedGenerationsRequireExactCommittedEvidence(t *testing.T) {
+	for _, damage := range []string{"missingDependency", "planOnly", "wrongEncoding", "checksum", "size", "missingRemote", "keyIdentity", "invalidBody", "invalidPublication", "wrongSession", "wrongAgent", "wrongKey", "transcriptSize", "transcriptHash", "transcriptRole", "transcriptLines", "transcriptPieces", "transcriptHistory", "duplicateDependency", "corruptCache"} {
+		t.Run(damage, func(t *testing.T) {
+			sy, bucket := branchSyncer(t)
+			file := branchPublication("file")
+			p, body := branchCopiedReference(t, sy, bucket, file)
+			if err := p.validate("machine"); err != nil {
+				t.Fatalf("baseline descriptor: %v", err)
+			}
+			if err := sy.verifyReferences(t.Context(), p, nil); err != nil {
+				t.Fatalf("baseline committed references: %v", err)
+			}
+			tr := &p.Manifest.Transcripts[0]
+			want := ""
+			switch damage {
+			case "missingDependency":
+				p.Dependencies = nil
+				want = "missing committed metadata dependency"
+			case "planOnly":
+				tr.Commit = strings.Replace(tr.Commit, "/commits/", "/plans/", 1)
+				tr.Object = tr.Commit
+				p.Dependencies[0].Object = tr.Commit
+				if err := bucket.Put(t.Context(), tr.Commit, body, nil); err != nil {
+					t.Fatal(err)
+				}
+				want = "missing committed metadata dependency"
+			case "wrongEncoding":
+				p.Dependencies[0].Encoding = "zstd"
+				want = "missing committed metadata dependency"
+			case "checksum":
+				p.Dependencies[0].SHA256 = raw.SHA256([]byte("other"))
+				want = "metadata dependency checksum mismatch"
+			case "size":
+				p.Dependencies[0].Size++
+				want = "metadata dependency checksum mismatch"
+			case "missingRemote":
+				if err := bucket.Delete(t.Context(), tr.Commit); err != nil {
+					t.Fatal(err)
+				}
+				want = "not found"
+			case "keyIdentity":
+				key := sy.publicationPrefix("file", "claude", "different") + "commits/" + filepath.Base(tr.Commit)
+				if err := bucket.Put(t.Context(), key, body, nil); err != nil {
+					t.Fatal(err)
+				}
+				tr.Commit, tr.Object, p.Dependencies[0].Object = key, key, key
+				want = "referenced publication identity mismatch"
+			case "invalidBody", "invalidPublication":
+				if damage == "invalidBody" {
+					body = []byte(`{"unknown":true}`)
+					want = "unknown field"
+				} else {
+					file.Schema = 2
+					var err error
+					body, _, err = canonicalPublication(file)
+					if err != nil {
+						t.Fatal(err)
+					}
+					want = "invalid publication identity"
+				}
+				id := raw.SHA256(body)
+				key := sy.publicationKey(file, true, id)
+				if err := bucket.Put(t.Context(), key, body, nil); err != nil {
+					t.Fatal(err)
+				}
+				tr.Commit, tr.Object = key, key
+				p.Dependencies[0] = dependency{Object: key, SHA256: id, Size: int64(len(body)), Encoding: "plain"}
+			case "wrongSession", "wrongAgent", "wrongKey":
+				switch damage {
+				case "wrongSession":
+					file.File.Identity.SessionKey = "other"
+				case "wrongAgent":
+					file.Agent = "pi"
+					file.File.Identity.Agent = "pi"
+				case "wrongKey":
+					file.Key = "other"
+					file.File.Identity.Key = "other"
+				}
+				changed, _ := branchCopiedReference(t, sy, bucket, file)
+				tr.Commit, tr.Object = changed.Manifest.Transcripts[0].Commit, changed.Manifest.Transcripts[0].Object
+				p.Dependencies = changed.Dependencies
+				want = "transcript identity mismatch"
+			case "transcriptSize":
+				tr.Size++
+				want = "transcript content differs"
+			case "transcriptHash":
+				tr.SHA256 = raw.SHA256([]byte("other"))
+				want = "transcript content differs"
+			case "transcriptRole":
+				tr.Role = adapters.RoleAux
+				want = "transcript content differs"
+			case "transcriptLines":
+				tr.LineCount++
+				want = "transcript content differs"
+			case "transcriptPieces":
+				tr.Pieces = append([]raw.Piece(nil), tr.Pieces...)
+				tr.Pieces[0].End++
+				want = "transcript content differs"
+			case "transcriptHistory":
+				tr.History = "v3/wrong/commits/"
+				want = "transcript history is not its stream"
+			case "duplicateDependency":
+				p.Dependencies = append(p.Dependencies, p.Dependencies[0])
+				want = "duplicate dependency identity"
+			case "corruptCache":
+				if err := sy.db.ImportPlan(state.Record{Key: tr.Commit, Kind: "file", Body: []byte("corrupt cached record")}); err != nil {
+					t.Fatal(err)
+				}
+				want = "metadata dependency checksum mismatch"
+			}
+			requireBranchError(t, sy.verifyReferences(t.Context(), p, nil), want)
+			// Mutations of an otherwise valid graph must fail before even a plan is written.
+			if damage != "wrongEncoding" && damage != "duplicateDependency" {
+				if err := p.validate("machine"); err != nil {
+					t.Fatalf("mutated descriptor is structurally invalid: %v", err)
+				}
+				bucket.takeOps()
+				_, err := sy.publish(t.Context(), p, nil)
+				requireBranchError(t, err, want)
+				ops, _ := bucket.takeOps()
+				for _, op := range ops {
+					if strings.HasPrefix(op, "put ") {
+						t.Fatalf("rejected reference wrote remote metadata: %v", ops)
+					}
+				}
+			}
+			sess, err := sy.db.Session(adapters.SessionRef{Agent: p.Agent, Key: p.Key})
+			if err != nil || sess != nil {
+				t.Fatalf("rejected reference projected session = %+v, %v", sess, err)
+			}
+		})
+	}
+}
+
+func TestPublicationBranchesCopiedGenerationMustBeComplete(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*CopiedGeneration)
+	}{
+		{"object", func(c *CopiedGeneration) { c.Object = "v3/other" }},
+		{"hash", func(c *CopiedGeneration) { c.SHA256 = "invalid" }},
+		{"size", func(c *CopiedGeneration) { c.Size = -1 }},
+		{"pieces", func(c *CopiedGeneration) { c.Pieces = nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sy, bucket := branchSyncer(t)
+			p, _ := branchCopiedReference(t, sy, bucket, branchPublication("file"))
+			if err := p.validate("machine"); err != nil {
+				t.Fatalf("valid baseline: %v", err)
+			}
+			tc.mutate(p.Manifest.Transcripts[0].CopiedGeneration)
+			requireBranchError(t, p.validate("machine"), "invalid transcript reference")
+		})
+	}
+}
+
 func TestPublicationBranchesManifestMembersRejectInconsistentHistory(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -291,6 +466,9 @@ func TestPublicationBranchesManifestMembersRejectInconsistentHistory(t *testing.
 	}{
 		{"duplicateTranscript", func(m *manifest) { m.Transcripts = append(m.Transcripts, m.Transcripts[0]) }, "invalid transcript reference"},
 		{"schema", func(m *manifest) { m.Schema = 5 }, "invalid manifest payload"},
+		{"copiedSchema", func(m *manifest) { m.Schema = copiedManifestSchema }, "invalid manifest payload"},
+		{"unsupportedRole", func(m *manifest) { m.Transcripts[0].Role = "definitely-unsupported-role" }, "invalid transcript reference"},
+		{"copyInStreamSchema", func(m *manifest) { m.Transcripts[0].CopiedGeneration = &CopiedGeneration{} }, "invalid transcript reference"},
 		{"deletionUnknown", func(m *manifest) { m.DeletedLocally[0].Key = "other" }, "invalid deletion reference"},
 		{"deletionTime", func(m *manifest) { m.DeletedLocally[0].At = 0 }, "invalid deletion reference"},
 		{"snapshotID", func(m *manifest) { m.Snapshots[0].ID = "invalid" }, "invalid snapshot reference"},

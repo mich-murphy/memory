@@ -139,37 +139,57 @@ func TestSessionMetadataUsesCanonicalLaunchOrderAndMainFileEvidence(t *testing.T
 	}
 }
 
-func TestOpeningForgetsRetiredManifestsAndRepublishesTheirSessions(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open(t.Context(), dir)
-	check(t, err)
-	ref := adapters.SessionRef{Agent: "claude", Key: "session"}
-	key := "v3/machines/m/records/manifest/stream/commits/00000000000000000001-x.json"
-	check(t, db.CommitSession(Record{Key: key, Kind: "manifest", Body: []byte("copied generations")}, ref, &Session{FirstSeen: 1}, SessionManifestCurrent))
-	check(t, db.MarkArchiveSeen(key, "scan"))
-	check(t, db.Close())
+func TestPruningForgetsCopiedManifestsOnlyOfRepublishedSessions(t *testing.T) {
+	db := open(t)
+	republished := adapters.SessionRef{Agent: "claude", Key: "republished"}
+	waiting := adapters.SessionRef{Agent: "claude", Key: "waiting"}
+	copied := map[adapters.SessionRef]string{republished: "records/manifest/a/commits/1.json", waiting: "records/manifest/b/commits/1.json"}
+	streams := map[adapters.SessionRef]string{republished: "a", waiting: "b"}
+	for ref, key := range copied {
+		check(t, db.CommitSession(Record{Key: key, Kind: "manifest", Stream: streams[ref], Sequence: 1, Committed: true, Body: []byte("copied")}, ref, &Session{FirstSeen: 1}, SessionManifestStale))
+		check(t, db.MarkArchiveSeen(key, "scan"))
+	}
+	check(t, db.CommitSession(Record{Key: "records/session/a/commits/1.json", Kind: "session", Stream: "a", Sequence: 1, Committed: true, Body: []byte("references")}, republished, &Session{FirstSeen: 1}, SessionManifestCurrent))
+	check(t, db.PruneCopiedManifests())
 
-	db, err = Open(t.Context(), dir)
-	check(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	if record, err := db.ArchiveRecord(key); record != nil || err != nil {
-		t.Fatalf("retired manifest = %v, %v; want forgotten", record, err)
+	if record, err := db.ArchiveRecord(copied[republished]); record != nil || err != nil {
+		t.Fatalf("republished session's copied manifest = %v, %v; want forgotten", record, err)
 	}
-	if applied, err := db.ArchiveApplied(key); applied || err != nil {
-		t.Fatalf("retired manifest applied = %v, %v; want forgotten", applied, err)
+	if applied, err := db.ArchiveApplied(copied[republished]); applied || err != nil {
+		t.Fatalf("republished session's copied manifest applied = %v, %v; want forgotten", applied, err)
 	}
-	pending, err := db.PendingManifests()
-	check(t, err)
-	if diff := cmp.Diff([]adapters.SessionRef{ref}, pending); diff != "" {
-		t.Fatalf("pending manifests (-want +got): %s", diff)
+	if missing, err := db.MissingArchive("records/manifest/a/", "other"); missing != "" || err != nil {
+		t.Fatalf("missing after prune = %q, %v", missing, err)
 	}
-	check(t, db.Atomic(func() error { return db.ManifestWritten(ref) }))
-	check(t, db.Close())
+	if record, err := db.ArchiveRecord(copied[waiting]); record == nil || err != nil {
+		t.Fatalf("waiting session's copied manifest = %v, %v; want kept until it is republished", record, err)
+	}
+}
 
-	db, err = Open(t.Context(), dir)
-	check(t, err)
-	if pending, err := db.PendingManifests(); len(pending) != 0 || err != nil {
-		t.Fatalf("reopening republished again: %v, %v", pending, err)
+func TestFileAnchorMovesOnlyWhenSessionOrRoleChanges(t *testing.T) {
+	db := open(t)
+	gen := func(session string, role adapters.Role) *raw.Generation {
+		return &raw.Generation{Identity: raw.Identity{Agent: "claude", Key: "f", SessionKey: session}, Role: string(role), Sources: []raw.Source{{Path: "/f"}}}
 	}
-	check(t, db.Close())
+	steps := []struct {
+		record string
+		g      *raw.Generation
+		want   string
+	}{
+		{"capture", gen("s", adapters.RoleMain), "capture"},
+		{"append", gen("s", adapters.RoleMain), "capture"},
+		{"role", gen("s", adapters.RoleSuperseded), "role"},
+		{"move", gen("t", adapters.RoleSuperseded), "move"},
+		{"again", gen("t", adapters.RoleSuperseded), "move"},
+	}
+	var previous *raw.Generation
+	for _, step := range steps {
+		check(t, db.CommitFile(Record{Key: step.record, Kind: "file", Body: []byte(step.record)}, "f", step.g, previous))
+		got, err := db.FileAnchor("f")
+		check(t, err)
+		if got != step.want {
+			t.Fatalf("anchor after %s = %q, want %q", step.record, got, step.want)
+		}
+		previous = step.g
+	}
 }

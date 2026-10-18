@@ -6,6 +6,14 @@ import (
 	"github.com/mich-murphy/memory/internal/adapters"
 )
 
+// PublishedInfo is the session info a manifest carries: without last_event_at, which every append
+// changes and the main transcript's current head carries.
+func PublishedInfo(info map[string]any) map[string]any {
+	out := maps.Clone(info)
+	delete(out, "last_event_at")
+	return out
+}
+
 // MergeFileInfo projects parent/session metadata, not every transcript's identity.
 // Child heads remain intact in transcript entries even when the main is absent.
 func MergeFileInfo(info map[string]any, files []File) {

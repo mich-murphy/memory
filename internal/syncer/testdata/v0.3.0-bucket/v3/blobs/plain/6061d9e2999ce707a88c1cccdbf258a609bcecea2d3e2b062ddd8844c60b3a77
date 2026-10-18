@@ -1,0 +1,20 @@
+{
+ "mcpServers": {
+  "gh": {
+   "command": "npx",
+   "env": {
+    "GITHUB_TOKEN": "[redacted]"
+   }
+  }
+ },
+ "project": {
+  "mcpServers": {
+   "local": {
+    "headers": {
+     "Authorization": "[redacted]"
+    },
+    "url": "http://x"
+   }
+  }
+ }
+}

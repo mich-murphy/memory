@@ -1,0 +1,4 @@
+---
+name: deploy
+---
+Run scripts/go.sh

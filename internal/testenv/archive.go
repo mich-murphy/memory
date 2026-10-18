@@ -457,32 +457,32 @@ func (a *Archive) audit(keys []string, read func(string) ([]byte, error)) error 
 }
 
 // checkStreamReference checks a transcript that names its file stream: the manifest must
-// depend on exactly that stream's first commit.
+// depend on exactly one of that stream's commits, showing the file in this session with this role.
 func (a *Archive) checkStreamReference(r Record, tr map[string]any, read func(string) ([]byte, error)) error {
 	key, _ := tr["key"].(string)
 	history := Stream(r.MachineID, "file", r.Agent, key) + "commits/"
 	if tr["history"] != history || len(tr) != 3 {
 		return fmt.Errorf("transcript %q is not a stream reference", key)
 	}
-	var firsts []string
+	var anchors []string
 	for _, d := range r.Dependencies {
-		if strings.HasPrefix(d.Object, history+fmt.Sprintf("%020d-", 1)) {
-			firsts = append(firsts, d.Object)
+		if strings.HasPrefix(d.Object, history) {
+			anchors = append(anchors, d.Object)
 		}
 	}
-	if len(firsts) != 1 {
-		return fmt.Errorf("transcript %q has %d first-commit dependencies", key, len(firsts))
+	if len(anchors) != 1 {
+		return fmt.Errorf("transcript %q has %d commit dependencies", key, len(anchors))
 	}
-	body, err := read(firsts[0])
+	body, err := read(anchors[0])
 	if err != nil {
 		return err
 	}
-	file, err := a.decode(firsts[0], body)
+	file, err := a.decode(anchors[0], body)
 	if err != nil {
 		return err
 	}
-	if file.File == nil || file.Key != key || file.Sequence != 1 {
-		return fmt.Errorf("transcript %q first commit is another stream", key)
+	if file.File == nil || file.Key != key || file.File.Identity.SessionKey != r.Key || file.File.Role != tr["role"] {
+		return fmt.Errorf("transcript %q commit is not this session's", key)
 	}
 	return nil
 }

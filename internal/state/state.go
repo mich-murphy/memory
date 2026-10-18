@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS strays (
     PRIMARY KEY (key, object)
 );
 DROP TABLE IF EXISTS raw_versions;
+CREATE TABLE IF NOT EXISTS file_anchors (key TEXT PRIMARY KEY, record TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (
     agent TEXT NOT NULL,
     session_key TEXT NOT NULL,
@@ -170,9 +171,6 @@ func Open(ctx context.Context, dir string) (*State, error) {
 	if err == nil {
 		err = addDiskSize(ctx, conn)
 	}
-	if err == nil {
-		err = retireManifests(ctx, conn)
-	}
 	if err != nil {
 		_ = db.Close() // already failing; this only frees the handle
 		return nil, fmt.Errorf("state schema: %w", err)
@@ -196,28 +194,6 @@ func addDiskSize(ctx context.Context, conn *sql.Conn) error {
 	err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('files') WHERE name = 'disk_size'").Scan(&n)
 	if err == nil && n == 0 {
 		_, err = conn.ExecContext(ctx, "ALTER TABLE files ADD COLUMN disk_size INTEGER; UPDATE files SET disk_size = size")
-	}
-	if err != nil {
-		_, rerr := conn.ExecContext(ctx, "ROLLBACK")
-		return errors.Join(err, rerr)
-	}
-	_, err = conn.ExecContext(ctx, "COMMIT")
-	return err
-}
-
-// retireManifests forgets the schema 3 manifests under records/manifest/, which the collector
-// no longer reads, and makes every session republish under records/session/.
-func retireManifests(ctx context.Context, conn *sql.Conn) error {
-	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		return err
-	}
-	var n int
-	err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM (SELECT 1 FROM archive_records WHERE kind = 'manifest' LIMIT 1)").Scan(&n)
-	if err == nil && n == 1 {
-		_, err = conn.ExecContext(ctx, `INSERT OR IGNORE INTO pending_manifests SELECT agent, session_key FROM sessions;
-DELETE FROM archive_applied WHERE key GLOB '*/records/manifest/*';
-DELETE FROM archive_scan WHERE key GLOB '*/records/manifest/*';
-DELETE FROM archive_records WHERE kind = 'manifest'`)
 	}
 	if err != nil {
 		_, rerr := conn.ExecContext(ctx, "ROLLBACK")

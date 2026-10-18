@@ -186,11 +186,18 @@ func (s *Syncer) Recover(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Before enumerating, so copied manifests deleted from the bucket aren't missed.
+	if err := s.db.PruneCopiedManifests(); err != nil {
+		return err
+	}
 	if !warm {
 		if err := s.restoreExclusions(ctx); err != nil {
 			return err
 		}
 		if err := s.enumerateRecords(ctx, s.machinePrefix()+"records/", true); err != nil {
+			return err
+		}
+		if err := s.db.PruneCopiedManifests(); err != nil {
 			return err
 		}
 	}
@@ -204,6 +211,9 @@ func (s *Syncer) Recover(ctx context.Context) error {
 		if err := s.reconcileCatalog(ctx); err != nil {
 			return err
 		}
+	}
+	if err := s.republishCopiedManifests(); err != nil {
+		return err
 	}
 	s.recovered = true
 	return nil
@@ -410,13 +420,16 @@ func (s *Syncer) applyPublication(r state.Record, p *publication, previous *raw.
 		})
 	case "launch":
 		return s.applyLaunch(r, p.Launch)
-	case "session":
+	case "session", "manifest":
 		m := p.Manifest
 		sess := &state.Session{Info: m.Info, Snapshots: m.Snapshots, FirstSeen: m.FirstSeen}
 		sess.Launches = slices.Clone(m.Launches)
-		status, err := s.manifestProjectionStatus(m)
-		if err != nil {
-			return err
+		status := state.SessionManifestStale
+		if p.Kind == "session" {
+			var err error
+			if status, err = s.manifestProjectionStatus(m); err != nil {
+				return err
+			}
 		}
 		return s.db.CommitSession(r, adapters.SessionRef{Agent: p.Agent, Key: p.Key}, sess, status)
 	}
@@ -434,7 +447,7 @@ func LockDir(cfg *config.Config) (string, error) {
 }
 
 func (s *Syncer) reconcileCatalog(ctx context.Context) error {
-	for _, kind := range []string{"file", "root", "launch", "session"} {
+	for _, kind := range []string{"file", "root", "launch", "manifest", "session"} {
 		streams, err := s.db.AllArchiveStreams(kind)
 		if err != nil {
 			return err
@@ -449,6 +462,31 @@ func (s *Syncer) reconcileCatalog(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// republishCopiedManifests marks pending each session whose only manifest is schema 3, so its
+// launches and snapshots reach records/session/ before records/manifest/ is deleted.
+func (s *Syncer) republishCopiedManifests() error {
+	streams, err := s.db.ArchiveStreams("manifest")
+	if err != nil {
+		return err
+	}
+	return s.db.Atomic(func() error {
+		for _, stream := range streams {
+			r, err := s.db.CurrentArchive("manifest", stream)
+			if err != nil {
+				return err
+			}
+			p, err := decodePublication(r.Body)
+			if err != nil {
+				return err
+			}
+			if err := s.db.MarkManifestPending(adapters.SessionRef{Agent: p.Agent, Key: p.Key}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *Syncer) manifestProjectionStatus(m *manifest) (state.SessionPublication, error) {
