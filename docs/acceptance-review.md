@@ -9,7 +9,7 @@ remote captures, R2 credentials or R2 mutations are used. All literals are fake.
 From this checkout, using the project's toolchain:
 
 ```sh
-nix develop /Users/mm/dev/memory -c sh -c 'AGENT_SESSIONS_TEST_R2=0 go test -race -count=1 -timeout=5m ./cmd/agent-sessions -run "^TestAcceptance"'
+nix develop . -c sh -c 'AGENT_SESSIONS_TEST_R2=0 go test -race -count=1 -timeout=5m ./cmd/agent-sessions -run "^TestAcceptance"'
 python3 .agents/skills/verify-agent-sessions/verify_test.py
 ```
 

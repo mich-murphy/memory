@@ -1,6 +1,6 @@
 # Production-readiness verification
 
-This change follows the two-machine archive audit (macbook and bc-01). The audit found
+This change follows the two-machine archive audit (a Mac and a Linux VM). The audit found
 correct checksums and retained generations, but also a secret-bearing Pi migration backup,
 missing Pi child-session associations, excessive database uploads, and repeated serial
 snapshot dependency checks. Rotating the exposed provider keys does not replace fixing
@@ -36,21 +36,21 @@ below describe earlier checkpoints, not the current deployment state.
   verification results and private operation logs are also retained under that backup
   parent, outside temporary storage.
 - The operator subsequently chose the verified release installer instead of Nix on
-  both machines. The collector Nix dependency was removed from `machines`; both host
-  configurations evaluate without private-repository access. The explicit post-login
-  `HOST=dev-01 just install-agent-sessions` wrapper verifies the pinned installer asset
-  before execution, installs only the binary, and refuses dev-02.
+  both machines. The collector Nix dependency was removed from the host configuration
+  repository; both host configurations evaluate without private-repository access. The
+  explicit post-login install wrapper verifies the pinned installer asset before
+  execution, installs only the binary, and refuses hosts not approved for it.
 
 ### Executed production deployment and cold R2 audit
 
 The operator then authorised deployment and populated-backfill verification on the Mac
-and dev-01 only. No dev-02 connection or deployment was performed.
+and the Linux VM only. No other host was connected to or deployed.
 
 - Both normal login shells resolve `~/.local/bin/agent-sessions`, version **0.3.0**.
   Both installed binary SHA-256 digests match the immutable release assets. The
-  release installer itself was verified before execution. dev-01 used a credential
+  release installer itself was verified before execution. The Linux VM used a credential
   passed through encrypted stdin into the installation process environment only;
-  its existing `michaelmbc` GitHub login was not changed or supplemented on disk.
+  its existing GitHub login was not changed or supplemented on disk.
 - Immediately before capture, independent R2 listings again verified **zero objects
   and zero multipart uploads**, and both active state directories were empty. The
   original machine identities and R2 configs were retained.
@@ -60,13 +60,13 @@ and dev-01 only. No dev-02 connection or deployment was performed.
   trust (**0/6** on each machine). The operator must review `/hooks` in Codex on both
   machines; no trust hashes were manufactured. Existing Pi processes need `/reload`.
 - The Mac's initial backfill completed in **2472.15 s**: **5,404 files / 998 manifests,
-  zero errors**. dev-01's real Pi startup sweep populated its archive first; the
+  zero errors**. The Linux VM's real Pi startup sweep populated its archive first; the
   initial explicit backfill hit lock contention, then a successful retry uploaded
   **2 files, 3,087 unchanged, one manifest, zero errors**. Both subsequent manual
   sweeps passed with zero errors; both local SQLite integrity checks passed and
   neither state had pending manifests at verification.
 - Real Pi hooks produced automatic start/shutdown captures on the Mac, and
-  start/settled/shutdown captures plus sweeps on dev-01. A fresh local Pi prompt hit a
+  start/settled/shutdown captures plus sweeps on the Linux VM. A fresh local Pi prompt hit a
   provider usage limit, so this is lifecycle/capture evidence, not successful
   real-provider response evidence. Its launch and persisted session were captured.
 - Capture-policy skips were retained: literal secret assignments, symlink directories
@@ -84,14 +84,14 @@ whole-file reconstructions. Its per-agent current stream/session counts were:
 | Mac | Claude | 3,643 | 424 |
 | Mac | Codex | 132 | 18 |
 | Mac | Pi | 1,636 | 558 |
-| dev-01 | Claude | 1,483 | 78 |
-| dev-01 | Codex | 228 | 114 |
-| dev-01 | Pi | 1,390 | 66 |
+| Linux VM | Claude | 1,483 | 78 |
+| Linux VM | Codex | 228 | 114 |
+| Linux VM | Pi | 1,390 | 66 |
 
 All child-file streams had their own-session manifest membership. Known credential-file
 and migration-backup path counters were zero (not a comprehensive transcript secret
 scan). One stable original transcript per agent per machine matched its cold R2
-reconstruction. All **12 archived Codex database copies** (seven Mac, five dev-01)
+reconstruction. All **12 archived Codex database copies** (seven Mac, five Linux VM)
 passed SQLite integrity checks. The archive continues to grow after this snapshot.
 
 Private commands, logs, inventories, mirror, source comparisons, database checks and
@@ -214,7 +214,7 @@ Additional executed gates on that Go source:
   passed; the actual agents produced the synthetic assistant reply and all required
   start/turn/end events. Final sources reconstructed exactly (234,854 / 40,396 / 3,362 bytes),
   without an explicit sync/backfill after the agents. All three proof trees were imported.
-- `bc-01` Linux amd64 / Go 1.27.2: all eight acceptance-prefixed CLI journeys passed
+- Linux amd64 test host / Go 1.27.2: all eight acceptance-prefixed CLI journeys passed
   under race (174.487 s), plus focused chunk, deletion-fence and Linux ancestry tests
   (syncer 72.774 s). This is runtime evidence, not merely a cross-build.
 - Exact live R2 acceptance: **218.61 s**, including the new 22 MiB database-role fixture;

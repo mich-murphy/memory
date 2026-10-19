@@ -47,7 +47,7 @@ than reducing the production limit. A Fold smoke benchmark passed; no full/compa
 benchmark ran here, since parent owns serial comparisons.
 
 Focused regressions, race-enabled pieces tests, golangci-lint and worktree-local gopls CLI
-checks were run via nix develop /Users/mm/dev/memory. The gopls MCP workspace was unavailable;
+checks were run via nix develop in the main checkout. The gopls MCP workspace was unavailable;
 CLI checks use this worktree. An earlier full make check passed format/lint/fix/tidy/deadcode/
 vulnerability checks and reached race coverage testing before the operation timed out.
 Golden is intentionally stale. Parent will run complete integrated gates after metadata,
