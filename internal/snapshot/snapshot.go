@@ -482,7 +482,13 @@ func nestedFiles(s scopeBase) map[string][]string {
 		if !ok || strings.HasSuffix(rel, "/") || slices.ContainsFunc(strings.Split(rel, "/"), func(part string) bool { return skipDirs[part] }) {
 			continue
 		}
-		found[pattern] = append(found[pattern], filepath.Join(s.base, filepath.FromSlash(rel)))
+		abs := filepath.Join(s.base, filepath.FromSlash(rel))
+		// The index also lists files absent from the working tree: unstaged deletions and
+		// sparse-checkout exclusions. A dangling symlink still exists, so it is still reported.
+		if _, err := os.Lstat(abs); errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		found[pattern] = append(found[pattern], abs)
 	}
 	for pattern, paths := range found {
 		slices.Sort(paths)
