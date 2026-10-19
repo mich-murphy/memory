@@ -37,7 +37,7 @@ func TestTextWithholdsLiteralAssignmentsWithoutReportingValues(t *testing.T) {
 		"fencedExample":         "```sh\nAPI_KEY=example-literal\n```",
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := Text([]byte(line))
+			err := Text(nil, []byte(line))
 			if !errors.Is(err, ErrLiteralSecret) {
 				t.Fatal("Text did not withhold literal assignment")
 			}
@@ -82,7 +82,7 @@ func TestTextKeepsReferencesAndNonAssignments(t *testing.T) {
 		"large":               "API_KEY=fixture\n" + strings.Repeat("x", MaxTextSize),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := Text([]byte(line)); err != nil {
+			if err := Text(nil, []byte(line)); err != nil {
 				t.Fatalf("Text = %v, want allowed", err)
 			}
 		})
@@ -114,12 +114,12 @@ func TestTextRecognizesEquivalentFishAssignments(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			for _, value := range []string{"fixture-fish-secret", "'${TOKEN}'", `\$TOKEN`, "'fixture-fish-secret"} {
-				if err := Text([]byte(prefix + value)); !errors.Is(err, ErrLiteralSecret) || err.Error() != "literal_secret_assignment" {
+				if err := Text(nil, []byte(prefix+value)); !errors.Is(err, ErrLiteralSecret) || err.Error() != "literal_secret_assignment" {
 					t.Fatal("Text did not safely withhold literal assignment")
 				}
 			}
 			for _, value := range []string{"$TOKEN", `"${TOKEN}"`, "'[redacted]'"} {
-				if err := Text([]byte(prefix + value)); err != nil {
+				if err := Text(nil, []byte(prefix+value)); err != nil {
 					t.Fatalf("Text = %v, want allowed reference or redaction", err)
 				}
 			}
@@ -157,7 +157,7 @@ func TestTextDoesNotTreatUnrelatedSetCommandsAsAssignments(t *testing.T) {
 		"exportSet":            "export set -gx API_KEY fixture-private-value",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := Text([]byte(line)); err != nil {
+			if err := Text(nil, []byte(line)); err != nil {
 				t.Fatalf("Text = %v, want unrelated command allowed", err)
 			}
 		})
@@ -170,15 +170,38 @@ func FuzzText(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
 		before := bytes.Clone(data)
-		err := Text(data)
+		err := Text(nil, data)
 		if !bytes.Equal(data, before) {
 			t.Fatal("Text mutated input")
 		}
 		if err != nil && !errors.Is(err, ErrLiteralSecret) {
 			t.Fatal("Text returned an unsafe diagnostic")
 		}
-		if !errors.Is(err, Text(data)) {
+		if !errors.Is(err, Text(nil, data)) {
 			t.Fatal("Text is not deterministic")
 		}
 	})
+}
+
+func TestTextChecksShellAndProseButNotSourceCodeKeywordArguments(t *testing.T) {
+	kwargs := []byte("rows = sorted(\n    rows,\n    key=lambda r: r[0],\n)\nf(\n    token=None,\n)\n")
+	for name, tc := range map[string]struct {
+		identities []string
+		withheld   bool
+	}{
+		"python":         {[]string{"/skills/x/scripts/stylometry.py"}, false},
+		"typescript":     {[]string{"/x/hooks/start.ts"}, false},
+		"pythonBackup":   {[]string{"/x/tool.py.bak"}, false},
+		"shell":          {[]string{"/x/run.sh"}, true},
+		"markdown":       {[]string{"/x/SKILL.md"}, true},
+		"noExtension":    {[]string{"/x/bin/tool"}, true},
+		"unknown":        {nil, true},
+		"symlinkToShell": {[]string{"/x/tool.py", "/y/tool.sh"}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := Text(tc.identities, kwargs); (err != nil) != tc.withheld {
+				t.Errorf("Text(%v) = %v, want withheld %v", tc.identities, err, tc.withheld)
+			}
+		})
+	}
 }

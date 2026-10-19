@@ -194,7 +194,7 @@ func TestSweepCapturesEveryAgentDirAndIsIdempotent(t *testing.T) {
 
 	m := e.Manifest("claude", claudeKey)
 	info := m["info"].(map[string]any)
-	if m["schema"] != 4.0 || m["machine_id"] != "testbox" || m["hostname"] == "" {
+	if m["schema"] != 5.0 || m["machine_id"] != "testbox" || m["hostname"] == "" {
 		t.Errorf("manifest header: schema %v machine %v hostname %v", m["schema"], m["machine_id"], m["hostname"])
 	}
 	if info["session_id"] != claudeSID || info["cwd"] != e.Project {
@@ -970,7 +970,11 @@ func TestLaunchIsRecordedWithAPreSessionSnapshot(t *testing.T) {
 		t.Error("launch file left behind")
 	}
 	m := e.Manifest("claude", claudeKey)
-	l := m["launch"].(map[string]any)
+	launches := e.Launches(m)
+	if len(launches) != 1 || m["launch"] != nil || m["launches"] != nil {
+		t.Fatalf("manifest launches = %v, launch_records %v, want one record and no copy", launches, m["launch_records"])
+	}
+	l := launches[0]
 	envelope := l["envelope"].(map[string]any)
 	payload := envelope["payload"].(map[string]any)
 	if envelope["schema"] != 1.0 || envelope["agent"] != "claude" || envelope["path"] != path || envelope["id"] == "" {
@@ -1001,8 +1005,8 @@ func TestLaunchFallsBackToTheHookInputCwd(t *testing.T) {
 	if len(snaps) != 1 || snaps[0].(map[string]any)["timing"] != "captured" {
 		t.Errorf("snapshots = %v", snaps)
 	}
-	if m["launch"].(map[string]any)["git"].(map[string]any)["head"] == nil {
-		t.Errorf("launch git = %v", m["launch"])
+	if l := e.Launches(m); len(l) != 1 || l[0]["git"].(map[string]any)["head"] == nil {
+		t.Errorf("launch = %v", l)
 	}
 }
 
@@ -1168,7 +1172,7 @@ func TestSnapshotRecordsWholeHarnessWithSecretsRedacted(t *testing.T) {
 	if got := files[[2]string{"user", "skills/review/SKILL.md"}]["target"]; got != resolved(filepath.Join(target, "SKILL.md")) {
 		t.Errorf("symlink target = %v", got)
 	}
-	if _, ok := snap["mtimes"].(map[string]any)["harness:user:CLAUDE.md"]; !ok {
+	if _, ok := e.Mtimes(snap)["harness:user:CLAUDE.md"]; !ok || snap["mtimes"] != nil {
 		t.Error("no mtime for CLAUDE.md")
 	}
 	blob := func(scope, path string) string {

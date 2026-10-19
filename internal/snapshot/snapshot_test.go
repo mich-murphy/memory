@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -128,6 +129,53 @@ func TestSnapshotHoldsTheHarness(t *testing.T) {
 	}
 	if got, ok := snap.Mtimes["harness:user:.claude.json#mcp"]; ok {
 		t.Errorf("mtime of an extract that is not a file = %v, want none", got)
+	}
+}
+
+func TestNestedInstructionsComeFromGitAndSkipIgnoredTrees(t *testing.T) {
+	e := testenv.New(t)
+	p := e.Project
+	testenv.Write(t, filepath.Join(p, ".gitignore"), ".tools/\nCLAUDE.local.md\n")
+	testenv.Write(t, filepath.Join(p, ".tools", "git", "po", "AGENTS.md"), "vendored\n")
+	testenv.Write(t, filepath.Join(p, "app", "CLAUDE.local.md"), "my notes\n")
+	testenv.Write(t, filepath.Join(p, "app", "deep", "AGENTS.md"), "untracked rules\n")
+	set := build(t, e, p)
+	var nested []string
+	for _, f := range set.Files {
+		if f.Scope == "project" && strings.Contains(f.Path, "/") && !strings.HasPrefix(f.Path, ".claude/") {
+			nested = append(nested, f.Path)
+		}
+	}
+	want := []string{"app/CLAUDE.local.md", "app/deep/AGENTS.md", "src/CLAUDE.md"}
+	if diff := cmp.Diff(want, nested); diff != "" {
+		t.Errorf("nested instruction files (-want +got):\n%s", diff)
+	}
+}
+
+func TestNestedInstructionsSkipIndexEntriesMissingFromTheWorkingTree(t *testing.T) {
+	e := testenv.New(t)
+	p := e.Project
+	testenv.Write(t, filepath.Join(p, "deleted", "AGENTS.md"), "deleted rules\n")
+	testenv.Write(t, filepath.Join(p, "sparse", "AGENTS.md"), "sparse rules\n")
+	symlink(t, filepath.Join(p, "missing-target.md"), filepath.Join(p, "dangling", "AGENTS.md"))
+	testenv.Git(t, p, "add", "-A")
+	testenv.Git(t, p, "commit", "-q", "-m", "nested")
+	if err := os.Remove(filepath.Join(p, "deleted", "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+	testenv.Git(t, p, "sparse-checkout", "set", "--no-cone", "/*", "!/sparse/")
+	if _, err := os.Lstat(filepath.Join(p, "sparse", "AGENTS.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("sparse checkout left the file in place: %v", err)
+	}
+	set := build(t, e, p)
+	var skipped []string
+	for _, f := range set.Skipped {
+		if f.Scope == "project" {
+			skipped = append(skipped, f.Path+" "+f.Reason)
+		}
+	}
+	if diff := cmp.Diff([]string{"dangling/AGENTS.md resolve_error"}, skipped); diff != "" {
+		t.Errorf("project skipped files (-want +got):\n%s", diff)
 	}
 }
 

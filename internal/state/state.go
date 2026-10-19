@@ -436,14 +436,43 @@ type Launch struct {
 	Snapshot   SnapshotEntry   `json:"snapshot"`
 }
 
+// SnapshotEntry holds its files' mtimes either inline, as launch records, local state and
+// manifests up to schema 4 do, or as the SHA-256 of their shared blob (MtimesBlob).
 type SnapshotEntry struct {
-	ID        string             `json:"id"`
-	MemoryID  *string            `json:"memory_id"`
-	Git       gitinfo.State      `json:"git"`
-	Timing    string             `json:"timing"`
-	TakenAt   float64            `json:"taken_at"`
-	CheckedAt float64            `json:"checked_at,omitempty"`
-	Mtimes    map[string]float64 `json:"mtimes"`
+	ID           string             `json:"id"`
+	MemoryID     *string            `json:"memory_id"`
+	Git          gitinfo.State      `json:"git"`
+	Timing       string             `json:"timing"`
+	TakenAt      float64            `json:"taken_at"`
+	CheckedAt    float64            `json:"checked_at,omitempty"`
+	Mtimes       map[string]float64 `json:"mtimes"`
+	MtimesSHA256 string             `json:"mtimes_sha256,omitempty"`
+}
+
+// MarshalJSON leaves out the inline mtimes of an entry that references their blob. Entries
+// without a reference keep "mtimes" even when empty, so earlier records stay canonical.
+func (e SnapshotEntry) MarshalJSON() ([]byte, error) {
+	type wire SnapshotEntry
+	if e.MtimesSHA256 == "" {
+		return json.Marshal(wire(e))
+	}
+	return json.Marshal(struct {
+		wire
+		Mtimes map[string]float64 `json:"mtimes,omitempty"`
+	}{wire: wire(e)})
+}
+
+// MtimesBlob is the canonical body of the entry's inline mtimes and its SHA-256. An entry that
+// already references its blob returns no body.
+func (e SnapshotEntry) MtimesBlob() (body []byte, sha string, err error) {
+	if e.MtimesSHA256 != "" {
+		return nil, e.MtimesSHA256, nil
+	}
+	body, err = jsonx.SortedCompact(orEmptyMap(e.Mtimes))
+	if err != nil {
+		return nil, "", err
+	}
+	return body, raw.SHA256(body), nil
 }
 
 func (s *State) Session(ref adapters.SessionRef) (*Session, error) {
@@ -493,9 +522,9 @@ func orEmpty[T any](s []T) []T {
 	return s
 }
 
-func orEmptyMap(m map[string]any) map[string]any {
+func orEmptyMap[V any](m map[string]V) map[string]V {
 	if m == nil {
-		return map[string]any{}
+		return map[string]V{}
 	}
 	return m
 }

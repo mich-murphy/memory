@@ -209,7 +209,7 @@ func TestSyncRecordsTheLaunchTheHookLeft(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
-	record := e.Manifest("pi", testenv.PiSessionKey)["launch"].(map[string]any)
+	record := e.Launches(e.Manifest("pi", testenv.PiSessionKey))[0]
 	got := record["envelope"].(map[string]any)["payload"].(map[string]any)
 	if got["source"] != "startup" || got["event"] != "session_start" || got["agent"] != nil || got["path"] != nil {
 		t.Errorf("manifest launch = %v", got)
@@ -248,7 +248,7 @@ func TestALaunchWhoseSyncCouldNotGetTheLockIsRecordedByTheNextRun(t *testing.T) 
 	if code, out, errOut := run("sync", "--quiet"); code != 1 {
 		t.Fatalf("sweep: exit %d\n%s%s", code, out, errOut)
 	}
-	if got := e.Manifest("pi", testenv.PiSessionKey)["launch"].(map[string]any)["envelope"].(map[string]any)["payload"].(map[string]any); got["source"] != "startup" {
+	if got := e.Launches(e.Manifest("pi", testenv.PiSessionKey))[0]["envelope"].(map[string]any)["payload"].(map[string]any); got["source"] != "startup" {
 		t.Errorf("manifest launch = %v", got)
 	}
 	if left, _ := filepath.Glob(filepath.Join(e.State, "pending", "launch-*")); len(left) != 1 || filepath.Base(left[0]) != "launch-garbage.json" {
@@ -271,10 +271,9 @@ func TestQueuedLaunchesAreChronologicalWithStableTies(t *testing.T) {
 		t.Fatalf("sync: %d %s %s", code, out, errOut)
 	}
 	manifest := e.Manifest("pi", testenv.PiSessionKey)
-	launches := manifest["launches"].([]any)
 	var got []string
-	for _, l := range launches {
-		got = append(got, l.(map[string]any)["envelope"].(map[string]any)["payload"].(map[string]any)["source"].(string))
+	for _, l := range e.Launches(manifest) {
+		got = append(got, l["envelope"].(map[string]any)["payload"].(map[string]any)["source"].(string))
 	}
 	if diff := cmp.Diff([]string{"first", "middle", "late", "tie"}, got); diff != "" {
 		t.Fatalf("launches (-want +got): %s", diff)

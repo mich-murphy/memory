@@ -164,7 +164,7 @@ func readFile(sf adapters.SessionFile) ([]byte, error) {
 	}
 	data, err = scrub.Identities(sf.Agent, resolution.Identities, data)
 	if err == nil && !transcriptRoles[sf.Role] {
-		err = scrub.Text(data)
+		err = scrub.Text(resolution.Identities, data)
 	}
 	if err != nil {
 		return nil, err
@@ -592,8 +592,8 @@ func (s *Syncer) planCaptured(sf adapters.SessionFile, c *content, baseline *fil
 			u.reuse = true
 		case same && foldable(previous):
 			kind = "fold"
-			pieces = slices.Clone(previous.Pieces[:1])
-			start = pieces[0].End
+			pieces = slices.Clone(previous.Pieces[:foldFrom(previous.Pieces)])
+			start = pieces[len(pieces)-1].End
 		case sf.Role != adapters.RoleDB && previous.DeletedAt == 0 && c.appended && prev.Size > 0 && c.size > prev.Size && (!strings.HasSuffix(sf.Key, ".jsonl") || c.prefixNewline):
 			kind = "append"
 			start = prev.Size
@@ -624,6 +624,19 @@ func pieceDependency(piece raw.Piece) dependency {
 // foldable requires append lineage, not an arbitrary piece count (notably databases).
 func foldable(g *raw.Generation) bool {
 	return g.Role != string(adapters.RoleDB) && g.Kind == "append" && len(g.Pieces) >= maxSegments
+}
+
+// foldFrom picks the first piece a fold merges: the last two, then each earlier piece no
+// bigger than twice what is merged so far, never the base. A large earlier piece stays as it
+// is, so a long transcript's bytes are recompressed a few times rather than at every fold.
+func foldFrom(pieces []raw.Piece) int {
+	i := len(pieces) - 2
+	merged := pieces[i].End - pieces[i].Start + pieces[i+1].End - pieces[i+1].Start
+	for i > 1 && pieces[i-1].End-pieces[i-1].Start <= 2*merged {
+		i--
+		merged += pieces[i].End - pieces[i].Start
+	}
+	return i
 }
 
 func sameClassification(sf adapters.SessionFile, g *raw.Generation) bool {
@@ -830,7 +843,7 @@ func (s *Syncer) foldBeforeAppend(ctx context.Context, sf adapters.SessionFile, 
 	g.Sequence++
 	g.Parent = baseline.record.ID
 	g.Kind = "fold"
-	g.Pieces = slices.Clone(previous.Pieces[:1])
+	g.Pieces = slices.Clone(previous.Pieces[:foldFrom(previous.Pieces)])
 	g.ObservedAt = s.nowSeconds()
 	sf.Role = adapters.Role(previous.Role)
 	sf.SessionKey = previous.Identity.SessionKey
@@ -838,7 +851,7 @@ func (s *Syncer) foldBeforeAppend(ctx context.Context, sf adapters.SessionFile, 
 	u := &upload{
 		key: baseline.key, previous: previous, compress: c.compress,
 		outcome:     uploadOutcome{Status: captureStaged},
-		piece:       raw.Piece{Start: g.Pieces[0].End, End: g.Size},
+		piece:       raw.Piece{Start: g.Pieces[len(g.Pieces)-1].End, End: g.Size},
 		file:        state.File{SessionFile: sf, Size: g.Size, DiskSize: -1, MtimeNS: -1, SHA256: g.SHA256, LineCount: g.LineCount, PrefixSHA256: g.PrefixSHA256, Head: g.Head},
 		publication: &publication{Schema: 3, MachineID: s.cfg.MachineID, Kind: "file", Agent: sf.Agent, Key: sf.Key, Sequence: g.Sequence, Parent: g.Parent, File: &g},
 	}

@@ -16,11 +16,11 @@ import (
 
 func (p *publication) validateManifest() error {
 	m := p.Manifest
-	schema := manifestSchema
+	schemas := []int{copiedLaunchSchema, manifestSchema}
 	if p.Kind == "manifest" {
-		schema = copiedManifestSchema
+		schemas = []int{copiedManifestSchema}
 	}
-	if m == nil || m.Schema != schema || m.Agent != p.Agent || m.MachineID != p.MachineID || m.SessionKey != p.Key || !validTime(m.FirstSeen) || !validTime(m.SyncedAt) || m.Info == nil {
+	if m == nil || !slices.Contains(schemas, m.Schema) || m.Agent != p.Agent || m.MachineID != p.MachineID || m.SessionKey != p.Key || !validTime(m.FirstSeen) || !validTime(m.SyncedAt) || m.Info == nil {
 		return errors.New("archive: invalid manifest payload")
 	}
 	return m.validateMembers()
@@ -56,6 +56,19 @@ func (m *manifest) validateLaunchSnapshots() error {
 		if err := validateSnapshot(m.Snapshots[i]); err != nil {
 			return err
 		}
+		if referenced := m.Snapshots[i].MtimesSHA256 != ""; referenced != (m.Schema == manifestSchema) || referenced && (m.Snapshots[i].Mtimes != nil || !raw.ValidHash(m.Snapshots[i].MtimesSHA256)) {
+			return errors.New("archive: invalid snapshot mtimes")
+		}
+	}
+	if m.Schema == manifestSchema {
+		return m.validateLaunchRefs()
+	}
+	return m.validateLaunchCopies()
+}
+
+func (m *manifest) validateLaunchCopies() error {
+	if len(m.LaunchRecords) > 0 {
+		return errors.New("archive: launch records before schema 5")
 	}
 	for i := range m.Launches {
 		if err := validateLaunch(&m.Launches[i]); err != nil {
@@ -80,6 +93,20 @@ func (m *manifest) validateLaunchSnapshots() error {
 		if !bytes.Equal(a, b) {
 			return errors.New("archive: first launch differs from history")
 		}
+	}
+	return nil
+}
+
+func (m *manifest) validateLaunchRefs() error {
+	if m.Launch != nil || len(m.Launches) > 0 {
+		return errors.New("archive: schema 5 copies a launch")
+	}
+	ids := map[string]bool{}
+	for _, ref := range m.LaunchRecords {
+		if ids[ref.ID] || !raw.ValidKey(ref.ID) || !strings.Contains(ref.Commit, "/records/launch/") || !strings.Contains(ref.Commit, "/commits/") {
+			return errors.New("archive: invalid launch reference")
+		}
+		ids[ref.ID] = true
 	}
 	return nil
 }
@@ -110,6 +137,25 @@ func validateSnapshot(snap state.SnapshotEntry) error {
 		return errors.New("archive: unsupported snapshot timing")
 	}
 	for _, mtime := range snap.Mtimes {
+		if !validTime(mtime) {
+			return errors.New("archive: invalid snapshot mtime")
+		}
+	}
+	return nil
+}
+
+// validateMtimes accepts only the canonical encoding of a map of valid times, the form the
+// collector writes, so each mtimes blob has exactly one body.
+func validateMtimes(body []byte) error {
+	var mtimes map[string]float64
+	if err := jsonx.Decode(body, &mtimes); err != nil || mtimes == nil {
+		return errors.New("archive: invalid snapshot mtimes blob")
+	}
+	canonical, err := jsonx.SortedCompact(mtimes)
+	if err != nil || !bytes.Equal(canonical, body) {
+		return errors.New("archive: noncanonical snapshot mtimes blob")
+	}
+	for _, mtime := range mtimes {
 		if !validTime(mtime) {
 			return errors.New("archive: invalid snapshot mtime")
 		}
@@ -164,6 +210,11 @@ func (s *Syncer) verifySessionReferences(ctx context.Context, p *publication, de
 				return nil, err
 			}
 		}
+		for _, ref := range m.LaunchRecords {
+			if err := s.verifyLaunchRecord(ctx, p, ref, deps); err != nil {
+				return nil, err
+			}
+		}
 		snapshots = m.Snapshots
 	}
 	return snapshots, nil
@@ -171,6 +222,11 @@ func (s *Syncer) verifySessionReferences(ctx context.Context, p *publication, de
 
 func (s *Syncer) verifySnapshotReferences(ctx context.Context, agent string, snapshots []state.SnapshotEntry, bodies map[string][]byte, deps map[string]dependency) error {
 	for i := range snapshots {
+		if sha := snapshots[i].MtimesSHA256; sha != "" {
+			if err := s.verifyMtimesReference(ctx, sha, bodies, deps); err != nil {
+				return err
+			}
+		}
 		for _, id := range snapshotIDs(snapshots[i]) {
 			expected, err := s.snapshotDependencies(ctx, id, bodies, agent)
 			if err != nil {
@@ -184,6 +240,14 @@ func (s *Syncer) verifySnapshotReferences(ctx context.Context, agent string, sna
 		}
 	}
 	return nil
+}
+
+func (s *Syncer) verifyMtimesReference(ctx context.Context, sha string, bodies map[string][]byte, deps map[string]dependency) error {
+	if got, ok := deps[plainKey(sha)]; !ok || got.SHA256 != sha || got.Encoding != "plain" {
+		return fmt.Errorf("archive: missing or inconsistent mtimes dependency %s", plainKey(sha))
+	}
+	_, err := s.mtimesBody(ctx, sha, bodies)
+	return err
 }
 
 func (s *Syncer) referencedPublication(ctx context.Context, key string, deps map[string]dependency) (*publication, error) {
@@ -264,6 +328,20 @@ func (s *Syncer) verifyCopiedGeneration(ctx context.Context, parent *publication
 	return nil
 }
 
+func (s *Syncer) verifyLaunchRecord(ctx context.Context, parent *publication, ref launchRef, deps map[string]dependency) error {
+	if !strings.HasPrefix(ref.Commit, s.publicationPrefix("launch", parent.Agent, ref.ID)+"commits/") {
+		return errors.New("archive: launch reference names another stream")
+	}
+	p, err := s.referencedPublication(ctx, ref.Commit, deps)
+	if err != nil {
+		return err
+	}
+	if p.Launch == nil || p.Launch.Envelope.ID != ref.ID || p.Launch.SessionKey != parent.Key {
+		return errors.New("archive: launch reference differs from committed record")
+	}
+	return nil
+}
+
 func (s *Syncer) verifyLaunchReference(ctx context.Context, parent *publication, record *launchRecord, deps map[string]dependency) error {
 	found := false
 	for _, dep := range deps {
@@ -299,6 +377,12 @@ func (s *Syncer) verifyLaunchReference(ctx context.Context, parent *publication,
 // validateFileTransition checks the part of append/fold proofs available without reading
 // bodies. Appends inherit the parent's exact immutable prefix representation. Restore
 // additionally verifies every decoded byte and the declared whole-file digest.
+func retainsPrefix(pieces []raw.Piece, previous *raw.Generation) bool {
+	kept := len(pieces) - 1
+	return foldable(previous) && kept >= 1 && kept <= len(previous.Pieces)-2 &&
+		slices.Equal(pieces[:kept], previous.Pieces[:kept]) && pieces[kept].Start == previous.Pieces[kept].Start
+}
+
 func validateFileTransition(p *publication, previous *raw.Generation) error {
 	g := p.File
 	if g == nil || g.Kind != "append" && g.Kind != "fold" {
@@ -317,8 +401,9 @@ func validateFileTransition(p *publication, previous *raw.Generation) error {
 			return errors.New("archive: fold changes parent content")
 		}
 		// Existing v3 explicitly serialized file dependencies and folded the entire file.
-		// Keep those historical records readable; the new format retains the first base.
-		if p.Dependencies == nil && (!foldable(previous) || len(g.Pieces) != 2 || g.Pieces[0] != previous.Pieces[0]) {
+		// Keep those historical records readable; the new format retains a prefix of at
+		// least the base and merges the rest into one piece.
+		if p.Dependencies == nil && !retainsPrefix(g.Pieces, previous) {
 			return errors.New("archive: fold does not retain append base")
 		}
 	}

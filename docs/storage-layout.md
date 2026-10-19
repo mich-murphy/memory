@@ -71,7 +71,10 @@ A value that only names a secret is kept: `${VAR}`, `$VAR`, `Bearer ${TOKEN}`, a
 withheld whole when it contains a command-position literal assignment to a recognised
 secret-named ASCII shell variable. Supported forms include shell/export assignments and
 fish global/export `set` (`-gx`, `-xg`, separate `-g -x` or long flags), including complete
-static quoted command/flag/name spellings. Supported pure variable references remain allowed. This
+static quoted command/flag/name spellings. Supported pure variable references remain allowed.
+Source files in languages without shell assignments (`.py`, `.js`, `.ts`, `.go`, `.rb` and similar,
+including backup copies) are not checked, because a keyword argument on its own line, such as
+`key=lambda r: r[0],`, reads as one; a file reached through any other name still is. This
 applies to raw captures and snapshots; omissions report `literal_secret_assignment` in run
 summaries/doctor or snapshot skips, not a permanent retry error. Known-config scrubbing and
 parse failures retain their stricter rules above. Main, subagent and superseded transcripts
@@ -110,9 +113,15 @@ bytes, not an earlier mutable-source scan. `append` means a cryptographically pr
 plus a new tail, irrespective of source age. JSONL may append only when the acknowledged parent
 ends in newline, so each transcript piece is independently readable. `capture` means initial or
 rewritten content (including newline-boundary fallback); `fold` has identical bytes to its
-acknowledged parent. There is **no idle/time fold**. At 64 append-chain pieces, retain the first
-base and consolidate the remaining tail. Continuous growth publishes that unchanged fold first,
-then a separate append child, bounding the chain without recompressing the original base.
+acknowledged parent. There is **no idle/time fold**. At 64 append-chain pieces, a fold keeps a
+prefix of the parent's pieces and consolidates the rest into one piece. It merges the last two
+pieces, then each earlier piece no bigger than twice what is merged so far, and never the first
+base. A large earlier piece therefore stays as it is, and each byte of a long transcript is
+recompressed a few times rather than at every fold. A valid fold retains at least the base,
+merges at least two pieces, and its last piece starts where the retained prefix ends. Folds
+written by collectors up to 0.4.0 retained only the base and remain valid. Continuous growth
+publishes that unchanged fold first, then a separate append child, bounding the chain without
+recompressing the original base.
 Previous pieces/commits remain. A rewrite creates new pieces without overwriting old ones.
 Role/session/head changes can publish an unchanged-content capture reusing existing pieces. Every captured database generation is retained; capture frequency may be throttled,
 not acknowledged history. The collector performs no remote garbage collection.
@@ -170,8 +179,8 @@ store explicit dependencies; file descriptors derive them from pieces as describ
 Dependencies include immutable object key, encoded/body SHA-256, length and encoding; compressed dependencies
 also name decoded SHA-256 and length. References must match their typed committed payloads.
 
-Session manifests live under `records/session/`. A manifest payload has schema 4, agent, machine ID, hostname, namespaced session key, info,
-transcripts, launch/launches, git, snapshots, local deletions, first-seen/sync times and collector
+Session manifests live under `records/session/`. A manifest payload has schema 5, agent, machine ID, hostname, namespaced session key, info,
+transcripts, launch records, git, snapshots, local deletions, first-seen/sync times and collector
 version. Each transcript is a reference to a file stream: its file `key`, `role` and `history`
 (the stream's `commits/` prefix). `role` is one of the collector's roles. The manifest depends on
 exactly one commit under each `history`: the commit where the file joined this session with this
@@ -183,6 +192,19 @@ earlier version. An append, fold or rewrite of a listed file therefore publishes
 manifest is published only when the session itself changes: a file joins or leaves it, a file's
 role or local deletion changes, a launch or snapshot arrives, `info` changes, or the collector
 version changes. `info` omits `last_event_at`, which the main transcript's current head carries.
+
+`launch_records` lists each launch of the session, oldest first, as its envelope `id` and the
+`commit` key of its launch record, instead of copying the launch into the manifest: a session
+with many Pi subagents otherwise republished every launch with each new one. Read a launch by
+following `commit`; the session's `git` is the first launch's. Each snapshot entry names its
+mtimes by `mtimes_sha256`, the SHA-256 of a plain blob `v3/blobs/plain/<sha>` holding the
+mtimes map as sorted compact JSON, and the manifest depends on that blob. Sessions started from
+the same harness state share one blob, and a manifest stays small however many files a
+snapshot holds.
+
+Collectors 0.4.x wrote schema 4 manifests, which copy each launch (`launch`, the first, and
+`launches`, all of them) and carry each snapshot's `mtimes` inline. Newer collectors still read
+and verify them, and publish schema 5 the next time the session changes.
 
 Collectors up to 0.3.0 wrote schema 3 manifests under `records/manifest/` (kind `manifest`).
 Each copied every transcript's current generation (`size`, `sha256`, `line_count`,
@@ -206,7 +228,8 @@ Malformed/unreadable queued launches are retained and reported, not silently dis
 
 Launch snapshots use `timing: "captured"` with the actual capture time, **not** an unconditional
 `pre_session` claim. Later captures use `in_session` or `post_hoc`. Snapshot entries include set ID,
-optional memory set ID, git, taken-at and mtimes. `checked_at` is a disposable local recheck hint
+optional memory set ID, git, taken-at and mtimes (inline in a launch record, by
+`mtimes_sha256` in a schema 5 manifest). `checked_at` is a disposable local recheck hint
 and is zero/omitted in immutable manifest views.
 
 `git` records root/common directory, redacted remote, branch, HEAD, dirty flag and repository ID;
@@ -271,7 +294,7 @@ File bodies are stored as they are on disk, except for the secret values in conf
 
 - **`user`**: the agent's config dir. Skill, agent, command, rule and hook directories are taken whole.
 - **`home`**: `~/.agents/skills` for Codex and Pi.
-- **`project`**: the git repo containing the session's working directory, including nested CLAUDE.md and AGENTS.md files. Outside a repo, only the directory itself is checked.
+- **`project`**: the git repo containing the session's working directory, including nested CLAUDE.md and AGENTS.md files. Nested files come from `git ls-files` (tracked and untracked files git doesn't ignore, plus files ignored by name such as `CLAUDE.local.md`), so ignored and vendored trees aren't walked; if git fails, the directory is walked instead. Outside a repo, only the directory itself is checked.
 - **`ancestor`**: instruction files in the directories above the project.
 - **`managed`**: administrator settings in `/etc/claude-code`, `/Library/Application Support/ClaudeCode` and `/etc/codex`.
 - **`plugin`**: every file of each installed Claude Code plugin, as `<plugin>/<path>`.
@@ -279,7 +302,7 @@ File bodies are stored as they are on disk, except for the secret values in conf
 - **`import`**: files a CLAUDE.md or AGENTS.md pulls in with `@path`, followed five levels deep.
 
 Snapshot symlinks retain the existing explicit directory-follow policy (unlike raw discovery),
-and `target` records where a file really lives. The same identity exclusions apply. Files over 5 MB, or past 3000 in one scope, are listed in `skipped` with the reason. Each file's mtime goes in the manifest's snapshot entry, not the set, so it doesn't change the set id.
+and `target` records where a file really lives. The same identity exclusions apply. Files over 5 MB, or past 3000 in one scope, are listed in `skipped` with the reason. Each scope's directory walk is bounded separately (5,000 directories and 12,000 entries), so a large project can't use up the plugins' or memory's walk; the 64 MiB limit on the bytes a snapshot holds is shared. Each file's mtime goes in the snapshot entry's mtimes, not the set, so it doesn't change the set id.
 
 Pi harness sets retain installed npm package manifests/locks and a synthetic Git package
 HEAD/dirty-state observation, without exporting `.git/` metadata or executing hooks, fsmonitor
