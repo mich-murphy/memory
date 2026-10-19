@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"errors"
 	"iter"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/mich-murphy/memory/internal/capturepolicy"
 )
 
 // MaxTextSize bounds the assignment guard, not protected-config parsing. Larger files and
@@ -20,15 +24,28 @@ var ErrLiteralSecret = errors.New("literal_secret_assignment")
 var (
 	assignmentRE = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)=(.*)$`)
 	shellNameRE  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	// In these languages a keyword argument on its own line (`key=lambda r: r[0],`) reads as
+	// a shell assignment, and none of them has shell assignment syntax to guard.
+	sourceExtensions = map[string]bool{
+		".py": true, ".pyi": true, ".rb": true, ".js": true, ".mjs": true, ".cjs": true, ".jsx": true,
+		".ts": true, ".mts": true, ".cts": true, ".tsx": true, ".go": true, ".rs": true, ".java": true,
+		".kt": true, ".kts": true, ".scala": true, ".swift": true, ".c": true, ".h": true, ".cc": true,
+		".cpp": true, ".hpp": true, ".cs": true, ".php": true, ".lua": true, ".r": true, ".jl": true,
+		".ex": true, ".exs": true, ".dart": true,
+	}
 )
 
 // Text withholds small UTF-8 text containing a shell assignment or fish global/export set command
 // whose name says it holds a secret and whose value is not a supported pure reference.
 // Only command-like lines are checked: comments, prose and inline documentation examples
 // are not assignments. Executable examples (including fenced examples) are checked too.
-// Callers MUST NOT pass main, subagent or superseded transcript contents.
-func Text(data []byte) error {
+// Callers MUST NOT pass main, subagent or superseded transcript contents. A file is
+// skipped only when every path it was reached by names source code in such a language.
+func Text(identities []string, data []byte) error {
 	if len(data) > MaxTextSize || bytes.IndexByte(data, 0) >= 0 || !utf8.Valid(data) {
+		return nil
+	}
+	if len(identities) > 0 && !slices.ContainsFunc(identities, isGuarded) {
 		return nil
 	}
 	for line := range strings.SplitSeq(string(data), "\n") {
@@ -37,6 +54,10 @@ func Text(data []byte) error {
 		}
 	}
 	return nil
+}
+
+func isGuarded(identity string) bool {
+	return !sourceExtensions[strings.ToLower(filepath.Ext(capturepolicy.BaseName(identity)))]
 }
 
 func literalAssignment(line string) bool {

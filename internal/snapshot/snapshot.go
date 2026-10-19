@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -30,6 +31,7 @@ const (
 	maxSnapshotSize  = 64 << 20
 	maxWalkFiles     = 12000
 	maxSkippedFiles  = 3000
+	maxGitOutput     = 1 << 20
 )
 
 var (
@@ -58,14 +60,19 @@ type SkippedFile struct {
 
 type scopedName struct{ scope, name string }
 
+// budget bounds the bytes a whole snapshot holds. Walks are bounded per scope instead, so
+// a large repository cannot starve the plugins and memory listed after it.
 type budget struct {
-	held   int64
-	walked int
-	listed int
+	held int64
+}
+
+type walk struct {
+	dirs, entries int
 }
 
 type collected struct {
 	budget    *budget
+	walks     map[string]*walk
 	agent     string
 	entries   []*entry
 	skipped   []SkippedFile
@@ -78,7 +85,7 @@ type collected struct {
 func newCollected(agent string) *collected {
 	policy, err := capturepolicy.New(config.FilePath(), config.StateDir())
 	return &collected{
-		budget: &budget{}, agent: agent, skipped: []SkippedFile{}, counts: map[string]int{}, seen: map[scopedName]bool{},
+		budget: &budget{}, walks: map[string]*walk{}, agent: agent, skipped: []SkippedFile{}, counts: map[string]int{}, seen: map[scopedName]bool{},
 		policy: policy, policyErr: err,
 	}
 }
@@ -143,7 +150,7 @@ func (c *collected) add(scope, path, name string) *entry {
 		c.skip(scope, name, "unparseable", st.Size())
 		return nil
 	}
-	if err := scrub.Text(body); err != nil {
+	if err := scrub.Text(resolution.Identities, body); err != nil {
 		c.skip(scope, name, "literal_secret_assignment", st.Size())
 		return nil
 	}
@@ -228,8 +235,9 @@ func (c *collected) walkFiles(scope, top string, follow bool) []string {
 	var out []string
 	visited := map[string]bool{}
 	queue := []string{top}
+	w := c.walk(scope)
 	for len(queue) > 0 {
-		if c.budget.walked >= maxWalkDirs || c.budget.listed >= maxWalkFiles {
+		if w.dirs >= maxWalkDirs || w.entries >= maxWalkFiles {
 			c.skip(scope, top, "walk_limit", 0)
 			break
 		}
@@ -240,8 +248,8 @@ func (c *collected) walkFiles(scope, top string, follow bool) []string {
 			continue
 		}
 		visited[resolved] = true
-		c.budget.walked++
-		subdirs, files := c.listDir(scope, dir, follow, maxWalkFiles-c.budget.listed)
+		w.dirs++
+		subdirs, files := c.listDir(scope, dir, follow, maxWalkFiles-w.entries)
 		out = append(out, files...)
 		if len(queue)+len(subdirs) > maxWalkDirs {
 			c.skip(scope, top, "walk_limit", 0)
@@ -252,7 +260,17 @@ func (c *collected) walkFiles(scope, top string, follow bool) []string {
 	return out
 }
 
+func (c *collected) walk(scope string) *walk {
+	w, ok := c.walks[scope]
+	if !ok {
+		w = &walk{}
+		c.walks[scope] = w
+	}
+	return w
+}
+
 func (c *collected) listDir(scope, dir string, follow bool, limit int) (subdirs, files []string) {
+	w := c.walk(scope)
 	f, err := os.Open(dir)
 	if err != nil {
 		c.skip(scope, dir, "walk_error", 0)
@@ -266,7 +284,7 @@ func (c *collected) listDir(scope, dir string, follow bool, limit int) (subdirs,
 			return subdirs, files
 		}
 		for _, d := range entries {
-			c.budget.listed++
+			w.entries++
 			p := filepath.Join(dir, d.Name())
 			isDir, include := c.walkEntry(scope, p, d, follow)
 			if !include {
@@ -277,7 +295,7 @@ func (c *collected) listDir(scope, dir string, follow bool, limit int) (subdirs,
 			} else {
 				files = append(files, p)
 			}
-			if len(files) >= limit || len(subdirs) >= maxWalkDirs || c.budget.listed >= maxWalkFiles {
+			if len(files) >= limit || len(subdirs) >= maxWalkDirs || w.entries >= maxWalkFiles {
 				c.skip(scope, dir, "walk_limit", 0)
 				return subdirs, files
 			}
@@ -413,11 +431,64 @@ func (c *collected) sourceIssues(scope string, issues []adapters.Issue) {
 }
 
 func (c *collected) addPatterns(s scopeBase) {
+	nested := nestedFiles(s)
 	for _, pattern := range s.patterns {
-		for _, p := range c.match(s.scope, s.base, pattern, s.recursiveOK) {
+		paths, ok := nested[pattern]
+		if !ok {
+			paths = c.match(s.scope, s.base, pattern, s.recursiveOK)
+		}
+		for _, p := range paths {
 			c.add(s.scope, p, relSlash(p, s.base))
 		}
 	}
+}
+
+// nestedFiles answers a repository's **/<name> patterns from git, which skips ignored and
+// untracked vendored trees that a walk would spend its budget on. Files that are ignored
+// themselves, such as CLAUDE.local.md, are kept; files inside ignored directories are not.
+// Without git, the patterns are left to the walk.
+func nestedFiles(s scopeBase) map[string][]string {
+	if !s.recursiveOK {
+		return nil
+	}
+	patterns := map[string]string{}
+	var specs []string
+	for _, pattern := range s.patterns {
+		if name, ok := strings.CutPrefix(pattern, "**/"); ok && !strings.ContainsAny(name, "/*?[") {
+			patterns[name] = pattern
+			specs = append(specs, ":(glob)**/"+name)
+		}
+	}
+	if len(specs) == 0 {
+		return nil
+	}
+	var listed []byte
+	for _, args := range [][]string{
+		{"ls-files", "-z", "--cached", "--others", "--exclude-standard"},
+		{"ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"},
+	} {
+		out, err := adapters.Git(s.base, maxGitOutput, append(append(args, "--"), specs...)...)
+		if err != nil {
+			return nil
+		}
+		listed = append(listed, out...)
+	}
+	found := map[string][]string{}
+	for _, pattern := range patterns {
+		found[pattern] = []string{}
+	}
+	for rel := range strings.SplitSeq(string(listed), "\x00") {
+		pattern, ok := patterns[path.Base(rel)]
+		if !ok || strings.HasSuffix(rel, "/") || slices.ContainsFunc(strings.Split(rel, "/"), func(part string) bool { return skipDirs[part] }) {
+			continue
+		}
+		found[pattern] = append(found[pattern], filepath.Join(s.base, filepath.FromSlash(rel)))
+	}
+	for pattern, paths := range found {
+		slices.Sort(paths)
+		found[pattern] = slices.Compact(paths)
+	}
+	return found
 }
 
 func (c *collected) addAncestors(projectRoot string) {

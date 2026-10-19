@@ -192,7 +192,7 @@ func TestHarnessAndMemoryShareAggregateRetainedByteBudget(t *testing.T) {
 	}
 }
 
-func TestSnapshotBoundsDiagnosticsAndWalksAcrossScopes(t *testing.T) {
+func TestSnapshotBoundsDiagnosticsAndEachScopesWalk(t *testing.T) {
 	c := newCollected("pi")
 	for range maxSkippedFiles + 5 {
 		c.skip("user", "missing", "stat_error", 0)
@@ -201,8 +201,13 @@ func TestSnapshotBoundsDiagnosticsAndWalksAcrossScopes(t *testing.T) {
 		t.Fatalf("bounded skipped count = %d, last = %+v", len(c.skipped), c.skipped[len(c.skipped)-1])
 	}
 	c = newCollected("pi")
-	c.budget.walked = maxWalkDirs
-	if got := c.walkFiles("user", t.TempDir(), true); len(got) != 0 || len(c.skipped) != 1 || c.skipped[0].Reason != "walk_limit" {
-		t.Fatalf("aggregate walk = %v %+v", got, c.skipped)
+	c.walk("project").dirs = maxWalkDirs
+	if got := c.walkFiles("project", t.TempDir(), true); len(got) != 0 || len(c.skipped) != 1 || c.skipped[0].Reason != "walk_limit" {
+		t.Fatalf("exhausted walk = %v %+v", got, c.skipped)
+	}
+	plugin := t.TempDir()
+	testenv.Write(t, filepath.Join(plugin, "skills", "x", "SKILL.md"), "skill\n")
+	if got := c.walkFiles("plugin", plugin, true); len(got) != 1 || len(c.skipped) != 1 {
+		t.Fatalf("a later scope's walk = %v %+v, want its own budget", got, c.skipped)
 	}
 }

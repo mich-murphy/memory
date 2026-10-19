@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -118,6 +119,58 @@ func TestAppendBoundaryFoldRetainsBaseAndEveryHistoricalVersion(t *testing.T) {
 	p, sum = f.run(t, body)
 	if p.File.Kind != "append" || sum.Segments != 1 || p.File.Pieces[0] != base.File.Pieces[0] {
 		t.Fatalf("append after fold = %+v, %+v", p.File, sum)
+	}
+}
+
+func TestFoldKeepsLargeEarlierPiecesAndRecompressesOnlyTheSmallTail(t *testing.T) {
+	f := newPieceFixture(t, "transcript.jsonl", adapters.RoleAux)
+	body := []byte("base\n")
+	f.run(t, body)
+	body = append(body, bytes.Repeat([]byte("large tool output\n"), 1<<14)...)
+	large, _ := f.run(t, body)
+	for i := 2; i < maxSegments; i++ {
+		body = fmt.Appendf(body, "line %d\n", i)
+		f.run(t, body)
+	}
+	p, sum := f.run(t, nil)
+	if sum.Folded != 1 || len(p.File.Pieces) != 3 || !slices.Equal(p.File.Pieces[:2], large.File.Pieces) {
+		t.Fatalf("fold = %d pieces, %+v, want base and large piece kept", len(p.File.Pieces), sum)
+	}
+	if tail := p.File.Pieces[2]; tail.Start != large.File.Size || sum.BytesUploaded != tail.EncodedSize {
+		t.Fatalf("fold uploaded %d bytes for tail %+v, want only the small tail", sum.BytesUploaded, tail)
+	}
+	var out bytes.Buffer
+	if err := f.sy.Restore(t.Context(), f.sf.Agent, f.sf.Key, "", &out); err != nil || !bytes.Equal(out.Bytes(), body) {
+		t.Fatalf("Restore = %v", err)
+	}
+}
+
+func TestFoldFromMergesComparablePiecesButNeverTheBase(t *testing.T) {
+	pieces := func(sizes ...int64) []raw.Piece {
+		var out []raw.Piece
+		var at int64
+		for _, size := range sizes {
+			out = append(out, raw.Piece{Start: at, End: at + size})
+			at += size
+		}
+		return out
+	}
+	for name, tc := range map[string]struct {
+		sizes []int64
+		want  int
+	}{
+		"equal":       {[]int64{1, 1, 1, 1, 1}, 1},
+		"largeEarly":  {[]int64{1, 100, 1, 1, 1}, 2},
+		"largeLast":   {[]int64{1, 1, 1, 1, 100}, 1},
+		"doubling":    {[]int64{1, 8, 4, 2, 1, 1}, 1},
+		"largeBase":   {[]int64{100, 1, 1}, 1},
+		"twoOfNested": {[]int64{1, 64, 16, 1, 1}, 3},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := foldFrom(pieces(tc.sizes...)); got != tc.want {
+				t.Errorf("foldFrom(%v) = %d, want %d", tc.sizes, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -327,6 +380,38 @@ func TestFileTransitionRejectsForgedAppendAndChangedFold(t *testing.T) {
 	g.Kind = "fold"
 	if err := validateFileTransition(&altered, first.File); err == nil {
 		t.Fatal("accepted changed-content fold")
+	}
+}
+
+func TestFoldTransitionMustRetainAPrefixAndMergeTheRest(t *testing.T) {
+	previous := &raw.Generation{Kind: "append", Sequence: 1, Size: 64, SHA256: raw.SHA256([]byte("x"))}
+	for i := range int64(maxSegments) {
+		previous.Pieces = append(previous.Pieces, raw.Piece{Start: i, End: i + 1, SHA256: strconv.FormatInt(i, 10)})
+	}
+	fold := func(kept int, start int64) *publication {
+		g := *previous
+		g.Kind, g.Sequence, g.Parent = "fold", 2, "parent"
+		g.Pieces = append(slices.Clone(previous.Pieces[:kept]), raw.Piece{Start: start, End: 64})
+		return &publication{File: &g}
+	}
+	if err := validateFileTransition(fold(3, 3), previous); err != nil {
+		t.Errorf("tiered fold rejected: %v", err)
+	}
+	if err := validateFileTransition(fold(1, 1), previous); err != nil {
+		t.Errorf("whole-tail fold rejected: %v", err)
+	}
+	for name, p := range map[string]*publication{
+		"noBase":     fold(0, 0),
+		"noMerge":    fold(maxSegments-1, maxSegments-1),
+		"gap":        fold(3, 4),
+		"changedKey": fold(3, 3),
+	} {
+		if name == "changedKey" {
+			p.File.Pieces[1].SHA256 = "forged"
+		}
+		if err := validateFileTransition(p, previous); err == nil {
+			t.Errorf("%s: accepted invalid fold", name)
+		}
 	}
 }
 

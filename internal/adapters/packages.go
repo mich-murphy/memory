@@ -156,6 +156,12 @@ func (o *packageOutput) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// Git runs a read-only git observation in dir: no hooks, fsmonitor or inherited configuration,
+// bounded in time and to limit bytes of output.
+func Git(dir string, limit int, args ...string) ([]byte, error) {
+	return runPackageGit(dir, nil, limit, args...)
+}
+
 func packageGit(dir string, args ...string) ([]byte, error) {
 	return runPackageGit(dir, nil, 0, args...)
 }

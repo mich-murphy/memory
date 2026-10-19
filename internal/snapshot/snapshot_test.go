@@ -131,6 +131,26 @@ func TestSnapshotHoldsTheHarness(t *testing.T) {
 	}
 }
 
+func TestNestedInstructionsComeFromGitAndSkipIgnoredTrees(t *testing.T) {
+	e := testenv.New(t)
+	p := e.Project
+	testenv.Write(t, filepath.Join(p, ".gitignore"), ".tools/\nCLAUDE.local.md\n")
+	testenv.Write(t, filepath.Join(p, ".tools", "git", "po", "AGENTS.md"), "vendored\n")
+	testenv.Write(t, filepath.Join(p, "app", "CLAUDE.local.md"), "my notes\n")
+	testenv.Write(t, filepath.Join(p, "app", "deep", "AGENTS.md"), "untracked rules\n")
+	set := build(t, e, p)
+	var nested []string
+	for _, f := range set.Files {
+		if f.Scope == "project" && strings.Contains(f.Path, "/") && !strings.HasPrefix(f.Path, ".claude/") {
+			nested = append(nested, f.Path)
+		}
+	}
+	want := []string{"app/CLAUDE.local.md", "app/deep/AGENTS.md", "src/CLAUDE.md"}
+	if diff := cmp.Diff(want, nested); diff != "" {
+		t.Errorf("nested instruction files (-want +got):\n%s", diff)
+	}
+}
+
 func TestMemorySetHoldsOnlyWhatTheAgentRemembered(t *testing.T) {
 	e := testenv.New(t)
 	a := adapters.NewClaude(e.Home)

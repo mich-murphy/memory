@@ -299,6 +299,12 @@ func (s *Syncer) verifyLaunchReference(ctx context.Context, parent *publication,
 // validateFileTransition checks the part of append/fold proofs available without reading
 // bodies. Appends inherit the parent's exact immutable prefix representation. Restore
 // additionally verifies every decoded byte and the declared whole-file digest.
+func retainsPrefix(pieces []raw.Piece, previous *raw.Generation) bool {
+	kept := len(pieces) - 1
+	return foldable(previous) && kept >= 1 && kept <= len(previous.Pieces)-2 &&
+		slices.Equal(pieces[:kept], previous.Pieces[:kept]) && pieces[kept].Start == previous.Pieces[kept].Start
+}
+
 func validateFileTransition(p *publication, previous *raw.Generation) error {
 	g := p.File
 	if g == nil || g.Kind != "append" && g.Kind != "fold" {
@@ -317,8 +323,9 @@ func validateFileTransition(p *publication, previous *raw.Generation) error {
 			return errors.New("archive: fold changes parent content")
 		}
 		// Existing v3 explicitly serialized file dependencies and folded the entire file.
-		// Keep those historical records readable; the new format retains the first base.
-		if p.Dependencies == nil && (!foldable(previous) || len(g.Pieces) != 2 || g.Pieces[0] != previous.Pieces[0]) {
+		// Keep those historical records readable; the new format retains a prefix of at
+		// least the base and merges the rest into one piece.
+		if p.Dependencies == nil && !retainsPrefix(g.Pieces, previous) {
 			return errors.New("archive: fold does not retain append base")
 		}
 	}

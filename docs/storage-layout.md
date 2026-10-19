@@ -71,7 +71,10 @@ A value that only names a secret is kept: `${VAR}`, `$VAR`, `Bearer ${TOKEN}`, a
 withheld whole when it contains a command-position literal assignment to a recognised
 secret-named ASCII shell variable. Supported forms include shell/export assignments and
 fish global/export `set` (`-gx`, `-xg`, separate `-g -x` or long flags), including complete
-static quoted command/flag/name spellings. Supported pure variable references remain allowed. This
+static quoted command/flag/name spellings. Supported pure variable references remain allowed.
+Source files in languages without shell assignments (`.py`, `.js`, `.ts`, `.go`, `.rb` and similar,
+including backup copies) are not checked, because a keyword argument on its own line, such as
+`key=lambda r: r[0],`, reads as one; a file reached through any other name still is. This
 applies to raw captures and snapshots; omissions report `literal_secret_assignment` in run
 summaries/doctor or snapshot skips, not a permanent retry error. Known-config scrubbing and
 parse failures retain their stricter rules above. Main, subagent and superseded transcripts
@@ -110,9 +113,15 @@ bytes, not an earlier mutable-source scan. `append` means a cryptographically pr
 plus a new tail, irrespective of source age. JSONL may append only when the acknowledged parent
 ends in newline, so each transcript piece is independently readable. `capture` means initial or
 rewritten content (including newline-boundary fallback); `fold` has identical bytes to its
-acknowledged parent. There is **no idle/time fold**. At 64 append-chain pieces, retain the first
-base and consolidate the remaining tail. Continuous growth publishes that unchanged fold first,
-then a separate append child, bounding the chain without recompressing the original base.
+acknowledged parent. There is **no idle/time fold**. At 64 append-chain pieces, a fold keeps a
+prefix of the parent's pieces and consolidates the rest into one piece. It merges the last two
+pieces, then each earlier piece no bigger than twice what is merged so far, and never the first
+base. A large earlier piece therefore stays as it is, and each byte of a long transcript is
+recompressed a few times rather than at every fold. A valid fold retains at least the base,
+merges at least two pieces, and its last piece starts where the retained prefix ends. Folds
+written by collectors up to 0.4.0 retained only the base and remain valid. Continuous growth
+publishes that unchanged fold first, then a separate append child, bounding the chain without
+recompressing the original base.
 Previous pieces/commits remain. A rewrite creates new pieces without overwriting old ones.
 Role/session/head changes can publish an unchanged-content capture reusing existing pieces. Every captured database generation is retained; capture frequency may be throttled,
 not acknowledged history. The collector performs no remote garbage collection.
@@ -271,7 +280,7 @@ File bodies are stored as they are on disk, except for the secret values in conf
 
 - **`user`**: the agent's config dir. Skill, agent, command, rule and hook directories are taken whole.
 - **`home`**: `~/.agents/skills` for Codex and Pi.
-- **`project`**: the git repo containing the session's working directory, including nested CLAUDE.md and AGENTS.md files. Outside a repo, only the directory itself is checked.
+- **`project`**: the git repo containing the session's working directory, including nested CLAUDE.md and AGENTS.md files. Nested files come from `git ls-files` (tracked and untracked files git doesn't ignore, plus files ignored by name such as `CLAUDE.local.md`), so ignored and vendored trees aren't walked; if git fails, the directory is walked instead. Outside a repo, only the directory itself is checked.
 - **`ancestor`**: instruction files in the directories above the project.
 - **`managed`**: administrator settings in `/etc/claude-code`, `/Library/Application Support/ClaudeCode` and `/etc/codex`.
 - **`plugin`**: every file of each installed Claude Code plugin, as `<plugin>/<path>`.
@@ -279,7 +288,7 @@ File bodies are stored as they are on disk, except for the secret values in conf
 - **`import`**: files a CLAUDE.md or AGENTS.md pulls in with `@path`, followed five levels deep.
 
 Snapshot symlinks retain the existing explicit directory-follow policy (unlike raw discovery),
-and `target` records where a file really lives. The same identity exclusions apply. Files over 5 MB, or past 3000 in one scope, are listed in `skipped` with the reason. Each file's mtime goes in the manifest's snapshot entry, not the set, so it doesn't change the set id.
+and `target` records where a file really lives. The same identity exclusions apply. Files over 5 MB, or past 3000 in one scope, are listed in `skipped` with the reason. Each scope's directory walk is bounded separately (5,000 directories and 12,000 entries), so a large project can't use up the plugins' or memory's walk; the 64 MiB limit on the bytes a snapshot holds is shared. Each file's mtime goes in the manifest's snapshot entry, not the set, so it doesn't change the set id.
 
 Pi harness sets retain installed npm package manifests/locks and a synthetic Git package
 HEAD/dirty-state observation, without exporting `.git/` metadata or executing hooks, fsmonitor
