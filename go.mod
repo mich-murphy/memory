@@ -14,7 +14,7 @@ require (
 	github.com/gofrs/flock v0.13.1
 	github.com/google/go-cmp v0.7.0
 	github.com/johannesboyne/gofakes3 v1.2.0
-	github.com/klauspost/compress v1.20.1
+	github.com/klauspost/compress v1.20.3
 	github.com/rogpeppe/go-internal v1.16.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.47.0
