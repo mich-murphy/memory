@@ -144,6 +144,25 @@ func validateSnapshot(snap state.SnapshotEntry) error {
 	return nil
 }
 
+// validateMtimes accepts only the canonical encoding of a map of valid times, the form the
+// collector writes, so each mtimes blob has exactly one body.
+func validateMtimes(body []byte) error {
+	var mtimes map[string]float64
+	if err := jsonx.Decode(body, &mtimes); err != nil || mtimes == nil {
+		return errors.New("archive: invalid snapshot mtimes blob")
+	}
+	canonical, err := jsonx.SortedCompact(mtimes)
+	if err != nil || !bytes.Equal(canonical, body) {
+		return errors.New("archive: noncanonical snapshot mtimes blob")
+	}
+	for _, mtime := range mtimes {
+		if !validTime(mtime) {
+			return errors.New("archive: invalid snapshot mtime")
+		}
+	}
+	return nil
+}
+
 func dependencyMap(deps []dependency) (map[string]dependency, error) {
 	byKey := make(map[string]dependency, len(deps))
 	for _, dep := range deps {
@@ -206,6 +225,9 @@ func (s *Syncer) verifySnapshotReferences(ctx context.Context, agent string, sna
 		if sha := snapshots[i].MtimesSHA256; sha != "" {
 			if got, ok := deps[plainKey(sha)]; !ok || got.SHA256 != sha || got.Encoding != "plain" {
 				return fmt.Errorf("archive: missing or inconsistent mtimes dependency %s", plainKey(sha))
+			}
+			if _, err := s.mtimesBody(ctx, sha, bodies); err != nil {
+				return err
 			}
 		}
 		for _, id := range snapshotIDs(snapshots[i]) {

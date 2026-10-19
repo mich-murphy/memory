@@ -455,25 +455,43 @@ func (s *Syncer) mtimesDependency(ctx context.Context, snap *state.SnapshotEntry
 	if err != nil {
 		return dependency{}, err
 	}
+	if body == nil {
+		body, err = s.mtimesBody(ctx, sha, bodies)
+	} else {
+		err = validateMtimes(body)
+	}
+	if err != nil {
+		return dependency{}, err
+	}
 	key := plainKey(sha)
-	if body == nil {
-		body = bodies[key]
-	}
-	if body == nil {
-		body = s.cachedSnapshot(key)
-	}
-	if body == nil {
-		if body, err = s.readRecord(ctx, key); err != nil {
-			return dependency{}, err
-		}
-		if raw.SHA256(body) != sha {
-			return dependency{}, errors.New("archive snapshot: mtimes checksum mismatch")
-		}
-	}
 	bodies[key] = body
 	s.cacheSnapshot(key, body)
 	snap.Mtimes, snap.MtimesSHA256 = nil, sha
 	return dependency{Object: key, SHA256: sha, Size: int64(len(body)), Encoding: "plain"}, nil
+}
+
+// mtimesBody returns a referenced mtimes blob once its bytes and its typed contents check out,
+// since a matching hash alone proves only that the bytes are the ones the manifest named.
+func (s *Syncer) mtimesBody(ctx context.Context, sha string, bodies map[string][]byte) ([]byte, error) {
+	key := plainKey(sha)
+	body, ok := bodies[key]
+	if !ok {
+		body = s.cachedSnapshot(key)
+	}
+	if body == nil {
+		var err error
+		if body, err = s.readRecord(ctx, key); err != nil {
+			return nil, err
+		}
+	}
+	if raw.SHA256(body) != sha {
+		return nil, errors.New("archive snapshot: mtimes checksum mismatch")
+	}
+	if err := validateMtimes(body); err != nil {
+		return nil, err
+	}
+	s.cacheSnapshot(key, body)
+	return body, nil
 }
 
 func snapshotIDs(snap state.SnapshotEntry) []string {

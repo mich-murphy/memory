@@ -545,6 +545,51 @@ func TestSchema5ManifestReferencesLaunchRecordsAndMtimesBlobs(t *testing.T) {
 	}
 }
 
+func TestMtimesBlobsMustHoldCanonicalValidTimes(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"valid", `{"a":1,"b":2.5}`, ""},
+		{"empty", `{}`, ""},
+		{"negative", `{"file":-1}`, "invalid snapshot mtime"},
+		{"array", `[]`, "invalid snapshot mtimes blob"},
+		{"notJSON", `not json`, "invalid snapshot mtimes blob"},
+		{"null", `null`, "invalid snapshot mtimes blob"},
+		{"stringTime", `{"file":"1"}`, "invalid snapshot mtimes blob"},
+		{"trailing", `{"a":1}{}`, "invalid snapshot mtimes blob"},
+		{"unsorted", `{"b":1,"a":1}`, "noncanonical snapshot mtimes blob"},
+		{"floatSpelling", `{"a":1.0}`, "noncanonical snapshot mtimes blob"},
+		{"duplicate", `{"a":1,"a":2}`, "snapshot mtimes blob"},
+	} {
+		for _, staged := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/staged=%v", tc.name, staged), func(t *testing.T) {
+				sy, bucket, id, bodies := publicationFixture(t, 0)
+				body := []byte(tc.body)
+				sha := raw.SHA256(body)
+				if staged {
+					bodies[plainKey(sha)] = body
+				} else if err := bucket.Put(t.Context(), plainKey(sha), body, map[string]string{"sha256": sha}); err != nil {
+					t.Fatal(err)
+				}
+				p := branchPublication("session")
+				p.Manifest.Snapshots = []state.SnapshotEntry{{ID: id, TakenAt: 1, Timing: "captured", MtimesSHA256: sha}}
+				var err error
+				p.Dependencies, err = sy.snapshotDependencies(t.Context(), id, bodies, p.Agent)
+				if err != nil {
+					t.Fatal(err)
+				}
+				p.Dependencies = append(p.Dependencies, dependency{Object: plainKey(sha), SHA256: sha, Size: int64(len(body)), Encoding: "plain"})
+				_, err = sy.publish(t.Context(), p, bodies)
+				if tc.want == "" {
+					if err != nil {
+						t.Fatalf("publish = %v", err)
+					}
+					return
+				}
+				requireBranchError(t, err, tc.want)
+			})
+		}
+	}
+}
+
 func TestSchema4ManifestStaysCanonicalAndSchema5LeavesCopiesOut(t *testing.T) {
 	snap := state.SnapshotEntry{ID: raw.SHA256([]byte("snapshot")), Timing: "captured", TakenAt: 10, Mtimes: map[string]float64{"a": 1}}
 	entry := *branchPublication("launch").Launch
