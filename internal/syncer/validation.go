@@ -223,10 +223,7 @@ func (s *Syncer) verifySessionReferences(ctx context.Context, p *publication, de
 func (s *Syncer) verifySnapshotReferences(ctx context.Context, agent string, snapshots []state.SnapshotEntry, bodies map[string][]byte, deps map[string]dependency) error {
 	for i := range snapshots {
 		if sha := snapshots[i].MtimesSHA256; sha != "" {
-			if got, ok := deps[plainKey(sha)]; !ok || got.SHA256 != sha || got.Encoding != "plain" {
-				return fmt.Errorf("archive: missing or inconsistent mtimes dependency %s", plainKey(sha))
-			}
-			if _, err := s.mtimesBody(ctx, sha, bodies); err != nil {
+			if err := s.verifyMtimesReference(ctx, sha, bodies, deps); err != nil {
 				return err
 			}
 		}
@@ -243,6 +240,14 @@ func (s *Syncer) verifySnapshotReferences(ctx context.Context, agent string, sna
 		}
 	}
 	return nil
+}
+
+func (s *Syncer) verifyMtimesReference(ctx context.Context, sha string, bodies map[string][]byte, deps map[string]dependency) error {
+	if got, ok := deps[plainKey(sha)]; !ok || got.SHA256 != sha || got.Encoding != "plain" {
+		return fmt.Errorf("archive: missing or inconsistent mtimes dependency %s", plainKey(sha))
+	}
+	_, err := s.mtimesBody(ctx, sha, bodies)
+	return err
 }
 
 func (s *Syncer) referencedPublication(ctx context.Context, key string, deps map[string]dependency) (*publication, error) {

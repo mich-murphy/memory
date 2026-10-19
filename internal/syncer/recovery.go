@@ -422,11 +422,13 @@ func (s *Syncer) applyPublication(r state.Record, p *publication, previous *raw.
 		return s.applyLaunch(r, p.Launch)
 	case "session", "manifest":
 		m := p.Manifest
-		sess := &state.Session{Info: m.Info, Snapshots: m.Snapshots, FirstSeen: m.FirstSeen}
-		sess.Launches = slices.Clone(m.Launches)
+		launches, err := s.manifestLaunches(m)
+		if err != nil {
+			return err
+		}
+		sess := &state.Session{Info: m.Info, Snapshots: m.Snapshots, FirstSeen: m.FirstSeen, Launches: launches}
 		status := state.SessionManifestStale
 		if p.Kind == "session" {
-			var err error
 			if status, err = s.manifestProjectionStatus(m); err != nil {
 				return err
 			}
@@ -434,6 +436,31 @@ func (s *Syncer) applyPublication(r state.Record, p *publication, previous *raw.
 		return s.db.CommitSession(r, adapters.SessionRef{Agent: p.Agent, Key: p.Key}, sess, status)
 	}
 	return errors.New("archive: unhandled publication kind")
+}
+
+// manifestLaunches returns the launches a manifest holds. Schema 5 names launch records, which
+// recovery imports before it replays sessions, so a current manifest does not replay as stale.
+// A record not imported yet is left out, and the merge with applied launches decides.
+func (s *Syncer) manifestLaunches(m *manifest) ([]state.Launch, error) {
+	launches := slices.Clone(m.Launches)
+	for _, ref := range m.LaunchRecords {
+		record, err := s.db.ArchiveRecord(ref.Commit)
+		if err != nil {
+			return nil, err
+		}
+		if record == nil {
+			continue
+		}
+		p, err := decodePublication(record.Body)
+		if err != nil {
+			return nil, err
+		}
+		if p.Launch == nil || p.Launch.Envelope.ID != ref.ID {
+			return nil, errors.New("archive: launch reference differs from committed record")
+		}
+		launches = append(launches, *p.Launch)
+	}
+	return launches, nil
 }
 
 // LockDir keeps normal same-machine writers serialized even when their cache directories differ.

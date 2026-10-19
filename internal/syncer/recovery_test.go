@@ -1086,6 +1086,61 @@ func TestArchiveRecoveredLateLaunchMakesManifestPending(t *testing.T) {
 	}
 }
 
+func TestColdRecoveryKeepsAReferencedLaunchCurrentButALateOnePending(t *testing.T) {
+	home := t.TempDir()
+	cfg := &config.Config{Home: home, LocalStore: t.TempDir(), MachineID: "review-machine"}
+	path := filepath.Join(home, ".claude", "projects", "project", "session.jsonl")
+	testenv.Write(t, path, "{}\n")
+	bucket := store.NewLocal(cfg.LocalStore)
+	fresh := func() (*Syncer, *state.State) {
+		t.Helper()
+		cfg := *cfg
+		cfg.StateDir = t.TempDir()
+		db, err := state.Open(t.Context(), cfg.StateDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := db.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		return New(&cfg, bucket, db, adapters.All(home), Options{}), db
+	}
+	pending := func() []adapters.SessionRef {
+		t.Helper()
+		sy, db := fresh()
+		if err := sy.Recover(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		refs, err := db.PendingManifests()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return refs
+	}
+	sy, _ := fresh()
+	if err := sy.RecordEnvelope(t.Context(), launch.Envelope{Schema: 1, ID: "first", Agent: "claude", Path: path, RecordedAt: 100, Payload: map[string]any{}}); err != nil {
+		t.Fatal(err)
+	}
+	if sum, err := sy.Run(t.Context(), nil); err != nil || sum.Errors != 0 {
+		t.Fatalf("Run = %+v, %v", sum, err)
+	}
+	if refs := pending(); len(refs) != 0 {
+		t.Fatalf("pending after recovering a current session = %v, want none", refs)
+	}
+	sy, _ = fresh()
+	if err := sy.Recover(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := sy.RecordEnvelope(t.Context(), launch.Envelope{Schema: 1, ID: "late", Agent: "claude", Path: path, RecordedAt: 200, Payload: map[string]any{}}); err != nil {
+		t.Fatal(err)
+	}
+	if refs := pending(); len(refs) != 1 || refs[0].Agent != "claude" {
+		t.Fatalf("pending after recovering a late launch = %v, want the session", refs)
+	}
+}
+
 func TestArchiveRecoveredNewFileMakesManifestPending(t *testing.T) {
 	home := t.TempDir()
 	cfg := &config.Config{Home: home, StateDir: t.TempDir(), LocalStore: t.TempDir(), MachineID: "review-machine"}
