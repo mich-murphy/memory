@@ -1081,7 +1081,7 @@ func TestArchiveRecoveredLateLaunchMakesManifestPending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if latest == nil || len(latest.Manifest.Launches) != 2 {
+	if latest == nil || len(latest.Manifest.LaunchRecords) != 2 {
 		t.Fatalf("post-recovery current manifest = %+v, want both durable launches", latest)
 	}
 }

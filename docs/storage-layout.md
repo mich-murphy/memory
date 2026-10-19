@@ -179,8 +179,8 @@ store explicit dependencies; file descriptors derive them from pieces as describ
 Dependencies include immutable object key, encoded/body SHA-256, length and encoding; compressed dependencies
 also name decoded SHA-256 and length. References must match their typed committed payloads.
 
-Session manifests live under `records/session/`. A manifest payload has schema 4, agent, machine ID, hostname, namespaced session key, info,
-transcripts, launch/launches, git, snapshots, local deletions, first-seen/sync times and collector
+Session manifests live under `records/session/`. A manifest payload has schema 5, agent, machine ID, hostname, namespaced session key, info,
+transcripts, launch records, git, snapshots, local deletions, first-seen/sync times and collector
 version. Each transcript is a reference to a file stream: its file `key`, `role` and `history`
 (the stream's `commits/` prefix). `role` is one of the collector's roles. The manifest depends on
 exactly one commit under each `history`: the commit where the file joined this session with this
@@ -192,6 +192,19 @@ earlier version. An append, fold or rewrite of a listed file therefore publishes
 manifest is published only when the session itself changes: a file joins or leaves it, a file's
 role or local deletion changes, a launch or snapshot arrives, `info` changes, or the collector
 version changes. `info` omits `last_event_at`, which the main transcript's current head carries.
+
+`launch_records` lists each launch of the session, oldest first, as its envelope `id` and the
+`commit` key of its launch record, instead of copying the launch into the manifest: a session
+with many Pi subagents otherwise republished every launch with each new one. Read a launch by
+following `commit`; the session's `git` is the first launch's. Each snapshot entry names its
+mtimes by `mtimes_sha256`, the SHA-256 of a plain blob `v3/blobs/plain/<sha>` holding the
+mtimes map as sorted compact JSON, and the manifest depends on that blob. Sessions started from
+the same harness state share one blob, and a manifest stays small however many files a
+snapshot holds.
+
+Collectors 0.4.x wrote schema 4 manifests, which copy each launch (`launch`, the first, and
+`launches`, all of them) and carry each snapshot's `mtimes` inline. Newer collectors still read
+and verify them, and publish schema 5 the next time the session changes.
 
 Collectors up to 0.3.0 wrote schema 3 manifests under `records/manifest/` (kind `manifest`).
 Each copied every transcript's current generation (`size`, `sha256`, `line_count`,
@@ -215,7 +228,8 @@ Malformed/unreadable queued launches are retained and reported, not silently dis
 
 Launch snapshots use `timing: "captured"` with the actual capture time, **not** an unconditional
 `pre_session` claim. Later captures use `in_session` or `post_hoc`. Snapshot entries include set ID,
-optional memory set ID, git, taken-at and mtimes. `checked_at` is a disposable local recheck hint
+optional memory set ID, git, taken-at and mtimes (inline in a launch record, by
+`mtimes_sha256` in a schema 5 manifest). `checked_at` is a disposable local recheck hint
 and is zero/omitted in immutable manifest views.
 
 `git` records root/common directory, redacted remote, branch, HEAD, dirty flag and repository ID;
@@ -288,7 +302,7 @@ File bodies are stored as they are on disk, except for the secret values in conf
 - **`import`**: files a CLAUDE.md or AGENTS.md pulls in with `@path`, followed five levels deep.
 
 Snapshot symlinks retain the existing explicit directory-follow policy (unlike raw discovery),
-and `target` records where a file really lives. The same identity exclusions apply. Files over 5 MB, or past 3000 in one scope, are listed in `skipped` with the reason. Each scope's directory walk is bounded separately (5,000 directories and 12,000 entries), so a large project can't use up the plugins' or memory's walk; the 64 MiB limit on the bytes a snapshot holds is shared. Each file's mtime goes in the manifest's snapshot entry, not the set, so it doesn't change the set id.
+and `target` records where a file really lives. The same identity exclusions apply. Files over 5 MB, or past 3000 in one scope, are listed in `skipped` with the reason. Each scope's directory walk is bounded separately (5,000 directories and 12,000 entries), so a large project can't use up the plugins' or memory's walk; the 64 MiB limit on the bytes a snapshot holds is shared. Each file's mtime goes in the snapshot entry's mtimes, not the set, so it doesn't change the set id.
 
 Pi harness sets retain installed npm package manifests/locks and a synthetic Git package
 HEAD/dirty-state observation, without exporting `.git/` metadata or executing hooks, fsmonitor

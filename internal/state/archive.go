@@ -437,8 +437,14 @@ func MergeSnapshots(a, b []SnapshotEntry) ([]SnapshotEntry, error) {
 	return out, nil
 }
 
+// Inline mtimes and a reference to their blob are one observation.
 func snapshotIdentity(entry SnapshotEntry) (string, error) {
 	entry.CheckedAt = 0
+	_, sha, err := entry.MtimesBlob()
+	if err != nil {
+		return "", err
+	}
+	entry.Mtimes, entry.MtimesSHA256 = nil, sha
 	body, err := jsonx.SortedCompact(entry)
 	return string(body), err
 }

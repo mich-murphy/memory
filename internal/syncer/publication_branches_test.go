@@ -9,6 +9,7 @@ import (
 
 	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/config"
+	"github.com/mich-murphy/memory/internal/jsonx"
 	"github.com/mich-murphy/memory/internal/launch"
 	"github.com/mich-murphy/memory/internal/raw"
 	"github.com/mich-murphy/memory/internal/state"
@@ -465,7 +466,9 @@ func TestPublicationBranchesManifestMembersRejectInconsistentHistory(t *testing.
 		want   string
 	}{
 		{"duplicateTranscript", func(m *manifest) { m.Transcripts = append(m.Transcripts, m.Transcripts[0]) }, "invalid transcript reference"},
-		{"schema", func(m *manifest) { m.Schema = 5 }, "invalid manifest payload"},
+		{"schema", func(m *manifest) { m.Schema = manifestSchema + 1 }, "invalid manifest payload"},
+		{"launchRecordsBeforeSchema5", func(m *manifest) { m.LaunchRecords = []launchRef{{ID: "event"}} }, "launch records before schema 5"},
+		{"inlineMtimesInSchema5", func(m *manifest) { m.Schema = manifestSchema; m.Launch, m.Launches = nil, nil }, "invalid snapshot mtimes"},
 		{"copiedSchema", func(m *manifest) { m.Schema = copiedManifestSchema }, "invalid manifest payload"},
 		{"unsupportedRole", func(m *manifest) { m.Transcripts[0].Role = "definitely-unsupported-role" }, "invalid transcript reference"},
 		{"copyInStreamSchema", func(m *manifest) { m.Transcripts[0].CopiedGeneration = &CopiedGeneration{} }, "invalid transcript reference"},
@@ -491,6 +494,7 @@ func TestPublicationBranchesManifestMembersRejectInconsistentHistory(t *testing.
 			entry := *branchPublication("launch").Launch
 			entry.Snapshot = snap
 			first := entry
+			p.Manifest.Schema = copiedLaunchSchema
 			p.Manifest.Launch, p.Manifest.Launches = &first, []launchRecord{entry}
 			p.Manifest.Snapshots = []state.SnapshotEntry{snap}
 			p.Manifest.DeletedLocally = []deletion{{Key: p.Manifest.Transcripts[0].Key, At: 30}}
@@ -506,6 +510,71 @@ func TestPublicationBranchesManifestMembersRejectInconsistentHistory(t *testing.
 				t.Fatalf("invalid history accessed bucket: %v", ops)
 			}
 		})
+	}
+}
+
+func TestSchema5ManifestReferencesLaunchRecordsAndMtimesBlobs(t *testing.T) {
+	sha := raw.SHA256([]byte("{}"))
+	for _, tc := range []struct {
+		name   string
+		mutate func(*manifest)
+		want   string
+	}{
+		{"valid", func(*manifest) {}, ""},
+		{"missingMtimes", func(m *manifest) { m.Snapshots[0].MtimesSHA256 = "" }, "invalid snapshot mtimes"},
+		{"inlineAndReferenced", func(m *manifest) { m.Snapshots[0].Mtimes = map[string]float64{} }, "invalid snapshot mtimes"},
+		{"invalidMtimesHash", func(m *manifest) { m.Snapshots[0].MtimesSHA256 = "invalid" }, "invalid snapshot mtimes"},
+		{"copiedLaunch", func(m *manifest) { m.Launches = []launchRecord{*branchPublication("launch").Launch} }, "schema 5 copies a launch"},
+		{"duplicateLaunch", func(m *manifest) { m.LaunchRecords = append(m.LaunchRecords, m.LaunchRecords[0]) }, "invalid launch reference"},
+		{"notALaunch", func(m *manifest) { m.LaunchRecords[0].Commit = "v3/machines/machine/records/file/x/commits/1.json" }, "invalid launch reference"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := branchPublication("session")
+			p.Manifest.Snapshots = []state.SnapshotEntry{{ID: raw.SHA256([]byte("snapshot")), Timing: "captured", TakenAt: 10, MtimesSHA256: sha}}
+			p.Manifest.LaunchRecords = []launchRef{{ID: "event", Commit: "v3/machines/machine/records/launch/x/commits/1.json"}}
+			tc.mutate(p.Manifest)
+			err := p.validate("machine")
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("validate = %v", err)
+				}
+				return
+			}
+			requireBranchError(t, err, tc.want)
+		})
+	}
+}
+
+func TestSchema4ManifestStaysCanonicalAndSchema5LeavesCopiesOut(t *testing.T) {
+	snap := state.SnapshotEntry{ID: raw.SHA256([]byte("snapshot")), Timing: "captured", TakenAt: 10, Mtimes: map[string]float64{"a": 1}}
+	entry := *branchPublication("launch").Launch
+	old := &manifest{Schema: copiedLaunchSchema, Launch: &entry, Launches: []launchRecord{entry}, Snapshots: []state.SnapshotEntry{snap}, Transcripts: []transcript{}, DeletedLocally: []deletion{}}
+	body, err := jsonx.SortedCompact(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{`"launch":{`, `"launches":[{`, `"mtimes":{"a":1}`} {
+		if !strings.Contains(string(body), field) {
+			t.Errorf("schema 4 lost %s: %s", field, body)
+		}
+	}
+	if strings.Contains(string(body), "launch_records") || strings.Contains(string(body), "mtimes_sha256") {
+		t.Errorf("schema 4 gained schema 5 fields: %s", body)
+	}
+	_, sha, err := snap.MtimesBlob()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.Mtimes, snap.MtimesSHA256 = nil, sha
+	current := &manifest{Schema: manifestSchema, Snapshots: []state.SnapshotEntry{snap}, Transcripts: []transcript{}, DeletedLocally: []deletion{}}
+	body, err = jsonx.SortedCompact(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for field, want := range map[string]bool{`"launch":`: false, `"launches":`: false, `"mtimes":`: false, `"launch_records":[]`: true, `"mtimes_sha256":"` + sha: true} {
+		if strings.Contains(string(body), field) != want {
+			t.Errorf("schema 5 contains %s = %v, want %v: %s", field, !want, want, body)
+		}
 	}
 }
 

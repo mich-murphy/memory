@@ -26,11 +26,13 @@ import (
 
 const maxRecordSize = 16 << 20
 
-// manifestSchema 4 references file streams under records/session/. Schema 3 manifests, under
-// records/manifest/, copied every generation; the collector still reads them, so a session that
-// has only one is republished, but never writes them.
+// manifestSchema 5 references launch records and each snapshot's mtimes blob, which schema 4
+// copied into every manifest. Both reference file streams under records/session/. Schema 3
+// manifests, under records/manifest/, copied every generation; the collector still reads schemas
+// 3 and 4, so a session that has only a schema 3 manifest is republished, but never writes them.
 const (
-	manifestSchema       = 4
+	manifestSchema       = 5
+	copiedLaunchSchema   = 4
 	copiedManifestSchema = 3
 )
 
@@ -79,6 +81,12 @@ type deletion struct {
 
 type launchRecord = state.Launch
 
+// launchRef names the launch record of one launch of the session.
+type launchRef struct {
+	ID     string `json:"id"`
+	Commit string `json:"commit"`
+}
+
 type manifest struct {
 	Schema           int                   `json:"schema"`
 	Agent            string                `json:"agent"`
@@ -89,12 +97,27 @@ type manifest struct {
 	Transcripts      []transcript          `json:"transcripts"`
 	Launch           *launchRecord         `json:"launch"`
 	Launches         []launchRecord        `json:"launches"`
+	LaunchRecords    []launchRef           `json:"launch_records,omitempty"`
 	Git              gitinfo.State         `json:"git"`
 	Snapshots        []state.SnapshotEntry `json:"snapshots"`
 	DeletedLocally   []deletion            `json:"deleted_locally"`
 	FirstSeen        float64               `json:"first_seen"`
 	SyncedAt         float64               `json:"synced_at"`
 	CollectorVersion string                `json:"collector_version"`
+}
+
+// MarshalJSON leaves the launch copies out of schema 5, which lists launch records instead.
+func (m manifest) MarshalJSON() ([]byte, error) {
+	type wire manifest
+	if m.Schema < manifestSchema {
+		return json.Marshal(wire(m))
+	}
+	return json.Marshal(struct {
+		wire
+		Launch        *launchRecord  `json:"launch,omitempty"`
+		Launches      []launchRecord `json:"launches,omitempty"`
+		LaunchRecords []launchRef    `json:"launch_records"`
+	}{wire: wire(m), LaunchRecords: orEmpty(m.LaunchRecords)})
 }
 
 type rootRecord struct {

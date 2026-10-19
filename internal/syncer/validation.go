@@ -16,11 +16,11 @@ import (
 
 func (p *publication) validateManifest() error {
 	m := p.Manifest
-	schema := manifestSchema
+	schemas := []int{copiedLaunchSchema, manifestSchema}
 	if p.Kind == "manifest" {
-		schema = copiedManifestSchema
+		schemas = []int{copiedManifestSchema}
 	}
-	if m == nil || m.Schema != schema || m.Agent != p.Agent || m.MachineID != p.MachineID || m.SessionKey != p.Key || !validTime(m.FirstSeen) || !validTime(m.SyncedAt) || m.Info == nil {
+	if m == nil || !slices.Contains(schemas, m.Schema) || m.Agent != p.Agent || m.MachineID != p.MachineID || m.SessionKey != p.Key || !validTime(m.FirstSeen) || !validTime(m.SyncedAt) || m.Info == nil {
 		return errors.New("archive: invalid manifest payload")
 	}
 	return m.validateMembers()
@@ -56,6 +56,19 @@ func (m *manifest) validateLaunchSnapshots() error {
 		if err := validateSnapshot(m.Snapshots[i]); err != nil {
 			return err
 		}
+		if referenced := m.Snapshots[i].MtimesSHA256 != ""; referenced != (m.Schema == manifestSchema) || referenced && (m.Snapshots[i].Mtimes != nil || !raw.ValidHash(m.Snapshots[i].MtimesSHA256)) {
+			return errors.New("archive: invalid snapshot mtimes")
+		}
+	}
+	if m.Schema == manifestSchema {
+		return m.validateLaunchRefs()
+	}
+	return m.validateLaunchCopies()
+}
+
+func (m *manifest) validateLaunchCopies() error {
+	if len(m.LaunchRecords) > 0 {
+		return errors.New("archive: launch records before schema 5")
 	}
 	for i := range m.Launches {
 		if err := validateLaunch(&m.Launches[i]); err != nil {
@@ -80,6 +93,20 @@ func (m *manifest) validateLaunchSnapshots() error {
 		if !bytes.Equal(a, b) {
 			return errors.New("archive: first launch differs from history")
 		}
+	}
+	return nil
+}
+
+func (m *manifest) validateLaunchRefs() error {
+	if m.Launch != nil || len(m.Launches) > 0 {
+		return errors.New("archive: schema 5 copies a launch")
+	}
+	ids := map[string]bool{}
+	for _, ref := range m.LaunchRecords {
+		if ids[ref.ID] || !raw.ValidKey(ref.ID) || !strings.Contains(ref.Commit, "/records/launch/") || !strings.Contains(ref.Commit, "/commits/") {
+			return errors.New("archive: invalid launch reference")
+		}
+		ids[ref.ID] = true
 	}
 	return nil
 }
@@ -164,6 +191,11 @@ func (s *Syncer) verifySessionReferences(ctx context.Context, p *publication, de
 				return nil, err
 			}
 		}
+		for _, ref := range m.LaunchRecords {
+			if err := s.verifyLaunchRecord(ctx, p, ref, deps); err != nil {
+				return nil, err
+			}
+		}
 		snapshots = m.Snapshots
 	}
 	return snapshots, nil
@@ -171,6 +203,11 @@ func (s *Syncer) verifySessionReferences(ctx context.Context, p *publication, de
 
 func (s *Syncer) verifySnapshotReferences(ctx context.Context, agent string, snapshots []state.SnapshotEntry, bodies map[string][]byte, deps map[string]dependency) error {
 	for i := range snapshots {
+		if sha := snapshots[i].MtimesSHA256; sha != "" {
+			if got, ok := deps[plainKey(sha)]; !ok || got.SHA256 != sha || got.Encoding != "plain" {
+				return fmt.Errorf("archive: missing or inconsistent mtimes dependency %s", plainKey(sha))
+			}
+		}
 		for _, id := range snapshotIDs(snapshots[i]) {
 			expected, err := s.snapshotDependencies(ctx, id, bodies, agent)
 			if err != nil {
@@ -260,6 +297,20 @@ func (s *Syncer) verifyCopiedGeneration(ctx context.Context, parent *publication
 	g := file.File
 	if tr.Size != g.Size || tr.SHA256 != g.SHA256 || tr.LineCount != g.LineCount || string(tr.Role) != g.Role || !slices.Equal(tr.Pieces, g.Pieces) {
 		return errors.New("archive: transcript content differs from committed generation")
+	}
+	return nil
+}
+
+func (s *Syncer) verifyLaunchRecord(ctx context.Context, parent *publication, ref launchRef, deps map[string]dependency) error {
+	if !strings.HasPrefix(ref.Commit, s.publicationPrefix("launch", parent.Agent, ref.ID)+"commits/") {
+		return errors.New("archive: launch reference names another stream")
+	}
+	p, err := s.referencedPublication(ctx, ref.Commit, deps)
+	if err != nil {
+		return err
+	}
+	if p.Launch == nil || p.Launch.Envelope.ID != ref.ID || p.Launch.SessionKey != parent.Key {
+		return errors.New("archive: launch reference differs from committed record")
 	}
 	return nil
 }

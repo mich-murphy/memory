@@ -300,6 +300,36 @@ func (e *Env) Manifest(agent, sessionKey string) map[string]any {
 	return records[len(records)-1].Manifest
 }
 
+// Launches follows a manifest's launch_records to each launch record, oldest first.
+func (e *Env) Launches(manifest map[string]any) []map[string]any {
+	e.T.Helper()
+	refs, _ := manifest["launch_records"].([]any)
+	var out []map[string]any
+	for _, ref := range refs {
+		fields, _ := ref.(map[string]any)
+		commit, ok := fields["commit"].(string)
+		if !ok {
+			e.T.Fatalf("launch reference without commit: %v", ref)
+		}
+		launch, ok := e.ReadJSON(commit)["launch"].(map[string]any)
+		if !ok {
+			e.T.Fatalf("launch record %s holds no launch", commit)
+		}
+		out = append(out, launch)
+	}
+	return out
+}
+
+// Mtimes reads the mtimes blob a manifest snapshot entry references.
+func (e *Env) Mtimes(snapshot map[string]any) map[string]any {
+	e.T.Helper()
+	sha, ok := snapshot["mtimes_sha256"].(string)
+	if !ok {
+		e.T.Fatalf("snapshot without mtimes_sha256: %v", snapshot)
+	}
+	return e.ReadJSON("v3/blobs/plain/" + sha)
+}
+
 func (e *Env) ReadJSON(key string) map[string]any {
 	e.T.Helper()
 	data, err := os.ReadFile(filepath.Join(e.Bucket, filepath.FromSlash(key)))

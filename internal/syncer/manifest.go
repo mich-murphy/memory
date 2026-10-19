@@ -264,7 +264,7 @@ func (s *Syncer) newManifestDraft(ref adapters.SessionRef) (*manifestDraft, erro
 	if root != "" {
 		sess.Info["source_root"] = root
 	}
-	m := &manifest{Schema: manifestSchema, Agent: ref.Agent, MachineID: s.cfg.MachineID, Hostname: s.cfg.Hostname, SessionKey: ref.Key, Info: state.PublishedInfo(sess.Info), Transcripts: []transcript{}, Launches: []launchRecord{}, Snapshots: orEmpty(slices.Clone(sess.Snapshots)), DeletedLocally: []deletion{}, FirstSeen: sess.FirstSeen, CollectorVersion: s.opts.Version}
+	m := &manifest{Schema: manifestSchema, Agent: ref.Agent, MachineID: s.cfg.MachineID, Hostname: s.cfg.Hostname, SessionKey: ref.Key, Info: state.PublishedInfo(sess.Info), Transcripts: []transcript{}, LaunchRecords: []launchRef{}, Snapshots: orEmpty(slices.Clone(sess.Snapshots)), DeletedLocally: []deletion{}, FirstSeen: sess.FirstSeen, CollectorVersion: s.opts.Version}
 	p := &publication{Schema: 3, MachineID: s.cfg.MachineID, Kind: "session", Agent: ref.Agent, Key: ref.Key, Sequence: 1, Manifest: m, Dependencies: []dependency{}}
 	return &manifestDraft{ref: ref, root: root, files: files, session: sess, publication: p, bodies: map[string][]byte{}}, nil
 }
@@ -355,21 +355,20 @@ func metadataDependency(record *state.Record) dependency {
 func (s *Syncer) attachCommittedLaunches(draft *manifestDraft) error {
 	p := draft.publication
 	m := p.Manifest
-	for i := range draft.session.Launches {
-		record := &draft.session.Launches[i]
-		_, r, err := s.current("launch", p.Agent, record.Envelope.ID)
+	launches := draft.session.Launches
+	for i := range launches {
+		_, r, err := s.current("launch", p.Agent, launches[i].Envelope.ID)
 		if err != nil {
 			return err
 		}
 		if r == nil {
 			return errors.New("archive manifest: launch has no committed record")
 		}
-		m.Launches = append(m.Launches, *record)
+		m.LaunchRecords = append(m.LaunchRecords, launchRef{ID: launches[i].Envelope.ID, Commit: r.Key})
 		p.Dependencies = append(p.Dependencies, metadataDependency(r))
 	}
-	if len(m.Launches) > 0 {
-		m.Launch = &m.Launches[0]
-		m.Git = m.Launch.Git
+	if len(launches) > 0 {
+		m.Git = launches[0].Git
 	} else if len(m.Snapshots) > 0 {
 		m.Git = m.Snapshots[0].Git
 	}
@@ -403,6 +402,11 @@ func (s *Syncer) attachSnapshotDependencies(ctx context.Context, draft *manifest
 	m := p.Manifest
 	for i := range m.Snapshots {
 		m.Snapshots[i].CheckedAt = 0
+		dep, err := s.mtimesDependency(ctx, &m.Snapshots[i], draft.bodies)
+		if err != nil {
+			return err
+		}
+		p.Dependencies = append(p.Dependencies, dep)
 		for _, id := range snapshotIDs(m.Snapshots[i]) {
 			deps, err := s.snapshotDependencies(ctx, id, draft.bodies, p.Agent)
 			if err != nil {
@@ -441,6 +445,35 @@ func (s *Syncer) finalizeManifest(draft *manifestDraft) (bool, error) {
 	}
 	m.SyncedAt = s.nowSeconds()
 	return true, nil
+}
+
+// mtimesDependency moves an entry's mtimes into their blob, which every session and launch
+// that saw the same files shares. A reference replayed from a schema 5 manifest is read back
+// for its size.
+func (s *Syncer) mtimesDependency(ctx context.Context, snap *state.SnapshotEntry, bodies map[string][]byte) (dependency, error) {
+	body, sha, err := snap.MtimesBlob()
+	if err != nil {
+		return dependency{}, err
+	}
+	key := plainKey(sha)
+	if body == nil {
+		body = bodies[key]
+	}
+	if body == nil {
+		body = s.cachedSnapshot(key)
+	}
+	if body == nil {
+		if body, err = s.readRecord(ctx, key); err != nil {
+			return dependency{}, err
+		}
+		if raw.SHA256(body) != sha {
+			return dependency{}, errors.New("archive snapshot: mtimes checksum mismatch")
+		}
+	}
+	bodies[key] = body
+	s.cacheSnapshot(key, body)
+	snap.Mtimes, snap.MtimesSHA256 = nil, sha
+	return dependency{Object: key, SHA256: sha, Size: int64(len(body)), Encoding: "plain"}, nil
 }
 
 func snapshotIDs(snap state.SnapshotEntry) []string {

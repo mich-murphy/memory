@@ -57,18 +57,30 @@ func publicationFixture(tb testing.TB, count int) (*Syncer, *memStore, string, m
 	return sy, bucket, id, bodies
 }
 
+func capturedEntry(tb testing.TB, sy *Syncer, id string, bodies map[string][]byte) (state.SnapshotEntry, dependency) {
+	tb.Helper()
+	entry := state.SnapshotEntry{ID: id, TakenAt: 1, Timing: "captured"}
+	dep, err := sy.mtimesDependency(tb.Context(), &entry, bodies)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return entry, dep
+}
+
 func publishSnapshotFanout(tb testing.TB, sy *Syncer, id string, bodies map[string][]byte, sessions int) {
 	tb.Helper()
 	for i := range sessions {
 		p := branchPublication("session")
 		p.Key = fmt.Sprintf("session%d", i)
 		p.Manifest.SessionKey = p.Key
-		p.Manifest.Snapshots = []state.SnapshotEntry{{ID: id, TakenAt: 1, Timing: "captured"}}
-		deps, err := sy.snapshotDependencies(tb.Context(), id, bodies, p.Agent)
+		entry, mtimes := capturedEntry(tb, sy, id, bodies)
+		p.Manifest.Snapshots = []state.SnapshotEntry{entry}
+		var err error
+		p.Dependencies, err = sy.snapshotDependencies(tb.Context(), id, bodies, p.Agent)
 		if err != nil {
 			tb.Fatal(err)
 		}
-		p.Dependencies = deps
+		p.Dependencies = append(p.Dependencies, mtimes)
 		if _, err := sy.publish(tb.Context(), p, bodies); err != nil {
 			tb.Fatal(err)
 		}
@@ -109,8 +121,8 @@ func TestPublicationSharedDependenciesHaveLinearRequests(t *testing.T) {
 					heads++
 				}
 			}
-			if heads != 65 {
-				t.Fatalf("dependency HEADs = %d, want 65 distinct dependencies", heads)
+			if heads != 66 {
+				t.Fatalf("dependency HEADs = %d, want 66 distinct dependencies: 64 files, the set and the mtimes", heads)
 			}
 			bucket.takeOps()
 			for range 20 {
@@ -277,12 +289,14 @@ func TestDependencyFailureWritesPlanButNeverCommit(t *testing.T) {
 	sy, bucket, id, bodies := publicationFixture(t, 40)
 	sy.bucket = &publicationProbeStore{Store: bucket, fail: true}
 	p := branchPublication("session")
-	p.Manifest.Snapshots = []state.SnapshotEntry{{ID: id, TakenAt: 1, Timing: "captured"}}
+	entry, mtimes := capturedEntry(t, sy, id, bodies)
+	p.Manifest.Snapshots = []state.SnapshotEntry{entry}
 	var err error
 	p.Dependencies, err = sy.snapshotDependencies(t.Context(), id, bodies, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
+	p.Dependencies = append(p.Dependencies, mtimes)
 	_, err = sy.publish(t.Context(), p, bodies)
 	if err == nil || !strings.Contains(err.Error(), p.Dependencies[0].Object) {
 		t.Fatalf("publish = %v, want first dependency error", err)
