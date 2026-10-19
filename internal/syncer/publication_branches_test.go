@@ -578,6 +578,88 @@ func TestSchema4ManifestStaysCanonicalAndSchema5LeavesCopiesOut(t *testing.T) {
 	}
 }
 
+// branchLaunch commits a launch record for the session and returns its commit dependency.
+func branchLaunch(t *testing.T, sy *Syncer, bucket *memStore, mutate func(*launchRecord)) (launchRecord, dependency) {
+	t.Helper()
+	p := branchPublication("launch")
+	mutate(p.Launch)
+	body, id, err := canonicalPublication(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := sy.publicationKey(p, true, id)
+	if err := bucket.Put(t.Context(), key, body, map[string]string{"sha256": id}); err != nil {
+		t.Fatal(err)
+	}
+	return *p.Launch, dependency{Object: key, SHA256: id, Size: int64(len(body)), Encoding: "plain"}
+}
+
+func TestLaunchReferencesMustMatchTheirCommittedRecord(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		copied bool
+		damage func(t *testing.T, sy *Syncer, bucket *memStore, m *manifest, deps []dependency) []dependency
+		want   string
+	}{
+		{"copied", true, nil, ""},
+		{"copiedDiffers", true, func(_ *testing.T, _ *Syncer, _ *memStore, m *manifest, deps []dependency) []dependency {
+			m.Launches[0].Root, m.Launch.Root = "/other", "/other"
+			return deps
+		}, "launch differs from committed record"},
+		{"copiedWithoutDependency", true, func(*testing.T, *Syncer, *memStore, *manifest, []dependency) []dependency { return nil }, "launch has no committed dependency"},
+		{"copiedMissingRemote", true, func(t *testing.T, _ *Syncer, bucket *memStore, _ *manifest, deps []dependency) []dependency {
+			if err := bucket.Delete(t.Context(), deps[0].Object); err != nil {
+				t.Fatal(err)
+			}
+			return deps
+		}, "not found"},
+		{"referenced", false, nil, ""},
+		{"referencedOtherStream", false, func(_ *testing.T, sy *Syncer, _ *memStore, m *manifest, deps []dependency) []dependency {
+			m.LaunchRecords[0].Commit = strings.Replace(m.LaunchRecords[0].Commit, sy.publicationPrefix("launch", "claude", "event"), sy.publicationPrefix("launch", "claude", "other"), 1)
+			return deps
+		}, "launch reference names another stream"},
+		{"referencedMissingRemote", false, func(t *testing.T, _ *Syncer, bucket *memStore, _ *manifest, deps []dependency) []dependency {
+			if err := bucket.Delete(t.Context(), deps[0].Object); err != nil {
+				t.Fatal(err)
+			}
+			return deps
+		}, "not found"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sy, bucket := branchSyncer(t)
+			record, dep := branchLaunch(t, sy, bucket, func(*launchRecord) {})
+			p := branchPublication("session")
+			if tc.copied {
+				first := record
+				p.Manifest.Schema, p.Manifest.Launch, p.Manifest.Launches = copiedLaunchSchema, &first, []launchRecord{record}
+			} else {
+				p.Manifest.LaunchRecords = []launchRef{{ID: record.Envelope.ID, Commit: dep.Object}}
+			}
+			p.Dependencies = []dependency{dep}
+			if err := p.validate("machine"); err != nil {
+				t.Fatalf("valid baseline: %v", err)
+			}
+			if tc.damage == nil {
+				if err := sy.verifyReferences(t.Context(), p, nil); err != nil {
+					t.Fatalf("verifyReferences = %v", err)
+				}
+				return
+			}
+			p.Dependencies = tc.damage(t, sy, bucket, p.Manifest, p.Dependencies)
+			requireBranchError(t, sy.verifyReferences(t.Context(), p, nil), tc.want)
+		})
+	}
+}
+
+func TestLaunchReferenceRejectsARecordOfAnotherSession(t *testing.T) {
+	sy, bucket := branchSyncer(t)
+	record, dep := branchLaunch(t, sy, bucket, func(l *launchRecord) { l.SessionKey = "other" })
+	p := branchPublication("session")
+	p.Manifest.LaunchRecords = []launchRef{{ID: record.Envelope.ID, Commit: dep.Object}}
+	p.Dependencies = []dependency{dep}
+	requireBranchError(t, sy.verifyReferences(t.Context(), p, nil), "launch reference differs from committed record")
+}
+
 func TestPublicationBranchesDependencyVerificationRejectsAlteredBytesAndMetadata(t *testing.T) {
 	for _, encoding := range []string{"plain", "zstd"} {
 		for _, damage := range []string{"size", "encodedHash", "rawHash", "rawSize", "missingMetadata", "wrongMetadata", "rawMetadata"} {
