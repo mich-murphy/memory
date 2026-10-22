@@ -427,7 +427,7 @@ index 0000000..c814e77
 +  Narrow system-library paths are accepted, but their loader aliases must also
 +  be available inside the namespace: do not solve missing libraries by binding
 +  the host root, `/usr`, `/bin`, `/etc`, `/proc` or a home. The template resolves
-+  input symlinks. The bc-01-specific launcher provides Debian x86_64 `/lib` and
++  input symlinks. The test host's launcher provides Debian x86_64 `/lib` and
 +  `/lib64` loader aliases into `/usr/lib`; the operator must bind the approved
 +  public `/usr/lib/x86_64-linux-gnu` library directory when staging its unchanged
 +  Node/Claude ELF files. This is public runtime code, not host configuration.
@@ -630,7 +630,7 @@ index 0000000..fda0e83
 +    command = [str(args.bwrap), "--unshare-all", "--die-with-parent", "--new-session",
 +               "--cap-drop", "ALL", "--clearenv", "--tmpfs", "/",
 +               "--dir", "/run", "--dir", "/usr", "--dir", "/usr/bin", "--dir", "/bin",
-+               # bc-01's unchanged public Node/Claude binaries use Debian's
++               # The test host's unchanged public Node/Claude binaries use Debian's
 +               # x86_64 ELF interpreter. Only public libraries are bound below;
 +               # these aliases do not expose any host directory or /etc cache.
 +               "--symlink", "usr/lib", "/lib",
