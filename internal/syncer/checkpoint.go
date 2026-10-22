@@ -5,9 +5,12 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 
 	"github.com/mich-murphy/memory/internal/exclusion"
 	"github.com/mich-murphy/memory/internal/jsonx"
+	"github.com/mich-murphy/memory/internal/state"
 	"github.com/mich-murphy/memory/internal/store"
 )
 
@@ -109,12 +112,28 @@ func (s *Syncer) refreshStream(ctx context.Context, kind, agent, key string) err
 
 func (s *Syncer) enumerateRecords(ctx context.Context, prefix string, cold bool) error {
 	token := rand.Text()
+	var batch []store.Object
+	flush := func() error {
+		err := s.importColdBatch(ctx, batch, token)
+		batch = batch[:0]
+		return err
+	}
 	err := s.list(ctx, prefix, func(object store.Object) error {
-		if err := s.importListedObject(ctx, object, cold); err != nil {
-			return err
+		if !cold {
+			if err := s.importListedObject(ctx, object, false); err != nil {
+				return err
+			}
+			return s.db.MarkArchiveSeen(object.Key, token)
 		}
-		return s.db.MarkArchiveSeen(object.Key, token)
+		batch = append(batch, object)
+		if len(batch) < coldBatchSize {
+			return nil
+		}
+		return flush()
 	})
+	if err == nil && len(batch) > 0 {
+		err = flush()
+	}
 	if err != nil {
 		return err
 	}
@@ -126,6 +145,99 @@ func (s *Syncer) enumerateRecords(ctx context.Context, prefix string, cold bool)
 		return fmt.Errorf("archive: previously recorded immutable object is missing: %s", missing)
 	}
 	return nil
+}
+
+const coldBatchSize = 256
+
+type coldRecord struct {
+	object store.Object
+	cached *state.Record
+	commit *publication
+}
+
+// State is not goroutine-safe: only the store checks of cached records may run concurrently.
+func (s *Syncer) importColdBatch(ctx context.Context, objects []store.Object, token string) error {
+	records := make([]coldRecord, 0, len(objects))
+	var prepared error
+	for _, object := range objects {
+		r, err := s.prepareColdRecord(ctx, object)
+		if err != nil {
+			prepared = err
+			break
+		}
+		records = append(records, r)
+	}
+	errs := s.verifyColdRecords(ctx, records)
+	for i, r := range records {
+		if errs[i] != nil {
+			return errs[i]
+		}
+		if r.cached == nil {
+			if err := s.importListedObject(ctx, r.object, true); err != nil {
+				return err
+			}
+		}
+		if err := s.db.MarkArchiveSeen(r.object.Key, token); err != nil {
+			return err
+		}
+	}
+	if prepared != nil {
+		return prepared
+	}
+	return ctx.Err()
+}
+
+func (s *Syncer) prepareColdRecord(ctx context.Context, object store.Object) (coldRecord, error) {
+	cached, err := s.db.ArchiveRecord(object.Key)
+	if err != nil || cached == nil || !cached.Committed {
+		return coldRecord{object: object, cached: cached}, err
+	}
+	p, err := decodePublication(cached.Body)
+	if err != nil {
+		return coldRecord{}, err
+	}
+	if err := s.verifyReferences(ctx, p, nil); err != nil {
+		return coldRecord{}, err
+	}
+	return coldRecord{object: object, cached: cached, commit: p}, nil
+}
+
+func (s *Syncer) verifyColdRecords(ctx context.Context, records []coldRecord) []error {
+	errs := make([]error, len(records))
+	var next atomic.Uint64
+	var failed atomic.Bool
+	var workers sync.WaitGroup
+	for range min(dependencyWorkers, len(records)) {
+		workers.Go(func() {
+			for !failed.Load() {
+				i := int(next.Add(1) - 1)
+				if i >= len(records) {
+					return
+				}
+				if errs[i] = s.verifyColdRecord(ctx, records[i]); errs[i] != nil {
+					failed.Store(true)
+				}
+			}
+		})
+	}
+	workers.Wait()
+	return errs
+}
+
+func (s *Syncer) verifyColdRecord(ctx context.Context, r coldRecord) error {
+	if err := ctx.Err(); err != nil || r.cached == nil {
+		return err
+	}
+	release, err := s.dependencySlot(ctx)
+	if err != nil {
+		return err
+	}
+	err = s.checkCachedRecord(ctx, r.object.Key, r.cached)
+	release()
+	if err != nil || r.commit == nil {
+		return err
+	}
+	return s.ensureDependencies(ctx, r.commit.dependencies(), nil)
 }
 
 func (s *Syncer) importListedObject(ctx context.Context, object store.Object, cold bool) error {

@@ -225,21 +225,7 @@ func (s *Syncer) importRemote(ctx context.Context, key string) error {
 		return err
 	}
 	if cached != nil {
-		object, err := s.bucket.Head(ctx, key)
-		if err != nil {
-			return err
-		}
-		if object.Size != int64(len(cached.Body)) {
-			return errors.New("archive: immutable record size changed")
-		}
-		sha := object.Metadata["sha256"]
-		if local := object.Metadata["content_sha256"]; local != "" {
-			sha = local
-		}
-		if sha != cached.ID {
-			return errors.New("archive: immutable record checksum changed")
-		}
-		return nil
+		return s.checkCachedRecord(ctx, key, cached)
 	}
 	body, err := s.readRecord(ctx, key)
 	if err != nil {
@@ -269,6 +255,24 @@ func (s *Syncer) importRemote(ctx context.Context, key string) error {
 		}
 	}
 	return s.db.ImportPlan(recordFor(key, id, p, body, committed))
+}
+
+func (s *Syncer) checkCachedRecord(ctx context.Context, key string, cached *state.Record) error {
+	object, err := s.bucket.Head(ctx, key)
+	if err != nil {
+		return err
+	}
+	if object.Size != int64(len(cached.Body)) {
+		return errors.New("archive: immutable record size changed")
+	}
+	sha := object.Metadata["sha256"]
+	if local := object.Metadata["content_sha256"]; local != "" {
+		sha = local
+	}
+	if sha != cached.ID {
+		return errors.New("archive: immutable record checksum changed")
+	}
+	return nil
 }
 
 func (s *Syncer) verifyPublication(ctx context.Context, p *publication) error {
