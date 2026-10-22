@@ -122,7 +122,12 @@ merges at least two pieces, and its last piece starts where the retained prefix 
 written by collectors up to 0.4.0 retained only the base and remain valid. Continuous growth
 publishes that unchanged fold first, then a separate append child, bounding the chain without
 recompressing the original base.
-Previous pieces/commits remain. A rewrite creates new pieces without overwriting old ones.
+Previous commits remain, and so do their pieces, with one exception: a piece that a fold
+replaced and that no current generation references may be pruned by hand. 1,323 such pieces
+(260 MB, four Pi main transcripts) were pruned on 2026-10-19. Each generation of an append and
+fold chain is a byte prefix of every later one, so a reader that finds a commit's pieces missing
+rebuilds that generation from a later generation's pieces, truncated to its `size` and checked
+against its `sha256`. A rewrite creates new pieces without overwriting old ones.
 Role/session/head changes can publish an unchanged-content capture reusing existing pieces. Every captured database generation is retained; capture frequency may be throttled,
 not acknowledged history. The collector performs no remote garbage collection.
 
