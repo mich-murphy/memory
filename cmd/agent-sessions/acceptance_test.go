@@ -21,9 +21,11 @@ import (
 	"github.com/mich-murphy/memory/internal/testenv"
 )
 
-// These tests drive only the compiled CLI and its private Local destination. The
+// These tests drive only the current v3 CLI and its private Local destination. The
 // oracle checks physical immutable records and bytes, not the SQLite projection or
 // Syncer.Restore. No production config, credentials, agent or hook is used.
+// This remains legacy collector acceptance, not the replacement writer-reader-importer
+// gate in docs/session-capture-contract.md; no shared production reader/importer is exercised.
 type acceptanceRun struct {
 	t      *testing.T
 	root   string

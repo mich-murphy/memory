@@ -1,5 +1,7 @@
 # Opt-in live-agent acceptance (loopback, local store only)
 
+> **Status (2026-10-23):** Existing native-agent/local-store acceptance harness and historical v3 results. These isolation and byte-exact lifecycle checks remain useful, but are not replacement or production consumer acceptance. The agreed canonical [session-capture contract](session-capture-contract.md) additionally requires source → durable queue → publication → authoritative reader → analytics bodies/events → report, including restart/retry and session failure isolation. No new writer/reader is implemented by this page.
+
 The regular tests and `make check` **do not require or launch live agents**.
 `cmd/agent-sessions/live_test.go` adds an explicitly enabled acceptance test for
 installed Claude Code, Codex and Pi. It builds the collector through the existing

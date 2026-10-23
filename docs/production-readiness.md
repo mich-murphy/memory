@@ -1,5 +1,7 @@
 # Production-readiness verification
 
+> **Status (2026-10-23):** Historical v3 readiness and deployment evidence, not present production health or replacement acceptance. The dated successful runs below do not supersede the subsequently degraded deployment. Follow the agreed canonical [session-capture contract](session-capture-contract.md) for the controlled Mac + BC-01 rebuild, not the old repair/rollout stack. An opt-in [replacement candidate](session-capture-phase3.md) is implemented with [passing 2026-10-24 offline gates](session-capture-offline-evidence.md), but is not release-accepted or deployed and has not activated defaults; an R2 reset is permitted only after replacement acceptance and reviewed cutover, preserving identities, exclusions, learned roots and original local sources.
+
 This change follows the two-machine archive audit (a Mac and a Linux VM). The audit found
 correct checksums and retained generations, but also a secret-bearing Pi migration backup,
 missing Pi child-session associations, excessive database uploads, and repeated serial
@@ -7,11 +9,12 @@ snapshot dependency checks. Rotating the exposed provider keys does not replace 
 capture policy. Raw transcripts remain byte-exact: analytical de-duplication belongs in a
 rebuildable normalisation stage, not destructive filtering in the collector.
 
-## Current rollout status (2026-10-16)
+## Recorded rollout status (2026-10-16)
 
 The operator approved local checks in place of unavailable hosted CI, publication of
-`v0.3.0`, and cleanup of the experimental archive/state. The dated evidence sections
-below describe earlier checkpoints, not the current deployment state.
+`v0.3.0`, and cleanup of the experimental archive/state. This section records that dated
+rollout, not current deployment health; later missing-piece recovery and consumer gaps
+motivate the agreed replacement. The dated evidence below remains historical evidence.
 
 - `v0.3.0` points to `9ff2b42` and is published as the latest immutable release.
   All ten uploaded asset digests matched the clean local build; GitHub release
@@ -101,7 +104,15 @@ session data; do not publish them. A fresh local `make check` also passed during
 
 ## Rollout gates
 
-Do not reset an archive or install a candidate until the integrated candidate has passed:
+The following are the historical v3 gate categories, with reusable safety checks. They
+are not a requirement to restore every legacy generation before replacement. For the
+new candidate, the agreed [session-capture contract](session-capture-contract.md) governs
+acceptance: prove durable spool/restart/retry, per-source progress, failure isolation,
+complete source-epoch snapshots, and the actual shared reader → analytics → report path
+using writer-generated fixtures and real source samples. Collector exit status alone is
+not acceptance. Keep unsupported formats and per-session failures explicit.
+
+Historical v3 gate list (retain its exact test meaning when reproducing old evidence):
 
 1. `make check` with live-test opt-ins disabled: formatting, lint, go fix, tidy, deadcode,
    vulnerabilities, race-enabled tests, coverage, CRAP, benchmark smoke and workflow checks.
@@ -116,9 +127,9 @@ An offline/local-store pass is not a live R2 pass. A cross-build is not Linux ru
 acceptance. A successful explicit backfill does not prove that installed hooks or Codex
 hook approval work.
 
-## Wire-format and compatibility boundary
+## Historical v3 wire-format and compatibility boundary
 
-The key templates stay unchanged. The updated v3 contract adds proven `append` generations,
+In that v3 update, key templates stayed unchanged. The updated v3 contract adds proven `append` generations,
 retained-base folds, fixed database chunks, bounded transcript observations and child roles;
 file dependency arrays are now derived from the ordered pieces. See
 [storage-layout.md](storage-layout.md). The golden bucket changes intentionally remove idle
@@ -127,23 +138,39 @@ The new reader accepts matching legacy explicit dependencies. Older readers must
 before consuming the new append/derived-dependency records; mixed-version writers are not a
 supported rollout strategy.
 
-## Deployment boundary
+## Replacement deployment boundary (agreed direction, not executed)
 
-The operator authorised replacing this fresh experimental archive, including its legacy
-sandbox objects, after the fixes pass. Retain each machine's existing `machine-id` and
-private config, and preserve any existing persistent opt-outs while replacing the upload
-projection. Never select a new identity to work around a cache problem. Stop all
-writers before resetting remote objects or local projections; preserve a reviewed object
-inventory and verify the destination before any deletion. Do not run old and new writers
-against the same machine namespace. Rebuild both machines' local caches after an archive
-reset. Use a traceable committed binary, not `-dirty` version metadata.
+The operator accepts a controlled rebuild from eligible local sources on this Mac and
+BC-01, with an R2 reset after replacement acceptance. No legacy compatibility engine,
+pruned-piece repair, or old cold-recovery patch stack is a prerequisite. Inventory both
+machines' available sources and report the loss boundary: remote-only transcripts,
+removed epochs or provenance may not be reproducible. Do not claim the local rebuild
+recreates all previous archive history.
+
+Before cutover, preserve each machine's existing `machine-id`, private config, effective
+opt-outs/exclusions (including remote-only records), learned nondefault roots and original
+source directories. Reset does not revoke exclusions. Do not indiscriminately remove
+pending bytes/state or use a new machine ID to work around a cache problem. Stop or replace
+old workers and hook launch paths on both machines; verify they cannot resume writing the
+retired namespace. Removing lock files is not a way to stop writers.
+
+Validate an isolated new namespace before deletion. Establish a fresh archive-instance
+identity and state binding, rebuild through the normal durable queue with resumable
+per-source progress, and rebuild analytics. Verify exact eligible session/source/epoch
+coverage, restored body hashes, import idempotency, incoming-update/report freshness and
+explicit failures on both machines. New publications must depend only on new-namespace
+objects. Preserve local research/classification artifacts and explicitly preserve or
+retire old citations; never silently attach them to new publications.
+
+Only then remove the reviewed exact retired R2 destination/prefix inventory, without
+removing validated new publications or unrelated bucket data; verify the result. This is
+not a requirement for a permanent legacy backup. Existing private historical evidence is
+not deleted by this authorization or this documentation cleanup.
 
 Installation changes real agent settings. Verify each installed hook and Pi extension;
-Codex hook trust may still require the operator's interactive `/hooks` approval. After
-backfill, repeat an unchanged sync and a growing-session sync, then independently verify
-bucket descriptor chains, pieces, whole-content checksums, secret exclusions, database
-integrity, child-session manifest membership and package provenance. Remove private
-analysis copies only after the final evidence has been retained safely.
+Codex hook trust may still require the operator's interactive `/hooks` approval. Use a
+traceable committed binary, not `-dirty` version metadata. The dated v3 descriptor-chain
+checks remain useful historical evidence, not a substitute for real consumer acceptance.
 
 ## Local merge acceptance (2026-10-15)
 
@@ -185,7 +212,7 @@ pushed `v0.2.0`; use a new version for a successful follow-up candidate. Fresh f
 full benchmarks/native/R2 evidence still needs recording after the follow-up is frozen.
 
 At this checkpoint production remained unchanged: **no installation, hook rollout,
-reset or fresh backfill**. The current status above supersedes this historical snapshot.
+reset or fresh backfill**. The recorded October 16 rollout above supersedes this historical snapshot, not the agreed replacement direction.
 A private durable offline backup now preserves all **26,624 old objects / 1,350,478,068
 encoded bytes**, including the 392 legacy objects. All 26,623 single-part ETags matched;
 the strict v3 audit again verified all 8,296 file and 1,257 manifest generations. This copy
@@ -245,6 +272,6 @@ no split indexes or linked worktrees, no observation failures). Split-index, SHA
 attached linked-worktree compatibility are not established by this run.
 
 At this earlier checkpoint release, real installation, archive reset and backfill had
-**not yet occurred**; see the current status above for subsequent operations. These gate
+**not yet occurred**; see the recorded October 16 rollout above for subsequent operations. These gate
 results are not a claim of real Codex hook approval, real-provider acceptance or every hook
 lifecycle edge.

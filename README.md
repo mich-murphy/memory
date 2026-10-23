@@ -1,125 +1,146 @@
 # memory
 
-AI memory pipeline research and optimisation.
+Capture and analyze Claude Code, Codex, and Pi session evidence across machines.
 
-The first piece is **agent-sessions**, a small collector that copies everything Claude Code, Codex and Pi keep on each of your machines into one Cloudflare R2 bucket: every session, how it was launched, and a snapshot of the instructions, skills, settings and scripts it ran with. Later stages (normalising to Parquet, then mining the sessions for CLAUDE.md, docs, prompt, skill and harness changes) read from that bucket.
+## Direction and implementation status
 
-## Set up a machine
+**Start with the [session capture contract](docs/session-capture-contract.md).** It is
+the agreed replacement direction: independent sessions, durable local work, scoped
+retries, complete readable publications, and analytics acceptance end to end.
+For the next implementation session, use the **[implementation handoff](docs/session-capture-handoff.md)**:
+it records the current checkout, phased build plan, acceptance gates, and pickup commands.
 
-You need an R2 API token scoped to the bucket with Object Read & Write. Use one token per machine so any machine can be revoked on its own. Nothing else: agent-sessions is a single binary for Linux and macOS (13 or later) on amd64 or arm64.
+An **opt-in offline replacement candidate** is implemented under the explicit
+experimental `agent-sessions capture-v1` command prefix. Its current publication,
+reader and report contracts are **v2**; the command prefix and linked filenames do
+not imply v1 wire compatibility. It includes independent durable capture, autonomous
+retry/discovery, quarantine and progress, explicit Local/SDK R2 backend construction,
+native-context capture, independent enrichment, declared-root aliases, and source/WAL
+no-follow protections. The shared authoritative reader feeds the real analytics
+importer, event index and report. Existing dashboard/query entry points are wired in
+explicit `--source publications` mode; defaults remain legacy.
 
-Install the binary pinned to a release tag, either with Nix (built from source; see [docs/install.md](docs/install.md#nix-built-from-source)) or from the release itself. The release route needs the GitHub CLI, logged in with `gh auth login`:
+See the [implementation checkpoint](docs/session-capture-implementation.md),
+[phase-3 candidate](docs/session-capture-phase3.md),
+[backend boundary](docs/session-capture-backends.md), and
+[offline evidence](docs/session-capture-offline-evidence.md).
+The 2026-10-24 evidence records passing full development gates: `make check` **622.40s**,
+`make test` **460.36s**, all **nine × 30s** fuzz targets (**285.31s** total), all
+**73 analytics tests / 23.744s**, and all **11 actual-process journeys**.
+These are offline results, **not release acceptance or deployment**. Actual native
+agents/hooks, real conditional R2 behavior, representative resource/freshness loads,
+both machines' preserved inventories/policies and installed paths, writer fencing and
+cutover remain separate acceptance work. No default activation has occurred.
 
-```bash
-gh release download v0.3.0 -R mich-murphy/memory -p install.sh
-gh release verify-asset v0.3.0 install.sh -R mich-murphy/memory   # GitHub's attestation of the published file
-less install.sh                                                   # read it before running it
-VERSION=v0.3.0 sh install.sh                                      # verifies the binary the same way, into ~/.local/bin
+The installed/runtime default is still the legacy v3 collector. Its machine-wide
+recovery and historical publication chains are not replacement requirements; existing
+code and safety tests remain until their callers are safely replaced.
+
+The operator accepts retiring the existing R2 archive and rebuilding from sources on
+this Mac and BC-01. That does not authorize incidental deletion of original sessions,
+identities, privacy exclusions, or local research. Follow the contract's inventory,
+validation, two-machine cutover, and scoped deletion sequence.
+
+### What we are building
+
+```text
+agent hooks + periodic discovery
+    -> durable per-source capture/work queue
+    -> bounded fair publication workers
+    -> complete session publications in R2
+    -> one authoritative reader
+    -> analytics metadata/bodies -> events -> reports
 ```
 
-Then set the machine up:
+- **Session isolation:** a failed session does not block unrelated capture or reads.
+- **Honest progress:** observed, locally captured, remotely published, enriched, and
+  imported/served are separate states. Previous success survives failed updates.
+- **Durable recovery:** pending work retries without another hook, with backoff,
+  explicit quarantine, bounded resources, and visible coverage/freshness.
+- **Conversation preservation:** retain captured source epochs across unproven rewrites;
+  do not require every collector prefix, fold, or compression layout to survive forever.
+- **Simple storage first:** full compressed epoch objects and complete session manifests.
+  Delta chunking is an optimization to measure, not the logical data contract.
+- **One reader:** restore and analytics use the same resolved publication, not independent
+  interpretations of storage JSON.
+- **Consumer acceptance:** actual writer output must reach the real importer and report.
+  Upload success or separately handwritten fixtures are insufficient.
 
-```bash
-agent-sessions machine-id --new   # deliberate NEW machine only; for a lost ID, restore it instead (see below)
-agent-sessions install      # hooks and the Pi extension
-$EDITOR ~/.config/agent-sessions/config.env   # R2 endpoint, bucket and keys (written for you, mode 600)
-agent-sessions doctor       # checks the bucket and every hook
-agent-sessions backfill     # uploads every session already on this machine
-```
+See the [documentation map](docs/README.md) for current implementation references,
+historical evidence, and the [design rationale](docs/research/session-capture-contract-review.md).
 
-If you use Codex, open it once and approve the agent-sessions hooks in `/hooks`. Codex doesn't run a new hook until you've reviewed it, and `agent-sessions doctor` tells you whether that's done.
+## Current tooling: legacy, not replacement acceptance
 
-That's all. `agent-sessions install` only touches agents it finds on the machine, so rerun it after installing another agent. It's safe to rerun at any time: it replaces its own entries and leaves everything else in your settings alone, backing up any file before changing it.
+`agent-sessions` is the existing Go collector. It installs Claude/Codex hooks and a Pi
+extension, captures session files and associated launch/harness data, applies credential
+exclusions and configuration scrubbing, and writes to R2. Its implemented detached syncs
+and sweeps do **not** constitute the replacement's autonomous durable queue.
 
-### Keep the machine identity
+| Existing command | Current purpose |
+| --- | --- |
+| `agent-sessions machine-id` | Print the effective stable machine identity. |
+| `agent-sessions machine-id --new` | Explicit new-machine setup, not identity recovery. |
+| `agent-sessions install` | Install current hooks/extension and configuration template. |
+| `agent-sessions doctor` | Inspect current setup; includes remote store probes. |
+| `agent-sessions backfill` | Capture available sources using the legacy archive engine. |
+| `agent-sessions sync` | Run the legacy sync path. |
+| `agent-sessions uninstall` | Remove managed hooks/extension; retain data and configuration. |
 
-`agent-sessions machine-id` prints the effective ID. Keep a backup of it: ordinary sync,
-backfill, doctor, install and upgrades never generate an identity. `machine-id --new` is an
-explicit new-machine choice, not a recovery command; an existing identity is printed, never
-rotated. If `machine-id` is lost or empty, restore the original file or set the known previous
-`AGENT_SESSIONS_MACHINE_ID` in `config.env` (or the agent's environment) before syncing.
-The collector cannot recover an unknown ID or select an old namespace by hostname; inspect
-remote namespaces with your bucket tools. See [docs/machine-identity.md](docs/machine-identity.md)
-for fresh-install, recovery and upgrade details.
+These are references to implemented commands, not instructions to install the old
+collector for the replacement rollout. Follow [install](docs/install.md),
+[hooks](docs/hooks.md), and [machine identity](docs/machine-identity.md) when maintaining
+an existing deployment. They do not prove deployment health or new-contract acceptance.
 
-## How it captures sessions
+The optional [analytics tools](tools/analytics/README.md) preserve existing private
+local research access and provide a separate v2 publication consumer. The legacy R2
+importer targets retired manifest payloads, not current legacy session references or
+the replacement contract; it is not a current archive refresh path. Use the explicit
+publication-backed mode only with its separate reader-generated projection. Neither
+historical reports nor offline candidate results establish live archive coverage.
 
-Each agent tells agent-sessions when a session has new content. Nothing runs on a schedule: when any session starts or ends, a sweep of every agent's files catches whatever the hooks missed.
+### Safety boundaries
 
-| Agent | Trigger | Installed into |
-|---|---|---|
-| Claude Code | `SessionStart`, `Stop`, `StopFailure`, `SubagentStop`, `PreCompact`, `TaskCompleted`, `TeammateIdle`, `SessionEnd` hooks | `~/.claude/settings.json` |
-| Codex | `SessionStart`, `Stop`, `SubagentStop`, `PreCompact`, `Interrupt`, `SessionEnd` hooks | `~/.codex/hooks.json` |
-| Pi | an extension handling `session_start`, `agent_settled` and `session_shutdown` | `~/.pi/agent/extensions/agent-sessions.ts` |
+- Keep buckets, credentials, logs, transcript bodies, and analytics caches private.
+  Scrubbing known configuration secrets is not universal transcript DLP.
+- Preserve machine IDs and learned custom source roots through rebuilding. Do not
+  rotate identity or select an old namespace by hostname to work around recovery.
+- `AGENT_SESSIONS_DISABLE=1` records a persistent session opt-out where a session path
+  is available. Preserve effective local and remote exclusions through reset; do not
+  silently re-enable capture or confuse opt-out with deletion of archived bytes.
+- Incomplete discovery must not imply source deletion. FIFOs/devices and unsafe or
+  unreadable configuration must not be treated as successfully captured.
+- Never delete a live lock file to bypass the single-writer protections.
 
-The hook command returns within milliseconds, prints nothing and always exits 0. It hands the upload to a detached process that waits a few seconds for the transcript to flush, so a slow network never slows an agent down and capture never interrupts one. At session start it also records the agent's command line and settings environment. The detached sync snapshots the harness and git state when it actually runs; the session-start event alone does not prove that capture preceded the first prompt. The sweep covers crashes, killed terminals, user interrupts, failed uploads and anything from before agent-sessions was installed, at the next session start or end on that machine.
-
-[docs/hooks.md](docs/hooks.md) has the details for each agent, with the docs and source lines they were checked against, and the edge cases handled.
-
-## What gets captured
-
-- **Everything under each agent's directory, byte for byte.** Transcripts (main, subagent, spilled tool output, set-aside), memory, plans, prompt history, file-history backups, todos, tasks, agent-team mailboxes, debug logs, settings, skills and extensions. Codex rollouts are read through their `.zst` recompression, so they keep one key, and Codex's SQLite databases are uploaded as consistent backup copies.
-- **Only what changed is uploaded.** While a transcript grows, each sync uploads just the bytes appended since the last one, and once the session goes quiet they are folded back into one object. Raw pieces are zstd-compressed; folds add a consolidated representation without removing earlier pieces.
-- **Earlier versions.** Every acknowledged capture, including append intermediates, rewrites, empty files and database generations, remains restorable from immutable v3 records and content-addressed blobs. A file deleted locally gets a new deletion record; its captured bytes remain archived.
-- **How each session was launched.** The agent's command line (`--model`, `--permission-mode`, `-p`, `--profile`...), its `CLAUDE_CODE_*`/`CODEX_*`/`PI_*` environment, the session-start hook's payload, and the repo's root, remote, branch, HEAD and dirty flag.
-- **The harness each session ran with.** Every CLAUDE.md and AGENTS.md in scope, `@imports`, whole skill directories, subagents, commands, rules, settings, installed plugins, the hook and status-line scripts settings point at, MCP servers and managed settings, plus a separate set for the memory agents write for themselves. Files are stored once by content hash.
-- **Secrets.** Credential files are left out (logins, API keys, OAuth tokens), and known secret values in config files, such as `primaryApiKey` and MCP server env and headers, are replaced with `[redacted]`; see [docs/storage-layout.md](docs/storage-layout.md). Everything else can contain anything a tool printed or a settings file holds, so keep the bucket private.
-
-Claude Code deletes transcripts after 30 days by default. `agent-sessions install` raises `cleanupPeriodDays` to 3650 (never lowers it) so nothing is lost while a machine is offline.
-
-Capture can be partial: unreadable sources, failed SQLite exports, malformed config and traversal limits are reported rather than treated as missing files. Partial discovery must not imply local deletion. Snapshot sets expose `complete` and list skipped entries; harness and memory bodies share a 64 MiB budget, with 5 MiB per-file and 3000-files-per-scope limits. FIFOs and devices are not read.
-
-[docs/storage-layout.md](docs/storage-layout.md) describes the bucket layout, the manifest format and exactly what is skipped.
-
-## Archive durability and recovery
-
-The v3 archive is append-only: a typed plan precedes new dependencies and an immutable commit follows their durability. Unique parent chains select current content; conflicting writers fail closed rather than choosing by timestamp. The collector performs no remote deletion or garbage collection, so retained history grows without a fixed retention cap. Keep the bucket private and do not configure lifecycle expiry for archived objects.
-
-SQLite is a disposable cache, bound to the destination, store identity and explicit machine ID. With the same machine ID, losing the local cache triggers paginated remote-only recovery before any new capture, launch or deletion. Legacy remote data is left untouched; the first v3 binding replaces only legacy local upload/session projections. There is no automatic remote migration. One writer per machine ID is required; the local machine/destination lock is independent of the selected cache directory. See [docs/archive-design.md](docs/archive-design.md) for failure boundaries and limits.
-
-## Commands
-
-| Command | What it does |
-|---|---|
-| `agent-sessions machine-id` | Prints identity. `--new` explicitly creates one for a new machine, never replacing an existing identity. |
-| `agent-sessions install` | Hooks, Pi extension, config file. `--dry-run` shows what would change. |
-| `agent-sessions doctor` | Checks settings, bucket access, each hook and the binary it runs, Codex hook trust, the last sweep and recent errors. |
-| `agent-sessions backfill` | Uploads everything already on the machine. |
-| `agent-sessions sync` | Uploads what changed. Hooks run this. |
-| `agent-sessions uninstall` | Removes the hooks and the extension. Uploaded data stays. |
-
-Set `AGENT_SESSIONS_DISABLE=1` in an agent's environment to persist a session opt-out. The hook still obtains the session path and writes a private exclusion record, but starts no capture or sweep. Later enabled hooks and sweeps do not re-enable that session. If the agent supplies no session path, the collector cannot guarantee future exclusion; recording failures are best-effort logged and never fail an agent.
-
-The conservative policy also withholds agent-wide files in that source root (shared history, logs, databases, memory and settings), plus its user harness and generated memory snapshots, even for an allowed sibling session. It is not universal DLP for content copied elsewhere. Existing remote bytes are never removed. Opt-outs have no automatic expiry: deleting only a local record cannot clear the archive's monotonic exclusion union. A deliberate archive-identity reset or a future explicit revocation mechanism is required to re-enable capture; changing state directory alone is not a reset, and recovered exclusions must be restored before capture.
-
-Logs are in `~/.local/state/agent-sessions/agent-sessions.log`.
-
-To upgrade, change the tag in your flake input and rebuild, or download and verify the new release's `install.sh` and run it with the new `VERSION`. Releases are immutable, and the script refuses one that GitHub hasn't attested.
-
-To remove the binary too, run `sh install.sh uninstall` from a local copy of the script. It removes the managed hooks and extension first, then the binary, without using the network. Config, credentials, machine identity, local state and all remote data are retained. See [docs/install.md](docs/install.md) for installation, removal and hook-trust verification details.
+See [security](docs/security.md) and the replacement contract for the full boundaries.
 
 ## Development
 
-Use the locked Nix development shell on Linux (amd64/arm64) or macOS (arm64):
+Read [AGENTS.md](AGENTS.md) before editing. Use the pinned Nix development environment:
 
-```bash
+```sh
 nix develop
-# Or, with direnv and nix-direnv configured:
-direnv allow
+# Or use direnv with the existing .envrc after reviewing it.
 ```
 
-The shell supplies Go 1.27, [golangci-lint](https://golangci-lint.run) at the version in `.golangci-lint-version`, a C compiler for race tests, Make, Git, jq for the Claude hooks, Python 3.14 for verification, ShellCheck/zizmor for workflow checks, and GoReleaser/Syft for releases. Other Go tools stay pinned in `tools/go.mod` and `tools/gopls/go.mod`; Go downloads them on first use. Agent CLIs and live-test credentials are not provisioned.
+The shell supplies the pinned Go toolchain, golangci-lint, C compiler for race tests,
+Python, and supporting verification tools. Tool dependencies are pinned in `tools/`;
+agent CLIs and live credentials are not provisioned.
 
-Commit `flake.lock` when updating dependencies with `nix flake update`; keep Go aligned with `go.mod` and golangci-lint with `.golangci-lint-version`. Without Nix, install those versions and a C compiler manually. `nix fmt flake.nix` formats the flake.
-
-```bash
-make hooks   # git hooks: format and lint on commit, tests on push
-make check   # every gate CI runs
-make gopls   # the pinned gopls, for the Claude Code gopls-lsp plugin
+```sh
+make build        # builds the collector currently in this checkout
+make test         # current race-enabled Go suite
+make check        # existing formatting, lint, static, coverage/CRAP and other gates
+make hooks        # install repository Git hooks
+make gopls        # install the pinned language server
 ```
 
-For Claude Code, the repo's settings turn on the `gopls-lsp` plugin and the gopls MCP server in `.mcp.json`. Install the plugin once with `claude plugin install gopls-lsp@claude-plugins-official --scope project` after `make gopls`, and approve the MCP server when asked.
+[Quality gates](docs/quality-gates.md) describes the current development checks,
+including mandatory actual-writer/shared-reader/importer/report journeys in `make test`
+and `make check`, plus the separate CI analytics job. Legacy safety suites remain.
+The [verification record](docs/verification.md) is dated legacy/native evidence;
+the linked verification skill is operator-blocked for this audit and was not reviewed
+or executed. Passing offline gates does not prove native-agent/live-R2 or installed
+replacement acceptance. Do not relax gates to ship the redesign.
 
-[docs/quality-gates.md](docs/quality-gates.md) explains each gate and its settings, and [CLAUDE.md](CLAUDE.md) has the rules for coding agents. Linux and macOS only.
-
-For executable user-path verification, use the [agent-sessions verification skill](.agents/skills/verify-agent-sessions/SKILL.md). It builds the real CLI, drives isolated local journeys and optional sandboxed real-agent hooks, and preserves evidence after cleanup. Its feature map names the remaining gaps; local-store success is not live R2 acceptance. Separately authorised [live R2 acceptance](docs/r2-acceptance.md) exercises the actual backend and archive engine inside a disposable key namespace, with verified cleanup.
+Existing dated benchmark and production records remain under `docs/` as historical
+evidence. They are not active release instructions or promises about the replacement.

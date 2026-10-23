@@ -25,6 +25,7 @@ Usage:
   agent-sessions backfill     upload every session already on this machine
   agent-sessions sync         upload new or changed session files
   agent-sessions doctor       check settings, bucket access and hooks
+  agent-sessions capture-v1   experimental opt-in durable capture/read (Local or configured R2)
   agent-sessions uninstall    remove hooks and the Pi extension
   agent-sessions --version
 
@@ -111,6 +112,8 @@ func Main(ctx context.Context, args []string, version string, o IO) int {
 	var code int
 	var err error
 	switch cmd {
+	case "capture-v1":
+		code, err = runCapture(ctx, rest, o)
 	case "sync", "backfill":
 		code, err = runSync(ctx, cmd, rest, version, o)
 	case "machine-id":

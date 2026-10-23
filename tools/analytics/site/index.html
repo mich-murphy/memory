@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light"><title>Session observatory · local analytics</title>
+<link rel="stylesheet" href="style.css"><script src="app.js" defer></script>
+</head>
+<body>
+<aside class="sidebar">
+<a class="brand" href="#"><span class="brand-mark">s/</span><span>Session<br><strong>observatory</strong></span></a>
+<div class="eyebrow sidebar-label">YOUR LOCAL WORKSPACE</div>
+<nav aria-label="Dashboard sections" id="navigation">
+<button data-tab="overview" aria-current="page"><span>01</span> Overview</button>
+<button data-tab="findings"><span>02</span> Findings <small id="findings-count"></small></button>
+<button data-tab="corrections"><span>03</span> Corrections</button>
+<button data-tab="discovery"><span>04</span> Discovery & code map</button>
+<button data-tab="trace"><span>05</span> Trace explorer</button>
+<button data-tab="health"><span>06</span> Capture health</button>
+<button data-tab="pipeline"><span>07</span> Pipeline & prompts</button>
+</nav>
+<div class="sidebar-foot"><span class="status-dot"></span> PRIVATE BY DESIGN<p>Local files. Local inspection.<br>No external assets or telemetry.</p></div>
+</aside>
+<div class="workspace">
+<div class="privacy"><span>● &nbsp; PRIVATE DATA</span> Transcripts can contain secrets. Use on loopback only. Do not publish this dashboard or its data.</div>
+<header>
+<div><div class="eyebrow">PERSONAL AGENT INTELLIGENCE</div><h1 id="page-title">Overview</h1><p id="page-description">From raw conversations to evidence you can inspect.</p></div>
+<div class="header-actions"><button id="refresh" class="button">↻ Refresh</button><div id="timestamps" class="muted small">Waiting for local report</div></div>
+</header>
+<section class="filter-bar" aria-label="Scope filters"><label>Agent <select id="agent-filter"><option value="">All agents</option></select></label><label>Project <select id="project-filter"><option value="">All projects</option></select></label><span id="scope-note">Filters apply to findings, candidates, discovery evidence and sessions. Aggregate charts remain global.</span></section>
+<div id="notice" role="status" aria-live="polite"></div>
+<main id="content" tabindex="-1"></main>
+<footer>Evidence before inference. Review proposals before making them persistent. <span>LOCAL / READ-ONLY SOURCES</span></footer>
+</div>
+<dialog id="raw-dialog"><div class="dialog-heading"><h2>Original source event</h2><button id="close-dialog" class="button">Close</button></div><p class="muted" id="raw-description">Original source returned by the local server. Rendered as text, never executed.</p><pre id="raw-content"></pre></dialog>
+</body>
+</html>

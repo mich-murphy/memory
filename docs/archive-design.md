@@ -1,5 +1,7 @@
 # Append-only archive design
 
+> **Status (2026-10-23):** Legacy v3 design, not the replacement contract. The guarantees and machine-wide recovery below describe the existing archive architecture, including historical retention promises; they are not requirements to carry forward. See the agreed canonical [session-capture contract](session-capture-contract.md): greenfield session-local capture with a durable spool, per-source progress and isolated retries. The opt-in [candidate](session-capture-phase3.md) implements a different v2 publication/reader path with [passing offline development gates](session-capture-offline-evidence.md), not release acceptance or default activation. Legacy repair/compatibility is not a rollout prerequisite.
+
 ## Authority and durability
 
 The v3 bucket is sufficient to recover file generations, current selections, previous contents,
@@ -46,7 +48,9 @@ known missing immutable objects fail closed. Actual-body audits use streamed res
 verification rather than downloading every historical transcript on every hook. A clean warm
 checkpoint assumes archived objects have not been externally modified; it is not an audit.
 Unchanged warm captures do not HEAD every old dependency. Use cold reconciliation for metadata
-checks and streamed restore for actual-byte verification; prohibit external lifecycle expiry.
+checks and streamed restore for actual-byte verification. External lifecycle expiry is unsafe
+under the v3 history promise; this is not a prohibition on the separately authorized controlled
+reset after replacement acceptance or on explicit new-contract retention.
 
 ## Capture and privacy
 
@@ -69,7 +73,7 @@ session manifests. Snapshot time is actual capture time, without a pre-session p
 
 ## Limits and non-goals
 
-Archive growth is unbounded by design: immutable plans/commits, retained file pieces, database
+Under this legacy v3 contract, archive growth is unbounded by design: immutable plans/commits, retained file pieces, database
 generations and captured snapshot sets accumulate. Content addressing shares identical blobs,
 but append history, folds and rewrites may retain multiple representations. There is no automatic
 remote migration of legacy namespaces.

@@ -278,9 +278,13 @@ func (c *Claude) Exports(root, workDir string, interval time.Duration) Discovery
 // ExtraSnapshotEntries records only the MCP parts of ~/.claude.json, whose UI state changes
 // every run.
 func (c *Claude) ExtraSnapshotEntries(root, projectRoot string) Sources {
+	return c.SnapshotMCP(root, projectRoot, c.claudeJSON(root), readClaudeConfig)
+}
+
+// SnapshotMCP uses the caller-authorized original reader, never installed collector policy.
+func (c *Claude) SnapshotMCP(_, projectRoot, source string, read func(string) ([]byte, []string, error)) Sources {
 	out := Sources{Complete: true}
-	source := c.claudeJSON(root)
-	data, identities, err := readClaudeConfig(source)
+	data, identities, err := read(source)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			out.issue(source, "read", err)
@@ -336,9 +340,14 @@ func (c *Claude) MemoryDirs(root, projectRoot, sessionKey string) []ScopedDir {
 }
 
 func (c *Claude) Plugins(root string) Sources {
+	return c.SnapshotPlugins(root, snapshotSource)
+}
+
+// SnapshotPlugins reads its manifest through the caller-authorized reader.
+func (c *Claude) SnapshotPlugins(root string, read func(string) ([]byte, error)) Sources {
 	out := Sources{Complete: true}
 	source := filepath.Join(root, "plugins", "installed_plugins.json")
-	data, err := snapshotSource(source)
+	data, err := read(source)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			out.issue(source, "read", err)

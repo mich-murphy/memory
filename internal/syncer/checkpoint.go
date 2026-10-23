@@ -8,9 +8,13 @@ import (
 
 	"github.com/mich-murphy/memory/internal/exclusion"
 	"github.com/mich-murphy/memory/internal/jsonx"
+	"github.com/mich-murphy/memory/internal/state"
 	"github.com/mich-murphy/memory/internal/store"
 )
 
+// checkpoint is legacy v3 machine-wide recovery bookkeeping, not a per-source durable
+// capture watermark or proof of reader/importer acceptance. The replacement separates
+// these coordinates; see docs/session-capture-contract.md.
 type checkpoint struct {
 	Schema    int    `json:"schema"`
 	MachineID string `json:"machine_id"`
@@ -109,13 +113,27 @@ func (s *Syncer) refreshStream(ctx context.Context, kind, agent, key string) err
 
 func (s *Syncer) enumerateRecords(ctx context.Context, prefix string, cold bool) error {
 	token := rand.Text()
-	err := s.list(ctx, prefix, func(object store.Object) error {
-		if err := s.importListedObject(ctx, object, cold); err != nil {
+	keys := make([]string, 0, state.ArchiveSeenBatchSize)
+	flush := func() error {
+		if err := s.db.MarkArchiveSeenBatch(keys, token); err != nil {
 			return err
 		}
-		return s.db.MarkArchiveSeen(object.Key, token)
+		keys = keys[:0]
+		return nil
+	}
+	err := s.listPages(ctx, prefix, func(objects []store.Object) error {
+		return s.importListedPage(ctx, objects, cold, func(key string) error {
+			keys = append(keys, key)
+			if len(keys) == state.ArchiveSeenBatchSize {
+				return flush()
+			}
+			return nil
+		})
 	})
 	if err != nil {
+		return err
+	}
+	if err := flush(); err != nil {
 		return err
 	}
 	missing, err := s.db.MissingArchive(prefix, token)
@@ -128,16 +146,43 @@ func (s *Syncer) enumerateRecords(ctx context.Context, prefix string, cold bool)
 	return nil
 }
 
-func (s *Syncer) importListedObject(ctx context.Context, object store.Object, cold bool) error {
-	cached, err := s.db.ArchiveRecord(object.Key)
+// importListedPage finishes its bounded metadata read before any remote import or
+// marker callback. Cached warm records need no per-object SQLite read.
+func (s *Syncer) importListedPage(ctx context.Context, objects []store.Object, cold bool, seen func(string) error) error {
+	keys := make([]string, len(objects))
+	for i, object := range objects {
+		keys[i] = object.Key
+	}
+	sizes, err := s.db.ArchiveRecordSizes(keys)
 	if err != nil {
 		return err
 	}
-	if cached == nil || cold {
+	for _, object := range objects {
+		size, found := sizes[object.Key]
+		if err := s.importListedObjectSize(ctx, object, cold, size, found); err != nil {
+			return err
+		}
+		if err := seen(object.Key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Syncer) importListedObject(ctx context.Context, object store.Object, cold bool) error {
+	size, found, err := s.db.ArchiveRecordSize(object.Key)
+	if err != nil {
+		return err
+	}
+	return s.importListedObjectSize(ctx, object, cold, size, found)
+}
+
+func (s *Syncer) importListedObjectSize(ctx context.Context, object store.Object, cold bool, size int64, found bool) error {
+	if !found || cold {
 		if err := s.importRemote(ctx, object.Key); err != nil {
 			return err
 		}
-	} else if object.Size != int64(len(cached.Body)) {
+	} else if object.Size != size {
 		return errors.New("archive: immutable record size changed")
 	}
 

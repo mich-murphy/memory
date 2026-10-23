@@ -4,6 +4,7 @@
 package snapshot
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -63,7 +64,9 @@ type scopedName struct{ scope, name string }
 // budget bounds the bytes a whole snapshot holds. Walks are bounded per scope instead, so
 // a large repository cannot starve the plugins and memory listed after it.
 type budget struct {
-	held int64
+	held     int64
+	evidence int
+	metadata int
 }
 
 type walk struct {
@@ -80,6 +83,10 @@ type collected struct {
 	seen      map[scopedName]bool
 	policy    *capturepolicy.Policy
 	policyErr error
+	ctx       context.Context
+	options   *Options
+	evidence  []AssetEvidence
+	selector  string
 }
 
 func newCollected(agent string) *collected {
@@ -91,19 +98,8 @@ func newCollected(agent string) *collected {
 }
 
 func (c *collected) add(scope, path, name string) *entry {
-	if c.seen[scopedName{scope, name}] {
-		return nil
-	}
-	if c.policyErr != nil {
-		c.skip(scope, name, "policy_error", 0)
-		return nil
-	}
-	resolution, err := capturepolicy.Resolve(path)
-	if c.policy.Excludes(resolution.Identities) {
-		return nil
-	}
-	if err != nil {
-		c.skip(scope, name, "resolve_error", 0)
+	resolution, ok := c.resolveAsset(scope, path, name)
+	if !ok {
 		return nil
 	}
 	resolved := resolution.Path
@@ -133,7 +129,13 @@ func (c *collected) add(scope, path, name string) *entry {
 		c.skip(scope, name, "memory_limit", st.Size())
 		return nil
 	}
-	body, err := readBounded(resolved, min(int64(maxFileSize), int64(maxSnapshotSize)-c.budget.held))
+	if c.options != nil {
+		if err := c.allow(path, resolution.Identities, scope, c.selection(scope, path), "file"); err != nil {
+			c.skip(scope, name, "authorization", 0)
+			return nil
+		}
+	}
+	body, err := c.readBounded(resolved, min(int64(maxFileSize), int64(maxSnapshotSize)-c.budget.held), st)
 	if err != nil {
 		c.skip(scope, name, "read_error", st.Size())
 		return nil
@@ -228,6 +230,10 @@ func findProjectRoot(cwd string) (root string, isRepo bool) {
 }
 
 func (c *collected) walkFiles(scope, top string, follow bool) []string {
+	if c.ctx != nil && c.ctx.Err() != nil {
+		c.skip(scope, top, "canceled", 0)
+		return nil
+	}
 	// Optional roots are normal when absent; disappearance after traversal starts is an issue.
 	if _, err := os.Lstat(top); errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -237,6 +243,10 @@ func (c *collected) walkFiles(scope, top string, follow bool) []string {
 	queue := []string{top}
 	w := c.walk(scope)
 	for len(queue) > 0 {
+		if c.ctx != nil && c.ctx.Err() != nil {
+			c.skip(scope, top, "canceled", 0)
+			break
+		}
 		if w.dirs >= maxWalkDirs || w.entries >= maxWalkFiles {
 			c.skip(scope, top, "walk_limit", 0)
 			break
@@ -270,7 +280,6 @@ func (c *collected) walk(scope string) *walk {
 }
 
 func (c *collected) listDir(scope, dir string, follow bool, limit int) (subdirs, files []string) {
-	w := c.walk(scope)
 	f, err := os.Open(dir)
 	if err != nil {
 		c.skip(scope, dir, "walk_error", 0)
@@ -278,27 +287,19 @@ func (c *collected) listDir(scope, dir string, follow bool, limit int) (subdirs,
 	}
 	defer func() { _ = f.Close() }() // read-only directory
 	for {
+		if c.ctx != nil && c.ctx.Err() != nil {
+			c.skip(scope, dir, "canceled", 0)
+			return subdirs, files
+		}
 		entries, err := f.ReadDir(128)
 		if err != nil && !errors.Is(err, io.EOF) {
 			c.skip(scope, dir, "walk_error", 0)
 			return subdirs, files
 		}
-		for _, d := range entries {
-			w.entries++
-			p := filepath.Join(dir, d.Name())
-			isDir, include := c.walkEntry(scope, p, d, follow)
-			if !include {
-				continue
-			}
-			if isDir {
-				subdirs = append(subdirs, p)
-			} else {
-				files = append(files, p)
-			}
-			if len(files) >= limit || len(subdirs) >= maxWalkDirs || w.entries >= maxWalkFiles {
-				c.skip(scope, dir, "walk_limit", 0)
-				return subdirs, files
-			}
+		var full bool
+		subdirs, files, full = c.directoryBatch(scope, dir, follow, limit, entries, subdirs, files)
+		if full {
+			return subdirs, files
 		}
 		if errors.Is(err, io.EOF) {
 			return subdirs, files
@@ -367,8 +368,8 @@ type scopeBase struct {
 	recursiveOK bool
 }
 
-func collect(a adapters.Adapter, root, projectRoot string, isRepo bool, shared *budget, withheld bool) *collected {
-	c := newCollected(a.Name())
+func collect(ctx context.Context, a adapters.Adapter, root, projectRoot string, isRepo bool, shared *budget, withheld bool, states ...*buildState) *collected {
+	c := initCollected(a.Name(), states)
 	c.budget = shared
 	home := a.Home()
 	if fsutil.IsDir(home) {
@@ -389,7 +390,7 @@ func collect(a adapters.Adapter, root, projectRoot string, isRepo bool, shared *
 			c.skip(s.scope, s.base, "session_exclusion", 0)
 			continue
 		}
-		c.addPatterns(s)
+		c.addPatterns(ctx, s)
 	}
 	if projectRoot != "" && projectRoot != filepath.Dir(projectRoot) {
 		c.addAncestors(projectRoot)
@@ -401,7 +402,7 @@ func collect(a adapters.Adapter, root, projectRoot string, isRepo bool, shared *
 	c.sourceIssues("plugin", plugins.Issues)
 	for _, plugin := range plugins.Plugins {
 		for _, p := range c.walkFiles("plugin", plugin.Dir, true) {
-			c.add("plugin", p, plugin.Name+"/"+relSlash(p, plugin.Dir))
+			c.addSelected("plugin", p, plugin.Name+"/"+relSlash(p, plugin.Dir), "plugin:"+plugin.Name+":"+plugin.Dir)
 		}
 	}
 	addScripts(c, home, projectRoot)
@@ -430,24 +431,38 @@ func (c *collected) sourceIssues(scope string, issues []adapters.Issue) {
 	}
 }
 
-func (c *collected) addPatterns(s scopeBase) {
-	nested := nestedFiles(s)
+func (c *collected) addPatterns(ctx context.Context, s scopeBase) {
+	var nested map[string][]string
+	if c.options == nil {
+		nested = legacyNestedFiles(ctx, s)
+	} else {
+		nested = c.nestedFiles(ctx, s)
+	}
 	for _, pattern := range s.patterns {
 		paths, ok := nested[pattern]
 		if !ok {
 			paths = c.match(s.scope, s.base, pattern, s.recursiveOK)
 		}
+		c.selector = "pattern:" + s.scope + ":" + s.base + ":" + pattern
 		for _, p := range paths {
 			c.add(s.scope, p, relSlash(p, s.base))
 		}
 	}
+	c.selector = ""
 }
 
 // nestedFiles answers a repository's **/<name> patterns from git, which skips ignored and
 // untracked vendored trees that a walk would spend its budget on. Files that are ignored
 // themselves, such as CLAUDE.local.md, are kept; files inside ignored directories are not.
 // Without git, the patterns are left to the walk.
-func nestedFiles(s scopeBase) map[string][]string {
+
+func legacyNestedFiles(ctx context.Context, s scopeBase) map[string][]string {
+	return nestedSelection(s, func(args ...string) ([]byte, error) {
+		return adapters.SnapshotLegacyGit(ctx, s.base, maxGitOutput, args...)
+	})
+}
+
+func nestedSelection(s scopeBase, run func(...string) ([]byte, error)) map[string][]string {
 	if !s.recursiveOK {
 		return nil
 	}
@@ -467,7 +482,7 @@ func nestedFiles(s scopeBase) map[string][]string {
 		{"ls-files", "-z", "--cached", "--others", "--exclude-standard"},
 		{"ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"},
 	} {
-		out, err := adapters.Git(s.base, maxGitOutput, append(append(args, "--"), specs...)...)
+		out, err := run(append(append(args, "--"), specs...)...)
 		if err != nil {
 			return nil
 		}
@@ -516,7 +531,7 @@ func addScripts(c *collected, home, projectRoot string) {
 		}
 		for _, command := range commands(parseSettings(e), false) {
 			for _, p := range scriptPaths(command, home, projectRoot) {
-				c.add("script", p, realPath(p))
+				c.addSelected("script", p, realPath(p), "script:"+e.scope+":"+e.path)
 			}
 		}
 	}
@@ -534,7 +549,7 @@ func addImports(c *collected, home string) {
 		var added []*entry
 		for _, e := range frontier {
 			for _, p := range imports(e, home) {
-				if ne := c.add("import", p, realPath(p)); ne != nil {
+				if ne := c.addSelected("import", p, realPath(p), "import:"+e.scope+":"+e.path); ne != nil {
 					added = append(added, ne)
 				}
 			}
@@ -552,12 +567,12 @@ func sortEntries(entries []*entry) {
 	})
 }
 
-func collectMemory(a adapters.Adapter, root, projectRoot, sessionKey string, shared *budget) *collected {
-	c := newCollected(a.Name())
+func collectMemory(a adapters.Adapter, root, projectRoot, sessionKey string, shared *budget, states ...*buildState) *collected {
+	c := initCollected(a.Name(), states)
 	c.budget = shared
 	for _, d := range a.MemoryDirs(root, projectRoot, sessionKey) {
 		for _, p := range c.walkFiles(d.Scope, d.Dir, true) {
-			c.add(d.Scope, p, p)
+			c.addSelected(d.Scope, p, p, "memory:"+d.Scope+":"+d.Dir)
 		}
 	}
 	sortEntries(c.entries)
@@ -588,9 +603,10 @@ type Snapshot struct {
 	Complete bool
 	Harness  *Set
 	// Memory is nil when the agent kept no memory for the session.
-	Memory *Set
-	Blobs  map[string][]byte
-	Mtimes map[string]float64
+	Memory   *Set
+	Blobs    map[string][]byte
+	Mtimes   map[string]float64
+	Evidence []AssetEvidence
 }
 
 func (s *Snapshot) set(kind string, a adapters.Adapter, root, projectRoot string, c *collected) (*Set, error) {
@@ -609,15 +625,36 @@ func (s *Snapshot) set(kind string, a adapters.Adapter, root, projectRoot string
 			s.Mtimes[kind+":"+e.scope+":"+e.path] = e.mtime
 		}
 	}
+	if c.options != nil {
+		if err := checkSnapshotMetadata(&Snapshot{Harness: set}); err != nil {
+			return nil, err
+		}
+	}
 	body, err := jsonx.SortedCompact(set)
 	if err != nil {
 		return nil, err
+	}
+	if c.options != nil {
+		c.budget.metadata += len(body)
+		if c.budget.metadata > maxBundleMetadata {
+			return nil, errors.New("snapshot: metadata capacity exceeded")
+		}
 	}
 	set.ID = raw.SHA256(body)
 	return set, nil
 }
 
 func Build(a adapters.Adapter, root, cwd, sessionKey string) (*Snapshot, error) {
+	return BuildContext(context.Background(), a, root, cwd, sessionKey)
+}
+
+// BuildContext builds a legacy snapshot with the global collector configuration and
+// legacy selectors. Cancellation returns an error, never a successful partial snapshot.
+// Legacy adapter callbacks without context support remain bounded by their own limits.
+func BuildContext(ctx context.Context, a adapters.Adapter, root, cwd, sessionKey string) (*Snapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	excluded, err := exclusion.Load(config.StateDir())
 	if err != nil {
 		return nil, err
@@ -629,7 +666,10 @@ func Build(a adapters.Adapter, root, cwd, sessionKey string) (*Snapshot, error) 
 	if cwd != "" && fsutil.IsDir(cwd) {
 		projectRoot, isRepo = findProjectRoot(cwd)
 	}
-	if s.Harness, err = s.set("harness", a, root, projectRoot, collect(a, root, projectRoot, isRepo, shared, withheld)); err != nil {
+	if s.Harness, err = s.set("harness", a, root, projectRoot, collect(ctx, a, root, projectRoot, isRepo, shared, withheld)); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	memory := newCollected(a.Name())
@@ -638,6 +678,9 @@ func Build(a adapters.Adapter, root, cwd, sessionKey string) (*Snapshot, error) 
 	} else {
 		memory = collectMemory(a, root, projectRoot, sessionKey, shared)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(memory.entries) > 0 || len(memory.skipped) > 0 {
 		if s.Memory, err = s.set("memory", a, root, projectRoot, memory); err != nil {
 			return nil, err
@@ -645,4 +688,123 @@ func Build(a adapters.Adapter, root, cwd, sessionKey string) (*Snapshot, error) 
 	}
 	s.Complete = s.Harness.Complete && (s.Memory == nil || s.Memory.Complete)
 	return s, nil
+}
+
+func (c *collected) resolveAsset(scope, path, name string) (capturepolicy.Resolution, bool) {
+	if c.ctx != nil && c.ctx.Err() != nil {
+		c.skip(scope, name, "canceled", 0)
+		return capturepolicy.Resolution{}, false
+	}
+	if c.seen[scopedName{scope, name}] {
+		return capturepolicy.Resolution{}, false
+	}
+	if c.policyErr != nil {
+		c.skip(scope, name, "policy_error", 0)
+		return capturepolicy.Resolution{}, false
+	}
+	resolution, err := capturepolicy.Resolve(path)
+	if c.policy.Excludes(resolution.Identities) {
+		return capturepolicy.Resolution{}, false
+	}
+	if err != nil {
+		c.skip(scope, name, "resolve_error", 0)
+		return capturepolicy.Resolution{}, false
+	}
+	return resolution, true
+}
+
+func (c *collected) selection(scope, path string) string {
+	if c.selector != "" {
+		return c.selector
+	}
+	return scope + ":" + path
+}
+
+func (c *collected) directoryBatch(scope, dir string, follow bool, limit int, entries []os.DirEntry, subdirs, files []string) ([]string, []string, bool) {
+	w := c.walk(scope)
+	for _, d := range entries {
+		w.entries++
+		p := filepath.Join(dir, d.Name())
+		isDir, include := c.walkEntry(scope, p, d, follow)
+		if !include {
+			continue
+		}
+		if isDir {
+			subdirs = append(subdirs, p)
+		} else {
+			files = append(files, p)
+		}
+		if len(files) >= limit || len(subdirs) >= maxWalkDirs || w.entries >= maxWalkFiles {
+			c.skip(scope, dir, "walk_limit", 0)
+			return subdirs, files, true
+		}
+	}
+	return subdirs, files, false
+}
+
+func (c *collected) nestedFiles(ctx context.Context, s scopeBase) map[string][]string {
+	if !s.recursiveOK {
+		return nil
+	}
+	if _, err := os.Lstat(filepath.Join(s.base, ".git")); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	dir, pruned, err := adapters.SnapshotRepositoryPartial(ctx, s.base, func(p string) error {
+		r, err := capturepolicy.Resolve(p)
+		if err != nil {
+			return err
+		}
+		if c.policy.Excludes(r.Identities) {
+			return errors.New("snapshot: excluded git dependency")
+		}
+		return c.allow(p, r.Identities, s.scope, "nested-git:"+s.base, "git-selection")
+	}, c.options.WorkingDirectory)
+	if err != nil {
+		c.skip(s.scope, s.base, "git_selection_error", 0)
+		return emptyNested(s)
+	}
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			c.skip(s.scope, s.base, "git_cleanup_error", 0)
+		}
+	}()
+	failed := false
+	found := nestedSelection(s, func(args ...string) ([]byte, error) {
+		out, err := adapters.SnapshotRepositoryGit(ctx, s.base, dir, maxGitOutput, args...)
+		if err != nil {
+			failed = true
+		}
+		return out, err
+	})
+	if failed {
+		c.skip(s.scope, s.base, "git_selection_error", 0)
+		return emptyNested(s)
+	}
+	for _, subtree := range pruned {
+		c.skip(s.scope, subtree, "git_subtree_pruned", 0)
+		for pattern, paths := range found {
+			found[pattern] = slices.DeleteFunc(paths, func(p string) bool {
+				rel, err := filepath.Rel(subtree, p)
+				return err != nil || rel == "." || rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+			})
+		}
+	}
+	return found
+}
+
+func emptyNested(s scopeBase) map[string][]string {
+	out := map[string][]string{}
+	for _, p := range s.patterns {
+		if strings.HasPrefix(p, "**/") {
+			out[p] = nil
+		}
+	}
+	return out
+}
+
+func (c *collected) addSelected(scope, p, name, selector string) *entry {
+	previous := c.selector
+	c.selector = selector
+	defer func() { c.selector = previous }()
+	return c.add(scope, p, name)
 }

@@ -51,6 +51,22 @@ jobs:
         if: runner.os == 'macOS'
         run: make vuln
 
+  capture-consumer:
+    name: Writer to shared reader to analytics
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go
+      - name: Isolated pinned analytics dependencies
+        run: |
+          python3 -m venv .capture-venv
+          .capture-venv/bin/python -m pip install -r tools/analytics/requirements.txt
+      - run: make capture-acceptance ANALYTICS_PYTHON=.capture-venv/bin/python
+      - run: PYTHONDONTWRITEBYTECODE=1 .capture-venv/bin/python -m unittest discover -s tools/analytics -v
+
   fuzz:
     name: Fuzz
     runs-on: ubuntu-24.04

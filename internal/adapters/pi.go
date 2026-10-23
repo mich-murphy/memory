@@ -156,13 +156,16 @@ func piSession(parts []string) (string, Role) {
 }
 
 func (p *Pi) Classify(path, root string) (SessionFile, bool) {
+	return p.classifyLayout(path, root, p.isAgentDir(root))
+}
+
+func (p *Pi) classifyLayout(path, root string, agentDir bool) (SessionFile, bool) {
 	rel, ok := relative(path, root)
 	if !ok || isSQLite(filepath.Base(path)) || skipped(filepath.Base(path)) {
 		return SessionFile{}, false
 	}
 	parts := strings.Split(rel, "/")
 	prefix := "dirs/" + rootTag(root) + "/"
-	agentDir := p.isAgentDir(root)
 	if agentDir {
 		prefix = keyPrefix(p, root)
 		if parts[0] != "sessions" {

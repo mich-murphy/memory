@@ -65,7 +65,7 @@ func (s *Syncer) RecordEnvelope(ctx context.Context, envelope launch.Envelope) e
 		cwd, _ = input["cwd"].(string)
 	}
 	git := gitinfo.Read(ctx, cwd, s.cfg.MachineID)
-	snap, bodies, dependencies, err := s.stageSnapshot(sf.Session(), sf.Root, cwd)
+	snap, bodies, dependencies, err := s.stageSnapshot(ctx, sf.Session(), sf.Root, cwd)
 	if err != nil {
 		return err
 	}
@@ -381,7 +381,7 @@ func (s *Syncer) captureManifestSnapshot(ctx context.Context, draft *manifestDra
 	if draft.root == "" || cwd == "" || len(sess.Snapshots) > 0 && s.nowSeconds()-sess.Snapshots[len(sess.Snapshots)-1].CheckedAt < snapshotRecheck.Seconds() {
 		return nil
 	}
-	snap, bodies, deps, err := s.stageSnapshot(draft.ref, draft.root, cwd)
+	snap, bodies, deps, err := s.stageSnapshot(ctx, draft.ref, draft.root, cwd)
 	if err != nil {
 		return err
 	}
@@ -507,14 +507,14 @@ func snapshotIDs(snap state.SnapshotEntry) []string {
 func snapshotKeyFor(id string) string { return "v3/snapshots/sets/" + id + ".json" }
 func plainKey(sha string) string      { return "v3/blobs/plain/" + sha }
 
-func (s *Syncer) stageSnapshot(ref adapters.SessionRef, root, cwd string) (state.SnapshotEntry, map[string][]byte, []dependency, error) {
+func (s *Syncer) stageSnapshot(ctx context.Context, ref adapters.SessionRef, root, cwd string) (state.SnapshotEntry, map[string][]byte, []dependency, error) {
 	if !utf8.ValidString(root) || !utf8.ValidString(cwd) {
 		return state.SnapshotEntry{}, nil, nil, errors.New("archive snapshot: unsupported non-UTF-8 path")
 	}
 	if cwd == "" {
 		return state.SnapshotEntry{}, map[string][]byte{}, nil, nil
 	}
-	snap, err := snapshot.Build(s.adapters[ref.Agent], root, cwd, ref.Key)
+	snap, err := snapshot.BuildContext(ctx, s.adapters[ref.Agent], root, cwd, ref.Key)
 	if err != nil {
 		return state.SnapshotEntry{}, nil, nil, err
 	}

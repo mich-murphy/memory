@@ -242,7 +242,55 @@ func (p *publication) validatePayload(machine string) error {
 	return nil
 }
 
+// publicationDependencies captures only the dependency value, counting repeated keys so
+// their historical typed-decoder merge/error behavior can use the slow path.
+type publicationDependencies struct {
+	raw   json.RawMessage
+	count int
+}
+
+func (d *publicationDependencies) UnmarshalJSON(body []byte) error {
+	d.count++
+	return d.raw.UnmarshalJSON(body)
+}
+
 func decodePublication(body []byte) (*publication, error) {
+	type wire publication
+	var decoded struct {
+		wire
+		Dependencies publicationDependencies `json:"dependencies"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return decodePublicationFallback(body)
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return decodePublicationFallback(body)
+	}
+	p := publication(decoded.wire)
+	deps := decoded.Dependencies
+	// Null file lists have case-sensitive presence semantics in the original
+	// decoder. Repeated keys can merge slices or retain an earlier type error.
+	if deps.count > 1 || p.File != nil && bytes.Equal(deps.raw, []byte("null")) {
+		return decodePublicationFallback(body)
+	}
+	if deps.raw != nil {
+		decoder := json.NewDecoder(bytes.NewReader(deps.raw))
+		decoder.UseNumber()
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&p.Dependencies); err != nil {
+			// Preserve original error paths and ordering against other fields.
+			return decodePublicationFallback(body)
+		}
+	}
+	return &p, nil
+}
+
+// decodePublicationFallback preserves uncommon wire cases without a second
+// full-body parse on the common derived-file dependency path.
+func decodePublicationFallback(body []byte) (*publication, error) {
 	var p publication
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()

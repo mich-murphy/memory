@@ -111,15 +111,50 @@ func RecordPath(stateDir string, a adapters.Adapter, path string) (Record, error
 	if !ok || sf.SessionKey == "" {
 		return Record{}, errors.New("exclusion: no session identity for path")
 	}
+	return recordFile(stateDir, sf, canonical(path))
+}
+
+// RecordFile records independently classified ownership without root inference or
+// source body reads. Repeated observations retain the earlier identity and aliases.
+func RecordFile(stateDir string, sf adapters.SessionFile) (Record, error) {
+	return recordFile(stateDir, sf)
+}
+
+func recordFile(stateDir string, sf adapters.SessionFile, aliases ...string) (Record, error) {
 	r := Record{
-		Schema: schema, Agent: a.Name(), Root: sf.Root, ResolvedRoot: canonical(sf.Root), SessionKey: sf.SessionKey,
-		Paths: []string{sf.Path, canonical(sf.Path), canonical(path)}, RecordedAt: float64(time.Now().UnixNano()) / 1e9,
+		Schema: schema, Agent: sf.Agent, Root: sf.Root, ResolvedRoot: canonical(sf.Root), SessionKey: sf.SessionKey,
+		Paths: append([]string{sf.Path, canonical(sf.Path)}, aliases...), RecordedAt: float64(time.Now().UnixNano()) / 1e9,
 	}
 	r.ID = recordID(r.Agent, r.ResolvedRoot, r.SessionKey)
+	if err := r.validate(); err != nil {
+		return Record{}, err
+	}
+	old, err := Load(stateDir)
+	if err != nil {
+		return Record{}, err
+	}
+	for _, previous := range old {
+		if previous.ID == r.ID {
+			paths := r.Paths
+			r = previous
+			r.Paths = append(r.Paths, paths...)
+			break
+		}
+	}
+	slices.Sort(r.Paths)
+	r.Paths = slices.Compact(r.Paths)
 	return r, Save(stateDir, r)
 }
 
 func (r Record) validate() error {
+	if filepath.IsAbs(r.SessionKey) || filepath.ToSlash(filepath.Clean(r.SessionKey)) != r.SessionKey || r.SessionKey == "." || r.SessionKey == ".." || strings.HasPrefix(r.SessionKey, "../") {
+		return errors.New("exclusion: invalid session identity")
+	}
+	for _, path := range r.Paths {
+		if !filepath.IsAbs(path) {
+			return errors.New("exclusion: invalid path")
+		}
+	}
 	for _, identity := range append([]string{r.Root, r.ResolvedRoot, r.SessionKey}, r.Paths...) {
 		if !utf8.ValidString(identity) {
 			return errors.New("exclusion: unsupported non-UTF-8 identity or path")

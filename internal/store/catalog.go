@@ -38,7 +38,7 @@ func (l *Local) List(ctx context.Context, prefix, token string, limit int) (Page
 	if limit <= 0 || limit > 1000 {
 		return Page{}, errors.New("store list: limit must be between 1 and 1000")
 	}
-	var objects []Object
+	var objects listCandidates
 	err := filepath.WalkDir(l.root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -53,11 +53,7 @@ func (l *Local) List(ctx context.Context, prefix, token string, limit int) (Page
 		if object == nil {
 			return nil
 		}
-		objects = append(objects, *object)
-		slices.SortFunc(objects, func(a, b Object) int { return strings.Compare(a.Key, b.Key) })
-		if len(objects) > limit+1 {
-			objects = objects[:limit+1]
-		}
+		objects.keep(*object, limit+1)
 		return nil
 	})
 	if errors.Is(err, fs.ErrNotExist) {
@@ -230,11 +226,45 @@ func (r *R2) Create(ctx context.Context, key string, body []byte) error {
 	return nil
 }
 
-func (l *Local) listObject(path string, entry fs.DirEntry, prefix, token string) (*Object, error) {
-	if entry.IsDir() {
-		if path == filepath.Join(l.root, ".store-staging") {
-			return nil, fs.SkipDir
+// listCandidates is a max heap: only the smallest limit+1 keys are retained.
+// WalkDir's directory order is not object-key order (a/x can precede a-b).
+type listCandidates []Object
+
+func (h *listCandidates) keep(object Object, capacity int) {
+	if len(*h) < capacity {
+		*h = append(*h, object)
+		for child := len(*h) - 1; child > 0; {
+			parent := (child - 1) / 2
+			if (*h)[parent].Key >= (*h)[child].Key {
+				break
+			}
+			(*h)[parent], (*h)[child] = (*h)[child], (*h)[parent]
+			child = parent
 		}
+		return
+	}
+	if object.Key >= (*h)[0].Key {
+		return
+	}
+	(*h)[0] = object
+	for parent := 0; ; {
+		child := 2*parent + 1
+		if child >= len(*h) {
+			return
+		}
+		if child+1 < len(*h) && (*h)[child+1].Key > (*h)[child].Key {
+			child++
+		}
+		if (*h)[parent].Key >= (*h)[child].Key {
+			return
+		}
+		(*h)[parent], (*h)[child] = (*h)[child], (*h)[parent]
+		parent = child
+	}
+}
+
+func (l *Local) listObject(path string, entry fs.DirEntry, prefix, token string) (*Object, error) {
+	if entry.IsDir() && path == l.root {
 		return nil, nil
 	}
 	key, err := filepath.Rel(l.root, path)
@@ -242,6 +272,12 @@ func (l *Local) listObject(path string, entry fs.DirEntry, prefix, token string)
 		return nil, err
 	}
 	key = filepath.ToSlash(key)
+	if entry.IsDir() {
+		if key == ".store-staging" || !listSubtreeMatches(key, prefix, token) {
+			return nil, fs.SkipDir
+		}
+		return nil, nil
+	}
 	if !strings.HasPrefix(key, prefix) || key <= token {
 		return nil, nil
 	}
@@ -250,4 +286,19 @@ func (l *Local) listObject(path string, entry fs.DirEntry, prefix, token string)
 		return nil, err
 	}
 	return &Object{Key: key, Size: info.Size()}, nil
+}
+
+// A directory contains only keys beginning with key+"/". Intersect that range
+// with the literal prefix and the exclusive token. Never clean a prefix or use
+// it as a filesystem path: even ../, repeated slashes and OS-invalid strings
+// are literal filters. Descending from the root also retains WalkDir's rule of
+// never following directory symlinks, including in a narrow prefix's ancestors.
+func listSubtreeMatches(key, prefix, token string) bool {
+	subtree := key + "/"
+	if !strings.HasPrefix(subtree, prefix) && !strings.HasPrefix(prefix, subtree) {
+		return false
+	}
+	// '/' immediately precedes '0' in byte order, so key+"0" is an
+	// exclusive upper bound for every key in this directory.
+	return token < key+"0"
 }

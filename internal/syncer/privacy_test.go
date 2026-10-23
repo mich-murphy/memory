@@ -107,7 +107,7 @@ func TestProjectSnapshotWithholdingAppearsInRunSummary(t *testing.T) {
 	e := testenv.New(t)
 	testenv.Write(t, filepath.Join(e.Project, "CLAUDE.md"), "API_KEY=fixture-private-value\n")
 	s := &Syncer{adapters: adapters.All(e.Home)}
-	_, _, _, err := s.stageSnapshot(adapters.SessionRef{Agent: "claude", Key: "fixture"}, e.Claude, e.Project)
+	_, _, _, err := s.stageSnapshot(t.Context(), adapters.SessionRef{Agent: "claude", Key: "fixture"}, e.Claude, e.Project)
 	if err != nil {
 		t.Fatal(err)
 	}

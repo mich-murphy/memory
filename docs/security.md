@@ -1,5 +1,7 @@
 # Capture security boundaries
 
+> **Scope (2026-10-23):** These capture-policy and scrubbing boundaries remain safety requirements for the agreed [session-capture contract](session-capture-contract.md), including spool acceptance, repair and delivery. Unknown exclusion state must fail closed for the affected scope. The authorized rebuild/reset does not revoke opt-outs: preserve and reapply effective exclusions, including remote-only exclusions, and recheck policy before delivering queued work.
+
 The collector applies a known-file policy, not arbitrary transcript DLP. An unrecognised filename
 remains byte-for-byte unchanged, even if its contents look like a supported config or contain a
 literal credential. Copies renamed to unrelated filenames with no recognised path identity are
@@ -39,10 +41,32 @@ literal secrets and equivalent decoded string copies are redacted without rewrit
 Supported environment references and Pi secret-command references remain references. Parser
 errors must not echo credential values.
 
+## Opt-in candidate source boundary
+
+The default collector remains legacy; the implemented `capture-v1` candidate adds
+source/component no-follow reads and pinned SQLite main/WAL provenance checks,
+including sidecar/alias policy, plus immediate pre-publication policy rechecks.
+Native-context and independent enrichment use bounded admitted evidence, not a
+permission to read arbitrary Home/ancestor/managed paths. See the
+[phase-3 boundary](session-capture-phase3.md) and
+[independent enrichment contract](session-enrichment-contract.md).
+These protections supplement—not replace—the exclusions and scrubbing above.
+[Passing offline tests](session-capture-offline-evidence.md) do not prove hostile
+filesystem snapshot atomicity, actual native/R2 behavior or installed acceptance.
+No default activation or archive deletion follows from them.
+
 ## Previously archived data
 
-These checks protect new captures. Existing remote objects are not retroactively scrubbed or
-deleted: the append-only archive retains already captured history, including legacy namespaces.
-If a credential is known to have been archived, rotate or revoke it and treat those objects as
-sensitive. Updating the collector, deleting the local cache or changing a filename does not
-remove earlier remote bytes.
+These checks protect new captures. The existing v3 collector does not retroactively scrub or
+delete remote objects: its append-only behavior retains already captured history, including
+legacy namespaces. That describes v3 behavior, not a requirement to retain the old archive
+forever. The operator has authorized a controlled R2 reset after replacement acceptance, with
+a reviewed exact destination/key inventory; this page performs no deletion. New retention
+policy is defined by the agreed contract, not by v3 collector-generation retention.
+
+If a credential is known to have been archived, rotate or revoke it and treat remaining remote
+objects and local evidence/backups as sensitive. Updating the collector, deleting the local
+cache or changing a filename does not remove earlier remote bytes. Resetting the archive does
+not revoke opt-outs or authorize deleting local research/classification artifacts, original
+sources or policy state. Preserve effective exclusions before reset, including remote-only
+records; never silently re-enable excluded sessions.

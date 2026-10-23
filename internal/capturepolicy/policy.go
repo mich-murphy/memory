@@ -15,7 +15,7 @@ import (
 // The collector's config.env is excluded regardless of where it is found.
 func IsCredential(path string) bool {
 	name := BaseName(path)
-	return name == ".credentials.json" || name == "auth.json" || name == "oauth.json" || name == "mcp-auth.json" ||
+	return additionalCredentialPath(path) || name == ".credentials.json" || name == "auth.json" || name == "oauth.json" || name == "mcp-auth.json" ||
 		name == "config.env" || strings.HasSuffix(name, ".key") || strings.HasSuffix(name, ".pem") ||
 		strings.HasPrefix(name, ".claude.json") || name == ".env" || strings.HasPrefix(name, ".env.")
 }

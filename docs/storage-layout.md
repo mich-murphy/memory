@@ -1,7 +1,9 @@
 # Bucket layout
 
-The authoritative archive contract is **v3**. The collector never deletes or modifies legacy
-v2 archive objects. A configured machine ID is an explicit identity, not a hostname guess.
+> **Status (2026-10-23):** Legacy v3 wire-format reference, not the target architecture. The formats and reader rules below document deployed/retired representations and their test contracts; they do not establish that every historical recovery path works. The agreed canonical [session-capture contract](session-capture-contract.md) defines the greenfield direction: complete source-epoch snapshots as the baseline and one authoritative reader shared by restore and analytics. The opt-in implementation uses [publication/reader v2](session-publication-v1.md), explicit [candidate backends](session-capture-backends.md) and separate analytics; see [offline evidence](session-capture-offline-evidence.md). Defaults remain legacy, and release/native/R2/two-machine acceptance is not complete. No legacy migration or cold-recovery patch stack is required for the controlled rebuild.
+
+The existing archive wire format described here is **v3**, not the agreed replacement
+contract. The v3 collector never deletes or modifies legacy v2 archive objects. A configured machine ID is an explicit identity, not a hostname guess.
 
 ```
 v3/store.json
@@ -122,12 +124,15 @@ merges at least two pieces, and its last piece starts where the retained prefix 
 written by collectors up to 0.4.0 retained only the base and remain valid. Continuous growth
 publishes that unchanged fold first, then a separate append child, bounding the chain without
 recompressing the original base.
-Previous commits remain, and so do their pieces, with one exception: a piece that a fold
-replaced and that no current generation references may be pruned by hand. 1,323 such pieces
-(260 MB, four Pi main transcripts) were pruned on 2026-10-19. Each generation of an append and
-fold chain is a byte prefix of every later one, so a reader that finds a commit's pieces missing
-rebuilds that generation from a later generation's pieces, truncated to its `size` and checked
-against its `sha256`. A rewrite creates new pieces without overwriting old ones.
+Previous commits and their required pieces are part of the v3 acknowledged-history promise.
+On 2026-10-19, 1,323 pieces (260 MB, four Pi main transcripts) replaced by folds were pruned
+by hand. This is historical evidence, **not a safe pruning procedure**: absence from current
+generations does not prove that a retained historical generation no longer needs a piece.
+The earlier claim that readers automatically reconstruct missing historical pieces from a
+later prefix was not an established deployed recovery guarantee; the observed missing-piece
+failure is discussed in the [contract review](research/session-capture-contract-review.md).
+Do not require prefix-proof recovery or historical `Restore` compatibility before shipping
+the clean-rebuild replacement. A rewrite creates new pieces without overwriting old ones.
 Role/session/head changes can publish an unchanged-content capture reusing existing pieces. Every captured database generation is retained; capture frequency may be throttled,
 not acknowledged history. The collector performs no remote garbage collection.
 
@@ -220,8 +225,10 @@ snapshots and launches may exist nowhere else, but never write them. A session w
 manifest is schema 3 is replayed into the session projection and republished under
 `records/session/`, with every snapshot and launch it had. A collector forgets its local copy of a
 schema 3 manifest once that session has a `records/session/` manifest, before it lists the
-bucket. So `records/manifest/` can be deleted once every machine has run a newer collector and
-every stream under it has a `records/session/` counterpart.
+bucket. This describes legacy projection behavior, not authorization to delete
+`records/manifest/`: a counterpart alone is not proof of consumer coverage or safe retained-root
+reachability. The controlled rebuild instead validates new independent publications and real
+consumers before reviewed deletion of the exact retired archive inventory.
 The manifest is a valid captured view, not an atomic snapshot of a live filesystem. A failed file
 capture leaves its stream at the previous committed generation.
 

@@ -76,10 +76,10 @@ func (d *digest) result(appended bool) hashed {
 	return h
 }
 
-// hashContent reads src's first size bytes once and says whether they start with the bytes
-// last uploaded (prev). With saved left by hashing prev, those bytes are checked by xxhash and
-// only the appended ones go through SHA-256, so a sync after one turn of a long session reads
-// the session at memory speed rather than SHA-256 speed.
+// hashContent hashes src's first size bytes and checks whether the previous upload is an
+// unchanged prefix using SHA-256. It hashes the full prefix and suffix, not just appended
+// bytes; the saved Resume argument is currently ignored. It also rereads the prefix's last
+// byte to determine whether an append starts at a line boundary.
 func hashContent(src io.ReaderAt, size int64, prev *state.Upload, _ *state.Resume) (hashed, error) {
 	old := int64(-1)
 	if prev != nil && prev.Size <= size {

@@ -5,13 +5,14 @@ FUZZTIME      ?= 30s
 BENCH         ?= .
 BENCHCOUNT    ?= 10
 BENCHOUT      ?= bench.txt
+ANALYTICS_PYTHON ?= $(if $(wildcard .analytics-venv/bin/python),.analytics-venv/bin/python,python3)
 FUZZ_TARGETS  := internal/adapters:FuzzSessionInfo internal/hook:FuzzReadInput \
                  internal/jsonx:FuzzParseObjectRoundTrip internal/raw:FuzzCompressRoundTrip \
                  internal/scrub:FuzzFile internal/scrub:FuzzText internal/capturepolicy:FuzzBaseName internal/shellwords:FuzzJoinSplit internal/gitinfo:FuzzStripUserinfo
 
-.PHONY: check fmt fmt-check lint lint-version tidy-check fix-check deadcode vuln test cover crap fuzz mutation bench bench-smoke actionlint build hooks gopls clean
+.PHONY: check fmt fmt-check lint lint-version tidy-check fix-check deadcode vuln test cover crap fuzz mutation bench bench-smoke actionlint build hooks gopls clean capture-acceptance
 
-check: fmt-check lint fix-check tidy-check deadcode vuln crap bench-smoke actionlint
+check: fmt-check lint fix-check tidy-check deadcode vuln crap bench-smoke actionlint capture-acceptance
 
 fmt:
 	$(GOLANGCI_LINT) fmt ./...
@@ -46,8 +47,16 @@ actionlint:
 	$(TOOL) actionlint
 
 # The race detector needs cgo; release builds don't.
-test:
+test: capture-acceptance
 	CGO_ENABLED=1 go test -race -shuffle=on ./...
+
+# No network, live ingestion, dependency installation, or legacy archive access.
+# A fresh actual writer fixture is required; the consumer cannot skip this gate.
+capture-acceptance:
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
+		CGO_ENABLED=0 go build -o "$$tmp/agent-sessions" ./cmd/agent-sessions && \
+		CAPTURE_V1_BINARY="$$tmp/agent-sessions" PYTHONDONTWRITEBYTECODE=1 \
+		$(ANALYTICS_PYTHON) -m unittest discover -s tools/analytics -p 'test_capture_journey.py' -v
 
 cover:
 	rm -rf $(COVER_DIR) && mkdir -p $(COVER_DIR)/unit $(COVER_DIR)/e2e
