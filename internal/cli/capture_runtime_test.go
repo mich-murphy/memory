@@ -119,3 +119,12 @@ func TestRuntimeParserAndServiceDryRun(t *testing.T) {
 		t.Fatal("implicit hint accepted")
 	}
 }
+
+func TestRuntimeQueueInventoryQuotaConfiguration(t *testing.T) {
+	c, _ := runtimeFixture(t)
+	c.MaxInventoryRecords = 32768
+	opts, err := runtimeQueueOptions(c)
+	if err != nil || opts.MaxInventoryRecords != 32768 {
+		t.Fatalf("quota not forwarded: %+v %v", opts, err)
+	}
+}

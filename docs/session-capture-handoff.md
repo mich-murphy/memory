@@ -1,17 +1,21 @@
 # Implementation handoff: dependable session capture
 
 **Updated: 2026-10-24 (AEDT). Current state:** autonomous delivery continues after
-checkpoint `b68a412`. Its process-journey synchronization failure is fixed and repeated
+reviewed checkpoint `c9749da` (after `b68a412`). Its process-journey synchronization failure is fixed and repeated
 100 times successfully; actual scratch-native and isolated real-R2 journeys also pass.
 The SSH-free authoritative reader and durable per-session discovery-failure isolation
 are implemented and independently reviewed. Final unchanged serial gates all pass:
 `make check` 803s, `make test` 451s, nine 30-second fuzz targets 283s, 95 analytics
 tests 29.551s, 86.9% merged coverage and CRAP thresholds. The
 [delivery ledger](session-capture-delivery.md) records exact scopes and logs.
-It is **not release-accepted, deployed or cut over**. Installed defaults remain legacy.
-Both machines' identity/policy/root and sizing inventories are recorded privately;
-no production-source ingestion, installation, archive reset or original-source deletion
-has occurred. Synthetic R2 acceptance is not production binding/cutover evidence.
+It is **not release-accepted or finally cut over**. Candidate binaries/configs and
+supervisors are now installed and active on **both machines**; independent production
+source backfill has started. The real shared binding was initialized on Mac and verified
+using BC's own preserved credentials. Fresh identity/policy/root inventories remain
+private. Legacy PATH writers are now fenced on both hosts and managed hooks replaced;
+old settings/binaries were privately preserved. Publication refresher/dashboard run on
+staging 8766; old dashboard 8765 is unchanged. Original sources and old remote keys remain untouched. See the delivery ledger's current operating
+state; earlier inventory-only/no-install statements below are historical boundaries.
 
 This document is current continuation guidance. Requirements remain the
 [session-capture contract](session-capture-contract.md) and
@@ -56,8 +60,8 @@ use the pinned `nix develop` environment for development/validation.
 | Derived sources | Bounded zstd, protected-config scrubbing, authorized coherent readonly SQLite/WAL backup | No raw fallback, source writes, immutable-VFS WAL omission or whole-source scratch copies; present WAL needs independent authority; rollback journals explicitly rejected |
 | Native and enrichment | `internal/hook`, `launch`, `snapshot`: transient allowlisted native context, independent durable native evidence/enrichment, self-contained deterministic bundles, effective injected policy, selected-byte closure | Context is not inferred from daemon environment; no prompt capture; missing native/CWD remains partial; enrichment defaults off |
 | Optional progress | Explicit optional-artifact selection/withholding, separate raw/optional delivery lanes, durable repair and verified-attachment-pending restart | New same-session main is readable and locally ACKed before optional network gates release; required bodies cannot be demoted; session exclusion remains scope-fatal |
-| Backend construction | `capturebackend` + `publicationr2`: exclusive explicit Local/R2 config, named static credential refs, constrained endpoint, actual SDK signing/conditional requests, lazy remote runtime binding | No default credential chain, SDK retries or remote availability prerequisite for local raw startup; real R2 endpoint acceptance is outstanding |
-| Lifecycle and hooks | `capturedaemon`, `capturehooks`, CLI: explicit private config, opt-in owned hooks, nonmutating plans and deliberate apply, Darwin/Linux service definitions with injected runners | Legacy hooks/settings preserved; no actual install, trust/reload or supervisor acceptance claimed |
+| Backend construction | `capturebackend` + `publicationr2`: exclusive explicit Local/R2 config, named static credential refs, constrained endpoint, actual SDK signing/conditional requests, lazy remote runtime binding | No default credential chain, SDK retries or remote prerequisite for local startup; isolated real R2 passes and both production binding/auth checks pass; complete operating acceptance remains |
+| Lifecycle and hooks | `capturedaemon`, `capturehooks`, CLI: explicit private config, opt-in owned hooks, nonmutating plans and deliberate apply, Darwin/Linux service definitions with injected runners | Both supervisors now installed/started; legacy hooks/settings preserved pending controlled fence/new hook install; installed trust/restart/freshness acceptance remains |
 | Analytics and callers | `publications.py`: reader/v2 import; report/v2; explicit dashboard/query `--source publications`, owned verified selected-body cache, source/epoch coordinates | Legacy defaults/research preserved; no Python storage resolver, GET-time import, original-path fallback, withheld-body serving or silent old DB reset |
 | Acceptance | Mandatory `make capture-acceptance`, included in test/check and separate CI consumer job; **eleven actual-process journeys** | Offline actual SDK peer is not R2; synthetic native commands are not actual agent/trust evidence |
 
@@ -92,7 +96,7 @@ amplification/request cost and actual discovery freshness remain release evidenc
 | Actual backend factory and consumer callers | Implemented opt-in | Actual SDK peer factory → Queue → reader → Python; existing dashboard process uses only owned projection after source/store/spool/export removal |
 | Full unchanged development gates | **Dated PASS; fresh acceptance FAIL** | Final serial checks below remain historical evidence; checkpoint rerun failed one of eleven journeys |
 | Actual native agents, real conditional R2, representative resource/freshness | **Not accepted** | Separate deliberately scoped operational acceptance |
-| Both-machine preserved inventory/policy, installed paths/restart | **Not performed** | This Mac + BC-01 access/coverage and effective privacy must be validated |
+| Both-machine preserved inventory/policy, installed paths/restart | **In progress** | Fresh effective inventories, exact-revision binaries, production binding/auth and both active supervisors pass; installed native/restart/coverage acceptance remains |
 | Controlled rebuild/fencing/cutover/deletion | **Not performed** | Follow original contract; no archive reset or deletion authorization follows from offline passes |
 
 ### Independent review and completed fixes
@@ -222,8 +226,9 @@ checkpoint failure above as an unresolved diagnosis.
 Current-root A/B isolation review and final serial development gates are complete.
 Bounded real-R2 current-root acceptance also passed (70/160 backend operations,
 5.48s journey); it still uses the isolated test binding, not the production binding.
-Create the reviewed source checkpoint, then continue **explicitly scoped operating
-acceptance**, not another architecture restart: installed native paths,
+Checkpoint `c9749da` is committed and both installed supervisors are backfilling.
+Continue **explicitly scoped operating acceptance**, not another architecture restart:
+fence legacy PATH/workers, install new managed hooks and autonomous consumer, then verify installed native paths,
 representative resource/freshness loads, both-machine source coverage, policy/identity
 preservation, supervision/restart and exact authoritative restores through analytics.
 Scratch-native and isolated R2 results above are already implemented evidence, not
@@ -267,3 +272,254 @@ make fuzz FUZZTIME=30s
 Do not run all full gates concurrently, raise timeouts, suppress missing coverage or
 represent an extended diagnostic as a passing unchanged gate. Update this current ledger
 with actual new checks; preserve the historical ledger and frozen research separately.
+
+### Focused measured inventory quota correction — 2026-10-24 AEDT
+
+Reported production metadata reaches exactly 4096 runtime sources and discovery
+issues. Code diagnosis confirms a retained-record admission ceiling, not destination
+pause: new identities receive quota backpressure while admitted identities can still
+coalesce/capture/publish; resolved issue history also consumes capacity. No production
+source/credential inspection or host operation was performed for this correction.
+
+Candidate config now optionally accepts `max_inventory_records` (zero/omitted =
+4096, positive maximum 65536), forwarded through the single runtime queue-options
+constructor to source, issue and scope admission. Batch limits remain 4096 and detail
+pages remain at most 256. Existing read-only status uses full SQL aggregates and
+requires no migration or count-path change. Suggested 32768 is an explicit operating
+choice, not evidence of representative capacity acceptance. See the phase-3 quota
+section. Active hosts remain unchanged by this work.
+
+New tests cover 4097th source/issue admission and truthful paginated status, configured
+ceiling rejection, durable inbox backpressure across same-cap restart, raised-cap
+resumption without deletion, retained accepted publication identity, existing/new
+source capture and publication drain, config loader roundtrips/bounds and CLI wiring.
+Pinned Nix checks: focused race/shuffle queue/config/CLI including all
+`TestRuntimeDiscovery*`: PASS (10.495s / 1.519s / 1.567s); complete affected
+`internal/sessioncapture` and `internal/capturedaemon` race/shuffle: PASS
+(92.622s / 1.739s); `make lint`: PASS, zero issues;
+`golangci-lint fmt --diff` and `git diff --check`: PASS. An initial new test wrongly
+expected one bounded delivery turn to drain three publications; corrected it to three
+turns without changing runtime behavior or assertions. Initial lint findings were
+fixed rather than suppressed. No full repository/native/live/analytics/fuzz gates
+were run in that focused implementation turn.
+
+Parent continuation: independent medium-effort scoped review **PASS**, no confirmed
+blocker; bounds/defaults, atomic admission, non-mutating rejection, same-cap durable
+backpressure/higher-cap restart, complete SQL counts and unchanged coverage gates
+checked. This was static review, not another test execution. **413** source/build/test
+inputs remain frozen. First fresh unchanged serial run (`gates-inventory-capacity`):
+**make check PASS 628s; make test FAIL** in existing one-second healthy-session,
+five-second startup/fatal-injection and 15-second isolation budgets. No deadline,
+assertion or gate parallelism changed. Under concurrent initial backfill, measured
+capture used 321–332% CPU plus refresher near one core; contention is supported, not
+confirmed as sole cause. Same failing seeds / three focused repetitions pass both
+before (queue 20.236s / CLI 16.508s) and after (19.850s / 16.693s) the explicit owned
+production scheduling experiment: only `Nice=10` in capture/refresher units and live
+owned process priorities, no restart or queue/projection change. A measured 60-second
+window still made capture/refresh progress; this is not proof the scheduling change
+fixes full-load gates or the high capture CPU. The unchanged retry under
+`gates-inventory-fairness` was **deliberately stopped**, not passed: subsequent actual
+exception diagnosis produced a necessary Python monitor correction and changed the
+frozen inputs. Only the owned gate process tree was stopped; live capture/consumer
+were untouched. Original `cover.out` restored exactly after both interrupted/failed
+runs. New frozen full gates remain required. Prior c9749da results do not validate this later tree.
+Neither operating config has yet been raised. Next: finish all serial gates, commit /
+rebuild exact revision, controlled both-host upgrade with pending work preserved, then
+installed native -> authoritative restore/import/index/report and final freshness /
+classified catch-up acceptance. Do not reset the queue to clear the measured bound.
+
+Actual consumer retry recovery is recorded in the delivery ledger: 2,579 targets,
+0 errors / 0 head failures, both saved original publication coordinates now imported;
+no normalizer modification in that first window. The subsequent actual probe captured
+four `FileNotFoundError` exceptions in `export -> disk_bytes -> lstat`, before import:
+Go's temporary export metadata entry was atomically renamed between enumeration and
+inspection. Deterministic separate-process regression RED before the narrow correction;
+focused 19 PASS (4.716s), independent static review PASS, full analytics 97 PASS (33.073s)
+in pinned Nix/owned runtime/current test binary. Two Python files changed, not deployed;
+no deadline/budget/symlink/completed-export validation weakened. Original refresher
+entrypoint restored/running, preserving the separately approved Nice=10 scheduling
+field. Earlier 95-test installed pass (39.079s) predates this correction.
+BC's unchanged installed-Pi plan now passes after separately authorized owned parent
+mode tightening 0775 -> 0700, preserving its inode and all original source contents.
+25 private pure helper tests pass, including bounded numeric quota schema review;
+new binary/config hashes must be freshly reviewed after the upgrade, not assumed.
+No native/model run yet. Old v3 metadata-only inventory completed (81,896 objects /
+2,823,793,063 bytes / 82 LIST pages); no body GET or deletion. No final cutover or
+retirement acceptance is implied.
+
+### Settled monitored candidate — fresh validation in progress
+
+Bounded quota and export-monitor corrections have independent scoped PASS reviews.
+An additional measured pure-string `mayHaveBackupSuffix` prefilter refinement avoids
+ordinary-name regexp false positives while the **unchanged regexp remains the sole
+stripping authority**. No policy construction/identity cache, path-resolution, callback,
+filesystem-check, scheduling or deadline change. Actual-callback synthetic medians
+improved approximately 9–16%; exact `New`/`Resolve`/Lstat/exclusion-Stat counts match.
+This does not resolve/accept production throughput. A proposed policy-construction
+cache was explicitly rejected because it would miss protected-location repoints;
+optional-repair success spin was also disproved (one worked / nine idle turns).
+
+Actual post-write pinned-Nix: full capturepolicy race/shuffle PASS 1.947s; focused CLI
+policy/enrichment/alias/privacy/claimed plus new source/credential/protected-state/
+config repoint, live exclusion and cycle regressions PASS 6.791s; unchanged 30s
+`FuzzBaseName` PASS 31.364s (42,498 executions, plateau noted); targeted lint zero issues,
+format/diff checks PASS. Independent static review PASS, no confirmed blocker.
+
+**414** settled source/build/test hashes remain unchanged. The first
+`gates-inventory-monitor-policy` run **failed make check**: the existing returning
+isolation journey's coverage-instrumented command **build** exceeded its unchanged
+15-second context. Other gates were not run. Original `cover.out` was restored exactly.
+Both isolation journeys subsequently passed ten ordinary race/shuffle repetitions
+(72.949s); that invocation did **not** exercise the coverage-only build branch. Three
+further repetitions with the actual coverage environment/instrumentation and same
+failed shuffle seed **PASS 30.587s**, including that build branch. No source, deadline,
+assertion or gate-parallelism change. The full unchanged serial retry
+`gates-inventory-monitor-policy-retry` then recorded **make check PASS 630s; make test
+FAIL** in the existing five-second enrichment-attachment and optional-fatal boundary
+budgets. Fuzz/analytics/JS were not run after that failure; all 414 hashes still matched
+and original coverage was restored exactly. Nice=10 is not established as sufficient
+resource control or as a full-gate fix.
+
+A separate deterministic scheduling defect is now corrected and independently
+reviewed: `deliveryLaneNext` previously reported `did=true` when nonwaiting delivery
+found a busy lane and performed no attempt. This bypassed the existing worker idle
+poll. The work-aware helper now reports false before an attempt and true once an
+attempt is reached; old error-only callers retain their API. Scheduling claims still
+release before I/O, raw/optional lanes remain independent, and every privacy/upload/
+publication check and deadline is unchanged. Synthetic RED: both busy lanes reported
+10/10 false progress turns with zero attempts/puts/publications. GREEN: 0/10, with
+unchanged zero-side-effect/state assertions and a virtual-time observation of the
+existing 100ms idle poll. Already-paused scheduler behavior was idle before the fix;
+only the helper's idle cases were additionally tested, not misreported as old defects.
+Queue race/shuffle checks PASS 121.155s, 26.207s and 19.445s (including the failed seed
+and existing fatal/independence/fairness/restart cases); matching CLI enrichment tests
+PASS 4.697s; lint zero issues, format/diff PASS; independent focused static review PASS.
+Actual coverage-only isolation branch with this source also PASS 10.902s. These are
+not production CPU or large-publication timeout acceptance.
+
+The new **415**-input unchanged serial run `gates-inventory-monitor-policy-progress`
+ended **make check PASS 624s; make test FAIL**. The sole reported failure was
+`TestRuntimeFatalNetworkRetryKeepsRawAlive`, seed `1792819926578271000`, at its
+`wrong raw view: <nil>` assertion (1.06s test duration). **This is not a timeout**:
+the assertion combines newest-raw identity and optional-withheld state, so diagnosis
+must first distinguish actual stale raw publication from a healthy concurrent repair
+or an insufficient fault fixture. Do not remove the assertion, weaken its race checks,
+or infer the cause from duration. Syncer PASS 406.907s; fuzz/analytics/JS not run after
+failure. All 415 source/build/test hashes match; original coverage restored exactly.
+Private synthetic diagnostics then proved an insufficient test ACK predicate: a
+legitimate prior withheld raw publication at seq3 satisfied `published sequence >
+optional seq2`, while newest raw seq4 was still pending. After releasing raw delivery,
+seq4 ACKed and the newest-source/withheld assertions passed. This controlled execution
+demonstrates a stale read, not rollback; the exact historical uninstrumented branch
+remains unknown. The approved **test-only** correction now awaits an ACK at or after
+`newest.Sequence`, a stronger condition. A controlled regression shares that exact
+wait and the original assertions: old predicate RED 1.39s; final source race/shuffle
+with the failed seed and existing network/fatal cases, count=3, GREEN 37.665s; original
+network case count=20 PASS 35.303s before cleanup-only lint correction; final lint zero,
+format/diff PASS. All original operation/wait budgets, runtime concurrency, source/
+withheld/liveness/retry assertions remain. Independent focused static review PASS.
+Only `runtime_fatal_test.go` changed after the 415-input run; coverage remains restored.
+
+The unchanged **415**-input serial run `gates-inventory-monitor-policy-progress-ack`
+ended **ALL PASS**: `make check` **708s**, `make test` **453s**, all nine 30-second
+fuzz targets **287s**, **97 analytics tests 33.454s**, and JavaScript/whitespace checks.
+Coverage **87.0%**, package/total thresholds PASS, no reported CRAP>30. All 415 hashes
+still match and original `cover.out` SHA
+`70386d5160553c62f5b9cef9c38af0f7273336aebd491000ab9259fd94f117b9`
+is restored exactly. Earlier failures/interruption remain recorded, not replaced by
+focused results. New-tree Nix packaging, scratch-native/live-R2 and installed operating
+acceptance have not yet run. Four production correction groups and the test correction
+are **not installed yet**. Latest read-only Mac status still has 4096 sources/issues,
+completed sweep0, pending sources855/publications499, 14 quarantined jobs and 30 inbox
+backpressure hints; none was cleared. Next: commit reviewed source, exact-revision
+Darwin/Linux builds and package validation, then controlled32768/monitor upgrades;
+verify actual retry recovery without queue/projection reset; review fresh BC
+native spec hashes then run the authorized isolated installed-producer journey;
+complete classified catch-up, quarantine recovery, restore/index/report/restart/
+freshness/resource acceptance and final dashboard/old-key cutover. Original source
+and old remote bytes remain undeleted.
+
+### Actual offline producer-cost evidence — not an implemented fix
+
+A sandboxed private copy of accepted spool data reproduced delivery cost using the
+actual delivery core and actual read-only privacy callbacks, an in-memory backend,
+network denial and an unchanged **60-second** operation deadline. No original source
+bodies or credentials were opened; no active queue, source, R2 or repository data was
+changed. Only whitelisted counts, public function names and timings were reported.
+
+- One 16-source publication (14.2 MB decoded, 748 retained enrichment assets) completed
+  in **30.878s**: 36 full asset-check passes, 26,928 asset callbacks and 82,528 filesystem
+  policy calls. `checkAssets` consumed 30.037s, including 26.886s filesystem policy;
+  payload integrity verification consumed 0.021s. Nested times are not additive.
+- A 45-source publication (49.4 MB, the same 748 assets) **timed out offline at 60.002s**:
+  `checkAssets` 55.809s, filesystem policy 51.810s, 41,117 asset callbacks and 26 sink
+  puts completed. Local privacy-check work can therefore exhaust the delivery budget;
+  this does not establish the cause of every active timeout.
+- The largest decoded and a previously inspected 59-source publication, both without
+  enrichment assets, passed offline in 13.310s and 11.588s. Eleven quarantined jobs
+  were observed in that read-only snapshot; none was cleared or replayed live.
+
+A **private overlay only** combined protected-location construction freshly inside
+**each** filesystem-policy invocation, without retaining policy objects across calls
+or removing asset callbacks/authorization boundaries. Matched 16-source replay
+improved to 23.101s with identical completed check counts. Independent scoped plan
+review approved that limited freshness model, not identical incidental within-call
+race observations. The worst publication **still timed out at 60.001s**; this is not a
+sufficient production fix and has not been added to the source tree. An additional
+pure-string noise-suffix prototype had no meaningful actual-delivery improvement and
+was not adopted. Deeper timings locate remaining cost in fresh `Resolve` and
+`isWithin`, not filename parsing or payload verification.
+
+Per-invocation metadata reuse with final revalidation was reviewed only as a possible
+experiment; its non-atomic/ABA limitations prevent claiming preservation of every
+old intermediate observation. It is **not implemented or approved for release**.
+A separately reviewed design permits durable acknowledgement/resumption of completed
+immutable dependency PUTs, not policy or existence caching. A **private overlay only**
+now compiles and its focused synthetic sessioncapture/CLI tests PASS 20.415s, with the
+same selection under race PASS 31.961s. It stores bounded per-job dependency receipts,
+uses validated logical R2 destination identity plus a freshly validated complete
+archive descriptor, retains every new-write/start/final/manifest/CAS guard and full
+remote body verification (also already-current), and conditionally clears all matching
+receipt bits only after authoritative positive missing-dependency verification.
+No generation marker is required by the scoped design review; corruption/cancellation/
+authentication failures are not missing evidence. Independent implementation review is
+PASS for receipt authority/durability, guards, full verification, missing/reset
+classification, destination binding and overlay integrity. Abrupt-process durability,
+protected-root repoint fixtures and actual resource behavior remain unproven. This
+does **not** establish actual 45-source/748-asset completion, full gates,
+release approval or any production/schema change. All five original overlay targets
+still match; original tests are retained; runtime delivery/store fixes are not masked.
+Keep all race assertions, privacy boundaries, retry limits and meaningful deadlines.
+
+### Private controlled-upgrade and installed-Pi preparation — no new execution
+
+The quota upgrade helper now starts the existing unit rather than regenerating it,
+preserving Nice=10 and unknown fields. Original unit **and parent** device/inode/mode/
+UID/GID/mtime/ctime, SHA and bytes are compared before and after start; atime is excluded.
+Same-byte replacement/metadata mutation and partial binary/config replacement failures
+have explicit regressions. All 24 helper and three artifact tests PASS. No apply occurred.
+
+Mac Pi preparation reached 65 pure tests, but independent full private-helper review
+**BLOCKED current8**. It identified a false startup premise: the actual pinned installed
+shell wrapper invokes **absolute `/usr/bin/python3`**, not PATH-resolved Python. Its
+launcher's env-Python shebang is irrelevant to that invocation. Pins matched, so this
+was a semantic modeling error, not file drift. Base/venv prefix metadata and the 1,906
+base-file/eight-alias comparison remain valid software evidence, but do **not** prove
+the actual callback's interpreter closure. The two-tree/353,705,879-byte current8
+closure is therefore insufficient for installed proof. Do not change the installed
+wrapper or claim that changing PATH repairs it; establish the real shim/developer/
+interpreter/import/loader route instead.
+
+Review also found wildcard loopback grants to every port, not only the synthetic SSE
+endpoint, and a software ACL validation gap outside POSIX-writable ancestor exceptions.
+Both require private-helper corrections and fresh review: exact preselected numeric
+port/negative unrelated-loopback probe, and bounded software ACL validation across the
+complete code closure. No unsafe native execution occurred; interlocks stayed closed.
+Private source/config/policy/inbox/session guards remain unchanged. Root/current-UID
+writer-authority evidence applies to the inspected exception edges, not an unproved
+all-ACL closure. Mach/sysctl/process-info requirements, inherited loader run-path
+context and complete identity/content-bound effective-policy review remain separate
+acceptance items. All future review flags stay false. Actual wrapper/SDK/extension,
+software permissions and runtime configs are unchanged; no help/model/probe/native
+capture ran. BC/Mac proofs still need post-upgrade fresh hashes/config review and
+explicit execution authorization. Production capture remains historical/default4096.

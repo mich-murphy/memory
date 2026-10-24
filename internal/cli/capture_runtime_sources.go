@@ -10,7 +10,7 @@ import (
 )
 
 func runtimeQueueOptions(c capturedaemon.Config) (sessioncapture.Options, error) {
-	opts := sessioncapture.Options{ArchiveID: c.ArchiveID, MaxSpoolBytes: c.MaxSpoolBytes, MinFreeBytes: c.MinFreeBytes, CheckPolicy: runtimePolicy(c), EnableEnrichment: c.Enrichment}
+	opts := sessioncapture.Options{ArchiveID: c.ArchiveID, MaxSpoolBytes: c.MaxSpoolBytes, MinFreeBytes: c.MinFreeBytes, MaxInventoryRecords: c.MaxInventoryRecords, CheckPolicy: runtimePolicy(c), EnableEnrichment: c.Enrichment}
 	if runtimeHasAliases(c) {
 		inventory, err := c.CoordinateInventory()
 		if err != nil {

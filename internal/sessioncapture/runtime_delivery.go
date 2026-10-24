@@ -19,24 +19,31 @@ func (q *Queue) DeliverDue(ctx context.Context, b publication.Backend, i publica
 }
 
 func (q *Queue) deliverDue(ctx context.Context, b publication.Backend, i publication.Identity, o RuntimeOptions) error {
+	_, err := q.deliverDueWork(ctx, b, i, o)
+	return err
+}
+
+// deliverDueWork reports work only once an attempt is reached. Scheduling or
+// finding an idle lane must not keep a runtime worker in its immediate loop.
+func (q *Queue) deliverDueWork(ctx context.Context, b publication.Backend, i publication.Identity, o RuntimeOptions) (bool, error) {
 	if i.ArchiveID != q.opts.ArchiveID {
-		return errors.New("sessioncapture: archive mismatch")
+		return false, errors.New("sessioncapture: archive mismatch")
 	}
 	paused, err := q.destinationPaused(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if paused {
-		return nil
+		return false, nil
 	}
 	optional, err := q.optionalDeliveryHead(ctx, i)
 	if err != nil {
-		return err
+		return false, err
 	}
 	lock := q.deliveryLane(i, optional)
 	// Never consume a worker budget waiting behind another capture/delivery.
 	if !lock.TryLock() {
-		return nil
+		return false, nil
 	}
 	defer lock.Unlock()
 	var seq uint64
@@ -46,31 +53,31 @@ func (q *Queue) deliverDue(ctx context.Context, b publication.Backend, i publica
 	var next int64
 	err = q.db.QueryRowContext(ctx, `SELECT sequence,manifest,evidence,attempts,state,next_retry FROM jobs WHERE session=? AND state NOT IN ('published','superseded') ORDER BY sequence LIMIT 1`, i.BaseKey()).Scan(&seq, &body, &ev, &attempts, &state, &next)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	if state == "quarantined" || next > q.opts.Now().UnixNano() {
-		return nil
+		return false, nil
 	}
 	attemptErr := q.attempt(ctx, b, i, seq, body, ev)
 	save, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.OperationTimeout)
 	defer cancel()
 	if errors.Is(attemptErr, errSelectionSuperseded) {
-		return nil
+		return true, nil
 	}
 	if attemptErr != nil {
-		return q.runtimeDeliveryFailure(save, i, seq, attempts+1, attemptErr, o)
+		return true, q.runtimeDeliveryFailure(save, i, seq, attempts+1, attemptErr, o)
 	}
 	if err = q.fault("ack-before-commit"); err != nil {
-		return q.runtimeDeliveryFailure(save, i, seq, attempts+1, err, o)
+		return true, q.runtimeDeliveryFailure(save, i, seq, attempts+1, err, o)
 	}
 	_, err = q.db.ExecContext(save, `UPDATE jobs SET state='published',last_error='',next_retry=0 WHERE session=? AND sequence=? AND state!='superseded'`, i.BaseKey(), seq)
 	if err != nil {
-		return err
+		return true, err
 	}
-	return q.fault("ack-committed")
+	return true, q.fault("ack-committed")
 }
 
 func (q *Queue) runtimeDeliveryFailure(ctx context.Context, i publication.Identity, seq uint64, attempts int, cause error, o RuntimeOptions) (result error) {

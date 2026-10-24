@@ -58,6 +58,9 @@ type Options struct {
 	EnableEnrichment bool
 	ArchiveID        string
 	MaxSpoolBytes    int64
+	// MaxInventoryRecords bounds each retained runtime source/issue/scope table.
+	// Zero preserves the default 4096; positive values may not exceed 65536.
+	MaxInventoryRecords int
 	// MinFreeBytes reserves filesystem space; zero disables this additional gate.
 	MinFreeBytes int64
 	CheckPolicy  func(context.Context, Request) error
@@ -112,6 +115,11 @@ func Open(ctx context.Context, dir string, opts Options) (*Queue, error) {
 	if opts.ArchiveID == "" || opts.MaxSpoolBytes <= 0 || opts.MinFreeBytes < 0 || opts.CheckPolicy == nil {
 		return nil, errors.New("sessioncapture: archive, positive quota and explicit policy required")
 	}
+	limit, err := inventoryRecordLimit(opts.MaxInventoryRecords)
+	if err != nil {
+		return nil, err
+	}
+	opts.MaxInventoryRecords = limit
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
@@ -438,4 +446,15 @@ func (q *Queue) checkCallback(ctx context.Context, r Request) error {
 		return ctx.Err()
 	}
 	return fmt.Errorf("%w: callback denied", ErrPolicy)
+}
+
+// inventoryRecordLimit normalizes the optional operating quota before any disk I/O.
+func inventoryRecordLimit(limit int) (int, error) {
+	if limit < 0 || limit > MaxInventoryRecords {
+		return 0, errors.New("sessioncapture: inventory quota out of bounds")
+	}
+	if limit == 0 {
+		return MaxRuntimeSources, nil
+	}
+	return limit, nil
 }

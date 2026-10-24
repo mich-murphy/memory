@@ -95,6 +95,13 @@ func TestBaseNameOrdinaryNamesDoNotAllocate(t *testing.T) {
 		"/home/agent/projects/settings.json",
 		"/home/agent/state_5.sqlite",
 		"/home/agent/projects",
+		"/home/agent/project/artifact.txt",
+		"/home/agent/project/package-lock",
+		"/home/agent/project/workshop",
+		"/home/agent/project/catalog",
+		"/home/agent/project/record",
+		"/home/agent/project/blitz",
+		"/home/agent/project/worker",
 	} {
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			var got string
@@ -131,5 +138,26 @@ func BenchmarkBaseName(b *testing.B) {
 				BaseName(tc.path)
 			}
 		})
+	}
+}
+
+// The prefilter may admit extra names, but every regexp suffix must reach the
+// unchanged oracle, including when stripping reveals another suffix.
+func TestBackupSuffixPrefilterLiteralEndings(t *testing.T) {
+	for _, name := range []string{"artifact.txt", "package-lock", "workshop", "catalog", "record", "blitz", "worker"} {
+		if mayHaveBackupSuffix(name) {
+			t.Errorf("ordinary name %q reached backup regexp", name)
+		}
+	}
+	for _, suffix := range []string{".bak", ".backup", ".orig", ".old", ".gz", ".bz2", ".xz", ".zst", ".zstd", ".zip", ".7z", ".rar", ".tar", ".tgz", "~", ".~123~", "-20261014", "-20261014-235959", ".agent-sessions-backup---", ".before-artifact.txt", ".before-package-lock", ".before-workshop", ".before-catalog", ".before-record", ".before-blitz", ".before-worker"} {
+		for _, tail := range []string{"", ".bak.old.tar.gz~"} {
+			name := "auth.json" + suffix + tail
+			if !mayHaveBackupSuffix(name) {
+				t.Errorf("backup %q skipped backup regexp", name)
+			}
+			if got, want := BaseName(name), regexpBaseName(name); got != want {
+				t.Errorf("BaseName(%q) = %q, want oracle %q", name, got, want)
+			}
+		}
 	}
 }

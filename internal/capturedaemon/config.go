@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mich-murphy/memory/internal/capturebackend"
+	"github.com/mich-murphy/memory/internal/sessioncapture"
 )
 
 const (
@@ -25,29 +26,30 @@ type Root struct {
 	Path  string `json:"path"`
 }
 type Config struct {
-	Version          string               `json:"version"`
-	ArchiveID        string               `json:"archive_id"`
-	MachineID        string               `json:"machine_id"`
-	Store            string               `json:"store,omitempty"`
-	Backend          *capturebackend.Spec `json:"backend,omitempty"`
-	Spool            string               `json:"spool"`
-	PolicyDir        string               `json:"policy_dir"`
-	Home             string               `json:"home"`
-	DefaultRoots     bool                 `json:"default_roots"`
-	Enrichment       bool                 `json:"enrichment,omitempty"`
-	EnrichmentRoots  []string             `json:"enrichment_roots,omitempty"`
-	Roots            []Root               `json:"roots"`
-	RootAliases      []RootAlias          `json:"root_aliases,omitempty"`
-	LeafAliases      []LeafAlias          `json:"leaf_aliases,omitempty"`
-	CaptureWorkers   int                  `json:"capture_workers"`
-	DeliveryWorkers  int                  `json:"delivery_workers"`
-	PollSeconds      int                  `json:"poll_seconds"`
-	OperationSeconds int                  `json:"operation_seconds"`
-	MaxAttempts      int                  `json:"max_attempts"`
-	MaxSpoolBytes    int64                `json:"max_spool_bytes"`
-	MinFreeBytes     int64                `json:"min_free_bytes"`
-	EntriesPerRoot   int                  `json:"entries_per_root"`
-	sourcePath       string
+	Version             string               `json:"version"`
+	ArchiveID           string               `json:"archive_id"`
+	MachineID           string               `json:"machine_id"`
+	Store               string               `json:"store,omitempty"`
+	Backend             *capturebackend.Spec `json:"backend,omitempty"`
+	Spool               string               `json:"spool"`
+	PolicyDir           string               `json:"policy_dir"`
+	Home                string               `json:"home"`
+	DefaultRoots        bool                 `json:"default_roots"`
+	Enrichment          bool                 `json:"enrichment,omitempty"`
+	EnrichmentRoots     []string             `json:"enrichment_roots,omitempty"`
+	Roots               []Root               `json:"roots"`
+	RootAliases         []RootAlias          `json:"root_aliases,omitempty"`
+	LeafAliases         []LeafAlias          `json:"leaf_aliases,omitempty"`
+	CaptureWorkers      int                  `json:"capture_workers"`
+	DeliveryWorkers     int                  `json:"delivery_workers"`
+	PollSeconds         int                  `json:"poll_seconds"`
+	OperationSeconds    int                  `json:"operation_seconds"`
+	MaxAttempts         int                  `json:"max_attempts"`
+	MaxInventoryRecords int                  `json:"max_inventory_records,omitempty"`
+	MaxSpoolBytes       int64                `json:"max_spool_bytes"`
+	MinFreeBytes        int64                `json:"min_free_bytes"`
+	EntriesPerRoot      int                  `json:"entries_per_root"`
+	sourcePath          string
 }
 
 // Load rejects unknown fields, trailing values, oversized input and unsafe paths.
@@ -186,6 +188,7 @@ func (c Config) validateBudgets() error {
 		{c.MaxSpoolBytes, 1, 1 << 50},
 		{c.MinFreeBytes, 0, 1 << 50},
 		{int64(c.EntriesPerRoot), 1, 4096},
+		{int64(c.MaxInventoryRecords), 0, sessioncapture.MaxInventoryRecords},
 	}
 	for _, b := range bounds {
 		if b[0] < b[1] || b[0] > b[2] {

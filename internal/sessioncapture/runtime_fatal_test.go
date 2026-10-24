@@ -200,6 +200,15 @@ func TestRuntimeFatalClassificationAndBookkeeping(t *testing.T) {
 }
 
 func TestRuntimeFatalNetworkRetryKeepsRawAlive(t *testing.T) {
+	testRuntimeNetworkRetryRawACK(t, false)
+}
+
+func TestRuntimeNetworkRetryWaitsForNewestRawACK(t *testing.T) {
+	testRuntimeNetworkRetryRawACK(t, true)
+}
+
+func testRuntimeNetworkRetryRawACK(t *testing.T, priorACK bool) {
+	t.Helper()
 	for _, cause := range []error{errors.New("ordinary network failure"), context.DeadlineExceeded} {
 		dir, o, r := setup(t)
 		o.EnableEnrichment = true
@@ -230,6 +239,46 @@ func TestRuntimeFatalNetworkRetryKeepsRawAlive(t *testing.T) {
 			<-done
 			t.Fatal("optional upload never started")
 		}
+		releaseRaw := func() {}
+		if priorACK {
+			// Expire the original optional operation before the new capture.
+			// Its withheld view must genuinely ACK, not merely be accepted.
+			select {
+			case <-b.attempts:
+			case <-time.After(5 * time.Second):
+				cancel()
+				<-done
+				t.Fatal("optional failure never recorded")
+			}
+			priorDeadline := time.After(5 * time.Second)
+			priorTicker := time.NewTicker(time.Millisecond)
+			for {
+				var n int
+				if err := q.db.QueryRowContext(t.Context(), `SELECT count(*) FROM jobs WHERE state='published' AND sequence>?`, m.Sequence).Scan(&n); err != nil {
+					cancel()
+					<-done
+					priorTicker.Stop()
+					t.Fatal(err)
+				}
+				if n > 0 {
+					break
+				}
+				select {
+				case <-priorTicker.C:
+				case <-priorDeadline:
+					cancel()
+					<-done
+					priorTicker.Stop()
+					t.Fatal("prior withheld raw ACK missing")
+				}
+			}
+			priorTicker.Stop()
+			lane := q.deliveryLane(r.Identity, false)
+			lane.Lock()
+			var once sync.Once
+			releaseRaw = func() { once.Do(lane.Unlock) }
+			t.Cleanup(releaseRaw)
+		}
 		write(t, r.Path, "first\nnewest-network\n")
 		newest := capture(t, q, r)
 		// A normal optional transport outcome is withheld with durable repair, and
@@ -250,13 +299,18 @@ func TestRuntimeFatalNetworkRetryKeepsRawAlive(t *testing.T) {
 				t.Fatal("raw ACK blocked by network")
 			case <-ticker.C:
 				var n int
-				if err := q.db.QueryRowContext(t.Context(), `SELECT count(*) FROM jobs WHERE state='published' AND sequence>?`, m.Sequence).Scan(&n); err != nil {
+				if err := q.db.QueryRowContext(t.Context(), `SELECT count(*) FROM jobs WHERE state='published' AND sequence>=?`, newest.Sequence).Scan(&n); err != nil {
 					cancel()
 					<-done
 					ticker.Stop()
 					t.Fatal(err)
 				}
 				published = n > 0
+				if !published {
+					// The controlled case holds newest raw pending through this
+					// first probe: an older withheld ACK must not end the wait.
+					releaseRaw()
+				}
 			}
 		}
 		ticker.Stop()

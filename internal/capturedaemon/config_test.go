@@ -194,3 +194,25 @@ func TestServiceRejectsAndRunnerRequired(t *testing.T) {
 		t.Fatal("invalid apply accepted")
 	}
 }
+
+func TestConfigInventoryQuotaOptionalRoundtrip(t *testing.T) {
+	for _, limit := range []int{0, 1, 32768, 65536} {
+		c := testConfig(t)
+		c.MaxInventoryRecords = limit
+		path := filepath.Join(c.Home, "runtime.json")
+		if err := Save(path, c); err != nil {
+			t.Fatal(err)
+		}
+		got, err := Load(path)
+		if err != nil || got.MaxInventoryRecords != limit {
+			t.Fatalf("quota %d: %d %v", limit, got.MaxInventoryRecords, err)
+		}
+	}
+	for _, limit := range []int{-1, 65537} {
+		c := testConfig(t)
+		c.MaxInventoryRecords = limit
+		if err := c.Validate(); err == nil {
+			t.Fatalf("accepted quota %d", limit)
+		}
+	}
+}

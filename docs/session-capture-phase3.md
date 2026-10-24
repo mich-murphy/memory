@@ -67,8 +67,8 @@ acceptance**:
 | Discovery directory entries | At most 4096 per call, fairly divided among configured roots |
 | Discovery directory descriptors | At most 256; depth/descriptor gaps are explicit |
 | Configured roots | At most 128 |
-| Retained source work records | 4096, with same-source coalescing at capacity |
-| Retained discovery issues / scopes | 4096 each, including resolved history |
+| Retained source work records | Default 4096; optional `max_inventory_records` up to 65536, with same-source coalescing at capacity |
+| Retained discovery issues / scopes | Default 4096 each; same optional inventory quota, including resolved history |
 | Path-hint inbox | 1024 hints, each at most 64 KiB |
 | Status page | 1–256 records; independent list cursors |
 
@@ -259,7 +259,7 @@ compressed subagent capture, protected global/settings/backup scrubbing, WAL bac
 exact installed Claude/Codex synthetic commands and pathless wake, indexed artifacts,
 native launch plus closed project snapshot, original-source/Home/spool-independent
 restore and actual idempotent import/event index/report.
-### Current combined offline acceptance
+### Earlier combined offline acceptance
 
 Final combined acceptance has **eleven actual-process journeys**, including actual
 SDK factory/protocol peer → writer → reader → importer after synthetic source/spool
@@ -275,3 +275,39 @@ R2, and both machines' preserved policy/inventory/installed-path acceptance rema
 required. Caller/dashboard defaults are deliberately not activated; activation belongs
 to controlled cutover, not proof of candidate caller wiring. No production cutover or
 reviewed retired-key deletion is authorized by these offline tests.
+
+### Measured inventory operating quota
+
+`capture-runtime/v1` optionally accepts `"max_inventory_records": 32768`.
+Omitted or zero retains the old **4096** default; positive values are bounded at
+**65536**. This is a per-table retained metadata limit for runtime sources,
+discovery issues and discovery scopes, not a byte quota, per-sweep entry budget,
+or complete-inventory guarantee. The 4096 per-discovery-batch bound and 256-row
+status detail page ceiling are unchanged. Status aggregates count all admitted
+rows, independently of page size or the current configured quota.
+
+The operating report of exactly 4096 source and issue rows motivates this opt-in;
+32768 is a proposed operating setting, not measured acceptance of that capacity.
+Changing it requires an explicit config change and coordinator restart; no host
+changes are part of this implementation. Existing identities continue coalescing
+at capacity and accepted publications continue draining. New identities receive
+backpressure, durable inbox hints remain unacknowledged, and discovery metadata
+exhaustion marks the sweep partial with `quota` rather than resolving missing
+issues. Raising capacity allows retry without deleting state or accepted bytes.
+Lowering it never deletes admitted rows: existing identities still update, while
+new identities wait until an explicitly sufficient quota is configured. No GC,
+source/archive/status migration, ownership/enrichment quota change or coverage
+claim is implied.
+
+### Current correction-source development gates
+
+The unchanged 415-input serial run recorded full check PASS (708s), test PASS (453s),
+nine 30-second fuzz targets PASS (287s), 97 analytics tests PASS (33.454s) and JavaScript/
+whitespace PASS. Coverage 87.0%, thresholds PASS and no reported CRAP>30; all input
+hashes match and original coverage is restored. Earlier failed full attempts remain
+recorded in the handoff. A deterministic scheduler busy-lane false-progress defect
+and a test ACK predicate accepting a prior rather than newest raw publication were
+corrected without removing privacy/race assertions or increasing deadlines. Retained
+inventory, monitor-rename and necessary-suffix corrections are independently reviewed.
+These are development gates, not installed 32768-record, native/resource/coverage/cutover
+acceptance. Exact-revision builds and controlled two-host/consumer upgrades are next.

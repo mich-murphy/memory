@@ -87,22 +87,36 @@ func BaseName(path string) string {
 }
 
 // mayHaveBackupSuffix is a necessary, not sufficient check on a folded name.
-// Except .before-..., every regexp alternative ends in one of these bytes:
-// editors ~; copies k/p/g/d; dates/installers 0-9/-; archives z/2/t/d/p/r.
-// .before-... can end in any [a-z0-9_.-], so admit any occurrence of its marker.
+// Fixed suffixes must match literally; dates/installers and editor suffixes may
+// end in digits, -, or ~. Admit any .before- marker because its tail is variable.
 // When changing backupSuffix, keep this check a superset of its matches and
 // extend the regexp-oracle tests. Only the regexp decides what gets stripped.
 func mayHaveBackupSuffix(name string) bool {
 	if name == "" {
 		return false
 	}
-	switch name[len(name)-1] {
-	case '~', 'k', 'p', 'g', 'd', 'z', 't', 'r', '-',
-		'0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+	last := name[len(name)-1]
+	if last == '~' || last == '-' || last >= '0' && last <= '9' {
 		return true
-	default:
-		return strings.Contains(name, ".before-")
 	}
+	matched := false
+	switch last {
+	case 'k':
+		matched = strings.HasSuffix(name, ".bak")
+	case 'p':
+		matched = strings.HasSuffix(name, ".backup") || strings.HasSuffix(name, ".zip")
+	case 'g':
+		matched = strings.HasSuffix(name, ".orig")
+	case 'd':
+		matched = strings.HasSuffix(name, ".old") || strings.HasSuffix(name, ".zstd")
+	case 'z':
+		matched = strings.HasSuffix(name, ".gz") || strings.HasSuffix(name, ".xz") || strings.HasSuffix(name, ".7z") || strings.HasSuffix(name, ".tgz")
+	case 't':
+		matched = strings.HasSuffix(name, ".zst")
+	case 'r':
+		matched = strings.HasSuffix(name, ".rar") || strings.HasSuffix(name, ".tar")
+	}
+	return matched || strings.Contains(name, ".before-")
 }
 
 // IsNoise reports explicit disposable filenames and app bundles, including known backups.

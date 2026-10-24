@@ -10,8 +10,8 @@ import (
 	"unicode/utf8"
 )
 
-// MaxDiscoveryRecords bounds each retained issue/scope table (including resolved
-// records) and each discovery batch. Capacity is visible backpressure, not GC or
+// MaxDiscoveryRecords is the default retained issue/scope bound (including resolved
+// records) and the fixed discovery batch bound. Capacity is visible backpressure, not GC or
 // a claim that inventories larger than this limit have been fully captured.
 const MaxDiscoveryRecords = 4096
 
@@ -83,7 +83,7 @@ func (q *Queue) saveDiscoveryIssue(ctx context.Context, tx *sql.Tx, issue Discov
 	if !discoveryToken(issue.RootAgent, false) || !discoveryToken(issue.Code, false) || !discoveryPath(issue.RootPath) || !discoveryPath(issue.Path) {
 		return errDiscoveryMetadata
 	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO runtime_discovery_issues(agent,root,path,code,first_generation,seen_generation) SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_discovery_issues WHERE agent=? AND root=? AND path=? AND code=?) OR (SELECT COUNT(*) FROM runtime_discovery_issues)<? ON CONFLICT(agent,root,path,code) DO UPDATE SET seen_generation=excluded.seen_generation,active=1`, issue.RootAgent, issue.RootPath, issue.Path, issue.Code, generation, generation, issue.RootAgent, issue.RootPath, issue.Path, issue.Code, MaxDiscoveryRecords)
+	result, err := tx.ExecContext(ctx, `INSERT INTO runtime_discovery_issues(agent,root,path,code,first_generation,seen_generation) SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_discovery_issues WHERE agent=? AND root=? AND path=? AND code=?) OR (SELECT COUNT(*) FROM runtime_discovery_issues)<? ON CONFLICT(agent,root,path,code) DO UPDATE SET seen_generation=excluded.seen_generation,active=1`, issue.RootAgent, issue.RootPath, issue.Path, issue.Code, generation, generation, issue.RootAgent, issue.RootPath, issue.Path, issue.Code, q.opts.MaxInventoryRecords)
 	return discoveryCapacity(result, err)
 }
 
@@ -91,7 +91,7 @@ func (q *Queue) saveDiscoveryScope(ctx context.Context, tx *sql.Tx, scope Discov
 	if !discoveryToken(scope.Agent, false) || !discoveryToken(scope.State, false) || !discoveryToken(scope.Enrichment, true) || !discoveryPath(scope.Root) || scope.Examined < 0 {
 		return errDiscoveryMetadata
 	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO runtime_discovery_scopes(agent,root,state,examined,enrichment,seen_generation) SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_discovery_scopes WHERE agent=? AND root=?) OR (SELECT COUNT(*) FROM runtime_discovery_scopes)<? ON CONFLICT(agent,root) DO UPDATE SET state=excluded.state,examined=excluded.examined,enrichment=excluded.enrichment,seen_generation=excluded.seen_generation,active=1`, scope.Agent, scope.Root, scope.State, scope.Examined, scope.Enrichment, generation, scope.Agent, scope.Root, MaxDiscoveryRecords)
+	result, err := tx.ExecContext(ctx, `INSERT INTO runtime_discovery_scopes(agent,root,state,examined,enrichment,seen_generation) SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_discovery_scopes WHERE agent=? AND root=?) OR (SELECT COUNT(*) FROM runtime_discovery_scopes)<? ON CONFLICT(agent,root) DO UPDATE SET state=excluded.state,examined=excluded.examined,enrichment=excluded.enrichment,seen_generation=excluded.seen_generation,active=1`, scope.Agent, scope.Root, scope.State, scope.Examined, scope.Enrichment, generation, scope.Agent, scope.Root, q.opts.MaxInventoryRecords)
 	return discoveryCapacity(result, err)
 }
 

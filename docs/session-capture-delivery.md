@@ -1,7 +1,7 @@
 # Corrected capture delivery ledger
 
-Status: delivery in progress, not release acceptance. Implementation checkpoint:
-`b68a412`. Requirements remain the [capture contract](session-capture-contract.md).
+Status: controlled operating delivery in progress, not release acceptance.
+Reviewed implementation checkpoint: **`c9749da`** (after `b68a412`). Requirements remain the [capture contract](session-capture-contract.md).
 This ledger records new work after the checkpoint; prior passing gates remain dated
 evidence, not automatic proof for later changes.
 
@@ -13,6 +13,94 @@ validates and continues the controlled sequence. Preserve privacy/access boundar
 record actual blockers and attempted checks rather than inventing human prerequisites.
 No legacy archive/analytics migration or refresh-compatibility work is required.
 Capacity/retention changes belong in a measured, validated vertical slice.
+
+## Current operating state — 2026-10-24
+
+- Final serial gates passed and scoped checkpoint review found no confirmed blocker;
+  committed `c9749da` locally (not pushed). Fresh static Darwin/arm64 and Linux/amd64
+  binaries were built from that exact revision inside pinned Nix.
+- Refreshed both private inventories and R2 policy: original distinct machine identities,
+  three available default roots each, zero learned roots/local exclusions/remote policy
+  records at this observation. Originals, credentials and prior evidence are preserved.
+- Candidate binary, credential-scoped launcher and private runtime config are now
+  installed on **both machines**. The previously absent real shared capture binding was
+  initialized on Mac and verified with BC's own existing credentials. This is actual
+  production binding use, not the synthetic acceptance binding/remapping.
+- Owned launchd/systemd supervisors are **started on both machines**. Independent source
+  capture/backfill/publication is active; read-only `work-status` succeeds beside each
+  live owner. Initial bounded spool budgets: Mac 8 GiB, BC 6 GiB; free-space reserve
+  4 GiB each, chosen against measured source metadata/free space, not a retention proof.
+- Mac's existing owned `LaunchAgents` directory was 0755; the unchanged private-file
+  gate refused service installation. Its prior mode was recorded privately and the
+  directory was deliberately tightened to 0700; installation then succeeded. No unit or
+  unrelated file was deleted, and no gate was relaxed. BC's owned service directory was
+  also prepared privately. Existing authenticated Azure management—not refused SSH or
+  copied keys—delivered a byte-verified **public-code-only** artifact to UID 1000.
+- Backfill is not yet classified complete. Broad inventory explicitly reports protected,
+  denied, executable, orphan-owner and unsupported resource gaps; these are not hidden
+  or claimed captured. No source quarantine was present in the first Mac observation.
+- Both owned PATH entries are now fenced: legacy `sync` exits 2, old managed hooks
+  were safely uninstalled and new explicit candidate callbacks installed. Mac's one
+  identified old Go writer was stopped; BC had none. Four old managed config/extension
+  files and the old binary on each host were privately backed up before replacement.
+  Cached legacy native callbacks retain the bounded privacy-aware bridge. No original
+  source or remote key was deleted.
+- Autonomous Mac refresher and publication-only loopback dashboard are supervised on
+  staging port **8766**; old dashboard **8765** remains unchanged. Actual writer -> R2 ->
+  authoritative reader -> owned importer/cache/index -> served report is connected:
+  an early sample had 225 observed targets / 486 selected sources. Health correctly
+  remained false during initial catch-up; this is not classified completeness.
+- Analytics software is copied from exact checkpoint sources with an owned, byte-checked
+  portable Python **3.13.15** runtime and DuckDB **1.5.6** / Boto3 **1.43.114**. The
+  validated venv was not Nix Python 3.14; its portable base and dependencies were copied
+  and loader dependencies checked rather than changing ABI or relying on uv/repo cache.
+  All **95 tests PASS, 32.324s** from the actual installed runtime/source copy.
+- **Measured blocker:** retained source and discovery-issue tables each reached their
+  4096-record admission bound. A bounded optional `max_inventory_records` correction
+  preserves default 4096 and all input/detail/coverage gates; focused race suites/lint
+  and independent review pass. It is **not deployed**; fresh final serial gates are
+  required before raising the operating setting (proposed 32768, ceiling 65536).
+- **Operating diagnosis:** two, later three, small opaque artifact targets intermittently
+  recorded `import_failed`. Exact same published exports import unchanged successfully
+  in fresh/combined/copied projections and through isolated actual `_target`; no source
+  normalizer bug is established. A temporary bounded, privacy-safe actual refresher
+  probe captured no exception; both exact original failing coordinates subsequently
+  imported, with **0 target errors / 0 head failures** at 2,579 targets. The original
+  unit was byte-restored/running. Served report observed 2,578 sessions / 4,325 sources /
+  0 projection failures, HTTP 200; one intervening HTTP 503 remains explicitly observed.
+  Installed-runtime analytics tests again **95 PASS, 39.079s, zero skips**. No Python
+  change, failure suppression or data deletion in that first diagnostic window. It
+  proved retry recovery, not the original exception's root cause or completeness.
+  A later bounded actual probe **captured four `FileNotFoundError` exceptions** in
+  the export monitor's `disk_bytes` entry inspection, before normalization/import:
+  an enumerated temporary metadata entry was atomically renamed before `lstat`.
+  A deterministic separate-process rename regression was RED on unchanged code.
+  The narrow correction uses one no-follow inspection and tolerates only that vanished
+  entry; permission/other errors, entry/byte limits, symlink rejection and strict
+  completed-export/import validation remain. Focused **19 PASS / 4.716s**, independent
+  scoped review PASS, then full analytics **97 PASS / 33.073s** in pinned Nix with the
+  owned runtime/current test binary. Fix is **not installed**; later live failures
+  remain visible. Final frozen serial gates must include both changed Python files.
+- Read-only, bounded **old `v3/` metadata inventory** completed after fencing:
+  81,896 objects / 2,823,793,063 bytes / 82 scoped LIST pages; no body GET, new-prefix
+  access or deletion. Private manifest SHA256
+  `ca3a80c40fcd3c5f9bdff382f99a9280863a9e9f426dd5239f2a7974bed326f4`.
+  It is retirement input, not evidence that every old byte exists locally or authority
+  to delete before operating acceptance. The first list attempt rejected URL-encoded
+  key spelling before recording anything; the corrected metadata parser explicitly
+  decodes declared URL encoding and completed the scoped inventory.
+- Mac pre-upgrade spool point: 4,023 files, 889,053,684 apparent bytes / 909,807,616
+  allocated bytes, no spool symlinks, 64,911,896,576 filesystem bytes free. Both retained
+  inventory tables are exactly 4,096 rows. This isolates the measured record quota from
+  byte-space exhaustion; it is not completed capacity/retention acceptance.
+- BC installed-Pi plan now passes after separately recording/tightening only the owned
+  canonical session-parent directory from 0775 to 0700. Source contents were unchanged,
+  assertions were not relaxed. Reviewed plan: 43 RO binds, 32 runtime software entries,
+  48 exact aliases, four existing active metadata-inbox binds, four denied original/
+  credential/unrelated/repo coordinates, no shadow spool. No native/model execution yet.
+- **Not yet done:** installed native-hook acceptance, classified two-host final catch-up,
+  restart/freshness/exact restore acceptance, final dashboard switch and old-key
+  retirement. Original-source and old remote archive deletion have **not occurred**.
 
 ## Current work
 
@@ -74,7 +162,8 @@ Capacity/retention changes belong in a measured, validated vertical slice.
   Status versions 1/2 are refused without migration/reset. Actual SDK and real importer
   tests assert A/B progress, prior-good A retention, restart, retry and recovery.
 - Final unchanged development gates **all passed serially** on the settled, hashed
-  tree. Operating deployment/cutover has not started; offline green is not delivery.
+  tree. The later operating state above begins controlled deployment; offline green
+  alone is not delivery.
 
 ### Fresh validation ledger
 
@@ -167,15 +256,19 @@ not retained-capacity guarantees or combined RSS/disk measurements.
 
 ## Remaining controlled sequence
 
-1. Complete independent fix review and fresh unchanged development gates.
-2. Prove real R2 behavior in a bounded new synthetic namespace and real native agents
-   in scratch-only sandboxed homes; distinguish these from installed operation.
-3. Preserve and validate effective policy/identity/root bindings, configure bounded
-   production queues and explicit supervisor secret provisioning without printing keys.
-4. Rebuild/reconcile available sources and catch up; fence legacy workers and hooks
-   before final writer cutover. Preserve originals and local research evidence.
+1. **Done:** independent closure review, fresh unchanged serial gates and checkpoint.
+2. **Done, scoped:** isolated real R2 and scratch-native agents. These are not installed
+   operating acceptance.
+3. **Started:** refreshed effective policy/identity/root inventory, installed bounded
+   production queues, real binding and both supervisors with named credential handoff.
+4. Rebuild/reconcile available sources and catch up. Legacy PATH writers and managed
+   hooks are already fenced/replaced on both hosts, with originals retained. The next
+   correction source passed unchanged full check/test/fuzz, 97 analytics and JavaScript
+   gates; exact-revision rebuild and controlled 32768-record/monitor upgrades remain pending.
+   Preserve originals and local research evidence.
 5. Verify both installed paths, restart/retry, exact restores and publication-backed
    analytics freshness. Retire only reviewed old remote keys after acceptance.
 
-No deployment, archive reset, original-source deletion or retired-key deletion is
-claimed by the inventory and implementation work above.
+Original sources and retired remote keys remain untouched. A new capture binding and
+both active candidate supervisors are now real; complete operating acceptance, final
+writer/dashboard cutover and remote retirement are still outstanding.

@@ -75,8 +75,15 @@ def disk_bytes(root, cap):
         require(entries <= 65536, 'export_entry_limit')
         for name in dirs + files:
             path = Path(directory) / name
-            require(not path.is_symlink(), 'export_symlink')
-            total += path.lstat().st_size
+            try:
+                info = path.lstat()
+            except FileNotFoundError:
+                # The active reader atomically renames its temporary metadata.
+                # An enumerated name may therefore disappear before this sample.
+                # Completed exports are sampled again before import validation.
+                continue
+            require(not stat.S_ISLNK(info.st_mode), 'export_symlink')
+            total += info.st_size
             require(total <= cap, 'export_byte_limit')
     return total
 

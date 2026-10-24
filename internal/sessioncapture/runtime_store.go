@@ -57,10 +57,14 @@ func (q *Queue) InitRuntime(ctx context.Context) error {
 	return nil
 }
 
-// MaxRuntimeSources bounds retained source metadata, including absent sources.
+// MaxRuntimeSources is the default retained source metadata bound, including absent sources.
 // At capacity new identities receive backpressure; existing identities still
 // coalesce. There is no automatic GC, nor a complete-inventory guarantee.
 const MaxRuntimeSources = 4096
+
+// MaxInventoryRecords is the hard ceiling for an explicitly configured inventory.
+// It does not raise per-batch discovery or paginated status limits.
+const MaxInventoryRecords = 65536
 
 // Hint owns only bounded pathname metadata, not source bytes. Repeated hints
 // coalesce by source identity; they never clear backoff or quarantine. A worker
@@ -91,7 +95,7 @@ func (q *Queue) Hint(ctx context.Context, req Request) error {
 	if len(body) > publication.MaxMetadata {
 		return ErrQuota
 	}
-	result, err := q.db.ExecContext(ctx, `INSERT INTO runtime_sources(session,source,request,observed_at) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_sources WHERE session=? AND source=?) OR (SELECT COUNT(*) FROM runtime_sources)<? ON CONFLICT(session,source) DO UPDATE SET request=excluded.request,version=version+1,observed_at=excluded.observed_at,observed_state='present',state=CASE WHEN state='captured' OR state='absent' THEN 'pending' ELSE state END`, req.Identity.BaseKey(), req.SourceID, body, req.ObservedAtNS, req.Identity.BaseKey(), req.SourceID, MaxRuntimeSources)
+	result, err := q.db.ExecContext(ctx, `INSERT INTO runtime_sources(session,source,request,observed_at) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_sources WHERE session=? AND source=?) OR (SELECT COUNT(*) FROM runtime_sources)<? ON CONFLICT(session,source) DO UPDATE SET request=excluded.request,version=version+1,observed_at=excluded.observed_at,observed_state='present',state=CASE WHEN state='captured' OR state='absent' THEN 'pending' ELSE state END`, req.Identity.BaseKey(), req.SourceID, body, req.ObservedAtNS, req.Identity.BaseKey(), req.SourceID, q.opts.MaxInventoryRecords)
 	if err != nil {
 		return err
 	}
@@ -338,7 +342,7 @@ func (q *Queue) deliveryLaneNext(ctx context.Context, b publication.Backend, o R
 	if head != optional {
 		return false, nil
 	}
-	return true, q.deliverDue(ctx, b, identity, o)
+	return q.deliverDueWork(ctx, b, identity, o)
 }
 
 func (q *Queue) dueIdentity(ctx context.Context, session string) (publication.Identity, bool, error) {

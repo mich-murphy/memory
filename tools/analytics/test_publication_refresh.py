@@ -259,6 +259,54 @@ class RefreshTests(unittest.TestCase):
                     self.assertEqual(old.execute('SELECT version FROM binding').fetchall(), [(version,)])
                     self.assertEqual(old.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall(), [('binding',)])
 
+    def test_export_monitor_tolerates_atomic_metadata_rename_between_walk_and_stat(self):
+        import subprocess
+        import sys
+        root = self.root / 'export-race'
+        root.mkdir()
+        temporary, committed = root / '.metadata.tmp', root / 'metadata.json'
+        temporary.write_bytes(b'x' * 2048)
+        original = Path.lstat
+        renamed = False
+
+        def concurrent_commit(path, *args, **kwargs):
+            nonlocal renamed
+            if path == temporary and not renamed:
+                # Separate producer, synchronized after os.walk enumerated the
+                # temporary name. The real Go exporter commits this same rename.
+                subprocess.run([sys.executable, '-c',
+                    'import os,sys; os.replace(sys.argv[1],sys.argv[2])',
+                    str(temporary), str(committed)], check=True, timeout=10,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                renamed = True
+            return original(path, *args, **kwargs)
+
+        with patch.object(Path, 'lstat', concurrent_commit):
+            self.assertEqual(refresh.disk_bytes(root, 1024), 0)
+        self.assertTrue(renamed)
+        # A transient sample is not final validation: the committed oversized
+        # file must still fail the next (including post-export) sample.
+        with self.assertRaisesRegex(refresh.RefreshFailure, 'export_byte_limit'):
+            refresh.disk_bytes(root, 1024)
+        self.assertEqual(refresh.disk_bytes(root, 4096), 2048)
+
+    def test_export_monitor_keeps_symlink_permission_and_entry_limits(self):
+        root = self.root / 'export-bounds'
+        root.mkdir()
+        selected = root / 'body'
+        selected.write_bytes(b'x')
+        alias = root / 'alias'
+        alias.symlink_to(selected)
+        with self.assertRaisesRegex(refresh.RefreshFailure, 'export_symlink'):
+            refresh.disk_bytes(root, 4096)
+        alias.unlink()
+        with patch.object(Path, 'lstat', side_effect=PermissionError):
+            with self.assertRaises(PermissionError):
+                refresh.disk_bytes(root, 4096)
+        with patch.object(refresh.os, 'walk', return_value=[(str(root), [], ['body'] * 65537)]):
+            with self.assertRaisesRegex(refresh.RefreshFailure, 'export_entry_limit'):
+                refresh.disk_bytes(root, 4096)
+
     def test_process_output_bytes_and_timeout_bounded(self):
         import sys
         with self.assertRaisesRegex(refresh.RefreshFailure, 'process_output_limit'):
