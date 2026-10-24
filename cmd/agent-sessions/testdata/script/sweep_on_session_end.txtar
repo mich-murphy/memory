@@ -8,6 +8,7 @@ waitfor bucket/v3/machines/testbox/records/file/b230815be409a354093c34c474f4a031
 waitfor bucket/v3/machines/testbox/records/file/40b57dafef7b6a0af6331bbdbdaed3be6f58899327cf54b7bf4690b798c160ec/commits/00000000000000000001-*.json
 waitfor bucket/v3/machines/testbox/records/session/ef08ae020fa1b232e27b7a9041c3ba909661fd2f17537ea3442381bf80fa3700/commits/00000000000000000001-*.json
 ! waitfor state/pending/[0-9a-f]*
+waitrun sweep:session_shutdown
 ! exec agent-sessions doctor
 stdout 'last sweep \(sweep:session_shutdown\)'
 

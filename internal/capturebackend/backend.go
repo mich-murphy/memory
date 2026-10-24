@@ -126,7 +126,7 @@ func Open(ctx context.Context, s Spec, d Dependencies) (publication.Backend, err
 	sdk := s3.New(s3.Options{
 		Region: "auto", BaseEndpoint: aws.String(s.Endpoint), UsePathStyle: true,
 		Credentials: credentials.NewStaticCredentialsProvider(access, secret, ""),
-		HTTPClient:  client, Retryer: aws.NopRetryer{}, RetryMaxAttempts: 1,
+		HTTPClient:  boundedErrorClient{client: client}, Retryer: aws.NopRetryer{}, RetryMaxAttempts: 1,
 		RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired,
 		ResponseChecksumValidation: aws.ResponseChecksumValidationWhenRequired,
 	})

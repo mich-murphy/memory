@@ -146,3 +146,16 @@ func (b *captureDestinationBackend) Sync(ctx context.Context, key string) error 
 	}
 	return nil
 }
+
+func (b *captureDestinationBackend) ListSessionNamespaces(ctx context.Context, scope publication.Identity, after string, limit int) ([]string, bool, error) {
+	backend, err := b.get(ctx, publication.ArchiveKey)
+	if err != nil {
+		return nil, false, err
+	}
+	lister, ok := backend.(publication.SessionNamespaceLister)
+	if !ok {
+		return nil, false, publication.ErrListingUnsupported
+	}
+	prefixes, complete, err := lister.ListSessionNamespaces(ctx, scope, after, limit)
+	return prefixes, complete, destinationError(err)
+}

@@ -19,7 +19,7 @@ import (
 type captureFlags struct {
 	store, spool, archive, machine, agent, session       string
 	source, path, role, output, policyDir, runtimeConfig string
-	quota                                                int64
+	quota, maxBytes                                      int64
 }
 
 func (c captureFlags) identity() publication.Identity {
@@ -41,12 +41,16 @@ func parseCaptureFlags(cmd string, args []string, o IO) (captureFlags, error) {
 	fs.StringVar(&c.role, "role", "main", "main or subagent transcript")
 	fs.StringVar(&c.output, "output", "", "new private export directory")
 	fs.StringVar(&c.policyDir, "policy-dir", "", "preserved effective exclusion registry directory; required for capture/delivery")
+	fs.Int64Var(&c.maxBytes, "max-bytes", publication.DefaultExportMaxBytes, "maximum total decoded export bytes, 1..1099511627776 (default 1 GiB)")
 	fs.Int64Var(&c.quota, "max-spool-bytes", 1<<30, "maximum retained encoded spool bytes; no eviction")
 	if err := parse(fs, args); err != nil {
 		return c, err
 	}
 	if fs.NArg() != 0 || (c.archive == "" && c.runtimeConfig == "") {
 		return c, fmt.Errorf("%w: capture-v1 requires --archive or --config and no positional arguments", errUsage)
+	}
+	if cmd == "export" && (c.maxBytes <= 0 || c.maxBytes > publication.MaxExportBytes) {
+		return c, fmt.Errorf("%w: export --max-bytes must be 1..1099511627776", errUsage)
 	}
 	return c, nil
 }
@@ -56,7 +60,7 @@ func parseCaptureFlags(cmd string, args []string, o IO) (captureFlags, error) {
 // the legacy v3 namespace and installed runtime remain untouched.
 func runCapture(ctx context.Context, args []string, o IO) (int, error) {
 	if len(args) == 0 {
-		return exitUsage, errors.New("capture-v1 requires init, capture, deliver, status, export, fixture, run, hint, hook, hooks, work-status, quarantine, replay, resume, enrichment-status, enrichment-replay, policy-pauses, or service")
+		return exitUsage, errors.New("capture-v1 requires init, capture, deliver, status, export, fixture, run, hint, hook, hooks, work-status, publication-status, current-heads, quarantine, replay, resume, enrichment-status, enrichment-replay, policy-pauses, or service")
 	}
 	if args[0] == "fixture" {
 		return runCaptureFixture(ctx, args[1:], o)
@@ -85,7 +89,7 @@ func runCapture(ctx context.Context, args []string, o IO) (int, error) {
 		if c.store == "" || c.output == "" || !captureIdentityComplete(c.identity()) {
 			return exitUsage, errors.New("export requires --store, --output, --machine, --agent, --session")
 		}
-		_, err := publication.ExportSession(ctx, backend, c.identity(), c.output)
+		_, err := publication.ExportSessionBounded(ctx, backend, c.identity(), c.output, c.maxBytes)
 		return exitOK, err
 	case "capture", "deliver", "status":
 		return runCaptureWork(ctx, args[0], c, o)

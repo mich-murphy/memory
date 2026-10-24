@@ -492,6 +492,26 @@ class CoordinatorJourney(unittest.TestCase):
         identity = row['Request']['Identity']
 
         def enriched_export():
+            # A native event owns launch + CWD snapshot work, independently of
+            # the transcript capture's source-basis snapshot. Seeing the native
+            # pair alone can still leave a third attachment/publication in flight.
+            # Synchronize on durable work and its remotely readable sequence, not
+            # a sleep, shutdown timing, or two observations that happen to match.
+            status = self.run_writer('enrichment-status', '--config', str(self.config))
+            work = [item for item in (json.loads(status.stdout) or [])
+                    if item['Spec']['Identity'] == identity]
+            if sorted(item['Spec']['SelectionVersion'] for item in work) != [
+                    'native-launch/v1', 'native-snapshot/v1', 'snapshot/v1']:
+                return None
+            if any(item['State'] != 'attached' or item['AttachedSequence'] == 0 for item in work):
+                return None
+            attached_sequence = max(item['AttachedSequence'] for item in work)
+            view = self.view()
+            if view is None or view['Runtime']['PendingPublications'] != 0:
+                return None
+            repairs = json.loads(self.run_writer('optional-status', '--config', str(self.config)).stdout) or []
+            if any(item['State'] != 'repaired' for item in repairs):
+                return None
             destination = self.root / 'enriched-observation'
             if destination.exists():
                 shutil.rmtree(destination)  # Owned synthetic reader attempts only.
@@ -502,7 +522,29 @@ class CoordinatorJourney(unittest.TestCase):
             if exported.returncode:
                 return None
             metadata = json.loads((destination / 'metadata.json').read_text())
+            # 'attached' means locally accepted, not remotely published. The
+            # reader must include every accepted attachment before we stop it.
+            if metadata['manifest']['sequence'] < attached_sequence:
+                return None
+            # Optional delivery/repair may advance beyond the attachment's
+            # sequence without changing its selected source closure.
+            sources = metadata['manifest']['sources']
+            self.assertEqual(len(sources), 4)  # Main + launch + both snapshot bases.
+            self.assertEqual(len(metadata['bodies']), 4)
+            self.assertEqual(sorted(association for source in sources
+                for association in (source.get('associations') or [])
+                if association.startswith('enrichment:')),
+                ['enrichment:launch', 'enrichment:snapshot', 'enrichment:snapshot'])
+            captured = next(item for item in work if item['Spec']['SelectionVersion'] == 'snapshot/v1')
+            self.assertTrue(captured['BasisCurrent'])
+            main = next(source for source in sources if source['role'] == 'main')
+            self.assertEqual(captured['Spec']['Source']['SourceID'], main['source_id'])
+            self.assertEqual(captured['Spec']['Source']['EpochID'], main['epoch_id'])
+            self.assertEqual(captured['Spec']['Source']['Revision'], main['revision'])
+            self.assertEqual(captured['Spec']['Source']['SHA256'], main['object']['sha256'])
             bodies = {(b['source_id'], b['epoch_id']): b for b in metadata['bodies']}
+            self.assertEqual(len(bodies), 4)
+            self.assertEqual(set(bodies), {(source['source_id'], source['epoch_id']) for source in sources})
             launch_seen, project_seen = False, False
             for source in metadata['manifest']['sources']:
                 body = bodies.get((source['source_id'], source['epoch_id']))

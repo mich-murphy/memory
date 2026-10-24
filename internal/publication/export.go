@@ -9,15 +9,55 @@ import (
 	"path/filepath"
 )
 
-// ExportSession pins one manifest before creating any bodies. dest must not exist
+const (
+	DefaultExportMaxBytes int64 = 1 << 30
+	MaxExportBytes        int64 = 1 << 40
+)
+
+// ErrExportBudget is content-free and reports invalid or exceeded export budgets.
+var ErrExportBudget = errors.New("publication: export byte budget invalid or exceeded")
+
+// ExportSession exports with the default 1-GiB total decoded-body budget.
+func ExportSession(ctx context.Context, b Backend, i Identity, dest string) (Export, error) {
+	return ExportSessionBounded(ctx, b, i, dest, DefaultExportMaxBytes)
+}
+
+// ExportSessionBounded pins one manifest before creating any bodies. dest must not exist
 // and its parent must be private/trusted. metadata.json is the completion marker;
 // failures may leave a private partial directory without that marker.
-func ExportSession(ctx context.Context, b Backend, i Identity, dest string) (Export, error) {
+func ExportSessionBounded(ctx context.Context, b Backend, i Identity, dest string, maxBytes int64) (Export, error) {
 	var out Export
+	if maxBytes <= 0 || maxBytes > MaxExportBytes {
+		return out, ErrExportBudget
+	}
 	m, err := pinned(ctx, b, i)
 	if err != nil {
 		return out, err
 	}
+	if err := checkExportBudget(m, maxBytes); err != nil {
+		return out, err
+	}
+	return exportPinned(ctx, b, m, dest)
+}
+
+func checkExportBudget(m Manifest, maxBytes int64) error {
+	// Subtraction avoids aggregate overflow, including hostile declared sizes.
+	remaining := maxBytes
+	for n := range m.Sources {
+		source := &m.Sources[n]
+		if !IsSelected(*source) {
+			continue
+		}
+		if source.Object.Size > remaining {
+			return ErrExportBudget
+		}
+		remaining -= source.Object.Size
+	}
+	return nil
+}
+
+func exportPinned(ctx context.Context, b Backend, m Manifest, dest string) (Export, error) {
+	var out Export
 	if err := noSymlinks(dest); err != nil {
 		return out, err
 	}

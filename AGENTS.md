@@ -28,6 +28,18 @@ and update its progress ledger with implemented work, exact checks, and the next
 - Preserve identities, effective privacy exclusions, learned custom roots, original
   sources, and local research evidence. Never print credentials or private transcripts.
 
+## Delivery ownership
+
+The operator expects autonomous coordination through delivery, not a sequence of
+checkpoints handed back as next steps. A commit, audit report, failed gate or completed
+subagent is a milestone, not a stopping condition. Diagnose failures, implement fixes,
+independently review changed invariants, rerun unchanged gates and continue the agreed
+acceptance/cutover sequence within the authorized scope. Do not ask the operator to
+perform work that available tools can complete. Record actual external blockers with
+attempted checks; never substitute a green claim or bypass privacy/access boundaries.
+Do not add legacy migration/refresh compatibility as a delivery prerequisite. Measure
+capacity/retention in the appropriate validated vertical slice, not speculatively.
+
 ## Changes and validation
 
 Keep implemented behavior, target requirements, and dated evidence visibly distinct.

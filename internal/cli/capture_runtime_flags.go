@@ -27,7 +27,7 @@ func validateRuntimeFlags(cmd string, f runtimeFlags, extra int) error {
 			return errors.New("valid enrichment work cursor required")
 		}
 		fallthrough
-	case "work-status", "quarantine":
+	case "current-heads", "publication-status", "work-status", "quarantine":
 		if f.limit < 1 || f.limit > 256 {
 			return errors.New("capture status page must be 1..256")
 		}

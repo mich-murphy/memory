@@ -198,3 +198,85 @@ Native/live rollout remains separate. Opt-in dashboard/query caller integration 
 an actual writer → reader → importer → server process journey now exist; default
 collector/dashboard activation, full replacement acceptance and production cutover
 have not occurred.
+
+## Explicit endpoint publication refresh candidate
+
+`tools/analytics/publication_refresh.py` adds opt-in all-session delivery from an
+explicit private Mac + BC-01 endpoint set, without adding a second storage resolver.
+Each full bounded sweep calls Go with `--config … --after-session … --limit 256`.
+The optional endpoint `discovery` enum selects `queue` (default, existing
+`capture-v1 publication-status` locally ACKed heads) or `remote-current`
+(`capture-v1 current-heads`, bounded current-root enumeration through the authoritative
+Go R2 reader, no queue/SSH requirement). Unknown modes are rejected. Both use
+`session-publication-heads/v1`, then the existing actual reader exporter and
+`publications.import_export`. Production endpoints for both machines use a local
+binary/explicit credential-handoff wrapper and per-machine private reader config with
+`remote-current`, not interactive SSH or background 1Password approval. On Mac the
+BC config binds BC's machine ID and shared archive/backend named credential references,
+with Mac-local paths and default roots disabled. Local configured Go export remains
+the body reader; no Python R2 SDK, resolver or direct-key access is added. Optional
+SSH transport remains available for offline/manual use. No persistent lexical
+watermark or known-session list is the discovery authority. Import pins the actual
+reader coordinate, which may advance beyond the enumerated target but cannot change
+identity, regress, or conflict at equal sequence.
+
+The heads wire additively permits an optional `failures` array of
+`{identity: fullIdentity, reason: "current-unreadable"}`. Python validates the exact
+failure fields, full archive-coherent identities, strict fixed reason, a combined
+heads+failures limit of 256 and uniqueness across heads/failures/pages. A failed current
+for A does not discard healthy B or prevent subsequent pages/agents/endpoints importing.
+Scope/LIST/auth/cancellation errors still fail enumeration, never successful-empty.
+
+Consumer enumeration attempt/completion/failure and expected/unimported/failed targets
+are durable in an independent private SQLite WAL/FULL database, not mixed into or
+silently migrated into the publications projection schema. Previous success survives
+failed updates. Each endpoint and session can fail independently; repeated full sweeps
+recover after outages and rebuild empty projections. Counts and endpoint health use
+`session-publication-refresh-status/v1`; errors are fixed safe codes, not transcript or
+credential-bearing subprocess output. `--once` and bounded autonomous polling are
+available; the destination has single-refresh-writer flock ownership. No network call
+runs inside a status or projection transaction. Status schema v3 adds `head_failures`
+keyed by endpoint/full identity, with fixed reason, attempts and first/last observed
+nanoseconds, not an invented publication coordinate. Prior successful targets/projections
+are preserved. Only a returning valid head clears its identity's failure; starting or
+completing another sweep, or an empty page, cannot hide it. Full sweeps retry automatically.
+`discovery_errors` counts failures for active configured endpoints and must be zero for
+one-shot success and dashboard health. Expected targets are the union of valid target
+and active failure keys, without double-counting a previously imported A. Omitted
+endpoint failure history is retained but does not count as active discovery coverage.
+
+See the [analytics README](../tools/analytics/README.md#explicit-all-machine-publication-refresh-candidate)
+for the endpoint configuration, private remote staging/cleanup, process/byte/time
+bounds, commands and focused tests. The actual-process two-machine-queue journey
+uses the real Go CLI and reader rather than handwritten reader JSON. This is an
+implemented offline candidate; mocked command-selection/binding tests do not establish
+the remote-current SDK/live journey or production two-machine acceptance. It is not
+evidence that private endpoints were configured,
+services installed, real sources imported, or Mac/BC-01/live-R2 acceptance completed.
+
+### Concurrent local access and independent dashboard health
+
+`projection_access.py` coordinates participating publication readers and imports using
+an owned/private/no-follow `.projection.lock` shared/exclusive flock, with bounded
+10-second waits. Dashboard read connections, report generation, publication-mode
+operator SQL and refresher verification use shared access; local imports use exclusive
+access. Reader exports/network never hold this lock. Uncoordinated direct importer
+callers remain responsible for writer coordination; the projection schema is unchanged.
+
+`serve.py --source publications --refresh-status PATH` adds read-only local independent
+consumer health (`session-publication-refresh-health/v1`) to report/v2: endpoint errors,
+expected/unimported/failed targets, active discovery errors, oldest endpoint completion and staleness (default
+300 seconds; `--refresh-stale-seconds` configures it). Missing/unavailable status is
+unhealthy; omission explicitly means partial imported-subset mode, not archive coverage.
+The UI warns accordingly. GET never invokes imports, exports or network discovery.
+
+Refresh status **schema v3** binds the full expected endpoint configuration atomically
+before any enumeration or export. A configuration digest covers each endpoint's name,
+binary, config path, optional SSH host and explicit discovery mode; changed binding
+(including switching to remote-current) invalidates active completion
+before work begins. Every configured endpoint must complete under that binding for
+health to be green. Unattempted endpoints survive crashes as incomplete, and removed
+endpoints are retained explicitly as omitted, not counted as active completion. Health
+without a valid binding fails closed. Status schemas v1/v2 are explicitly rejected with
+no automatic migration/reset; use a deliberately selected new status path. This is separate from
+unchanged publication projection schema v2 and existing report wire versions.

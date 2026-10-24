@@ -27,7 +27,7 @@ import (
 const MaxObjectSize int64 = 1 << 30
 
 // ErrDestinationPaused identifies destination authentication/authorization failures.
-var ErrDestinationPaused = errors.New("publication destination paused")
+var ErrDestinationPaused = publication.ErrDestinationPaused
 
 // Backend uses only the supplied client; it never discovers credentials or config.
 type Backend struct {

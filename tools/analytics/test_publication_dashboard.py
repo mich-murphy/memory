@@ -61,6 +61,126 @@ class PublicationDashboardTests(unittest.TestCase):
         self.thread.start()
         self.addCleanup(self.stop_server)
 
+    def test_refresh_health_is_independent_readonly_and_never_green_when_missing(self):
+        import contextlib
+        import time
+        import publication_refresh
+        status_path = self.root / 'refresh.sqlite'
+        self.assertEqual(self.adapter.report()['refresh_health']['mode'], 'partial')
+        adapter = PublicationDashboard(self.database, status_path)
+        self.assertFalse(adapter.report()['refresh_health']['healthy'])
+        self.assertFalse(status_path.exists(), 'GET must not create missing status')
+        with contextlib.closing(publication_refresh.open_status(status_path)) as status:
+            now = time.time_ns()
+            status.execute('INSERT INTO endpoints VALUES (?,?,?,NULL)', ('Mac', now, now))
+            status.commit()
+            self.assertFalse(adapter.report()['refresh_health']['healthy'], 'unbound rows are not coverage')
+            publication_refresh.bind_endpoints(status, [dict(name='Mac', binary='/reader', config='/private/config')])
+            status.execute('UPDATE endpoints SET attempted_ns=?,completed_ns=?', (now,now))
+            status.commit()
+            with patch.object(publications, 'import_export', side_effect=AssertionError('GET import')), \
+                 patch.object(publications, 'export_session', side_effect=AssertionError('GET reader')):
+                self.assertTrue(adapter.report()['refresh_health']['healthy'])
+                status.execute("UPDATE endpoints SET error='process_failed'")
+                status.commit()
+                health = adapter.report()['refresh_health']
+                self.assertFalse(health['healthy'])
+                self.assertEqual(health['endpoint_errors'], 1)
+                status.execute('UPDATE endpoints SET error=NULL')
+                status.execute("INSERT INTO targets(endpoint,identity,sequence,publication_id,error) VALUES ('Mac','private',1,'p1','reader_export_failed')")
+                status.commit()
+                health = adapter.report()['refresh_health']
+                self.assertEqual((health['expected_targets'], health['unimported'], health['target_errors']), (1,1,1))
+                status.execute('DELETE FROM targets')
+                status.execute('UPDATE endpoints SET completed_ns=?', (now-301*10**9,))
+                status.commit()
+                health = adapter.report()['refresh_health']
+                self.assertFalse(health['healthy'])
+                self.assertTrue(health['stale'])
+                self.assertFalse(health['archive_coverage_claim'])
+
+    def test_old_refresh_status_versions_are_unavailable_not_migrated(self):
+        import contextlib
+        import publication_refresh as refresh
+        for version in (1, 2):
+            with self.subTest(version=version):
+                path = self.root / ('old-refresh-' + str(version) + '.sqlite')
+                with contextlib.closing(refresh.open_status(path)) as status:
+                    refresh.bind_endpoints(status, [dict(name='Mac', binary='/reader', config='/private/config')])
+                    status.execute('UPDATE binding SET version=?', (version,))
+                    status.commit()
+                health = PublicationDashboard(self.database, path).refresh_health()
+                self.assertFalse(health['healthy'])
+                self.assertEqual(health['mode'], 'unavailable')
+                import sqlite3
+                with contextlib.closing(sqlite3.connect(path)) as status:
+                    self.assertEqual(status.execute('SELECT version FROM binding').fetchall(), [(version,)])
+
+    def test_expected_endpoint_binding_precedes_all_work_initial_add_repoint_and_restart(self):
+        import contextlib
+        import threading
+        import publication_refresh as refresh
+        path = self.root / 'bound-status.sqlite'
+        adapter = PublicationDashboard(self.database, path)
+        endpoints = [dict(name=name, binary='/reader', config='/private/' + name) for name in ('Mac','BC01')]
+        for phase in ('initial', 'add', 'repoint', 'discovery'):
+            if phase == 'add':
+                endpoints.append(dict(name='third', binary='/reader', config='/private/third'))
+            if phase == 'repoint':
+                endpoints[0] = dict(endpoints[0], config='/private/repointed')
+            if phase == 'discovery':
+                endpoints[0] = dict(endpoints[0], discovery='remote-current')
+            arrived = [threading.Event(), threading.Event()]
+            release = [threading.Event(), threading.Event()]
+            failures = []
+            calls = []
+            def transport(command, root, **kwargs):
+                position = len(calls)
+                calls.append(command)
+                if position < 2:
+                    arrived[position].set()
+                    if not release[position].wait(10):
+                        raise AssertionError('test release deadline')
+                return json.dumps(dict(contract='session-publication-heads/v1', archive_id='archive',
+                    heads=[], next_cursor='', complete=True)).encode()
+            def worker():
+                try:
+                    with contextlib.closing(refresh.open_status(path)) as status:
+                        refresh.sweep(endpoints, self.database, status)
+                except BaseException as exc:
+                    failures.append(exc)
+            with patch.object(refresh, 'run', side_effect=transport):
+                thread = threading.Thread(target=worker)
+                thread.start()
+                try:
+                    for index in range(2):
+                        self.assertTrue(arrived[index].wait(10))
+                        health = adapter.report()['refresh_health']
+                        self.assertFalse(health['healthy'], phase)
+                        self.assertEqual(health['expected_endpoints'], len(endpoints))
+                        self.assertGreater(health['incomplete_endpoints'], 0)
+                        # A separate connection/restart sees the complete durable set,
+                        # even while endpoint network work is deliberately held.
+                        with contextlib.closing(refresh.open_status(path)) as restarted:
+                            self.assertEqual(restarted.execute('SELECT count(*) FROM expected_endpoints WHERE active=1').fetchone()[0], len(endpoints))
+                        release[index].set()
+                finally:
+                    for event in release:
+                        event.set()
+                    thread.join(10)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual(failures, [])
+                self.assertTrue(adapter.report()['refresh_health']['healthy'])
+        # Removal is explicit and cannot reuse omitted success as active coverage.
+        with contextlib.closing(refresh.open_status(path)) as status:
+            refresh.bind_endpoints(status, endpoints[:1])
+        health = adapter.report()['refresh_health']
+        self.assertFalse(health['healthy'])
+        self.assertEqual((health['expected_endpoints'], health['omitted_endpoints']), (1,2))
+        with contextlib.closing(refresh.open_status(path)) as status:
+            self.assertEqual(status.execute('SELECT completed_ns FROM endpoints WHERE name=?', ('Mac',)).fetchone(), (None,))
+        self.assertFalse(adapter.report()['refresh_health']['healthy'])
+
     def stop_server(self):
         self.server.shutdown()
         self.server.server_close()
@@ -166,6 +286,7 @@ class PublicationDashboardTests(unittest.TestCase):
         self.assertNotIn(b'innerHTML', script)
         self.assertIn(b'session-observatory-reviews-v1', script)
         self.assertIn(b'BigInt(value) / 1000000n', script)
+        self.assertIn(b'discovery errors:', script)
 
     def run_cli(self, name, *args, cwd=None):
         return subprocess.run([sys.executable, str(Path(__file__).with_name(name)), *args], cwd=cwd,

@@ -18,7 +18,7 @@ import (
 
 type runtimeFlags struct {
 	config, agent, session, source, path, role, action, platform, executable string
-	nonce, workID, workAfter                                                 string
+	nonce, workID, workAfter, sessionAfter                                   string
 	apply, acknowledge                                                       bool
 	id, after                                                                int64
 	limit                                                                    int
@@ -26,7 +26,7 @@ type runtimeFlags struct {
 
 func runtimeCommand(s string) bool {
 	switch s {
-	case "run", "hint", "hook", "hooks", "work-status", "quarantine", "replay", "resume", "service", "policy-pauses", "enrichment-status", "enrichment-replay", "optional-status", "optional-replay", "optional-quota-replay":
+	case "current-heads", "publication-status", "run", "hint", "hook", "hooks", "work-status", "quarantine", "replay", "resume", "service", "policy-pauses", "enrichment-status", "enrichment-replay", "optional-status", "optional-replay", "optional-quota-replay":
 		return true
 	}
 	return false
@@ -46,6 +46,9 @@ func parseRuntimeFlags(cmd string, args []string, o IO) (runtimeFlags, error) {
 	case "hook":
 		fs.StringVar(&f.agent, "agent", "", "claude, codex or pi")
 		fs.StringVar(&f.path, "path", "", "source path; otherwise bounded native hook input on stdin")
+	case "publication-status", "current-heads":
+		fs.StringVar(&f.sessionAfter, "after-session", "", "lexical session cursor; restart with empty cursor for each full sweep")
+		fs.IntVar(&f.limit, "limit", 256, "page size, 1..256")
 	case "work-status", "quarantine":
 		fs.Int64Var(&f.after, "after", 0, "pagination coordinate")
 		fs.IntVar(&f.limit, "limit", 64, "page size, 1..256")
@@ -100,6 +103,10 @@ func runCaptureRuntime(ctx context.Context, cmd string, args []string, o IO) (co
 		return runNativeCaptureHook(ctx, c, f, os.Stdin)
 	case "policy-pauses":
 		return runCapturePolicyPauses(ctx, c, f, o)
+	case "current-heads":
+		return readCaptureCurrentHeads(ctx, c, f, o)
+	case "publication-status":
+		return readCapturePublicationHeads(ctx, c, f, o)
 	case "enrichment-status":
 		return readCaptureEnrichment(ctx, c, f, o)
 	case "optional-status":

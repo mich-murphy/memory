@@ -19,9 +19,10 @@ const (
 
 var (
 	// ErrDurability cannot be reconciled by visible read-back. Retry must sync again.
-	ErrDurability = errors.New("publication durability failure")
-	ErrConflict   = errors.New("publication conflict")
-	ErrNotFound   = errors.New("publication object not found")
+	ErrDurability        = errors.New("publication durability failure")
+	ErrDestinationPaused = errors.New("publication destination paused")
+	ErrConflict          = errors.New("publication conflict")
+	ErrNotFound          = errors.New("publication object not found")
 )
 
 type Backend interface {

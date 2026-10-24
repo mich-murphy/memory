@@ -1,13 +1,17 @@
 # Implementation handoff: dependable session capture
 
-**Updated: 2026-10-24 (AEDT). Current state:** the opt-in offline replacement candidate
-is implemented and independently reviewed within recorded scopes. Full unchanged
-development gates passed in the dated evidence below, but a fresh checkpoint run has
-one failing process journey; see the checkpoint ledger before claiming current green
-status. It is **not release-accepted, deployed or cut over**.
-Default installed collector and analytics paths remain legacy. No real-source inventory,
-production ingestion/R2 operation, install, archive reset or original-source deletion
-was performed by this implementation work.
+**Updated: 2026-10-24 (AEDT). Current state:** autonomous delivery continues after
+checkpoint `b68a412`. Its process-journey synchronization failure is fixed and repeated
+100 times successfully; actual scratch-native and isolated real-R2 journeys also pass.
+The SSH-free authoritative reader and durable per-session discovery-failure isolation
+are implemented and independently reviewed. Final unchanged serial gates all pass:
+`make check` 803s, `make test` 451s, nine 30-second fuzz targets 283s, 95 analytics
+tests 29.551s, 86.9% merged coverage and CRAP thresholds. The
+[delivery ledger](session-capture-delivery.md) records exact scopes and logs.
+It is **not release-accepted, deployed or cut over**. Installed defaults remain legacy.
+Both machines' identity/policy/root and sizing inventories are recorded privately;
+no production-source ingestion, installation, archive reset or original-source deletion
+has occurred. Synthetic R2 acceptance is not production binding/cutover evidence.
 
 This document is current continuation guidance. Requirements remain the
 [session-capture contract](session-capture-contract.md) and
@@ -200,13 +204,33 @@ operating behavior; then measure representative amplification/freshness and impl
 only justified capacity/retention changes with their own safety tests. Do not introduce
 speculative chunk/history complexity or automatic deletion to make this checkpoint.
 
+### Delivery ownership correction — 2026-10-24 AEDT
+
+Checkpoint `b68a412` was incorrectly treated as a stopping point after a failed gate.
+The operator clarified that the coordinator must continue through delivery: diagnose,
+fix, independently review, run unchanged gates and proceed with the agreed acceptance
+sequence. A failure or checkpoint is not a request for human intervention. This rule
+is now recorded in `AGENTS.md`. Work continues; neither the fresh failure nor release
+acceptance is claimed resolved by this process correction. The subsequent
+[delivery ledger](session-capture-delivery.md) records the diagnosed synchronization
+fix, repeated green checks, new actual native/R2 acceptance, two-machine inventory and
+consumer-discovery integration. Use its latest results rather than treating the
+checkpoint failure above as an unresolved diagnosis.
+
 ## 4. Current next action
 
-First diagnose the fresh checkpoint acceptance failure recorded above and rerun the
-unchanged gate. Then prepare and execute **explicitly scoped operating acceptance**,
-not another architecture restart: actual Claude/Codex/Pi fields/trust/reload/disabled-hook behavior; isolated real
-conditional R2 failure/readback; representative resource and freshness loads; preserved
-identities/exclusions/learned-root inventory on both machines; installed paths/restart.
+Current-root A/B isolation review and final serial development gates are complete.
+Bounded real-R2 current-root acceptance also passed (70/160 backend operations,
+5.48s journey); it still uses the isolated test binding, not the production binding.
+Create the reviewed source checkpoint, then continue **explicitly scoped operating
+acceptance**, not another architecture restart: installed native paths,
+representative resource/freshness loads, both-machine source coverage, policy/identity
+preservation, supervision/restart and exact authoritative restores through analytics.
+Scratch-native and isolated R2 results above are already implemented evidence, not
+outstanding implementation requests. The approval-gated BC SSH agent later refused
+signatures; an existing authenticated Azure management channel was verified against the
+same VM and identity without bypassing approval or copying keys. Autonomous consumer
+refresh must use local Go R2 current-root discovery, not interactive SSH approval.
 Do not invent a human inventory prerequisite for additional offline tests, or treat
 absent external evidence as proof that implemented offline code is still missing.
 
@@ -225,10 +249,10 @@ completeness or permission to delete originals, research or unrelated objects.
 
 Use the unchanged [quality-gate commands](quality-gates.md), run focused changed-behavior
 tests, then final full gates serially. No live opt-ins, dependency install or host change
-is implicit. For example, inside pinned Nix with both live variables unset:
+is implicit. For example, inside pinned Nix with all live-test opt-ins unset:
 
 ```sh
-unset AGENT_SESSIONS_TEST_R2 AGENT_SESSIONS_LIVE
+unset AGENT_SESSIONS_TEST_R2 AGENT_SESSIONS_LIVE AGENT_SESSIONS_CAPTURE_NATIVE CANDIDATE_R2_LIVE_ACCEPTANCE
 make test
 # Preserve the preexisting cover.out even on failure; retain new coverage separately.
 gate_dir=$(mktemp -d /tmp/memory-replacement-check.XXXXXX)

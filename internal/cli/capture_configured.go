@@ -39,6 +39,6 @@ func runConfiguredCapture(ctx context.Context, cmd string, flags captureFlags) (
 	if cmd == "init" {
 		return exitOK, publication.WriteArchive(ctx, backend, publication.Archive{Contract: publication.Contract, ArchiveID: cfg.ArchiveID})
 	}
-	_, err = publication.ExportSession(ctx, backend, flags.identity(), flags.output)
+	_, err = publication.ExportSessionBounded(ctx, backend, flags.identity(), flags.output, flags.maxBytes)
 	return exitOK, err
 }

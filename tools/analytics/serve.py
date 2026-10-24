@@ -55,7 +55,7 @@ def filters(query, trace=False):
 class Dashboard(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, database, report=None, source='legacy'):
+    def __init__(self, address, database, report=None, source='legacy', refresh_status=None, refresh_stale_seconds=300):
         self.database = str(database)
         self.report = Path(report) if report is not None else None
         self.publications = None
@@ -64,7 +64,7 @@ class Dashboard(ThreadingHTTPServer):
                 raise ValueError('publications does not accept a legacy report')
             from publication_dashboard import PublicationDashboard
             # Fail closed on unsupported projections before binding even a loopback port.
-            self.publications = PublicationDashboard(database)
+            self.publications = PublicationDashboard(database, refresh_status, refresh_stale_seconds)
         elif source != 'legacy':
             raise ValueError('unknown source')
         super().__init__(address, Handler)
@@ -192,8 +192,14 @@ def main():
     parser.add_argument('--source', choices=('legacy', 'publications'), default='legacy')
     parser.add_argument('--database', type=Path)
     parser.add_argument('--report', type=Path)
+    parser.add_argument('--refresh-status', type=Path)
+    parser.add_argument('--refresh-stale-seconds', type=int, default=300)
     parser.add_argument('--port', type=int, default=8765)
     args = parser.parse_args()
+    if not 1 <= args.refresh_stale_seconds <= 86400:
+        parser.error('invalid refresh staleness threshold')
+    if args.source != 'publications' and args.refresh_status is not None:
+        parser.error('--refresh-status requires --source publications')
     if args.source == 'publications' and args.report is not None:
         parser.error('--report is legacy-only; publications serves the read-only projection')
     args.database = args.database or Path('.analytics/publications.duckdb' if args.source == 'publications' else '.analytics/events.duckdb')
@@ -204,11 +210,11 @@ def main():
     if args.source == 'publications':
         try:
             from publication_dashboard import PublicationDashboard
-            PublicationDashboard(args.database)
+            PublicationDashboard(args.database, args.refresh_status, args.refresh_stale_seconds)
         except (ValueError, OSError, duckdb.Error):
             parser.error('unsupported or unavailable publication projection')
     try:
-        with Dashboard(('127.0.0.1', args.port), args.database, args.report, source=args.source) as server:
+        with Dashboard(('127.0.0.1', args.port), args.database, args.report, source=args.source, refresh_status=args.refresh_status, refresh_stale_seconds=args.refresh_stale_seconds) as server:
             print(f'Private session observatory: http://127.0.0.1:{server.server_port} (Ctrl-C to stop)', flush=True)
             server.serve_forever()
     except KeyboardInterrupt:

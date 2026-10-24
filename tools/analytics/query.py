@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run local read-only DuckDB SQL; no R2 access or credentials needed."""
 import argparse
+import projection_access
 import os
 from pathlib import Path
 
@@ -23,7 +24,8 @@ def main():
             PublicationDashboard(database)
         except (ValueError, OSError, duckdb.Error):
             parser.error('unsupported or unavailable publication projection')
-    with duckdb.connect(database, read_only=True) as db:
+    connection = projection_access.connect(database) if args.source == 'publications' else duckdb.connect(database, read_only=True)
+    with connection as db:
         db.execute("SET TimeZone = 'UTC'")
         sql = args.sql or Path(__file__).with_name('report.sql').read_text()
         for statement in db.extract_statements(sql):

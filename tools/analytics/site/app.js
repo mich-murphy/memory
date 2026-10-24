@@ -101,6 +101,9 @@ function publicationView(root) {
     return;
   }
   root.append(heading('Publication coverage & freshness', 'Coverage is producer-declared, not a completeness guarantee'));
+  const health = r.refresh_health;
+  if (!health?.healthy) root.append(node('p', 'warning', `Publication refresh incomplete / unknown (${health?.mode || 'partial'}). Imported sessions are a subset, not archive coverage. Endpoint errors: ${text(health?.endpoint_errors)}; discovery errors: ${text(health?.discovery_errors)}; unimported: ${text(health?.unimported)}; target errors: ${text(health?.target_errors)}; stale: ${text(health?.stale)}.`));
+  root.append(details('Independent publication refresh health', health || {mode: 'partial', healthy: false}, true));
   root.append(details('Selected / withheld source counts', r.source_counts, true));
   const freshness = node('dl', 'kv');
   ['captured_at_ns', 'published_at_ns', 'imported_at_ns'].forEach(k => kv(freshness, k, publicationTime(r.freshness?.[k])));

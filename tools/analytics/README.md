@@ -357,3 +357,148 @@ loopback/API boundaries, malformed-source access, and evidence-centred paginatio
 The historical legacy dashboard was also checked in headless Chromium against the actual local report,
 including filters, deep links, tool calls/results, full/middle/raw views, local feedback,
 mobile layout and absence of external requests.
+
+## Explicit all-machine publication refresh candidate
+
+`publication_refresh.py` is an opt-in autonomous consumer, not a Python storage
+resolver or a change to legacy analytics defaults. It sweeps session heads through
+each explicitly configured Go reader and imports actual reader exports. Endpoint
+`discovery` is optional: `queue` (default) calls `capture-v1 publication-status` for
+locally ACKed heads, preserving the local/offline test path; `remote-current` calls
+`capture-v1 current-heads` for bounded current-root enumeration through the authoritative
+Go R2 reader only, without a local queue or SSH dependency. Both return the same
+`session-publication-heads/v1` wire. Unknown modes are rejected. A private endpoint file must explicitly list both Mac and BC-01; discovery
+is not inferred from whichever machine happens to run analytics:
+
+```json
+{"contract":"session-refresh-endpoints/v1","endpoints":[
+  {"name":"Mac","binary":"/absolute/reader-wrapper","config":"/private/mac-reader.json","discovery":"remote-current"},
+  {"name":"BC01","binary":"/absolute/reader-wrapper","config":"/private/bc01-reader.json","discovery":"remote-current"}
+]}
+```
+
+Keep this file mode 0600. Config paths reference Go runtime configurations; neither
+endpoint JSON nor command arguments contain credentials. Only the actual Go reader
+receives its explicit credential references and inherited process environment. For
+production, both machine endpoints use a **local** binary (or explicit credential-handoff
+wrapper), per-machine private config and `remote-current`. The BC reader config on
+Mac binds BC's machine ID and shared archive/backend named credential references,
+but uses Mac-local paths with default roots disabled. Exports still use the existing
+local configured Go exporter via that wrapper; Python has no R2 SDK, resolver or direct
+object-key access. The wrapper must support both `current-heads` and `export` without
+interactive SSH/signing-agent or background 1Password approval dependencies.
+
+Optional `ssh_host` remains for offline/manual use, independent of discovery mode;
+it is not the production autonomous consumer path. Operating acceptance found expired
+BC-01 SSH signing-agent approval refused access even while existing authenticated
+Azure management access still worked; interactive SSH is not an autonomous dependency.
+SSH hosts are constrained host/alias names (optional user), not arbitrary SSH options.
+Remote fixed commands and identity arguments are individually shell-quoted. Exports
+use a newly owned remote temporary directory, bounded Go reader export, SCP to a
+private local temporary directory, and cleanup of only that remote directory.
+SSH authentication/host-key provisioning is a separate operator action, never an
+implicit install or trust change by this tool.
+
+```sh
+python tools/analytics/publication_refresh.py \
+  --endpoints /private/analytics-endpoints.json \
+  --database /private/publications.duckdb --status /private/refresh.sqlite --once
+# Omit --once for autonomous bounded polling (default interval: 60 seconds).
+```
+
+One refresh writer owns the destination's `.refresh.lock` via flock. Coordinate other
+projection writers separately. Each sweep starts enumeration at the beginning; a
+persistent lexical watermark would miss sessions created earlier in sort order.
+Enumeration is paged at 256 heads, capped at 1024 pages per endpoint per sweep.
+Process timeout defaults to 300 seconds; `--timeout` and `--max-bytes` configure
+bounded individual exports (default 256 MiB, maximum 1 GiB). Local output bytes and
+entry counts are monitored during subprocesses, with process-group cancellation;
+this polling bound is not a filesystem quota or a hard instantaneous disk ceiling.
+Remote reader byte limits bound staging before SCP. At most one export is staged
+at a time. Unsupported contracts, partial enumeration, reader failures and projection
+errors remain failures; B still proceeds when A fails. Unchanged targets skip the reader only when the actual projection is at the same
+or a newer valid coordinate and every selected owned body passes private regular-file,
+no-symlink, size and streaming SHA-256 checks. Missing/recreated projections or missing/
+changed bodies force reader repair. Unchanged validation does not advance freshness.
+A newer valid reader coordinate is accepted if publication advances after enumeration;
+identity mismatches, regressions and equal-sequence conflicts are rejected.
+
+The independent SQLite WAL/FULL status store retains endpoint attempt/completion/error
+and expected target/imported actual coordinates even when the projection is absent or
+broken. Output is a versioned `session-publication-refresh-status/v1` count/endpoint-
+health report, without session IDs, transcript bodies or subprocess diagnostics.
+A failed update preserves previous successful imported coordinates. Empty sweeps do
+not erase prior expected targets. `--once` returns nonzero for endpoint/target errors
+or unimported targets or active discovery errors; autonomous mode keeps retrying each full sweep. This candidate
+does not install a scheduler or establish live Mac/BC-01 acceptance.
+
+The heads wire optionally includes `failures`, an array of
+`{"identity":{"archive_id":"…","machine_id":"…","agent":"claude","session_id":"…"},"reason":"current-unreadable"}`.
+Heads plus failures are capped at 256 per page; identities must be complete, archive-
+coherent and unique across heads/failures and all pages. Only the fixed sanitized
+`current-unreadable` reason is accepted, never arbitrary reader exception text.
+An unreadable A is durably recorded while healthy B on the same page, later pages,
+other agents and other endpoints continues importing. Whole-page scope/LIST/auth or
+cancellation failures remain enumeration errors, not empty success.
+
+Status retains each failed identity separately in `head_failures`, with attempts and
+first/last observation times, not fake publication sequence 0. Prior targets and owned
+projections survive. Only a returning valid head for that identity clears its discovery
+failure; a new attempt, completed timestamp or empty sweep cannot clear it. Full sweeps
+retry automatically. `discovery_errors` counts active configured endpoint failures and
+must be zero for dashboard health/one-shot success. `expected_targets` unions target
+and active failure coordinates, counting A once even if it has a prior imported head.
+Omitted endpoint failure history remains durable but is not active discovery coverage.
+Offline tests exercise real importer/event-index/report and body ownership with mocked
+reader transport/export; they do not prove the actual SDK/live or installed journey.
+
+Focused checks (pinned Nix):
+
+```sh
+nix develop --command .analytics-venv/bin/python -m unittest discover \
+  -s tools/analytics -p test_publication_refresh.py -v
+# Build actual candidate and supply CAPTURE_V1_BINARY for the process journey:
+CAPTURE_V1_BINARY=/absolute/candidate nix develop --command \
+  .analytics-venv/bin/python -m unittest discover -s tools/analytics \
+  -p test_publication_refresh_journey.py -v
+```
+
+### Concurrent publication dashboard and consumer health
+
+Publication dashboard/query readers and refresher local imports coordinate through a
+private no-follow `.projection.lock` sidecar: shared for the entire read connection,
+exclusive for local import, with bounded 10-second waits and safe failure codes.
+No export/network call holds this lock. Direct importer callers must independently
+coordinate; this does not change DuckDB's cross-process locking behavior.
+
+Run the dashboard with explicit independent health input:
+
+```sh
+python tools/analytics/serve.py --source publications \
+  --database /private/publications.duckdb --refresh-status /private/refresh.sqlite \
+  --refresh-stale-seconds 300
+```
+
+GET requests read only local projection/status files, never import or contact readers.
+The report retains per-session v2 details and adds `refresh_health` with endpoint errors,
+expected/unimported/failed target counts, active discovery errors, oldest endpoint
+completion and staleness.
+Missing/unavailable status is not green. Without `--refresh-status`, the dashboard is
+explicitly partial: its imported subset is not an archive-coverage claim. Even healthy
+consumer delivery status is not proof of complete source inventory. The UI warns on
+incomplete, unavailable, stale or partial refresh health.
+
+The refresh status database now requires **schema version 3**. Versions 1 and 2 are
+explicitly rejected, not silently migrated, cleared or treated as healthy; choose a deliberate
+new status destination for the candidate (the publications database is unchanged).
+Before any enumeration/export, one SQLite transaction durably binds the **entire**
+expected endpoint set and fingerprints each endpoint's name/binary/config/SSH host
+and explicit discovery mode (omission retains default queue behavior).
+New or changed configuration invalidates every active endpoint completion until that
+configured sweep has completed; a crash leaves unattempted endpoints incomplete.
+The dashboard validates this binding and cannot treat a partially created endpoint
+list or unbound old success rows as healthy. Removed endpoints remain explicit as
+`omitted_endpoints`; they cannot supply completion for the currently configured scope.
+Healthy means delivery for that configured scope only, never all-machine inventory or
+coverage of intentionally omitted endpoints. Endpoint fingerprints/paths are not
+printed in reports.

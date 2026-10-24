@@ -250,7 +250,7 @@ func parseCurrent(data []byte, i Identity) (Current, error) {
 	if c.Contract != Contract {
 		return c, errors.New("unsupported current contract")
 	}
-	if c.Identity != i || c.PublicationID == "" || !validOrder(c.Sequence) || !validDigest(c.ManifestSHA256) {
+	if !validIdentity(i) || c.Identity != i || c.PublicationID == "" || !validStrings(c.PublicationID) || !validOrder(c.Sequence) || !validDigest(c.ManifestSHA256) {
 		return c, errors.New("invalid current identity")
 	}
 	if c.ManifestKey != i.BaseKey()+"/manifests/"+c.ManifestSHA256+".json" {
