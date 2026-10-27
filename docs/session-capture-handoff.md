@@ -231,7 +231,19 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   withheld/`unavailable` raw view while the repair call blocks, with
   `OperationTimeout` 10s and one delivery worker) and fixes the cause.
 
+- **W11 `66ee491` (accepted, parent-reviewed diff).** Product race: `beginOptionalDelivery`
+  inserted the `optional_repairs` row as `pending` and only then set `delivering`. The repair
+  lane could claim it in between with an unconditional `SET state='working'`, which duplicated
+  the upload and added a >=1s `retryDelay` (6/40 helper runs). Fix: delivery inserts
+  `delivering` in one statement, and the repair claim is a guarded
+  `WHERE state IN ('pending','retry')` compare-and-set. No deadline, fixture or W9 guard
+  changed. Evidence (load 7–9): `^TestCaptureIsolationFixture` race ×10 pass, `cli` race
+  shuffle ×3 ok (≈31s), `sessioncapture` ok 82s, vet, lint 0, capture-acceptance ok.
+  **Gaps:** no deterministic regression test for the SELECT→UPDATE race window, and W10's
+  15s kill is not fully explained beyond this 1s race. The next aggregate `make test` is
+  the check.
+
 ### Next action
 
-Parent: W11 diagnoses and fixes the isolation-fixture crash-stage latency. Then rerun
-`make test`, then do the remaining Step 2 operator-CLI cleanup.
+Parent: Step 2 operator-CLI cleanup (diagnostic/fixture subcommands) via W12, then one
+aggregate gate run (`make check`, `make test`, fuzz, analytics) on the resulting commit.
