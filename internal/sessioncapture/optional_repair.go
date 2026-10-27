@@ -79,7 +79,7 @@ func genuineOptionalExpiry(ctx context.Context, cause error) bool {
 	var dependency *publication.SourceDependencyError
 	return errors.As(cause, &dependency) && dependency.Optional &&
 		errors.Is(ctx.Err(), context.DeadlineExceeded) &&
-		leavesAre(cause, func(e error) bool { return e == context.DeadlineExceeded })
+		leavesAre(cause, func(e error) bool { return errors.Is(e, context.DeadlineExceeded) })
 }
 
 func (q *Queue) withholdUnavailable(ctx context.Context, i publication.Identity, m publication.Manifest, es []evidence, dependency *publication.SourceDependencyError) (bool, error) {
