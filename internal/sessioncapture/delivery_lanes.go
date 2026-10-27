@@ -73,10 +73,7 @@ func (q *Queue) beginOptionalDelivery(ctx context.Context, m publication.Manifes
 		if blocked {
 			continue
 		}
-		if err := q.persistOptionalRepair(ctx, m.Identity, s, es[n], "delivery"); err != nil {
-			return noop, err
-		}
-		if _, err := q.db.ExecContext(ctx, `UPDATE optional_repairs SET state='delivering' WHERE id=?`, repairID(m.Identity, s)); err != nil {
+		if err := q.persistOptionalRepairState(ctx, m.Identity, s, es[n], "delivery", "delivering"); err != nil {
 			return noop, err
 		}
 	}

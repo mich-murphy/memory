@@ -117,6 +117,13 @@ func (q *Queue) withholdUnavailable(ctx context.Context, i publication.Identity,
 }
 
 func (q *Queue) persistOptionalRepair(ctx context.Context, i publication.Identity, s publication.Source, e evidence, stage string) error {
+	return q.persistOptionalRepairState(ctx, i, s, e, stage, "pending")
+}
+
+// persistOptionalRepairState writes the row in its final state in one statement.
+// Delivery inserts "delivering" directly so the repair lane can never claim a
+// transient "pending" row for an upload delivery is already performing.
+func (q *Queue) persistOptionalRepairState(ctx context.Context, i publication.Identity, s publication.Source, e evidence, stage, state string) error {
 	source, err := json.Marshal(s)
 	if err != nil {
 		return err
@@ -130,7 +137,7 @@ func (q *Queue) persistOptionalRepair(ctx context.Context, i publication.Identit
 		return err
 	}
 	id := repairID(i, s)
-	_, err = q.db.ExecContext(ctx, `INSERT INTO optional_repairs(id,session,source_hash,epoch,commitment,source,evidence,identity,stage,contract,software) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state='pending',stage=excluded.stage,last_error='unavailable',next_retry=0`, id, i.BaseKey(), publication.SourceKeyHash(s), s.EpochID, publication.ObjectCommitment(s.Object), source, ev, identity, stage, publication.Contract, q.runtimeSoftwareVersion())
+	_, err = q.db.ExecContext(ctx, `INSERT INTO optional_repairs(id,session,source_hash,epoch,commitment,source,evidence,identity,stage,contract,software,state) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,stage=excluded.stage,last_error='unavailable',next_retry=0`, id, i.BaseKey(), publication.SourceKeyHash(s), s.EpochID, publication.ObjectCommitment(s.Object), source, ev, identity, stage, publication.Contract, q.runtimeSoftwareVersion(), state)
 	return err
 }
 
@@ -157,8 +164,17 @@ func (q *Queue) optionalRepairNext(ctx context.Context, b publication.Backend, o
 		return true, ErrIntegrity
 	}
 	if state != "verified_attachment_pending" {
-		if _, err := q.db.ExecContext(ctx, `UPDATE optional_repairs SET state='working',attempts=attempts+1 WHERE id=?`, id); err != nil {
-			return true, err
+		claim, claimErr := q.db.ExecContext(ctx, `UPDATE optional_repairs SET state='working',attempts=attempts+1 WHERE id=? AND state IN ('pending','retry')`, id)
+		if claimErr != nil {
+			return true, claimErr
+		}
+		// Delivery (or another claim) took the row after the select: not ours.
+		claimed, claimErr := claim.RowsAffected()
+		if claimErr != nil {
+			return true, claimErr
+		}
+		if claimed == 0 {
+			return false, nil
 		}
 		// No-op once a terminal state was saved; frees 'working' after a failed save.
 		defer q.releaseOptionalRepair(ctx, id)
