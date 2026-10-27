@@ -2,6 +2,7 @@ package sessioncapture
 
 import (
 	"database/sql"
+	"errors"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -43,4 +44,16 @@ func TestOpenWaitsForConcurrentReaderLock(t *testing.T) {
 		t.Fatalf("Open after %v: %v", time.Since(start), err)
 	}
 	_ = q.Close()
+}
+
+// A second writer against a held flock reports the typed single-writer conflict.
+func TestOpenReportsQueueOpenSentinel(t *testing.T) {
+	dir, o, _ := setup(t)
+	open(t, dir, o) // Cleanup closes the first writer.
+	if second, err := Open(t.Context(), dir, o); !errors.Is(err, ErrQueueOpen) {
+		if second != nil {
+			_ = second.Close()
+		}
+		t.Fatalf("second Open: %v", err)
+	}
 }

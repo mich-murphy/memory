@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/mich-murphy/memory/internal/capturedaemon"
@@ -147,7 +146,7 @@ func runCaptureWritable(ctx context.Context, cmd string, c capturedaemon.Config,
 		if cmd == "run" && sessioncapture.IsCallerCancellation(ctx, err) {
 			return exitOK, nil
 		}
-		if strings.Contains(err.Error(), "queue already open") {
+		if errors.Is(err, sessioncapture.ErrQueueOpen) {
 			return exitFailed, fmt.Errorf("capture coordinator unavailable; replay/resume require stopped coordinator: %w", err)
 		}
 		return exitFailed, fmt.Errorf("capture coordinator unavailable: %w", err)

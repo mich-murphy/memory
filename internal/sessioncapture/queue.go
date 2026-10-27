@@ -52,6 +52,8 @@ var (
 	ErrIntegrity       = errors.New("sessioncapture: payload integrity failure")
 	ErrSessionExcluded = errors.New("sessioncapture: session excluded")
 	ErrPolicy          = errors.New("sessioncapture: policy denied")
+	// ErrQueueOpen reports that another process holds the single-writer queue lock.
+	ErrQueueOpen = errors.New("sessioncapture: queue already open")
 )
 
 type Options struct {
@@ -136,7 +138,7 @@ func Open(ctx context.Context, dir string, opts Options) (*Queue, error) {
 		return nil, err
 	}
 	if !ok {
-		return nil, errors.New("sessioncapture: queue already open")
+		return nil, ErrQueueOpen
 	}
 	dbPath := filepath.Join(dir, "queue.sqlite")
 	if st, e := os.Lstat(dbPath); e == nil && (!st.Mode().IsRegular() || st.Mode().Perm()&0o077 != 0) {
