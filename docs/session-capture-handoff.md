@@ -430,6 +430,22 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   checking its state, so replaying quarantine 5 (whose job has since been `superseded`) would
   revive a stale sequence. W20 fixes both.
 
+- **W20 `ae8e20d`, accepted (shutdown cancellation and replay guard).** The new
+  `shutdownCancellation(opCtx, err)` is true only when the op context ended by cancellation
+  of its parent (not its own deadline) and every leaf is `context.Canceled`. Delivery
+  restores the attempt count read before the attempt (`state='retry'`, `next_retry=0`,
+  diagnostic `last_error='shutdown'`, guarded against `published`/`superseded`), writes no
+  quarantine row and still returns the cancellation so Run stops. Capture skips the failure
+  bookkeeping; the deferred `releaseSourceClaim` (`WithoutCancel` + bounded release timeout)
+  returns the claim. Op-deadline expiry still spends an attempt as `timeout`. Mixed or fatal
+  causes still take the old path and stop Run. `Replay` revives work only while it is still
+  `quarantined`; otherwise it deactivates the row (kept and inspectable) and returns
+  `ErrReplayResolved` (contract §3: "neither success nor silent disposal"). Tests in
+  `runtime_cancel_test.go` (passed with `-race -count=20`); existing tests unmodified
+  (`TestRuntimeFatalOptionalBoundaries/*/pure` motivated the non-empty `last_error`). Worker
+  gates: lint 0, `-race` on sessioncapture/cli, capture-acceptance. Parent review confirmed
+  the claim release and the published/superseded guard. Not yet installed.
+
 ### Next action
 
 W19 (scaling of per-publication object handling) and W20 (shutdown cancellation and replay of
