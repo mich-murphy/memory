@@ -278,8 +278,26 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   blocked on it. W13 fixes it. The per-capture `usage()` scan stays (a fail-closed integrity
   sweep) and is re-measured after the churn fix.
 
+- **W13 `4a1cfec` (accepted, parent-reviewed diff).** Discovery attaches a stat
+  fingerprint (dev, ino, size, mtime_ns, ctime_ns) only to untransformed sources (from
+  `classifyInfo`/`classifyExternal`). `Request.Fingerprint` is `json:"-"`, so no persisted
+  or publication bytes change. The new `runtime_sources.fingerprint` column (additive)
+  stores a digest of the fingerprint plus the request with `ObservedAtNS` zeroed. The
+  `Hint` UPSERT is a no-op only when the row is present and the non-empty fingerprint
+  matches. Transformed, SQLite, hook, inbox, native, manual and enrichment hints always
+  bump. `RowsAffected==0` + no row still returns `ErrQuota` (cap preserved). Policy:
+  discovery's `allowed()` still runs on every source every sweep, and delivery rechecks
+  separately, so skipping only drops the redundant re-read/hash. Per-source `observed_at`
+  now means "last observed change"; sweep freshness stays in the discovery tables.
+  Synthetic 2,000-file measurement: per-sweep version bumps 2000 → 0 and row writes
+  2000 → 0; discover 267–300ms → 139ms. Evidence: vet clean, lint 0, race shuffle
+  `sessioncapture` 92.8s / `capturesource` / `capturedaemon` / `cli` 39.3s ok, and
+  capture-acceptance ok. **Gaps:** no end-to-end SQLite-WAL source test (covered by
+  "transform ⇒ no fingerprint"). Coarse-timestamp filesystems could miss a change. Each
+  source re-captures once after upgrade.
+
 ### Next action
 
-W13 fixes discovery re-hint churn (an unchanged observation must not bump the source
-version). Then: build from `main`, back up `queue.sqlite`, swap the installed binary, and
+W13 `c6cd49a7-3a50-4da` dispatched (worktree `step4-churn` at `cdb96e6`) to fix discovery
+re-hint churn (an unchanged observation must not bump the source version). Then: build from `main`, back up `queue.sqlite`, swap the installed binary, and
 measure CPU, `step_errors`, backlog drain and freshness.
