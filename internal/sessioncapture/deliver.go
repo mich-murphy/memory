@@ -300,7 +300,7 @@ func (q *Queue) uploadDependencies(ctx context.Context, b publication.Backend, m
 		if !publication.IsSelected(*s) {
 			continue
 		}
-		if err := q.uploadOne(ctx, b, m, es, s, trusted[s.Object]); err != nil {
+		if err := q.uploadOne(ctx, b, es, j, s, trusted[s.Object]); err != nil {
 			return err
 		}
 	}
@@ -310,24 +310,32 @@ func (q *Queue) uploadDependencies(ctx context.Context, b publication.Backend, m
 	return q.recheck(ctx, selectedEvidence(m, es))
 }
 
-// uploadOne rechecks policy immediately before one object's bytes are sent. A
-// trusted object (already in the remote current's verified manifest) transfers
-// nothing, so it needs no per-object recheck: verifyDependencies ran before the
-// first upload, and the post-loop recheck, manifest PutFile and root
-// CompareAndSwap recheck the full selected evidence before anything becomes
-// current (contract section 3: recheck before delivering pending work). The
-// fault points still fire for both kinds.
-func (q *Queue) uploadOne(ctx context.Context, b publication.Backend, m publication.Manifest, es []evidence, s *publication.Source, trusted bool) error {
+// uploadOne sends one object. A trusted object (already in the remote current's
+// verified manifest) transfers nothing and gets no per-object recheck. For an
+// uploaded object, immediately before PutFile only that object's own evidence
+// (scopes + full check) is rechecked. Contract basis: section 3 "recheck
+// exclusions before delivering pending work" and the enrichment contract's
+// "every selected original identity, including immediately before CAS"; neither
+// needs a whole-session pass per object, which made a D-object publication
+// O(D*K). Full-session passes stay in verifyDependencies (before the first
+// upload), after the loop, in the manifest PutFile and at the root
+// CompareAndSwap. Accepted residual: an exclusion landing mid-batch that matches
+// only a different source stops further uploads at the post-loop pass and still
+// blocks publication. Fault points fire for both kinds. A missing evidence slot
+// fails closed with ErrIntegrity, as verifyDependencies does.
+func (q *Queue) uploadOne(ctx context.Context, b publication.Backend, es []evidence, j int, s *publication.Source, trusted bool) error {
 	if e := q.fault("upload-before"); e != nil {
 		return e
 	}
 	if !trusted {
-		// One full recheck after the fault point and immediately before PutFile,
-		// so a policy change injected at the boundary is observed.
-		if err := q.recheckScopes(ctx, es); err != nil {
+		if j >= len(es) {
+			return fmt.Errorf("%w: evidence missing", ErrIntegrity)
+		}
+		own := es[j : j+1]
+		if err := q.recheckScopes(ctx, own); err != nil {
 			return err
 		}
-		if e := q.recheck(ctx, selectedEvidence(m, es)); e != nil {
+		if e := q.recheck(ctx, own); e != nil {
 			return e
 		}
 		if e := b.PutFile(ctx, s.Object.Key, q.payload(s.Object)); e != nil {
