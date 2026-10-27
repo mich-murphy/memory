@@ -24,9 +24,10 @@ func TestCaptureIsolationFixtureProcess(t *testing.T) {
 	}
 	root := filepath.Join(t.TempDir(), "owned")
 	for _, stage := range []string{"crash", "repair", "revoke"} {
+		binary := isolationCoverageBinary(t, stage)
 		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 		started := time.Now()
-		cmd := isolationCommand(ctx, t, root, stage)
+		cmd := isolationCommand(ctx, binary, root, stage)
 		setupElapsed := time.Since(started)
 		cmd.Env = append(os.Environ(), "MEMORY_ISOLATION_HELPER=1")
 		output, err := cmd.CombinedOutput()
@@ -57,10 +58,11 @@ func helperArgs() int {
 // workers merely because the successful crash path intentionally does not return.
 func TestCaptureIsolationFixtureReturningStages(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "owned")
+	binary := isolationCoverageBinary(t, "crash")
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	started := time.Now()
-	cmd := isolationCommand(ctx, t, root, "crash")
+	cmd := isolationCommand(ctx, binary, root, "crash")
 	setupElapsed := time.Since(started)
 	cmd.Env = append(os.Environ(), "MEMORY_ISOLATION_HELPER=1")
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -99,23 +101,29 @@ func isolationHelperArgs(root, stage string) []string {
 // Test binaries initialize runtime coverage only during M.Run teardown. A crash
 // cannot reach that teardown, so use the actual instrumented command for this
 // stage instead of unsafe links into Go's private coverage implementation.
-func isolationCommand(ctx context.Context, t *testing.T, root, stage string) *exec.Cmd {
+// The compile is test-harness setup, not fixture behavior: it runs before the
+// caller starts the stage deadline, so that deadline bounds only the fixture run.
+// Empty means the stage runs as a test-binary helper.
+func isolationCoverageBinary(t *testing.T, stage string) string {
 	t.Helper()
 	if stage != "crash" || os.Getenv("E2E_GOCOVERDIR") == "" {
-		return exec.CommandContext(ctx, os.Args[0], isolationHelperArgs(root, stage)...)
+		return ""
 	}
 	binary := filepath.Join(t.TempDir(), "agent-sessions")
-	build := exec.CommandContext(ctx, "go", "build", "-race", "-cover", "-covermode=atomic", "-coverpkg=./...", "-o", binary, "./cmd/agent-sessions")
+	build := exec.CommandContext(t.Context(), "go", "build", "-race", "-cover", "-covermode=atomic", "-coverpkg=./...", "-o", binary, "./cmd/agent-sessions")
 	build.Dir = "../.."
 	started := time.Now()
 	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build crash fixture after %s (context %v): %v\n%s", time.Since(started), ctx.Err(), err, output)
+		t.Fatalf("build crash fixture after %s: %v\n%s", time.Since(started), err, output)
 	}
-	remaining := time.Duration(-1)
-	if deadline, ok := ctx.Deadline(); ok {
-		remaining = time.Until(deadline)
+	t.Logf("crash fixture build %s (outside stage deadline)", time.Since(started))
+	return binary
+}
+
+func isolationCommand(ctx context.Context, binary, root, stage string) *exec.Cmd {
+	if binary == "" {
+		return exec.CommandContext(ctx, os.Args[0], isolationHelperArgs(root, stage)...)
 	}
-	t.Logf("crash fixture build %s, remaining %s, context %v", time.Since(started), remaining, ctx.Err())
 	return exec.CommandContext(ctx, binary, "capture-v1", "isolation-fixture", "--output", root, "--stage", stage)
 }
 
@@ -131,7 +139,7 @@ func TestCaptureIsolationFixtureCoverageFailures(t *testing.T) {
 			}
 			t.Setenv("E2E_GOCOVERDIR", dir)
 			fixtureRoot := filepath.Join(base, "owned")
-			cmd := isolationCommand(t.Context(), t, fixtureRoot, "crash")
+			cmd := isolationCommand(t.Context(), isolationCoverageBinary(t, "crash"), fixtureRoot, "crash")
 			cmd.Env = os.Environ()
 			output, err := cmd.CombinedOutput()
 			if err == nil || !strings.Contains(string(output), "fixture coverage metadata:") {
