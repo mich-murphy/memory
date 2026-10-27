@@ -42,7 +42,8 @@ func (q *Queue) isolateOptionalFailure(ctx context.Context, i publication.Identi
 		return false, nil
 	}
 	if errors.Is(cause, ErrSessionExcluded) || runtimeFatalCause(cause) != nil ||
-		errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) ||
+		errors.Is(cause, context.Canceled) ||
+		(errors.Is(cause, context.DeadlineExceeded) && !genuineOptionalExpiry(ctx, cause)) ||
 		q.optionalFailureClass(cause) == FailureDestination {
 		return false, nil
 	}
@@ -69,6 +70,16 @@ func (q *Queue) isolateOptionalFailure(ctx context.Context, i publication.Identi
 		return true, errSelectionSuperseded
 	}
 	return false, nil
+}
+
+// genuineOptionalExpiry is the only deadline that may be isolated: an optional
+// source dependency whose every leaf is a bare deadline, while the operation
+// context itself has expired. A deadline under a live context stays fatal.
+func genuineOptionalExpiry(ctx context.Context, cause error) bool {
+	var dependency *publication.SourceDependencyError
+	return errors.As(cause, &dependency) && dependency.Optional &&
+		errors.Is(ctx.Err(), context.DeadlineExceeded) &&
+		leavesAre(cause, func(e error) bool { return e == context.DeadlineExceeded })
 }
 
 func (q *Queue) withholdUnavailable(ctx context.Context, i publication.Identity, m publication.Manifest, es []evidence, dependency *publication.SourceDependencyError) (bool, error) {
