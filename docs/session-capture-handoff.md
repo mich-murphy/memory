@@ -167,8 +167,23 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   before `PRAGMA busy_timeout=5000`, so a concurrent read-only `work-status` reader
   during a coordinator restart gets an immediate SQLITE_BUSY. A flock race is also possible.
 
+- **W6 `ef727a9`/`555ea6c` + parent `56bd2f9` (accepted).** Root cause of the journey
+  coordinator exit was reproduced on the base code by `TestOpenWaitsForConcurrentReaderLock`:
+  `Open` failed immediately with `database is locked (5) (SQLITE_BUSY)` while a read-only
+  inspector held a SHARED lock, because `busy_timeout` was set after `journal_mode=WAL`.
+  Fix: `busy_timeout(5000)` in the DSN of the writer (with `synchronous(FULL)`) and of all
+  three read-only readers (`runtime_view.go`, `ownership.go`, `enrichment_status.go`), so it
+  applies per connection before any locking statement. `runCaptureWritable` now wraps the
+  `Open` error (`capture coordinator unavailable: %w`). Parent correction C3: a typed
+  `ErrQueueOpen` sentinel replaces string matching (`TestOpenReportsQueueOpenSentinel`).
+  Evidence: 25/25 CoordinatorJourney iterations under 6 `yes` processes (load 9–23), with all
+  175 coordinator stderr files empty. That is weak statistical power against a ≈1/125 base rate,
+  so it shows no recurrence rather than proof. Race `sessioncapture` 101s ok, `cli` 42s/37s ok,
+  `make lint` 0, capture-acceptance ok. One load-sensitive failure
+  (`TestVerifiedOptionalRepairRestartAutonomouslyAttachesLatest`) passed when rerun alone 3×.
+
 ### Next action
 
-Parent: dispatch W6 to fix the Open-path coordinator exit (surface the error, set the
-busy timeout before any locking statement, reproduce deterministically, then repeat
-W4's loop); afterwards run the Step 3 full gates on a quiet machine.
+Parent: Step 3. Run the full gates (`make check`, `make test`, `make fuzz`, the analytics suite) on
+`main` on a quiet machine (no other workers), then disposition any remaining load-sensitive
+5s-deadline tests based on evidence.
