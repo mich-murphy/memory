@@ -356,8 +356,37 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   2026-10-24/25) predate this change and came from the bound path; they can be replayed.
   Not yet installed on the Mac.
 
+- **W16 + parent gates on `856cc08`: all green.** W16's first `make check` exited 2 only
+  because the gate worktree had no `.analytics-venv`, so the Makefile's `ANALYTICS_PYTHON`
+  fell back to system `python3`, which lacks `duckdb`. The parent then reran the full
+  `make check ANALYTICS_PYTHON=/Users/mm/dev/memory/.analytics-venv/bin/python` once, as the
+  only gate running: exit 0 in 628s, coverage 87.1%, 0/10 functions over CRAP 30. W16 also
+  passed `make test` (482s), analytics 97/97, `.mjs` 8/8 and fuzz 9/9. Rule for gate
+  worktrees from now on: always pass `ANALYTICS_PYTHON` explicitly.
+- **Mac install of `856cc08` (parent, 2026-10-28 04:58 AEDT).** Used the same procedure:
+  bootout (stopped in 1s), backup in `backups/step4b-20261028/` (`queue.sqlite` byte-identical,
+  `quick_check ok`, previous binary `agent-sessions.bin.c8abfd1`), atomic swap of
+  `agent-sessions.bin` only, then bootstrap. The binary is `vcs.modified=false`, sha256
+  `e88853c5…`. In the first 6 minutes published went 12,896 → 13,578 with no pause, 0
+  step_errors and no new stderr lines.
+- **`sqlite-backup` clean-closed WAL failure (found after install, predates it).** One
+  `sqlite-backup` artifact source was quarantined: kind=capture, reason `transient`, 8
+  attempts. Its last successful capture was 2026-10-24. The file's header is in WAL mode
+  (bytes 18/19 = 2/2) but no `-wal`, `-shm` or `-journal` sidecar exists, which is the normal
+  state after the last connection closes cleanly. Hypothesis: the read-only authorized VFS
+  cannot open or create the absent WAL, the resulting error is unclassified, so the failure
+  repeats on every attempt and ends in quarantine. Any captured WAL-mode database whose app
+  has closed would hit the same failure. W17 is reproducing and fixing it with synthetic
+  fixtures.
+- **Residual re-hint churn on transform sources (measured, not yet addressed).** The W13
+  fingerprint only applies when `transform==""`. Over 90s, the 7 `sqlite-backup` rows gained
+  1 version bump and the 71 `scrubbed-config` rows gained 13. This is small next to the
+  pre-W13 churn (19.6k rows every sweep), so it is recorded for measurement after the backlog
+  drains, not fixed speculatively.
+
 ### Next action
 
-W16 (sole verifier) runs the aggregate gates on `53f8a8f`. If green, the parent installs
-`53f8a8f` on the Mac with the same backup/swap procedure, then keeps monitoring the
-backlog drain, steady-state CPU, step_errors, pause state and refresher freshness.
+W17 fixes the `sqlite-backup` clean-closed WAL capture. After acceptance, run the aggregate
+gates as the only gate (with `ANALYTICS_PYTHON` passed explicitly), install on the Mac, and
+replay the quarantined source. Meanwhile the parent monitors the backlog drain, steady-state
+CPU and the `usage()` scan cost once the backlog clears.
