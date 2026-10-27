@@ -1,7 +1,8 @@
 # Independent enrichment refinement
 
-**Status (2026-10-24):** normative refinement with an implemented, reviewed offline
-candidate; not release-accepted or deployed. This refines the
+**Status:** normative refinement with an implemented, reviewed candidate; not
+release-accepted. Historical experimental installations are distinct from newer
+undeployed/private source fixes; current service health is unknown. This refines the
 [capture contract](session-capture-contract.md) for independent native launch evidence,
 harness/memory snapshots and post-acceptance policy isolation. The queue-native lane,
 immutable native inbox, context/policy-aware closed bundles, raw/optional delivery and
@@ -9,10 +10,14 @@ crash-safe repair, declared aliases and authorized raw/derived/WAL reads are now
 implemented. Publication/reader/report contracts are v2; `capture-v1` command prefix
 and namespace are unchanged. Enrichment remains independently opt-in.
 
-Fresh unchanged development gates pass: check **622.40s**, test **460.36s**, all nine
+**Historical checkpoint evidence — 2026-10-24:** unchanged development gates passed:
+check **622.40s**, test **460.36s**, all nine
 **30s** fuzz targets (**285.31s** total), analytics **73 tests / 23.744s**, including
 **11 actual-process journeys**. See [offline evidence](session-capture-offline-evidence.md)
-and the [handoff ledger](session-capture-handoff.md) for exact checks and review scope.
+and the [handoff scorecard](session-capture-handoff.md#current-session-checkpoint) for
+current state. Later autonomous/covered/journey failures remain unresolved. The latest
+private completion-metadata/predispatch corrections are uncompiled, unexecuted and
+unadopted; those historical passes do not qualify them or the current dirty checkout.
 The requirements below remain normative; passing offline checks does not establish
 actual native-agent fields/trust, operating-resource/freshness, conditional R2 or
 two-machine installed-path acceptance. No inventory, install, activation, cutover or
@@ -40,8 +45,8 @@ The earlier v1 protocol had unconditional object dependencies. The implemented
 `session-publication/v2` / `session-reader/v2` candidate explicitly retains all
 source-epoch coordinates while distinguishing selected content from an optional,
 withheld artifact; these are not silent new semantics under v1. Existing v1 readers
-must reject v2, not report empty success. No retired-schema compatibility is a prerequisite to this undeployed
-candidate. The experimental command/namespace name `capture-v1` is independent of
+must reject v2, not report empty success. No retired-schema compatibility is a
+prerequisite to this replacement candidate. The experimental command/namespace name `capture-v1` is independent of
 wire version; do not silently reset existing bound stores/spools.
 
 Implemented fields in `internal/publication/types.go` (exact wire semantics are in
@@ -83,6 +88,19 @@ policy must not gate raw acceptance; delivery still checks every selected origin
 identity, including immediately before CAS. Recovery can reselect retained optional
 bytes only after successful policy/integrity checks and never fabricates a new byte
 capture time. Failure history is not erased.
+
+**Accepted delivery versus repair reserve (target clarification, 2026-10-25 AEDT):**
+An already accepted selected snapshot may complete ordinary delivery despite exhausted
+repair capacity when exact retained authority, fresh policy, full remote dependency
+verification, ordering, guarded publication and acknowledgement all succeed. A redundant
+new repair record/history is not a prerequisite to that success. This does not change
+any accounting expression or exempt new payload/history. A genuinely blocked composite
+still requires latest-state raw isolation with charged repair work or an explicit quota
+gap. Keeping the same partially acknowledged optional job after genuine operation expiry
+requires authoritative prior raw coverage, not local ACK bits or an expected route.
+NoCover does not prohibit healthy ordinary selected delivery; it cannot excuse a real
+optional failure. This clarifies the target contract, not implementation/release evidence;
+the handoff records private implementation, test refinements and remaining gate failures.
 
 ## Snapshot closure and effective policy
 

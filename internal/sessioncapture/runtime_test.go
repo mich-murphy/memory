@@ -562,6 +562,10 @@ func TestRuntimeWriteHintBoundsAndUnsafeInbox(t *testing.T) {
 	if err := os.Mkdir(unsafe, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Set the unsafe permissions explicitly; directory creation is filtered by umask.
+	if err := os.Chmod(unsafe, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := WriteHint(t.Context(), unsafe, req); err == nil {
 		t.Fatal("unsafe spool accepted")
 	}

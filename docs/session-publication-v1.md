@@ -1,17 +1,20 @@
 # Session publication and reader v2
 
-The filename is retained for existing documentation links. The undeployed candidate
-now requires v2; it does not silently reinterpret v1 archives or reset their binding.
+The filename is retained for existing documentation links. The repository contract
+requires v2; it does not silently reinterpret v1 archives or reset their binding.
 The new explicit selection semantics support privacy-safe optional-artifact isolation.
 See [independent enrichment](session-enrichment-contract.md) for the implemented
 opt-in producer lane and normative isolation requirements. The command/namespace name `capture-v1` is not the wire
 contract version.
 
-**Current status (2026-10-24):** implemented and reviewed offline v2 candidate with
-queue/CLI/enrichment/backend/analytics integration. Fresh unchanged development gates
-and all eleven actual-process journeys pass; see
-[final offline evidence](session-capture-offline-evidence.md) for exact results and
+**Implementation status:** implemented and reviewed v2 candidate with
+queue/CLI/enrichment/backend/analytics integration. Unchanged development gates and
+all eleven actual-process journeys passed at the historical 2026-10-24 checkpoint;
+see [dated offline evidence](session-capture-offline-evidence.md) for exact results and
 [queue/CLI/analytics checkpoint](session-capture-implementation.md) for integration.
+The handoff's [current scorecard](session-capture-handoff.md#current-session-checkpoint)
+records later failures, private unqualified fixes, historical experimental deployments
+and unknown current service health. No current full-source qualification is implied.
 This library alone is not deployment, R2 endpoint acceptance, a scheduler or complete
 release acceptance. The [session capture contract](session-capture-contract.md)
 remains authoritative.
@@ -238,7 +241,7 @@ process death; do not delete lock files to fence writers.
 
 ## Focused evidence and remaining acceptance
 
-Current integrated gates pass: check **622.40s**, test **460.36s**, nine unchanged
+**Historical integrated checkpoint — 2026-10-24:** passed check **622.40s**, test **460.36s**, nine unchanged
 **30s** fuzz targets (**285.31s** total), analytics **73 tests / 23.744s**, including
 all **11 process journeys**. [Final offline evidence](session-capture-offline-evidence.md)
 records exact coverage/CRAP and limitations. Native/live/two-machine and representative
@@ -246,7 +249,7 @@ operating-resource acceptance remain outstanding.
 
 ### Historical focused library evidence (2026-10-23)
 
-These package-only results precede the current integrated gates; the commands and
+These package-only results precede the historical integrated gates; the commands and
 dated observations are retained, not instructions to restart completed integration.
 Pinned environment commands, run serially with live opt-ins unset:
 
@@ -274,9 +277,10 @@ prove focused behavior, not integrated consumer acceptance. Logs/profiles:
 `/tmp/publication-v2-cover.out`.
 
 At that focused checkpoint, full repository tests/check/coverage/fuzz and integrated
-consumer acceptance had not yet been rerun. They now pass as recorded above, including
-synthetic process-crash/restart journeys; this is not physical power-cut evidence.
-Real native-agent hooks, actual R2, two-machine inventory/cutover and production
-operations remain unperformed. Passing this package alone does not establish the
+consumer acceptance had not yet been rerun. They subsequently passed at the dated
+checkpoint above, including synthetic process-crash/restart journeys; this is not
+physical power-cut evidence. Later failures remain open. Historical native/R2 and
+experimental host operations occurred, but complete installed two-machine operating
+acceptance and final cutover remain outstanding. Passing this package alone does not establish the
 complete release journey; the [handoff ledger](session-capture-handoff.md) records
 integrated acceptance and the remaining external gates.

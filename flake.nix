@@ -58,6 +58,8 @@
             pkgs.python314
             # Analytics fixture tests invoke the CLI, not Python compression.zstd.
             pkgs.zstd
+            # Generated producer-handler tests strip types and mock spawn; no SDK is run.
+            pkgs.nodejs_24
             pkgs.shellcheck
             pkgs.zizmor
             pkgs.goreleaser

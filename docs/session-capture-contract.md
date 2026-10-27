@@ -1,10 +1,16 @@
 # Session capture: implementation direction
 
-**Status:** agreed replacement requirements. The opt-in offline candidate is implemented
-and its unchanged development gates pass; see the [current handoff](session-capture-handoff.md)
-and [dated evidence](session-capture-offline-evidence.md). The complete replacement is
-not release-accepted, deployed, or production-ready. Legacy installed/default paths
-remain in use; candidate implementation is not cutover evidence.
+**Status:** agreed replacement requirements, not release evidence. The opt-in candidate
+is implemented; dated checkpoints passed unchanged development gates, but newer checkout
+gates failed and remain unqualified. Last recorded Mac capture is qualified-dirty binary
+e69fb2ed… with staging8766; BC-01 remains on b23712bc. Current service health is unknown;
+newer checkout/private-candidate changes are undeployed.
+The complete replacement is **not release-accepted or production-ready**, and final
+legacy/default cutover has not occurred. See the [current handoff](session-capture-handoff.md)
+for the current scorecard, exact deployed/source/private-prototype distinctions and
+remaining gates, and
+[dated evidence](session-capture-offline-evidence.md) for historical checks. Neither a
+passing checkpoint nor an experimental installation establishes cutover acceptance.
 This is the authoritative design and acceptance guide for new capture work. Existing
 v3 code, wire specifications, benchmarks, and rollout records describe the legacy
 implementation, not requirements to reproduce it.
@@ -24,7 +30,9 @@ replacement requirements. Do not resume the old cold-recovery patch stack as the
 
 This permission is scoped to the archive replacement. It does not authorize deleting
 original sources, local research/classification evidence, credentials, identities, or
-privacy opt-outs. No reset or deployment has occurred as part of documenting this direction.
+privacy opt-outs. The permission itself is not evidence of a reset or deployment. Subsequent controlled
+experimental installations are recorded in the handoff; documenting this direction does
+not authorize additional rollout, reset or deletion.
 
 ## 1. Logical data contract
 

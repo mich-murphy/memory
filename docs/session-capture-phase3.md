@@ -1,11 +1,14 @@
 # Phase 3: independent capture and autonomous work
 
-**2026-10-24 — offline implementation candidate; fresh full development gates pass.**
+**Implementation reference; 2026-10-24 results below are historical evidence.**
 This follows the [capture contract](session-capture-contract.md), not the retired
-recovery design. See [final offline evidence](session-capture-offline-evidence.md) for
-unchanged check/test/fuzz, eleven process journeys and measured synthetic-resource
-scope. This is not release acceptance. Nothing here records production installation, real-source
-ingestion, two-machine inventory, live R2 acceptance, cutover, or deletion.
+recovery design. See [dated offline evidence](session-capture-offline-evidence.md) for
+check/test/fuzz, eleven process journeys and measured synthetic-resource scope. Those
+results do not qualify the current dirty checkout. The handoff's
+[current scorecard](session-capture-handoff.md#current-session-checkpoint) records later
+unresolved autonomous/covered/journey failures and uncompiled/unexecuted/unadopted
+private fixes. Historical experimental installations and live R2 checks occurred;
+current health and complete operating acceptance are not established by this document.
 
 Current integrated status: native immutable evidence/inbox, independent enrichment,
 raw/optional delivery and durable repair, declared aliases, authorized all-components
@@ -13,8 +16,9 @@ no-follow source reads and readonly WAL-aware SQLite capture are implemented and
 independently reviewed offline. Explicit Local/R2 backend construction and
 `--source publications` dashboard/query callers are wired. Wire/reader/report are v2;
 `capture-v1` command prefix/namespace is unchanged. Defaults remain unactivated.
-No new confirmed code/wiring blocker was found within the latest independent review's
-spot-check scope; that is not exhaustive correctness or release acceptance.
+At the dated review checkpoint, its bounded spot-check found no additional confirmed
+code/wiring blocker. That result does not qualify later changes or clear subsequent
+failures; it is not exhaustive correctness or release acceptance.
 
 ## Implemented capture and scheduling
 
@@ -22,6 +26,14 @@ spot-check scope; that is not exhaustive correctness or release acceptance.
 Source reads, compression, and network calls do not hold a metadata transaction or
 machine-wide capture-I/O lock. Context-aware session/hash-install waits do not create
 one goroutine per waiter. A blocked session cannot claim every capture worker.
+
+**Known independence limitation:** before each new snapshot,
+`internal/sessioncapture/capture.go` calls `usage()`, which enumerates and stats every
+retained payload entry for shared accounting/integrity checks. Capture admission still
+depends on unrelated spool metadata despite per-session scheduling; this is not full
+per-session independence from retained local state. The current audit documents the
+limitation, not a qualified fix or measured runtime impact. Do not remove those safety
+checks without a separately reviewed accounting/integrity design.
 
 SQLite WAL with `synchronous=FULL` remains authoritative for accepted work. Private
 encoded payloads are synced before acceptance; crash orphans, sealed epochs and
@@ -43,8 +55,11 @@ resumed after restart without another hook or their original source. Explicit
 Quarantine retains source/session coordinates, attempts, safe classifications,
 contract and diagnostic software version. Replaying does not erase historical entries.
 
-Caller cancellation is graceful only if every error-tree leaf is that cancellation;
-joined database, integrity or durability failures are not hidden by shutdown.
+The intended cancellation boundary is graceful shutdown only when every error-tree
+leaf is caller cancellation; database, integrity and durability causes must remain
+visible. The latest private completion-metadata repair addresses a proven hole in that
+classification and is not yet adopted or qualified. Do not infer that the current
+repository satisfies every metadata-error path from this intended boundary.
 
 ## Concrete resource bounds
 
@@ -230,17 +245,19 @@ Repair uses retained original basis and capture times, durable
 Repair metadata caps are 4096 rows, 32,768 aggregate histories and 128 histories per
 repair, all byte-charged. Admission failure exposes `OptionalRepairGap`; replay admits
 retained work before clearing it. No accepted evidence is silently evicted.
-Destination authentication is not optional poison; genuine local-store/durability
-causes, including joined cancellation, remain fatal after bookkeeping rather than
-being downgraded into ordinary retry. Known opted-out claimed identities and retained
+Destination authentication is not optional poison. Genuine local-store/durability
+causes, including joined cancellation, are required to remain fatal after bookkeeping
+rather than becoming ordinary retry; the unqualified completion-metadata repair noted
+above addresses a known authority gap. Known opted-out claimed identities and retained
 private evidence are restrictive checks even for withheld-only views.
 
 ## Checks and remaining acceptance
 
-Fresh `make check` **622.40s**, `make test` **460.36s**, all nine unchanged **30s** fuzz
-targets (**285.31s** total), and analytics **73 tests / 23.744s** pass. Exact final
-coverage/CRAP and eleven-journey evidence are in
-[final offline evidence](session-capture-offline-evidence.md).
+**Historical checkpoint — 2026-10-24:** `make check` **622.40s**, `make test` **460.36s**,
+all nine unchanged **30s** fuzz targets (**285.31s** total), and analytics
+**73 tests / 23.744s** passed. That checkpoint's coverage/CRAP and eleven-journey
+evidence are in [dated offline evidence](session-capture-offline-evidence.md).
+Current-source full qualification remains incomplete; use the handoff scorecard.
 
 ### Historical intermediate checks (superseded by the integrated result)
 
@@ -265,8 +282,8 @@ Final combined acceptance has **eleven actual-process journeys**, including actu
 SDK factory/protocol peer → writer → reader → importer after synthetic source/spool
 deletion, the existing server entry point consuming only its owned projection after
 the source/store/spool/export tree is removed, declared-root moves and three-process
-optional failure/crash/restart/repair/revocation. Full check/test/fuzz and all 73
-analytics tests now pass; the intermediate seven-journey result above is chronology,
+optional failure/crash/restart/repair/revocation. At that checkpoint, full check/test/fuzz and all 73
+analytics tests passed; the intermediate seven-journey result above is chronology,
 not a list of currently pending repairs. SDK peers use injected in-memory HTTPS transports,
 not actual conditional-R2 endpoints.
 
@@ -299,7 +316,7 @@ new identities wait until an explicitly sufficient quota is configured. No GC,
 source/archive/status migration, ownership/enrichment quota change or coverage
 claim is implied.
 
-### Current correction-source development gates
+### Historical 415-input correction-source development gates
 
 The unchanged 415-input serial run recorded full check PASS (708s), test PASS (453s),
 nine 30-second fuzz targets PASS (287s), 97 analytics tests PASS (33.454s) and JavaScript/
@@ -310,4 +327,6 @@ and a test ACK predicate accepting a prior rather than newest raw publication we
 corrected without removing privacy/race assertions or increasing deadlines. Retained
 inventory, monitor-rename and necessary-suffix corrections are independently reviewed.
 These are development gates, not installed 32768-record, native/resource/coverage/cutover
-acceptance. Exact-revision builds and controlled two-host/consumer upgrades are next.
+acceptance. Builds and controlled upgrades were the next action at that checkpoint;
+subsequent installations and failures are recorded in the handoff, not renewed rollout
+instructions here.

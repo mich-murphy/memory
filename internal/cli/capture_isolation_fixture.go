@@ -56,6 +56,11 @@ func runCaptureIsolationFixture(ctx context.Context, args []string, o IO) (int, 
 	absolute = filepath.Join(parent, filepath.Base(absolute))
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	if *stage == "crash" {
+		if err := writeFixtureCoverageMetadata(os.Getenv("E2E_GOCOVERDIR")); err != nil {
+			return exitFailed, err
+		}
+	}
 	if err := isolationStage(ctx, absolute, *stage); err != nil {
 		return exitFailed, err
 	}

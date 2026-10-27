@@ -17,9 +17,11 @@ import (
 
 var errNativeCapturePathless = errors.New("native hook has no source path")
 
-// This is an opt-in native hook entry point, not a change to installed legacy
-// hooks. It owns discovery hints and, when enabled, immutable native evidence.
-// Periodic discovery covers missed events. Source/session identities come from the same classifier as discovery.
+// This opt-in native hook entry point does not implicitly change legacy hooks.
+// It owns discovery hints and, when enabled, immutable native evidence.
+// Periodic discovery can recover missed hints while eligible sources remain;
+// it cannot recover vanished bytes or missed native launch context.
+// Source/session identities use the same classifier as discovery.
 func runNativeCaptureHook(ctx context.Context, c capturedaemon.Config, f runtimeFlags, input io.Reader) (int, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()

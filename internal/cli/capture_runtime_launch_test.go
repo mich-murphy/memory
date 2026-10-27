@@ -91,7 +91,7 @@ func TestPiNativeProducerUsesSDKMetadataAndJSONStdin(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(body)
-	for _, want := range []string{`source: event.reason`, `session_file: ctx.sessionManager.getSessionFile()`, `session_id: ctx.sessionManager.getSessionId()`, `cwd: ctx.cwd`, `model: ctx.model?.id`, `provider: ctx.model?.provider`, `argv: process.argv.slice(0, 32)`, `context_origin: "extension"`, `stdio: ["pipe", "ignore", "ignore"]`, `child.stdin.end(payload)`} {
+	for _, want := range []string{`source: event.reason`, `const file = ctx.sessionManager.getSessionFile();`, `if (!file) return; // --no-session has no durable source.`, `session_file: file`, `session_id: ctx.sessionManager.getSessionId()`, `cwd: ctx.cwd`, `model: ctx.model?.id`, `provider: ctx.model?.provider`, `argv: process.argv.slice(0, 32)`, `context_origin: "extension"`, `stdio: ["pipe", "ignore", "ignore"]`, `child.stdin.end(payload)`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing SDK producer fact %q", want)
 		}

@@ -38,8 +38,10 @@ func (w *prefixWriter) Write(b []byte) (int, error) {
 func digest(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 func sum(h hash.Hash) string { return hex.EncodeToString(h.Sum(nil)) }
 func (q *Queue) usage() (int64, error) {
+	// This shared accounting/integrity scan stats all retained payload entries;
+	// snapshot admission therefore still depends on unrelated spool metadata.
 	// Only directory metadata is fenced: compression, source I/O, payload sync
-	// and fault callbacks remain independent. A missing entry is now external
+	// and fault callbacks remain independent. A missing entry is external
 	// interference, not a benign internal temporary rename/removal.
 	q.payloadMu.RLock()
 	defer q.payloadMu.RUnlock()

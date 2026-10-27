@@ -44,8 +44,10 @@ settings files, foreign entries, sources, runtime config, spool and policy remai
 
 ## Evidence / remaining acceptance
 
-The integrated offline candidate now passes full unchanged development gates and all
-eleven actual-process consumer journeys. Synthetic installed native commands exercise
+At the historical 2026-10-24 checkpoint, the integrated offline candidate passed full
+unchanged development gates and eleven actual-process consumer journeys. Later failures
+and unqualified private fixes remain open; see the handoff's
+[current scorecard](../../docs/session-capture-handoff.md#current-session-checkpoint). Synthetic installed native commands exercise
 CLI hint/wake/context admission, including pathless durable discovery wake and indexed
 artifacts. See [current evidence](../../docs/session-capture-offline-evidence.md).
 These are not actual Claude/Codex/Pi, trust/reload or supervisor acceptance.
@@ -62,8 +64,10 @@ were read locally before generating the extension.
 Candidate CLI stdin -> durable hint/native-evidence integration and pathless Codex
 discovery wakes are implemented and exercised synthetically. Actual native Codex
 `/hooks` hash-trust acceptance is explicitly outstanding, not simulated or claimed.
-Actual Pi reload/event runtime, real R2, both-machine installed-path acceptance and
-production cutover remain unperformed. Full offline project gates are recorded above.
+Historical native/R2 checks and experimental hook installations occurred; they do not
+establish complete current-source native, restart, both-machine operating acceptance
+or final cutover. Current health is unknown. The full offline gates above remain dated
+evidence, not current qualification.
 
 ### Historical focused checks (2026-10-23)
 

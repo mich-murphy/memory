@@ -26,17 +26,20 @@ function kick(file: string | undefined): void {
     child.on("error", () => {});
     child.unref();
   } catch {
-    // Hint failure must never break an agent session. Periodic discovery repairs it.
+    // Hint failure must never break a session. Discovery can find retained sources,
+    // but cannot recover vanished bytes or missed native launch context.
   }
 }
 
 // Capture plain SDK facts inside the native event handler, never collector argv.
 function launch(event: SessionStartEvent, ctx: ExtensionContext): void {
   try {
+    const file = ctx.sessionManager.getSessionFile();
+    if (!file) return; // --no-session has no durable source.
     const payload = JSON.stringify({
       event: "session_start",
       source: event.reason,
-      session_file: ctx.sessionManager.getSessionFile(),
+      session_file: file,
       session_id: ctx.sessionManager.getSessionId(),
       cwd: ctx.cwd,
       model: ctx.model?.id,

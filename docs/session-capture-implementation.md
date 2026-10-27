@@ -1,17 +1,20 @@
 # Replacement implementation checkpoints
 
-**Scope:** offline candidate, not installed or production-ready. The legacy collector
-remains the installed runtime until the contract's two-machine acceptance and controlled
-cutover. No R2 reset, source inventory, policy recovery, or deployment is implied here.
+**Scope:** repository implementation reference, not release acceptance or current
+runtime-health evidence. Controlled experimental installations and managed hook/writer
+fencing occurred historically; final legacy/default cutover has not occurred. The
+handoff's [current scorecard](session-capture-handoff.md#current-session-checkpoint)
+distinguishes recorded deployments, unknown liveness, unresolved failures and private
+unqualified fixes. This document authorizes no installation, ingestion, reset or deletion.
 The current [phase-3 candidate](session-capture-phase3.md) includes independent
 capture/coordinator delivery, native evidence and enrichment lanes, optional-artifact
 repair isolation, declared aliases, authorized no-follow raw/derived/WAL reads,
 explicit Local/R2 backend construction and opt-in analytics callers. Wire, reader and
 report contracts are v2; the `capture-v1` command prefix/namespace is unchanged.
-Enrichment and `--source publications` callers remain opt-in; installed/default
-collector and analytics behavior has not been activated or replaced.
+Enrichment and `--source publications` callers remain opt-in; unselected collector and
+analytics defaults remain legacy, independently of experimental installation history.
 
-Fresh unchanged development gates pass: `make check` **622.40s**, `make test`
+**Historical checkpoint evidence — 2026-10-24:** unchanged development gates passed: `make check` **622.40s**, `make test`
 **460.36s**, nine fuzz targets at **30s** each (**285.31s** total), and analytics
 **73 tests / 23.744s**, including all **11 actual-process journeys**. See
 [final offline evidence](session-capture-offline-evidence.md) and the
@@ -59,7 +62,7 @@ backup, compressed sources, explicit learned roots and indexed artifact ownershi
 Native launch provenance, self-contained harness/memory bundles and declared alias
 integration are now implemented and reviewed offline. Their actual native-agent,
 representative inventory/resource and installed-path acceptance remains required before
-replacement of the installed collector. Explicit partial discovery/enrichment is not
+final controlled acceptance/cutover. Explicit partial discovery/enrichment is not
 a claim to capture missing artifacts.
 
 The default retained encoded spool quota is 1 GiB (override downward for tests); each
@@ -106,8 +109,10 @@ weakened.
 ## Remaining release requirements
 
 The integrated coordinator, quarantine/replay, destination pause, source progress,
-enrichment/repair and opt-in service/hooks candidates have passed fresh full offline
-development gates. Complete real-inventory artifact coverage, measured combined
+enrichment/repair and opt-in service/hooks candidates passed dated offline checkpoints,
+not a complete current-source qualification. Later autonomous/covered/journey failures
+remain open; the latest private metadata/predispatch fixes are uncompiled, unexecuted
+and unadopted. Complete real-inventory artifact coverage, measured combined
 resource/freshness bounds, actual native agents, live conditional-R2 behavior, both
 machines' source/policy inventories and installed-path acceptance remain separate work.
 Analytics dashboard/query candidate wiring exists with `--source publications`; default

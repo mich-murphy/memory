@@ -47,7 +47,7 @@ func parseRuntimeFlags(cmd string, args []string, o IO) (runtimeFlags, error) {
 		fs.StringVar(&f.agent, "agent", "", "claude, codex or pi")
 		fs.StringVar(&f.path, "path", "", "source path; otherwise bounded native hook input on stdin")
 	case "publication-status", "current-heads":
-		fs.StringVar(&f.sessionAfter, "after-session", "", "lexical session cursor; restart with empty cursor for each full sweep")
+		fs.StringVar(&f.sessionAfter, "after-session", "", "next_cursor from the previous page; restart empty for each full sweep")
 		fs.IntVar(&f.limit, "limit", 256, "page size, 1..256")
 	case "work-status", "quarantine":
 		fs.Int64Var(&f.after, "after", 0, "pagination coordinate")

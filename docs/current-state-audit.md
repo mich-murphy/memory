@@ -1,5 +1,11 @@
 # Current-state and direction alignment audit
 
+> **Historical audit record, not current-checkout certification.** Its findings and
+> validation below apply to the 2026-10-24 source state only. Later changes, failed
+> gates, experimental deployment history, unknown current health and the subsequent
+> documentation/code alignment review are recorded in the handoff's
+> [current scorecard](session-capture-handoff.md#current-session-checkpoint).
+
 **2026-10-24 (AEDT).** This is a documentation/public-interface consistency audit of
 the dirty offline candidate, not deployment or release acceptance. Requirements remain
 [the capture contract](session-capture-contract.md) and

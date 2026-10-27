@@ -66,13 +66,16 @@ the write error, not success or permission to overwrite.
 
 ## Offline evidence and remaining acceptance
 
-The final integrated candidate passes full unchanged check/test/fuzz and eleven
-actual-process consumer journeys, including the actual SDK factory against an injected
-HTTPS peer. See [current evidence](../../docs/session-capture-offline-evidence.md).
-The dated package checks below are preserved narrower checkpoints, not claims that
-integration or full gates are still pending.
+At the historical 2026-10-24 checkpoint, the integrated candidate passed full unchanged
+check/test/fuzz and eleven actual-process consumer journeys, including the actual SDK
+factory against an injected HTTPS peer. See
+[dated evidence](../../docs/session-capture-offline-evidence.md) and the handoff's
+[current scorecard](../../docs/session-capture-handoff.md#current-session-checkpoint)
+for later unresolved failures, private unqualified fixes and recorded deployments.
+The package checks below are narrower historical results, not current qualification.
 
-**Live R2 conditional-write semantics remain UNVERIFIED.** These tests exercise
+**These offline tests do not verify live R2 conditional-write semantics.** Historical
+live checks are recorded separately in the handoff, not established here. These tests exercise
 actual AWS SDK HTTP requests against an in-process, minimal S3 protocol peer,
 not R2 and not a claim that an emulator establishes R2 semantics. They use static
 synthetic credentials and synthetic bytes only, with no production configuration.
@@ -109,8 +112,8 @@ source deletion, or remote deletion was performed.
 
 Historical owner handoff: package integration and full lint/consumer gates were
 subsequently completed in the opt-in candidate. Current continuation lives in
-[the handoff](../../docs/session-capture-handoff.md). Isolated real R2/native /
-two-machine acceptance remains outstanding; injected SDK tests do not authorize
+[the handoff](../../docs/session-capture-handoff.md). Complete current-source R2/native /
+two-machine operating acceptance remains outstanding; injected SDK tests do not authorize
 production activation or establish real endpoint semantics.
 
 ## Immutable create correction (2026-10-23)

@@ -10,8 +10,12 @@ retries, complete readable publications, and analytics acceptance end to end.
 For the next implementation session, use the **[implementation handoff](docs/session-capture-handoff.md)**:
 it records the current checkout, phased build plan, acceptance gates, and pickup commands.
 
-An **opt-in offline replacement candidate** is implemented under the explicit
-experimental `agent-sessions capture-v1` command prefix. Its current publication,
+An **opt-in replacement candidate** is implemented under the explicit
+experimental `agent-sessions capture-v1` command prefix. The last recorded Mac capture
+installation is qualified-dirty binary `e69fb2ed…`, with staging8766; BC-01 remains on
+`b23712bc762de77e14a4f096d27bf7b603abac1e`. Current service health is unknown. These
+historical experimental installations are not final default cutover or release
+acceptance. Newer checkout/private-candidate changes are undeployed. Its current publication,
 reader and report contracts are **v2**; the command prefix and linked filenames do
 not imply v1 wire compatibility. It includes independent durable capture, autonomous
 retry/discovery, quarantine and progress, explicit Local/SDK R2 backend construction,
@@ -24,17 +28,38 @@ See the [implementation checkpoint](docs/session-capture-implementation.md),
 [phase-3 candidate](docs/session-capture-phase3.md),
 [backend boundary](docs/session-capture-backends.md), and
 [offline evidence](docs/session-capture-offline-evidence.md).
-The 2026-10-24 evidence records passing full development gates: `make check` **622.40s**,
+The historical 2026-10-24 evidence records passing full development gates: `make check` **622.40s**,
 `make test` **460.36s**, all **nine × 30s** fuzz targets (**285.31s** total), all
 **73 analytics tests / 23.744s**, and all **11 actual-process journeys**.
-These are offline results, **not release acceptance or deployment**. Actual native
-agents/hooks, real conditional R2 behavior, representative resource/freshness loads,
-both machines' preserved inventories/policies and installed paths, writer fencing and
-cutover remain separate acceptance work. No default activation has occurred.
+These dated offline results are **not current-checkout release acceptance**. The later
+b237 checkpoint passed415-input gates; newer426/427-input gates and the recorded
+647-input `make check` attempt failed. ROOT analytics383 passed after reviewed outer/
+inner caller cleanup; existing JS checks remain applicable. Subsequent reviewed Go
+fixture changes reject invalid coverage configuration before side effects and add a
+real final-exit error regression; their validation is tracked in the handoff, not
+implied by the earlier383 result. The unsafe-directory fixture is also fixed/reviewed.
+These corrections do **not** resolve the private queue race timeout or establish the
+cause of historical CLI kills. See the handoff's current next action and source-bound
+results before continuing; do not infer that all Go/release gates are green.
 
-The installed/runtime default is still the legacy v3 collector. Its machine-wide
-recovery and historical publication chains are not replacement requirements; existing
-code and safety tests remain until their callers are safely replaced.
+The [current scorecard](docs/session-capture-handoff.md#current-session-checkpoint)
+separates repository code, private staged fixes and source-bound checks. The latest
+V29 library Queue → Local → reader → importer → event index/report component passed
+14 tests with one live-R2 skip; it does not establish installed CLI or autonomous
+reliability. Two later Run deadline failures, three earlier covered attachment/timeline
+failures and the original journey09 remain unresolved. The private V32V2 metadata/
+predispatch corrections are uncompiled, unexecuted and unadopted; no complete current
+full-development or release pass is established. Capture also retains a shared spool
+metadata scan before new snapshots, a known independence/scaling limitation described
+in the [phase-3 reference](docs/session-capture-phase3.md#implemented-capture-and-scheduling).
+
+Unselected CLI/dashboard defaults remain legacy. Managed experimental capture is already
+installed on both hosts; legacy PATH writers were fenced and managed hooks replaced in
+the recorded rollout. The staging consumer remains separate from legacy8765. Installed
+native negatives/restart, full reader-to-analytics acceptance, representative coverage/
+freshness/resources and final cutover remain outstanding—not a request to reinstall or
+repeat completed fencing. Legacy machine-wide recovery and historical publication chains
+are not replacement requirements; preserve working safety coverage until replaced.
 
 The operator accepts retiring the existing R2 archive and rebuilding from sources on
 this Mac and BC-01. That does not authorize incidental deletion of original sessions,

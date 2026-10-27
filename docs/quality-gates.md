@@ -4,15 +4,18 @@
 
 The CI workflow configures development gates on each push and pull request; local `make` targets are listed below. Mutation testing and repeated benchmarks are opt-in diagnostics, not CI gates. Workflow configuration is not evidence that hosted CI ran successfully. The rule behind the settings: **a check is a hard gate only if fixing what it flags always makes the code better.** Bug, safety and error-handling checks pass that test. Size and style metrics don't, because the cheapest way to satisfy them is often an arbitrary split or rename, so they are either off or set high enough to act as backstops.
 
-**Current offline checkpoint (2026-10-24):** The opt-in v2 writer → shared reader →
+**Historical offline checkpoint (2026-10-24):** The opt-in v2 writer → shared reader →
 importer → event index → report journey is implemented and mandatory, not a future
-legacy-only gate. All eleven process journeys pass. Fresh serial pinned-Nix results
-are `make check` **622.40s**, `make test` **460.36s**, nine 30-second fuzz targets
+legacy-only gate. All eleven process journeys passed at that checkpoint. Serial pinned-Nix results
+were `make check` **622.40s**, `make test` **460.36s**, nine 30-second fuzz targets
 **285.31s** overall, and complete analytics discovery **73 tests / 23.744s**.
 See [exact offline evidence](session-capture-offline-evidence.md) for scope, merged
 coverage/CRAP and bounded synthetic resources. This is not actual native/R2,
 installed-path, BC-01, representative-resource or cutover acceptance; defaults
-remain legacy and release gates are unchanged.
+remain legacy and release gates are unchanged. Later source changes and failed gates
+mean these results are not current-checkout certification. The handoff's
+[current scorecard](session-capture-handoff.md#current-session-checkpoint) records open
+autonomous/covered/journey failures, unqualified private fixes and remaining checks.
 
 The research behind these choices (tool versions, the configs of 13 well-regarded Go projects, and each tool's docs) is in the project's `research/collector-language/go-tooling.md`.
 
@@ -24,10 +27,10 @@ The research behind these choices (tool versions, the configs of 13 well-regarde
 | `make fmt` | gofumpt and goimports, through `golangci-lint fmt` |
 | `make lint` | golangci-lint with `.golangci.yml` |
 | `make test` | Actual writer/reader/analytics compatibility gate, then `go test -race -shuffle=on ./...` |
-| `make capture-acceptance` | Build the actual candidate, generate synthetic durable publications, shared-reader export, real Python import/event index/report (offline; pinned analytics environment required) |
+| `make capture-acceptance` | Build the actual candidate; run writer/reader/import/event index/report and refresh process journeys, plus synthetic candidate-R2 and delivery-launcher tests (offline by default; pinned analytics environment required). The live launcher is separately opt-in, not acceptance from an offline pass. |
 | `make cover` | Tests with the race detector, plus end-to-end runs of the built binary, merged into one profile and checked against `.testcoverage.yml` |
 | `make crap` | `make cover`, then the CRAP gate on that profile |
-| `make fuzz` | Each fuzz target for `FUZZTIME` (default 30s) |
+| `make fuzz` | Each explicitly listed `FUZZ_TARGETS` entry for `FUZZTIME` (default 30s) |
 | `make mutation` | Mutation testing with gremlins; `MUTATE_DIFF=origin/main` mutates only the lines changed since that ref. Not part of `make check` |
 | `make bench` | Every benchmark `BENCHCOUNT` times (default 10) into `bench.txt`, for benchstat ([benchmarks.md](benchmarks.md)) |
 | `make bench-smoke` | Every benchmark once, as CI does, so a broken one fails |
@@ -39,6 +42,8 @@ Tools other than golangci-lint are pinned in their own module, `tools/go.mod`, a
 ## Toolchain
 
 The pinned Nix shell supplies Go 1.27 and sets `GOTOOLCHAIN=local`; CI explicitly installs `go1.27.3` from the `go.mod` toolchain line. `go.mod` says `go 1.27.0`: the code uses the `uuid` package and other APIs new in 1.27. Binaries built with Go 1.27 run on macOS 13 or later.
+
+Generated Pi producer-handler tests also require Node's built-in TypeScript stripping. The locked Nix shell supplies Node24.21.0, and the shared CI setup action explicitly selects that version rather than inheriting a host Node. These synthetic tests mock `spawn` and erase type-only imports: they neither import the Pi SDK at runtime nor execute a collector or model. Missing Node/type-stripping support fails the test; it is not skipped. This development-tool dependency does not change installed producer dispatch or install SDK packages.
 
 ## Formatting
 
@@ -85,7 +90,7 @@ gofumpt (stricter gofmt) and goimports, with this module's imports grouped last.
 - **CRAP gate (`make crap`, go-crap):** for each function, `CRAP = complexity² × (1 − coverage)³ + complexity`, from gocyclo's cyclomatic complexity and the coverage `make cover` measured. Any function over 30 fails, the threshold Savoia and Evans set and go-crap and fallow use. A fully tested function scores its complexity, so up to 30 branches pass when tested, while an untested one fails from 6 branches up. This catches what the per-package coverage gate can't: complex code with no tests inside a package that is well covered overall, such as the timer installers before this gate. Functions without coverage data count as untested. go-crap's baseline mode isn't used: it fails on any rise in any function's score, even from 2 to 3, and ignores new functions. A lower threshold would fail fully tested functions over that complexity, which is what gocognit's backstop is for. The fix for a failure is tests for the branches; simplify only where that also reads better.
 - **Mutation testing (`make mutation`, gremlins):** changes each covered line in small ways (a flipped comparison, a negated condition, a dropped `break`) and runs the package's tests; a mutant the tests don't catch is a line no test checks the behaviour of. It runs every mutator, excluding `internal/testenv`. gremlins can't pass `-race` or `-shuffle`, counts a mutant that doesn't compile as caught and doesn't mutate error checks. A full run takes about 20 minutes on 4 cores, so it isn't a gate. It measures coverage per package, so a line only another package's tests reach counts as not covered. A surviving mutant needs a test of the behaviour it changes, or is equivalent (it can't change behaviour), not a test written to kill it.
 - **Simulated sessions (`internal/syncer/simulate_test.go`):** seeded histories of what agents and machines do to session files (appends, half-written lines, rewrites, truncation, deletion, recompression, odd bytes, secrets) between sweeps and hook syncs, some of which fail, lose the bucket's answer or are killed part way. After each sync that completes, every file must rebuild from the bucket both through its manifest and without one, earlier bytes a change replaced must be kept as a version, and no secret may reach the bucket. `go test` plays 8 histories; `-simulations=200` plays more.
-- **Fuzzing:** nine targets cover transcript heads (`internal/adapters`), hook input (`internal/hook`), JSON settings (`internal/jsonx`), zstd round trips (`internal/raw`), secret redaction in config files and text (`internal/scrub`, two targets), capture-policy backup names (`internal/capturepolicy`), shell quoting (`internal/shellwords`) and credential stripping from git remotes (`internal/gitinfo`). Seeds run with every `go test`; CI fuzzes each for 30 seconds and keeps any failing input as a build artifact.
+- **Fuzzing:** `make fuzz` and CI campaign the nine explicit `FUZZ_TARGETS` in `Makefile`: transcript heads (`internal/adapters`), hook input (`internal/hook`), JSON settings (`internal/jsonx`), zstd round trips (`internal/raw`), secret redaction in config files and text (`internal/scrub`, two targets), capture-policy backup names (`internal/capturepolicy`), shell quoting (`internal/shellwords`) and credential stripping from git remotes (`internal/gitinfo`). Each configured campaign defaults to 30 seconds; CI keeps failing input as a build artifact. The source also declares `FuzzEquivalentSecretCopies`, which is not in that timed campaign list. All declared fuzz seeds participate in ordinary Go tests; this is not evidence that every declared target received a timed campaign.
 
 ## CI and releases
 

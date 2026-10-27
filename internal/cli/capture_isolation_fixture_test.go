@@ -25,12 +25,15 @@ func TestCaptureIsolationFixtureProcess(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "owned")
 	for _, stage := range []string{"crash", "repair", "revoke"} {
 		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+		started := time.Now()
 		cmd := isolationCommand(ctx, t, root, stage)
+		setupElapsed := time.Since(started)
 		cmd.Env = append(os.Environ(), "MEMORY_ISOLATION_HELPER=1")
 		output, err := cmd.CombinedOutput()
+		contextErr := ctx.Err()
 		cancel()
 		if err != nil {
-			t.Fatalf("%s: %v\n%s", stage, err, output)
+			t.Fatalf("%s: %v (setup %s, total %s, context %v)\n%s", stage, err, setupElapsed, time.Since(started), contextErr, output)
 		}
 		if stage == "crash" {
 			if err := os.RemoveAll(filepath.Join(root, "sources")); err != nil {
@@ -56,10 +59,12 @@ func TestCaptureIsolationFixtureReturningStages(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "owned")
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
+	started := time.Now()
 	cmd := isolationCommand(ctx, t, root, "crash")
+	setupElapsed := time.Since(started)
 	cmd.Env = append(os.Environ(), "MEMORY_ISOLATION_HELPER=1")
 	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("crash: %v\n%s", err, output)
+		t.Fatalf("crash: %v (setup %s, total %s, context %v)\n%s", err, setupElapsed, time.Since(started), ctx.Err(), output)
 	}
 	if err := os.RemoveAll(filepath.Join(root, "sources")); err != nil {
 		t.Fatal(err)
@@ -102,9 +107,15 @@ func isolationCommand(ctx context.Context, t *testing.T, root, stage string) *ex
 	binary := filepath.Join(t.TempDir(), "agent-sessions")
 	build := exec.CommandContext(ctx, "go", "build", "-race", "-cover", "-covermode=atomic", "-coverpkg=./...", "-o", binary, "./cmd/agent-sessions")
 	build.Dir = "../.."
+	started := time.Now()
 	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build crash fixture: %v\n%s", err, output)
+		t.Fatalf("build crash fixture after %s (context %v): %v\n%s", time.Since(started), ctx.Err(), err, output)
 	}
+	remaining := time.Duration(-1)
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining = time.Until(deadline)
+	}
+	t.Logf("crash fixture build %s, remaining %s, context %v", time.Since(started), remaining, ctx.Err())
 	return exec.CommandContext(ctx, binary, "capture-v1", "isolation-fixture", "--output", root, "--stage", stage)
 }
 
@@ -119,11 +130,49 @@ func TestCaptureIsolationFixtureCoverageFailures(t *testing.T) {
 				}
 			}
 			t.Setenv("E2E_GOCOVERDIR", dir)
-			cmd := isolationCommand(t.Context(), t, filepath.Join(base, "owned"), "crash")
+			fixtureRoot := filepath.Join(base, "owned")
+			cmd := isolationCommand(t.Context(), t, fixtureRoot, "crash")
 			cmd.Env = os.Environ()
 			output, err := cmd.CombinedOutput()
 			if err == nil || !strings.Contains(string(output), "fixture coverage metadata:") {
 				t.Fatalf("expected checked coverage failure, got %v: %s", err, output)
+			}
+			if _, err := os.Lstat(fixtureRoot); !os.IsNotExist(err) {
+				t.Fatalf("coverage failure must precede fixture side effects: Lstat = %v", err)
+			}
+		})
+	}
+}
+
+// This test-binary child exercises the real final exit boundary directly, not
+// command coverage initialization (which the actual-command journeys prove).
+// A failed final flush must return its diagnostic rather than exit successfully.
+func TestCaptureIsolationFixtureFinalCoverageFailure(t *testing.T) {
+	if os.Getenv("MEMORY_ISOLATION_EXIT_HELPER") == "1" {
+		if err := isolationExit(); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	for _, kind := range []string{"missing", "not-directory"} {
+		t.Run(kind, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "coverage")
+			if kind == "not-directory" {
+				if err := os.WriteFile(dir, []byte("not a directory"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			args := []string{"-test.run=^TestCaptureIsolationFixtureFinalCoverageFailure$"}
+			// Keep M.Run's actual subprocess coverage in the gate-owned valid
+			// directory, independent of the intentionally bad fixture setting.
+			if coverDir := os.Getenv("E2E_GOCOVERDIR"); coverDir != "" {
+				args = append(args, "-test.gocoverdir="+coverDir)
+			}
+			cmd := exec.CommandContext(t.Context(), os.Args[0], args...)
+			cmd.Env = append(os.Environ(), "MEMORY_ISOLATION_EXIT_HELPER=1", "E2E_GOCOVERDIR="+dir)
+			output, err := cmd.CombinedOutput()
+			if err == nil || !strings.Contains(string(output), "fixture coverage metadata:") {
+				t.Fatalf("expected checked final coverage failure, got %v: %s", err, output)
 			}
 		})
 	}

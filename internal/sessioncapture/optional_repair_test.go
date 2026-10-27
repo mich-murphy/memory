@@ -100,6 +100,8 @@ func TestOptionalNetworkStallDoesNotLockRawAcceptanceOrClaims(t *testing.T) {
 			go func() { done <- q.Deliver(t.Context(), backend, r.Identity) }()
 			select {
 			case <-backend.entered:
+			case err := <-done:
+				t.Fatalf("optional delivery returned before %s boundary: %v", stage, err)
 			case <-time.After(2 * time.Second):
 				t.Fatal("optional operation never started")
 			}
