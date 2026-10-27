@@ -50,6 +50,11 @@ func (q *Queue) InitRuntime(ctx context.Context) error {
 			return err
 		}
 	}
+	for _, c := range [][2]string{{"step_errors", "INTEGER NOT NULL DEFAULT 0"}, {"last_step_error", "TEXT NOT NULL DEFAULT ''"}, {"last_step_error_at", "INTEGER NOT NULL DEFAULT 0"}} {
+		if err := q.addColumnIfMissing(ctx, "runtime_destination", c[0], c[1]); err != nil {
+			return err
+		}
+	}
 	if err := q.initRuntimeSoftwareVersion(ctx); err != nil {
 		return err
 	}
@@ -193,8 +198,14 @@ func (q *Queue) claimSource(ctx context.Context) (sourceWork, error) {
 	return w, err
 }
 
-func (q *Queue) captureNext(ctx context.Context, o RuntimeOptions) (bool, error) {
+func (q *Queue) captureNext(ctx context.Context, o RuntimeOptions) (did bool, resultErr error) {
 	w, err := q.claimSource(ctx)
+	defer func() {
+		// A failed or timed-out step must not strand its claim.
+		if resultErr != nil {
+			q.releaseSourceClaim(ctx, w)
+		}
+	}()
 	if err != nil || w.id == 0 {
 		return false, err
 	}
@@ -327,6 +338,14 @@ func (q *Queue) deliveryNext(ctx context.Context, b publication.Backend, o Runti
 
 func (q *Queue) deliveryLaneNext(ctx context.Context, b publication.Backend, o RuntimeOptions, optional bool) (bool, error) {
 	id, identity, err := q.claimSession(ctx)
+	released := false
+	if id != 0 {
+		defer func() {
+			if !released {
+				q.releaseSessionClaim(ctx, id)
+			}
+		}()
+	}
 	if err != nil || id == 0 {
 		return false, err
 	}
@@ -335,6 +354,7 @@ func (q *Queue) deliveryLaneNext(ctx context.Context, b publication.Backend, o R
 	if _, err = q.db.ExecContext(ctx, "UPDATE runtime_sessions SET claim=0 WHERE id=?", id); err != nil {
 		return false, err
 	}
+	released = true
 	head, err := q.optionalDeliveryHead(ctx, identity)
 	if err != nil {
 		return false, err
@@ -390,7 +410,12 @@ func (q *Queue) quarantineMalformedJob(ctx context.Context, session string, seq 
 // Additive upgrade of this experimental runtime table. Never replace or clear
 // the authoritative queue to install a diagnostic field.
 func (q *Queue) initRuntimeSoftwareVersion(ctx context.Context) error {
-	rows, err := q.db.QueryContext(ctx, "PRAGMA table_info(runtime_quarantine)")
+	return q.addColumnIfMissing(ctx, "runtime_quarantine", "software_version", "TEXT NOT NULL DEFAULT 'unknown/devel'")
+}
+
+// addColumnIfMissing takes only constant table/column/declaration strings.
+func (q *Queue) addColumnIfMissing(ctx context.Context, table, column, decl string) error {
+	rows, err := q.db.QueryContext(ctx, "PRAGMA table_info("+table+")")
 	if err != nil {
 		return err
 	}
@@ -403,7 +428,7 @@ func (q *Queue) initRuntimeSoftwareVersion(ctx context.Context) error {
 		if err = rows.Scan(&cid, &name, &kind, &notnull, &defaultValue, &pk); err != nil {
 			break
 		}
-		if name == "software_version" {
+		if name == column {
 			found = true
 		}
 	}
@@ -411,6 +436,6 @@ func (q *Queue) initRuntimeSoftwareVersion(ctx context.Context) error {
 	if err != nil || found {
 		return err
 	}
-	_, err = q.db.ExecContext(ctx, "ALTER TABLE runtime_quarantine ADD COLUMN software_version TEXT NOT NULL DEFAULT 'unknown/devel'")
+	_, err = q.db.ExecContext(ctx, "ALTER TABLE "+table+" ADD COLUMN "+column+" "+decl)
 	return err
 }

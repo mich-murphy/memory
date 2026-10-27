@@ -20,12 +20,20 @@ import (
 func runtimeFatalCause(cause error) error {
 	var path *os.PathError
 	var link *os.LinkError
-	var db *sqlite.Error
 	if errors.Is(cause, publication.ErrDurability) || errors.Is(cause, context.Canceled) ||
-		errors.As(cause, &path) || errors.As(cause, &link) || errors.As(cause, &db) ||
+		errors.As(cause, &path) || errors.As(cause, &link) || fatalSQLite(cause) ||
 		errors.Is(cause, sql.ErrConnDone) || errors.Is(cause, sql.ErrTxDone) || errors.Is(cause, driver.ErrBadConn) ||
 		errors.Is(cause, syscall.EIO) || errors.Is(cause, syscall.ENOSPC) || errors.Is(cause, syscall.EROFS) {
 		return cause
 	}
 	return nil
+}
+
+// fatalSQLite is true when any leaf is a sqlite error other than SQLITE_INTERRUPT,
+// which only reports that an expired operation context cancelled a running query.
+func fatalSQLite(cause error) bool {
+	return !leavesAre(cause, func(leaf error) bool {
+		var se *sqlite.Error
+		return !errors.As(leaf, &se) || se.Code()&0xff == 9
+	})
 }

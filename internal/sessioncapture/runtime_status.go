@@ -38,6 +38,10 @@ type RuntimeStatus struct {
 	// Discovery and enrichment remain partial; a successful timer is not proof of
 	// complete source inventory. Published timestamps remain independent of capture.
 	Coverage string
+	// Swallowed (retried) work-step errors since the store was created. A rising
+	// count with a stale CompletedAtNS indicates a persistent stall.
+	StepErrors, LastStepErrorAtNS int64
+	LastStepError                 string
 }
 type QuarantineEntry struct {
 	ID              int64
@@ -96,7 +100,7 @@ func (q *Queue) RuntimeStatus(ctx context.Context) (RuntimeStatus, error) {
 	if err := q.db.QueryRowContext(ctx, `SELECT pending,rejected,truncated,scanned_at FROM runtime_discovery_wakes WHERE id=1`).Scan(&s.PendingDiscoveryHints, &s.RejectedDiscoveryHints, &s.DiscoveryHintsTruncated, &s.DiscoveryHintsScannedAtNS); err != nil {
 		return s, err
 	}
-	err := q.db.QueryRowContext(ctx, `SELECT paused,reason,paused_at,discovery_error,discovered_at FROM runtime_destination WHERE id=1`).Scan(&s.Paused, &s.PausedReason, &s.PausedAtNS, &s.DiscoveryError, &s.DiscoveredAtNS)
+	err := q.db.QueryRowContext(ctx, `SELECT paused,reason,paused_at,discovery_error,discovered_at,step_errors,last_step_error,last_step_error_at FROM runtime_destination WHERE id=1`).Scan(&s.Paused, &s.PausedReason, &s.PausedAtNS, &s.DiscoveryError, &s.DiscoveredAtNS, &s.StepErrors, &s.LastStepError, &s.LastStepErrorAtNS)
 	if err != nil {
 		return s, err
 	}

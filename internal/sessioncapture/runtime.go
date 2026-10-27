@@ -176,27 +176,27 @@ func (q *Queue) Run(ctx context.Context, b publication.Backend, options RuntimeO
 	}
 	for range o.CaptureWorkers {
 		launch(func(ctx context.Context) error {
-			return q.runtimeWorker(ctx, o, func(c context.Context) (bool, error) { return q.captureNext(c, o) })
+			return q.runtimeWorkerNamed(ctx, "capture", o, func(c context.Context) (bool, error) { return q.captureNext(c, o) })
 		})
 	}
 	for range o.DeliveryWorkers {
 		launch(func(ctx context.Context) error {
-			return q.runtimeWorker(ctx, o, func(c context.Context) (bool, error) { return q.deliveryNext(c, b, o) })
+			return q.runtimeWorkerNamed(ctx, "delivery", o, func(c context.Context) (bool, error) { return q.deliveryNext(c, b, o) })
 		})
 	}
 	// Exactly one additional worker owns optional publication network work.
 	// Raw DeliveryWorkers never spend their budgets on selected optional objects.
 	launch(func(ctx context.Context) error {
-		return q.runtimeWorker(ctx, o, func(c context.Context) (bool, error) { return q.deliveryLaneNext(c, b, o, true) })
+		return q.runtimeWorkerNamed(ctx, "optional-delivery", o, func(c context.Context) (bool, error) { return q.deliveryLaneNext(c, b, o, true) })
 	})
 	launch(q.inboxLoop)
 	launch(func(ctx context.Context) error {
-		return q.runtimeWorker(ctx, o, func(c context.Context) (bool, error) { return q.optionalRepairNext(c, b, o) })
+		return q.runtimeWorkerNamed(ctx, "optional-repair", o, func(c context.Context) (bool, error) { return q.optionalRepairNext(c, b, o) })
 	})
 	if q.opts.EnableEnrichment {
 		launch(q.nativeInboxLoop)
 		launch(func(ctx context.Context) error {
-			return q.runtimeWorker(ctx, o, func(c context.Context) (bool, error) { return q.enrichmentNext(c, o) })
+			return q.runtimeWorkerNamed(ctx, "enrichment", o, func(c context.Context) (bool, error) { return q.enrichmentNext(c, o) })
 		})
 	}
 	if o.Discover != nil || o.DiscoverBatch != nil {
@@ -213,14 +213,25 @@ func (q *Queue) Run(ctx context.Context, b publication.Backend, options RuntimeO
 }
 
 func (q *Queue) runtimeWorker(ctx context.Context, o RuntimeOptions, work func(context.Context) (bool, error)) error {
+	return q.runtimeWorkerNamed(ctx, "worker", o, work)
+}
+
+// runtimeWorkerNamed skips a step that failed only with an operation deadline or
+// SQLITE_BUSY (logged, counted, retried next turn); every other error still stops Run.
+func (q *Queue) runtimeWorkerNamed(ctx context.Context, name string, o RuntimeOptions, work func(context.Context) (bool, error)) error {
 	timer := time.NewTicker(min(o.PollInterval, 100*time.Millisecond))
 	defer timer.Stop()
 	for ctx.Err() == nil {
 		op, cancel := context.WithTimeout(ctx, o.OperationTimeout)
 		did, err := work(op)
+		opExpired := errors.Is(op.Err(), context.DeadlineExceeded)
 		cancel()
 		if err != nil {
-			return runtimeStopError(ctx, err)
+			if !transientStepError(ctx, opExpired, err) {
+				return runtimeStopError(ctx, err)
+			}
+			q.noteStepError(ctx, name, err)
+			did = false
 		}
 		if !did {
 			select {
@@ -238,7 +249,10 @@ func (q *Queue) discoverLoop(ctx context.Context, o RuntimeOptions) error {
 	defer timer.Stop()
 	for {
 		if err := q.discoverOnce(ctx, o); err != nil {
-			return err
+			if !transientStepError(ctx, false, err) {
+				return err
+			}
+			q.noteStepError(ctx, "discovery", err)
 		}
 		if ctx.Err() != nil {
 			return nil
@@ -262,25 +276,9 @@ func runtimeStopError(ctx context.Context, err error) error {
 }
 
 func pureCancellation(err, canceled error) bool {
-	if err == nil {
-		return false
-	}
-	if joined, ok := err.(interface{ Unwrap() []error }); ok {
-		children := joined.Unwrap()
-		if len(children) == 0 {
-			return false
-		}
-		for _, child := range children {
-			if !pureCancellation(child, canceled) {
-				return false
-			}
-		}
-		return true
-	}
-	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
-		return pureCancellation(wrapped.Unwrap(), canceled)
-	}
-	return err == canceled //nolint:errorlint // Leaves must equal the caller sentinel; custom Is must not hide other failures.
+	return err != nil && leavesAre(err, func(leaf error) bool {
+		return leaf == canceled //nolint:errorlint // Leaves must equal the caller sentinel; custom Is must not hide other failures.
+	})
 }
 
 // runtimeBuildVersion reports only metadata actually embedded by the Go builder.

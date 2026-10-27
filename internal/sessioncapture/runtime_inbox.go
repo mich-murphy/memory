@@ -215,10 +215,16 @@ func (q *Queue) inboxLoop(ctx context.Context) error {
 	defer timer.Stop()
 	for {
 		if err := q.drainHints(ctx); err != nil {
-			return runtimeStopError(ctx, err)
+			if !transientStepError(ctx, false, err) {
+				return runtimeStopError(ctx, err)
+			}
+			q.noteStepError(ctx, "inbox", err)
 		}
 		if err := q.pollDiscoveryHints(ctx); err != nil {
-			return runtimeStopError(ctx, err)
+			if !transientStepError(ctx, false, err) {
+				return runtimeStopError(ctx, err)
+			}
+			q.noteStepError(ctx, "inbox", err)
 		}
 		select {
 		case <-ctx.Done():

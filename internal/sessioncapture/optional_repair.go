@@ -160,6 +160,8 @@ func (q *Queue) optionalRepairNext(ctx context.Context, b publication.Backend, o
 		if _, err := q.db.ExecContext(ctx, `UPDATE optional_repairs SET state='working',attempts=attempts+1 WHERE id=?`, id); err != nil {
 			return true, err
 		}
+		// No-op once a terminal state was saved; frees 'working' after a failed save.
+		defer q.releaseOptionalRepair(ctx, id)
 		err = q.repairOptionalObject(ctx, b, s, e)
 	}
 	save, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.OperationTimeout)

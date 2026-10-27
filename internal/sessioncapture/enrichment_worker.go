@@ -36,6 +36,7 @@ func (q *Queue) enrichmentNext(ctx context.Context, o RuntimeOptions) (bool, err
 	if _, err := q.db.ExecContext(ctx, `UPDATE enrichment_work SET state='working',attempts=attempts+1,software=? WHERE id=?`, o.SoftwareVersion, id); err != nil {
 		return true, err
 	}
+	defer q.releaseEnrichment(ctx, id)
 	var result enrichmentResult
 	if len(saved) > 0 {
 		result, err = q.loadEnrichmentResult(ctx, string(saved))
