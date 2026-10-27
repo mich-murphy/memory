@@ -384,9 +384,25 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   pre-W13 churn (19.6k rows every sweep), so it is recorded for measurement after the backlog
   drains, not fixed speculatively.
 
+- **W17 `79eef7d`, accepted (`sqlite-backup` clean-closed WAL).** Reproduced with a synthetic
+  fixture: a WAL-mode DB closed cleanly (header 2/2, no sidecars) made `BackupSQLiteAuthorized`
+  fail with `unable to open database file (14)` (`SQLITE_CANTOPEN`). The failure is
+  unclassified, so it counts as `transient` and ends in quarantine. Fix: `backupSQLitePinned`
+  adds `immutable=1` only when no `main.db-wal` is pinned. The pinned main file is then the
+  complete committed state. The WAL-present URI is unchanged, because `immutable` would drop
+  WAL rows. Guards kept: journal rejection, `authorizeSQLitePair`, pins, `checkSQLitePair`
+  before backup, after backup with a rehash, and at the end (including `checkSQLiteAbsence` /
+  "WAL appeared"), and the read-only VFS. Tests: `TestAuthorizedSQLiteCleanClosedWALBacksUp`
+  checks rows, an unmodified source and no sidecars created.
+  `TestDerivedSQLiteAuthorizedCleanClosedWALCaptures` goes capture → deliver → export → row
+  count. Both passed ×20. Existing tests unmodified; lint 0; `-race` on
+  adapters/sessioncapture/capturesource and capture-acceptance passed. Classification of
+  opaque SQLite format errors is unchanged; this remains a follow-up risk (there is no
+  deterministic sentinel). Not yet installed.
+
 ### Next action
 
-W17 fixes the `sqlite-backup` clean-closed WAL capture. After acceptance, run the aggregate
-gates as the only gate (with `ANALYTICS_PYTHON` passed explicitly), install on the Mac, and
-replay the quarantined source. Meanwhile the parent monitors the backlog drain, steady-state
-CPU and the `usage()` scan cost once the backlog clears.
+W18 (sole verifier) runs the aggregate gates on the W17 merge, with `ANALYTICS_PYTHON` passed
+explicitly. If green, the parent installs it on the Mac, replays the quarantined
+`sqlite-backup` source and keeps monitoring the backlog drain, steady-state CPU and the
+`usage()` scan cost.
