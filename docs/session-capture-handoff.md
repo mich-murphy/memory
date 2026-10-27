@@ -182,7 +182,24 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   `make lint` 0, capture-acceptance ok. One load-sensitive failure
   (`TestVerifiedOptionalRepairRestartAutonomouslyAttachesLatest`) passed when rerun alone 3×.
 
+- **W7 Step 3 gates on `b94bf24` (verifier; load ≈9–13 including the installed service).**
+  Sub-gates each pass: fmt, lint 0, fix, tidy, deadcode, vuln (no vulns), bench-smoke,
+  actionlint, `crap` (cover 87.0%, 0/10 over CRAP 30), capture-acceptance, analytics 97/97,
+  `.mjs` 8/8, fuzz 9/9. Aggregate `make check` (cover step) and `make test` both failed on
+  only `TestRuntimeNetworkRetryWaitsForNewestRawACK` (`runtime_fatal_test.go:253`,
+  5s `priorDeadline` for the withheld raw ACK after a 1s optional operation expiry).
+  Alone: 5 of 6 passes, 6.4–10.8s. **Parent disposition:** this is not accepted as noise. It
+  has failed in every full-suite run (W3, W7 ×2), and the deadline may not be relaxed.
+  W8 must determine what consumes the window (product retry/backoff latency or test
+  scheduling) and fix the cause.
+
 ### Next action
+
+W7 `3a2a465a-c947-415` dispatched (worktree `step3-gates` at `b94bf24`, read-only, sole
+worker). Merged worker worktrees/branches removed. Background load note: the installed
+experimental Mac service (`~/.local/libexec/agent-sessions-capture/agent-sessions.bin
+capture-v1 run`, pre-fix binary) was observed at ≈300% CPU for 40+ minutes. It was not
+stopped or queried. This is a Step 4 resource finding to explain with the fixed binary.
 
 Parent: Step 3. Run the full gates (`make check`, `make test`, `make fuzz`, the analytics suite) on
 `main` on a quiet machine (no other workers), then disposition any remaining load-sensitive
