@@ -88,6 +88,9 @@ func classifyExternal(ctx context.Context, opts Options, policy *capturepolicy.P
 		return sessioncapture.Request{}, code
 	}
 	q := emitRequest(opts, root, sf, path, observed, transform)
+	if transform == "" {
+		q.Fingerprint = statFingerprint(info)
+	}
 	q.Identity.SessionID = session
 	q.Associations = append(q.Associations, "owner-uuid:"+uuid)
 	return q, ""

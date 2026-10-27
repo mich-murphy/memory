@@ -124,7 +124,14 @@ func classifyInfo(ctx context.Context, opts Options, policy *capturepolicy.Polic
 	if !allowed(ctx, opts, policy, root, path) {
 		return sessioncapture.Request{}, "policy_denied"
 	}
-	return emitRequest(opts, root, sf, path, observed, transform), ""
+	req := emitRequest(opts, root, sf, path, observed, transform)
+	// Only a plain file whose bytes are fully described by its own stat may be
+	// skipped as unchanged. Transformed/prepared sources (SQLite backup with WAL
+	// inputs, scrubbed config, decoded compression) never get a fingerprint.
+	if transform == "" {
+		req.Fingerprint = statFingerprint(info)
+	}
+	return req, ""
 }
 
 func emitRequest(opts Options, root Root, sf adapters.SessionFile, path string, observed int64, transform string) sessioncapture.Request {

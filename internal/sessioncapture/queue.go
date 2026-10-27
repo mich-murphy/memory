@@ -79,6 +79,10 @@ type Request struct {
 	Transform            string   `json:",omitempty"`
 	ObservedAtNS         int64
 	Associations         []string
+	// Fingerprint is a discovery-only cheap observation digest of the source's
+	// stat identity. It is never persisted in request/evidence/manifest JSON; the
+	// queue stores a digest of it plus the normalized request. Empty = unknown.
+	Fingerprint string `json:"-"`
 }
 type Status struct {
 	Identity             publication.Identity

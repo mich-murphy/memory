@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func fixture(t *testing.T, path, body string) string {
@@ -224,5 +225,68 @@ func TestClaudeExternalArtifactsHonest(t *testing.T) {
 	r := discover(t, o)
 	if !hasCode(r, "ownership_integration_required") || len(r.Requests) != 0 {
 		t.Fatal(r)
+	}
+}
+
+func fingerprintOf(t *testing.T, o Options, path string) string {
+	t.Helper()
+	requests := discover(t, o).Requests
+	for i := range requests {
+		if requests[i].Path == path {
+			return requests[i].Fingerprint
+		}
+	}
+	t.Fatalf("not discovered: %s", path)
+	return ""
+}
+
+func TestDiscoveryFingerprintTracksStatNotSweepTime(t *testing.T) {
+	o := options(t)
+	p := fixture(t, filepath.Join(o.Home, ".pi", "agent", "sessions", "--project--", "session.jsonl"), "aaaa\n")
+	first := fingerprintOf(t, o, p)
+	if first == "" || fingerprintOf(t, o, p) != first {
+		t.Fatal("unchanged file must keep a stable non-empty fingerprint")
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Same-size rewrite with restored mtime still changes ctime (and may change ino).
+	time.Sleep(20 * time.Millisecond)
+	if err := os.WriteFile(p, []byte("bbbb\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(p, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	second := fingerprintOf(t, o, p)
+	if second == first {
+		t.Fatal("same-size rewrite with restored mtime must change fingerprint")
+	}
+	if err := os.WriteFile(p, []byte("bbbb\nmore\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if fingerprintOf(t, o, p) == second {
+		t.Fatal("append must change fingerprint")
+	}
+}
+
+func TestDiscoveryTransformedSourcesHaveNoFingerprint(t *testing.T) {
+	o := options(t)
+	o.Derived = true
+	root := filepath.Join(o.Home, ".codex")
+	fixture(t, filepath.Join(root, "state.sqlite"), "SQLite format 3\x00")
+	r := discover(t, o)
+	var seen bool
+	for _, q := range r.Requests {
+		if q.Transform != "" {
+			seen = true
+			if q.Fingerprint != "" {
+				t.Fatalf("transform %q must not carry a fingerprint", q.Transform)
+			}
+		}
+	}
+	if !seen {
+		t.Skip("no transformed request emitted in this fixture")
 	}
 }

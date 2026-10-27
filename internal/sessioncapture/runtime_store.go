@@ -100,21 +100,48 @@ func (q *Queue) Hint(ctx context.Context, req Request) error {
 	if len(body) > publication.MaxMetadata {
 		return ErrQuota
 	}
-	result, err := q.db.ExecContext(ctx, `INSERT INTO runtime_sources(session,source,request,observed_at) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_sources WHERE session=? AND source=?) OR (SELECT COUNT(*) FROM runtime_sources)<? ON CONFLICT(session,source) DO UPDATE SET request=excluded.request,version=version+1,observed_at=excluded.observed_at,observed_state='present',state=CASE WHEN state='captured' OR state='absent' THEN 'pending' ELSE state END`, req.Identity.BaseKey(), req.SourceID, body, req.ObservedAtNS, req.Identity.BaseKey(), req.SourceID, q.opts.MaxInventoryRecords)
+	fingerprint, err := hintFingerprint(req)
+	if err != nil {
+		return err
+	}
+	// A matching non-empty fingerprint on a present source makes the upsert a no-op
+	// (no version bump, state reset or row write; RowsAffected is 0).
+	result, err := q.db.ExecContext(ctx, `INSERT INTO runtime_sources(session,source,request,observed_at,fingerprint) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_sources WHERE session=? AND source=?) OR (SELECT COUNT(*) FROM runtime_sources)<? ON CONFLICT(session,source) DO UPDATE SET request=excluded.request,version=version+1,observed_at=excluded.observed_at,fingerprint=excluded.fingerprint,observed_state='present',state=CASE WHEN state='captured' OR state='absent' THEN 'pending' ELSE state END WHERE excluded.fingerprint='' OR runtime_sources.fingerprint!=excluded.fingerprint OR runtime_sources.observed_state!='present'`, req.Identity.BaseKey(), req.SourceID, body, req.ObservedAtNS, fingerprint, req.Identity.BaseKey(), req.SourceID, q.opts.MaxInventoryRecords)
 	if err != nil {
 		return err
 	}
 	n, err := result.RowsAffected()
-	if err == nil && n == 0 {
-		return ErrQuota
-	}
 	if err != nil {
 		return err
+	}
+	if n == 0 {
+		// Either an unchanged existing row (fine) or the inventory cap refused a new one.
+		var exists int
+		if err := q.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_sources WHERE session=? AND source=?`, req.Identity.BaseKey(), req.SourceID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			return ErrQuota
+		}
 	}
 	// Ownership enrichment follows raw metadata admission, never under a source
 	// lock or the admission statement. Its bounded ambiguity/capacity must not
 	// block safe raw capture; unknown store/integrity failures remain visible.
 	return q.recordHintOwnership(ctx, req)
+}
+
+// hintFingerprint binds the discovery stat digest to the normalized request
+// (every field except the sweep-time ObservedAtNS). Empty stays empty.
+func hintFingerprint(req Request) (string, error) {
+	if req.Fingerprint == "" {
+		return "", nil
+	}
+	req.ObservedAtNS = 0
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+	return digest(append([]byte(req.Fingerprint+"\x00"), body...)), nil
 }
 
 func (q *Queue) recordHintOwnership(ctx context.Context, req Request) error {
@@ -410,6 +437,9 @@ func (q *Queue) quarantineMalformedJob(ctx context.Context, session string, seq 
 // Additive upgrade of this experimental runtime table. Never replace or clear
 // the authoritative queue to install a diagnostic field.
 func (q *Queue) initRuntimeSoftwareVersion(ctx context.Context) error {
+	if err := q.addColumnIfMissing(ctx, "runtime_sources", "fingerprint", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	return q.addColumnIfMissing(ctx, "runtime_quarantine", "software_version", "TEXT NOT NULL DEFAULT 'unknown/devel'")
 }
 
