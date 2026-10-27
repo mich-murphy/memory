@@ -243,7 +243,18 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   15s kill is not fully explained beyond this 1s race. The next aggregate `make test` is
   the check.
 
+- **Step 2 CLI cleanup `a3bde3e` (parent, right-sized).** Caller audit: the capture-acceptance
+  journeys (`tools/analytics/test_capture_journey.py`) run `fixture --backend sdk-fixture` and
+  `isolation-fixture` through the real binary. Moving them into test helpers would need a
+  second test binary, which adds complexity, so they stay as unlisted harness commands.
+  The `*-status`/`*-replay`/`current-heads`/`publication-status` commands are the contract's
+  quarantine/replay and analytics consumer surface, so they are kept. The usage text now lists
+  the real operator set (it had omitted the `optional-*` commands) and leaves the fixtures
+  out. Breaking the legacy import edges (`launch`, `snapshot`, `hook`) moves to the Step 5
+  legacy removal. `cli` race shuffle ok 33s, lint 0.
+
 ### Next action
 
-Parent: Step 2 operator-CLI cleanup (diagnostic/fixture subcommands) via W12, then one
-aggregate gate run (`make check`, `make test`, fuzz, analytics) on the resulting commit.
+Parent: W12 runs one aggregate gate pass (`make check`, `make test`, fuzz, analytics) on
+`a3bde3e` (+ this brief commit). If green, Step 3 is closed and Step 4 (installed Mac
+acceptance with the fixed binary) begins.
