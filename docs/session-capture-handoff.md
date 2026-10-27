@@ -208,14 +208,20 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   that the latch-saving `WithoutCancel` path was written for. Live-context deadlines,
   cancellation, durability/fatal trees and destination failures stay non-isolated.
 
+- **W9 `c3fd555`/`78d3f15` (accepted, parent-reviewed diff).** `isolateOptionalFailure`
+  now isolates a deadline only via `genuineOptionalExpiry`: an optional
+  `SourceDependencyError`, deadline-only leaves (existing `leavesAre`), and an expired
+  operation context. Exclusion, fatal/durability, cancellation and destination checks
+  still run first. `TestOptionalIsolationRejectsFatalErrorTrees` is unchanged, and the new
+  `TestOptionalIsolationAcceptsGenuineOperationExpiry` covers the positive and negative
+  cases for each stage. Withholding persists the latch and supersedes with a latest-state
+  raw view, and never keeps or ACKs the old optional job, which matches the enrichment
+  contract's genuine-expiry clause. Evidence (load ≈9–11):
+  `TestRuntimeNetworkRetryWaitsForNewestRawACK` passed `-race -count=20` 0 failures ×2;
+  `KeepsRawAlive` passed count=10 ×2; full `sessioncapture` passed `-race -shuffle=on` ×4;
+  `cli` ok; vet clean; lint 0; capture-acceptance ok.
+
 ### Next action
 
-W7 `3a2a465a-c947-415` dispatched (worktree `step3-gates` at `b94bf24`, read-only, sole
-worker). Merged worker worktrees/branches removed. Background load note: the installed
-experimental Mac service (`~/.local/libexec/agent-sessions-capture/agent-sessions.bin
-capture-v1 run`, pre-fix binary) was observed at ≈300% CPU for 40+ minutes. It was not
-stopped or queried. This is a Step 4 resource finding to explain with the fixed binary.
-
-Parent: Step 3. Run the full gates (`make check`, `make test`, `make fuzz`, the analytics suite) on
-`main` on a quiet machine (no other workers), then disposition any remaining load-sensitive
-5s-deadline tests based on evidence.
+Parent: rerun the Step 3 aggregate gates (`make check`, `make test`) on `main` via W10, then
+finish the remaining Step 2 operator-CLI cleanup (diagnostic/fixture subcommands).
