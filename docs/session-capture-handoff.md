@@ -261,8 +261,25 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   profile. `TestCaptureIsolationFixtureProcess` elapsed time is not logged without `-v`.
   Not run: live R2, installed-path, BC-01 and cutover acceptance (Step 4–5).
 
+- **Step 4 pre-install finding (parent, read-only, 2026-10-28).** Installed Mac service:
+  binary `b23712bc` (`vcs.modified=true`), launchd `KeepAlive`, `poll_seconds` 10,
+  `operation_seconds` 60, 2 capture / 2 delivery workers. stderr has 759 lines, all
+  `context deadline exceeded` (the Run-fatal bug fixed in `1706c00`/`ef727a9`). The current
+  process (up 3h+) is not crash-looping; it runs at ≈295% CPU. `sample` (stacks only) shows
+  `lstat`/`stat`/`getdirentries`/`read`, under `captureNext → capture →
+  validateUnchangedManifest → usage()` (the full scan of 17,195 payload files) plus a full
+  re-read/hash of the source. Spool counts: 19,629 runtime sources, 20,104 jobs (14,272
+  pending, 4,789 published, 15 quarantined). In 60s about 1,300 sources went `captured` →
+  `pending` while the job count stayed at 20,104. **Defect (present on `main`):** every
+  discovery sweep calls `Hint` for every source, and its UPSERT (`runtime_store.go:103`)
+  always does `version=version+1` and sets `captured`→`pending`. So all unchanged sources are
+  re-read and re-hashed every sweep, and a capture in progress is reset to `pending` when the
+  version moves under it. Installing `main` unchanged would not fix this, so Step 4 is
+  blocked on it. W13 fixes it. The per-capture `usage()` scan stays (a fail-closed integrity
+  sweep) and is re-measured after the churn fix.
+
 ### Next action
 
-Parent: Step 4. Prepare installed Mac acceptance with a binary built from `main`. Follow the
-documented controlled-acceptance install procedure; do not improvise host changes. Explain the
-installed pre-fix service's ≈300% CPU with the fixed binary's `status`/`step_errors`.
+W13 fixes discovery re-hint churn (an unchanged observation must not bump the source
+version). Then: build from `main`, back up `queue.sqlite`, swap the installed binary, and
+measure CPU, `step_errors`, backlog drain and freshness.
