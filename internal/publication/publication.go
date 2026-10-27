@@ -70,7 +70,7 @@ func readMetadata(ctx context.Context, b Backend, key string) ([]byte, error) {
 		return nil, err
 	}
 	if len(data) > MaxMetadata {
-		return nil, errors.New("metadata exceeds limit")
+		return nil, invalidMetadata{errors.New("metadata exceeds limit")}
 	}
 	return data, nil
 }
@@ -92,9 +92,12 @@ func ReadArchive(ctx context.Context, b Backend) (Archive, error) {
 		return a, err
 	}
 	if err := decode(data, &a); err != nil {
-		return a, err
+		return a, invalidMetadata{err}
 	}
-	return a, archiveValid(a)
+	if err := archiveValid(a); err != nil {
+		return a, invalidMetadata{err}
+	}
+	return a, nil
 }
 
 func WriteArchive(ctx context.Context, b Backend, a Archive) error {

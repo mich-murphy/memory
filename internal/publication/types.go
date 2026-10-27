@@ -23,7 +23,15 @@ var (
 	ErrDestinationPaused = errors.New("publication destination paused")
 	ErrConflict          = errors.New("publication conflict")
 	ErrNotFound          = errors.New("publication object not found")
+	// ErrInvalidMetadata marks a document that was read in full but is oversized,
+	// malformed or unsupported. It never marks a transport or read failure.
+	ErrInvalidMetadata = errors.New("publication metadata invalid")
 )
+
+type invalidMetadata struct{ error }
+
+func (e invalidMetadata) Unwrap() error      { return e.error }
+func (invalidMetadata) Is(target error) bool { return target == ErrInvalidMetadata }
 
 type Backend interface {
 	Open(context.Context, string) (io.ReadCloser, error)

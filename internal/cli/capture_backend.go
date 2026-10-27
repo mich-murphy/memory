@@ -63,41 +63,60 @@ func destinationError(err error) error {
 	return err
 }
 
-func (b *captureDestinationBackend) get(ctx context.Context, key string) (publication.Backend, error) {
+func (b *captureDestinationBackend) open(ctx context.Context) (publication.Backend, error) {
 	b.mu.Lock()
-	backend, bound := b.backend, b.bound
+	backend := b.backend
 	b.mu.Unlock()
-	if backend == nil {
-		var err error
-		backend, err = capturebackend.Open(ctx, b.spec, b.dependencies)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return nil, err
-			}
-			return nil, errors.Join(sessioncapture.ErrDestination, err)
-		}
-		b.mu.Lock()
-		if b.backend == nil {
-			b.backend = backend
-		} else {
-			backend = b.backend
-		}
-		b.mu.Unlock()
+	if backend != nil {
+		return backend, nil
 	}
+	backend, err := capturebackend.Open(ctx, b.spec, b.dependencies)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		return nil, errors.Join(sessioncapture.ErrDestination, err)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.backend == nil {
+		b.backend = backend
+	}
+	return b.backend, nil
+}
+
+// bind reads the archive before any namespace access. Only evidence of
+// authentication, a missing binding or an invalid archive document pauses;
+// transport, 5xx, throttling and mid-stream read failures stay transient.
+func (b *captureDestinationBackend) bind(ctx context.Context, backend publication.Backend) error {
+	archive, err := publication.ReadArchive(ctx, backend)
+	if err != nil {
+		if errors.Is(err, publicationr2.ErrDestinationPaused) || errors.Is(err, publication.ErrNotFound) || errors.Is(err, publication.ErrInvalidMetadata) {
+			return errors.Join(sessioncapture.ErrDestination, err)
+		}
+		return err
+	}
+	if archive.ArchiveID != b.archive {
+		return errors.Join(sessioncapture.ErrDestination, sessioncapture.ErrIntegrity, errors.New("runtime archive identity mismatch"))
+	}
+	b.mu.Lock()
+	b.bound = true
+	b.mu.Unlock()
+	return nil
+}
+
+func (b *captureDestinationBackend) get(ctx context.Context, key string) (publication.Backend, error) {
+	backend, err := b.open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	b.mu.Lock()
+	bound := b.bound
+	b.mu.Unlock()
 	if !bound && key != publication.ArchiveKey {
-		archive, err := publication.ReadArchive(ctx, backend)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, publication.ErrDurability) {
-				return nil, err
-			}
-			return nil, errors.Join(sessioncapture.ErrDestination, destinationError(err))
+		if err := b.bind(ctx, backend); err != nil {
+			return nil, err
 		}
-		if archive.ArchiveID != b.archive {
-			return nil, errors.Join(sessioncapture.ErrDestination, sessioncapture.ErrIntegrity, errors.New("runtime archive identity mismatch"))
-		}
-		b.mu.Lock()
-		b.bound = true
-		b.mu.Unlock()
 	}
 	return backend, nil
 }
