@@ -484,8 +484,26 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   object whose bytes are uploaded and drops it for trusted (not uploaded) objects; the full
   rechecks before uploads and before the root commit stay.
 
+- **W22 `3cee11b`, accepted (delivery policy rechecks linear in session size).** `uploadOne`
+  no longer rechecks around trusted objects (no bytes sent). For each uploaded object it runs
+  one full recheck (scopes + selected evidence) after the `upload-before` fault point and
+  immediately before `PutFile`, replacing two back-to-back pairs. Full rechecks remain in
+  `verifyDependencies` (before the first upload), after the upload loop, before the manifest
+  `PutFile` and at the root `CompareAndSwap` (contract §3). No caching of `CheckPolicy`. The
+  fault points still fire for trusted objects (existing tests count them). Measured
+  `CheckPolicy` calls per publication: K=10 1,270 → 320; K=50 26,350 → 1,600; K=150 229,050 →
+  4,800 (32×K). Tests: `TestDeliveryPolicyChecksAreLinearInSessionSize` (≤40×K) and
+  `TestDeliveryExclusionBlocksWithTrustedObjects` (exclusion between captures, at
+  `upload-before` on an uploaded object, and at `manifest-before` on a trusted source all
+  block publication). Existing tests unmodified; worker gates lint 0, `-race` on
+  sessioncapture/publication/cli, capture-acceptance. Residuals: per-call cost of
+  `runtimeFilesystemPolicy` (`Resolve` + `capturepolicy.New` per config × state) is unchanged
+  and unmeasured against the live 60s budget; first publications and full-path fallbacks
+  (D=K) remain O(K²). Not yet installed.
+
 ### Next action
 
-W22 makes delivery policy rechecks proportional to the uploaded delta. Then: aggregate gates
-(sole verifier, explicit `ANALYTICS_PYTHON`), Mac install, replay any new delivery
-quarantines, and confirm sessions with 100 or more sources publish.
+W23 (sole verifier) runs the aggregate gates on the W22 merge with explicit
+`ANALYTICS_PYTHON`. If green: Mac install, replay any new delivery quarantines, and confirm
+sessions with 100 or more sources publish. If they still time out, measure per-call
+`CheckPolicy` cost before designing a per-pass policy snapshot.
