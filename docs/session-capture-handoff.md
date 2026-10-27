@@ -313,8 +313,34 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   affected, and untracked research files were untouched. Rule from now on: no stash wrappers;
   commit brief edits before merging.
 
+- **Step 4 Mac install (parent, 2026-10-28 03:58–04:12 AEDT; operator-authorized).**
+  The installed service had restarted 582 times under launchd (`last exit code = 1`).
+  Pre-swap counts were recorded. The service was stopped via `launchctl bootout` (stopped in
+  1s; the clean shutdown checkpointed the WAL). Backup to
+  `~/.local/state/agent-sessions-capture/backups/step4-20261028/` (0700): `queue.sqlite`
+  byte-identical, `quick_check ok`, old binary `agent-sessions.bin.b23712bc` (sha256
+  `e69fb2ed…`). Only `agent-sessions.bin` was swapped atomically; the plist, launcher
+  wrapper, credentials and config are unchanged. New binary: `c8abfd1`, `vcs.modified=false`,
+  sha256 `91a736f0…`, built from a detached clean worktree. Rollback: bootout, restore both
+  files from the backup, bootstrap. First 5 minutes: 0 step errors, no new stderr lines,
+  one-time fingerprint pass ≈300 sources/min.
+- **Stale destination pause (found during Step 4).** `runtime_destination.paused=1,
+  reason='destination'` had been set since 2026-10-26 07:10 AEDT, so nothing was delivered
+  for ≈45h (published stayed at 4,789). R2 itself was healthy: the analytics refresher
+  reported 0 endpoint/target errors, and a read-only `current-heads` through the service's
+  own wrapper exited 0 with a complete listing. The documented operator `capture-v1 resume`
+  was run with the coordinator stopped (exit 0, paused=0) and the service restarted. In the
+  following 4 minutes published rose 4,902 → 5,435 (≈175/min), pending fell 14,119 → 13,586,
+  the destination stayed unpaused, and step_errors stayed 0. **Suspected defect:**
+  `captureDestinationBackend.get` (`internal/cli/capture_backend.go`) joins `ErrDestination`
+  onto any unbound `ReadArchive` failure except cancel/deadline/durability. A generic
+  transport failure (`publication destination operation failed` from
+  `publicationr2.safeError`) therefore pauses the destination indefinitely, contrary to
+  contract §3 (transient transport → backoff; only auth/config → pause). The existing
+  mapping test covers only `bound: true`. W15 fixes this.
+
 ### Next action
 
-W13 `c6cd49a7-3a50-4da` dispatched (worktree `step4-churn` at `cdb96e6`) to fix discovery
-re-hint churn (an unchanged observation must not bump the source version). Then: build from `main`, back up `queue.sqlite`, swap the installed binary, and
-measure CPU, `step_errors`, backlog drain and freshness.
+W15 fixes the unbound-archive destination misclassification. Parent keeps monitoring the
+installed Mac service: backlog drain, steady-state CPU once the backlog clears,
+step_errors, pause state and refresher freshness.
