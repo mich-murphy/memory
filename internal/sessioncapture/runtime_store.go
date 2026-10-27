@@ -254,6 +254,11 @@ func (q *Queue) captureNext(ctx context.Context, o RuntimeOptions) (did bool, re
 		_, err = q.db.ExecContext(save, `UPDATE runtime_sources SET claim=0,captured_version=MAX(captured_version,?),captured_at=?,sequence=?,publication=?,attempts=0,last_error='',next_retry=0,state=CASE WHEN observed_state='absent' THEN 'absent' WHEN version=? THEN 'captured' ELSE 'pending' END WHERE id=? AND claim=?`, w.version, capturedAt, m.Sequence, m.PublicationID, w.version, w.id, w.version)
 		return true, err
 	}
+	if shutdownCancellation(ctx, captureErr) {
+		// Attempts are only persisted on failure bookkeeping, so skipping it spends
+		// nothing; the deferred release returns the claim for the next run.
+		return true, captureErr
+	}
 	code := classify(captureErr, o.Classify)
 	if errors.Is(captureErr, os.ErrNotExist) {
 		code = FailureAbsent

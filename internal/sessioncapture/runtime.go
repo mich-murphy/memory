@@ -20,6 +20,9 @@ var (
 	ErrDestination    = errors.New("sessioncapture: destination unavailable")
 	ErrQuarantined    = errors.New("sessioncapture: work quarantined")
 	ErrRuntimeRunning = errors.New("sessioncapture: coordinator already running")
+	// ErrReplayResolved is returned after Replay deactivated a quarantine whose
+	// work had already moved on; the work itself was not revived.
+	ErrReplayResolved = errors.New("sessioncapture: quarantine resolved without revival")
 )
 
 type FailureClass string
@@ -273,6 +276,14 @@ func runtimeStopError(ctx context.Context, err error) error {
 		return nil
 	}
 	return err
+}
+
+// shutdownCancellation is true only when the supplied (operation) context ended
+// by cancellation of its parent, not by its own deadline, and the failure is
+// nothing but that cancellation. Any other leaf (durability, SQLite, a real
+// timeout) keeps the failure genuine.
+func shutdownCancellation(ctx context.Context, err error) bool {
+	return ctx.Err() == context.Canceled && pureCancellation(err, context.Canceled)
 }
 
 func pureCancellation(err, canceled error) bool {

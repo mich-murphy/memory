@@ -2,8 +2,10 @@ package sessioncapture
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 )
 
 type SourceStatus struct {
@@ -169,22 +171,47 @@ func (q *Queue) Replay(ctx context.Context, id int64) error {
 	if !active {
 		return errors.New("sessioncapture: quarantine already replayed")
 	}
+	// Revive only work that is still quarantined. Superseded, published, captured
+	// or absent work has moved on; reviving it would resurrect a stale coordinate.
+	// The row is deactivated (kept, inspectable) and the caller is told via
+	// ErrReplayResolved, so the resolution is neither revival nor silent disposal.
+	var current string
 	switch kind {
 	case "capture":
-		_, err = tx.ExecContext(ctx, `UPDATE runtime_sources SET state='pending',attempts=0,last_error='',next_retry=0,observed_state='present' WHERE id=?`, source)
+		err = tx.QueryRowContext(ctx, `SELECT state FROM runtime_sources WHERE id=?`, source).Scan(&current)
 	case "delivery":
-		_, err = tx.ExecContext(ctx, `UPDATE jobs SET state='pending',attempts=0,last_error='',next_retry=0 WHERE session=? AND sequence=?`, session, seq)
+		err = tx.QueryRowContext(ctx, `SELECT state FROM jobs WHERE session=? AND sequence=?`, session, seq).Scan(&current)
 	default:
 		return errors.New("sessioncapture: invalid quarantine kind")
 	}
+	if errors.Is(err, sql.ErrNoRows) {
+		current, err = "missing", nil
+	}
 	if err != nil {
 		return err
+	}
+	resolved := current != "quarantined"
+	if !resolved {
+		if kind == "capture" {
+			_, err = tx.ExecContext(ctx, `UPDATE runtime_sources SET state='pending',attempts=0,last_error='',next_retry=0,observed_state='present' WHERE id=?`, source)
+		} else {
+			_, err = tx.ExecContext(ctx, `UPDATE jobs SET state='pending',attempts=0,last_error='',next_retry=0 WHERE session=? AND sequence=?`, session, seq)
+		}
+		if err != nil {
+			return err
+		}
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE runtime_quarantine SET active=0 WHERE id=?`, id)
 	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if resolved {
+		return fmt.Errorf("%w: %s work is %s", ErrReplayResolved, kind, current)
+	}
+	return nil
 }
 
 func (q *Queue) discoveryStatus(ctx context.Context, s *RuntimeStatus) error {

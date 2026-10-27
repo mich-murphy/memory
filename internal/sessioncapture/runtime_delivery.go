@@ -67,6 +67,12 @@ func (q *Queue) deliverDueWork(ctx context.Context, b publication.Backend, i pub
 	if errors.Is(attemptErr, errSelectionSuperseded) {
 		return true, nil
 	}
+	if shutdownCancellation(ctx, attemptErr) {
+		// Shutdown is not a delivery failure: restore the pre-attempt count, keep the
+		// job immediately due, and never quarantine. last_error is diagnostic only.
+		_, err = q.db.ExecContext(save, `UPDATE jobs SET attempts=?,state='retry',last_error='shutdown',next_retry=0 WHERE session=? AND sequence=? AND state NOT IN ('published','superseded')`, attempts, i.BaseKey(), seq)
+		return true, errors.Join(err, attemptErr)
+	}
 	if attemptErr != nil {
 		return true, q.runtimeDeliveryFailure(save, i, seq, attempts+1, attemptErr, o)
 	}
