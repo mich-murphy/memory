@@ -465,8 +465,27 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   spool `q.verify` and the exact-retry ("already published") full `verify` are still
   O(session); not measured on R2. Not yet installed.
 
+- **W21 gates on `362ac12`: all green** (`make check` 629s, cover 87.1%, 0/10 functions over
+  CRAP 30; `make test` 487s; analytics 97/97; `.mjs` 8/8; fuzz 9/9). **Mac install of `362ac12`**
+  (parent, 2026-10-28 06:39 AEDT): same procedure, backup in `backups/step4d-20261028/`
+  (byte-identical, `quick_check ok`, previous binary `.5c8e9cd`), sha256 `675bfd2a…`. With the
+  coordinator stopped, every active delivery quarantine was replayed: 17 revived (exit 0), and
+  quarantine 5 returned `ErrReplayResolved` ("delivery work is superseded"), as designed. Active
+  quarantines went 18 → 0.
+- **Remaining large-session cost: per-object policy rechecks are O(K²) (found after install).**
+  After 10 minutes on `362ac12`, still no publication with 100 or more sources, and 5 jobs were
+  in `timeout` retry. A CPU sample (`sample`, read-only) put delivery time in `uploadOne` →
+  `recheck`/`recheckScopes` → `checkObserved` → `capturepolicy.Resolve`. `uploadOne` rechecks the
+  whole session's evidence twice per selected object. Runtime `CheckPolicy`
+  (`runtimeFilesystemPolicy`) resolves the path and builds `capturepolicy.New` per config ×
+  protected state. So a publication costs ≈4K² expensive checks (≈90k at K=150). W19 skipped
+  only the `PutFile` call for trusted objects; their rechecks still run. Contract §3: "Recheck
+  exclusions before delivering pending work". W22 keeps the per-upload recheck for every
+  object whose bytes are uploaded and drops it for trusted (not uploaded) objects; the full
+  rechecks before uploads and before the root commit stay.
+
 ### Next action
 
-W21 (sole verifier) runs the aggregate gates on the W19+W20 merge with explicit
-`ANALYTICS_PYTHON`. If green: Mac install, replay the active delivery quarantines (resolved ones
-now return `ErrReplayResolved`), and confirm sessions with 100 or more sources publish.
+W22 makes delivery policy rechecks proportional to the uploaded delta. Then: aggregate gates
+(sole verifier, explicit `ANALYTICS_PYTHON`), Mac install, replay any new delivery
+quarantines, and confirm sessions with 100 or more sources publish.
