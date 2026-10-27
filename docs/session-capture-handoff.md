@@ -296,6 +296,23 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   "transform ⇒ no fingerprint"). Coarse-timestamp filesystems could miss a change. Each
   source re-captures once after upgrade.
 
+- **W14 aggregate gates on `fcc8b03` (verifier; load ≈7–10).** `make test` exit 0, analytics
+  97/97, `.mjs` ok, fuzz 9/9. Aggregate `make check` stopped in `cover` on
+  `TestCaptureIsolationFixtureReturningStages`: in coverage mode the `-race -cover` crash
+  binary was compiled *inside* the 15s stage deadline and took 13.6s under parallel load,
+  leaving 1.4s for the fixture. Every sub-gate after that passed when rerun (crap/cover 87.0%,
+  0/10 over CRAP 30, bench-smoke, actionlint, capture-acceptance). **Parent fix `0504ed1`
+  (test harness only):** the coverage build now runs before the stage deadline starts, and the
+  15s limit bounds only the fixture run (unchanged). With the `make cover` flags
+  (`-covermode=atomic -coverpkg=./... -args -test.gocoverdir`), `^TestCaptureIsolationFixture`
+  passed ×3, build ≈0.7s outside the deadline, and e2e coverage files were still written.
+- **Parent process incident (2026-10-28, repaired).** A `git stash`/`stash pop` wrapper
+  around a fast-forward ran with nothing to stash, so `pop` applied an unrelated older
+  `improve/capture` stash and left 13 conflicted tracked files on `main`. The parent restored
+  exactly those files to `HEAD`. The stash entry is retained (`stash@{0}`), no commit was
+  affected, and untracked research files were untouched. Rule from now on: no stash wrappers;
+  commit brief edits before merging.
+
 ### Next action
 
 W13 `c6cd49a7-3a50-4da` dispatched (worktree `step4-churn` at `cdb96e6`) to fix discovery
