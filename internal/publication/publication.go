@@ -334,10 +334,16 @@ func streamObject(ctx context.Context, b Backend, o Object, dst io.Writer) (retE
 	return nil
 }
 
+// verify streams the complete selected closure; Read always uses it.
 func verify(ctx context.Context, b Backend, m Manifest) error {
+	return verifyExcept(ctx, b, m, nil)
+}
+
+// verifyExcept streams every selected object except those in trusted.
+func verifyExcept(ctx context.Context, b Backend, m Manifest, trusted map[Object]bool) error {
 	for n := range m.Sources {
 		s := &m.Sources[n]
-		if !IsSelected(*s) {
+		if !IsSelected(*s) || trusted[s.Object] {
 			continue
 		}
 		if err := streamObject(ctx, b, s.Object, io.Discard); err != nil {
@@ -389,34 +395,82 @@ func advances(old, next Manifest) error {
 	return nil
 }
 
-func publicationEligible(ctx context.Context, b Backend, m Manifest, c Current, expectedToken string) (bool, error) {
+// trustedFrom returns the selected objects of next that are byte-for-byte the
+// same descriptor (key, encoding, digests, sizes) as a selected object of prev.
+//
+// Invariant relied on: an object referenced by a published manifest stays present
+// and unmodified until the reviewed cutover deletion of contract section 6. Objects
+// are immutable and content addressed (create-only PutFile), the contract says to
+// "begin without automatic GC" and that future GC "must honor current/retained
+// roots" (section 4), and section 6 step 6 permits deletion only of "the reviewed
+// retired destination/key set after acceptance". prev is the remote current's
+// manifest, which Publish fully verified (or, inductively, trusted from a fully
+// verified predecessor) when it was published. Read never uses this shortcut.
+func trustedFrom(prev, next Manifest) map[Object]bool {
+	have := map[Object]bool{}
+	for n := range prev.Sources {
+		if IsSelected(prev.Sources[n]) {
+			have[prev.Sources[n].Object] = true
+		}
+	}
+	out := map[Object]bool{}
+	for n := range next.Sources {
+		if o := next.Sources[n].Object; IsSelected(next.Sources[n]) && have[o] {
+			out[o] = true
+		}
+	}
+	return out
+}
+
+// TrustedObjects lists the selected objects of m already present in the manifest
+// of the remote current that m would advance. Any failure to read, validate or
+// advance from that manifest yields nil, i.e. the full upload/verify path.
+func TrustedObjects(ctx context.Context, b Backend, m Manifest) map[Object]bool {
+	data, _, err := b.Current(ctx, m.Identity.CurrentKey())
+	if err != nil {
+		return nil
+	}
+	c, err := parseCurrent(data, m.Identity)
+	if err != nil || c.PublicationID == m.PublicationID {
+		return nil
+	}
+	prev, err := resolve(ctx, b, m.Identity, c)
+	if err != nil || advances(prev, m) != nil {
+		return nil
+	}
+	return trustedFrom(prev, m)
+}
+
+func publicationEligible(ctx context.Context, b Backend, m Manifest, c Current, expectedToken string) (bool, map[Object]bool, error) {
+	var trusted map[Object]bool
 	oldData, got, err := b.Current(ctx, m.Identity.CurrentKey())
 	switch {
 	case errors.Is(err, ErrNotFound):
 		got = ""
 	case err != nil:
-		return false, err
+		return false, nil, err
 	default:
 		old, err := parseCurrent(oldData, m.Identity)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		if old == c {
 			_, err := resolve(ctx, b, m.Identity, old)
-			return true, err
+			return true, nil, err
 		}
 		prev, err := resolve(ctx, b, m.Identity, old)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		if err := advances(prev, m); err != nil {
-			return false, err
+			return false, nil, err
 		}
+		trusted = trustedFrom(prev, m)
 	}
 	if got != expectedToken {
-		return false, ErrConflict
+		return false, nil, ErrConflict
 	}
-	return false, nil
+	return false, trusted, nil
 }
 
 // Publish uploads a complete immutable manifest after verifying dependencies, then
@@ -439,7 +493,7 @@ func Publish(ctx context.Context, b Backend, m Manifest, expectedToken string) (
 	}
 	digest := token(data)
 	c := Current{Contract: Contract, Identity: m.Identity, PublicationID: m.PublicationID, Sequence: m.Sequence, ManifestSHA256: digest, ManifestKey: m.Identity.BaseKey() + "/manifests/" + digest + ".json"}
-	already, err := publicationEligible(ctx, b, m, c, expectedToken)
+	already, trusted, err := publicationEligible(ctx, b, m, c, expectedToken)
 	if err != nil {
 		return zero, err
 	}
@@ -449,7 +503,7 @@ func Publish(ctx context.Context, b Backend, m Manifest, expectedToken string) (
 		}
 		return c, fencePublication(ctx, b, m, c)
 	}
-	if err := verify(ctx, b, m); err != nil {
+	if err := verifyExcept(ctx, b, m, trusted); err != nil {
 		return zero, err
 	}
 	if err := writeMetadata(ctx, b, c.ManifestKey, data); err != nil {

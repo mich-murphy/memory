@@ -164,7 +164,13 @@ func (q *Queue) deliverOne(ctx context.Context, b publication.Backend, m publica
 			return publication.ErrConflict
 		}
 	}
-	if e := q.uploadDependencies(ctx, b, m, es); e != nil {
+	// Objects already in the remote current's verified manifest need no upload or
+	// remote re-verification. Invariant: an object referenced by a published manifest
+	// stays present until the reviewed cutover deletion of contract section 6 (section 4:
+	// "Begin without automatic GC"; section 6 step 6: delete only "the reviewed retired
+	// destination/key set after acceptance"). Any unreadable or mismatching prior yields
+	// nil and the full path. Local payload verification still covers every object.
+	if e := q.uploadDependencies(ctx, b, m, es, publication.TrustedObjects(ctx, b, m)); e != nil {
 		return e
 	}
 	if e := q.fault("manifest-before"); e != nil {
@@ -288,34 +294,34 @@ func (q *Queue) verifyDependencies(ctx context.Context, m publication.Manifest, 
 	return nil
 }
 
-func (q *Queue) uploadDependencies(ctx context.Context, b publication.Backend, m publication.Manifest, es []evidence) error {
+func (q *Queue) uploadDependencies(ctx context.Context, b publication.Backend, m publication.Manifest, es []evidence, trusted map[publication.Object]bool) error {
 	for j := range m.Sources {
 		s := &m.Sources[j]
 		if !publication.IsSelected(*s) {
 			continue
 		}
-		// Recheck policy immediately before each upload as well as before root commit.
-		if err := q.recheckScopes(ctx, es); err != nil {
+		if err := q.uploadOne(ctx, b, m, es, s, trusted[s.Object]); err != nil {
 			return err
 		}
-		if e := q.recheck(ctx, selectedEvidence(m, es)); e != nil {
-			return e
-		}
-		if e := q.fault("upload-before"); e != nil {
-			return e
-		}
-		if err := q.recheckScopes(ctx, es); err != nil {
-			return err
-		}
-		if e := q.recheck(ctx, selectedEvidence(m, es)); e != nil {
-			return e
-		}
-		if e := b.PutFile(ctx, s.Object.Key, q.payload(s.Object)); e != nil {
-			return &publication.SourceDependencyError{SourceKeyHash: publication.SourceKeyHash(*s), EpochID: s.EpochID, Optional: s.Optional, Stage: "upload", Err: e}
-		}
-		if e := q.fault("upload-after"); e != nil {
-			return e
-		}
+	}
+	if err := q.recheckScopes(ctx, es); err != nil {
+		return err
+	}
+	return q.recheck(ctx, selectedEvidence(m, es))
+}
+
+// uploadOne rechecks policy around one selected object. A trusted object (already
+// in the remote current's verified manifest) skips only the remote PutFile.
+func (q *Queue) uploadOne(ctx context.Context, b publication.Backend, m publication.Manifest, es []evidence, s *publication.Source, trusted bool) error {
+	// Recheck policy immediately before each upload as well as before root commit.
+	if err := q.recheckScopes(ctx, es); err != nil {
+		return err
+	}
+	if e := q.recheck(ctx, selectedEvidence(m, es)); e != nil {
+		return e
+	}
+	if e := q.fault("upload-before"); e != nil {
+		return e
 	}
 	if err := q.recheckScopes(ctx, es); err != nil {
 		return err
@@ -323,8 +329,12 @@ func (q *Queue) uploadDependencies(ctx context.Context, b publication.Backend, m
 	if e := q.recheck(ctx, selectedEvidence(m, es)); e != nil {
 		return e
 	}
-
-	return nil
+	if !trusted {
+		if e := b.PutFile(ctx, s.Object.Key, q.payload(s.Object)); e != nil {
+			return &publication.SourceDependencyError{SourceKeyHash: publication.SourceKeyHash(*s), EpochID: s.EpochID, Optional: s.Optional, Stage: "upload", Err: e}
+		}
+	}
+	return q.fault("upload-after")
 }
 
 func (q *Queue) recheck(ctx context.Context, es []evidence) error {
