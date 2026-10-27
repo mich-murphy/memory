@@ -400,9 +400,39 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   opaque SQLite format errors is unchanged; this remains a follow-up risk (there is no
   deterministic sentinel). Not yet installed.
 
+- **W18 gates on `5c8e9cd`: all green** (`make check` 625s, cover 87.0%, 0/10 functions over
+  CRAP 30; `make test` 456s; analytics 97/97; `.mjs` 8/8; fuzz 9/9). **Mac install of `5c8e9cd`**
+  (parent, 2026-10-28 05:45 AEDT): same procedure, backup in `backups/step4c-20261028/`
+  (byte-identical, `quick_check ok`, previous binary `.856cc08`), sha256 `c0bfe4b8…`. Capture
+  quarantine 16 (the clean-closed WAL `sqlite-backup` source) was replayed while the
+  coordinator was stopped. It captured on the first attempt (version 267 = captured 267).
+- **Delivery cost grows with session size (found during Step 4; a product defect).** Every
+  publication re-handles the session's *entire* object set:
+  1. `uploadDependencies` → `PutFile` (an `IfNoneMatch` PUT) for each selected object;
+  2. for an object that already exists, `reconcileImmutable` does a GET and a full re-hash;
+  3. `Publish` → `verify` streams every object again.
+  So each publication costs O(session objects), and a session's lifetime cost grows
+  quadratically. Live evidence (metadata only):
+  - none of the 16,551 published jobs has more than 99 sources;
+  - none of the 792 pending jobs with 100 or more sources has ever published;
+  - all 16 active delivery quarantines sit exactly one sequence past their remote head (remote
+    = seq−1, a different publication id, so not a conflict), and most have every payload
+    present locally;
+  - quarantine 18 (`timeout`, new binary) is a 78-source session with a 27MB main revision.
+  Each quarantined head blocks its whole session (1,017 later jobs blocked), and attempts that
+  run to the 60s budget tie up both delivery workers, so throughput fell from ≈170 to ≈30
+  publications per minute. W19 fixes this.
+- **Shutdown cancellation counts as a failed attempt.** Quarantine 17 was written at the same
+  second as the parent's `launchctl bootout`. `runtimeDeliveryFailure` (and the capture-side
+  failure path) records through a `WithoutCancel` context, and `classify` has no case for
+  `context.Canceled`, so a coordinator shutdown spends a `transient` attempt and can
+  quarantine. Separately, `Replay` resets a quarantined delivery job to `pending` without
+  checking its state, so replaying quarantine 5 (whose job has since been `superseded`) would
+  revive a stale sequence. W20 fixes both.
+
 ### Next action
 
-W18 (sole verifier) runs the aggregate gates on the W17 merge, with `ANALYTICS_PYTHON` passed
-explicitly. If green, the parent installs it on the Mac, replays the quarantined
-`sqlite-backup` source and keeps monitoring the backlog drain, steady-state CPU and the
-`usage()` scan cost.
+W19 (scaling of per-publication object handling) and W20 (shutdown cancellation and replay of
+superseded jobs) are in disjoint worktrees. After review and merge: aggregate gates (sole
+verifier, explicit `ANALYTICS_PYTHON`), Mac install, then replay the active delivery
+quarantines (quarantine 5 only after W20) and confirm large sessions drain.
