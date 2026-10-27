@@ -26,7 +26,7 @@ func TestOpenWaitsForConcurrentReaderLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rdb.Close()
+	defer func() { _ = rdb.Close() }()
 	rdb.SetMaxOpenConns(1)
 	tx, err := rdb.BeginTx(t.Context(), nil)
 	if err != nil {
