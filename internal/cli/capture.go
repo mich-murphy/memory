@@ -60,7 +60,11 @@ func parseCaptureFlags(cmd string, args []string, o IO) (captureFlags, error) {
 // the legacy v3 namespace and installed runtime remain untouched.
 func runCapture(ctx context.Context, args []string, o IO) (int, error) {
 	if len(args) == 0 {
-		return exitUsage, errors.New("capture-v1 requires init, capture, deliver, status, export, fixture, run, hint, hook, hooks, work-status, publication-status, current-heads, quarantine, replay, resume, enrichment-status, enrichment-replay, policy-pauses, or service")
+		// fixture and isolation-fixture are offline acceptance harness commands
+		// (tools/analytics/test_capture_journey.py) and are deliberately unlisted.
+		return exitUsage, errors.New("capture-v1 requires one of: init, capture, deliver, status, export, run, service, hooks, hook, hint, " +
+			"work-status, quarantine, replay, resume, policy-pauses, publication-status, current-heads, " +
+			"enrichment-status, enrichment-replay, optional-status, optional-replay, optional-quota-replay")
 	}
 	if args[0] == "fixture" {
 		return runCaptureFixture(ctx, args[1:], o)
