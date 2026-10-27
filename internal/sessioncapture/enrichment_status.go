@@ -78,7 +78,7 @@ func ReadEnrichmentWorkStatus(ctx context.Context, spool, archive, afterID strin
 	return q.EnrichmentWorkStatus(ctx, afterID, limit)
 }
 
-// ReplayEnrichment retains every failure/history row and retained result. Its
+// ReplayEnrichment retains the row's attempts/last_error and retained result. Its
 // subsequent attachment always rechecks policy/integrity and rebases latest.
 func (q *Queue) ReplayEnrichment(ctx context.Context, id string) error {
 	tx, err := q.db.BeginTx(ctx, nil)
@@ -92,9 +92,6 @@ func (q *Queue) ReplayEnrichment(ctx context.Context, id string) error {
 	}
 	if state == "working" {
 		return errors.New("sessioncapture: enrichment busy")
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO enrichment_history(work,state,at,reason) VALUES(?,'replay',?,'operator')`, id, q.opts.Now().UnixNano()); err != nil {
-		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE enrichment_work SET state='pending',next_retry=0 WHERE id=?`, id); err != nil {
 		return err

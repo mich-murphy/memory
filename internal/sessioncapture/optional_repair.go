@@ -13,7 +13,6 @@ import (
 func (q *Queue) initOptionalRepair(ctx context.Context) error {
 	for _, statement := range []string{
 		`CREATE TABLE IF NOT EXISTS optional_repairs(id TEXT PRIMARY KEY,session TEXT NOT NULL,source_hash TEXT NOT NULL,epoch TEXT NOT NULL,commitment TEXT NOT NULL,source BLOB NOT NULL,evidence BLOB NOT NULL,identity BLOB NOT NULL,state TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,next_retry INTEGER NOT NULL DEFAULT 0,last_error TEXT NOT NULL DEFAULT '',stage TEXT NOT NULL,contract TEXT NOT NULL,software TEXT NOT NULL)`,
-		`CREATE TABLE IF NOT EXISTS optional_repair_history(id INTEGER PRIMARY KEY,repair TEXT NOT NULL,at INTEGER NOT NULL,stage TEXT NOT NULL,reason TEXT NOT NULL)`,
 		`UPDATE optional_repairs SET state='retry' WHERE state IN ('working','delivering')`,
 	} {
 		if _, err := q.db.ExecContext(ctx, statement); err != nil {
@@ -119,19 +118,9 @@ func (q *Queue) persistOptionalRepair(ctx context.Context, i publication.Identit
 	if err != nil {
 		return err
 	}
-	tx, err := q.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
 	id := repairID(i, s)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO optional_repairs(id,session,source_hash,epoch,commitment,source,evidence,identity,stage,contract,software) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state='pending',stage=excluded.stage,last_error='unavailable',next_retry=0`, id, i.BaseKey(), publication.SourceKeyHash(s), s.EpochID, publication.ObjectCommitment(s.Object), source, ev, identity, stage, publication.Contract, q.runtimeSoftwareVersion()); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO optional_repair_history(repair,at,stage,reason) VALUES(?,?,?,'unavailable')`, id, q.opts.Now().UnixNano(), stage); err != nil {
-		return err
-	}
-	return tx.Commit()
+	_, err = q.db.ExecContext(ctx, `INSERT INTO optional_repairs(id,session,source_hash,epoch,commitment,source,evidence,identity,stage,contract,software) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state='pending',stage=excluded.stage,last_error='unavailable',next_retry=0`, id, i.BaseKey(), publication.SourceKeyHash(s), s.EpochID, publication.ObjectCommitment(s.Object), source, ev, identity, stage, publication.Contract, q.runtimeSoftwareVersion())
+	return err
 }
 
 func (q *Queue) optionalRepairNext(ctx context.Context, b publication.Backend, o RuntimeOptions) (bool, error) {
@@ -225,27 +214,8 @@ func (q *Queue) saveOptionalRepairFailure(ctx context.Context, id string, attemp
 		state = "quarantined"
 	}
 	code := string(classify(cause, o.Classify))
-	tx, err := q.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO optional_repair_history(repair,at,stage,reason) VALUES(?,?,'repair',?)`, id, q.opts.Now().UnixNano(), code); err != nil {
-		if errors.Is(metadataError(err), ErrQuota) {
-			// State/error capacity is reserved in the row at admission. A full
-			// history budget cannot strand a working claim or stop raw capture.
-			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				return rollbackErr
-			}
-			_, saveErr := q.db.ExecContext(ctx, `UPDATE optional_repairs SET state='quarantined',last_error='quota',next_retry=0 WHERE id=?`, id)
-			return saveErr
-		}
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE optional_repairs SET state=?,last_error=?,next_retry=? WHERE id=?`, state, code, q.opts.Now().Add(retryDelay(attempts, o.Jitter)).UnixNano(), id); err != nil {
-		return err
-	}
-	return tx.Commit()
+	_, err := q.db.ExecContext(ctx, `UPDATE optional_repairs SET state=?,last_error=?,next_retry=? WHERE id=?`, state, code, q.opts.Now().Add(retryDelay(attempts, o.Jitter)).UnixNano(), id)
+	return err
 }
 
 func (q *Queue) optionalFailureClass(cause error) FailureClass {

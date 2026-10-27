@@ -49,8 +49,8 @@ func TestVerifiedOptionalRepairRestartAutonomouslyAttachesLatest(t *testing.T) {
 	write(t, r.Path, "first\nlatest after verification\n")
 	raw := capture(t, q, r)
 	var before int
-	if err := q.db.QueryRowContext(t.Context(), `SELECT count(*) FROM optional_repair_history`).Scan(&before); err != nil || before == 0 {
-		t.Fatal("missing retained history", err)
+	if err := q.db.QueryRowContext(t.Context(), `SELECT count(*) FROM optional_repairs WHERE last_error='unavailable' AND contract<>'' AND software<>''`).Scan(&before); err != nil || before != 1 {
+		t.Fatal("missing retained row-level quarantine evidence", before, err)
 	}
 	if err := q.Close(); err != nil {
 		t.Fatal(err)
@@ -89,10 +89,6 @@ func TestVerifiedOptionalRepairRestartAutonomouslyAttachesLatest(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
-	}
-	var after int
-	if err := q.db.QueryRowContext(t.Context(), `SELECT count(*) FROM optional_repair_history`).Scan(&after); err != nil || after < before {
-		t.Fatal("repair history lost", err)
 	}
 	if err := q.db.QueryRowContext(t.Context(), `SELECT state FROM optional_repairs`).Scan(&state); err != nil || state != "repaired" {
 		t.Fatal("attachment not completed", state, err)
@@ -159,7 +155,7 @@ func TestPreparedCleanupFailureVisibleAndOrphansRetainSlots(t *testing.T) {
 }
 
 func TestOptionalRepairQuotaTerminalReserveKeepsRawPublishing(t *testing.T) {
-	for _, kind := range []string{"bytes", "records", "history"} {
+	for _, kind := range []string{"bytes", "records"} {
 		t.Run(kind, func(t *testing.T) {
 			q, r, m := optionalFixture(t)
 			switch kind {
@@ -169,11 +165,6 @@ func TestOptionalRepairQuotaTerminalReserveKeepsRawPublishing(t *testing.T) {
 				}
 			case "records":
 				_, err := q.db.ExecContext(t.Context(), `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?) INSERT INTO optional_repairs(id,session,source_hash,epoch,commitment,source,evidence,identity,state,stage,contract,software) SELECT 'full-'||x,'quota','hash','epoch','commitment','{}','{}','{}','quarantined','quota','contract','test' FROM n`, MaxOptionalRepairRecords)
-				if err != nil {
-					t.Fatal(err)
-				}
-			case "history":
-				_, err := q.db.ExecContext(t.Context(), `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?) INSERT INTO optional_repair_history(repair,at,stage,reason) SELECT ?,1,'test','test' FROM n`, MaxOptionalRepairHistoryPerRecord, repairID(r.Identity, m.Sources[1]))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -259,53 +250,33 @@ func TestOptionalRepairQuotaTerminalReserveKeepsRawPublishing(t *testing.T) {
 	}
 }
 
-func TestOptionalRepairHistoryExhaustionQuarantinesAndReplayIsBounded(t *testing.T) {
-	q, r, m := optionalFixture(t)
-	_, es, err := q.latest(t.Context(), r.Identity)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := q.persistOptionalRepair(t.Context(), r.Identity, m.Sources[1], es[1], "upload"); err != nil {
-		t.Fatal(err)
-	}
-	id := repairID(r.Identity, m.Sources[1])
-	_, err = q.db.ExecContext(t.Context(), `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?) INSERT INTO optional_repair_history(repair,at,stage,reason) SELECT ?,1,'test','test' FROM n`, MaxOptionalRepairHistoryPerRecord-1, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := q.saveOptionalRepairFailure(t.Context(), id, 1, errors.New("network"), runtimeDefaults(RuntimeOptions{})); err != nil {
-		t.Fatal(err)
-	}
-	var state, code string
-	if err := q.db.QueryRowContext(t.Context(), `SELECT state,last_error FROM optional_repairs WHERE id=?`, id).Scan(&state, &code); err != nil || state != "quarantined" || code != "quota" {
-		t.Fatal("history exhaustion stranded working repair", state, code, err)
-	}
-	if err := q.ReplayOptionalRepair(t.Context(), id); !errors.Is(err, ErrQuota) {
-		t.Fatal("replay bypassed history cap", err)
-	}
-}
-
-func TestOptionalRepairAggregateHistoryCapChargesRetainedRows(t *testing.T) {
+func TestOpenDropsRetiredHistoryObjectsAndRecomputesBudget(t *testing.T) {
 	q, _, _ := optionalFixture(t)
-	var before, after int64
-	if err := q.db.QueryRowContext(t.Context(), `SELECT used FROM metadata_budgets WHERE name='enrichment'`).Scan(&before); err != nil {
+	for _, statement := range []string{
+		`CREATE TABLE optional_repair_history(id INTEGER PRIMARY KEY,repair TEXT NOT NULL,at INTEGER NOT NULL,stage TEXT NOT NULL,reason TEXT NOT NULL)`,
+		`CREATE INDEX optional_repair_history_owner ON optional_repair_history(repair)`,
+		`CREATE TRIGGER optional_repair_history_cap BEFORE INSERT ON optional_repair_history BEGIN SELECT 1; END`,
+		`CREATE TABLE enrichment_history (id INTEGER PRIMARY KEY, work TEXT NOT NULL, state TEXT NOT NULL, at INTEGER NOT NULL, reason TEXT NOT NULL)`,
+		`INSERT INTO optional_repair_history(repair,at,stage,reason) VALUES('x',1,'s','r')`,
+		`INSERT INTO enrichment_history(work,state,at,reason) VALUES('x','s',1,'r')`,
+		`UPDATE metadata_budgets SET used=used+100000 WHERE name='enrichment'`,
+	} {
+		if _, err := q.db.ExecContext(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := q.initEnrichment(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	_, err := q.db.ExecContext(t.Context(), `WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x+1<?) INSERT INTO optional_repair_history(repair,at,stage,reason) SELECT 'owner-'||(x/128),1,'test','test' FROM n`, MaxOptionalRepairHistory)
-	if err != nil {
+	var retired int
+	if err := q.db.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE name LIKE '%\_history%' ESCAPE '\'`).Scan(&retired); err != nil || retired != 0 {
+		t.Fatal("retired objects remain", retired, err)
+	}
+	var used, want int64
+	if err := q.db.QueryRowContext(t.Context(), `SELECT used FROM metadata_budgets WHERE name='enrichment'`).Scan(&used); err != nil {
 		t.Fatal(err)
 	}
-	if err := q.db.QueryRowContext(t.Context(), `SELECT used FROM metadata_budgets WHERE name='enrichment'`).Scan(&after); err != nil || after <= before {
-		t.Fatal("retained history not charged", before, after, err)
-	}
-	if _, err := q.db.ExecContext(t.Context(), `INSERT INTO optional_repair_history(repair,at,stage,reason) VALUES('new-owner',1,'test','test')`); !errors.Is(metadataError(err), ErrQuota) {
-		t.Fatal("aggregate history cap bypassed", err)
-	}
-	if err := q.initMetadataBudgets(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	var rebuilt int64
-	if err := q.db.QueryRowContext(t.Context(), `SELECT used FROM metadata_budgets WHERE name='enrichment'`).Scan(&rebuilt); err != nil || rebuilt != after {
-		t.Fatal("budget rebuild changed retained history charge", rebuilt, after, err)
+	if err := q.db.QueryRowContext(t.Context(), `SELECT coalesce((SELECT SUM(`+budgetExpression("enrichment_work", "enrichment_work")+`) FROM enrichment_work),0)+coalesce((SELECT SUM(128+length(id)+length(body)) FROM enrichment_results),0)+coalesce((SELECT SUM(`+budgetExpression("optional_repairs", "optional_repairs")+`) FROM optional_repairs),0)`).Scan(&want); err != nil || used != want {
+		t.Fatal("budget not recomputed without history", used, want, err)
 	}
 }

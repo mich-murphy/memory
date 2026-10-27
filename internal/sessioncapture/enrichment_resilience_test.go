@@ -44,7 +44,7 @@ func TestNativePoisonPageDoesNotStarveLaterEvidence(t *testing.T) {
 	}
 }
 
-func TestEnrichmentHistoryBudgetExhaustionIsDurableNotRuntimeFatal(t *testing.T) {
+func TestEnrichmentBudgetExhaustionIsDurableNotRuntimeFatal(t *testing.T) {
 	dir, o, r := setup(t)
 	o.EnableEnrichment = true
 	q := open(t, dir, o)
@@ -60,7 +60,7 @@ func TestEnrichmentHistoryBudgetExhaustionIsDurableNotRuntimeFatal(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status[0].State != "quarantined" || status[0].LastError != "quota" || status[0].Attempts != 1 {
+	if status[0].State != "retry" || status[0].LastError == "" || status[0].Attempts != 1 {
 		t.Fatal("budget failure not durably visible")
 	}
 	write(t, r.Path, "first\nmore\n")

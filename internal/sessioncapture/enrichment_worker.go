@@ -74,25 +74,8 @@ func (q *Queue) finishEnrichment(ctx context.Context, id string, attempts int, c
 	code := string(classify(cause, o.Classify))
 	save, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.OperationTimeout)
 	defer cancel()
-	tx, err := q.db.BeginTx(save, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(save, `INSERT INTO enrichment_history(work,state,at,reason) VALUES(?,?,?,?)`, id, state, q.opts.Now().UnixNano(), code); err != nil {
-		if errors.Is(metadataError(err), ErrQuota) {
-			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				return errors.Join(ErrQuota, rollbackErr)
-			}
-			_, saveErr := q.db.ExecContext(save, `UPDATE enrichment_work SET state='quarantined',last_error='quota',next_retry=0 WHERE id=?`, id)
-			return metadataError(saveErr)
-		}
-		return err
-	}
-	if _, err := tx.ExecContext(save, `UPDATE enrichment_work SET state=?,last_error=?,next_retry=? WHERE id=?`, state, code, q.opts.Now().Add(retryDelay(attempts, o.Jitter)).UnixNano(), id); err != nil {
-		return err
-	}
-	return metadataError(tx.Commit())
+	_, err := q.db.ExecContext(save, `UPDATE enrichment_work SET state=?,last_error=?,next_retry=? WHERE id=?`, state, code, q.opts.Now().Add(retryDelay(attempts, o.Jitter)).UnixNano(), id)
+	return metadataError(err)
 }
 
 // Reader-to-private-preparation is deliberately not a public trusted pathname API.

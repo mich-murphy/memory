@@ -41,7 +41,7 @@ func ReadOptionalRepairWorkStatus(ctx context.Context, spool, archive, afterID s
 	return q.OptionalRepairWorkStatus(ctx, afterID, limit)
 }
 
-// Replay keeps the failure log and original coordinates; it cannot clear the
+// Replay keeps the row's attempts/last_error and original coordinates; it cannot clear the
 // unavailable latch without a subsequent successful policy+remote integrity check.
 func (q *Queue) ReplayOptionalRepair(ctx context.Context, id string) error {
 	tx, err := q.db.BeginTx(ctx, nil)
@@ -49,9 +49,6 @@ func (q *Queue) ReplayOptionalRepair(ctx context.Context, id string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO optional_repair_history(repair,at,stage,reason) SELECT id,?,'replay','operator' FROM optional_repairs WHERE id=? AND state NOT IN ('working','delivering')`, q.opts.Now().UnixNano(), id); err != nil {
-		return metadataError(err)
-	}
 	result, err := tx.ExecContext(ctx, `UPDATE optional_repairs SET state='pending',next_retry=0 WHERE id=? AND state NOT IN ('working','delivering')`, id)
 	if err != nil {
 		return err

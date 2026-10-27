@@ -8,16 +8,28 @@ import (
 )
 
 const (
-	MaxOptionalRepairRecords          = 4096
-	MaxOptionalRepairHistory          = 32768
-	MaxOptionalRepairHistoryPerRecord = 128
+	MaxOptionalRepairRecords = 4096
 )
+
+// Append-only history tables were retired; row-level state/attempts/last_error
+// carry quarantine evidence. Dropping a table also drops its triggers/indexes,
+// so existing spools open cleanly and the ledger is recomputed afterwards.
+func (q *Queue) dropRetiredHistory(ctx context.Context) error {
+	for _, statement := range []string{
+		`DROP TRIGGER IF EXISTS optional_repair_history_cap`,
+		`DROP TABLE IF EXISTS optional_repair_history`,
+		`DROP TABLE IF EXISTS enrichment_history`,
+	} {
+		if _, err := q.db.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func (q *Queue) initOptionalRepairCaps(ctx context.Context) error {
 	for _, statement := range []string{
-		`CREATE INDEX IF NOT EXISTS optional_repair_history_owner ON optional_repair_history(repair)`,
 		fmt.Sprintf(`CREATE TRIGGER IF NOT EXISTS optional_repair_record_cap BEFORE INSERT ON optional_repairs WHEN NOT EXISTS(SELECT 1 FROM optional_repairs WHERE id=NEW.id) BEGIN SELECT CASE WHEN (SELECT count(*) FROM optional_repairs)>=%d THEN RAISE(ABORT,'sessioncapture: metadata quota exceeded') END; END`, MaxOptionalRepairRecords),
-		fmt.Sprintf(`CREATE TRIGGER IF NOT EXISTS optional_repair_history_cap BEFORE INSERT ON optional_repair_history BEGIN SELECT CASE WHEN (SELECT count(*) FROM optional_repair_history)>=%d OR (SELECT count(*) FROM optional_repair_history WHERE repair=NEW.repair)>=%d THEN RAISE(ABORT,'sessioncapture: metadata quota exceeded') END; END`, MaxOptionalRepairHistory, MaxOptionalRepairHistoryPerRecord),
 	} {
 		if _, err := q.db.ExecContext(ctx, statement); err != nil {
 			return err
@@ -28,7 +40,7 @@ func (q *Queue) initOptionalRepairCaps(ctx context.Context) error {
 
 // Called with the session mutation lock. The accepted job already reserves the
 // private source descriptors and payloads. Its fixed-size gap flag is the terminal
-// reserve when no new repair/history row can be admitted. No evidence is evicted,
+// reserve when no new repair row can be admitted. No evidence is evicted,
 // no failed job is ACKed, and future raw captures retain the withheld coordinates.
 // This is terminal/inspectable via Status.OptionalRepairGap, not accepted retry work.
 func (q *Queue) terminalOptionalQuota(ctx context.Context, i publication.Identity) (bool, error) {

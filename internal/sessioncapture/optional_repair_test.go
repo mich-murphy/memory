@@ -261,9 +261,9 @@ func TestOptionalRemoteFailureWithholdsLatestAndRepairsAfterRestart(t *testing.T
 			if repaired.Sources[1].Withheld != nil || repaired.Sources[0].Object != raw.Sources[0].Object || repaired.Sources[1].CapturedAtNS != remote.Sources[1].CapturedAtNS {
 				t.Fatal("repair restored stale main/fake capture time")
 			}
-			var history int
-			if err := q.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM optional_repair_history`).Scan(&history); err != nil || history == 0 {
-				t.Fatal("failure history lost", err)
+			var attempts int
+			if err := q.db.QueryRowContext(t.Context(), `SELECT attempts FROM optional_repairs`).Scan(&attempts); err != nil || attempts == 0 {
+				t.Fatal("row-level attempts lost", attempts, err)
 			}
 		})
 	}
