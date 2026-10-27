@@ -9,7 +9,6 @@ import contextlib
 import fcntl
 import hashlib
 import json
-import multiprocessing
 import os
 from pathlib import Path
 import re
@@ -125,33 +124,17 @@ def command(endpoint, args):
             shlex.join(args)]
 
 
-def _local_export(endpoint, identity, output):
-    publications.export_session(endpoint['binary'], None,
-        *(identity[k] for k in ('archive_id', 'machine_id', 'agent', 'session_id')),
-        output, config=endpoint['config'])
-
-
 def export(endpoint, identity, output, root, timeout, max_bytes):
+    """Run the authoritative reader's export, locally or over ssh, under one bound."""
+    def reader_args(destination):
+        args = ['export', '--config', endpoint['config']]
+        for flag, key in (('archive', 'archive_id'), ('machine', 'machine_id'),
+                          ('agent', 'agent'), ('session', 'session_id')):
+            args += ['--' + flag, identity[key]]
+        return args + ['--output', str(destination), '--max-bytes', str(max_bytes)]
+
     if 'ssh_host' not in endpoint:
-        # Reuse the public reader adapter in an isolated process group so its
-        # existing timeout is not our only bound. No network inside any DB tx.
-        child = multiprocessing.get_context('fork').Process(
-            target=_export_child, args=(endpoint, identity, str(output)))
-        child.start()
-        deadline = time.monotonic() + timeout
-        try:
-            while child.is_alive():
-                require(time.monotonic() < deadline, 'export_timeout')
-                disk_bytes(root, max_bytes)
-                child.join(.025)
-            require(child.exitcode == 0, 'reader_export_failed')
-            disk_bytes(root, max_bytes)
-        finally:
-            if child.is_alive():
-                with contextlib.suppress(ProcessLookupError, PermissionError):
-                    os.killpg(child.pid, signal.SIGKILL)
-                child.kill()
-            child.join()
+        run(command(endpoint, reader_args(output)), root, timeout=timeout, max_bytes=max_bytes)
         return
     host = endpoint['ssh_host']
     ssh = ['ssh', '-oBatchMode=yes', '-oConnectTimeout=10', '--', host]
@@ -159,27 +142,13 @@ def export(endpoint, identity, output, root, timeout, max_bytes):
                  timeout=timeout).decode().strip()
     require(re.fullmatch(r'/tmp/session-refresh\.[A-Za-z0-9]{12}', remote), 'remote_temp_invalid')
     try:
-        args = ['export', '--config', endpoint['config']]
-        for flag, key in (('archive', 'archive_id'), ('machine', 'machine_id'),
-                          ('agent', 'agent'), ('session', 'session_id')):
-            args += ['--' + flag, identity[key]]
-        args += ['--output', remote + '/export', '--max-bytes', str(max_bytes)]
-        run(command(endpoint, args), root, timeout=timeout, max_bytes=max_bytes)
+        run(command(endpoint, reader_args(remote + '/export')), root, timeout=timeout, max_bytes=max_bytes)
         run(['scp', '-q', '-r', '-oBatchMode=yes', '-oConnectTimeout=10', '--',
              host + ':' + remote + '/export', str(output)], root,
             timeout=timeout, max_bytes=max_bytes)
     finally:
         # Only the exact mktemp-owned directory, never config/source paths.
         run([*ssh, shlex.join(['rm', '-rf', '--', remote])], root, timeout=timeout)
-
-
-def _export_child(endpoint, identity, output):
-    os.setsid()
-    signal.signal(signal.SIGTERM, signal.SIG_DFL)
-    try:
-        _local_export(endpoint, identity, output)
-    except Exception:
-        os._exit(1)  # No transcript-bearing traceback from a reader/dependency.
 
 
 def open_status(path):

@@ -174,7 +174,7 @@ class RefreshTests(unittest.TestCase):
         with self.assertRaises(refresh.RefreshFailure):
             refresh.load_endpoints(path)
 
-    def test_discovery_command_selection_preserves_local_export_adapter(self):
+    def test_discovery_command_selection(self):
         for mode, subcommand in ((None, 'publication-status'), ('queue', 'publication-status'),
                                  ('remote-current', 'current-heads')):
             with self.subTest(mode=mode):
@@ -189,12 +189,6 @@ class RefreshTests(unittest.TestCase):
                 run.assert_called_once()
                 self.assertEqual(run.call_args.args[0], ['/bin/reader', 'capture-v1', subcommand,
                     '--config', endpoint['config'], '--after-session', '', '--limit', '256'])
-                identity = self.head('Mac', 'a')['identity']
-                output = self.root / 'export'
-                with patch.object(refresh.publications, 'export_session') as exporter:
-                    refresh._local_export(endpoint, identity, output)
-                exporter.assert_called_once_with(endpoint['binary'], None,
-                    'archive', 'Mac', 'claude', 'a', output, config=endpoint['config'])
 
     def test_discovery_validation(self):
         path = self.root / 'endpoints.json'
