@@ -58,7 +58,7 @@ weakened. No live install, ingestion or R2 deletion happens as an incidental act
 | --- | --- | --- |
 | 0 | Preserve dirty state; archive ledger; compact brief; commit reduced baseline. | Done `65759df` |
 | 1 | Runtime reliability (merged `1706c00`; holder measurement deferred to Step 4 via `step_errors`): operation timeouts/transient claim errors retry per item, only durable local-store failures stop Run; claims released on restart; timeouts visible in status; don't hold the lone connection across slow work; regression tests. | Pending |
-| 2 | Simplify: analytics refresh through one reader path; diagnostic subcommands to test helpers/hidden; optional-lane fold; enrichment trim; break legacy import edges (`launch`, `snapshot`, `hook`). | Pending |
+| 2 | Simplify (2A `c92bc61` done; 2B reduced scope `77276c4` done): analytics refresh through one reader path; diagnostic subcommands to test helpers/hidden; optional-lane fold; enrichment trim; break legacy import edges (`launch`, `snapshot`, `hook`). | Pending |
 | 3 | Green baseline on one commit: rerun journey09/V25 on the checkout, `make check`, `make test`, `make fuzz`, analytics tests. | Pending |
 | 4 | Installed acceptance: Mac 24–48h autonomous run, status/coverage/restart/restore/report; then BC-01; actual R2. | Pending (needs host actions) |
 | 5 | Cutover per contract §6; delete reviewed retired R2 key set; remove legacy v3 code. | Pending |
@@ -126,8 +126,49 @@ PASS (9.8s / 111.6s / 37.7s). Full gates not yet run.
   exit under load; none deterministic. "V25" and Qrace180 not reproduced by name.
   Logs: `/tmp/w3-*.log`. Required: a quiet-machine gate run (Step 3).
 
+### Step 2B decision (parent, from read-only plan `c3586223-a644-4f1`)
+
+The strict optional-lane fold is **not done**: the optional delivery lane, the extra
+optional-delivery/repair workers and the v2 `withheld` wire type are load-bearing
+(a stalled or forbidden artifact must not block transcript delivery; missing provenance
+must stay visible and redacted; `TestOptionalNetworkStallDoesNotLockRawAcceptanceOrClaims`).
+Also kept: `optional_repair_gap` + quota replay (sole record that no repair row could be
+admitted), the `metadata_budgets` byte ledger (contract byte limits), enrichment
+admission gap/intent, all authority/exclusion code. Reduced scope: drop append-only
+`optional_repair_history` and `enrichment_history` (duplicate row state), with explicit
+`DROP … IF EXISTS` of retired objects on init.
+
+- W4 `e139aa4f-108c-4df` — coordinator-exit stress A/B (BASE `65759df` vs NEW
+  `c92bc61`), worktrees `step3-verify`/`step2b-stress`, uncommitted diagnostic edit
+  only. Correction C2 (sent): load reached 82; keep 6 `yes`, flag iterations with load >30.
+- W5 `fec722e2-7dfe-4d1` — history-table removal; worktree `step2b-optional` (base
+  `91630ce`); full suites wait until W4's load processes are gone.
+- C1 → W1: acknowledged and taken up; verified in `1706c00` (single walker, PRAGMA
+  helper, INTERRUPT handled only after op expiry — observed error was plain
+  DeadlineExceeded, so INTERRUPT handling is defensive).
+
+- **W5 `77276c4` (accepted, parent-reviewed diff).** Retired `optional_repair_history`
+  and `enrichment_history`: inserts, budget entries and cap trigger removed; init drops
+  the retired objects and the ledger is recomputed
+  (`TestOpenDropsRetiredHistoryObjectsAndRecomputesBudget`). Behaviour change accepted:
+  enrichment metadata-budget exhaustion is now row-level `retry` + `last_error` with
+  bounded attempts → quarantine, not immediate `quarantined/quota`; raw delivery still
+  proceeds. Deleted two history-only cap tests. Non-test −43, test −29 LOC. Worker
+  checks on a quiet machine: `make lint` 0, race `sessioncapture` 92.8s ok and `cli`
+  42.9s ok, capture-acceptance ok, analytics 97/97. Enrichment contract wording updated.
+- **W4 stress A/B (completed).** 25+25 alternating CoordinatorJourney iterations at load
+  16–31 (an earlier 20+20 at load ~100 was discarded): BASE 1 failure, NEW 1 failure.
+  Both failures were the coordinator exiting 1 with `capture coordinator unavailable;
+  replay/resume require stopped coordinator`. That message comes from
+  `runCaptureWritable` (`internal/cli/capture_runtime.go`), which discards the
+  `sessioncapture.Open` error. **So the journey flake is a separate defect in the Open path, which
+  `1706c00` does not reach** (no `step skipped` lines were seen). Rate ≈1/125 coordinator
+  test runs. Leading hypothesis (unproven): `initializeDB` issues `PRAGMA journal_mode=WAL`
+  before `PRAGMA busy_timeout=5000`, so a concurrent read-only `work-status` reader
+  during a coordinator restart gets an immediate SQLITE_BUSY. A flock race is also possible.
+
 ### Next action
 
-Parent: confirm the coordinator-exit fix under load (stress loop, stderr captured,
-base vs `c92bc61`); read-only design pass for the optional-lane fold + enrichment trim;
-then implement Step 2B serially and run Step 3 gates on a quiet machine.
+Parent: dispatch W6 to fix the Open-path coordinator exit (surface the error, set the
+busy timeout before any locking statement, reproduce deterministically, then repeat
+W4's loop); afterwards run the Step 3 full gates on a quiet machine.

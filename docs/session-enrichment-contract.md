@@ -36,7 +36,7 @@ basis or waits on network I/O.
 Separate workers alone do not solve isolation. A newly forbidden optional artifact in
 an ordered complete publication must not permanently block a later safe transcript.
 No implementation may solve that by uploading forbidden bytes, pretending an old job
-was published, deleting its payload/history, or weakening source-epoch regression
+was published, deleting its payload or repair record, or weakening source-epoch regression
 checks.
 
 ## Versioned deliverable selection
@@ -83,18 +83,19 @@ label/association supplied by a hook is not privacy authorization.
 Queue delivery must durably supersede a blocked composite with a higher-sequence
 selection view built from the **latest** accepted local state. Earlier jobs are not
 marked published; their safe accepted bytes/epochs remain represented or retained for
-repair with explicit history. All local payloads remain charged. Rechecking optional
+repair with row-level attempts and last error. All local payloads remain charged. Rechecking optional
 policy must not gate raw acceptance; delivery still checks every selected original
 identity, including immediately before CAS. Recovery can reselect retained optional
 bytes only after successful policy/integrity checks and never fabricates a new byte
-capture time. Failure history is not erased.
+capture time. Row-level failure state (attempts, last error, contract/software
+version) is not erased; append-only history tables were retired 2026-10-27.
 
 **Accepted delivery versus repair reserve (target clarification, 2026-10-25 AEDT):**
 An already accepted selected snapshot may complete ordinary delivery despite exhausted
 repair capacity when exact retained authority, fresh policy, full remote dependency
 verification, ordering, guarded publication and acknowledgement all succeed. A redundant
-new repair record/history is not a prerequisite to that success. This does not change
-any accounting expression or exempt new payload/history. A genuinely blocked composite
+new repair record is not a prerequisite to that success. This does not change
+any accounting expression or exempt new payload/metadata. A genuinely blocked composite
 still requires latest-state raw isolation with charged repair work or an explicit quota
 gap. Keeping the same partially acknowledged optional job after genuine operation expiry
 requires authoritative prior raw coverage, not local ACK bits or an expected route.
