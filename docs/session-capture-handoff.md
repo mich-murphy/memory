@@ -546,9 +546,25 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   exclusion that lands mid-batch already leaves earlier uploads and earlier publications in R2
   (privacy recovery, not delivery, removes those). Cost becomes O(K) per publication.
 
+- **W26 `5bb81d9`, accepted (own-evidence per-upload recheck).** Implements the decision above.
+  `uploadOne` takes the evidence index; immediately before each `PutFile` it runs
+  `recheckScopes` + `check` on that object's own evidence only. A missing evidence slot fails
+  closed with `ErrIntegrity`; this is unreachable today because `verifyDependencies` already
+  rejects `len(es) != len(m.Sources)`. The full-session passes (`verifyDependencies`, post-loop,
+  manifest `PutFile`, root `CompareAndSwap`) are unchanged. `CheckPolicy` calls for one
+  publication with D=K: K=10 770 → 320; K=50 13,850 → 1,600; K=150 116,550 → 4,800; K=378
+  724,626 → 12,096 (32×K). New tests: `TestFirstPublicationPolicyChecksAreLinear` (≤40×K),
+  `TestUploadExclusionOfOwnPathPreventsPut`, `TestUploadExclusionOfLaterSourceBlocksPublication`
+  (the later excluded object is caught by its own check and never uploaded) and
+  `TestUploadSessionExclusionMidBatchBlocksPublication`; each asserts the excluded key is absent
+  and nothing became current. Existing tests unmodified; worker gates: lint 0, `-race` on
+  sessioncapture/publication/cli, capture-acceptance. Projected at 2.6 ms/call (upper bound):
+  K=123 ≈10 s, K=378 ≈31 s, K=1000 ≈83 s (over the 60 s budget; no live session that large is
+  pending, max K=378). Not yet installed.
+
 ### Next action
 
-W26 implements own-evidence per-upload rechecks (O(K) publications). Then: aggregate gates (sole
-verifier under `caffeinate`, explicit `ANALYTICS_PYTHON`), Mac install, replay quarantine 22, and
-confirm sessions with K≥150 publish. Measure retry cost (re-PUT/412 reconcile of untrusted objects)
-before considering resumable upload progress.
+W27 (sole verifier under `caffeinate`, explicit `ANALYTICS_PYTHON`) runs the aggregate gates on
+the W26 merge. If green: Mac install, replay quarantine 22, and confirm sessions with K≥150
+publish. Measure retry cost (re-PUT/412 reconcile of untrusted objects) before considering
+resumable upload progress.
