@@ -446,9 +446,27 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   gates: lint 0, `-race` on sessioncapture/cli, capture-acceptance. Parent review confirmed
   the claim release and the published/superseded guard. Not yet installed.
 
+- **W19 `d7f9364`, accepted (per-publication delivery cost proportional to the delta).**
+  `publication.TrustedObjects` / `trustedFrom` trust an object only when its full `Object`
+  descriptor (key, encoding, both digests, both sizes) equals a selected object of the remote
+  current's manifest. That manifest must pass `parseCurrent`, a checksum-checked `resolve` and
+  `advances`. Any failure returns nil, which means the full path. `uploadDependencies` skips
+  only `PutFile` for trusted objects; every `recheck`/`recheckScopes` call and fault point
+  stays per object. `Publish` uses `verifyExcept` with trust recomputed from the prior it
+  actually read, so if the current moves between reads the worst case is a failed attempt, not
+  an unverified publish. `Read`/export still verify the full closure. Invariant (code
+  comments): an object referenced by a published manifest stays present until the reviewed §6
+  cutover deletion (§4 "Begin without automatic GC", §6 step 6). Cutover deletion must honour
+  this. Measured on Local: publication 12 went from 12 PUT / 12 opens to 1 / 1, with constant
+  metadata operations (3 Current + 3 manifest opens). Tests: `TestDeliveryCostIsProportionalToDelta`,
+  `TestTrustedObjectsFallbacks`, `TestReadStillVerifiesTrustedObjects`; existing tests
+  unmodified. Worker gates: lint 0, `-race` on sessioncapture/publication/publicationr2/cli,
+  capture-acceptance. Rebased onto W20 and the combined focused tests passed. Residual: local
+  spool `q.verify` and the exact-retry ("already published") full `verify` are still
+  O(session); not measured on R2. Not yet installed.
+
 ### Next action
 
-W19 (scaling of per-publication object handling) and W20 (shutdown cancellation and replay of
-superseded jobs) are in disjoint worktrees. After review and merge: aggregate gates (sole
-verifier, explicit `ANALYTICS_PYTHON`), Mac install, then replay the active delivery
-quarantines (quarantine 5 only after W20) and confirm large sessions drain.
+W21 (sole verifier) runs the aggregate gates on the W19+W20 merge with explicit
+`ANALYTICS_PYTHON`. If green: Mac install, replay the active delivery quarantines (resolved ones
+now return `ErrReplayResolved`), and confirm sessions with 100 or more sources publish.
