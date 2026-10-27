@@ -191,7 +191,22 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   Alone: 5 of 6 passes, 6.4–10.8s. **Parent disposition:** this is not accepted as noise. It
   has failed in every full-suite run (W3, W7 ×2), and the deadline may not be relaxed.
   W8 must determine what consumes the window (product retry/backoff latency or test
-  scheduling) and fix the cause.
+  scheduling) and fix the cause. W8 `d9d4126e-1116-4ef` dispatched (worktree
+  `step3-ack` at `98fb4a9`).
+
+- **W8 `d9d4126e-1116-4ef` (diagnosis accepted; no commit).** Temporary timestamps showed
+  that the withheld-ACK window is consumed by product retry backoff, not by `busy_timeout`,
+  `1706c00`, lane mutexes or test scheduling. Ordinary optional transport failure is
+  withheld ≈65ms after operation expiry. With the `context.DeadlineExceeded` cause,
+  `isolateOptionalFailure` rejects any deadline in the tree, so the job takes the
+  `runtimeDeliveryFailure` retry/backoff path (1s, 2s, 4s…) and is withheld only on a
+  later round. Pinning jitter was insufficient (2/20 failures). Isolating every optional
+  deadline broke `TestOptionalIsolationRejectsFatalErrorTrees`, which correctly rejects a
+  bare deadline on a live context. **Parent design for W9:** isolate an optional
+  `SourceDependencyError` whose leaves are deadline-only *only when the operation
+  context itself has expired*. This is the existing "genuine operation expiry" case
+  that the latch-saving `WithoutCancel` path was written for. Live-context deadlines,
+  cancellation, durability/fatal trees and destination failures stay non-isolated.
 
 ### Next action
 
