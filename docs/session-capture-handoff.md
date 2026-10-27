@@ -339,8 +339,25 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   contract §3 (transient transport → backoff; only auth/config → pause). The existing
   mapping test covers only `bound: true`. W15 fixes this.
 
+- **W15 `53f8a8f`, accepted (destination pause classification).** The unbound
+  archive read in `captureDestinationBackend` is split into `open`/`bind`/`get`. `bind`
+  pauses only on `ErrDestinationPaused` (401/403), `ErrNotFound` (missing binding),
+  `publication.ErrInvalidMetadata` (a new marker for an archive document that was read in
+  full but is oversized, malformed or unsupported) and archive identity mismatch (with
+  `ErrIntegrity`). Transport, 5xx, throttling and mid-stream read failures now follow the
+  same per-job backoff → bounded quarantine as the bound path (contract §3). The archive
+  gate before namespace writes is unchanged: a failed read never binds. Tests:
+  `TestCaptureDestinationUnboundArchiveReadClassification` and
+  `TestTransientUnboundArchiveReadRetriesWithoutPause`; existing tests unmodified. Worker
+  gates: vet, lint 0, `-race` on cli/sessioncapture/publicationr2/capturebackend/publication,
+  and capture-acceptance all passed. Parent review: the `invalidMetadata` wrap is also
+  reached by manifest reads, but nothing else matches the marker, so behaviour there is
+  unchanged. The live spool's 15 quarantined delivery jobs (4 `timeout`, 11 `transient`,
+  2026-10-24/25) predate this change and came from the bound path; they can be replayed.
+  Not yet installed on the Mac.
+
 ### Next action
 
-W15 fixes the unbound-archive destination misclassification. Parent keeps monitoring the
-installed Mac service: backlog drain, steady-state CPU once the backlog clears,
-step_errors, pause state and refresher freshness.
+W16 (sole verifier) runs the aggregate gates on `53f8a8f`. If green, the parent installs
+`53f8a8f` on the Mac with the same backup/swap procedure, then keeps monitoring the
+backlog drain, steady-state CPU, step_errors, pause state and refresher freshness.
