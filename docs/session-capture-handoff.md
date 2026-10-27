@@ -501,9 +501,34 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   and unmeasured against the live 60s budget; first publications and full-path fallbacks
   (D=K) remain O(K²). Not yet installed.
 
+- **W24 gates on `1ad50ea`: all green** (`make check` 613s, cover 87.1%, 0/10 functions over
+  CRAP 30; `make test` 451s; analytics 97/97; `.mjs` 8/8; fuzz pass), each run under
+  `caffeinate -i -s` on AC power with no sleep events. W23's earlier run was invalid, not a
+  failure: the Mac entered clamshell sleep on battery at 07:09:37 during `internal/syncer`.
+  The transient delivery retries seen afterwards line up with DarkWake windows (07:19, 07:37,
+  08:41) and cleared once the Mac was fully awake. **Mac install of `1ad50ea`** (parent, 09:40
+  AEDT): backup in `backups/step4e-20261028/` (byte-identical, `quick_check ok`, previous binary
+  `.362ac12`), sha256 `3a5be6d6…`. With the coordinator stopped, quarantines 20 and 21 were
+  replayed (exit 0), leaving 0 active. Within 10 minutes, sessions with 100 or more sources were
+  publishing (1 → 5).
+- **Remaining defect: near-first publications are O(D×K) (found after install).** Quarantine 22
+  (`timeout`, 8 attempts) is seq 124 of a session last published at seq 13. Superseding folded
+  seqs 14–123 into it, so it must upload D=110 of K=123 objects (28.6 MB encoded) in one 60s
+  attempt. A new CPU sample is still dominated by `capturepolicy.Resolve`, `checkObserved`,
+  `capturepolicy.New`, `ReadOwnership`, `adapters.All`, `excludes` and `isWithin` under
+  `uploadOne`, `recheckScopes` and `verifyDependencies`. Each uploaded object still triggers a
+  full-session pass (scopes + selected evidence), and every source check reloads the policy
+  inputs: the exclusion registry, a `capturepolicy.New` for each config × protected state, the
+  coordinate inventory and the adapters. 254 pending jobs have K=200–378, while the largest K
+  ever published is 151. No code reads per-job upload progress, so retries restart from zero.
+  Decision: keep the privacy window unchanged (a full-session recheck immediately before every
+  `PutFile`). First cut the per-check constant by reading policy inputs once per pass, fresh for
+  every pass and never shared between passes. Measure D=K at 378 and 1000 before deciding
+  whether resumable upload progress is also needed.
+
 ### Next action
 
-W23 (sole verifier) runs the aggregate gates on the W22 merge with explicit
-`ANALYTICS_PYTHON`. If green: Mac install, replay any new delivery quarantines, and confirm
-sessions with 100 or more sources publish. If they still time out, measure per-call
-`CheckPolicy` cost before designing a per-pass policy snapshot.
+W25 measures the runtime per-check `CheckPolicy` cost and introduces a per-pass policy snapshot
+with an unchanged recheck schedule. Then: aggregate gates (sole verifier under `caffeinate`,
+explicit `ANALYTICS_PYTHON`), Mac install, replay quarantine 22, and confirm sessions with K≥150
+publish.
