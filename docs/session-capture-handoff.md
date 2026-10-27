@@ -526,9 +526,29 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   every pass and never shared between passes. Measure D=K at 378 and 1000 before deciding
   whether resumable upload progress is also needed.
 
+- **W25 measured, no fix (stopped per brief).** A synthetic runtime delivery `CheckPolicy` call
+  takes 2.6 ms with 40 exclusion records (registry `Load` + `Excludes` ≈ 78%, `capturepolicy.New`
+  ×6 ≈ 5%, `runtimeFilesystemPolicy` ≈ 10%). The live registry has 0 records, so the live split
+  is dominated by `Resolve`, `New` and privacy-owner derivation, as the CPU sample showed. Either
+  way, a per-pass snapshot cuts only the constant: (D+4) full passes × 2K calls stays O(D×K)
+  (projected D=K: K=123 ≈ 81 s, K=378 ≈ 750 s against the 60 s budget).
+- **Decision (parent, 2026-10-28): per-upload recheck covers the uploaded object's own evidence;
+  full-session passes stay at the batch boundaries.** Contract basis: §3 "Recheck exclusions
+  before delivering pending work", and the enrichment contract "delivery still checks every
+  selected original identity, including immediately before CAS". Neither requires a
+  whole-session pass before each object. Full-session passes (scopes + every selected identity)
+  remain before the first upload (`verifyDependencies`), after the upload loop, before the
+  manifest `PutFile` and at the root `CompareAndSwap`. Immediately before each `PutFile`, the
+  object's own evidence gets scopes + full check, which catches path, credential and
+  claimed-session exclusions for the bytes being sent. Accepted residual: an exclusion that
+  lands mid-batch and matches only a *different* source's identity stops further uploads at
+  the post-loop pass rather than at the next object. It still blocks publication, and an
+  exclusion that lands mid-batch already leaves earlier uploads and earlier publications in R2
+  (privacy recovery, not delivery, removes those). Cost becomes O(K) per publication.
+
 ### Next action
 
-W25 measures the runtime per-check `CheckPolicy` cost and introduces a per-pass policy snapshot
-with an unchanged recheck schedule. Then: aggregate gates (sole verifier under `caffeinate`,
-explicit `ANALYTICS_PYTHON`), Mac install, replay quarantine 22, and confirm sessions with K≥150
-publish.
+W26 implements own-evidence per-upload rechecks (O(K) publications). Then: aggregate gates (sole
+verifier under `caffeinate`, explicit `ANALYTICS_PYTHON`), Mac install, replay quarantine 22, and
+confirm sessions with K≥150 publish. Measure retry cost (re-PUT/412 reconcile of untrusted objects)
+before considering resumable upload progress.
