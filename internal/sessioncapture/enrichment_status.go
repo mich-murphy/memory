@@ -112,7 +112,7 @@ func readDiagnosticQueue(ctx context.Context, spool, archive string) (*Queue, er
 		return nil, err
 	}
 	u := url.URL{Scheme: "file", Path: absolute}
-	u.RawQuery = url.Values{"mode": {"ro"}, "_pragma": {"query_only(1)"}}.Encode()
+	u.RawQuery = url.Values{"mode": {"ro"}, "_pragma": {"busy_timeout(5000)", "query_only(1)"}}.Encode()
 	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
 		return nil, err

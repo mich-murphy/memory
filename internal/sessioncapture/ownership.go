@@ -219,8 +219,8 @@ func ReadOwnership(ctx context.Context, spool, archive, agent, root, uuid string
 	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
 		return "", "", ErrPolicy
 	}
-	u := url.URL{Scheme: "file", Path: path}
-	db, err := sql.Open("sqlite", u.String()+"?mode=ro")
+	u := url.URL{Scheme: "file", Path: path, RawQuery: url.Values{"mode": {"ro"}, "_pragma": {"busy_timeout(5000)"}}.Encode()}
+	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
 		return "", "", err
 	}

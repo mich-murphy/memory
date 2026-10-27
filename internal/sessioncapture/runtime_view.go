@@ -40,7 +40,7 @@ func ReadRuntime(ctx context.Context, spool, archive string, afterID int64, limi
 		return view, err
 	}
 	u := url.URL{Scheme: "file", Path: absolute}
-	values := url.Values{"mode": {"ro"}, "_pragma": {"query_only(1)"}}
+	values := url.Values{"mode": {"ro"}, "_pragma": {"busy_timeout(5000)", "query_only(1)"}}
 	u.RawQuery = values.Encode()
 	db, err := sql.Open("sqlite", u.String())
 	if err != nil {

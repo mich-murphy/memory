@@ -31,6 +31,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -151,7 +152,10 @@ func Open(ctx context.Context, dir string, opts Options) (*Queue, error) {
 		_ = l.Unlock()
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", dbPath)
+	// busy_timeout first, per connection: journal_mode=WAL and the schema
+	// statements take locks that concurrent read-only inspectors may hold.
+	dsn := url.URL{Scheme: "file", Path: dbPath, RawQuery: url.Values{"_pragma": {"busy_timeout(5000)", "synchronous(FULL)"}}.Encode()}
+	db, err := sql.Open("sqlite", dsn.String())
 	if err != nil {
 		_ = l.Unlock()
 		return nil, err
@@ -375,7 +379,7 @@ func (q *Queue) Status(ctx context.Context) ([]Status, error) {
 
 func initializeDB(ctx context.Context, db *sql.DB, dir, archiveID string) error {
 	var err error
-	for _, s := range []string{"PRAGMA journal_mode=WAL", "PRAGMA synchronous=FULL", "PRAGMA busy_timeout=5000", `CREATE TABLE IF NOT EXISTS binding (archive TEXT NOT NULL)`, `CREATE TABLE IF NOT EXISTS jobs (session TEXT NOT NULL, sequence INTEGER NOT NULL, manifest BLOB NOT NULL, evidence BLOB NOT NULL, state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', next_retry INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(session,sequence))`} {
+	for _, s := range []string{"PRAGMA journal_mode=WAL", "PRAGMA synchronous=FULL", `CREATE TABLE IF NOT EXISTS binding (archive TEXT NOT NULL)`, `CREATE TABLE IF NOT EXISTS jobs (session TEXT NOT NULL, sequence INTEGER NOT NULL, manifest BLOB NOT NULL, evidence BLOB NOT NULL, state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', next_retry INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(session,sequence))`} {
 		if _, err = db.ExecContext(ctx, s); err != nil {
 			return err
 		}
