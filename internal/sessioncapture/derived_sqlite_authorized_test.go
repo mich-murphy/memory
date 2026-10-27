@@ -381,3 +381,42 @@ func TestDerivedSQLiteAuthorizedUnchangedMissingOriginRevocation(t *testing.T) {
 		t.Fatal("revoked session blocked healthy publication", e)
 	}
 }
+
+func TestDerivedSQLiteAuthorizedCleanClosedWALCaptures(t *testing.T) {
+	dir, o, r := setup(t)
+	r.Path = filepath.Join(filepath.Dir(r.Path), "clean.sqlite")
+	r.Transform = "sqlite-backup"
+	db := sqliteQueueDB(t, r.Path, true, "closed")
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	head, err := os.ReadFile(r.Path)
+	if err != nil || head[18] != 2 || head[19] != 2 {
+		t.Fatal("fixture is not WAL mode", err)
+	}
+	for _, s := range []string{"-wal", "-shm", "-journal"} {
+		if _, err := os.Lstat(r.Path + s); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("sidecar remains", s, err)
+		}
+	}
+	q := open(t, dir, o)
+	capture(t, q, r)
+	backend := newBackend(t)
+	if err := q.Deliver(t.Context(), backend, r.Identity); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(t.TempDir(), "export")
+	exported, err := publication.ExportSession(t.Context(), backend, r.Identity, dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := sql.Open("sqlite", filepath.Join(dest, exported.Bodies[0].Path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = restored.Close() }()
+	var count int
+	if err := restored.QueryRowContext(t.Context(), "SELECT count(*) FROM evidence WHERE body='closed'").Scan(&count); err != nil || count != 3 {
+		t.Fatal("rows lost", count, err)
+	}
+}

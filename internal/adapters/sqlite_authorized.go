@@ -238,7 +238,15 @@ func backupSQLitePinned(ctx context.Context, pins sqlitePinnedFS, dest string, l
 		return err
 	}
 	defer func() { err = errors.Join(err, registered.Close()) }()
-	db, err := sql.Open("sqlite", "file:main.db?mode=ro&_pragma=locking_mode(EXCLUSIVE)&vfs="+name)
+	uri := "file:main.db?mode=ro&_pragma=locking_mode(EXCLUSIVE)&vfs=" + name
+	if pins.files["main.db-wal"] == nil {
+		// A cleanly closed WAL-mode database has no sidecar: the pinned main file
+		// is the complete committed state and the WAL's absence is verified before
+		// and after backup. immutable=1 stops SQLite opening a WAL it cannot create.
+		// It is never used when a WAL is pinned, which would silently drop its rows.
+		uri += "&immutable=1"
+	}
+	db, err := sql.Open("sqlite", uri)
 	if err != nil {
 		return err
 	}
