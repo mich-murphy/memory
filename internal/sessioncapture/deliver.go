@@ -310,26 +310,26 @@ func (q *Queue) uploadDependencies(ctx context.Context, b publication.Backend, m
 	return q.recheck(ctx, selectedEvidence(m, es))
 }
 
-// uploadOne rechecks policy around one selected object. A trusted object (already
-// in the remote current's verified manifest) skips only the remote PutFile.
+// uploadOne rechecks policy immediately before one object's bytes are sent. A
+// trusted object (already in the remote current's verified manifest) transfers
+// nothing, so it needs no per-object recheck: verifyDependencies ran before the
+// first upload, and the post-loop recheck, manifest PutFile and root
+// CompareAndSwap recheck the full selected evidence before anything becomes
+// current (contract section 3: recheck before delivering pending work). The
+// fault points still fire for both kinds.
 func (q *Queue) uploadOne(ctx context.Context, b publication.Backend, m publication.Manifest, es []evidence, s *publication.Source, trusted bool) error {
-	// Recheck policy immediately before each upload as well as before root commit.
-	if err := q.recheckScopes(ctx, es); err != nil {
-		return err
-	}
-	if e := q.recheck(ctx, selectedEvidence(m, es)); e != nil {
-		return e
-	}
 	if e := q.fault("upload-before"); e != nil {
 		return e
 	}
-	if err := q.recheckScopes(ctx, es); err != nil {
-		return err
-	}
-	if e := q.recheck(ctx, selectedEvidence(m, es)); e != nil {
-		return e
-	}
 	if !trusted {
+		// One full recheck after the fault point and immediately before PutFile,
+		// so a policy change injected at the boundary is observed.
+		if err := q.recheckScopes(ctx, es); err != nil {
+			return err
+		}
+		if e := q.recheck(ctx, selectedEvidence(m, es)); e != nil {
+			return e
+		}
 		if e := b.PutFile(ctx, s.Object.Key, q.payload(s.Object)); e != nil {
 			return &publication.SourceDependencyError{SourceKeyHash: publication.SourceKeyHash(*s), EpochID: s.EpochID, Optional: s.Optional, Stage: "upload", Err: e}
 		}
