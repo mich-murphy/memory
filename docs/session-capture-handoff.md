@@ -221,7 +221,17 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   `KeepsRawAlive` passed count=10 ×2; full `sessioncapture` passed `-race -shuffle=on` ×4;
   `cli` ok; vet clean; lint 0; capture-acceptance ok.
 
+- **W10 aggregate gates on `551dbb2` (verifier; load ≈8–11).** `make check` exit 0 (cover
+  87.1%, CRAP 0/10 over 30; nearest `runCaptureFixture` 29.40), analytics 97/97, fuzz all
+  pass. `TestRuntimeNetworkRetryWaitsForNewestRawACK` did not recur. `make test` failed
+  once, on `TestCaptureIsolationFixtureProcess` (`internal/cli/capture_isolation_fixture_test.go:22`,
+  15s per-stage deadline; the crash-stage helper was killed at 15.08s). Alone 3/3 pass, but
+  each takes ≈5–6s for a local fixture. **Parent disposition:** the deadline will not be
+  widened. W11 measures where the crash stage spends its time (it waits for the
+  withheld/`unavailable` raw view while the repair call blocks, with
+  `OperationTimeout` 10s and one delivery worker) and fixes the cause.
+
 ### Next action
 
-Parent: rerun the Step 3 aggregate gates (`make check`, `make test`) on `main` via W10, then
-finish the remaining Step 2 operator-CLI cleanup (diagnostic/fixture subcommands).
+Parent: W11 diagnoses and fixes the isolation-fixture crash-stage latency. Then rerun
+`make test`, then do the remaining Step 2 operator-CLI cleanup.
