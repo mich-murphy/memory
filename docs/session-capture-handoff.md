@@ -253,8 +253,16 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   out. Breaking the legacy import edges (`launch`, `snapshot`, `hook`) moves to the Step 5
   legacy removal. `cli` race shuffle ok 33s, lint 0.
 
+- **W12 aggregate gates on `b648399` (verifier; load ≈7–15 including the installed service).
+  Step 3 CLOSED.** `make check` exit 0 (647s; cover 87.0%, CRAP 0/10 over 30, nearest
+  `runCaptureFixture` 29.40), `make test` exit 0 (619s; capture-acceptance 12+6+6 and
+  `go test -race -shuffle=on ./...` all packages), analytics 97/97, `.mjs` 8/8, fuzz 9/9 with
+  no crashers. Exit codes were taken with `pipefail`. Caveats: one green run on one load
+  profile. `TestCaptureIsolationFixtureProcess` elapsed time is not logged without `-v`.
+  Not run: live R2, installed-path, BC-01 and cutover acceptance (Step 4–5).
+
 ### Next action
 
-Parent: W12 runs one aggregate gate pass (`make check`, `make test`, fuzz, analytics) on
-`a3bde3e` (+ this brief commit). If green, Step 3 is closed and Step 4 (installed Mac
-acceptance with the fixed binary) begins.
+Parent: Step 4. Prepare installed Mac acceptance with a binary built from `main`. Follow the
+documented controlled-acceptance install procedure; do not improvise host changes. Explain the
+installed pre-fix service's ≈300% CPU with the fixed binary's `status`/`step_errors`.
