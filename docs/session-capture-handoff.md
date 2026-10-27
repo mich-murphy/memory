@@ -32,10 +32,10 @@ or cut over**; defaults remain legacy.
 | --- | --- |
 | Design | Sound and fit for purpose; matches contract. No direction change. |
 | Candidate code | Opt-in `capture-v1`; publication/reader/report v2; one Go reader used by Python via `capture-v1 export`. |
-| Autonomous reliability | **Fix merged `1706c00` (W1); end-to-end confirmation pending.** Original cause: `runtimeWorker` (`internal/sessioncapture/runtime.go`) treats any error returned from a work step as Run-fatal; ~10 workers share one SQLite connection (`SetMaxOpenConns(1)`), so a >60s wait for it returns `context deadline exceeded` and kills Run. Reproduced in a throwaway copy (0.49s). Matches the recorded Mac `exit 1 context deadline exceeded`. |
-| Open test failures (historical, private-tree) | journey09, V25 attachment/timeline ×3, Qrace180. Must be re-run on a repository commit; may be private-tree artifacts. |
+| Autonomous reliability | **Run-fatal step errors fixed `1706c00` (W1); Open-path SQLITE_BUSY fixed `ef727a9`/`56bd2f9` (W6); optional genuine-expiry withholding `c3fd555` (W9); repair-claim race `66ee491` (W11). Installed end-to-end confirmation pending (Step 4).** Original cause: `runtimeWorker` (`internal/sessioncapture/runtime.go`) treats any error returned from a work step as Run-fatal; ~10 workers share one SQLite connection (`SetMaxOpenConns(1)`), so a >60s wait for it returns `context deadline exceeded` and kills Run. Reproduced in a throwaway copy (0.49s). Matches the recorded Mac `exit 1 context deadline exceeded`. |
+| Open test failures | None on `b648399` (W12 aggregate gates green). journey09 cause found and fixed (W6). V25/Qrace180 were private-tree names and did not reproduce on the checkout. |
 | Shared spool `usage()` scan | Accepted limitation: O(payload files) stat per snapshot (≈185 files observed); fail-closed on integrity error. Not redesigned. |
-| Gates | `make check` ≈620s, dominated by legacy `internal/syncer`; shrinks at legacy removal. |
+| Gates | Green on `b648399`: `make check` 647s, `make test` 619s, fuzz, analytics 97/97. Dominated by legacy `internal/syncer`; shrinks at legacy removal. |
 | Deployment | Last recorded: Mac qualified-dirty `e69fb2ed…` (failing with deadline), BC-01 `b23712bc`. Current health unknown. |
 | Cutover (contract §6) | Inventory/rebuild/fence/cutover/deletion not performed. |
 
@@ -57,9 +57,9 @@ weakened. No live install, ingestion or R2 deletion happens as an incidental act
 | Step | Content | Status |
 | --- | --- | --- |
 | 0 | Preserve dirty state; archive ledger; compact brief; commit reduced baseline. | Done `65759df` |
-| 1 | Runtime reliability (merged `1706c00`; holder measurement deferred to Step 4 via `step_errors`): operation timeouts/transient claim errors retry per item, only durable local-store failures stop Run; claims released on restart; timeouts visible in status; don't hold the lone connection across slow work; regression tests. | Pending |
-| 2 | Simplify (2A `c92bc61` done; 2B reduced scope `77276c4` done): analytics refresh through one reader path; diagnostic subcommands to test helpers/hidden; optional-lane fold; enrichment trim; break legacy import edges (`launch`, `snapshot`, `hook`). | Pending |
-| 3 | Green baseline on one commit: rerun journey09/V25 on the checkout, `make check`, `make test`, `make fuzz`, analytics tests. | Pending |
+| 1 | Runtime reliability (merged `1706c00`; holder measurement deferred to Step 4 via `step_errors`): operation timeouts/transient claim errors retry per item, only durable local-store failures stop Run; claims released on restart; timeouts visible in status; don't hold the lone connection across slow work; regression tests. | Done (W1/W6/W9/W11) |
+| 2 | Simplify (2A `c92bc61` done; 2B reduced scope `77276c4` done): analytics refresh through one reader path; diagnostic subcommands to test helpers/hidden; optional-lane fold; enrichment trim; break legacy import edges (`launch`, `snapshot`, `hook`). | Done in reduced scope (`c92bc61`, `77276c4`, `a3bde3e`); optional-lane fold rejected as load-bearing; legacy edges move to Step 5 |
+| 3 | Green baseline on one commit: rerun journey09/V25 on the checkout, `make check`, `make test`, `make fuzz`, analytics tests. | Done `b648399` (W12) |
 | 4 | Installed acceptance: Mac 24–48h autonomous run, status/coverage/restart/restore/report; then BC-01; actual R2. | Pending (needs host actions) |
 | 5 | Cutover per contract §6; delete reviewed retired R2 key set; remove legacy v3 code. | Pending |
 
