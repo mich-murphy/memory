@@ -13,6 +13,10 @@ import (
 	"github.com/mich-murphy/memory/internal/publication"
 )
 
+// ErrPolicyUnavailable marks a sanitized policy-store authority failure. Callers
+// must not use it for ordinary policy denial or expose private store diagnostics.
+var ErrPolicyUnavailable = errors.New("sessioncapture: policy authority unavailable")
+
 // runtimeFatalCause preserves local storage failures across retry bookkeeping.
 // Transport failures, SDK deadlines and integrity quarantines remain autonomous
 // work outcomes. Cancellation trees are returned intact so the caller's all-leaf
@@ -21,7 +25,7 @@ func runtimeFatalCause(cause error) error {
 	var path *os.PathError
 	var link *os.LinkError
 	var policy *policyStorageFailure
-	if errors.As(cause, &policy) || errors.Is(cause, publication.ErrDurability) || errors.Is(cause, context.Canceled) ||
+	if errors.As(cause, &policy) || errors.Is(cause, ErrPolicyUnavailable) || errors.Is(cause, publication.ErrDurability) || errors.Is(cause, context.Canceled) ||
 		errors.As(cause, &path) || errors.As(cause, &link) || fatalSQLite(cause) ||
 		errors.Is(cause, sql.ErrConnDone) || errors.Is(cause, sql.ErrTxDone) || errors.Is(cause, driver.ErrBadConn) ||
 		errors.Is(cause, syscall.ENOENT) || errors.Is(cause, syscall.EIO) || errors.Is(cause, syscall.ENOSPC) || errors.Is(cause, syscall.EROFS) {
