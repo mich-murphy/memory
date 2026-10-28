@@ -2,11 +2,13 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -109,15 +111,45 @@ func isolationCoverageBinary(t *testing.T, stage string) string {
 	if stage != "crash" || os.Getenv("E2E_GOCOVERDIR") == "" {
 		return ""
 	}
-	binary := filepath.Join(t.TempDir(), "agent-sessions")
-	build := exec.CommandContext(t.Context(), "go", "build", "-race", "-cover", "-covermode=atomic", "-coverpkg=./...", "-o", binary, "./cmd/agent-sessions")
-	build.Dir = "../.."
-	started := time.Now()
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build crash fixture after %s: %v\n%s", time.Since(started), err, output)
+	isolationBuild.once.Do(buildIsolationCoverageBinary)
+	if isolationBuild.err != nil {
+		t.Fatal(isolationBuild.err)
 	}
-	t.Logf("crash fixture build %s (outside stage deadline)", time.Since(started))
-	return binary
+	return isolationBuild.binary
+}
+
+// One instrumented build per test binary, outside every stage deadline. The
+// directory outlives individual tests and is removed by TestMain.
+var isolationBuild struct {
+	once   sync.Once
+	dir    string
+	binary string
+	err    error
+}
+
+func buildIsolationCoverageBinary() {
+	dir, err := os.MkdirTemp("", "isolation-fixture-")
+	if err != nil {
+		isolationBuild.err = err
+		return
+	}
+	isolationBuild.dir = dir
+	binary := filepath.Join(dir, "agent-sessions")
+	build := exec.CommandContext(context.Background(), "go", "build", "-race", "-cover", "-covermode=atomic", "-coverpkg=./...", "-o", binary, "./cmd/agent-sessions")
+	build.Dir = "../.."
+	if output, err := build.CombinedOutput(); err != nil {
+		isolationBuild.err = fmt.Errorf("build crash fixture: %w\n%s", err, output)
+		return
+	}
+	isolationBuild.binary = binary
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if isolationBuild.dir != "" {
+		_ = os.RemoveAll(isolationBuild.dir)
+	}
+	os.Exit(code)
 }
 
 func isolationCommand(ctx context.Context, binary, root, stage string) *exec.Cmd {
