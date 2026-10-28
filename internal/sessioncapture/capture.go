@@ -310,13 +310,13 @@ func (q *Queue) acceptSnapshot(ctx context.Context, r Request, identities []stri
 		if err := boundPolicyIdentities(merged); err != nil {
 			return publication.Manifest{}, err
 		}
-		es[idx] = evidence{Request: r, Identities: merged}
+		es[idx] = evidence{EpochID: src.EpochID, Request: r, Identities: merged}
 	} else {
 		if idx >= 0 {
 			m.Sources[idx].State = "sealed"
 		}
 		m.Sources = append(m.Sources, src)
-		es = append(es, evidence{Request: r, Identities: identities})
+		es = append(es, evidence{EpochID: src.EpochID, Request: r, Identities: identities})
 	}
 	m.Contract = publication.Contract
 	m.Identity = r.Identity
@@ -518,7 +518,7 @@ func encodeAcceptedView(m publication.Manifest, es []evidence) (publication.Mani
 	if err := publication.ValidateManifest(m); err != nil {
 		return m, nil, nil, err
 	}
-	if err := validateEvidencePair(m, es); err != nil {
+	if err := validateEvidencePair(m, es, false); err != nil {
 		return m, nil, nil, err
 	}
 	b, err = json.Marshal(m)

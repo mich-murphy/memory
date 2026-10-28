@@ -358,7 +358,7 @@ func (q *Queue) attempt(ctx context.Context, b publication.Backend, i publicatio
 	if err != nil {
 		return err
 	}
-	if err := validateEvidencePair(m, es); err != nil {
+	if err := validateEvidencePair(m, es, true); err != nil {
 		return err
 	}
 	return q.attemptManifest(ctx, b, i, seq, m, es)

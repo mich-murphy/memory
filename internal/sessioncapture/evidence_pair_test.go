@@ -27,7 +27,7 @@ func TestEvidencePairSwappedAndWithheldCommitment(t *testing.T) {
 	if _, _, _, err = encodeAcceptedView(original, es); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("swapped encode: %v", err)
 	}
-	if err = validateEvidencePair(m, es); !errors.Is(err, ErrIntegrity) {
+	if err = validateEvidencePair(m, es, false); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("swapped decode: %v", err)
 	}
 	es[0], es[1] = es[1], es[0]
@@ -38,11 +38,11 @@ func TestEvidencePairSwappedAndWithheldCommitment(t *testing.T) {
 	m.Sources[1] = withheld
 	copySource := original.Sources[1]
 	es[1].Original = &copySource
-	if err = validateEvidencePair(m, es); err != nil {
+	if err = validateEvidencePair(m, es, false); err != nil {
 		t.Fatalf("valid withheld: %v", err)
 	}
 	es[1].Original.Object.SHA256 = "wrong"
-	if err = validateEvidencePair(m, es); !errors.Is(err, ErrIntegrity) {
+	if err = validateEvidencePair(m, es, false); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("withheld commitment: %v", err)
 	}
 }

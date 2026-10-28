@@ -232,7 +232,7 @@ func (q *Queue) attachEnrichment(ctx context.Context, s EnrichmentSpec, r enrich
 		m.Sources[idx].State = "sealed"
 	}
 	m.Sources = append(m.Sources, src)
-	es = append(es, evidence{Request: request, ResultID: resultID})
+	es = append(es, evidence{EpochID: src.EpochID, Request: request, ResultID: resultID})
 	m.Identity = s.Identity
 	m.Contract = publication.Contract
 	m.Sequence++

@@ -83,7 +83,15 @@ func (q *Queue) deliveryResult(ctx context.Context, i publication.Identity, seq 
 	}
 	if cause == nil {
 		cause = q.acknowledge(save, i, seq)
-		if cause == nil || errors.Is(cause, errSelectionSuperseded) {
+		if cause == nil {
+			return nil
+		}
+		// A post-commit fault reports an ambiguous ACK, never a new failed job.
+		var state string
+		if err := q.db.QueryRowContext(save, `SELECT state FROM jobs WHERE session=? AND sequence=?`, i.BaseKey(), seq).Scan(&state); err != nil {
+			return errors.Join(cause, err)
+		}
+		if state == "published" || state == "superseded" {
 			return cause
 		}
 	}
@@ -106,13 +114,13 @@ func (q *Queue) persistDeliveryFailure(ctx context.Context, i publication.Identi
 		if err := q.pauseDestination(ctx); err != nil {
 			return err
 		}
-		_, err := q.db.ExecContext(ctx, `UPDATE jobs SET attempts=MAX(attempts-1,0),state='retry',last_error='destination',next_retry=0 WHERE session=? AND sequence=?`, i.BaseKey(), seq)
+		_, err := q.db.ExecContext(ctx, `UPDATE jobs SET attempts=MAX(attempts-1,0),state='retry',last_error='destination',next_retry=0 WHERE session=? AND sequence=? AND state NOT IN ('published','superseded')`, i.BaseKey(), seq)
 		return err
 	}
 	state := "retry"
 	if immediate && (code == FailurePolicy || code == FailureIntegrity) {
 		state = string(code) // Explicit replay retains the legacy visible blocked state.
-	} else if attempts >= o.MaxAttempts {
+	} else if !immediate && attempts >= o.MaxAttempts {
 		state = "quarantined"
 	}
 	tx, err := q.db.BeginTx(ctx, nil)
@@ -120,14 +128,18 @@ func (q *Queue) persistDeliveryFailure(ctx context.Context, i publication.Identi
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if state == "quarantined" {
-		_, err = tx.ExecContext(ctx, `INSERT INTO runtime_quarantine(kind,session,sequence,reason,attempts,created_at,contract,software_version) VALUES('delivery',?,?,?,?,?,?,?)`, i.BaseKey(), seq, string(code), attempts, q.opts.Now().UnixNano(), publication.Contract, q.runtimeSoftwareVersion())
-	}
-	if err == nil {
-		_, err = tx.ExecContext(ctx, `UPDATE jobs SET state=?,last_error=?,next_retry=? WHERE session=? AND sequence=?`, state, string(code), q.opts.Now().Add(retryDelay(attempts, o.Jitter)).UnixNano(), i.BaseKey(), seq)
-	}
+	updated, err := tx.ExecContext(ctx, `UPDATE jobs SET state=?,last_error=?,next_retry=? WHERE session=? AND sequence=? AND state NOT IN ('published','superseded')`, state, string(code), q.opts.Now().Add(retryDelay(attempts, o.Jitter)).UnixNano(), i.BaseKey(), seq)
 	if err != nil {
 		return err
+	}
+	n, err := updated.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if state == "quarantined" && n != 0 {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO runtime_quarantine(kind,session,sequence,reason,attempts,created_at,contract,software_version) VALUES('delivery',?,?,?,?,?,?,?)`, i.BaseKey(), seq, string(code), attempts, q.opts.Now().UnixNano(), publication.Contract, q.runtimeSoftwareVersion()); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

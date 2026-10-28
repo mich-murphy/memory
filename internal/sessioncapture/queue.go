@@ -95,6 +95,7 @@ type Status struct {
 	NextRetryNS          int64
 }
 type evidence struct {
+	EpochID         string              `json:",omitempty"` // Private durable source-epoch join; older rows have no binding.
 	SelectionReason string              `json:",omitempty"`
 	ResultID        string              `json:",omitempty"`
 	Original        *publication.Source `json:",omitempty"`
@@ -363,7 +364,17 @@ func (q *Queue) latest(ctx context.Context, i publication.Identity) (publication
 		err = json.Unmarshal(e, &es)
 	}
 	if err == nil {
-		err = validateEvidencePair(m, es)
+		err = validateEvidencePair(m, es, true)
+		if err == nil {
+			// Historical evidence predates epoch binding. Only after its existing
+			// identity/commitment checks may a new view bind it to its selected
+			// manifest epoch; old rows themselves remain unproven across epochs.
+			for j := range es {
+				if es[j].EpochID == "" {
+					es[j].EpochID = m.Sources[j].EpochID
+				}
+			}
+		}
 	}
 	return m, es, err
 }
