@@ -4,18 +4,12 @@
 
 The CI workflow configures development gates on each push and pull request; local `make` targets are listed below. Mutation testing and repeated benchmarks are opt-in diagnostics, not CI gates. Workflow configuration is not evidence that hosted CI ran successfully. The rule behind the settings: **a check is a hard gate only if fixing what it flags always makes the code better.** Bug, safety and error-handling checks pass that test. Size and style metrics don't, because the cheapest way to satisfy them is often an arbitrary split or rename, so they are either off or set high enough to act as backstops.
 
-**Historical offline checkpoint (2026-10-24):** The opt-in v2 writer → shared reader →
-importer → event index → report journey is implemented and mandatory, not a future
-legacy-only gate. All eleven process journeys passed at that checkpoint. Serial pinned-Nix results
-were `make check` **622.40s**, `make test` **460.36s**, nine 30-second fuzz targets
-**285.31s** overall, and complete analytics discovery **73 tests / 23.744s**.
-See [exact offline evidence](session-capture-offline-evidence.md) for scope, merged
-coverage/CRAP and bounded synthetic resources. This is not actual native/R2,
-installed-path, BC-01, representative-resource or cutover acceptance; defaults
-remain legacy and release gates are unchanged. Later source changes and failed gates
-mean these results are not current-checkout certification. The handoff's
-[current scorecard](session-capture-handoff.md#current-session-checkpoint) records open
-autonomous/covered/journey failures, unqualified private fixes and remaining checks.
+The mandatory opt-in v2 writer → shared reader → importer → event index → report
+gate is part of development checks, not native/R2/two-machine acceptance. See
+[dated offline evidence](session-capture-offline-evidence.md) for historical results
+and the [current handoff](session-capture-handoff.md#current-session-checkpoint) for
+checkout qualification, deployment and next action. Defaults remain legacy; do not
+weaken release gates.
 
 The research behind these choices (tool versions, the configs of 13 well-regarded Go projects, and each tool's docs) is in the project's `research/collector-language/go-tooling.md`.
 

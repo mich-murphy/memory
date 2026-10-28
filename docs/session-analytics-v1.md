@@ -4,18 +4,11 @@ This filename is retained for existing links. The repository consumer is
 v2-only; prior v1 gate results in the handoff remain historical evidence, not
 proof of this candidate or a claim that a database migration occurred.
 
-**Historical checkpoint (2026-10-24):** actual writer → authoritative v2 reader → importer
-→ event index → report and opt-in server/query callers were implemented and reviewed
-offline. Complete analytics discovery passed **73 tests / 23.744s**, without
-skips/warnings, including all **11 actual-process journeys**. Full unchanged check
-(**622.40s**), test (**460.36s**) and nine **30s** fuzz targets (**285.31s** total)
-also passed. See [dated offline evidence](session-capture-offline-evidence.md). These
-are offline development results, not current-source qualification. The handoff's
-[current scorecard](session-capture-handoff.md#current-session-checkpoint) records later
-failures, the V29 library Local component pass, unqualified private fixes, historical
-staging deployment and unknown current health. Default activation, complete native/R2
-and representative resource/freshness acceptance, and final two-machine cutover are
-not established by those dated tests.
+The opt-in consumer uses the actual v2 writer/reader/importer/event-index/report path.
+The [2026-10-24 offline evidence](session-capture-offline-evidence.md) records dated
+checks, not present operating acceptance. For deployment, qualification and next
+action see the [current handoff](session-capture-handoff.md#current-session-checkpoint).
+Unselected analytics defaults remain legacy.
 
 `tools/analytics/publications.py` consumes **only** the authoritative reader's
 `session-reader/v2` export: `metadata.json` plus relative decoded body files. It

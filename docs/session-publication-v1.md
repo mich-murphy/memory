@@ -7,16 +7,10 @@ See [independent enrichment](session-enrichment-contract.md) for the implemented
 opt-in producer lane and normative isolation requirements. The command/namespace name `capture-v1` is not the wire
 contract version.
 
-**Implementation status:** implemented and reviewed v2 candidate with
-queue/CLI/enrichment/backend/analytics integration. Unchanged development gates and
-all eleven actual-process journeys passed at the historical 2026-10-24 checkpoint;
-see [dated offline evidence](session-capture-offline-evidence.md) for exact results and
-[queue/CLI/analytics checkpoint](session-capture-implementation.md) for integration.
-The handoff's [current scorecard](session-capture-handoff.md#current-session-checkpoint)
-records later failures, private unqualified fixes, historical experimental deployments
-and unknown current service health. No current full-source qualification is implied.
-This library alone is not deployment, R2 endpoint acceptance, a scheduler or complete
-release acceptance. The [session capture contract](session-capture-contract.md)
+**Scope:** v2 opt-in publication/reader interface, not operating acceptance.
+See [dated offline evidence](session-capture-offline-evidence.md) for historical checks
+and the [current handoff](session-capture-handoff.md#current-session-checkpoint) for
+qualification, deployment and next action. The [capture contract](session-capture-contract.md)
 remains authoritative.
 
 ## Namespace and identity

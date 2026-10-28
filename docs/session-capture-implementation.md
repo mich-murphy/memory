@@ -1,24 +1,12 @@
 # Replacement implementation checkpoints
 
-**Scope:** repository implementation reference, not release acceptance or current
-runtime-health evidence. Controlled experimental installations and managed hook/writer
-fencing occurred historically; final legacy/default cutover has not occurred. The
-handoff's [current scorecard](session-capture-handoff.md#current-session-checkpoint)
-distinguishes recorded deployments, unknown liveness, unresolved failures and private
-unqualified fixes. This document authorizes no installation, ingestion, reset or deletion.
-The current [phase-3 candidate](session-capture-phase3.md) includes independent
-capture/coordinator delivery, native evidence and enrichment lanes, optional-artifact
-repair isolation, declared aliases, authorized no-follow raw/derived/WAL reads,
-explicit Local/R2 backend construction and opt-in analytics callers. Wire, reader and
-report contracts are v2; the `capture-v1` command prefix/namespace is unchanged.
-Enrichment and `--source publications` callers remain opt-in; unselected collector and
-analytics defaults remain legacy, independently of experimental installation history.
-
-**Historical checkpoint evidence — 2026-10-24:** unchanged development gates passed: `make check` **622.40s**, `make test`
-**460.36s**, nine fuzz targets at **30s** each (**285.31s** total), and analytics
-**73 tests / 23.744s**, including all **11 actual-process journeys**. See
-[final offline evidence](session-capture-offline-evidence.md) and the
-[handoff ledger](session-capture-handoff.md) for exact scope and limitations.
+**Scope:** repository implementation reference, not release or runtime-health evidence.
+The opt-in candidate includes independent capture, enrichment, backend selection and
+publication-backed analytics; wire/reader/report contracts are v2 despite the
+`capture-v1` command prefix. Unselected defaults remain legacy. For deployment,
+qualification and next action, see the [current handoff](session-capture-handoff.md#current-session-checkpoint).
+The [2026-10-24 offline checkpoint](session-capture-offline-evidence.md) is dated
+historical evidence, not permission to install, ingest, reset or delete.
 
 ## First-slice chronology (2026-10-23)
 
@@ -109,10 +97,8 @@ weakened.
 ## Remaining release requirements
 
 The integrated coordinator, quarantine/replay, destination pause, source progress,
-enrichment/repair and opt-in service/hooks candidates passed dated offline checkpoints,
-not a complete current-source qualification. Later autonomous/covered/journey failures
-remain open; the latest private metadata/predispatch fixes are uncompiled, unexecuted
-and unadopted. Complete real-inventory artifact coverage, measured combined
+enrichment/repair and opt-in service/hooks candidates have dated offline evidence;
+current checkout qualification belongs in the handoff. Complete real-inventory artifact coverage, measured combined
 resource/freshness bounds, actual native agents, live conditional-R2 behavior, both
 machines' source/policy inventories and installed-path acceptance remain separate work.
 Analytics dashboard/query candidate wiring exists with `--source publications`; default

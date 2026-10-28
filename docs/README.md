@@ -11,40 +11,17 @@
    alternatives, industry precedents, and analysis of the legacy consumer mismatch.
 4. [Repository guidance](../AGENTS.md) — contribution guardrails and scope.
 
-The [offline replacement slice](session-capture-implementation.md) now implements
-versioned local publication/read/export and an actual separate analytics consumer.
-The [phase-3 candidate](session-capture-phase3.md) adds independent durable capture,
-autonomous work, safe derived sources and opt-in lifecycle integration. Neither description alone establishes rollout acceptance. As of 2026-10-28 the Mac has
-candidate `efbb99e` installed and BC-01 `b23712bc`; capture is disabled on both hosts by a
-deliberate source-absence containment, and newer gated fixes on `main` are not installed.
-The replacement is not production-ready or finally cut over. See the handoff's
-[current scorecard](session-capture-handoff.md#current-session-checkpoint) for unresolved
-autonomous/covered/journey failures and unqualified V32V2 source work, rather than
-treating dated checkpoint text as current qualification or live host evidence. See [wire/reader v2](session-publication-v1.md),
-[analytics v2](session-analytics-v1.md), the
-[independent enrichment refinement](session-enrichment-contract.md), and
-[explicit candidate backends](session-capture-backends.md). The
-[2026-10-24 offline evidence](session-capture-offline-evidence.md) records dated passing
-full development gates, eleven process journeys and bounded synthetic resource
-observations—not native/live/two-machine release acceptance. Existing filenames retain
-old link compatibility, not retired wire-schema compatibility. The default collector
-and dashboard still use their old paths; the dashboard/query entry points have an
-explicit publication-backed candidate mode. Neither default legacy behavior nor a
-single candidate journey is evidence of whole replacement acceptance. Do not mix
-these states or resume old patch plans as the roadmap. The
-[current-state alignment audit](current-state-audit.md) records the subsequent wording /
-public-help corrections, scoped checks, independent review and audit limits; it does not
-supersede the latest handoff.
-
-**Next-session pickup:** start with the handoff's [current-session checkpoint](session-capture-handoff.md#current-session-checkpoint), not the preserved chronological restart instructions.
-The unsafe-directory Go fixture is fixed/reviewed, not an all-Go-gates pass. Recorded
-analytics383 evidence includes reviewed outer/inner importer/projection cleanup and
-precedes the three-file Go coverage-preflight/final-error-test supplement. The recorded
-647-input check failed; follow-up source-bound validation is in the handoff. Existing JS
-evidence remains scoped. Private queue-race timeout, historical CLI kill cause, legacy/
-opaque caller boundaries and release/operating acceptance remain open. Continue the
-independent capture → authoritative reader → analytics direction, not retired recovery
-work or completed installation steps.
+The [offline replacement slice](session-capture-implementation.md),
+[phase-3 candidate](session-capture-phase3.md), [wire/reader v2](session-publication-v1.md),
+[analytics v2](session-analytics-v1.md), [enrichment refinement](session-enrichment-contract.md)
+and [candidate backends](session-capture-backends.md) document implemented opt-in
+interfaces. Their filenames and the `capture-v1` prefix do not imply v1 wire support.
+Unselected collector and analytics defaults remain legacy. For current deployment,
+qualification and next action, use the handoff's
+[current-session checkpoint](session-capture-handoff.md#current-session-checkpoint).
+The [2026-10-24 offline evidence](session-capture-offline-evidence.md) and
+[current-state alignment audit](current-state-audit.md) are dated records, not current
+operating acceptance or rollout instructions.
 
 ## References for the implementation that exists today
 

@@ -1,14 +1,17 @@
 # Installation and removal
 
-> **Scope (2026-10-23):** These are existing release installation/removal mechanics, not instructions to deploy the agreed replacement. See the agreed [session-capture contract](session-capture-contract.md) for acceptance and controlled Mac + BC-01 cutover. Retain machine IDs, effective exclusions (including remote-only records), learned nondefault roots and original sources; do not erase pending local data/state as an upgrade shortcut. Stop old workers and hook launch paths before switching writers.
+> **Scope:** These are binary installation/removal and legacy managed-hook mechanics,
+> not candidate service activation or controlled cutover instructions. Preserve machine
+> IDs, exclusions, learned roots, original sources and pending state. See the
+> [contract](session-capture-contract.md) for acceptance and the
+> [current handoff](session-capture-handoff.md#current-session-checkpoint) for deployment
+> and next action.
 
-The two release installation routes below describe the legacy default, pinned to a
-release tag you choose. The opt-in [candidate lifecycle](session-capture-phase3.md)
-also implements explicit service/hook planning and apply commands, native-context
-capture and backend selection. Those are offline-tested candidate paths, not an
-installed deployment or instructions to activate defaults. Real native/R2, both
-machines' installed paths and controlled cutover remain unaccepted; see
-[offline evidence](session-capture-offline-evidence.md).
+The Nix and release routes below install a selected binary; `agent-sessions install`
+configures the legacy managed hooks/extension. The opt-in
+[candidate lifecycle](session-capture-phase3.md) separately provides service/hook
+planning and apply commands. Neither installing a binary nor applying candidate hooks
+is final default cutover or evidence of native/R2/two-machine acceptance.
 
 ## Nix (built from source)
 

@@ -1,27 +1,13 @@
 # Independent enrichment refinement
 
-**Status:** normative refinement with an implemented, reviewed candidate; not
-release-accepted. Historical experimental installations are distinct from newer
-undeployed/private source fixes; current service health is unknown. This refines the
-[capture contract](session-capture-contract.md) for independent native launch evidence,
-harness/memory snapshots and post-acceptance policy isolation. The queue-native lane,
-immutable native inbox, context/policy-aware closed bundles, raw/optional delivery and
-crash-safe repair, declared aliases and authorized raw/derived/WAL reads are now
-implemented. Publication/reader/report contracts are v2; `capture-v1` command prefix
-and namespace are unchanged. Enrichment remains independently opt-in.
-
-**Historical checkpoint evidence — 2026-10-24:** unchanged development gates passed:
-check **622.40s**, test **460.36s**, all nine
-**30s** fuzz targets (**285.31s** total), analytics **73 tests / 23.744s**, including
-**11 actual-process journeys**. See [offline evidence](session-capture-offline-evidence.md)
-and the [handoff scorecard](session-capture-handoff.md#current-session-checkpoint) for
-current state. Later autonomous/covered/journey failures remain unresolved. The latest
-private completion-metadata/predispatch corrections are uncompiled, unexecuted and
-unadopted; those historical passes do not qualify them or the current dirty checkout.
-The requirements below remain normative; passing offline checks does not establish
-actual native-agent fields/trust, operating-resource/freshness, conditional R2 or
-two-machine installed-path acceptance. No inventory, install, activation, cutover or
-deletion is authorized by this document. Existing accepted evidence remains retained.
+**Status:** normative refinement of the [capture contract](session-capture-contract.md)
+with an implemented opt-in candidate, not release acceptance. The independent lane,
+native inbox, optional isolation and authorized source reads are described below;
+publication/reader/report contracts are v2 despite the `capture-v1` prefix.
+See [dated offline evidence](session-capture-offline-evidence.md) for historical checks
+and the [current handoff](session-capture-handoff.md#current-session-checkpoint) for
+qualification, deployment and next action. This document authorizes no installation,
+activation, reset or deletion.
 
 ## Why an independent lane
 
@@ -101,7 +87,7 @@ gap. Keeping the same partially acknowledged optional job after genuine operatio
 requires authoritative prior raw coverage, not local ACK bits or an expected route.
 NoCover does not prohibit healthy ordinary selected delivery; it cannot excuse a real
 optional failure. This clarifies the target contract, not implementation/release evidence;
-the handoff records private implementation, test refinements and remaining gate failures.
+the handoff owns current implementation qualification and gate results.
 
 ## Snapshot closure and effective policy
 

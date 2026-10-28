@@ -1,24 +1,12 @@
 # Phase 3: independent capture and autonomous work
 
-**Implementation reference; 2026-10-24 results below are historical evidence.**
-This follows the [capture contract](session-capture-contract.md), not the retired
-recovery design. See [dated offline evidence](session-capture-offline-evidence.md) for
-check/test/fuzz, eleven process journeys and measured synthetic-resource scope. Those
-results do not qualify the current dirty checkout. The handoff's
-[current scorecard](session-capture-handoff.md#current-session-checkpoint) records later
-unresolved autonomous/covered/journey failures and uncompiled/unexecuted/unadopted
-private fixes. Historical experimental installations and live R2 checks occurred;
-current health and complete operating acceptance are not established by this document.
-
-Current integrated status: native immutable evidence/inbox, independent enrichment,
-raw/optional delivery and durable repair, declared aliases, authorized all-components
-no-follow source reads and readonly WAL-aware SQLite capture are implemented and
-independently reviewed offline. Explicit Local/R2 backend construction and
-`--source publications` dashboard/query callers are wired. Wire/reader/report are v2;
-`capture-v1` command prefix/namespace is unchanged. Defaults remain unactivated.
-At the dated review checkpoint, its bounded spot-check found no additional confirmed
-code/wiring blocker. That result does not qualify later changes or clear subsequent
-failures; it is not exhaustive correctness or release acceptance.
+**Scope:** implemented opt-in candidate reference, not release acceptance.
+Independent capture/coordinator delivery, native evidence, enrichment, explicit
+Local/R2 construction and publication-backed analytics are described below; defaults
+remain legacy. The [2026-10-24 offline evidence](session-capture-offline-evidence.md)
+is historical. For current qualification, deployment and next action see the
+[handoff checkpoint](session-capture-handoff.md#current-session-checkpoint).
+This follows the [capture contract](session-capture-contract.md), not retired recovery.
 
 ## Implemented capture and scheduling
 
@@ -57,9 +45,8 @@ contract and diagnostic software version. Replaying does not erase historical en
 
 The intended cancellation boundary is graceful shutdown only when every error-tree
 leaf is caller cancellation; database, integrity and durability causes must remain
-visible. The latest private completion-metadata repair addresses a proven hole in that
-classification and is not yet adopted or qualified. Do not infer that the current
-repository satisfies every metadata-error path from this intended boundary.
+visible. The handoff tracks qualification of this boundary; intent is not proof that every
+metadata-error path is covered.
 
 ## Concrete resource bounds
 
@@ -247,8 +234,7 @@ repair, all byte-charged. Admission failure exposes `OptionalRepairGap`; replay 
 retained work before clearing it. No accepted evidence is silently evicted.
 Destination authentication is not optional poison. Genuine local-store/durability
 causes, including joined cancellation, are required to remain fatal after bookkeeping
-rather than becoming ordinary retry; the unqualified completion-metadata repair noted
-above addresses a known authority gap. Known opted-out claimed identities and retained
+rather than becoming ordinary retry. Known opted-out claimed identities and retained
 private evidence are restrictive checks even for withheld-only views.
 
 ## Checks and remaining acceptance

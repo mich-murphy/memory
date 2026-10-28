@@ -1,17 +1,11 @@
 # Explicit candidate backend construction
 
-**Implemented/reviewed opt-in integration; dated checkpoint evidence, not current qualification.**
-Historical experimental installations and live R2 checks are recorded in the handoff;
-current service health and complete operating acceptance remain unknown/unaccepted.
-This reference is not archive replacement, activation or deletion authorization. Follow the [capture contract](session-capture-contract.md) and
-[handoff ledger](session-capture-handoff.md) before rollout. Current wire/reader/report
-contracts are v2; the `capture-v1` command prefix/namespace is unchanged. Check
-**622.40s**, test **460.36s**, nine unchanged **30s** fuzz targets (**285.31s** total),
-and analytics **73 tests / 23.744s**, including **11 actual-process journeys**, passed at the 2026-10-24 checkpoint.
-See [dated offline evidence](session-capture-offline-evidence.md) for exact scope and the
-[current scorecard](session-capture-handoff.md#current-session-checkpoint) for later
-unresolved failures and uncompiled/unexecuted/unadopted private fixes. No complete
-current-source full-development or release pass is established.
+**Scope:** opt-in Local/R2 backend construction, not archive replacement or
+activation authorization. Wire/reader/report contracts are v2 despite the `capture-v1`
+prefix. See [dated offline evidence](session-capture-offline-evidence.md) for historical
+checks, the [contract](session-capture-contract.md) for acceptance and the
+[current handoff](session-capture-handoff.md#current-session-checkpoint) for deployment,
+qualification and next action.
 
 ## Selection and credentials
 
@@ -61,8 +55,8 @@ The CLI wrapper preserves destination authentication sentinels on Open, Put, cur
 read and CAS, and forwards durability fencing. A destination failure must not become an
 optional-artifact failure or consume an individual session's poison budget. Genuine
 local-store/durability causes must remain visible, including joined cancellation;
-the handoff records both earlier repairs and the latest private, unqualified
-completion-metadata authority repair. Do not treat its source review as an adopted fix.
+qualification of this boundary belongs in the handoff; source review alone is not
+release evidence.
 
 `capture-v1 init --config PRIVATE_CONFIG` explicitly initializes the selected archive;
 `run` never initializes/resets it implicitly. `capture-v1 export --config PRIVATE_CONFIG`

@@ -1,21 +1,12 @@
 # Session capture: implementation direction
 
-**Status:** agreed replacement requirements, not release evidence. The opt-in candidate
-is implemented; dated checkpoints passed unchanged development gates, but newer checkout
-gates failed and remain unqualified. Last recorded Mac capture is qualified-dirty binary
-e69fb2ed… with staging8766; BC-01 remains on b23712bc. Current service health is unknown;
-newer checkout/private-candidate changes are undeployed.
-The complete replacement is **not release-accepted or production-ready**, and final
-legacy/default cutover has not occurred. See the [current handoff](session-capture-handoff.md)
-for the current scorecard, exact deployed/source/private-prototype distinctions and
-remaining gates, and
-[dated evidence](session-capture-offline-evidence.md) for historical checks. Neither a
-passing checkpoint nor an experimental installation establishes cutover acceptance.
-This is the authoritative design and acceptance guide for new capture work. Existing
-v3 code, wire specifications, benchmarks, and rollout records describe the legacy
-implementation, not requirements to reproduce it.
-For checkout status, concrete implementation phases, crash/publication guidance, and
-pickup commands, use the [implementation handoff](session-capture-handoff.md).
+**Status:** authoritative replacement requirements, not implementation or release
+evidence. For current deployment, qualification and next action, see the
+[current-session checkpoint](session-capture-handoff.md#current-session-checkpoint);
+for historical checks see [dated offline evidence](session-capture-offline-evidence.md).
+Existing v3 code, wire specifications and rollout records describe legacy behavior,
+not requirements to reproduce it. Final legacy/default cutover requires the controlled
+acceptance sequence below.
 
 ## Objective
 
