@@ -733,14 +733,35 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   (about 36 ms per entry), so moderate load stalls freshness. This is a freshness risk, not
   only idle CPU; measure where per-entry time goes before designing a fix.
 
+- **W35 gates on `efbb99e`, green (sole verifier, AC power, no sleep).** `make check` exit 0
+  (about 11 min, coverage 87.1%, cover `syncer` 387s), `make test` exit 0 (`syncer` 320s,
+  `sessioncapture` 130s), `make fuzz` 9/9. `syncer` was previously about 593–600s.
+- **Install #8, `efbb99e` (16:33–16:38 AEDT).** The autonomous run of `463ddf3` was ended at
+  about 2.6h, deliberately: its binary had the full enrichment budget defect, so the run had to
+  restart on the binary that will ship. Steps followed the install method: bootout (no sidecars
+  left); backup `step4h-20261028` via the backup API (`quick_check ok`, counts and budget match)
+  plus `agent-sessions.bin.463ddf3`. A dry run on an APFS clone under `/private/tmp` (`/tmp` is a
+  symlink and the spool check rejects it) ran `resume` (4s): budget went from 134,216,914 to
+  12,340,658 bytes, all 1,516 results compacted, 8 lists, an independent Python rebuild of every
+  row matched its id, and all 591 `enrichment-replay` calls succeeded. The clone was deleted.
+  The same steps on the live spool gave identical numbers; then the binary was swapped (sha
+  `d5592fca…`), the 591 quota rows were replayed while stopped, and the service was bootstrapped
+  (`runs = 1`). At 17:04: 1,778 attached (from 1,516), budget 15.4 MB, `enrichment_gap` 3,134 and
+  falling (from 3,358), no pause, no quarantine, stderr unchanged at 789 lines, discovery
+  completed at 17:02:57. 151 pending delivery jobs (attempts 0–1, 96 sessions) are the new
+  enrichment attachments publishing. Replayed rows keep `last_error='quota'` and their attempt
+  count until processed (`ReplayEnrichment` retains them by design). The monitor was restarted
+  as `/tmp/step4-diag/autorun-efbb99e.jsonl`.
+
 ### Next action
 
-Step 4 is installed and delivering, with the backlog drained (`463ddf3`). Next:
-1. The 24–48h autonomous run on the Mac (AC power, lid open or `caffeinate`). Monitor
-   read-only with small indexed queries: pause, `step_errors`, active quarantines,
-   retry classes, discovery `completed_at`, and stderr growth.
-2. Operator decisions, recorded rather than taken: prune install backups `step4`–`step4d`
-   once `step4g` is confirmed as the rollback point; review the 591 enrichment `quota`
-   quarantines.
-3. Then BC-01 acceptance, R2 acceptance, and the Step 5 cutover per contract §6 (this
-   removes the legacy `syncer` package that is within 7s of its 600s test timeout).
+Step 4 is installed as `efbb99e` (install #8, 16:38 AEDT), with the enrichment backlog draining. Next:
+1. The 24–48h autonomous run restarts from 16:38 on `efbb99e` (ends about 2026-10-30 16:38).
+   Monitor read-only (`/tmp/step4-diag/autorun-efbb99e.jsonl`) with small indexed queries:
+   pause, `step_errors`, active quarantines, retry classes, discovery `completed_at`, stderr
+   growth, plus the enrichment budget and `enrichment_gap` draining to 0. Rollback point:
+   `step4h-20261028`.
+2. Measure, before designing anything, where discovery's about 36 ms per entry goes, because
+   moderate load already stalls sweep completion (freshness risk).
+3. Then BC-01 acceptance, R2 acceptance, and the Step 5 cutover per contract §6 (this removes
+   the legacy `syncer` package, now about 320–390s against its 600s test timeout).
