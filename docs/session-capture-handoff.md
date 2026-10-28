@@ -916,13 +916,20 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   are clean. Full gates not yet rerun; another session's gate (`/private/tmp/r5m-memory`,
   branch `chore/prek-hooks`) was running at the time, and the gates have a sole verifier.
 
+- **Gates on `bf99752` (W37, W40, W41, lint fix), qualifying, sole verifier, AC, no sleep.**
+  `make check` 20:43:17–20:53:57 exited 0 (coverage 87.2%, CRAP 0/10 over 30, cover `syncer`
+  444s, `sessioncapture` 238s). A concurrent session's gate started at 20:54:19, after this run
+  ended. The first `make test` (20:54:59–21:02:40) exited 0 but overlapped another session's
+  gate (started 20:57:01), so it does not qualify. The rerun `make test` 21:08:35–21:14:02 exited
+  0 (`syncer` 287s, `sessioncapture` 134s). `make fuzz` 21:14:52–21:19:39 passed 9/9. Not
+  installed: the Mac service is held disabled by the containment session.
+
 ### Next action
 
 `main` (`2021306`) holds W37, W40, W41 and the lint fix. The Mac service is **disabled by the
 concurrent BC-01 containment session** (see above); installed binary `efbb99e`, not running.
 Next:
-1. When no other gate is running, on AC: full gates (`make check`, `make test`, `make fuzz`) on
-   `main` HEAD as sole verifier.
+1. Done: full gates green on `bf99752` (above).
 2. Install #9 is blocked on that session's reviewed source-absence repair and its re-enable
    decision. When it lands on `main`, rerun the gates on the combined HEAD. Then install #9 from a
    clean detached worktree (backup `step4i`, old binary `.efbb99e`) and bootstrap, coordinating
