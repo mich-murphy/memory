@@ -614,6 +614,20 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   unindexed read-only scan of the 1.4 GB spool timed out under that I/O load; monitoring uses
   small, indexed queries only.
 
+- **W29 gates on `59dfc99`: green after one diagnosed rerun.** `make check` exit 0 (cover 87.2%,
+  0/10 functions over CRAP 30; `syncer` cover 536.6s); analytics 97/97; `.mjs` 8/8; fuzz pass; AC
+  power, no sleep. W29's `make test` failed once on
+  `TestRuntimeRemoteInspectionAndReplayNeverRequireCredentials` (`internal/cli`,
+  `capture_configured_test.go:103`, its fixed 5s wait for capture + pause). It took 11.84s
+  against a normal 0.6–1.5s, with load 11–16. Parent diagnosis: with W29's shuffle seed
+  (1793151606356515000) it passed 5/5, and 25/25 while the `syncer`/`snapshot`/`sessioncapture`
+  race suites ran alongside. So it is not order-dependent and was not reproduced under
+  load. W28 changed only the `verify` decode path, which this test does not reach. Parent
+  rerun of `make test`: exit 0 (`syncer` 593.2s, `sessioncapture` 349s, `cli` 138s). The
+  wait is not widened. **Risks:** that 5s wait can starve under heavy host load; `syncer`
+  (legacy) is within 7s of the 600s package timeout under `make test` too. Both are recorded,
+  not fixed; Step 5 removes `syncer`.
+
 ### Next action
 
 W29 (sole verifier under `caffeinate`, explicit `ANALYTICS_PYTHON`, on AC with load checked
