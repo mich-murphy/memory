@@ -329,6 +329,9 @@ func TestRuntimeDiscoveryMetadataValidationAndBatchBound(t *testing.T) {
 	if err != nil || status.DiscoveryError != "invalid-metadata" || status.ActiveDiscoveryIssues != 1 || status.DiscoveryComplete {
 		t.Fatalf("%+v %v", status, err)
 	}
+	if q.discoveryBatchLimit() != MaxDiscoveryRecords {
+		t.Fatal("default discovery batch limit differs from MaxDiscoveryRecords")
+	}
 	issues := make([]DiscoveryIssue, MaxDiscoveryRecords+1)
 	for j := range issues {
 		issues[j] = issue

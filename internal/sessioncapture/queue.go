@@ -116,6 +116,9 @@ type Queue struct {
 	deliveries sync.Map
 	sessions   sync.Map
 	installs   sync.Map
+
+	// discoveryLimit is a test-only override of MaxDiscoveryRecords; 0 means the const.
+	discoveryLimit int
 }
 
 func Open(ctx context.Context, dir string, opts Options) (*Queue, error) {

@@ -113,6 +113,14 @@ func discoveryMetadataCode(err error) string {
 	return string(classify(err, nil))
 }
 
+// discoveryBatchLimit is MaxDiscoveryRecords unless a test lowered it.
+func (q *Queue) discoveryBatchLimit() int {
+	if q.discoveryLimit > 0 {
+		return q.discoveryLimit
+	}
+	return MaxDiscoveryRecords
+}
+
 // saveDiscoveryBatch commits only bounded metadata. Requests are admitted before
 // this transaction; no cursor, source I/O or callbacks run with a DB transaction.
 // Metadata validation/capacity failures inhibit resolution for the entire sweep,
@@ -123,6 +131,7 @@ func (q *Queue) saveDiscoveryBatch(ctx context.Context, batch DiscoveryBatch, ca
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	limit := q.discoveryBatchLimit()
 	var generation int64
 	if err := tx.QueryRowContext(ctx, `SELECT generation FROM runtime_discovery WHERE id=1`).Scan(&generation); err != nil {
 		return err
@@ -131,15 +140,15 @@ func (q *Queue) saveDiscoveryBatch(ctx context.Context, batch DiscoveryBatch, ca
 	if cause != nil {
 		code = discoveryMetadataCode(cause)
 	}
-	if len(batch.Issues) > MaxDiscoveryRecords || len(batch.Coverage) > MaxDiscoveryRecords {
+	if len(batch.Issues) > limit || len(batch.Coverage) > limit {
 		code = "quota"
 	}
-	for _, issue := range batch.Issues[:min(len(batch.Issues), MaxDiscoveryRecords)] {
+	for _, issue := range batch.Issues[:min(len(batch.Issues), limit)] {
 		if err := discoveryRecordError(&code, q.saveDiscoveryIssue(ctx, tx, issue, generation)); err != nil {
 			return err
 		}
 	}
-	for _, scope := range batch.Coverage[:min(len(batch.Coverage), MaxDiscoveryRecords)] {
+	for _, scope := range batch.Coverage[:min(len(batch.Coverage), limit)] {
 		if err := discoveryRecordError(&code, q.saveDiscoveryScope(ctx, tx, scope, generation)); err != nil {
 			return err
 		}
@@ -185,6 +194,7 @@ func (q *Queue) discoverOnce(ctx context.Context, o RuntimeOptions) error {
 	if err := q.beginDiscoveryHints(ctx); err != nil {
 		return err
 	}
+	limit := q.discoveryBatchLimit()
 	op, cancel := context.WithTimeout(ctx, o.OperationTimeout)
 	var batch DiscoveryBatch
 	var err error
@@ -193,10 +203,10 @@ func (q *Queue) discoverOnce(ctx context.Context, o RuntimeOptions) error {
 	} else {
 		batch.Requests, err = o.Discover(op)
 	}
-	if len(batch.Requests) > MaxDiscoveryRecords {
+	if len(batch.Requests) > limit {
 		err = errors.Join(err, ErrQuota)
 	}
-	for j := range min(len(batch.Requests), MaxDiscoveryRecords) {
+	for j := range min(len(batch.Requests), limit) {
 		// Try every healthy request even if another request or root was rejected.
 		err = errors.Join(err, q.Hint(op, batch.Requests[j]))
 	}

@@ -134,7 +134,11 @@ func TestRuntimeAuditDiscoveryRequestBackpressure(t *testing.T) {
 	}
 	issue, _ := discoveryFixture(t)
 	recordDiscovery(t, q, DiscoveryBatch{Issues: []DiscoveryIssue{issue}, Complete: true}, nil)
-	requests := make([]Request, MaxDiscoveryRecords+1)
+	// The per-Queue override keeps the 4096-request fill out of the test; the
+	// default and its enforcement are asserted by the metadata/batch-bound test.
+	const limit = 64
+	q.discoveryLimit = limit
+	requests := make([]Request, limit+1)
 	for j := range requests {
 		requests[j] = req
 	}
@@ -152,7 +156,7 @@ func TestRuntimeAuditDiscoveryRequestBackpressure(t *testing.T) {
 		t.Fatalf("false complete sweep: %+v", status)
 	}
 	sources, err := q.WorkStatus(t.Context(), 0, 1)
-	if err != nil || len(sources) != 1 || sources[0].ObservedVersion != MaxDiscoveryRecords {
+	if err != nil || len(sources) != 1 || sources[0].ObservedVersion != limit {
 		t.Fatalf("unbounded request admission: %+v %v", sources, err)
 	}
 }
