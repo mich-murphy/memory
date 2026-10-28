@@ -892,20 +892,46 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   and install #9 need AC power. The service is left running: quarantines are recoverable by
   replay, and stopping it is not part of the documented procedure.
 
+- **Mac service disabled at 19:52:39 AEDT by a concurrent session (BC-01 containment), not by
+  this run.** launchd logged `Setting service agent-sessions-capture-experimental to disabled`,
+  then `removing service`, started by `launchctl` from a separate pi session (cwd
+  `~/businesscraft/machines`). Its handover
+  (`docs/handover/2026-10-28-bc-01-capacity-investigation.md` in that repo) records the cause. On
+  BC-01 the old `b23712bc` collector was in a systemd restart loop (thousands of exits a day,
+  about 46 MB of SQLite writes per start). That was traced to `capturepolicy: resolve:` + ENOENT
+  on a missing Claude source leaf being treated as runtime-fatal. The same handover says the Mac's
+  `efbb99e` source also treats any `os.PathError` as fatal. It contained BC-01
+  (`systemctl --user disable --now`) and, as a precaution, the Mac (plist backed up, disabled,
+  booted out), noting that the Mac was not shown to share the fault. Capture stays disabled
+  pending a reviewed repair. That session owns re-enabling. Its fix is in progress in
+  `memory-wt/capture-source-absence-20261028` (uncommitted, base `0ba0f10`; source-absence
+  isolation plus service backoff in `internal/sessioncapture` and `internal/capturedaemon`).
+  Nothing in it overlaps W40/W41 or `2021306`. Spool state at stop: WAL 0 bytes (19:56), so it
+  closed cleanly. Last monitor sample (19:51): pending 1,022, retry 26, quarantined 1 (23). This
+  run must not re-enable, bootstrap or install over that containment. The autonomous run is
+  stopped until then.
+- **`make check` on `0ba0f10` (gates10, 20:30) failed at lint:** gocritic `rangeValCopy` in the
+  W40 test, and revive `unused-parameter` (`c`) in W41's `runtimeFilesystemPolicyWith`. Fixed
+  in `2021306` (parameter dropped, loop indexes). Focused lint, vet and tests for both packages
+  are clean. Full gates not yet rerun; another session's gate (`/private/tmp/r5m-memory`,
+  branch `chore/prek-hooks`) was running at the time, and the gates have a sole verifier.
+
 ### Next action
 
-`main` holds W37, W40 and W41; installed is still `efbb99e` (install #8), whose autonomous run lost
-continuity at the 18:14 battery sleep. Next:
-1. On AC power only: full gates (`make check`, `make test`, `make fuzz`) on `main` HEAD as sole
-   verifier. The `243f819` gate runs do not qualify (partly on battery).
-2. Install #9 from a clean detached worktree (backup `step4i`, old binary `.efbb99e`; no schema
-   change, so no clone dry run). Then measure one full delivery pass for the quarantine-23 session
-   with the live read-only harness (`8be2613` on `wt/asset-checks`, rebased onto the installed
-   commit), and replay quarantine 23 only if five passes fit well inside 60s at normal load.
-3. Restart the 24–48h autonomous run on AC from install #9. Monitor read-only: pause,
-   `step_errors`, quarantines, retry classes, discovery `completed_at` (W37 effect), stderr,
-   the enrichment budget and `enrichment_gap` draining to 0.
-4. Then BC-01 acceptance, R2 acceptance, and the Step 5 cutover per contract §6 (this removes
-   the legacy `syncer` package, now about 310–390s against its 600s test timeout).
+`main` (`2021306`) holds W37, W40, W41 and the lint fix. The Mac service is **disabled by the
+concurrent BC-01 containment session** (see above); installed binary `efbb99e`, not running.
+Next:
+1. When no other gate is running, on AC: full gates (`make check`, `make test`, `make fuzz`) on
+   `main` HEAD as sole verifier.
+2. Install #9 is blocked on that session's reviewed source-absence repair and its re-enable
+   decision. When it lands on `main`, rerun the gates on the combined HEAD. Then install #9 from a
+   clean detached worktree (backup `step4i`, old binary `.efbb99e`) and bootstrap, coordinating
+   with that owner. Do not re-enable before then.
+3. After install: measure one delivery pass for the quarantine-23 session with the live
+   read-only harness (`8be2613` on `wt/asset-checks`). Replay 23 and any later copies of its
+   pattern only if five passes fit well inside 60s. Recheck the two timeout retries that asset
+   checks do not explain. Restart the 24–48h autonomous run on AC and monitor read-only.
+4. Then BC-01 acceptance (BC-01 also needs the repaired binary), R2 acceptance, and the Step 5
+   cutover per contract §6.
 5. Needs operator sign-off, not done autonomously: dropping the back-to-back second
    `verifyDependencies` pass, and withholding existing byte-identical artifact copies.
