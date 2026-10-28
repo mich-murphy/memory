@@ -50,12 +50,13 @@ func (f dedupeFixture) artifacts(t *testing.T) (selected, total int, seq uint64)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i, s := range m.Sources {
+	for i := range m.Sources {
+		s := &m.Sources[i]
 		if s.Role != "artifact" {
 			continue
 		}
 		total++
-		if s.State == "active" && publication.IsSelected(s) && es[i].SelectionReason == "" {
+		if s.State == "active" && publication.IsSelected(*s) && es[i].SelectionReason == "" {
 			selected++
 		}
 	}

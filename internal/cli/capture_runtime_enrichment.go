@@ -164,7 +164,7 @@ func checkRuntimeEnrichmentAssetWith(ctx context.Context, c capturedaemon.Config
 			return errors.New("enrichment asset outside declared inventory")
 		}
 		scrubbed := scrub.Recognizes(path) || asset.Kind == "generated-subset"
-		if err := runtimeFilesystemPolicyWith(c, path, scrubbed, resolve, lazyPolicy); err != nil {
+		if err := runtimeFilesystemPolicyWith(path, scrubbed, resolve, lazyPolicy); err != nil {
 			return err
 		}
 	}

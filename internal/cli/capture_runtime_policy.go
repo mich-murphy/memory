@@ -169,7 +169,7 @@ func runtimeOwningRoot(c capturedaemon.Config, agent, path string) string {
 
 func runtimeFilesystemPolicy(c capturedaemon.Config, path string, scrubbed bool) error {
 	// Built fresh per call: no caching across calls, entries, batches or sweeps.
-	return runtimeFilesystemPolicyWith(c, path, scrubbed, capturepolicy.Resolve, func() (*capturepolicy.Policy, error) {
+	return runtimeFilesystemPolicyWith(path, scrubbed, capturepolicy.Resolve, func() (*capturepolicy.Policy, error) {
 		return newRuntimeFilesystemSet(c)
 	})
 }
@@ -183,7 +183,7 @@ func newRuntimeFilesystemSet(c capturedaemon.Config) (*capturepolicy.Policy, err
 // runtimeFilesystemPolicyWith resolves path, then obtains the policy from policy(),
 // preserving the order: resolution errors surface before policy construction errors.
 // The caller owns any reuse of policy within a single call.
-func runtimeFilesystemPolicyWith(c capturedaemon.Config, path string, scrubbed bool, resolve func(string) (capturepolicy.Resolution, error), policy func() (*capturepolicy.Policy, error)) error {
+func runtimeFilesystemPolicyWith(path string, scrubbed bool, resolve func(string) (capturepolicy.Resolution, error), policy func() (*capturepolicy.Policy, error)) error {
 	resolved, err := resolve(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return errors.New("source policy resolution unavailable")
