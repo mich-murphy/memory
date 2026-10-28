@@ -777,6 +777,24 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   env-gated measurement tests (`59645df`) are not merged, consistent with deleting
   `TestMeasureDiscoveryChurn`.
 
+- **W37 `81d3333`, `4ca25e8`, accepted: collector policy locations resolved once per call.**
+  `capturepolicy.NewSet(configs, states)` resolves each distinct non-empty path once, using a
+  map that lives only for that call, and returns the union policy. `New` delegates to it.
+  `runtimeFilesystemPolicy` builds it fresh on every call. Nothing is cached across calls,
+  entries or sweeps. Equivalence: `excludes` is an OR of pair-independent noise/credential terms
+  and existentials over config/state lists, so the union equals the OR over all `New` pairs, and
+  `NewSet` errors exactly when some pair's `New` would. One intentional difference: if
+  `LocalProtectedPaths()` were empty, the old pair loop excluded nothing (not even credentials),
+  while the union still applies noise, credential and config checks. That is stricter, and the
+  spool is always configured. Tests (`set_test.go`): OR-over-pairs table on symlinked, missing and
+  credential fixtures, error equivalence (loop, over-long chain), one `Resolve` per distinct
+  location. The parent reran both mutations on the final code: dropping states fails
+  `TestNewSetEqualsOrOverPairs`, and swallowing non-NotExist errors fails
+  `TestNewSetErrorEquivalence` (W37's own error mutation had first failed to compile).
+  Synthetic per-request cost went from about 2.45 ms to about 1.49 ms. Live effect not yet measured. The
+  `wt/disc-measure` branch (`59645df`, env-gated measurement tests) is kept unmerged for
+  reference.
+
 ### Next action
 
 Step 4 is installed as `efbb99e` (install #8, 16:38 AEDT), with the enrichment backlog draining. Next:
