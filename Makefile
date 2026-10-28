@@ -55,16 +55,20 @@ test:
 # covdata to E2E_GOCOVERDIR as a side effect, which a cached test run does not redo. So that dir
 # is kept between runs, named for a hash of the sources: an unchanged tree reuses its data, any
 # change starts a fresh dir (and reruns the tests, since the dir is part of Go's cache key).
+# Dirs are touched on use and pruned after 7 unused days (Go trims its cache after 5), so a
+# cached result never points at a pruned dir; if the data is missing anyway, rerun uncached.
 cover:
 	@set -e; mkdir -p $(COVER_DIR); \
 	key=$$(git ls-files -co --exclude-standard -z -- cmd internal go.mod go.sum | xargs -0 shasum 2>/dev/null | shasum | cut -c1-16); \
 	e2e=$(COVER_DIR)/e2e-$$key; \
-	find $(COVER_DIR) -mindepth 1 -maxdepth 1 -name 'e2e-*' ! -name "e2e-$$key" -exec rm -rf {} +; \
+	find $(COVER_DIR) -mindepth 1 -maxdepth 1 -name 'e2e-*' -mtime +7 -exec rm -rf {} +; \
 	case "$(TESTFLAGS)" in *-count=*) rm -rf "$$e2e";; esac; \
-	mkdir -p "$$e2e"; \
-	set -x; CGO_ENABLED=1 E2E_GOCOVERDIR="$$e2e" go test $(TESTFLAGS) -race -covermode=atomic \
-		-coverpkg=./... -coverprofile=$(COVER_DIR)/unit.out ./...; set +x; \
-	[ -n "$$(ls -A "$$e2e")" ] || { echo "no end-to-end coverage data in $$e2e: rerun with TESTFLAGS=-count=1"; exit 1; }; \
+	mkdir -p "$$e2e"; touch "$$e2e"; \
+	run() { set -x; CGO_ENABLED=1 E2E_GOCOVERDIR="$$e2e" go test $$1 -race -covermode=atomic \
+		-coverpkg=./... -coverprofile=$(COVER_DIR)/unit.out ./...; { set +x; } 2>/dev/null; }; \
+	run "$(TESTFLAGS)"; \
+	[ -n "$$(ls -A "$$e2e")" ] || { echo "end-to-end coverage data missing for cached results; rerunning uncached"; run "-count=1 $(TESTFLAGS)"; }; \
+	[ -n "$$(ls -A "$$e2e")" ] || { echo "no end-to-end coverage data in $$e2e"; exit 1; }; \
 	go tool covdata textfmt -i="$$e2e" -o $(COVER_DIR)/e2e.out; \
 	awk -f scripts/merge-cover.awk $(COVER_DIR)/unit.out $(COVER_DIR)/e2e.out > cover.out; \
 	$(TOOL) go-test-coverage --config=.testcoverage.yml
