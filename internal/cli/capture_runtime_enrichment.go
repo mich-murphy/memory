@@ -106,6 +106,16 @@ func runtimeEnrichmentAssetPolicy(c capturedaemon.Config) sessioncapture.CheckEn
 }
 
 func checkRuntimeEnrichmentAsset(ctx context.Context, c capturedaemon.Config, spec sessioncapture.EnrichmentSpec, asset sessioncapture.EnrichmentAsset, delivery bool) error {
+	return checkRuntimeEnrichmentAssetWith(ctx, c, spec, asset, delivery, capturepolicy.Resolve, func() (*capturepolicy.Policy, error) {
+		return newRuntimeFilesystemSet(c)
+	})
+}
+
+// checkRuntimeEnrichmentAssetWith checks each distinct path once and builds the
+// filesystem policy lazily, at most once, for this call only. Lazy construction
+// keeps errors where they were: a call failing at runtimeAssetRoot or at a path's
+// resolution never builds (or reports an error from) the policy.
+func checkRuntimeEnrichmentAssetWith(ctx context.Context, c capturedaemon.Config, spec sessioncapture.EnrichmentSpec, asset sessioncapture.EnrichmentAsset, delivery bool, resolve func(string) (capturepolicy.Resolution, error), newPolicy func() (*capturepolicy.Policy, error)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -127,17 +137,34 @@ func checkRuntimeEnrichmentAsset(ctx context.Context, c capturedaemon.Config, sp
 		return errors.New("enrichment excluded by effective policy")
 	}
 	paths := append([]string{asset.Path}, asset.Identities...)
-	resolved, resolveErr := capturepolicy.Resolve(asset.Path)
+	resolved, resolveErr := resolve(asset.Path)
 	if resolveErr != nil && !delivery {
 		return errors.New("enrichment source resolution unavailable")
 	}
 	paths = append(paths, resolved.Identities...)
+	var (
+		policy    *capturepolicy.Policy
+		policyErr error
+		built     bool
+	)
+	lazyPolicy := func() (*capturepolicy.Policy, error) {
+		if !built {
+			built = true
+			policy, policyErr = newPolicy()
+		}
+		return policy, policyErr
+	}
+	seen := make(map[string]struct{}, len(paths))
 	for _, path := range paths {
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
 		if !runtimeAssetRoot(c, spec, path) {
 			return errors.New("enrichment asset outside declared inventory")
 		}
 		scrubbed := scrub.Recognizes(path) || asset.Kind == "generated-subset"
-		if err := runtimeFilesystemPolicy(c, path, scrubbed); err != nil {
+		if err := runtimeFilesystemPolicyWith(c, path, scrubbed, resolve, lazyPolicy); err != nil {
 			return err
 		}
 	}

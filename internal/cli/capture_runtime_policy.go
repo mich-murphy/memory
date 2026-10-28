@@ -168,14 +168,27 @@ func runtimeOwningRoot(c capturedaemon.Config, agent, path string) string {
 }
 
 func runtimeFilesystemPolicy(c capturedaemon.Config, path string, scrubbed bool) error {
-	resolved, err := capturepolicy.Resolve(path)
+	// Built fresh per call: no caching across calls, entries, batches or sweeps.
+	return runtimeFilesystemPolicyWith(c, path, scrubbed, capturepolicy.Resolve, func() (*capturepolicy.Policy, error) {
+		return newRuntimeFilesystemSet(c)
+	})
+}
+
+func newRuntimeFilesystemSet(c capturedaemon.Config) (*capturepolicy.Policy, error) {
+	return capturepolicy.NewSet(
+		[]string{c.ConfigPath(), filepath.Join(c.Home, ".config", "agent-sessions", "config.json")},
+		c.LocalProtectedPaths())
+}
+
+// runtimeFilesystemPolicyWith resolves path, then obtains the policy from policy(),
+// preserving the order: resolution errors surface before policy construction errors.
+// The caller owns any reuse of policy within a single call.
+func runtimeFilesystemPolicyWith(c capturedaemon.Config, path string, scrubbed bool, resolve func(string) (capturepolicy.Resolution, error), policy func() (*capturepolicy.Policy, error)) error {
+	resolved, err := resolve(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return errors.New("source policy resolution unavailable")
 	}
-	// Built fresh per call: no caching across calls, entries, batches or sweeps.
-	p, err := capturepolicy.NewSet(
-		[]string{c.ConfigPath(), filepath.Join(c.Home, ".config", "agent-sessions", "config.json")},
-		c.LocalProtectedPaths())
+	p, err := policy()
 	if err != nil {
 		return errors.New("source excluded by filesystem policy")
 	}
