@@ -31,7 +31,12 @@ func (q *Queue) enrichmentNext(ctx context.Context, o RuntimeOptions) (bool, err
 	}
 	var spec EnrichmentSpec
 	if json.Unmarshal(body, &spec) != nil {
-		return true, q.finishEnrichment(ctx, id, attempts, ErrIntegrity, o)
+		// An undecodable authoritative spec cannot become valid by retrying.
+		// Isolate it durably without invoking callbacks or blocking later work.
+		save, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.OperationTimeout)
+		defer cancel()
+		_, err := q.db.ExecContext(save, `UPDATE enrichment_work SET state='quarantined',attempts=attempts+1,last_error='integrity-error',next_retry=0,software=? WHERE id=? AND state IN ('pending','retry','ready')`, o.SoftwareVersion, id)
+		return true, metadataError(err)
 	}
 	if _, err := q.db.ExecContext(ctx, `UPDATE enrichment_work SET state='working',attempts=attempts+1,software=? WHERE id=?`, o.SoftwareVersion, id); err != nil {
 		return true, err

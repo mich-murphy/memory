@@ -39,12 +39,8 @@ type derivedReservations struct {
 }
 
 func (q *Queue) derivedReservations() *derivedReservations {
-	value, _ := q.installs.LoadOrStore("derived-reservations-state", &derivedReservations{workers: make(chan struct{}, 4)})
-	state, ok := value.(*derivedReservations)
-	if !ok {
-		panic("sessioncapture: invalid derived reservation state")
-	}
-	return state
+	q.derivedOnce.Do(func() { q.derived = &derivedReservations{workers: make(chan struct{}, 4)} })
+	return q.derived
 }
 
 // checkWorkingReserveLocked is called with q.mu held, including from the encoded

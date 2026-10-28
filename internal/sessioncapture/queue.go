@@ -104,18 +104,22 @@ type evidence struct {
 	Identities      []string
 }
 type Queue struct {
-	db         *sql.DB
-	dir        string
-	opts       Options
-	lock       *flock.Flock
-	policy     *capturepolicy.Policy
-	mu         sync.Mutex   // protects quota counters only; never held across source I/O
-	payloadMu  sync.RWMutex // fences directory scans against internal rename/remove only
-	used       int64
-	writing    int64
-	deliveries sync.Map
-	sessions   sync.Map
-	installs   sync.Map
+	db          *sql.DB
+	dir         string
+	opts        Options
+	lock        *flock.Flock
+	policy      *capturepolicy.Policy
+	mu          sync.Mutex   // protects quota counters only; never held across source I/O
+	payloadMu   sync.RWMutex // fences directory scans against internal rename/remove only
+	used        int64
+	writing     int64
+	deliveries  sync.Map
+	sessions    sync.Map // session mutexes only
+	installs    sync.Map // payload-install mutexes only
+	runtimeOnce sync.Once
+	runtime     *runtimeLocal
+	derivedOnce sync.Once
+	derived     *derivedReservations
 
 	// discoveryLimit is a test-only override of MaxDiscoveryRecords; 0 means the const.
 	discoveryLimit int
@@ -357,6 +361,9 @@ func (q *Queue) latest(ctx context.Context, i publication.Identity) (publication
 	}
 	if err = json.Unmarshal(b, &m); err == nil {
 		err = json.Unmarshal(e, &es)
+	}
+	if err == nil {
+		err = validateEvidencePair(m, es)
 	}
 	return m, es, err
 }

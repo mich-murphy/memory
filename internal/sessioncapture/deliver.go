@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 
 	"github.com/klauspost/compress/zstd"
 
@@ -138,10 +137,7 @@ func (q *Queue) deliverAccepted(ctx context.Context, b publication.Backend, i pu
 			}
 			return nil
 		}
-		if err != nil {
-			return q.recordFailure(ctx, i, seq, attempts, err)
-		}
-		if err := q.acknowledge(ctx, i, seq); err != nil {
+		if err := q.deliveryResult(ctx, i, seq, attempts, err, runtimeDefaults(RuntimeOptions{}), true); err != nil {
 			return err
 		}
 	}
@@ -248,23 +244,6 @@ func (b faultBackend) CompareAndSwap(ctx context.Context, key, token string, bod
 		return e
 	}
 	return b.q.fault("current-after")
-}
-
-func (q *Queue) recordFailure(ctx context.Context, i publication.Identity, seq uint64, attempts int, err error) error {
-	if errors.Is(err, ErrDestination) {
-		return errors.Join(err, q.runtimeDeliveryFailure(ctx, i, seq, attempts+1, err, runtimeDefaults(RuntimeOptions{})))
-	}
-	state := "retry"
-	if errors.Is(err, ErrIntegrity) {
-		state = "integrity-error"
-	}
-	if errors.Is(err, ErrPolicy) {
-		state = "policy-blocked"
-	}
-	// Store safe classifications only: backend errors may contain sensitive URLs.
-	delay := time.Second * time.Duration(1<<min(attempts, 8))
-	_, saveErr := q.db.ExecContext(ctx, "UPDATE jobs SET state=?,last_error=?,next_retry=? WHERE session=? AND sequence=?", state, state, q.opts.Now().Add(delay).UnixNano(), i.BaseKey(), seq)
-	return errors.Join(err, saveErr)
 }
 
 func (q *Queue) verifyDependencies(ctx context.Context, m publication.Manifest, es []evidence) error {
@@ -377,6 +356,9 @@ func (q *Queue) attempt(ctx context.Context, b publication.Backend, i publicatio
 		}
 	}
 	if err != nil {
+		return err
+	}
+	if err := validateEvidencePair(m, es); err != nil {
 		return err
 	}
 	return q.attemptManifest(ctx, b, i, seq, m, es)

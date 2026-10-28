@@ -518,6 +518,9 @@ func encodeAcceptedView(m publication.Manifest, es []evidence) (publication.Mani
 	if err := publication.ValidateManifest(m); err != nil {
 		return m, nil, nil, err
 	}
+	if err := validateEvidencePair(m, es); err != nil {
+		return m, nil, nil, err
+	}
 	b, err = json.Marshal(m)
 	if err != nil {
 		return m, nil, nil, err

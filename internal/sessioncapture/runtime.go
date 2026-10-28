@@ -66,12 +66,8 @@ type runtimeLocal struct {
 }
 
 func (q *Queue) runtimeLocal() *runtimeLocal {
-	v, _ := q.sessions.LoadOrStore("\x00sessioncapture-runtime", &runtimeLocal{discoveryWake: make(chan struct{}, 1)})
-	r, ok := v.(*runtimeLocal)
-	if !ok {
-		panic("sessioncapture: invalid runtime state")
-	}
-	return r
+	q.runtimeOnce.Do(func() { q.runtime = &runtimeLocal{discoveryWake: make(chan struct{}, 1)} })
+	return q.runtime
 }
 
 func runtimeDefaults(o RuntimeOptions) RuntimeOptions {
