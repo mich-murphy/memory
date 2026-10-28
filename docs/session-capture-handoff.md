@@ -9,13 +9,58 @@ the [progress history](session-capture-progress-history.md). Neither is current 
 
 ## Current session checkpoint
 
-**Updated 2026-10-27 (AEDT).** Operator-approved simplification and delivery plan in
-progress (decisions below). The replacement is **not release-accepted, production-ready
-or cut over**; defaults remain legacy.
+**Updated 2026-10-28 23:05 AEDT.** Steps 0–3 are done. Step 4 (installed acceptance) is
+**paused**: the Mac service is held disabled by a concurrent BC-01 containment session (see
+"Mac service disabled at 19:52:39" under Verification). The replacement is **not
+release-accepted, production-ready or cut over**; defaults remain legacy.
+
+### Pickup for a new session (read this first)
+
+- **Code:** `main` at `311a9f9`. Code is identical to `bf99752`, where all three gates qualify
+  (sole verifier, AC, no sleep; see "Gates on `bf99752`"). Commits after it are docs only.
+  Merged since the last install: W37 (discovery policy built once per call), W40 (equal
+  artifact bytes deduped across sources), W41 (per-call asset path dedupe), lint fix `2021306`.
+- **Mac service:** disabled and unloaded since 19:52:39 by the containment session. Installed
+  binary `~/.local/libexec/agent-sessions-capture/agent-sessions.bin` is `efbb99e` (sha
+  `d5592fca…`), not running. That session rewrote the plist at 20:42 (failure-only
+  `KeepAlive`, `ThrottleInterval` 300) and backed up both versions under
+  `~/.local/state/machines/capture-containment-20261028/`. Install #9 swaps only the binary and
+  keeps that plist. The `capture-v1 current-heads` processes seen while the service is off are
+  started by the separate `com.agent-sessions.publication-refresh` job, not by capture.
+- **BC-01:** old dirty `b23712bc`, disabled (`systemctl --user disable --now`), with a
+  restart-backoff drop-in
+  (`~/.config/systemd/user/agent-sessions-capture-experimental.service.d/restart-backoff.conf`).
+- **Blocker: the source-absence repair is not on `main`.** It sits uncommitted in
+  `~/dev/memory-wt/capture-source-absence-20261028` (branch
+  `fix/capture-source-absence-20261028`, base `0ba0f10`), written by the containment session,
+  which has since released ownership. Its record is
+  `~/businesscraft/machines/docs/handover/2026-10-28-bc-01-capacity-investigation.md` ("Final
+  acceptance and rollout record"). It reports full race/shuffle suites passing for
+  `sessioncapture` and `capturedaemon` before a last small correction; full gates were not
+  run. It is source-level evidence only. Its noted lint finding (`enrichment_attach_dedupe_test.go:53`)
+  is already fixed on `main`.
+- **Spool at 23:05 (read-only, service stopped, WAL 0 bytes):** jobs pending 1,023, retry 26
+  (timeout 16 with max attempts 5, transient 9, shutdown 1), quarantined 1 (id 23, delivery
+  timeout), published 20,335; enrichment work attached 3,437, pending 653, retry 5;
+  `enrichment_gap` 1,661 jobs; enrichment budget 26.1 MB of 128 MiB; `step_errors` 19;
+  discovery last completed 10-28 17:02:57 (`sweep_error=timeout`).
+- **Tools:** monitor `/tmp/step4-diag/autorun.py` (stopped 23:05; log
+  `autorun-efbb99e.jsonl`); live read-only asset-check harness `8be2613` on `wt/asset-checks`.
+  `/tmp/step4-build/` holds only stale binaries (`243f819`, `efbb99e`, `w28`), so build install
+  #9 fresh from the gated HEAD. `/tmp` content may not survive a reboot.
+- **Rollback point:** `~/.local/state/agent-sessions-capture/backups/step4h-20261028`
+  (backup-API `queue.sqlite` plus the `463ddf3` binary); `step4g-20261028` keeps the
+  pre-Step-4 original binary.
+- **What to do next:** see [Next action](#next-action).
 
 ### Checkout and preservation
 
-- Repository `/Users/mm/dev/memory`, branch `main`, base `b23712bc`.
+- Repository `/Users/mm/dev/memory`, branch `main` (HEAD `311a9f9`; original base `b23712bc`).
+- Worktrees under `/Users/mm/dev/memory-wt/`: `asset-checks` (env-gated measurement tests,
+  not for merge), `capture-source-absence-20261028` (uncommitted repair, see Pickup),
+  `log-failed-sync` and `pruned-pieces` (pre-existing, unrelated; leave alone). Branch
+  `wt/disc-measure` (`59645df`, env-gated discovery measurements) is kept unmerged for reference.
+  Keep `stash@{0..2}`.
 - The entire pre-simplification dirty worktree (77 paths, incl. dependency-resume
   bitmap, Python refresh/qualification scaffolding, handoff ledger) is preserved on
   branch `preserve/pre-simplification-20261027`. Recover anything from there; do not
@@ -32,11 +77,12 @@ or cut over**; defaults remain legacy.
 | --- | --- |
 | Design | Sound and fit for purpose; matches contract. No direction change. |
 | Candidate code | Opt-in `capture-v1`; publication/reader/report v2; one Go reader used by Python via `capture-v1 export`. |
-| Autonomous reliability | **Run-fatal step errors fixed `1706c00` (W1); Open-path SQLITE_BUSY fixed `ef727a9`/`56bd2f9` (W6); optional genuine-expiry withholding `c3fd555` (W9); repair-claim race `66ee491` (W11). Installed end-to-end confirmation pending (Step 4).** Original cause: `runtimeWorker` (`internal/sessioncapture/runtime.go`) treats any error returned from a work step as Run-fatal; ~10 workers share one SQLite connection (`SetMaxOpenConns(1)`), so a >60s wait for it returns `context deadline exceeded` and kills Run. Reproduced in a throwaway copy (0.49s). Matches the recorded Mac `exit 1 context deadline exceeded`. |
-| Open test failures | None on `b648399` (W12 aggregate gates green). journey09 cause found and fixed (W6). V25/Qrace180 were private-tree names and did not reproduce on the checkout. |
+| Autonomous reliability | Run-fatal step errors, Open-path SQLITE_BUSY, optional expiry, repair-claim race fixed (W1/W6/W9/W11). Delivery cost made linear (W19/W22/W26); enrichment budget fixed (W30); discovery policy cost (W37) and duplicate-artifact asset checks (W40/W41) fixed but **not yet installed**. Open: source absence (ENOENT) treated as runtime-fatal (repair uncommitted, see Pickup); discovery sweep freshness under load; two timeout retries not explained by asset checks. |
+| Open test failures | None on `bf99752`. One diagnosed load-sensitive 3s wait (`TestRuntimeDiscoveryPartialAndInboxConcurrent`) failed once on `243f819` and passed 5/5 by seed and 30/30 under load. |
 | Shared spool `usage()` scan | Accepted limitation: O(payload files) stat per snapshot (≈185 files observed); fail-closed on integrity error. Not redesigned. |
-| Gates | Green on `b648399`: `make check` 647s, `make test` 619s, fuzz, analytics 97/97. Dominated by legacy `internal/syncer`; shrinks at legacy removal. |
-| Deployment | Last recorded: Mac qualified-dirty `e69fb2ed…` (failing with deadline), BC-01 `b23712bc`. Current health unknown. |
+| Gates | Qualifying green on `bf99752`: `make check` (cover 87.2%, CRAP 0/10), `make test`, `make fuzz` 9/9. Dominated by legacy `internal/syncer` (about 290–445s against a 600s timeout); shrinks at legacy removal. |
+| Deployment | Mac: `efbb99e` installed (install #8), **disabled** by containment since 19:52:39. BC-01: `b23712bc` dirty, **disabled**. |
+| Autonomous run | Not achieved. The `efbb99e` run (from 16:38) lost continuity at the 18:14 battery sleep and stopped at the 19:52 containment. |
 | Cutover (contract §6) | Inventory/rebuild/fence/cutover/deletion not performed. |
 
 ### Authoritative decisions (operator, 2026-10-27)
@@ -60,7 +106,7 @@ weakened. No live install, ingestion or R2 deletion happens as an incidental act
 | 1 | Runtime reliability (merged `1706c00`; holder measurement deferred to Step 4 via `step_errors`): operation timeouts/transient claim errors retry per item, only durable local-store failures stop Run; claims released on restart; timeouts visible in status; don't hold the lone connection across slow work; regression tests. | Done (W1/W6/W9/W11) |
 | 2 | Simplify (2A `c92bc61` done; 2B reduced scope `77276c4` done): analytics refresh through one reader path; diagnostic subcommands to test helpers/hidden; optional-lane fold; enrichment trim; break legacy import edges (`launch`, `snapshot`, `hook`). | Done in reduced scope (`c92bc61`, `77276c4`, `a3bde3e`); optional-lane fold rejected as load-bearing; legacy edges move to Step 5 |
 | 3 | Green baseline on one commit: rerun journey09/V25 on the checkout, `make check`, `make test`, `make fuzz`, analytics tests. | Done `b648399` (W12) |
-| 4 | Installed acceptance: Mac 24–48h autonomous run, status/coverage/restart/restore/report; then BC-01; actual R2. | Pending (needs host actions) |
+| 4 | Installed acceptance: Mac 24–48h autonomous run, status/coverage/restart/restore/report; then BC-01; actual R2. | In progress, paused: Mac installs #1–#8 done (latest `efbb99e`); install #9 blocked on the source-absence repair and re-enable decision |
 | 5 | Cutover per contract §6; delete reviewed retired R2 key set; remove legacy v3 code. | Pending |
 
 ### Baseline commit content (Step 0)
@@ -76,6 +122,10 @@ Dropped (preserved on branch): dependency-resume bitmap and its tests; all uncom
 PASS (9.8s / 111.6s / 37.7s). Full gates not yet run.
 
 ### Ownership
+
+Current: the parent coordinator owns `main`, gates and all host actions; no workers are
+running. The list below is the Steps 0–2 record (historical).
+
 
 - Parent (coordinator): brief, integration, commits to `main`, acceptance.
 - Workers: Sonnet subagents in separate git worktrees under `/Users/mm/dev/memory-wt/`,
@@ -924,21 +974,33 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   0 (`syncer` 287s, `sessioncapture` 134s). `make fuzz` 21:14:52–21:19:39 passed 9/9. Not
   installed: the Mac service is held disabled by the containment session.
 
+- **Session close (23:05 AEDT).** Service still disabled; no capture process. Monitor stopped.
+  Spool snapshot is in Pickup. Nothing was installed, re-enabled or replayed after 19:52.
+
 ### Next action
 
-`main` (`2021306`) holds W37, W40, W41 and the lint fix. The Mac service is **disabled by the
-concurrent BC-01 containment session** (see above); installed binary `efbb99e`, not running.
-Next:
-1. Done: full gates green on `bf99752` (above).
-2. Install #9 is blocked on that session's reviewed source-absence repair and its re-enable
-   decision. When it lands on `main`, rerun the gates on the combined HEAD. Then install #9 from a
-   clean detached worktree (backup `step4i`, old binary `.efbb99e`) and bootstrap, coordinating
-   with that owner. Do not re-enable before then.
-3. After install: measure one delivery pass for the quarantine-23 session with the live
-   read-only harness (`8be2613` on `wt/asset-checks`). Replay 23 and any later copies of its
-   pattern only if five passes fit well inside 60s. Recheck the two timeout retries that asset
-   checks do not explain. Restart the 24–48h autonomous run on AC and monitor read-only.
-4. Then BC-01 acceptance (BC-01 also needs the repaired binary), R2 acceptance, and the Step 5
-   cutover per contract §6.
-5. Needs operator sign-off, not done autonomously: dropping the back-to-back second
-   `verifyDependencies` pass, and withholding existing byte-identical artifact copies.
+`main` at `311a9f9` (code = gated `bf99752`). Mac and BC-01 capture are **disabled** by the
+containment session. Steps, in order:
+1. **Land the source-absence repair.** Review the uncommitted diff in
+   `~/dev/memory-wt/capture-source-absence-20261028` as a parent review (fail-closed rules:
+   ENOENT tagged only at authorized original-source reads after policy checks; missing
+   policy/spool/storage and mixed fatal trees stay fatal; service backoff in
+   `internal/capturedaemon`). Commit it on its branch, rebase onto `main`, mutation-check its
+   tests, and merge `--ff-only`. Confirm with the operator first if ownership is unclear.
+2. **Full gates** (`make check`, `make test`, `make fuzz`) on the combined HEAD: sole verifier
+   (check no other session's `go test` is running, before and after), AC power, 5-min load
+   under 10–12, `caffeinate -i -s`, check `pmset` for sleep after each.
+3. **Install #9 on the Mac**, only with the operator's go-ahead to lift the containment. Build
+   from a clean detached worktree (`vcs.modified=false`). Back up through the SQLite backup API
+   to `backups/step4i-<date>` with the `.efbb99e` binary. No schema change, so no clone dry run.
+   Swap only the binary, keep the containment plist, then `launchctl enable` and bootstrap.
+4. **After install:** measure one delivery pass for the quarantine-23 session with the live
+   harness (`8be2613`, rebased). Replay 23 (and any later quarantine of the same pattern) only
+   if five passes fit well inside 60s. Check discovery `completed_at` advances (W37). Recheck the
+   two timeout retries that asset checks do not explain. Restart the monitor and the 24–48h
+   autonomous run on AC.
+5. **Then** BC-01 (repaired binary; its drop-in stays), BC-01 acceptance, R2 acceptance and the
+   Step 5 cutover per contract §6.
+6. **Needs operator sign-off, not done autonomously:** dropping the back-to-back second
+   `verifyDependencies` pass; withholding existing byte-identical artifact copies (up to 17 per
+   open session).

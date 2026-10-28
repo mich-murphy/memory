@@ -11,11 +11,12 @@ For the next implementation session, use the **[implementation handoff](docs/ses
 it records the current checkout, phased build plan, acceptance gates, and pickup commands.
 
 An **opt-in replacement candidate** is implemented under the explicit
-experimental `agent-sessions capture-v1` command prefix. The last recorded Mac capture
-installation is qualified-dirty binary `e69fb2ed…`, with staging8766; BC-01 remains on
-`b23712bc762de77e14a4f096d27bf7b603abac1e`. Current service health is unknown. These
-historical experimental installations are not final default cutover or release
-acceptance. Newer checkout/private-candidate changes are undeployed. Its current publication,
+experimental `agent-sessions capture-v1` command prefix. As of 2026-10-28 23:05 AEDT the
+Mac has candidate `efbb99e` installed and BC-01 has `b23712bc` (dirty). **Capture is
+disabled on both hosts** by a deliberate containment of a source-absence restart fault,
+pending a reviewed repair. Newer fixes on `main` are gated but not installed. These
+experimental installations are not final default cutover or release acceptance. See the
+handoff's [pickup section](docs/session-capture-handoff.md#pickup-for-a-new-session-read-this-first). Its current publication,
 reader and report contracts are **v2**; the command prefix and linked filenames do
 not imply v1 wire compatibility. It includes independent durable capture, autonomous
 retry/discovery, quarantine and progress, explicit Local/SDK R2 backend construction,

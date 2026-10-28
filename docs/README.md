@@ -14,9 +14,9 @@
 The [offline replacement slice](session-capture-implementation.md) now implements
 versioned local publication/read/export and an actual separate analytics consumer.
 The [phase-3 candidate](session-capture-phase3.md) adds independent durable capture,
-autonomous work, safe derived sources and opt-in lifecycle integration. Neither description alone establishes rollout acceptance. Last recorded Mac capture is
-qualified-dirty binary e69fb2ed… with staging8766; BC-01 remains on b23712bc. Current
-service health is unknown; newer checkout/private-candidate changes are undeployed.
+autonomous work, safe derived sources and opt-in lifecycle integration. Neither description alone establishes rollout acceptance. As of 2026-10-28 the Mac has
+candidate `efbb99e` installed and BC-01 `b23712bc`; capture is disabled on both hosts by a
+deliberate source-absence containment, and newer gated fixes on `main` are not installed.
 The replacement is not production-ready or finally cut over. See the handoff's
 [current scorecard](session-capture-handoff.md#current-session-checkpoint) for unresolved
 autonomous/covered/journey failures and unqualified V32V2 source work, rather than
