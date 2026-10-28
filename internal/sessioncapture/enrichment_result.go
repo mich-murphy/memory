@@ -35,8 +35,26 @@ func (q *Queue) storeEnrichmentResult(ctx context.Context, r enrichmentResult) (
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
+	if compact, list, listID, ok := compactEnrichmentBody(body); ok {
+		return id, metadataError(q.insertCompactResult(ctx, id, compact, listID, list))
+	}
 	_, err = q.db.ExecContext(ctx, `INSERT OR IGNORE INTO enrichment_results(id,body) VALUES(?,?)`, id, body)
 	return id, metadataError(err)
+}
+
+func (q *Queue) insertCompactResult(ctx context.Context, id string, compact []byte, listID string, list []byte) error {
+	tx, err := q.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := insertAssetList(ctx, tx, listID, list); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO enrichment_results(id,body) VALUES(?,?)`, id, compact); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (q *Queue) loadEnrichmentResult(ctx context.Context, id string) (enrichmentResult, error) {
@@ -47,6 +65,27 @@ func (q *Queue) loadEnrichmentResult(ctx context.Context, id string) (enrichment
 			return r, err
 		}
 		return r, errors.Join(ErrIntegrity, err)
+	}
+	if len(body) > MaxEnrichmentResultBytes {
+		return r, ErrIntegrity
+	}
+	if _, _, _, compact := compactReference(body); compact {
+		var failure error
+		rebuilt, ok := expandCompact(body, func(listID string) ([]byte, bool) {
+			var list []byte
+			if err := q.db.QueryRowContext(ctx, `SELECT body FROM enrichment_asset_lists WHERE id=?`, listID).Scan(&list); err != nil {
+				failure = err
+				return nil, false
+			}
+			return list, true
+		})
+		if failure != nil && IsCallerCancellation(ctx, failure) {
+			return r, failure
+		}
+		if !ok {
+			return r, errors.Join(ErrIntegrity, failure)
+		}
+		body = rebuilt
 	}
 	if len(body) > MaxEnrichmentResultBytes || digest(body) != id || json.Unmarshal(body, &r) != nil {
 		return r, ErrIntegrity

@@ -34,6 +34,7 @@ func (q *Queue) initMetadataBudgets(ctx context.Context) error {
 		{"native_evidence", "native"},
 		{"enrichment_work", "enrichment"},
 		{"enrichment_results", "enrichment"},
+		{"enrichment_asset_lists", "enrichment"},
 		{"optional_repairs", "enrichment"},
 	}
 	for _, table := range tables {
@@ -44,7 +45,7 @@ func (q *Queue) initMetadataBudgets(ctx context.Context) error {
 	// Existing retained rows are charged too, including restart after upgrade.
 	for name, query := range map[string]string{
 		"native":     `SELECT coalesce(SUM(128+length(CAST(id AS BLOB))+length(body)),0) FROM native_evidence`,
-		"enrichment": `SELECT coalesce((SELECT SUM(128+length(CAST(id AS BLOB))+length(CAST(session AS BLOB))+length(spec)+coalesce(length(result),0)+max(32,length(state))+max(64,length(last_error))+max(64,length(contract))+max(256,length(software))) FROM enrichment_work),0)+coalesce((SELECT SUM(128+length(id)+length(body)) FROM enrichment_results),0)+coalesce((SELECT SUM(` + budgetExpression("optional_repairs", "optional_repairs") + `) FROM optional_repairs),0)`,
+		"enrichment": `SELECT coalesce((SELECT SUM(128+length(CAST(id AS BLOB))+length(CAST(session AS BLOB))+length(spec)+coalesce(length(result),0)+max(32,length(state))+max(64,length(last_error))+max(64,length(contract))+max(256,length(software))) FROM enrichment_work),0)+coalesce((SELECT SUM(128+length(id)+length(body)) FROM enrichment_results),0)+coalesce((SELECT SUM(128+length(id)+length(body)) FROM enrichment_asset_lists),0)+coalesce((SELECT SUM(` + budgetExpression("optional_repairs", "optional_repairs") + `) FROM optional_repairs),0)`,
 	} {
 		var used int64
 		if err := q.db.QueryRowContext(ctx, query).Scan(&used); err != nil {
@@ -79,10 +80,11 @@ func installBudgetTriggers(ctx context.Context, db *sql.DB, table, budget string
 
 func budgetExpression(table, prefix string) string {
 	fields := map[string][]string{
-		"native_evidence":    {"id", "body"},
-		"enrichment_work":    {"id", "session", "spec", "result", "state", "last_error", "contract", "software"},
-		"enrichment_results": {"id", "body"},
-		"optional_repairs":   {"id", "session", "source_hash", "epoch", "commitment", "source", "evidence", "identity", "state", "last_error", "stage", "contract", "software"},
+		"native_evidence":        {"id", "body"},
+		"enrichment_work":        {"id", "session", "spec", "result", "state", "last_error", "contract", "software"},
+		"enrichment_results":     {"id", "body"},
+		"enrichment_asset_lists": {"id", "body"},
+		"optional_repairs":       {"id", "session", "source_hash", "epoch", "commitment", "source", "evidence", "identity", "state", "last_error", "stage", "contract", "software"},
 	}
 	var expression strings.Builder
 	expression.WriteString("128")
