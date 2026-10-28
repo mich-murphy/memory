@@ -195,6 +195,25 @@ func (q *Queue) attachEnrichment(ctx context.Context, s EnrichmentSpec, r enrich
 	if idx >= 0 && previous.Object == r.Object {
 		return m.Sequence, nil
 	}
+	// The same short-cut across source ids: the main transcript and each subagent
+	// attach their own artifact, often byte-identical. If an ACTIVE, SELECTED
+	// artifact already holds exactly this object, attach nothing (it only ever
+	// publishes less; existing copies are never sealed, withheld or changed).
+	// latestPolicyChecked rehydrates withheld optional sources to their originals,
+	// so selection must be read from SelectionReason, not Source.Withheld alone.
+	// The asset list/result body need not match: the bytes are identical and the
+	// bundle is self-contained; they were authorized by that source's own evidence,
+	// and this result's assets were just checked above (delivery=true), so nothing
+	// new is exposed. Residual: if the matched artifact is later sealed/replaced,
+	// this work row still reports attached at this sequence, but nothing claims
+	// completeness: reduceEnrichmentCoverage keeps coverage partial and
+	// BasisCurrent tracks only the transcript source coordinate.
+	for i := range m.Sources {
+		c := m.Sources[i]
+		if c.Role == "artifact" && c.State == "active" && publication.IsSelected(c) && i < len(es) && es[i].SelectionReason == "" && c.Object == r.Object {
+			return m.Sequence, nil
+		}
+	}
 	provenance, err := q.enrichmentSourceRequest(ctx, s)
 	if err != nil {
 		return 0, err
