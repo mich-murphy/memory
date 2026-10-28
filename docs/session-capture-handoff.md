@@ -795,18 +795,27 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   `wt/disc-measure` branch (`59645df`, env-gated measurement tests) is kept unmerged for
   reference.
 
-- **W38 gates on `243f819`, green after one diagnosed rerun; not installed.** The first `make check`
+- **W38 gates on `243f819`: exits green, but not qualifying evidence; not installed.** The Mac
+  switched to battery at about 17:53 AEDT (pmset `Using Batt` from 17:53:42; the monitor shows
+  `battery` from 17:55). The rerun `make check` (17:51–18:00), `make test` (18:00–18:06) and
+  `make fuzz` (18:06–18:11) therefore ran wholly or partly on battery, which the gate procedure
+  does not allow. All three must be rerun on AC before install #9. The first `make check`
   failed `TestRuntimeDiscoveryPartialAndInboxConcurrent` (`runtime_test.go:177`, its fixed 3s
   wait, 5.48s, 5-min load about 11.5, seed 1793169687848638000). The seed rerun passed 5/5 at
   about 0.5s each, and 30/30 passed under 6 `yes` processes with cover instrumentation. The rerun
   `make check` exited 0 (coverage 87.1%, cover `syncer` 337s); `make test` exited 0 (`syncer`
-  311s); `make fuzz` 9/9. No sleep during any gate.
+  311s); `make fuzz` 9/9. No sleep during any gate, but see the battery note above.
 - **Sleep during the `efbb99e` run (18:14–18:45 AEDT).** Clamshell sleep on battery, then
   DarkWake cycles until the lid opened at 18:45. The monitor logged nothing from 18:10:57 to
   18:46:22. Retries rose to 34, 31 of them `transient`, which matches the W23 DarkWake pattern.
   Before that, at 18:10, load hit 59 while the service was at 0.1% CPU, so the spike was external.
   The run's continuity is broken; it restarts with the next install, on AC power.
-- **Quarantine 23 (delivery, 8 × `timeout`, created 18:48:05): structural, not load.** Session
+- **Quarantine 23 (delivery, 8 × `timeout`, created 18:48:05): cause not established.** The
+  timeouts started at 17:40, with 5-min load about 9. They accumulated through the gate runs
+  (load 10–12), the external spike (59 at 18:10), and the post-wake period (5-min load about 22).
+  Published heads carrying up to 39,681 assets passed the same per-asset checks within the 60s
+  budget, so asset count alone does not explain it. Load and asset-check growth are both open
+  hypotheses. Do not replay it until it has been measured. Facts: session
   seq 40 adds no new object bytes against published seq 39. It adds a fifth optional enrichment
   artifact (K 37 to 38), and all 5 results share one asset list. Each full-session policy pass
   therefore runs `CheckEnrichmentAsset` 3,885 times for 777 distinct (scope, asset) pairs. The
