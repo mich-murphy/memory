@@ -628,9 +628,47 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   (legacy) is within 7s of the 600s package timeout under `make test` too. Both are recorded,
   not fixed; Step 5 removes `syncer`.
 
+- **Mac install of `463ddf3` (W28), and steady-state measurements** (parent, 2026-10-28
+  13:31 AEDT). Before the stop, the backlog had fully drained (0 pending, 0 retry, 0 active
+  quarantines). No WAL sidecars were present after `bootout`. The spool was backed up through
+  the SQLite backup API to `backups/step4g-20261028/` (7.1s, `quick_check ok`, counts identical
+  to the pre-stop read); the previous binary is kept as `.88451ad`. New sha256 `7de38051…`.
+  Measured after the install (read-only):
+  - **Delivery:** idle. In 2 minutes, 29 sources were re-observed, 2 captured and 2 jobs created.
+    The stderr log is unchanged since 12:09:48; all 17 lines added after 11:50 are
+    load-episode `context deadline exceeded` step skips.
+  - **Discovery and freshness:** `poll_seconds` 10, three scopes (claude, codex, pi), each
+    `bounded` with 1,365 entries examined per batch. A bounded batch takes about 50s and a
+    complete sweep about 7.5 minutes at load ≈5 (generation 2596 started 13:48:20 and completed
+    13:56:09). Generation 2595 carried `sweep_error='timeout'` from a batch that ran past 60s,
+    and the last complete sweep before that was 12:29:34. So under host load, freshness falls
+    back to at least one ~8 minute sweep after load drops, and a timed-out batch leaves the
+    generation visibly incomplete, as the contract requires. This was not fixed; it is recorded
+    for the autonomous run.
+  - **Idle CPU:** about 180–250%. It is dominated by discovery (`discoverLoop` →
+    `capturesource.Discover` → full runtime policy per walked entry: `runtimeExclusions`,
+    `runtimePrivacyOwner`/`ReadOwnership`, `capturepolicy.Resolve`), then the capture,
+    native-inbox and enrichment loops. This is the dominant steady-state cost. A candidate
+    follow-up is a policy-input snapshot per discovery batch, which needs the same freshness
+    argument as W25. It is measured, not yet designed.
+  - **Enrichment:** 1,516 `attached`, 591 `quarantined` with `last_error='quota'` (459 written
+    by the pre-capture-v1 `c9749dac+dirty` build, 132 by `c8abfd1` at 8 attempts). These are
+    durable and visible, not lost. They need an operator review against the metadata budget
+    before any replay.
+  - **Discovery issues:** 3,160 active `protected_source_requires_scrub`, 225
+    `executable_source_requires_review`, 87 `policy_denied`, 25 `adapter_omission`, 24
+    `unsupported_compressed_source`, 3 `launch_snapshot_integration_required`. These are
+    explicit coverage gaps for the BC-01/R2 acceptance inventory.
+  - **Disk:** 24G free (95%); install backups total about 10G across `step4`–`step4g`.
+
 ### Next action
 
-W29 (sole verifier under `caffeinate`, explicit `ANALYTICS_PYTHON`, on AC with load checked
-before each gate) runs the aggregate gates on the W28 merge. If green: Mac install (SQLite
-backup-API copy if sidecars exist). Then monitor read-only until the backlog drains, including
-the K=378 session, and begin the 24–48h autonomous run before BC-01 and R2 acceptance.
+Step 4 is installed and delivering, with the backlog drained (`463ddf3`). Next:
+1. The 24–48h autonomous run on the Mac (AC power, lid open or `caffeinate`). Monitor
+   read-only with small indexed queries: pause, `step_errors`, active quarantines,
+   retry classes, discovery `completed_at`, and stderr growth.
+2. Operator decisions, recorded rather than taken: prune install backups `step4`–`step4d`
+   once `step4g` is confirmed as the rollback point; review the 591 enrichment `quota`
+   quarantines.
+3. Then BC-01 acceptance, R2 acceptance, and the Step 5 cutover per contract §6 (this
+   removes the legacy `syncer` package that is within 7s of its 600s test timeout).
