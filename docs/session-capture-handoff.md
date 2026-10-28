@@ -880,6 +880,18 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   rehydration and is kept as a guard. Existing duplicate copies in open sessions remain; they are
   checked at delivery at the W41 per-call cost.
 
+- **Live state at 19:30 AEDT, still `efbb99e`, on battery (75%, load 9–13).** Pending jobs are
+  773, retry 32, active quarantines 1 (23), enrichment budget 24.4 MB. Discovery has completed no
+  sweep since 17:02:57 (`sweep_error=timeout`); W37 is not installed yet. Among the timeout
+  retries, four jobs match the quarantine-23 pattern: 4–5 selected byte-identical artifacts
+  carrying 3,108–4,100 assets, at attempts 7, 4, 3 and 2. Expect at least the attempt-7 job to
+  quarantine before install #9; replay after install, as for 23. Two timeout retries are NOT
+  explained by asset checks (K 82 with 335 selected assets at attempts 3; K 2 with 10 assets at
+  attempts 2). They point to load or battery throttling, or to a cost not yet measured. Check
+  them after install #9 on AC before calling the asset-check fix sufficient. **Blocker:** gates
+  and install #9 need AC power. The service is left running: quarantines are recoverable by
+  replay, and stopping it is not part of the documented procedure.
+
 ### Next action
 
 `main` holds W37, W40 and W41; installed is still `efbb99e` (install #8), whose autonomous run lost
