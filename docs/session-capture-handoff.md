@@ -16,7 +16,7 @@ release-accepted, production-ready or cut over**; defaults remain legacy.
 
 ### Pickup for a new session (read this first)
 
-- **Code:** `main` at `311a9f9`. Code is identical to `bf99752`, where all three gates qualify
+- **Code:** `main` code is identical to `bf99752`, where all three gates qualify
   (sole verifier, AC, no sleep; see "Gates on `bf99752`"). Commits after it are docs only.
   Merged since the last install: W37 (discovery policy built once per call), W40 (equal
   artifact bytes deduped across sources), W41 (per-call asset path dedupe), lint fix `2021306`.
@@ -55,7 +55,7 @@ release-accepted, production-ready or cut over**; defaults remain legacy.
 
 ### Checkout and preservation
 
-- Repository `/Users/mm/dev/memory`, branch `main` (HEAD `311a9f9`; original base `b23712bc`).
+- Repository `/Users/mm/dev/memory`, branch `main` (code = gated `bf99752`; original base `b23712bc`).
 - Worktrees under `/Users/mm/dev/memory-wt/`: `asset-checks` (env-gated measurement tests,
   not for merge), `capture-source-absence-20261028` (uncommitted repair, see Pickup),
   `log-failed-sync` and `pruned-pieces` (pre-existing, unrelated; leave alone). Branch
@@ -979,7 +979,7 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
 
 ### Next action
 
-`main` at `311a9f9` (code = gated `bf99752`). Mac and BC-01 capture are **disabled** by the
+`main` code = gated `bf99752` (later commits are docs only). Mac and BC-01 capture are **disabled** by the
 containment session. Steps, in order:
 1. **Land the source-absence repair.** Review the uncommitted diff in
    `~/dev/memory-wt/capture-source-absence-20261028` as a parent review (fail-closed rules:
