@@ -50,6 +50,70 @@ class PublicationsTests(unittest.TestCase):
         with duckdb.connect(str(self.db), read_only=True) as db:
             return db.execute(sql).fetchall()
 
+    def test_typed_batch_preserves_bigint_null_boolean_unicode_and_json(self):
+        _, events = publications._dependencies()
+        columns = dict(events.EVENT_COLUMNS, session_key='VARCHAR', archive_id='VARCHAR',
+                       machine_id='VARCHAR', agent='VARCHAR', session_id='VARCHAR',
+                       source_id='VARCHAR', epoch_id='VARCHAR', publication_id='VARCHAR')
+        row = {key: None for key in columns}
+        row.update(event_id='event', trace_id='trace', line=2**63-1,
+                   offset=2**53+17, length=2**53+19, byte_offset=2**63-2,
+                   byte_length=2**53+21, ordinal=1, is_error=False,
+                   duplicate=True, is_human=False, text='🦆 Unicode \\n \\"quote\\"',
+                   tool_args=json.dumps({'number': 2**63-1, 'unicode': '雪', 'none': None}, ensure_ascii=False))
+        with duckdb.connect(str(self.db)) as db:
+            db.execute('CREATE TABLE events (' + ','.join('"'+key+'" '+typ for key, typ in columns.items()) + ')')
+            with tempfile.TemporaryDirectory() as temp:
+                batch = publications._ProjectionBatch(db, 'events', columns, temp)
+                batch.add(row)
+                batch.flush()
+            found = db.execute('SELECT * FROM events').fetchone()
+            names = [item[0] for item in db.description]
+            issue_columns = dict(events.ISSUE_COLUMNS, session_key='VARCHAR', archive_id='VARCHAR',
+                                 machine_id='VARCHAR', agent='VARCHAR', session_id='VARCHAR',
+                                 source_id='VARCHAR', epoch_id='VARCHAR', publication_id='VARCHAR')
+            db.execute('CREATE TABLE issues (' + ','.join('"'+key+'" '+typ for key, typ in issue_columns.items()) + ')')
+            with tempfile.TemporaryDirectory() as temp:
+                batch = publications._ProjectionBatch(db, 'issues', issue_columns, temp)
+                batch.add(dict(trace_id='trace', line=2**63-1, offset=2**53+17,
+                               length=2**53+19, kind='malformed_json', record_type=None))
+                batch.flush()
+            issue = db.execute('SELECT line,"offset",length,kind,record_type FROM issues').fetchone()
+        actual = dict(zip(names, found))
+        self.assertEqual(issue, (2**63-1, 2**53+17, 2**53+19, 'malformed_json', None))
+        self.assertEqual({key: actual[key] for key in ('line', 'offset', 'length', 'byte_offset', 'byte_length')},
+                         {key: row[key] for key in ('line', 'offset', 'length', 'byte_offset', 'byte_length')})
+        self.assertEqual({key: actual[key] for key in ('is_error', 'duplicate', 'is_human', 'native_id', 'text')},
+                         {key: row[key] for key in ('is_error', 'duplicate', 'is_human', 'native_id', 'text')})
+        self.assertEqual(json.loads(actual['tool_args']), json.loads(row['tool_args']))
+
+    def test_second_batch_failure_rolls_back_prior_success_and_retries(self):
+        self.fixture()
+        publications.import_export(self.export, self.db)
+        before = self.query('SELECT event_id,text FROM events')
+        self.manifest.update(sequence=2, publication_id='p2')
+        raw = (self.text * 1200) + b'broken JSON\n'
+        self.fixture([('s', 'e', 'main', raw)])
+        original = publications._ProjectionBatch.flush
+        calls = [0]
+        def failing(batch):
+            calls[0] += 1
+            if calls[0] == 2:
+                raise RuntimeError('synthetic batch failure')
+            return original(batch)
+        with patch.object(publications._ProjectionBatch, 'flush', failing):
+            with self.assertRaisesRegex(publications.ImportFailure, '^import_failed$'):
+                publications.import_export(self.export, self.db)
+        self.assertGreaterEqual(calls[0], 2)
+        self.assertEqual(self.query('SELECT event_id,text FROM events'), before)
+        self.assertEqual(self.query('SELECT publication_id,sequence FROM sessions'), [('p1', 1)])
+        self.assertEqual(self.query('SELECT publication_id,sequence,reason FROM failures'),
+                         [('p2', 2, 'import_failed')])
+        result = publications.import_export(self.export, self.db)
+        self.assertEqual((result['events'], result['issues']), (1200, 1))
+        self.assertEqual(self.query('SELECT count(*) FROM failures'), [(0,)])
+        self.assertEqual(publications.import_export(self.export, self.db)['status'], 'unchanged')
+
     def test_summary_exact_totals_bounded_detail_and_offline_exhaustive(self):
         self.fixture()
         publications.import_export(self.export, self.db)

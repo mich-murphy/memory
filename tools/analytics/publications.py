@@ -189,6 +189,41 @@ def _insert(db, table, row):
     db.execute(f'INSERT INTO {table} ({keys}) VALUES (' + ','.join('?' for _ in row) + ')', list(row.values()))
 
 
+class _ProjectionBatch:
+    """Typed, bounded event/issue staging inside the session's DuckDB transaction."""
+    def __init__(self, db, table, columns, folder):
+        self.db, self.table, self.columns = db, table, columns
+        self.path = Path(folder) / (table + '.jsonl')
+        self.rows = []
+        self.size = 0
+
+    def add(self, row):
+        values = {key: row.get(key) for key in self.columns}
+        for key, typ in self.columns.items():
+            if typ == 'JSON' and values[key] is not None:
+                values[key] = json.loads(values[key])
+        encoded = json.dumps(values, ensure_ascii=False, separators=(',', ':'))
+        self.rows.append(encoded)
+        self.size += len(encoded.encode('utf-8')) + 1
+        if len(self.rows) >= 1000 or self.size >= 1024 * 1024:
+            self.flush()
+
+    def flush(self):
+        if not self.rows:
+            return
+        # The parent is an owned private 0700 staging directory. No second index
+        # or persistent data authority: SQL rows commit or roll back as one session.
+        with self.path.open('w', encoding='utf-8') as stream:
+            os.chmod(self.path, 0o600)
+            stream.write('\n'.join(self.rows) + '\n')
+        spec = '{' + ','.join(f"'{key}':'{typ}'" for key, typ in self.columns.items()) + '}'
+        self.db.execute(f'INSERT INTO {self.table} BY NAME SELECT * FROM read_json('
+                        "?, columns=" + spec + ", format='newline_delimited', maximum_object_size=" +
+                        str(max(self.size, 1024 * 1024)) + ')', [str(self.path)])
+        self.rows.clear()
+        self.size = 0
+
+
 def _key(values):
     return hashlib.sha256(json.dumps(list(values), separators=(',', ':')).encode()).hexdigest()
 
@@ -285,12 +320,15 @@ def import_export(export_dir, db_path, *, reset=False):
                     for table in ('events', 'issues', 'sources', 'sessions'):
                         db.execute(f'DELETE FROM {table} WHERE session_key=?', [session])
                     counts = dict(sources=0, events=0, issues=0)
+                    batch_columns = dict(**{k: 'VARCHAR' for k in coords}, source_id='VARCHAR', epoch_id='VARCHAR')
+                    batches = {table: _ProjectionBatch(db, table, dict(columns, **batch_columns), temp)
+                               for table, columns in (('events', events.EVENT_COLUMNS), ('issues', events.ISSUE_COLUMNS))}
                     for pair, source in sources.items():
                         trace = _key([session, *pair])
                         loc = dict(coords, source_id=source['source_id'], epoch_id=pair[1])
                         withheld = source.get('withheld')
                         if withheld is not None:
-                            _insert(db, 'issues', dict(loc, trace_id=trace, line=0, offset=0,
+                            batches['issues'].add(dict(loc, trace_id=trace, line=0, offset=0,
                                 length=0, kind='source_withheld_' + withheld['reason'], record_type=None))
                             _insert(db, 'sources', dict(loc, trace_id=trace, source_role=source['role'],
                                 revision=source['revision'], state=source['state'],
@@ -323,12 +361,12 @@ def import_export(export_dir, db_path, *, reset=False):
                             if event:
                                 if source['role'] == 'subagent' and event['role'] == 'user':
                                     event.update(is_human=False, origin='agent')
-                                _insert(db, 'events', dict(event, **loc))
+                                batches['events'].add(dict(event, **loc))
                                 counts['events'] += 1
                             if issue:
                                 # record_type can itself contain private malformed data.
                                 issue['record_type'] = None
-                                _insert(db, 'issues', dict(issue, **loc))
+                                batches['issues'].add(dict(issue, **loc))
                                 counts['issues'] += 1
                         if partial:
                             with owned.open('rb') as stream:
@@ -336,7 +374,7 @@ def import_export(export_dir, db_path, *, reset=False):
                                 for number, raw in enumerate(stream, 1):
                                     offset += length
                                     length = len(raw)
-                            _insert(db, 'issues', dict(loc, trace_id=trace, line=number,
+                            batches['issues'].add(dict(loc, trace_id=trace, line=number,
                                     offset=offset, length=length, kind='incomplete_tail', record_type=None))
                             counts['issues'] += 1
                         _insert(db, 'sources', dict(loc, trace_id=trace, source_role=source['role'],
@@ -346,6 +384,8 @@ def import_export(export_dir, db_path, *, reset=False):
                             associations=json.dumps(source['associations']), partial_tail=partial,
                             source_key_hash=pair[0], optional=source.get('optional', False), withheld_reason=None))
                         counts['sources'] += 1
+                    for batch in batches.values():
+                        batch.flush()
                     now = time.time_ns()
                     _insert(db, 'sessions', dict(coords, sequence=manifest['sequence'], manifest_sha256=fingerprint,
                         observed_at_ns=manifest['observed_at_ns'], captured_at_ns=manifest['captured_at_ns'],
@@ -389,10 +429,15 @@ def report(db_path, *, now_ns=None, stale_after_ns=86400 * 10**9, summary=False)
         detail_limit = ' LIMIT 50' if summary else ''
         sessions = rows('SELECT * EXCLUDE(manifest_sha256) FROM sessions ORDER BY session_key' + detail_limit)
         failures = rows('SELECT * FROM failures ORDER BY session_key' + detail_limit)
-        failed = ({r['session_key'] for r in failures} if not summary else
-                  {r[0] for r in db.execute('SELECT session_key FROM failures WHERE session_key IN (' +
-                   ','.join('?' for _ in sessions) + ')', [s['session_key'] for s in sessions]).fetchall()}
-                  if sessions else set())
+        if summary and sessions:
+            keys = [session['session_key'] for session in sessions]
+            failed = {row[0] for row in db.execute(
+                'SELECT session_key FROM failures WHERE session_key IN (' +
+                ','.join('?' for _ in keys) + ')', keys).fetchall()}
+        elif summary:
+            failed = set()
+        else:
+            failed = {failure['session_key'] for failure in failures}
         for session in sessions:
             session['coverage'] = json.loads(session['coverage'])
             session['capture_age_ns'] = max(0, now - session['captured_at_ns'])
@@ -416,7 +461,7 @@ def report(db_path, *, now_ns=None, stale_after_ns=86400 * 10**9, summary=False)
                 count(*) FILTER (WHERE withheld_reason IS NOT NULL) AS withheld FROM sources''')[0],
             sources=rows('''SELECT session_key,trace_id,source_id,epoch_id,publication_id,
                 source_role,revision,state,source_key_hash,optional,withheld_reason,sha256,size,observed_at_ns,captured_at_ns,
-                associations,partial_tail FROM sources ORDER BY session_key,source_id,epoch_id''' + detail_limit) if not summary else [],
+                associations,partial_tail FROM sources ORDER BY session_key,source_id,epoch_id''') if not summary else [],
             withheld_counts=rows('SELECT withheld_reason AS reason, count(*) AS sources FROM sources WHERE withheld_reason IS NOT NULL GROUP BY withheld_reason ORDER BY withheld_reason'),
             source_roles=rows('SELECT source_role, count(*) AS sources FROM sources GROUP BY source_role ORDER BY source_role'),
             event_counts=rows('SELECT event_type, count(*) AS events FROM events GROUP BY event_type ORDER BY event_type'),
