@@ -7,6 +7,65 @@ lease/admission bookkeeping, dated checks) is preserved verbatim in the
 [2026-10-27 archive](session-capture-handoff-archive-20261027.md); older history is in
 the [progress history](session-capture-progress-history.md). Neither is current guidance.
 
+## Six-phase delivery (2026-10-29, active)
+
+Operator approved implementation of the six-phase plan following the holistic review.
+Parent owns integration, this brief, quality gates and final acceptance. Sol/medium
+workers use isolated worktrees; start/status/steering/resume capabilities are available.
+No implementation change is release acceptance. Existing containment remains until
+its controlled re-enable boundary is resolved; no incidental host changes or deletion.
+
+- Baseline: `4c9aca5`, review-only dirty handoff/report adopted into
+  `delivery/holistic-baseline` (`gh stack`). Frozen untracked research is excluded.
+- External source-absence repair: source ownership released per the machines handover;
+  copy/review in a new task worktree, preserve the original dirty worktree unchanged.
+- Scope/exit: (1) reconcile baseline and criteria; (2) source absence, analytics health,
+  current-status docs; (3) typed queue state, inventory reuse, evidence validation,
+  delivery transitions, malformed-work disposition; (4) measured resource slice and
+  bounded improvements; (5) full gates then installed/two-machine/native/R2 acceptance;
+  (6) controlled cutover then legacy retirement. Exact criteria: holistic review §6.
+- Constraints: preserve identities/exclusions/roots/source bytes/research and all quality
+  gates. No new framework, second reader, speculative GC/chunking, or legacy migration.
+- Verification: parent serializes expensive checks; `bc-heavy` not found on current PATH
+  (investigate installed absolute path before expensive gates). AC power confirmed.
+  Earlier review checks qualify baseline only, not future edits.
+- Work ownership: dispatch pending; parent owns docs/handoff and integration checkout.
+- Next: parallel repair adoption, analytics correctness, and immutable inventory reuse;
+  then independently review and integrate before overlapping runtime changes.
+
+## Holistic architecture review (2026-10-29, completed)
+
+- Scope: read-only implementation/design review requested by the operator; deliver a
+  prioritized maintainability, abstraction/API/data-contract and production-readiness
+  assessment in `docs/holistic-review-20261029.md`. This does not resume rollout.
+- Source: `main` at `4c9aca5c5cb178316e9eed32626dbf56f7dbaac9`; initial tracked tree clean.
+  Untracked `docs/research/README.md`, `agent-navigation-context-graphs/` and
+  `agent-navigation-handover.md` are preserved, not review output.
+- Parent owns this brief, cross-cutting review, findings validation and final report.
+  Sol/medium read-only reviewers completed: runtime `327ab9e4-c6af-4f5`, publication
+  `487272b4-eed8-452`, source/privacy `47112e77-94a5-48a`, analytics
+  `f8724bf5-a931-495`, boundaries/tests `82151d36-ed40-4df`, final accuracy
+  `977e368b-4b86-450`. Startup/activity and substantive interim findings were inspected;
+  all are stopped, no worker owns implementation files.
+- Constraints: no implementation edits, live ingestion, host changes, installs, remote
+  cleanup or private transcript/credential inspection. Existing external repair work
+  is not merged or edited. Offline checks are coordinated centrally in pinned Nix.
+- Delivered: [holistic review](holistic-review-20261029.md), with prioritized findings,
+  data-model/API assessment, explicit non-recommendations and ordered acceptance plan.
+  Parent reconciled findings against source: retracted broad optional-corruption/attachment
+  defect claims, role-immutability claims, per-GET projection qualification and the extra
+  fixture-binary proposal. Final reviewer correction on same-name endpoint rebinding is
+  incorporated. Review accepted as an assessment, not implementation/release acceptance.
+- Fresh pinned-Nix checks on unchanged implementation: `make capture-acceptance` passed
+  12+6+6; analytics discovery 97 with 12 skips (process journeys ran separately); ten
+  candidate Go packages passed `-race -shuffle=on -count=1`. Synthetic probes reproduced
+  missing-current and inactive-target status errors. Exact commands/logs and scope are
+  in the report. Full check/test/fuzz, native/live/installed gates were not rerun.
+- Next action: implement the report's ordered narrow fixes, starting with review of the
+  existing source-absence repair and analytics scope accounting. This review made no host
+  changes and grants no new re-enable/cutover authority; the containment decision below
+  remains in force. Frozen research and external worktrees remain untouched.
+
 ## Current session checkpoint
 
 **Updated 2026-10-28 23:05 AEDT.** Steps 0–3 are done. Step 4 (installed acceptance) is
