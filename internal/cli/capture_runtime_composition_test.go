@@ -26,6 +26,10 @@ func TestRuntimeCompositionCompilesOnceAcrossCallbacks(t *testing.T) {
 	if err != nil || calls != 1 {
 		t.Fatalf("compile count %d: %v", calls, err)
 	}
+	// Replace the declarations in this test composition without mutating their
+	// backing array. A callback recompiling them would forget the moved root;
+	// the original compiled snapshot must remain the only coordinate authority.
+	r.config.RootAliases = []capturedaemon.RootAlias{{Agent: "claude", Root: root, Path: old}, {Agent: "claude", Root: root, Path: moved + "-redeclared"}}
 	queue := r.queueOptions()
 	source := r.sourceOptions("")
 	if queue.Coordinates != r.inventory || source.Coordinates != r.inventory {
@@ -41,8 +45,8 @@ func TestRuntimeCompositionCompilesOnceAcrossCallbacks(t *testing.T) {
 	if err := r.policy(true)(t.Context(), req); err != nil {
 		t.Fatal(err)
 	}
-	if !r.aliasMapped("claude", path) || r.aliasMapped("claude", moved+"-sibling") {
-		t.Fatal("alias membership incorrect")
+	if !r.aliasMapped("claude", path) || r.aliasMapped("claude", moved+"-redeclared") {
+		t.Fatal("alias membership did not use the original snapshot")
 	}
 	if calls != 1 {
 		t.Fatalf("policy recompiled declarations: %d", calls)

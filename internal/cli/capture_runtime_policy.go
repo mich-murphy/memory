@@ -48,16 +48,16 @@ func (r runtimeComposition) exclusions(ctx context.Context, req sessioncapture.R
 	c := r.config
 	for _, dir := range []string{c.PolicyDir, filepath.Join(c.PolicyDir, "exclusions")} {
 		if err := capturedaemon.SafePath(dir); err != nil {
-			return errors.New("effective exclusions unavailable")
+			return sessioncapture.ErrPolicyUnavailable
 		}
 		st, err := os.Stat(dir)
 		if err != nil || !st.IsDir() {
-			return errors.New("effective exclusions unavailable")
+			return sessioncapture.ErrPolicyUnavailable
 		}
 	}
 	registry, err := exclusion.Load(c.PolicyDir)
 	if err != nil {
-		return errors.New("effective exclusions unavailable")
+		return sessioncapture.ErrPolicyUnavailable
 	}
 	claimedExcluded, err := r.claimedSessionExcluded(req, registry)
 	if err != nil {
