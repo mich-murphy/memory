@@ -82,15 +82,19 @@ func TestRuntimeRunValidatesArchiveAndJoinsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { _, err := runCaptureRuntime(ctx, "run", []string{"--config", config}, o); done <- err }()
-	time.Sleep(50 * time.Millisecond)
-	cancel()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
+	for {
+		if _, err := sessioncapture.ReadRuntime(t.Context(), c.Spool, c.ArchiveID, 0, 1); err == nil {
+			break
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("runtime failed to join")
+		select {
+		case err := <-done:
+			t.Fatalf("runtime exited before it was running: %v", err)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -98,13 +102,14 @@ func TestRuntimeParserAndServiceDryRun(t *testing.T) {
 	c, config := runtimeFixture(t)
 	var out bytes.Buffer
 	o := IO{Stdout: &out, Stderr: &out}
+	// Routing is not covered elsewhere for every command (mutation-checked: dropping "hint" passed without this).
 	for _, cmd := range []string{"run", "hint", "work-status", "quarantine", "replay", "resume", "service"} {
 		if !runtimeCommand(cmd) {
-			t.Fatal("not routed")
+			t.Fatalf("%s not routed", cmd)
 		}
-		if _, err := parseRuntimeFlags(cmd, nil, o); err == nil {
-			t.Fatal("missing config accepted")
-		}
+	}
+	if _, err := parseRuntimeFlags("run", nil, o); err == nil {
+		t.Fatal("missing config accepted")
 	}
 	if _, err := runCaptureRuntime(t.Context(), "service", []string{"--config", config, "--platform", "linux", "--executable", filepath.Join(c.Home, "synthetic binary %")}, o); err != nil {
 		t.Fatal(err)

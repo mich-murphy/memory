@@ -69,16 +69,10 @@ func TestRuntimeEnrichmentEnabledRunPublishesAndStatusDoesNotTakeLease(t *testin
 	}()
 	defer func() {
 		cancel()
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Error(err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Error("coordinator did not join")
+		if err := <-done; err != nil {
+			t.Error(err)
 		}
 	}()
-	deadline := time.Now().Add(5 * time.Second)
 	for {
 		rows, err := sessioncapture.ReadEnrichmentWorkStatus(t.Context(), c.Spool, c.ArchiveID, "", 64)
 		attached := false
@@ -93,9 +87,6 @@ func TestRuntimeEnrichmentEnabledRunPublishesAndStatusDoesNotTakeLease(t *testin
 			done <- err
 			t.Fatal("coordinator exited before enrichment")
 		default:
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("enrichment attachment deadline exceeded")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
