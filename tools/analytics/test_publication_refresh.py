@@ -553,6 +553,30 @@ class DiscoveryFailureConsumerTests(unittest.TestCase):
             self.assertEqual(projection.execute('SELECT sequence FROM sessions').fetchall(), [(5,)])
         self.assertEqual(self.status.execute("SELECT imported_sequence,imported_publication FROM targets WHERE endpoint='Mac'").fetchone(),
                          (5, 'pub-5'))
+        self.status.close()
+        self.status = refresh.open_status(self.status_path)
+        with patch.object(refresh, 'run', side_effect=[json.dumps(self.page([self.a])).encode(),
+                                                       json.dumps(self.page()).encode()]), \
+             patch.object(refresh, '_projection_coordinate', side_effect=old_projection), \
+             patch.object(refresh, 'export', side_effect=unavailable):
+            result = refresh.sweep(self.endpoints, self.database, self.status)
+        self.assertEqual(attempted, [True, True], 'retry after restart must also invoke the reader')
+        self.assertEqual((result['target_errors'], result['unimported']), (1, 1))
+        self.assertEqual(self.status.execute("SELECT imported_sequence,imported_publication FROM targets WHERE endpoint='Mac'").fetchone(),
+                         (5, 'pub-5'))
+        def recovered_export(endpoint, identity, output, *args):
+            old_export(endpoint, identity, output, *args)
+            path = output / 'metadata.json'
+            payload = json.loads(path.read_text())
+            payload['manifest'].update(sequence=6, publication_id='pub-6')
+            path.write_text(json.dumps(payload))
+        with patch.object(refresh, 'run', side_effect=[json.dumps(self.page([self.a])).encode(),
+                                                       json.dumps(self.page()).encode()]), \
+             patch.object(refresh, 'export', side_effect=recovered_export):
+            result = refresh.sweep(self.endpoints, self.database, self.status)
+        self.assertEqual((result['target_errors'], result['unimported']), (0, 0))
+        with refresh.projection_access.connect(self.database) as projection:
+            self.assertEqual(projection.execute('SELECT sequence FROM sessions').fetchall(), [(6,)])
 
     def test_failed_a_durable_healthy_siblings_import_and_automatic_recovery(self):
         import publications

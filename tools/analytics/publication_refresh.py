@@ -446,8 +446,11 @@ def _target(status, endpoint, head, key, database, root, timeout, max_bytes):
                    (name, key, head['sequence'], head['publication_id'], fingerprint))
     status.execute('DELETE FROM head_failures WHERE endpoint=? AND identity=?', (name, key))
     status.commit()
-    prior = status.execute('SELECT imported_sequence,imported_publication FROM targets WHERE endpoint=? AND identity=?',
-                           (name, key)).fetchone() if old and old[2] == fingerprint else None
+    # Target ownership changes before export; only an import validated under this
+    # binding can be reused, including after a failed attempt and process restart.
+    prior = status.execute('''SELECT imported_sequence,imported_publication FROM targets
+        WHERE endpoint=? AND identity=? AND imported_fingerprint=?''',
+                           (name, key, fingerprint)).fetchone()
     healthy = _projection_coordinate(database, head, prior)
     if healthy is not None:
         status.execute('UPDATE targets SET imported_sequence=?,imported_publication=?,imported_ns=?,imported_fingerprint=?,error=NULL WHERE endpoint=? AND identity=?',
