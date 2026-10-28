@@ -179,9 +179,11 @@ func (f *firstPub) current(t *testing.T) bool {
 }
 
 // One publication uploading all K objects costs a constant number of full
-// passes plus one own-evidence check per upload: linear in K.
+// passes plus one own-evidence check per upload: linear in K. Fixture setup
+// (K sequential captures, each writing a K-sized manifest) is itself O(K^2),
+// so K stays at 150: the 40K bound already fails the old O(D*K) code at K=10.
 func TestFirstPublicationPolicyChecksAreLinear(t *testing.T) {
-	for _, k := range []int{10, 50, 150, 378} {
+	for _, k := range []int{10, 50, 150} {
 		f := newFirstPublication(t, k, nil, nil)
 		if e := f.q.Deliver(t.Context(), f.b, f.id); e != nil {
 			t.Fatal(e)
