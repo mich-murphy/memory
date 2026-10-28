@@ -577,8 +577,23 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   (Step 5) removes this package; until then, a cover failure in `syncer` near 600s needs a load
   and timing check before it is treated as a regression.
 
+- **Mac install of `88451ad`** (parent, 2026-10-28 11:26 AEDT; production code identical to
+  `34a586f`): backup in `backups/step4f-20261028/` (previous binary `.1ad50ea`), sha256
+  `3177862d…`. With the coordinator stopped, quarantine 22 was replayed (exit 0), leaving 0 active.
+  **Backup finding:** unlike earlier installs, `queue.sqlite-wal`/`-shm` were still present
+  after `bootout`, most likely because a short-lived reader (the `publication-refresh` service
+  spawns `agent-sessions.bin` children) held the spool open, so close did not checkpoint. The
+  plain `cp` of `queue.sqlite` matched the pre-stop counts exactly, and the parent also took an
+  online SQLite backup-API copy (`queue.online.sqlite`, `quick_check ok`) as the stronger
+  rollback point. **Procedure change for future installs:** after stopping, if sidecars exist,
+  back up through the SQLite backup API (read-only source), not `cp` of the main file alone.
+  **Result:** within 12 minutes, 0 retries, 0 quarantines, no pause; the largest published K
+  went 151 → 219, with 30 publications at K≥200 and 183 at K≥150. 224 pending jobs with K≥200
+  remain (max 378), draining at about 7–9 publications per minute. No retry-cost problem was
+  observed, so resumable upload progress is not pursued.
+
 ### Next action
 
-Mac install of `34a586f`, replay quarantine 22, and confirm sessions with K≥150 publish. Measure
-retry cost (re-PUT/412 reconcile of untrusted objects) before considering resumable upload
-progress.
+Monitor (read-only) until the backlog drains, including the K=378 session. Then record
+steady-state CPU, the `usage()` scan cost and refresher freshness, and begin the 24–48h
+autonomous run (Mac on AC, no sleep) before BC-01 and R2 acceptance.
