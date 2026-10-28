@@ -14,14 +14,21 @@ import (
 // canonical component and replacements of the authorized file itself.
 type authorizedSource struct {
 	capturepolicy.Resolution
-	before os.FileInfo
+	before   os.FileInfo
+	original bool // Only checkObserved grants original-source read authority.
 }
 
 func (s authorizedSource) open(ctx context.Context) (*os.File, error) {
 	if s.before != nil && !s.before.Mode().IsRegular() {
 		return nil, errors.New("sessioncapture: regular source required")
 	}
-	return safefile.OpenResolved(ctx, s.Path, s.before)
+	f, err := safefile.OpenResolved(ctx, s.Path, s.before)
+	if s.original {
+		if s.before != nil {
+			err = originalSourceError(err)
+		}
+	}
+	return f, err
 }
 
 // observePrivate is only for queue-owned immutable prepared/enrichment output.

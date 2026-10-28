@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"os"
 	"strings"
 
 	"github.com/mich-murphy/memory/internal/publication"
@@ -237,6 +236,7 @@ func (q *Queue) captureNext(ctx context.Context, o RuntimeOptions) (did bool, re
 		return false, err
 	}
 	m, captureErr := q.CaptureIfChanged(ctx, w.req)
+	defer func() { resultErr = errors.Join(runtimeFatalCause(captureErr), resultErr) }()
 	// Metadata completion gets its own bounded budget: an expired operation must
 	// still release its claim and retain retry state. WithoutCancel preserves values.
 	save, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.OperationTimeout)
@@ -260,7 +260,7 @@ func (q *Queue) captureNext(ctx context.Context, o RuntimeOptions) (did bool, re
 		return true, captureErr
 	}
 	code := classify(captureErr, o.Classify)
-	if errors.Is(captureErr, os.ErrNotExist) {
+	if onlySourceAbsence(captureErr) {
 		code = FailureAbsent
 	}
 	attempts := w.attempts + 1

@@ -51,7 +51,7 @@ func ServicePlan(platform, home, executable, configPath string, uid int) (Plan, 
 			}
 			b.WriteString("</string>")
 		}
-		b.WriteString("</array><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ProcessType</key><string>Background</string><key>Umask</key><integer>63</integer></dict></plist>\n")
+		b.WriteString("</array><key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict><key>ThrottleInterval</key><integer>300</integer><key>ProcessType</key><string>Background</string><key>Umask</key><integer>63</integer></dict></plist>\n")
 		p.Unit = b.String()
 		domain := "gui/" + strconv.Itoa(uid)
 		p.Start = []Command{{"launchctl", []string{"bootstrap", domain, p.Path}}}
@@ -63,7 +63,7 @@ func ServicePlan(platform, home, executable, configPath string, uid int) (Plan, 
 		for i, a := range args {
 			quoted[i] = systemdQuote(a)
 		}
-		p.Unit = "[Unit]\nDescription=Experimental local session capture (not production cutover)\n[Service]\nType=simple\nExecStart=" + strings.Join(quoted, " ") + "\nRestart=on-failure\nRestartSec=5\nUMask=0077\n[Install]\nWantedBy=default.target\n"
+		p.Unit = "[Unit]\nDescription=Experimental local session capture (not production cutover)\nStartLimitIntervalSec=3600\nStartLimitBurst=5\n[Service]\nType=simple\nExecStart=" + strings.Join(quoted, " ") + "\nRestart=on-failure\nRestartSec=60\nRestartSteps=4\nRestartMaxDelaySec=900\nUMask=0077\n[Install]\nWantedBy=default.target\n"
 		p.Start = []Command{{"systemctl", []string{"--user", "daemon-reload"}}, {"systemctl", []string{"--user", "enable", "--now", ServiceName + ".service"}}}
 		p.Stop = []Command{{"systemctl", []string{"--user", "disable", "--now", ServiceName + ".service"}}}
 		p.Restart = []Command{{"systemctl", []string{"--user", "restart", ServiceName + ".service"}}}

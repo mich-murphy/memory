@@ -20,10 +20,11 @@ import (
 func runtimeFatalCause(cause error) error {
 	var path *os.PathError
 	var link *os.LinkError
-	if errors.Is(cause, publication.ErrDurability) || errors.Is(cause, context.Canceled) ||
+	var policy *policyStorageFailure
+	if errors.As(cause, &policy) || errors.Is(cause, publication.ErrDurability) || errors.Is(cause, context.Canceled) ||
 		errors.As(cause, &path) || errors.As(cause, &link) || fatalSQLite(cause) ||
 		errors.Is(cause, sql.ErrConnDone) || errors.Is(cause, sql.ErrTxDone) || errors.Is(cause, driver.ErrBadConn) ||
-		errors.Is(cause, syscall.EIO) || errors.Is(cause, syscall.ENOSPC) || errors.Is(cause, syscall.EROFS) {
+		errors.Is(cause, syscall.ENOENT) || errors.Is(cause, syscall.EIO) || errors.Is(cause, syscall.ENOSPC) || errors.Is(cause, syscall.EROFS) {
 		return cause
 	}
 	return nil
@@ -37,3 +38,55 @@ func fatalSQLite(cause error) bool {
 		return !errors.As(leaf, &se) || se.Code()&0xff == 9
 	})
 }
+
+// sourceAbsence is created only at an authorized original-source read boundary,
+// never around callbacks, prepared output, retained payloads or queue metadata.
+// Deliberately do not unwrap the PathError: the scheduler must not confuse this
+// expected source outcome with a fatal local-store PathError. The private path
+// is not needed for the durable failure code either.
+type sourceAbsence struct{}
+
+func (*sourceAbsence) Error() string        { return "sessioncapture: source absent" }
+func (*sourceAbsence) Is(target error) bool { return target == os.ErrNotExist }
+
+func originalSourceError(err error) error {
+	original := err
+	// Openat may return a bare errno; only call after a source descriptor
+	// was authorized. Reject joined trees and all non-ENOENT leaves.
+	// Never classify a joined tree here, even if one branch reports ENOENT.
+	for err != nil {
+		if err == syscall.ENOENT { //nolint:errorlint // Exact leaf only; do not let Is hide a joined or non-source error.
+			return &sourceAbsence{}
+		}
+		wrapped, ok := err.(interface{ Unwrap() error })
+		if !ok {
+			break
+		}
+		err = wrapped.Unwrap()
+	}
+	return original
+}
+
+// Resolve and Lstat must report an actual source path/link failure; a bare
+// errno from unrelated resolution work (such as getwd) is not absence.
+func originalResolvedSourceError(err error) error {
+	var path *os.PathError
+	var link *os.LinkError
+	if errors.As(err, &path) || errors.As(err, &link) {
+		return originalSourceError(err)
+	}
+	return err
+}
+
+func onlySourceAbsence(err error) bool {
+	return err != nil && leavesAre(err, func(leaf error) bool {
+		_, ok := errors.AsType[*sourceAbsence](leaf)
+		return ok
+	})
+}
+
+// Preserve a fatal policy-store classification without exposing the callback's
+// private diagnostic or making a mixed cancellation look like clean shutdown.
+type policyStorageFailure struct{}
+
+func (*policyStorageFailure) Error() string { return "sessioncapture: policy storage unavailable" }

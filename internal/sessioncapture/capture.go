@@ -131,7 +131,7 @@ func (q *Queue) snapshotAuthorized(ctx context.Context, r Request, source author
 	if n > MaxSourceBytes {
 		return obj, "", ErrQuota
 	}
-	if e := stableObservation(ctx, f, source.Path, before, n, sum(raw)); e != nil {
+	if e := stableObservationSource(ctx, f, source.Path, before, n, sum(raw), source.original); e != nil {
 		return obj, "", e
 	}
 	if e := q.fault("payload-before-sync"); e != nil {
@@ -388,6 +388,10 @@ func (q *Queue) acceptView(ctx context.Context, m publication.Manifest, es []evi
 }
 
 func stableObservation(ctx context.Context, f *os.File, path string, before os.FileInfo, n int64, rawHash string) error {
+	return stableObservationSource(ctx, f, path, before, n, rawHash, false)
+}
+
+func stableObservationSource(ctx context.Context, f *os.File, path string, before os.FileInfo, n int64, rawHash string, original bool) error {
 	// A second complete read plus descriptor/path stats detects ordinary concurrent
 	// edits. It cannot establish a producer transaction or defeat adversarial races.
 	if _, e := f.Seek(0, io.SeekStart); e != nil {
@@ -404,9 +408,12 @@ func stableObservation(ctx context.Context, f *os.File, path string, before os.F
 	}
 	canonical, e := capturepolicy.Resolve(path)
 	if e != nil {
+		if original {
+			e = originalResolvedSourceError(e)
+		}
 		return fmt.Errorf("sessioncapture: source changed during observation: %w", e)
 	}
-	atFile, e := (authorizedSource{Resolution: canonical, before: before}).open(ctx)
+	atFile, e := (authorizedSource{Resolution: canonical, before: before, original: original}).open(ctx)
 	if e != nil {
 		return fmt.Errorf("sessioncapture: source changed during observation: %w", e)
 	}
@@ -493,7 +500,7 @@ func (q *Queue) unchanged(ctx context.Context, r Request, source authorizedSourc
 	if err != nil {
 		return false, err
 	}
-	if err := stableObservation(ctx, f, source.Path, before, n, sum(h)); err != nil {
+	if err := stableObservationSource(ctx, f, source.Path, before, n, sum(h), source.original); err != nil {
 		return false, err
 	}
 	return n == previous.Object.Size && sum(h) == previous.Object.SHA256, nil

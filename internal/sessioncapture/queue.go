@@ -297,7 +297,7 @@ func (q *Queue) checkObserved(ctx context.Context, e evidence, delivery bool) (a
 		return authorizedSource{}, coordinateErr
 	}
 	r, err := capturepolicy.Resolve(e.Request.Path)
-	observed := authorizedSource{Resolution: r}
+	observed := authorizedSource{Resolution: r, original: true}
 	// Bind byte authority before invoking even the first caller callback.
 	if err == nil && !delivery {
 		observed.before, err = os.Lstat(r.Path)
@@ -331,7 +331,7 @@ func (q *Queue) checkObserved(ctx context.Context, e evidence, delivery bool) (a
 		}
 	}
 	if err != nil && (!delivery || !errors.Is(err, os.ErrNotExist)) {
-		return observed, err
+		return observed, originalResolvedSourceError(err)
 	}
 	return observed, nil
 }
@@ -453,10 +453,16 @@ func (q *Queue) checkCallback(ctx context.Context, r Request) error {
 		return nil
 	}
 	if errors.Is(err, ErrSessionExcluded) {
+		if runtimeFatalCause(err) != nil {
+			return errors.Join(ErrPolicy, ErrSessionExcluded, &policyStorageFailure{})
+		}
 		return errors.Join(ErrPolicy, ErrSessionExcluded)
 	}
 	if ctx.Err() != nil && pureCancellation(err, ctx.Err()) {
 		return ctx.Err()
+	}
+	if runtimeFatalCause(err) != nil {
+		return errors.Join(fmt.Errorf("%w: callback denied", ErrPolicy), &policyStorageFailure{})
 	}
 	return fmt.Errorf("%w: callback denied", ErrPolicy)
 }

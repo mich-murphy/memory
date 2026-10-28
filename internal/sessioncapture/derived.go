@@ -253,7 +253,7 @@ func (q *Queue) transformFile(ctx context.Context, r Request, source authorizedS
 	if n > limit {
 		return ErrQuota
 	}
-	if err := stableObservation(ctx, f, source.Path, before, n, sum(h)); err != nil {
+	if err := stableObservationSource(ctx, f, source.Path, before, n, sum(h), source.original); err != nil {
 		return err
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
@@ -263,7 +263,7 @@ func (q *Queue) transformFile(ctx context.Context, r Request, source authorizedS
 		return err
 	}
 
-	return stableObservation(ctx, f, source.Path, before, n, sum(h))
+	return stableObservationSource(ctx, f, source.Path, before, n, sum(h), source.original)
 }
 
 func writeTransformed(ctx context.Context, r Request, identities []string, f *os.File, out io.Writer) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -67,5 +68,23 @@ func TestServiceStopStartRestartPreserveStateAndPlan(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestServicePlansBoundRestartStorms(t *testing.T) {
+	for _, platform := range []string{"linux", "darwin"} {
+		p, err := ServicePlan(platform, "/synthetic/home", "/synthetic/candidate", "/synthetic/config", 42)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"StartLimitIntervalSec=3600", "StartLimitBurst=5", "RestartSec=60", "RestartSteps=4", "RestartMaxDelaySec=900"}
+		if platform == "darwin" {
+			want = []string{"<key>ThrottleInterval</key><integer>300</integer>", "<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>"}
+		}
+		for _, value := range want {
+			if !strings.Contains(p.Unit, value) {
+				t.Fatalf("%s missing restart guard %s", platform, value)
+			}
+		}
 	}
 }
