@@ -199,9 +199,9 @@ class _ProjectionBatch:
 
     def add(self, row):
         values = {key: row.get(key) for key in self.columns}
-        for key, typ in self.columns.items():
-            if typ == 'JSON' and values[key] is not None:
-                values[key] = json.loads(values[key])
+        # JSON columns already contain normalized JSON text. Stage as VARCHAR,
+        # then cast to JSON in SQL: parsing again here changes duplicate keys
+        # and numeric lexemes that parameterized inserts previously preserved.
         encoded = json.dumps(values, ensure_ascii=False, separators=(',', ':'))
         self.rows.append(encoded)
         self.size += len(encoded.encode('utf-8')) + 1
@@ -216,8 +216,11 @@ class _ProjectionBatch:
         with self.path.open('w', encoding='utf-8') as stream:
             os.chmod(self.path, 0o600)
             stream.write('\n'.join(self.rows) + '\n')
-        spec = '{' + ','.join(f"'{key}':'{typ}'" for key, typ in self.columns.items()) + '}'
-        self.db.execute(f'INSERT INTO {self.table} BY NAME SELECT * FROM read_json('
+        spec = '{' + ','.join(f"'{key}':'{'VARCHAR' if typ == 'JSON' else typ}'"
+                              for key, typ in self.columns.items()) + '}'
+        projection = ','.join(f'CAST("{key}" AS JSON) AS "{key}"' if typ == 'JSON' else f'"{key}"'
+                              for key, typ in self.columns.items())
+        self.db.execute(f'INSERT INTO {self.table} BY NAME SELECT {projection} FROM read_json('
                         "?, columns=" + spec + ", format='newline_delimited', maximum_object_size=" +
                         str(max(self.size, 1024 * 1024)) + ')', [str(self.path)])
         self.rows.clear()

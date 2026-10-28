@@ -87,6 +87,21 @@ class PublicationsTests(unittest.TestCase):
                          {key: row[key] for key in ('is_error', 'duplicate', 'is_human', 'native_id', 'text')})
         self.assertEqual(json.loads(actual['tool_args']), json.loads(row['tool_args']))
 
+    def test_batch_json_keeps_raw_tool_argument_lexemes(self):
+        # DuckDB's parameterized JSON cast retains valid JSON text verbatim;
+        # a second Python json.loads would discard duplicate keys/float spelling.
+        value = '{"a":1,"a":2,"decimal":1.20e+02,"huge":123456789012345678901234567890,"unicode":"雪"}'
+        with duckdb.connect(str(self.db)) as db:
+            db.execute('CREATE TABLE events(tool_args JSON)')
+            db.execute('INSERT INTO events VALUES (?)', [value])
+            baseline = db.execute('SELECT tool_args FROM events').fetchone()[0]
+            db.execute('DELETE FROM events')
+            with tempfile.TemporaryDirectory() as temp:
+                batch = publications._ProjectionBatch(db, 'events', {'tool_args': 'JSON'}, temp)
+                batch.add({'tool_args': value})
+                batch.flush()
+            self.assertEqual(db.execute('SELECT tool_args FROM events').fetchone()[0], baseline)
+
     def test_second_batch_failure_rolls_back_prior_success_and_retries(self):
         self.fixture()
         publications.import_export(self.export, self.db)
