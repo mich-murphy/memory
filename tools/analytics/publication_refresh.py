@@ -176,8 +176,8 @@ def open_status(path):
     db.execute('''CREATE TABLE IF NOT EXISTS head_failures(endpoint TEXT, identity TEXT,
         reason TEXT NOT NULL, attempts INTEGER NOT NULL, first_observed_ns INTEGER NOT NULL,
         last_observed_ns INTEGER NOT NULL, fingerprint TEXT NOT NULL DEFAULT '', PRIMARY KEY(endpoint,identity))''')
-    # v3 lacked target ownership. Preserve its rows but do not qualify them until
-    # rediscovery under the current endpoint fingerprint.
+    # v3 lacked target ownership. Bind retained expectations to the endpoint
+    # fingerprint recorded by v3; imported successes need rediscovery to qualify.
     if db.execute('SELECT version FROM binding').fetchone() == (3,):
         # sqlite3's context manager does not start a transaction for DDL.
         # Begin explicitly so interruption cannot leave v3 with half-added columns.
@@ -186,6 +186,12 @@ def open_status(path):
             db.execute("ALTER TABLE targets ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''")
             db.execute("ALTER TABLE targets ADD COLUMN imported_fingerprint TEXT NOT NULL DEFAULT ''")
             db.execute("ALTER TABLE head_failures ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''")
+            for table in ('targets', 'head_failures'):
+                require(not db.execute('''SELECT 1 FROM ''' + table + ''' t WHERE NOT EXISTS
+                    (SELECT 1 FROM expected_endpoints x WHERE x.name=t.endpoint
+                        AND length(x.fingerprint)=64) LIMIT 1''').fetchone(), 'status_unbound_target')
+                db.execute('''UPDATE ''' + table + ''' SET fingerprint=(SELECT x.fingerprint
+                    FROM expected_endpoints x WHERE x.name=''' + table + '''.endpoint)''')
             db.execute('UPDATE endpoints SET completed_ns=NULL')
             db.execute('UPDATE binding SET version=4')
             db.commit()
@@ -224,17 +230,17 @@ def bind_endpoints(status, endpoints):
 def summary(db):
     """Active-binding target scope shared by CLI and dashboard."""
     targets = db.execute('''SELECT count(*),
-        sum(t.fingerprint='' OR t.imported_fingerprint!=t.fingerprint OR t.imported_sequence IS NULL
+        sum(t.imported_fingerprint!=t.fingerprint OR t.imported_sequence IS NULL
             OR t.imported_sequence<t.sequence),sum(t.error IS NOT NULL)
         FROM targets t JOIN expected_endpoints x ON x.name=t.endpoint
-            AND x.active=1 AND (x.fingerprint=t.fingerprint OR t.fingerprint='')''').fetchone()
+            AND x.active=1 AND x.fingerprint=t.fingerprint''').fetchone()
     discovery_errors = db.execute('''SELECT count(*) FROM head_failures f
-        JOIN expected_endpoints x ON x.name=f.endpoint AND (x.fingerprint=f.fingerprint OR f.fingerprint='') WHERE x.active=1''').fetchone()[0]
+        JOIN expected_endpoints x ON x.name=f.endpoint AND x.fingerprint=f.fingerprint WHERE x.active=1''').fetchone()[0]
     expected_targets = db.execute('''SELECT count(*) FROM (
         SELECT t.endpoint,t.identity FROM targets t JOIN expected_endpoints x
-            ON x.name=t.endpoint AND x.active=1 AND (x.fingerprint=t.fingerprint OR t.fingerprint='')
+            ON x.name=t.endpoint AND x.active=1 AND x.fingerprint=t.fingerprint
         UNION SELECT f.endpoint,f.identity FROM head_failures f
-            JOIN expected_endpoints x ON x.name=f.endpoint AND (x.fingerprint=f.fingerprint OR f.fingerprint='') WHERE x.active=1)''').fetchone()[0]
+            JOIN expected_endpoints x ON x.name=f.endpoint AND x.fingerprint=f.fingerprint WHERE x.active=1)''').fetchone()[0]
     return dict(expected_targets=expected_targets, unimported=targets[1] or 0,
                 target_errors=targets[2] or 0, discovery_errors=discovery_errors)
 
@@ -441,7 +447,7 @@ def _target(status, endpoint, head, key, database, root, timeout, max_bytes):
     status.execute('DELETE FROM head_failures WHERE endpoint=? AND identity=?', (name, key))
     status.commit()
     prior = status.execute('SELECT imported_sequence,imported_publication FROM targets WHERE endpoint=? AND identity=?',
-                           (name, key)).fetchone()
+                           (name, key)).fetchone() if old and old[2] == fingerprint else None
     healthy = _projection_coordinate(database, head, prior)
     if healthy is not None:
         status.execute('UPDATE targets SET imported_sequence=?,imported_publication=?,imported_ns=?,imported_fingerprint=?,error=NULL WHERE endpoint=? AND identity=?',

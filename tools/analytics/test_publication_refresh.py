@@ -162,6 +162,32 @@ class RefreshTests(unittest.TestCase):
         self.assertEqual(refresh.report(self.status)['incomplete_endpoints'], 2)
         self.assertEqual(self.sweep()['unimported'], 0)
         self.assertEqual(refresh.report(self.status)['discovery_errors'], 0)
+        old = self.status.execute("SELECT fingerprint FROM targets WHERE endpoint='Mac' LIMIT 1").fetchone()[0]
+        self.endpoints[0]['config'] = '/private/repointed'
+        refresh.bind_endpoints(self.status, self.endpoints)
+        self.assertNotEqual(old, self.status.execute("SELECT fingerprint FROM expected_endpoints WHERE name='Mac'").fetchone()[0])
+        self.assertEqual((refresh.report(self.status)['expected_targets'], refresh.report(self.status)['unimported']), (2, 0))
+        self.heads['Mac'] = []
+        self.assertEqual(self.sweep()['expected_targets'], 2)
+        self.assertEqual(self.status.execute('SELECT count(*) FROM targets').fetchone(), (4,))
+
+    def test_v3_upgrade_then_repoint_empty_sweep_keeps_old_history_out_of_scope(self):
+        self.sweep()
+        old = self.status.execute("SELECT fingerprint FROM expected_endpoints WHERE name='Mac'").fetchone()[0]
+        self.status.execute('ALTER TABLE targets DROP COLUMN fingerprint')
+        self.status.execute('ALTER TABLE targets DROP COLUMN imported_fingerprint')
+        self.status.execute('ALTER TABLE head_failures DROP COLUMN fingerprint')
+        self.status.execute('UPDATE binding SET version=3')
+        self.status.commit()
+        self.status.close()
+        self.status = refresh.open_status(self.root / 'status.sqlite')
+        self.addCleanup(self.status.close)
+        self.assertEqual(self.status.execute("SELECT DISTINCT fingerprint FROM targets WHERE endpoint='Mac'").fetchall(), [(old,)])
+        self.endpoints[0]['config'] = '/private/repointed'
+        self.heads['Mac'] = []
+        result = self.sweep()
+        self.assertEqual((result['expected_targets'], result['unimported'], result['target_errors']), (2, 0, 0))
+        self.assertEqual(self.status.execute('SELECT count(*) FROM targets').fetchone(), (4,))
 
     def test_healthy_actual_projection_skips_reader_without_advancing_freshness(self):
         self.sweep()
@@ -330,6 +356,24 @@ class RefreshTests(unittest.TestCase):
                     self.assertEqual(old.execute('SELECT version FROM binding').fetchall(), [(version,)])
                     self.assertEqual(old.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall(), [('binding',)])
 
+    def test_v3_upgrade_refuses_unbound_expectations_without_mutation(self):
+        import contextlib
+        path = self.root / 'unbound.sqlite'
+        with contextlib.closing(refresh.open_status(path)) as status:
+            status.execute('ALTER TABLE targets DROP COLUMN fingerprint')
+            status.execute('ALTER TABLE targets DROP COLUMN imported_fingerprint')
+            status.execute('ALTER TABLE head_failures DROP COLUMN fingerprint')
+            status.execute("INSERT INTO targets(endpoint,identity,sequence,publication_id) VALUES ('unknown','x',1,'p')")
+            status.execute('UPDATE binding SET version=3')
+            status.commit()
+        with self.assertRaisesRegex(refresh.RefreshFailure, 'status_unbound_target'):
+            refresh.open_status(path)
+        import sqlite3
+        with contextlib.closing(sqlite3.connect(path)) as status:
+            self.assertEqual(status.execute('SELECT version FROM binding').fetchone(), (3,))
+            self.assertNotIn('fingerprint', [row[1] for row in status.execute('PRAGMA table_info(targets)')])
+            self.assertEqual(status.execute('SELECT count(*) FROM targets').fetchone(), (1,))
+
     def test_v3_upgrade_interruption_rolls_back_all_ddl_and_completion(self):
         import contextlib
         import sqlite3
@@ -469,6 +513,46 @@ class DiscoveryFailureConsumerTests(unittest.TestCase):
         with patch.object(refresh, 'run', side_effect=[json.dumps(p).encode() for p in pages]), \
              patch.object(refresh, 'export', side_effect=self.fixture_export):
             return refresh.sweep(self.endpoints, self.database, self.status)
+
+    def test_repoint_old_seq5_projection_cannot_qualify_new_seq1(self):
+        import publications
+        old = dict(self.a, sequence=5, publication_id='pub-5')
+        def old_export(endpoint, identity, output, *args):
+            self.fixture_export(endpoint, identity, output, *args)
+            path = output / 'metadata.json'
+            payload = json.loads(path.read_text())
+            payload['manifest'].update(sequence=5, publication_id='pub-5')
+            path.write_text(json.dumps(payload))
+        with patch.object(refresh, 'run', side_effect=[json.dumps(self.page([old])).encode(),
+                                                       json.dumps(self.page()).encode()]), \
+             patch.object(refresh, 'export', side_effect=old_export):
+            self.assertEqual(refresh.sweep(self.endpoints, self.database, self.status)['unimported'], 0)
+        key = json.dumps(self.a['identity'], sort_keys=True)
+        prior = self.status.execute('SELECT imported_sequence,imported_publication FROM targets WHERE endpoint=? AND identity=?',
+                                    ('Mac', key)).fetchone()
+        self.assertEqual(prior, (5, 'pub-5'))
+        with refresh.projection_access.connect(self.database) as projection:
+            self.assertEqual(projection.execute('SELECT sequence,publication_id FROM sessions').fetchall(), [(5, 'pub-5')])
+        # Simulate a successful owned-projection check for the old coordinate.
+        # The new binding must not even offer that coordinate for qualification.
+        def old_projection(database, head, coordinate):
+            return (5, 'pub-5', 123) if coordinate == prior else None
+        self.endpoints[0]['config'] = '/private/new'
+        attempted = []
+        def unavailable(*args):
+            attempted.append(True)
+            raise refresh.RefreshFailure('reader_export_failed')
+        with patch.object(refresh, 'run', side_effect=[json.dumps(self.page([self.a])).encode(),
+                                                       json.dumps(self.page()).encode()]), \
+             patch.object(refresh, '_projection_coordinate', side_effect=old_projection), \
+             patch.object(refresh, 'export', side_effect=unavailable):
+            result = refresh.sweep(self.endpoints, self.database, self.status)
+        self.assertEqual(attempted, [True], 'new binding must invoke the reader')
+        self.assertEqual((result['expected_targets'], result['target_errors'], result['unimported']), (1, 1, 1))
+        with refresh.projection_access.connect(self.database) as projection:
+            self.assertEqual(projection.execute('SELECT sequence FROM sessions').fetchall(), [(5,)])
+        self.assertEqual(self.status.execute("SELECT imported_sequence,imported_publication FROM targets WHERE endpoint='Mac'").fetchone(),
+                         (5, 'pub-5'))
 
     def test_failed_a_durable_healthy_siblings_import_and_automatic_recovery(self):
         import publications

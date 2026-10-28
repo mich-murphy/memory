@@ -87,7 +87,9 @@ class PublicationDashboardTests(unittest.TestCase):
                 self.assertFalse(health['healthy'])
                 self.assertEqual(health['endpoint_errors'], 1)
                 status.execute('UPDATE endpoints SET error=NULL')
-                status.execute("INSERT INTO targets(endpoint,identity,sequence,publication_id,error) VALUES ('Mac','private',1,'p1','reader_export_failed')")
+                status.execute('''INSERT INTO targets(endpoint,identity,sequence,publication_id,error,fingerprint)
+                    VALUES ('Mac','private',1,'p1','reader_export_failed',
+                        (SELECT fingerprint FROM expected_endpoints WHERE name='Mac'))''')
                 status.commit()
                 health = adapter.report()['refresh_health']
                 self.assertEqual((health['expected_targets'], health['unimported'], health['target_errors']), (1,1,1))
