@@ -2,6 +2,8 @@ GOLANGCI_LINT ?= golangci-lint
 TOOL          := go tool -modfile=tools/go.mod
 COVER_DIR     := $(CURDIR)/.cover
 FUZZTIME      ?= 30s
+# CI keeps these. The pre-push hook passes TESTFLAGS= so Go's test cache applies.
+TESTFLAGS     ?= -count=1 -shuffle=on
 BENCH         ?= .
 BENCHCOUNT    ?= 10
 BENCHOUT      ?= bench.txt
@@ -49,11 +51,22 @@ actionlint:
 test:
 	CGO_ENABLED=1 go test -race -shuffle=on ./...
 
+# Unit coverage is a -coverprofile (cacheable). The end-to-end runs of the built binary write
+# covdata to E2E_GOCOVERDIR as a side effect, which a cached test run does not redo. So that dir
+# is kept between runs, named for a hash of the sources: an unchanged tree reuses its data, any
+# change starts a fresh dir (and reruns the tests, since the dir is part of Go's cache key).
 cover:
-	rm -rf $(COVER_DIR) && mkdir -p $(COVER_DIR)/unit $(COVER_DIR)/e2e
-	CGO_ENABLED=1 E2E_GOCOVERDIR=$(COVER_DIR)/e2e go test -count=1 -race -shuffle=on \
-		-covermode=atomic -coverpkg=./... ./... -args -test.gocoverdir=$(COVER_DIR)/unit
-	go tool covdata textfmt -i=$(COVER_DIR)/unit,$(COVER_DIR)/e2e -o cover.out
+	@set -e; mkdir -p $(COVER_DIR); \
+	key=$$(git ls-files -co --exclude-standard -z -- cmd internal go.mod go.sum | xargs -0 shasum 2>/dev/null | shasum | cut -c1-16); \
+	e2e=$(COVER_DIR)/e2e-$$key; \
+	find $(COVER_DIR) -mindepth 1 -maxdepth 1 -name 'e2e-*' ! -name "e2e-$$key" -exec rm -rf {} +; \
+	case "$(TESTFLAGS)" in *-count=*) rm -rf "$$e2e";; esac; \
+	mkdir -p "$$e2e"; \
+	set -x; CGO_ENABLED=1 E2E_GOCOVERDIR="$$e2e" go test $(TESTFLAGS) -race -covermode=atomic \
+		-coverpkg=./... -coverprofile=$(COVER_DIR)/unit.out ./...; set +x; \
+	[ -n "$$(ls -A "$$e2e")" ] || { echo "no end-to-end coverage data in $$e2e: rerun with TESTFLAGS=-count=1"; exit 1; }; \
+	go tool covdata textfmt -i="$$e2e" -o $(COVER_DIR)/e2e.out; \
+	awk -f scripts/merge-cover.awk $(COVER_DIR)/unit.out $(COVER_DIR)/e2e.out > cover.out; \
 	$(TOOL) go-test-coverage --config=.testcoverage.yml
 
 # Compare two runs with: go tool -modfile=tools/go.mod benchstat old.txt new.txt
@@ -90,7 +103,7 @@ gopls:
 	go install -modfile=tools/gopls/go.mod golang.org/x/tools/gopls
 
 hooks:
-	$(TOOL) lefthook install
+	prek install --hook-type pre-commit --hook-type pre-push
 
 clean:
 	rm -rf $(COVER_DIR) cover.out bench.txt mutation.json bin dist
