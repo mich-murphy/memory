@@ -852,15 +852,48 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   dropping the back-to-back second `verifyDependencies` pass (`attemptManifest` then
   `deliverOne`), and withholding existing byte-identical duplicates.
 
+- **W41 `78f56ed`, `f1bc1e0`, accepted: per-call enrichment asset path dedupe.**
+  `checkRuntimeEnrichmentAsset` checks each distinct path string once (first-seen order) and
+  builds the `NewSet` policy lazily, at most once per call, through `runtimeFilesystemPolicyWith`.
+  Lazy construction keeps the error order: a call that fails at `runtimeAssetRoot` or a path's
+  resolution never builds or reports the policy. `runtimeFilesystemPolicy` still builds fresh
+  for its other callers. Nothing is cached across calls, assets, entries or passes. Each distinct
+  path keeps its own fresh `Resolve`, and `exclusion.Load` stays once per call. Tests: an
+  equivalence oracle (old per-path algorithm, 17 assets, both delivery modes), a build/resolve
+  count, and fail-closed only when reached. The parent reran two mutations on the final code:
+  ignoring the policy error fails `…PolicyErrorFailsClosedAndOnlyWhenReached`, and checking only
+  the first path fails the oracle and count tests. Synthetic 0.758 to 0.275 ms per call; live not
+  yet measured.
+- **W40 `2e19d90`, `eb5006b`, accepted: equal artifact bytes deduped across source ids.** After
+  the existing checks (`checkAssets` delivery=true, `latestPolicyChecked`, `verify`) and the
+  same-source short-cut, `attachEnrichment` returns the current sequence without a new source
+  when an `artifact` source in the latest view is `active`, selected and has an empty evidence
+  `SelectionReason`, and its `Object` equals the result's exactly. `SelectionReason` is required
+  because `latestPolicyChecked` rehydrates withheld sources (`derived.go`). It only ever publishes
+  less; existing copies are never sealed, withheld or changed. Residuals: if the matched copy is
+  later sealed or withheld, the deduped work stays `attached` at its sequence and its artifact is
+  not separately published. That loses coverage, not privacy, and coverage stays `partial`
+  (`reduceEnrichmentCoverage`). Tests: `TestAttachDedupesEqualBytesAcrossSources`,
+  `…DifferentBytesStillAttaches`, `…DedupeIgnoresWithheldCopy`, `…DedupeIgnoresSealedCopy`. The
+  parent reran two mutations on the final code: dropping `SelectionReason` fails the withheld
+  test, and dropping `active` fails the sealed test. `IsSelected` is an equivalent mutant after
+  rehydration and is kept as a guard. Existing duplicate copies in open sessions remain; they are
+  checked at delivery at the W41 per-call cost.
+
 ### Next action
 
-Step 4 is installed as `efbb99e` (install #8, 16:38 AEDT), with the enrichment backlog draining. Next:
-1. The 24–48h autonomous run restarts from 16:38 on `efbb99e` (ends about 2026-10-30 16:38).
-   Monitor read-only (`/tmp/step4-diag/autorun-efbb99e.jsonl`) with small indexed queries:
-   pause, `step_errors`, active quarantines, retry classes, discovery `completed_at`, stderr
-   growth, plus the enrichment budget and `enrichment_gap` draining to 0. Rollback point:
-   `step4h-20261028`.
-2. Measure, before designing anything, where discovery's about 36 ms per entry goes, because
-   moderate load already stalls sweep completion (freshness risk).
-3. Then BC-01 acceptance, R2 acceptance, and the Step 5 cutover per contract §6 (this removes
-   the legacy `syncer` package, now about 320–390s against its 600s test timeout).
+`main` holds W37, W40 and W41; installed is still `efbb99e` (install #8), whose autonomous run lost
+continuity at the 18:14 battery sleep. Next:
+1. On AC power only: full gates (`make check`, `make test`, `make fuzz`) on `main` HEAD as sole
+   verifier. The `243f819` gate runs do not qualify (partly on battery).
+2. Install #9 from a clean detached worktree (backup `step4i`, old binary `.efbb99e`; no schema
+   change, so no clone dry run). Then measure one full delivery pass for the quarantine-23 session
+   with the live read-only harness (`8be2613` on `wt/asset-checks`, rebased onto the installed
+   commit), and replay quarantine 23 only if five passes fit well inside 60s at normal load.
+3. Restart the 24–48h autonomous run on AC from install #9. Monitor read-only: pause,
+   `step_errors`, quarantines, retry classes, discovery `completed_at` (W37 effect), stderr,
+   the enrichment budget and `enrichment_gap` draining to 0.
+4. Then BC-01 acceptance, R2 acceptance, and the Step 5 cutover per contract §6 (this removes
+   the legacy `syncer` package, now about 310–390s against its 600s test timeout).
+5. Needs operator sign-off, not done autonomously: dropping the back-to-back second
+   `verifyDependencies` pass, and withholding existing byte-identical artifact copies.
