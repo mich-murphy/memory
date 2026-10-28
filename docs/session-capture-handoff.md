@@ -673,6 +673,27 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   every new delivery or capture quarantine diagnosed to a cause, discovery `completed_at` keeps
   advancing, and stderr growth is explained.
 
+- **Backups pruned (operator-approved, 2026-10-28 15:04 AEDT).** `step4g-20261028` was confirmed
+  as the rollback point (`quick_check ok`, counts match the pre-stop read, `.88451ad` binary).
+  The original pre-Step-4 dirty binary (`b23712bc`, sha `e69fb2ed…`) could not be rebuilt, so it
+  was copied into `step4g` as `agent-sessions.bin.pre-step4-original` (verified with `cmp`).
+  Then `step4`–`step4f` and the superseded `/tmp/step4-build` binaries were deleted. Free disk
+  went from 24G to 50G.
+- **Enrichment metadata budget is full; the 591 `quota` quarantines are a symptom (found
+  2026-10-28).** `metadata_budgets.enrichment` was at 134,216,914 of 134,217,728 bytes (814 bytes
+  left). By the trigger expressions, `enrichment_results` uses 127.2 MB (1,516 rows,
+  about 84 KB each), `enrichment_work` 4.9 MB and `optional_repairs` 2.2 MB. Every result is
+  live: each is referenced by its session's latest job evidence, and `checkEvidenceAssets`
+  reloads it to recheck asset policy at delivery. So deleting results would turn delivery into
+  `ErrIntegrity`. Deleting quarantine rows would free under 1 MB and fix nothing, because every
+  new enrichment would hit the same quota. Cause: almost all of the 127 MB is the inline
+  `Assets` list, and there are only **8 distinct asset lists** (834 distinct assets, about 340 KB)
+  repeated across 1,516 results in 378 sessions. Also 3,358 jobs carry
+  `enrichment_gap='quota'`. Transcript capture and delivery are unaffected; they are visible
+  gaps, as the contract requires. Fix (W30): store asset lists once, content-addressed, and
+  compact existing rows in place without changing result ids. Then replay the quota
+  quarantines.
+
 ### Next action
 
 Step 4 is installed and delivering, with the backlog drained (`463ddf3`). Next:
