@@ -761,6 +761,22 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   so one more failure quarantines them again. That is the documented `ReplayEnrichment`
   behaviour and is acceptable, because each re-quarantine would be a newly diagnosable failure.
 
+- **W36 discovery cost measurement (synthetic, no production change).** Hypothesis that
+  Hint upserts starve on the single shared connection was NOT confirmed: with 4 contending
+  goroutines the 1,365-request Hint loop went from about 0.1s to about 2s (all connection wait),
+  far below the 60s budget. The scalable cost is the walk plus runtime policy: about 4 policy calls per
+  emitted request; `runtimeFilesystemPolicy` builds `capturepolicy.New` for 2 config paths × 3
+  protected paths = 6 times per call (12 `Resolve` walks over 5 distinct inputs, all identical
+  within the call), about 93% of CPU in `Lstat`/`Stat`. Synthetic 2.4 ms per request against about 36 ms
+  live (page cache, shallow paths, idle disk). Live discovery during the post-install backlog
+  completed no sweep from 17:02:57 onward (timeouts at 5-min load about 7, process at 250–290% CPU). Fix
+  chosen (W37): resolve each distinct protected location once per policy call. That is
+  construction reuse within one call only, with the same fail-closed error semantics and no
+  caching across calls, entries or sweeps. Rejected without sign-off: separate walk/Hint deadlines
+  (doubles the bounded batch time) and fewer policy calls per entry (fail-closed risk). The
+  env-gated measurement tests (`59645df`) are not merged, consistent with deleting
+  `TestMeasureDiscoveryChurn`.
+
 ### Next action
 
 Step 4 is installed as `efbb99e` (install #8, 16:38 AEDT), with the enrichment backlog draining. Next:
