@@ -83,9 +83,9 @@ gofumpt (stricter gofmt) and goimports, with this module's imports grouped last.
 - Dependabot updates Go modules and Actions weekly, grouped, after a 7-day cooldown.
 - Required checks on `main` need branch protection, which GitHub offers free on public repos.
 
-## Git hooks (`lefthook.yml`)
+## Git hooks (`.pre-commit-config.yaml`, prek)
 
-Pre-commit formats staged Go files, runs `make lint` and `make tidy-check`, and lints changed workflows; pre-push runs the tests. The installed hooks call lefthook through `go tool -modfile=tools/go.mod`, and fail rather than let a commit through when they can't find it.
+`make hooks` installs the pre-commit and pre-push shims with prek. Pre-commit is the fast tier: hygiene hooks (excluding `testdata/`), `fmt-check`, `lint` and `actionlint`, run in parallel and only when a matching file changed. Pre-push is the full tier: `tidy-check`, `fix-check`, `deadcode`, `vuln`, `coverage` (`make cover TESTFLAGS=`, which runs the tests once with `-race` through Go's test cache). Each hook is scoped by `files`/`types`, so a scoped run (`prek run --from-ref <base> --to-ref HEAD`) runs only the hooks a change affects. CI passes no `TESTFLAGS`, so it keeps `-count=1 -shuffle=on`.
 
 ## For agents
 
