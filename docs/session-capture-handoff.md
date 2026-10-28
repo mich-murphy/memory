@@ -11,8 +11,10 @@ current rollout authority.
 
 ## Current session checkpoint
 
-**2026-10-29: six-phase implementation in progress.** The operator approved completing
+**2026-10-29: corrective/simplification implementation is independently reviewed and
+passes the full local development gates at `e8c96f8`.** The operator approved completing
 all six phases, with parent-owned quality, independent review and final verification.
+Representative operating budgets, installed acceptance and cutover remain incomplete.
 The replacement is **not release-accepted, production-ready or cut over**. Defaults
 remain legacy. No host change, remote deletion or original-source deletion has occurred
 in this delivery session. Existing containment remains until its controlled re-enable
@@ -81,10 +83,10 @@ inputs, not current spool statistics. Parent informed the operator of this bound
 | Phase | Scope | Exit condition | State |
 | --- | --- | --- | --- |
 | 1 | Reconcile baseline, ownership, criteria and tools | Each finding has owner/check; preservation and authority clear | Baseline reconciled; resource budgets still to qualify |
-| 2 | Source absence, analytics scope/disappearance, current-state docs | Defects have before/after regressions; fail-closed boundaries retained | Implemented and independently reviewed; combined gates next |
-| 3 | Typed queue state, inventory reuse, evidence correspondence, shared delivery outcomes, malformed work | Fewer interpretations/invalid states; invariant tests unchanged or stronger | Integrated with independent correction approval; combined gates next |
+| 2 | Source absence, analytics scope/disappearance, current-state docs | Defects have before/after regressions; fail-closed boundaries retained | Implemented, independently reviewed; local full gates passed; installed R1 acceptance remains phase 5 |
+| 3 | Typed queue state, inventory reuse, evidence correspondence, shared delivery outcomes, malformed work | Fewer interpretations/invalid states; invariant tests unchanged or stronger | Implemented, independently reviewed; local full gates passed |
 | 4 | Representative measurements; bounded report/import/scheduling improvements where justified | Stated resource/freshness/retention envelope demonstrated | Synthetic measurements justify three narrow changes; representative operating envelope remains open |
-| 5 | Combined full gates, installed Mac/BC-01/native/R2 acceptance and autonomous observation | Actual installed end-to-end path, privacy negatives, restart/retry and sustained operation | Blocked on implementation/gates/containment reconciliation |
+| 5 | Combined full gates, installed Mac/BC-01/native/R2 acceptance and autonomous observation | Actual installed end-to-end path, privacy negatives, restart/retry and sustained operation | Local gates passed; fresh destination/containment decision and installed operating acceptance remain |
 | 6 | Controlled cutover, reviewed remote retirement, legacy code removal | One supported architecture; preserved data/policy; post-cutover checks | Dependent on phase 5 |
 
 Non-negotiable: preserve source epochs, durable pending ownership, privacy exclusions,
@@ -93,7 +95,7 @@ No gate weakening, generic workflow framework, second reader, speculative GC/chu
 upload-ACK bitmap or legacy migration prerequisite. A simplification must actually
 remove duplicated interpretation/control flow, not merely add helper layers.
 
-## Ownership and active workers
+## Ownership and completed workers
 
 Parent owns this brief, integration checkout, commits/stack, expensive gates, all host
 operations and requirements acceptance. Sol/medium workers use isolated worktrees;
@@ -173,20 +175,20 @@ bases rather than assuming one shared baseline.
 - Source repair worker `3029551` → integration `1d7bad9`: parent reviewed narrow source
   marking/service guards. Worker full race/shuffle sessioncapture104.310s/capturedaemon1.529s,
   lint0; two mutations killed. Independent reviewer `3d4e62d0-1ff2-413` found C4, so final
-  C4 now closed by real callback regression and independent recheck; combined gates pending.
+  C4 closed by real callback regression and independent recheck; combined results below.
 - Docs worker `be84448` → `c892719`: current-status duplication removed from 11 references,
   net reduction; parent inspected contract/install/README; link paths and diff check pass.
   Parent archived exact old handoff and compacted current brief (`a1360f1`).
 - Analytics `dac9642` → `3112872`: completed remote sweep missing-state and binding-aware
   summary/atomic upgrade; worker refresh24 (one journey skip), dashboard12 pass. Independent
-  reviewer `da8bed5b-2d37-4e7` required C5/C6; corrections integrated as above and under recheck.
+  reviewer `da8bed5b-2d37-4e7` required C5/C6; corrections integrated and independently approved above.
 - Inventory `c5d1319` → `8682dc3`: immutable shared composition, fresh live checks;
   worker race/shuffle cli/capturedaemon/capturecoordinates and lint pass. Parent requested
   stronger immutable-snapshot test and C4 production path now integrated; focused four-package
   race/shuffle and lint passed. Independent review found fresh exclusions still enforced.
 - Queue worker `9856b5b1-e75f-4ef`, `review-queue-simplification`: typed singleton state,
-  evidence correspondence, delivery-result convergence, malformed work; now also owns
-  measured sparse scheduler fix. Parent actual-method overlay on `e490b51` with20k inactive
+  evidence correspondence, delivery-result convergence, malformed work and measured sparse
+  scheduler fix; implementation ownership released. Parent actual-method overlay on `e490b51` with20k inactive
   rows+1due: source/session each need313 claim calls (36.8ms/266.6ms SQL), with up to100ms
   worker wait per empty turn. This justifies due selection before page truncation.
   `10f6463/9fb6885` → `a827c14/32de1e9` select due work before page truncation;
@@ -204,17 +206,66 @@ bases rather than assuming one shared baseline.
   actual Go-writer journey passed; C10 correction integrated. Largest real record,
   fresh sweep I/O, discovery/freshness, offline spool and retention horizon unqualified.
 
-No combined full/native/live or release acceptance claimed.
+### Combined development qualification — `e8c96f890d199f8066e4b01d22b438d1a7d14051`
 
-## Next action
+Parent ran commands serially on this Mac in pinned Nix, on AC with `caffeinate -i`;
+`AGENT_SESSIONS_TEST_R2` and `AGENT_SESSIONS_LIVE` were unset. No gate configuration,
+timeout, race check, simulation count or quality threshold changed.
 
-1. Independent source, analytics, queue and resource reviews are closed narrowly;
-   corrected invariants and failing-before sparse scheduling regressions are integrated.
-2. Run unchanged full pinned-Nix gates centrally on the frozen combined source; diagnose
-   failures rather than weakening gates. Record exact source, commands and logs here.
-3. Resolve fresh bucket/archive choice and explicit containment boundary
-   before installed rebuild; do not recreate deleted state as incidental testing.
-4. Qualify representative budgets and actual installed Mac/BC-01/R2/native journeys,
-   then sustained autonomous observation. Only then cut over and retire legacy/old keys.
-5. Continue through available work; phases 5/6 cannot be marked complete from commits,
-   offline tests or historical installs.
+| Check | Actual result / log |
+| --- | --- |
+| `make check` | PASS: format/lint/fix/tidy/deadcode/vulnerability scan, coverage **87.2% (13719/15732)**, package/CRAP thresholds, benchmark smoke/actionlint and capture acceptance. `/tmp/memory-holistic-check.log` |
+| First `make test` | FAIL: isolation crash subprocess exceeded unchanged15s; legacy syncer suite exceeded unchanged10m. `/tmp/memory-holistic-test.log` |
+| Focused failure investigation | Both isolation stages repeated10 times with race and the failed shuffle seed; PASS79.111s. Exact command below. `/tmp/memory-holistic-isolation-repeat.log` |
+| Unchanged `make test` rerun | PASS: all packages race/shuffle; cli58.016s, sessioncapture154.164s, legacy syncer312.732s. `/tmp/memory-holistic-test-rerun.log` |
+| `make fuzz` | PASS: all9 configured targets, default30s each. `/tmp/memory-holistic-fuzz.log` |
+| `.analytics-venv/bin/python -m unittest discover -s tools/analytics -p 'test_*.py' -v` | PASS:111 discovered/12 skipped,16.757s. Skipped actual-process journeys ran separately in both make gates (12/12 plus6+6 launcher tests), not skipped acceptance. `/tmp/memory-holistic-analytics.log` |
+| `node --check tools/analytics/site/app.js`; `git diff --check` | PASS |
+
+Focused investigation command (same pinned environment/live opt-outs):
+
+```sh
+go test -race -shuffle=1793229077115693000 -count=10 \
+  -run '^TestCaptureIsolationFixture(Process|ReturningStages)$' ./internal/cli
+```
+
+The failed test invocation is retained, not overwritten by its green rerun. Inspection
+found host load/swap pressure and no surviving gate processes; the isolated failure did
+not reproduce and the same source/full command subsequently passed. This supports a
+transient timing explanation, not a proven root-cause fix. No timeout was relaxed and
+no unrelated host process was stopped. No hosted CI, Linux full gate, new native/live/R2
+or installed acceptance was run; local green is not release acceptance.
+
+### Finding dispositions and remaining dependencies
+
+| Finding | Parent disposition |
+| --- | --- |
+| R1 source absence | Implemented/offline-validated, including actual production callback fatal policy handling; installed acceptance still required in phase5. |
+| R2/R3 health | Fixed and validated: missing-current, inactive scope, same-name repoint/retry/restart, atomic v3 upgrade. |
+| R4/R5 delivery/evidence | Shared guarded results and epoch-bound evidence validated. Intentional immediate/due semantics retained; historical unbound local evidence cannot retroactively prove epoch association. |
+| R6 inventory/ownership | One compiled immutable inventory validated; filesystem/exclusions remain fresh. No extra ownership wrapper added: `RecordOwnership` already separates validated `ownershipClaim` from descriptive associations and policy checks; forged/duplicate/conflicting-claim tests remain. Another representation did not justify its conversion cost. |
+| R7 scheduling | Indexed due selection and fairness validated with failing-before regression and synthetic measurement. Actual idle CPU/due latency and retained-payload `usage()` cost remain phase4/5 measurements; no speculative accounting cache. |
+| R8 analytics | Bounded summary and typed transactional batching validated, including exact JSON/BIGINT semantics and actual writer journey. Refresh hashing/I/O, largest actual record, representative RSS/throughput and retention envelope remain phase4/5 measurements; no verification removed or arbitrary line cap added. |
+| R9 documentation | Current status centralized here; historical handoff preserved, entry points/reference contracts corrected. |
+| R10 local state/corruption | Typed singleton fields and explicit malformed enrichment quarantine validated; no speculative lock eviction. |
+| Retirement/retention | Pending controlled acceptance/cutover. No GC, old-key deletion, legacy removal or indefinite-retention claim. |
+
+## Next action / actual release boundary
+
+1. **Operator decision pending:** approve the recommended separate R2 bucket/fresh archive
+   and controlled fresh-state rebuild, or explicitly require same-bucket isolation (a new
+   design scope). Existing bucket configuration is sufficient for the recommended option;
+   do not overwrite old `archive.json` or invent queue-resume compatibility.
+2. Parent then checks destination access and inventories preserved original sources,
+   identities, learned roots and effective exclusions on Mac/BC-01 without exposing
+   credentials/transcripts. BC-01 is reachable through lowercase `bc-01`.
+3. Build/install exact gated source only at the controlled containment boundary; validate
+   writer→R2→sole reader→importer→events→report, native hooks, exclusions and restart/retry.
+   Qualify representative budgets, spool/offline/retention horizon and24–48h autonomous
+   observation. Record deleted unpublished backlog and unavailable history honestly.
+4. Only after acceptance: controlled cutover, fence old writers, reviewed authorized
+   retired-key deletion and legacy-only code/operator-path removal, followed by checks.
+
+No further implementation worker is active. Parent owns the remaining operating work;
+this is an authority/acceptance boundary, not a request for the operator to run tests or
+perform routine engineering. All six phases are **not** complete.
