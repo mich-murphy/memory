@@ -661,6 +661,18 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
     explicit coverage gaps for the BC-01/R2 acceptance inventory.
   - **Disk:** 24G free (95%); install backups total about 10G across `step4`–`step4g`.
 
+- **24–48h autonomous run started** (parent, 2026-10-28 13:57 AEDT, installed `463ddf3`, AC
+  power). The read-only monitor `/tmp/step4-diag/autorun.py` runs under `caffeinate -i -s`
+  (300s interval, 48h). It writes metadata only to `/tmp/step4-diag/autorun.jsonl`: power, load,
+  service CPU and uptime, launchd runs and last exit, job and source state counts, pause,
+  `step_errors`, active quarantines by class, retry classes, discovery generation and
+  `completed_at`, stderr line count, and free disk. Baseline at 14:02: 19,514 published, 0
+  pending, 0 retry, 0 active quarantines, no pause, discovery generation 2596 complete at
+  13:56:09, stderr 784 lines, 24.2G free. The installed binary is not changed during the run.
+  **Acceptance criteria for the run:** no unplanned restarts (`runs = 1`), no destination pause,
+  every new delivery or capture quarantine diagnosed to a cause, discovery `completed_at` keeps
+  advancing, and stderr growth is explained.
+
 ### Next action
 
 Step 4 is installed and delivering, with the backlog drained (`463ddf3`). Next:
