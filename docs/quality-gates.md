@@ -18,7 +18,7 @@ The research behind these choices (tool versions, the configs of 13 well-regarde
 | `make mutation` | Mutation testing with gremlins; `MUTATE_DIFF=origin/main` mutates only the lines changed since that ref. Not part of `make check` |
 | `make bench` | Every benchmark `BENCHCOUNT` times (default 10) into `bench.txt`, for benchstat ([benchmarks.md](benchmarks.md)) |
 | `make bench-smoke` | Every benchmark once, as CI does, so a broken one fails |
-| `make hooks` | Installs the git hooks in `lefthook.yml` |
+| `make hooks` | Installs the prek git hooks (`.pre-commit-config.yaml`) |
 | `make gopls` | Installs the pinned gopls, for the Claude Code `gopls-lsp` plugin |
 
 Tools other than golangci-lint are pinned in their own module, `tools/go.mod`, and run with `go tool -modfile=tools/go.mod <name>`, so they never touch the collector's `go.mod` and Dependabot updates them (it only reads files named `go.mod`). gopls has a module of its own, `tools/gopls/go.mod`, because it needs a different `golang.org/x/tools` from deadcode's. golangci-lint is installed as a binary, as its maintainers recommend, at the version in `.golangci-lint-version`: CI installs that version, and `make lint` fails when the local one differs.

@@ -1,0 +1,28 @@
+# Hook tiers follow the Gate standard (SPEC §4.5): pre-commit is the fast tier (scoped to the
+# changed files, check-only, run in parallel); pre-push is the full tier (cacheable, one run of
+# each suite). CI runs the same make targets with strict flags (-count=1 -shuffle=on).
+minimum_prek_version: "0.5.0"
+priorities:
+  hygiene: 0
+  checks: 10
+  full: 20
+repos:
+  - repo: builtin
+    hooks:
+      - {id: trailing-whitespace, args: [--markdown-linebreak-ext=md], exclude: '(^|/)testdata/', priority: hygiene, stages: [pre-commit]}
+      - {id: end-of-file-fixer, exclude: '(^|/)testdata/', priority: hygiene, stages: [pre-commit]}
+      - {id: check-merge-conflict, exclude: '(^|/)testdata/', priority: hygiene, stages: [pre-commit]}
+      - {id: check-added-large-files, exclude: '(^|/)testdata/', priority: hygiene, stages: [pre-commit]}
+      - {id: check-yaml, exclude: '(^|/)testdata/', priority: hygiene, stages: [pre-commit]}
+  - repo: local
+    hooks:
+      # Fast tier: package-level tools run once, only when a relevant file changed.
+      - {id: fmt-check, name: fmt-check, entry: make fmt-check, language: system, pass_filenames: false, types: [go], priority: checks, stages: [pre-commit]}
+      - {id: lint, name: lint, entry: make lint, language: system, pass_filenames: false, files: '\.go$|^\.golangci(\.yml|-lint-version)$', priority: checks, stages: [pre-commit]}
+      - {id: actionlint, name: actionlint, entry: make actionlint, language: system, pass_filenames: false, files: '^\.github/workflows/', priority: checks, stages: [pre-commit, pre-push]}
+      # Full tier: all in parallel. cover runs the tests once, with -race, through Go's test cache.
+      - {id: tidy-check, name: tidy-check, entry: make tidy-check, language: system, pass_filenames: false, files: '(^|/)go\.(mod|sum)$|\.go$', priority: full, stages: [pre-push]}
+      - {id: fix-check, name: fix-check, entry: make fix-check, language: system, pass_filenames: false, types: [go], priority: full, stages: [pre-push]}
+      - {id: deadcode, name: deadcode, entry: make deadcode, language: system, pass_filenames: false, files: '\.go$|(^|/)go\.(mod|sum)$|^\.testcoverage\.yml$', priority: full, stages: [pre-push]}
+      - {id: vuln, name: vuln, entry: make vuln, language: system, pass_filenames: false, files: '\.go$|(^|/)go\.(mod|sum)$', priority: full, stages: [pre-push]}
+      - {id: coverage, name: coverage, entry: make cover TESTFLAGS=, language: system, pass_filenames: false, files: '\.go$|(^|/)go\.(mod|sum)$|^\.testcoverage\.yml$|^cmd/.*/testdata/|^Makefile$', priority: full, stages: [pre-push]}
