@@ -49,21 +49,24 @@ The machines handover's newest top section withdraws the custom `bc-heavy` tool;
 removed deliberately. Do not reinstall it or follow historical admission instructions.
 Parent serializes expensive gates directly in pinned Nix, on AC with sleep prevented.
 
-### Rollback and continuation assets (historical, verify before use)
+### Fresh-state rebuild boundary (material reconciliation)
 
-- Mac rollback: `~/.local/state/agent-sessions-capture/backups/step4h-20261028`
-  (SQLite backup API plus `463ddf3` binary). `step4g-20261028` preserves the pre-Step-4 binary.
-- Installed service uses containment plist: failure-only KeepAlive, throttle 300s.
-  A future binary swap must preserve it; back up SQLite via backup API, not main-file
-  copy if WAL/SHM exist. Build exact gated source, not a stale `/tmp` binary.
-- Last stopped-spool observation (October 28 23:05, not current): 1,023 pending,
-  26 retry, 1 quarantined delivery (23), 20,335 published; enrichment attached 3,437,
-  pending 653, retry 5; budget 26.1 MB/128 MiB; last discovery complete 17:02:57.
-- Quarantine 23 involved repeated equal enrichment assets; W37/W40/W41 are in source
-  but were not installed. Two timeout retries had no established cause. Re-measure
-  before replay; do not assume the source fixes establish installed performance.
-- Prior monitor `/tmp/step4-diag/autorun.py` was stopped. Asset-check harness commit
-  `8be2613` on `wt/asset-checks` is unmerged evidence, not a production dependency.
+The machines handover now records subsequent **operator-authorized generated-data
+cleanup, October 28 21:37–21:45 UTC**. Mac/BC experimental spools (including unpublished
+backlog), Mac analytics and capture backups were deleted. The former `step4g/step4h`
+rollback points and quarantines are historical, NOT available continuation inputs.
+Original agent sources, identities/privacy configuration, credentials and installed
+software remain; no cloud archive objects were deleted. Older legacy archives/state
+outside the experimental root were explicitly not deleted. Native hooks may recreate
+small intake stubs; that is not an intact queue or bulk capture.
+
+Therefore phase 5 requires intentional fresh-state inventory/rebuild with the existing
+archive identity and source-epoch ordering reconciled, not a blind binary swap/replay.
+Do not recreate deleted generated data incidentally or treat local source availability
+as proof every deleted accepted byte can be recovered. Preserve the containment plist
+(failure-only KeepAlive, throttle 300s), build exact gated source, and back up any new
+SQLite state via its backup API. Historical performance findings remain useful test
+inputs, not current spool statistics. Parent informed the operator of this boundary.
 
 ## Scope and acceptance plan
 
@@ -108,10 +111,17 @@ Worker base `06c6da4`. No automatic acceptance from completion/commit.
 - C2 analytics upgrade: parent identified Python SQLite DDL transaction gap; worker
   instructed to wrap v3→v4 ALTERs and completion invalidation in an explicit transaction
   with interruption/rollback regression. Uptake pending.
-- C3 inventory: shared composition accepted; remove production wrappers retained only
-  for tests (move test adapters or update callers), rather than increasing API surface.
-  Uptake pending. All three implementation startups confirmed from tool activity and
-  substantive interim reports.
+- C3 inventory: test-only wrappers removed from production in `c5d1319`; parent verified
+  shared composition and test helpers. All initial implementation startups confirmed.
+- C4 source review: actual CLI exclusion callback erased fatal store classification.
+  Queue exported safe `ErrPolicyUnavailable` in `2134744` (integrated `e490b51`);
+  inventory worker owns production callback correction/integration test. Source absence
+  not fully accepted until this closes.
+- C5/C6 independent analytics review: new binding must not reuse old-binding projection
+  success; v3 blank ownership must not follow all future bindings. Analytics worker
+  resumed to correct both with real projection and upgrade/repoint regressions.
+- Tools aborted two workers mid-run; resumed same IDs/worktrees after status reconciliation,
+  no duplicate implementation owners. Queue worker also resumed after tool abort.
 - Review corrections already accepted: no unconditional poison-row isolation without
   trustworthy coordinates; verified attachment retry is not a new upload attempt;
   no blanket role immutability rule; no per-GET cross-database qualification or second
@@ -132,8 +142,30 @@ Worker base `06c6da4`. No automatic acceptance from completion/commit.
 
 ### Current implementation
 
-Pending worker results, parent review, independent changed-invariant review and combined
-checks. No new source, full/native/live or release acceptance claimed.
+- Source repair worker `3029551` → integration `1d7bad9`: parent reviewed narrow source
+  marking/service guards. Worker full race/shuffle sessioncapture104.310s/capturedaemon1.529s,
+  lint0; two mutations killed. Independent reviewer `3d4e62d0-1ff2-413` found C4, so final
+  changed-invariant acceptance pending production callback correction.
+- Docs worker `be84448` → `c892719`: current-status duplication removed from 11 references,
+  net reduction; parent inspected contract/install/README; link paths and diff check pass.
+  Parent archived exact old handoff and compacted current brief (`a1360f1`).
+- Analytics `dac9642` → `3112872`: completed remote sweep missing-state and binding-aware
+  summary/atomic upgrade; worker refresh24 (one journey skip), dashboard12 pass. Independent
+  reviewer `da8bed5b-2d37-4e7` requires C5/C6 before acceptance.
+- Inventory `c5d1319` → `8682dc3`: immutable shared composition, fresh live checks;
+  worker race/shuffle cli/capturedaemon/capturecoordinates and lint pass. Parent requested
+  stronger non-tautological compile/reuse evidence plus C4; follow-up in same worktree.
+- Queue worker `9856b5b1-e75f-4ef`, `review-queue-simplification`: typed singleton state,
+  evidence correspondence, delivery-result convergence, malformed work; now also owns
+  measured sparse scheduler fix. Parent actual-method overlay on `e490b51` with20k inactive
+  rows+1due: source/session each need313 claim calls (36.8ms/266.6ms SQL), with up to100ms
+  worker wait per empty turn. This justifies due selection before page truncation.
+  Log `/tmp/memory-sparse-scheduler-before.log`; no live performance claim.
+- Resource worker `a6a0477e-fccf-4e8`, `review-analytics-resources` base3112872: bounded
+  dashboard overview and measured import/normalization improvements; does not own health
+  binding logic. Startup review pending.
+
+No combined full/native/live or release acceptance claimed.
 
 ## Next action
 
