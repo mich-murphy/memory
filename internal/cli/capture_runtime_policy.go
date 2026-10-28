@@ -172,20 +172,19 @@ func runtimeFilesystemPolicy(c capturedaemon.Config, path string, scrubbed bool)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return errors.New("source policy resolution unavailable")
 	}
-	for _, configPath := range []string{c.ConfigPath(), filepath.Join(c.Home, ".config", "agent-sessions", "config.json")} {
-		for _, state := range c.LocalProtectedPaths() {
-			p, e := capturepolicy.New(configPath, state)
-			if e != nil {
-				return errors.New("source excluded by filesystem policy")
-			}
-			excluded := p.Excludes(resolved.Identities)
-			if scrubbed {
-				excluded = p.ExcludesClaudeConfig(resolved.Identities)
-			}
-			if excluded {
-				return errors.New("source excluded by filesystem policy")
-			}
-		}
+	// Built fresh per call: no caching across calls, entries, batches or sweeps.
+	p, err := capturepolicy.NewSet(
+		[]string{c.ConfigPath(), filepath.Join(c.Home, ".config", "agent-sessions", "config.json")},
+		c.LocalProtectedPaths())
+	if err != nil {
+		return errors.New("source excluded by filesystem policy")
+	}
+	excluded := p.Excludes(resolved.Identities)
+	if scrubbed {
+		excluded = p.ExcludesClaudeConfig(resolved.Identities)
+	}
+	if excluded {
+		return errors.New("source excluded by filesystem policy")
 	}
 	return nil
 }

@@ -113,21 +113,53 @@ type Policy struct {
 // New resolves collector locations once. Missing locations still retain the logical and
 // resolved-parent identities (so backups are excluded); other resolution errors fail closed.
 func New(configPath, stateDir string) (*Policy, error) {
-	p := &Policy{}
-	for _, location := range []struct {
-		path       string
-		identities *[]string
-	}{{configPath, &p.configs}, {stateDir, &p.states}} {
-		if location.path == "" {
-			continue
+	return NewSet([]string{configPath}, []string{stateDir})
+}
+
+// NewSet builds one Policy holding the identities of every config and state location. A policy
+// excludes when any identity matches any location, so it equals the OR over every New(config, state)
+// pair. Each distinct non-empty path is resolved once per call; empty paths are skipped. Error
+// handling matches New: missing locations keep partial identities, any other error is returned.
+func NewSet(configPaths, stateDirs []string) (*Policy, error) {
+	return newSet(Resolve, configPaths, stateDirs)
+}
+
+func newSet(resolve func(string) (Resolution, error), configPaths, stateDirs []string) (*Policy, error) {
+	resolved := map[string][]string{}
+	collect := func(paths []string) ([]string, error) {
+		var out []string
+		seen := map[string]bool{}
+		for _, path := range paths {
+			if path == "" {
+				continue
+			}
+			identities, ok := resolved[path]
+			if !ok {
+				resolution, err := resolve(path)
+				if err != nil && !errors.Is(err, fs.ErrNotExist) {
+					return nil, err
+				}
+				identities = resolution.Identities
+				resolved[path] = identities
+			}
+			for _, identity := range identities {
+				if !seen[identity] {
+					seen[identity] = true
+					out = append(out, identity)
+				}
+			}
 		}
-		resolution, err := Resolve(location.path)
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return nil, err
-		}
-		*location.identities = resolution.Identities
+		return out, nil
 	}
-	return p, nil
+	configs, err := collect(configPaths)
+	if err != nil {
+		return nil, err
+	}
+	states, err := collect(stateDirs)
+	if err != nil {
+		return nil, err
+	}
+	return &Policy{configs: configs, states: states}, nil
 }
 
 // Excludes checks all supplied intermediate identities before any content is read.
