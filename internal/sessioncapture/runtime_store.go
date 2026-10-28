@@ -29,11 +29,13 @@ func (q *Queue) InitRuntime(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS runtime_discovery_scopes (id INTEGER PRIMARY KEY,agent TEXT NOT NULL,root TEXT NOT NULL,state TEXT NOT NULL,examined INTEGER NOT NULL,enrichment TEXT NOT NULL,seen_generation INTEGER NOT NULL,active INTEGER NOT NULL DEFAULT 1,UNIQUE(agent,root))`,
 		`CREATE TABLE IF NOT EXISTS runtime_sources (id INTEGER PRIMARY KEY,session TEXT NOT NULL,source TEXT NOT NULL,request BLOB NOT NULL,version INTEGER NOT NULL DEFAULT 1,captured_version INTEGER NOT NULL DEFAULT 0,observed_at INTEGER NOT NULL,captured_at INTEGER NOT NULL DEFAULT 0,sequence INTEGER NOT NULL DEFAULT 0,publication TEXT NOT NULL DEFAULT '',state TEXT NOT NULL DEFAULT 'pending',observed_state TEXT NOT NULL DEFAULT 'present',attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT NOT NULL DEFAULT '',next_retry INTEGER NOT NULL DEFAULT 0,claim INTEGER NOT NULL DEFAULT 0,UNIQUE(session,source))`,
 		`CREATE INDEX IF NOT EXISTS runtime_source_claims ON runtime_sources(session,claim)`,
+		`CREATE INDEX IF NOT EXISTS runtime_runnable_sources ON runtime_sources(id) WHERE claim=0 AND state NOT IN ('absent','captured','quarantined')`,
 		`CREATE TABLE IF NOT EXISTS runtime_sessions (id INTEGER PRIMARY KEY,session TEXT UNIQUE NOT NULL,claim INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE IF NOT EXISTS runtime_destination (id INTEGER PRIMARY KEY CHECK(id=1),paused INTEGER NOT NULL DEFAULT 0,reason TEXT NOT NULL DEFAULT '',paused_at INTEGER NOT NULL DEFAULT 0,discovery_error TEXT NOT NULL DEFAULT '',discovered_at INTEGER NOT NULL DEFAULT 0)`,
 		`INSERT OR IGNORE INTO runtime_destination(id) VALUES(1)`,
 		`CREATE TABLE IF NOT EXISTS runtime_quarantine (id INTEGER PRIMARY KEY,kind TEXT NOT NULL,source_id INTEGER NOT NULL DEFAULT 0,session TEXT NOT NULL,sequence INTEGER NOT NULL DEFAULT 0,request BLOB,reason TEXT NOT NULL,attempts INTEGER NOT NULL,created_at INTEGER NOT NULL,contract TEXT NOT NULL,software_version TEXT NOT NULL DEFAULT 'unknown/devel',active INTEGER NOT NULL DEFAULT 1)`,
 		`CREATE INDEX IF NOT EXISTS runtime_pending_jobs ON jobs(session,sequence) WHERE state NOT IN ('published','superseded')`,
+		`CREATE INDEX IF NOT EXISTS runtime_due_jobs ON jobs(next_retry,session,sequence) WHERE state NOT IN ('published','superseded','quarantined')`,
 		`CREATE TRIGGER IF NOT EXISTS runtime_job_session AFTER INSERT ON jobs BEGIN INSERT OR IGNORE INTO runtime_sessions(session) VALUES(NEW.session); END`,
 		// Bootstrap only the pending index, not published archive history. All future
 		// sessions are registered by the insert trigger in the acceptance transaction.
@@ -185,7 +187,7 @@ func (q *Queue) claimSource(ctx context.Context) (sourceWork, error) {
 	var w sourceWork
 	// Read at most one fixed page per turn; the cursor advances past unavailable
 	// sources as well as successful work. No archive job history is inspected.
-	rows, err := q.db.QueryContext(ctx, `SELECT id,request,version,attempts,claim,state,next_retry,observed_state FROM runtime_sources AS s WHERE id>? AND NOT EXISTS(SELECT 1 FROM runtime_sources AS busy WHERE busy.session=s.session AND busy.claim!=0) ORDER BY id LIMIT 64`, r.sourceCursor)
+	rows, err := q.db.QueryContext(ctx, `SELECT id,request,version,attempts,claim,state,next_retry,observed_state FROM runtime_sources AS s WHERE id>? AND claim=0 AND state NOT IN ('absent','captured','quarantined') AND next_retry<=? AND NOT EXISTS(SELECT 1 FROM runtime_sources AS busy WHERE busy.session=s.session AND busy.claim!=0) ORDER BY id LIMIT 64`, r.sourceCursor, q.opts.Now().UnixNano())
 	if err != nil {
 		return w, err
 	}
@@ -321,7 +323,7 @@ func (q *Queue) claimSession(ctx context.Context) (int64, publication.Identity, 
 	if err != nil || paused {
 		return 0, zero, err
 	}
-	rows, err := q.db.QueryContext(ctx, `SELECT id,session,claim FROM runtime_sessions WHERE id>? ORDER BY id LIMIT 64`, r.sessionCursor)
+	rows, err := q.db.QueryContext(ctx, `SELECT s.id,s.session,s.claim FROM jobs AS j INDEXED BY runtime_due_jobs JOIN runtime_sessions AS s ON s.session=j.session WHERE j.state NOT IN ('published','superseded','quarantined') AND j.next_retry<=? AND s.id>? AND s.claim=0 AND j.sequence=(SELECT sequence FROM jobs WHERE session=j.session AND state NOT IN ('published','superseded') ORDER BY sequence LIMIT 1) ORDER BY s.id LIMIT 64`, q.opts.Now().UnixNano(), r.sessionCursor)
 	if err != nil {
 		return 0, zero, err
 	}
