@@ -47,6 +47,13 @@ func (q *Queue) verify(ctx context.Context, o publication.Object) error {
 	h = sha256.New()
 	n, e := io.Copy(h, &contextReader{ctx: ctx, r: io.LimitReader(z, o.Size+1)})
 	if e != nil {
+		// A context end is not a payload verdict: return it unwrapped so classify
+		// yields timeout and shutdown cancellation stays pure. A corrupt payload
+		// failing just as the deadline fires may be reported as the context
+		// error; that is retried and re-verified on the next attempt.
+		if ce := ctx.Err(); ce != nil && errors.Is(e, ce) {
+			return e
+		}
 		return fmt.Errorf("%w: decode", ErrIntegrity)
 	}
 	if n != o.Size || sum(h) != o.SHA256 {
