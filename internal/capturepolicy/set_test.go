@@ -3,6 +3,7 @@ package capturepolicy
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"testing"
 )
@@ -10,25 +11,25 @@ import (
 func setFixture(t *testing.T) (configs, states, ids []string) {
 	t.Helper()
 	dir := t.TempDir()
-	real := filepath.Join(dir, "real")
-	writeSynthetic(t, filepath.Join(real, "cfg", "config.json"))
-	writeSynthetic(t, filepath.Join(real, "state", "spool", "x"))
-	writeSynthetic(t, filepath.Join(real, "other", "session.jsonl"))
-	writeSynthetic(t, filepath.Join(real, "other", ".claude.json"))
-	writeSynthetic(t, filepath.Join(real, "other", "auth.json"))
-	writeSynthetic(t, filepath.Join(real, "other", ".DS_Store"))
-	linkSynthetic(t, filepath.Join(real, "cfg", "config.json"), filepath.Join(dir, "cfglink.json"))
-	linkSynthetic(t, filepath.Join(real, "state"), filepath.Join(dir, "statelink"))
-	linkSynthetic(t, real, filepath.Join(dir, "parentlink"))
+	backing := filepath.Join(dir, "real")
+	writeSynthetic(t, filepath.Join(backing, "cfg", "config.json"))
+	writeSynthetic(t, filepath.Join(backing, "state", "spool", "x"))
+	writeSynthetic(t, filepath.Join(backing, "other", "session.jsonl"))
+	writeSynthetic(t, filepath.Join(backing, "other", ".claude.json"))
+	writeSynthetic(t, filepath.Join(backing, "other", "auth.json"))
+	writeSynthetic(t, filepath.Join(backing, "other", ".DS_Store"))
+	linkSynthetic(t, filepath.Join(backing, "cfg", "config.json"), filepath.Join(dir, "cfglink.json"))
+	linkSynthetic(t, filepath.Join(backing, "state"), filepath.Join(dir, "statelink"))
+	linkSynthetic(t, backing, filepath.Join(dir, "parentlink"))
 	configs = []string{filepath.Join(dir, "cfglink.json"), filepath.Join(dir, "missing", "config.json"), ""}
 	states = []string{filepath.Join(dir, "statelink"), filepath.Join(dir, "parentlink", "state", "spool"), filepath.Join(dir, "nostate")}
 	for _, p := range []string{
-		filepath.Join(real, "cfg", "config.json"), filepath.Join(dir, "cfglink.json"),
+		filepath.Join(backing, "cfg", "config.json"), filepath.Join(dir, "cfglink.json"),
 		filepath.Join(dir, "missing", "config.json"), filepath.Join(dir, "missing", "config.json.bak"),
-		filepath.Join(real, "state", "spool", "x"), filepath.Join(dir, "statelink", "spool", "x"),
+		filepath.Join(backing, "state", "spool", "x"), filepath.Join(dir, "statelink", "spool", "x"),
 		filepath.Join(dir, "parentlink", "state", "spool", "x"), filepath.Join(dir, "nostate", "y"),
-		filepath.Join(real, "other", "session.jsonl"), filepath.Join(real, "other", ".claude.json"),
-		filepath.Join(real, "other", "auth.json"), filepath.Join(real, "other", ".DS_Store"),
+		filepath.Join(backing, "other", "session.jsonl"), filepath.Join(backing, "other", ".claude.json"),
+		filepath.Join(backing, "other", "auth.json"), filepath.Join(backing, "other", ".DS_Store"),
 		filepath.Join(dir, "parentlink", "other", "session.jsonl"),
 	} {
 		ids = append(ids, p)
@@ -36,7 +37,7 @@ func setFixture(t *testing.T) (configs, states, ids []string) {
 			ids = append(ids, r.Identities...)
 		}
 	}
-	return
+	return configs, states, ids
 }
 
 func TestNewSetEqualsOrOverPairs(t *testing.T) {
@@ -55,19 +56,12 @@ func TestNewSetEqualsOrOverPairs(t *testing.T) {
 			pairs = append(pairs, p)
 		}
 	}
-	any := func(f func(*Policy) bool) bool {
-		for _, p := range pairs {
-			if f(p) {
-				return true
-			}
-		}
-		return false
-	}
+	anyPair := func(f func(*Policy) bool) bool { return slices.ContainsFunc(pairs, f) }
 	trueSeen, falseSeen := 0, 0
 	for _, id := range ids {
 		one := []string{id}
-		w1 := any(func(p *Policy) bool { return p.Excludes(one) })
-		w2 := any(func(p *Policy) bool { return p.ExcludesClaudeConfig(one) })
+		w1 := anyPair(func(p *Policy) bool { return p.Excludes(one) })
+		w2 := anyPair(func(p *Policy) bool { return p.ExcludesClaudeConfig(one) })
 		if g := set.Excludes(one); g != w1 {
 			t.Errorf("Excludes(%q)=%v want %v", id, g, w1)
 		}
@@ -84,7 +78,7 @@ func TestNewSetEqualsOrOverPairs(t *testing.T) {
 		t.Fatalf("fixture not discriminating: %d/%d", trueSeen, falseSeen)
 	}
 	// Whole-slice calls must agree too.
-	if set.Excludes(ids) != any(func(p *Policy) bool { return p.Excludes(ids) }) {
+	if set.Excludes(ids) != anyPair(func(p *Policy) bool { return p.Excludes(ids) }) {
 		t.Error("slice Excludes differs")
 	}
 	// States alone must exclude something configs alone do not.

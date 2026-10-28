@@ -126,40 +126,43 @@ func NewSet(configPaths, stateDirs []string) (*Policy, error) {
 
 func newSet(resolve func(string) (Resolution, error), configPaths, stateDirs []string) (*Policy, error) {
 	resolved := map[string][]string{}
-	collect := func(paths []string) ([]string, error) {
-		var out []string
-		seen := map[string]bool{}
-		for _, path := range paths {
-			if path == "" {
-				continue
-			}
-			identities, ok := resolved[path]
-			if !ok {
-				resolution, err := resolve(path)
-				if err != nil && !errors.Is(err, fs.ErrNotExist) {
-					return nil, err
-				}
-				identities = resolution.Identities
-				resolved[path] = identities
-			}
-			for _, identity := range identities {
-				if !seen[identity] {
-					seen[identity] = true
-					out = append(out, identity)
-				}
-			}
-		}
-		return out, nil
-	}
-	configs, err := collect(configPaths)
+	configs, err := collectIdentities(resolve, resolved, configPaths)
 	if err != nil {
 		return nil, err
 	}
-	states, err := collect(stateDirs)
+	states, err := collectIdentities(resolve, resolved, stateDirs)
 	if err != nil {
 		return nil, err
 	}
 	return &Policy{configs: configs, states: states}, nil
+}
+
+// collectIdentities unions the identities of paths, resolving each distinct path at most once
+// (memoised only in the per-call resolved map).
+func collectIdentities(resolve func(string) (Resolution, error), resolved map[string][]string, paths []string) ([]string, error) {
+	var out []string
+	seen := map[string]bool{}
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		identities, ok := resolved[path]
+		if !ok {
+			resolution, err := resolve(path)
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return nil, err
+			}
+			identities = resolution.Identities
+			resolved[path] = identities
+		}
+		for _, identity := range identities {
+			if !seen[identity] {
+				seen[identity] = true
+				out = append(out, identity)
+			}
+		}
+	}
+	return out, nil
 }
 
 // Excludes checks all supplied intermediate identities before any content is read.
