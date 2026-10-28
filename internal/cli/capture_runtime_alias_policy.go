@@ -19,22 +19,22 @@ func runtimeHasAliases(c capturedaemon.Config) bool {
 	return len(c.RootAliases) != 0 || len(c.LeafAliases) != 0
 }
 
-func runtimeAliasMapped(c capturedaemon.Config, agent, path string) bool {
-	if !runtimeHasAliases(c) {
+func (r runtimeComposition) aliasMapped(agent, path string) bool {
+	if !runtimeHasAliases(r.config) {
 		return false
 	}
-	inventory, err := c.CoordinateInventory()
-	if err != nil {
+	inventory := r.inventory
+	if inventory == nil {
 		return false
 	}
-	_, err = inventory.Coordinate(agent, path)
+	_, err := inventory.Coordinate(agent, path)
 	return err == nil
 }
 
-func runtimeAliasCoordinate(c capturedaemon.Config, agent, path string) (*capturecoordinates.Inventory, capturecoordinates.Coordinate, error) {
-	inventory, err := c.CoordinateInventory()
-	if err != nil {
-		return nil, capturecoordinates.Coordinate{}, err
+func (r runtimeComposition) aliasCoordinate(agent, path string) (*capturecoordinates.Inventory, capturecoordinates.Coordinate, error) {
+	inventory := r.inventory
+	if inventory == nil {
+		return nil, capturecoordinates.Coordinate{}, errors.New("coordinate inventory unavailable")
 	}
 	coordinate, err := inventory.Coordinate(agent, path)
 	if err != nil {
@@ -53,8 +53,8 @@ func runtimeAliasCoordinate(c capturedaemon.Config, agent, path string) (*captur
 	return inventory, coordinate, nil
 }
 
-func runtimeAliasPrivacyOwner(ctx context.Context, c capturedaemon.Config, req sessioncapture.Request, discovery bool) (*adapters.SessionFile, error) {
-	inventory, coordinate, err := runtimeAliasCoordinate(c, req.Identity.Agent, req.Path)
+func (r runtimeComposition) aliasPrivacyOwner(ctx context.Context, req sessioncapture.Request, discovery bool) (*adapters.SessionFile, error) {
+	inventory, coordinate, err := r.aliasCoordinate(req.Identity.Agent, req.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -65,9 +65,9 @@ func runtimeAliasPrivacyOwner(ctx context.Context, c capturedaemon.Config, req s
 	rel, _ := filepath.Rel(coordinate.Root, coordinate.LogicalPath)
 	first, _, _ := strings.Cut(filepath.ToSlash(rel), "/")
 	if req.Identity.Agent == "claude" && runtimeExternalScope(first) {
-		return runtimeExternalPrivacyOwner(ctx, c, req, coordinate.Root, rel, discovery)
+		return runtimeExternalPrivacyOwner(ctx, r.config, req, coordinate.Root, rel, discovery)
 	}
-	adapter := adapters.All(c.Home)[req.Identity.Agent]
+	adapter := adapters.All(r.config.Home)[req.Identity.Agent]
 	if adapter == nil {
 		return nil, errors.New("source agent unsupported")
 	}
@@ -109,8 +109,8 @@ func runtimeAliasDirectory(inventory *capturecoordinates.Inventory, coordinate c
 // An old opt-out can name a now-absent physical root. The compiled declaration,
 // not current inode coincidence or request metadata, supplies every equivalent
 // legacy root/session coordinate checked against the preserved registry.
-func runtimeAliasExcluded(c capturedaemon.Config, req sessioncapture.Request, owner adapters.SessionFile, registry exclusion.Registry) (bool, error) {
-	inventory, coordinate, err := runtimeAliasCoordinate(c, req.Identity.Agent, req.Path)
+func (r runtimeComposition) aliasExcluded(req sessioncapture.Request, owner adapters.SessionFile, registry exclusion.Registry) (bool, error) {
+	inventory, coordinate, err := r.aliasCoordinate(req.Identity.Agent, req.Path)
 	if err != nil {
 		return false, err
 	}
@@ -118,7 +118,7 @@ func runtimeAliasExcluded(c capturedaemon.Config, req sessioncapture.Request, ow
 	if err != nil {
 		return false, err
 	}
-	adapter := adapters.All(c.Home)[req.Identity.Agent]
+	adapter := adapters.All(r.config.Home)[req.Identity.Agent]
 	if adapter == nil {
 		return false, errors.New("source agent unsupported")
 	}

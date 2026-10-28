@@ -5,33 +5,32 @@ import (
 	"os"
 
 	"github.com/mich-murphy/memory/internal/adapters"
-	"github.com/mich-murphy/memory/internal/capturedaemon"
 	"github.com/mich-murphy/memory/internal/exclusion"
 	"github.com/mich-murphy/memory/internal/sessioncapture"
 )
 
-func runtimeEnrichmentRootPaths(c capturedaemon.Config, spec sessioncapture.EnrichmentSpec) ([]string, error) {
-	if !runtimeHasAliases(c) {
+func (r runtimeComposition) enrichmentRootPaths(spec sessioncapture.EnrichmentSpec) ([]string, error) {
+	if !runtimeHasAliases(r.config) {
 		return []string{spec.Root}, nil
 	}
-	inventory, coordinate, err := runtimeAliasCoordinate(c, spec.Identity.Agent, spec.Root)
+	inventory, coordinate, err := r.aliasCoordinate(spec.Identity.Agent, spec.Root)
 	if err != nil {
 		return nil, err
 	}
 	return inventory.EquivalentPaths(coordinate), nil
 }
 
-func runtimeEnrichmentObservedRoot(c capturedaemon.Config, spec sessioncapture.EnrichmentSpec) (string, error) {
-	if !runtimeHasAliases(c) {
+func (r runtimeComposition) enrichmentObservedRoot(spec sessioncapture.EnrichmentSpec) (string, error) {
+	if !runtimeHasAliases(r.config) {
 		return spec.Root, nil
 	}
-	paths, err := runtimeEnrichmentRootPaths(c, spec)
+	paths, err := r.enrichmentRootPaths(spec)
 	if err != nil {
 		return "", err
 	}
 	for _, path := range paths {
-		if runtimeHasAliases(c) {
-			if _, _, err := runtimeAliasCoordinate(c, spec.Identity.Agent, path); err != nil {
+		if runtimeHasAliases(r.config) {
+			if _, _, err := r.aliasCoordinate(spec.Identity.Agent, path); err != nil {
 				continue
 			}
 		}
@@ -42,11 +41,11 @@ func runtimeEnrichmentObservedRoot(c capturedaemon.Config, spec sessioncapture.E
 	return "", errors.New("enrichment root unavailable")
 }
 
-func runtimeAliasEnrichmentExcluded(c capturedaemon.Config, spec sessioncapture.EnrichmentSpec, registry exclusion.Registry) (bool, error) {
-	if !runtimeHasAliases(c) {
+func (r runtimeComposition) aliasEnrichmentExcluded(spec sessioncapture.EnrichmentSpec, registry exclusion.Registry) (bool, error) {
+	if !runtimeHasAliases(r.config) {
 		return false, nil
 	}
-	inventory, coordinate, err := runtimeAliasCoordinate(c, spec.Identity.Agent, spec.Root)
+	inventory, coordinate, err := r.aliasCoordinate(spec.Identity.Agent, spec.Root)
 	if err != nil {
 		return false, err
 	}

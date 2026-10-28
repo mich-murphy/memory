@@ -137,10 +137,11 @@ func runCaptureWritable(ctx context.Context, cmd string, c capturedaemon.Config,
 			return exitFailed, err
 		}
 	}
-	queueOptions, err := runtimeQueueOptions(c)
+	r, err := newRuntimeComposition(c)
 	if err != nil {
 		return exitFailed, err
 	}
+	queueOptions := r.queueOptions()
 	q, err := sessioncapture.Open(ctx, c.Spool, queueOptions)
 	if err != nil {
 		if cmd == "run" && sessioncapture.IsCallerCancellation(ctx, err) {
@@ -164,11 +165,11 @@ func runCaptureWritable(ctx context.Context, cmd string, c capturedaemon.Config,
 	case "optional-quota-replay":
 		err = q.ReplayOptionalRepairQuota(ctx, publication.Identity{ArchiveID: c.ArchiveID, MachineID: c.MachineID, Agent: f.agent, SessionID: f.session})
 	case "run":
-		discover, closeDiscovery := runtimeDiscovery(c, f.config)
+		discover, closeDiscovery := r.discovery(f.config)
 		defer func() { err = errors.Join(err, closeDiscovery()) }()
 		opts := sessioncapture.RuntimeOptions{DiscoverBatch: discover, PollInterval: time.Duration(c.PollSeconds) * time.Second, OperationTimeout: time.Duration(c.OperationSeconds) * time.Second, CaptureWorkers: c.CaptureWorkers, DeliveryWorkers: c.DeliveryWorkers, MaxAttempts: c.MaxAttempts}
 		if c.Enrichment {
-			opts.Enrich, opts.CheckEnrichmentAsset = runtimeEnrichment(c), runtimeEnrichmentAssetPolicy(c)
+			opts.Enrich, opts.CheckEnrichmentAsset = r.enrichment(), r.enrichmentAssetPolicy()
 		}
 		err = q.Run(ctx, backend, opts)
 	}
@@ -180,19 +181,20 @@ func enqueueCaptureHint(ctx context.Context, c capturedaemon.Config, f runtimeFl
 	if !captureIdentityComplete(req.Identity) || f.source == "" || !filepath.IsAbs(f.path) || (f.role != "main" && f.role != "subagent") {
 		return exitUsage, errors.New("hint requires explicit --agent --session --source --path and main/subagent --role")
 	}
-	if err := runtimePolicy(c)(ctx, req); err != nil {
+	r, err := newRuntimeComposition(c)
+	if err != nil {
+		return exitFailed, err
+	}
+	if err := r.policy(false)(ctx, req); err != nil {
 		return exitFailed, err
 	}
 	return exitOK, sessioncapture.WriteHint(ctx, c.Spool, req)
 }
 
-func runtimeDiscovery(c capturedaemon.Config, configPath string) (func(context.Context) (sessioncapture.DiscoveryBatch, error), func() error) {
+func (r runtimeComposition) discovery(configPath string) (func(context.Context) (sessioncapture.DiscoveryBatch, error), func() error) {
 	var cursor *capturesource.Cursor
-	opts, optionsErr := runtimeSourceOptions(c, configPath)
+	opts := r.sourceOptions(configPath)
 	return func(ctx context.Context) (sessioncapture.DiscoveryBatch, error) {
-			if optionsErr != nil {
-				return sessioncapture.DiscoveryBatch{}, optionsErr
-			}
 			opts.Cursor = cursor
 			result, err := capturesource.Discover(ctx, opts)
 			cursor = result.Cursor

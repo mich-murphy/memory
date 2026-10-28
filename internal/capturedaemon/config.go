@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mich-murphy/memory/internal/capturebackend"
+	"github.com/mich-murphy/memory/internal/capturecoordinates"
 	"github.com/mich-murphy/memory/internal/sessioncapture"
 )
 
@@ -213,16 +214,20 @@ func (c Config) validatePolicy() error {
 
 // AllowsSource requires the configured source inventory, including defaults.
 func (c Config) AllowsSource(agent, path string) bool {
+	inventory, err := c.CoordinateInventory()
+	return err == nil && c.AllowsSourceIn(inventory, agent, path)
+}
+
+// AllowsSourceIn uses only immutable declarations; callers must still check live policy.
+func (c Config) AllowsSourceIn(inventory *capturecoordinates.Inventory, agent, path string) bool {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return false
 	}
 	if len(c.RootAliases) != 0 || len(c.LeafAliases) != 0 {
-		inventory, err := c.CoordinateInventory()
-		if err != nil {
-			return false
-		}
-		if _, err := inventory.Coordinate(agent, path); err == nil {
-			return true
+		if inventory != nil {
+			if _, err := inventory.Coordinate(agent, path); err == nil {
+				return true
+			}
 		}
 	}
 	for _, r := range c.SourceRoots() {

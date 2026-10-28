@@ -28,13 +28,12 @@ func validateRuntimeEnrichment(c capturedaemon.Config, s sessioncapture.Enrichme
 	return runtimeUnresolvedNativePolicy(c, s.Identity.Agent)
 }
 
-func runtimeEnrichment(c capturedaemon.Config) sessioncapture.EnrichFunc {
-	return func(ctx context.Context, spec sessioncapture.EnrichmentSpec) (sessioncapture.EnrichmentArtifact, error) {
-		return buildRuntimeEnrichment(ctx, c, spec)
-	}
+func (r runtimeComposition) enrichment() sessioncapture.EnrichFunc {
+	return r.buildEnrichment
 }
 
-func buildRuntimeEnrichment(ctx context.Context, c capturedaemon.Config, spec sessioncapture.EnrichmentSpec) (sessioncapture.EnrichmentArtifact, error) {
+func (r runtimeComposition) buildEnrichment(ctx context.Context, spec sessioncapture.EnrichmentSpec) (sessioncapture.EnrichmentArtifact, error) {
+	c := r.config
 	var result sessioncapture.EnrichmentArtifact
 	if err := validateRuntimeEnrichment(c, spec); err != nil {
 		return result, err
@@ -51,8 +50,8 @@ func buildRuntimeEnrichment(ctx context.Context, c capturedaemon.Config, spec se
 	if err != nil {
 		return result, errors.New("enrichment exclusions unavailable")
 	}
-	check := runtimeEnrichmentAssetPolicy(c)
-	observedRoot, err := runtimeEnrichmentObservedRoot(c, spec)
+	check := r.enrichmentAssetPolicy()
+	observedRoot, err := r.enrichmentObservedRoot(spec)
 	if err != nil {
 		return result, err
 	}
@@ -99,14 +98,13 @@ func runtimeSnapshotAsset(asset snapshot.AssetEvidence) sessioncapture.Enrichmen
 // This callback is reachable only through the trusted snapshot selector or its
 // private persisted evidence. Extra roots authorize those declared routes, never
 // ordinary discovery or arbitrary capture requests outside the source inventory.
-func runtimeEnrichmentAssetPolicy(c capturedaemon.Config) sessioncapture.CheckEnrichmentAssetFunc {
-	return func(ctx context.Context, spec sessioncapture.EnrichmentSpec, asset sessioncapture.EnrichmentAsset, delivery bool) error {
-		return checkRuntimeEnrichmentAsset(ctx, c, spec, asset, delivery)
-	}
+func (r runtimeComposition) enrichmentAssetPolicy() sessioncapture.CheckEnrichmentAssetFunc {
+	return r.checkEnrichmentAsset
 }
 
-func checkRuntimeEnrichmentAsset(ctx context.Context, c capturedaemon.Config, spec sessioncapture.EnrichmentSpec, asset sessioncapture.EnrichmentAsset, delivery bool) error {
-	return checkRuntimeEnrichmentAssetWith(ctx, c, spec, asset, delivery, capturepolicy.Resolve, func() (*capturepolicy.Policy, error) {
+func (r runtimeComposition) checkEnrichmentAsset(ctx context.Context, spec sessioncapture.EnrichmentSpec, asset sessioncapture.EnrichmentAsset, delivery bool) error {
+	c := r.config
+	return r.checkEnrichmentAssetWith(ctx, spec, asset, delivery, capturepolicy.Resolve, func() (*capturepolicy.Policy, error) {
 		return newRuntimeFilesystemSet(c)
 	})
 }
@@ -115,7 +113,8 @@ func checkRuntimeEnrichmentAsset(ctx context.Context, c capturedaemon.Config, sp
 // filesystem policy lazily, at most once, for this call only. Lazy construction
 // keeps errors where they were: a call failing at runtimeAssetRoot or at a path's
 // resolution never builds (or reports an error from) the policy.
-func checkRuntimeEnrichmentAssetWith(ctx context.Context, c capturedaemon.Config, spec sessioncapture.EnrichmentSpec, asset sessioncapture.EnrichmentAsset, delivery bool, resolve func(string) (capturepolicy.Resolution, error), newPolicy func() (*capturepolicy.Policy, error)) error {
+func (r runtimeComposition) checkEnrichmentAssetWith(ctx context.Context, spec sessioncapture.EnrichmentSpec, asset sessioncapture.EnrichmentAsset, delivery bool, resolve func(string) (capturepolicy.Resolution, error), newPolicy func() (*capturepolicy.Policy, error)) error {
+	c := r.config
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -129,7 +128,7 @@ func checkRuntimeEnrichmentAssetWith(ctx context.Context, c capturedaemon.Config
 	if err != nil {
 		return errors.New("enrichment exclusions unavailable")
 	}
-	aliasExcluded, err := runtimeAliasEnrichmentExcluded(c, spec, registry)
+	aliasExcluded, err := r.aliasEnrichmentExcluded(spec, registry)
 	if err != nil {
 		return err
 	}
@@ -160,7 +159,7 @@ func checkRuntimeEnrichmentAssetWith(ctx context.Context, c capturedaemon.Config
 			continue
 		}
 		seen[path] = struct{}{}
-		if !runtimeAssetRoot(c, spec, path) {
+		if !r.assetRoot(spec, path) {
 			return errors.New("enrichment asset outside declared inventory")
 		}
 		scrubbed := scrub.Recognizes(path) || asset.Kind == "generated-subset"
@@ -176,11 +175,12 @@ func runtimeAssetMetadata(asset sessioncapture.EnrichmentAsset) bool {
 		slices.Contains([]string{"file", "generated-subset", "plugin-manifest", "package-provenance", "git-selection"}, asset.Kind)
 }
 
-func runtimeAssetRoot(c capturedaemon.Config, spec sessioncapture.EnrichmentSpec, path string) bool {
+func (r runtimeComposition) assetRoot(spec sessioncapture.EnrichmentSpec, path string) bool {
+	c := r.config
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return false
 	}
-	rootPaths, err := runtimeEnrichmentRootPaths(c, spec)
+	rootPaths, err := r.enrichmentRootPaths(spec)
 	if err != nil {
 		return false
 	}

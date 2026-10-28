@@ -31,13 +31,17 @@ func runDisabledNativeCaptureHook(ctx context.Context, c capturedaemon.Config, f
 	if err := disabledNativePolicyAvailable(c); err != nil {
 		return unresolved()
 	}
+	r, err := newRuntimeComposition(c)
+	if err != nil {
+		return unresolved()
+	}
 	for _, path := range paths {
 		if ctx.Err() != nil || !filepath.IsAbs(path) || len(path) > 64<<10 {
 			return unresolved()
 		}
 		path = filepath.Clean(path)
 		req := sessioncapture.Request{Identity: publication.Identity{ArchiveID: c.ArchiveID, MachineID: c.MachineID, Agent: f.agent}, Path: path, Role: "main"}
-		sf, err := runtimePrivacyOwner(ctx, c, req, false)
+		sf, err := r.privacyOwner(ctx, req, false)
 		if err != nil || sf == nil || sf.SessionKey == "" {
 			return unresolved()
 		}

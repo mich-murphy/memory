@@ -43,11 +43,12 @@ func runNativeCaptureHook(ctx context.Context, c capturedaemon.Config, f runtime
 			return exitFailed, err
 		}
 	}
-	policy := runtimePolicy(c)
-	opts, err := runtimeSourceOptions(c, c.ConfigPath())
+	r, err := newRuntimeComposition(c)
 	if err != nil {
 		return exitFailed, err
 	}
+	policy := r.policy(false)
+	opts := r.sourceOptions(c.ConfigPath())
 	invocationID := nativeInvocationID()
 	for i, path := range paths {
 		classify := capturesource.Classify

@@ -7,7 +7,6 @@ import (
 
 	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/capturecoordinates"
-	"github.com/mich-murphy/memory/internal/capturedaemon"
 	"github.com/mich-murphy/memory/internal/exclusion"
 	"github.com/mich-murphy/memory/internal/sessioncapture"
 )
@@ -15,14 +14,12 @@ import (
 // A claimed identity cannot authorize bytes, but naming a known opted-out session
 // must restrict publication even when the hint's independently owned path is healthy.
 // Only preserved records and compiled declarations supply namespace equivalence.
-func runtimeClaimedSessionExcluded(c capturedaemon.Config, req sessioncapture.Request, registry exclusion.Registry) (bool, error) {
+func (r runtimeComposition) claimedSessionExcluded(req sessioncapture.Request, registry exclusion.Registry) (bool, error) {
+	c := r.config
 	if !strings.HasPrefix(req.Identity.SessionID, "session/") {
 		return false, nil
 	}
-	inventory, err := c.CoordinateInventory()
-	if err != nil {
-		return false, err
-	}
+	inventory := r.inventory
 	adapter := adapters.All(c.Home)[req.Identity.Agent]
 	for _, record := range registry {
 		if record.Agent != req.Identity.Agent {

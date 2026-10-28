@@ -130,7 +130,7 @@ func TestCheckRuntimeEnrichmentAssetBuildsPolicyOnceAndChecksDistinctPathsOnce(t
 	asset.Identities = append(append([]string{}, asset.Identities...), asset.Path, asset.Identities[0])
 	resolves := map[string]int{}
 	built := 0
-	err := checkRuntimeEnrichmentAssetWith(t.Context(), c, spec, asset, true,
+	err := checkRuntimeEnrichmentAssetWith(t.Context(), c, spec, asset,
 		func(p string) (capturepolicy.Resolution, error) { resolves[p]++; return capturepolicy.Resolve(p) },
 		func() (*capturepolicy.Policy, error) { built++; return newRuntimeFilesystemSet(c) })
 	if err != nil {
@@ -157,16 +157,16 @@ func TestCheckRuntimeEnrichmentAssetPolicyErrorFailsClosedAndOnlyWhenReached(t *
 	c, spec, assets := assetPathsFixture(t)
 	built := 0
 	failing := func() (*capturepolicy.Policy, error) { built++; return nil, errors.New("boom") }
-	err := checkRuntimeEnrichmentAssetWith(t.Context(), c, spec, assets["plain"], true, capturepolicy.Resolve, failing)
+	err := checkRuntimeEnrichmentAssetWith(t.Context(), c, spec, assets["plain"], capturepolicy.Resolve, failing)
 	if errString(err) != "source excluded by filesystem policy" || built != 1 {
 		t.Fatalf("got %v, built %d", err, built)
 	}
 	built = 0
-	err = checkRuntimeEnrichmentAssetWith(t.Context(), c, spec, assets["outside first"], true, capturepolicy.Resolve, failing)
+	err = checkRuntimeEnrichmentAssetWith(t.Context(), c, spec, assets["outside first"], capturepolicy.Resolve, failing)
 	if errString(err) != "enrichment asset outside declared inventory" || built != 0 {
 		t.Fatalf("early failure built policy: %v, built %d", err, built)
 	}
-	err = checkRuntimeEnrichmentAssetWith(t.Context(), c, spec, assets["bad metadata"], true, capturepolicy.Resolve, failing)
+	err = checkRuntimeEnrichmentAssetWith(t.Context(), c, spec, assets["bad metadata"], capturepolicy.Resolve, failing)
 	if built != 0 || err == nil {
 		t.Fatalf("metadata failure built policy: %v", err)
 	}

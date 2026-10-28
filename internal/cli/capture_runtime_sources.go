@@ -3,33 +3,30 @@ package cli
 import (
 	"context"
 
-	"github.com/mich-murphy/memory/internal/capturedaemon"
 	"github.com/mich-murphy/memory/internal/capturesource"
 	"github.com/mich-murphy/memory/internal/publication"
 	"github.com/mich-murphy/memory/internal/sessioncapture"
 )
 
-func runtimeQueueOptions(c capturedaemon.Config) (sessioncapture.Options, error) {
-	opts := sessioncapture.Options{ArchiveID: c.ArchiveID, MaxSpoolBytes: c.MaxSpoolBytes, MinFreeBytes: c.MinFreeBytes, MaxInventoryRecords: c.MaxInventoryRecords, CheckPolicy: runtimePolicy(c), EnableEnrichment: c.Enrichment}
+func (r runtimeComposition) queueOptions() sessioncapture.Options {
+	c := r.config
+	opts := sessioncapture.Options{ArchiveID: c.ArchiveID, MaxSpoolBytes: c.MaxSpoolBytes, MinFreeBytes: c.MinFreeBytes, MaxInventoryRecords: c.MaxInventoryRecords, CheckPolicy: r.policy(false), EnableEnrichment: c.Enrichment}
 	if runtimeHasAliases(c) {
-		inventory, err := c.CoordinateInventory()
-		if err != nil {
-			return opts, err
-		}
-		opts.Coordinates = inventory
+		opts.Coordinates = r.inventory
 	}
-	return opts, nil
+	return opts
 }
 
 // Periodic discovery and transient native hooks share one declared inventory and
 // all-identity metadata policy. Neither request-supplied associations nor a native
 // session string grant coordinate authority.
-func runtimeSourceOptions(c capturedaemon.Config, configPath string) (capturesource.Options, error) {
+func (r runtimeComposition) sourceOptions(configPath string) capturesource.Options {
+	c := r.config
 	roots := make([]capturesource.Root, len(c.Roots))
 	for i, r := range c.Roots {
 		roots[i] = capturesource.Root{Agent: r.Agent, Path: r.Path}
 	}
-	policy := runtimeDiscoveryPolicy(c)
+	policy := r.policy(true)
 	opts := capturesource.Options{
 		ArchiveID: c.ArchiveID, MachineID: c.MachineID, Home: c.Home, Roots: roots, OnlyRoots: !c.DefaultRoots, Derived: true, ConfigPath: configPath, StateDir: c.Spool, EntriesPerRoot: c.EntriesPerRoot,
 		LookupOwner: func(ctx context.Context, root capturesource.Root, uuid string) (string, string, error) {
@@ -45,12 +42,8 @@ func runtimeSourceOptions(c capturedaemon.Config, configPath string) (capturesou
 			return nil
 		},
 	}
-	if len(c.RootAliases) != 0 || len(c.LeafAliases) != 0 {
-		inventory, err := c.CoordinateInventory()
-		if err != nil {
-			return opts, err
-		}
-		opts.Coordinates = inventory
+	if runtimeHasAliases(c) {
+		opts.Coordinates = r.inventory
 	}
-	return opts, nil
+	return opts
 }

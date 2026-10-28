@@ -15,22 +15,15 @@ import (
 	"github.com/mich-murphy/memory/internal/sessioncapture"
 )
 
-func runtimePolicy(c capturedaemon.Config) func(context.Context, sessioncapture.Request) error {
-	return runtimePolicyMode(c, false)
-}
-
 // Discovery admits only metadata for a recognized configuration. The queue still
 // requires the explicit scrubbed-config transform before reading protected bytes.
-func runtimeDiscoveryPolicy(c capturedaemon.Config) func(context.Context, sessioncapture.Request) error {
-	return runtimePolicyMode(c, true)
-}
-
-func runtimePolicyMode(c capturedaemon.Config, discovery bool) func(context.Context, sessioncapture.Request) error {
+func (r runtimeComposition) policy(discovery bool) func(context.Context, sessioncapture.Request) error {
+	c := r.config
 	return func(ctx context.Context, req sessioncapture.Request) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if req.Identity.ArchiveID != c.ArchiveID || req.Identity.MachineID != c.MachineID || !c.AllowsSource(req.Identity.Agent, req.Path) {
+		if req.Identity.ArchiveID != c.ArchiveID || req.Identity.MachineID != c.MachineID || !c.AllowsSourceIn(r.inventory, req.Identity.Agent, req.Path) {
 			return errors.New("source outside configured inventory")
 		}
 		if req.Identity.SessionID != "" {
@@ -44,14 +37,15 @@ func runtimePolicyMode(c capturedaemon.Config, discovery bool) func(context.Cont
 		if err := runtimeUnresolvedNativePolicy(c, req.Identity.Agent); err != nil {
 			return errors.Join(sessioncapture.ErrSessionExcluded, err)
 		}
-		if err := runtimeExclusions(ctx, c, req, discovery); err != nil {
+		if err := r.exclusions(ctx, req, discovery); err != nil {
 			return err
 		}
 		return runtimeFilesystemPolicy(c, req.Path, discovery || req.Transform == "scrubbed-config")
 	}
 }
 
-func runtimeExclusions(ctx context.Context, c capturedaemon.Config, req sessioncapture.Request, discovery bool) error {
+func (r runtimeComposition) exclusions(ctx context.Context, req sessioncapture.Request, discovery bool) error {
+	c := r.config
 	for _, dir := range []string{c.PolicyDir, filepath.Join(c.PolicyDir, "exclusions")} {
 		if err := capturedaemon.SafePath(dir); err != nil {
 			return errors.New("effective exclusions unavailable")
@@ -65,14 +59,14 @@ func runtimeExclusions(ctx context.Context, c capturedaemon.Config, req sessionc
 	if err != nil {
 		return errors.New("effective exclusions unavailable")
 	}
-	claimedExcluded, err := runtimeClaimedSessionExcluded(c, req, registry)
+	claimedExcluded, err := r.claimedSessionExcluded(req, registry)
 	if err != nil {
 		return errors.New("effective claimed-session exclusions unavailable")
 	}
 	if claimedExcluded {
 		return sessioncapture.ErrSessionExcluded
 	}
-	sf, err := runtimePrivacyOwner(ctx, c, req, discovery)
+	sf, err := r.privacyOwner(ctx, req, discovery)
 	if err != nil {
 		return err
 	}
@@ -82,8 +76,8 @@ func runtimeExclusions(ctx context.Context, c capturedaemon.Config, req sessionc
 		return nil
 	}
 	excluded := registry.Excludes(*sf)
-	if runtimeAliasMapped(c, req.Identity.Agent, req.Path) {
-		aliasExcluded, err := runtimeAliasExcluded(c, req, *sf, registry)
+	if r.aliasMapped(req.Identity.Agent, req.Path) {
+		aliasExcluded, err := r.aliasExcluded(req, *sf, registry)
 		if err != nil {
 			return err
 		}
@@ -102,11 +96,12 @@ func runtimeExclusions(ctx context.Context, c capturedaemon.Config, req sessionc
 // root and physical layout. Request identity/associations are untrusted hints.
 // In particular it never invokes adapter root inference or Claude's external
 // ownership index (which scans the entire projects tree).
-func runtimePrivacyOwner(ctx context.Context, c capturedaemon.Config, req sessioncapture.Request, discovery bool) (*adapters.SessionFile, error) {
-	if runtimeAliasMapped(c, req.Identity.Agent, req.Path) {
-		return runtimeAliasPrivacyOwner(ctx, c, req, discovery)
+func (r runtimeComposition) privacyOwner(ctx context.Context, req sessioncapture.Request, discovery bool) (*adapters.SessionFile, error) {
+	c := r.config
+	if r.aliasMapped(req.Identity.Agent, req.Path) {
+		return r.aliasPrivacyOwner(ctx, req, discovery)
 	}
-	root := runtimeOwningRoot(c, req.Identity.Agent, req.Path)
+	root := r.owningRoot(req.Identity.Agent, req.Path)
 	if root == "" {
 		return nil, errors.New("source outside configured inventory")
 	}
@@ -145,12 +140,10 @@ func runtimePrivacyOwner(ctx context.Context, c capturedaemon.Config, req sessio
 
 // Prefer the longest actual configured root; the one-file global Claude config
 // exception uses the canonical Claude namespace only when no root owns it.
-func runtimeOwningRoot(c capturedaemon.Config, agent, path string) string {
+func (r runtimeComposition) owningRoot(agent, path string) string {
+	c := r.config
 	if runtimeHasAliases(c) {
-		inventory, err := c.CoordinateInventory()
-		if err != nil {
-			return ""
-		}
+		inventory := r.inventory
 		if coordinate, err := inventory.Coordinate(agent, path); err == nil {
 			return coordinate.Root
 		}
