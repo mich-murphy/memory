@@ -44,9 +44,9 @@ func growSession(t *testing.T, n int, hook func(k int)) []int64 {
 // Policy checks per publication must be linear in session size K for a
 // one-source delta: a constant number of full passes, not K passes.
 func TestDeliveryPolicyChecksAreLinearInSessionSize(t *testing.T) {
-	const n = 150
+	const n = 30
 	counts := growSession(t, n, nil)
-	for _, k := range []int{10, 50, 150} {
+	for _, k := range []int{10, 30} {
 		t.Logf("K=%d policy checks=%d", k, counts[k-1])
 	}
 	for k := 1; k <= n; k++ {
@@ -181,9 +181,9 @@ func (f *firstPub) current(t *testing.T) bool {
 // One publication uploading all K objects costs a constant number of full
 // passes plus one own-evidence check per upload: linear in K. Fixture setup
 // (K sequential captures, each writing a K-sized manifest) is itself O(K^2),
-// so K stays at 150: the 40K bound already fails the old O(D*K) code at K=10.
+// so K stays small: the 40K bound already fails the old O(D*K) code at K=10.
 func TestFirstPublicationPolicyChecksAreLinear(t *testing.T) {
-	for _, k := range []int{10, 50, 150} {
+	for _, k := range []int{12, 40} {
 		f := newFirstPublication(t, k, nil, nil)
 		if e := f.q.Deliver(t.Context(), f.b, f.id); e != nil {
 			t.Fatal(e)

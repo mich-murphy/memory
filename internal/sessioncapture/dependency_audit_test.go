@@ -11,12 +11,14 @@ import (
 
 func TestOptionalIsolationRejectsFatalErrorTrees(t *testing.T) {
 	for _, stage := range []string{"upload", "verify", "object-fence"} {
+		// One fixture per stage: the latch count is asserted to remain zero after
+		// every cause, so a latch from one cause cannot be masked by the next.
+		q, r, m := optionalFixture(t)
+		_, es, err := q.latest(t.Context(), r.Identity)
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, cause := range []error{publication.ErrDurability, context.Canceled, context.DeadlineExceeded, errors.Join(errors.New("transport"), context.Canceled), errors.Join(context.DeadlineExceeded, publication.ErrDurability)} {
-			q, r, m := optionalFixture(t)
-			_, es, err := q.latest(t.Context(), r.Identity)
-			if err != nil {
-				t.Fatal(err)
-			}
 			dep := &publication.SourceDependencyError{Optional: true, SourceKeyHash: publication.SourceKeyHash(m.Sources[1]), EpochID: m.Sources[1].EpochID, Stage: stage, Err: cause}
 			handled, err := q.isolateOptionalFailure(t.Context(), r.Identity, m, es, dep)
 			if handled || err != nil {

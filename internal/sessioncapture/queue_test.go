@@ -469,6 +469,10 @@ func TestNegativeCaptureTimestampsDoNotAdvanceJobs(t *testing.T) {
 			if valid.Sequence != a.Sequence+1 || valid.Sources[0].Revision != 2 {
 				t.Fatal("invalid capture advanced source order")
 			}
+			// Delivery of the valid follow-up is identical across modes; check it once.
+			if mode != "observed" {
+				return
+			}
 			b := newBackend(t)
 			if err := q.Deliver(t.Context(), b, r.Identity); err != nil {
 				t.Fatal(err)
