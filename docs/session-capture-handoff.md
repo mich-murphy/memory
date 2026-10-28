@@ -753,6 +753,14 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   count until processed (`ReplayEnrichment` retains them by design). The monitor was restarted
   as `/tmp/step4-diag/autorun-efbb99e.jsonl`.
 
+- **Post-install backlog (17:05–17:20).** Enrichment attachments use `accept` without
+  superseding, so each one adds a pending delivery job behind the raw head. Pending peaked at
+  439 (17:10), fell to 398 at 17:20 across 328 sessions (at most 23 in one session), all at 0–1
+  attempts, with no retries, quarantines or pause. Work is picked `ORDER BY attempts`, so the
+  140 fresh rows run before the 591 replayed ones. The replayed rows still carry attempts up to 8,
+  so one more failure quarantines them again. That is the documented `ReplayEnrichment`
+  behaviour and is acceptable, because each re-quarantine would be a newly diagnosable failure.
+
 ### Next action
 
 Step 4 is installed as `efbb99e` (install #8, 16:38 AEDT), with the enrichment backlog draining. Next:
