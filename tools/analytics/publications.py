@@ -372,8 +372,12 @@ def import_export(export_dir, db_path, *, reset=False):
             raise ImportFailure(reason) from None
 
 
-def report(db_path, *, now_ns=None, stale_after_ns=86400 * 10**9):
-    """Content-free actual event-index report. Served time is report generation."""
+def report(db_path, *, now_ns=None, stale_after_ns=86400 * 10**9, summary=False):
+    """Actual event-index report; summary bounds detail for interactive overview.
+
+    The default remains exhaustive for offline writer/reader acceptance and exports.
+    Summary totals are exact SQL aggregates; details are capped and ordered.
+    """
     duckdb, _ = _dependencies()
     now = time.time_ns() if now_ns is None else now_ns
     with duckdb.connect(str(db_path), read_only=True) as db:
@@ -382,9 +386,13 @@ def report(db_path, *, now_ns=None, stale_after_ns=86400 * 10**9):
             return [dict(zip([c[0] for c in result.description], row)) for row in result.fetchall()]
         _require('publication_binding' in {r[0] for r in db.execute('SHOW TABLES').fetchall()}, 'not_publication_database')
         _schema(db, None)
-        sessions = rows('SELECT * EXCLUDE(manifest_sha256) FROM sessions ORDER BY session_key')
-        failures = rows('SELECT * FROM failures ORDER BY session_key')
-        failed = {r['session_key'] for r in failures}
+        detail_limit = ' LIMIT 50' if summary else ''
+        sessions = rows('SELECT * EXCLUDE(manifest_sha256) FROM sessions ORDER BY session_key' + detail_limit)
+        failures = rows('SELECT * FROM failures ORDER BY session_key' + detail_limit)
+        failed = ({r['session_key'] for r in failures} if not summary else
+                  {r[0] for r in db.execute('SELECT session_key FROM failures WHERE session_key IN (' +
+                   ','.join('?' for _ in sessions) + ')', [s['session_key'] for s in sessions]).fetchall()}
+                  if sessions else set())
         for session in sessions:
             session['coverage'] = json.loads(session['coverage'])
             session['capture_age_ns'] = max(0, now - session['captured_at_ns'])
@@ -392,6 +400,12 @@ def report(db_path, *, now_ns=None, stale_after_ns=86400 * 10**9):
         return dict(contract='session-analytics-report/v2', served_at_ns=now,
             archive_id=db.execute('SELECT archive_id FROM publication_binding').fetchone()[0],
             sessions=sessions, failures=failures,
+            **(dict(detail_limit=50,
+                    totals=rows('SELECT (SELECT count(*) FROM sessions) AS sessions, '
+                                '(SELECT count(*) FROM failures) AS failures, '
+                                '(SELECT count(*) FROM sources) AS sources')[0],
+                    agents=rows('SELECT agent,count(*) AS sessions FROM sessions GROUP BY agent ORDER BY agent'))
+               if summary else {}),
             freshness=rows('''SELECT max(captured_at_ns) AS captured_at_ns,
                 max(published_at_ns) AS published_at_ns, max(imported_at_ns) AS imported_at_ns,
                 count(*) FILTER (WHERE captured_at_ns=0) AS unknown_capture_sessions,
@@ -402,7 +416,7 @@ def report(db_path, *, now_ns=None, stale_after_ns=86400 * 10**9):
                 count(*) FILTER (WHERE withheld_reason IS NOT NULL) AS withheld FROM sources''')[0],
             sources=rows('''SELECT session_key,trace_id,source_id,epoch_id,publication_id,
                 source_role,revision,state,source_key_hash,optional,withheld_reason,sha256,size,observed_at_ns,captured_at_ns,
-                associations,partial_tail FROM sources ORDER BY session_key,source_id,epoch_id'''),
+                associations,partial_tail FROM sources ORDER BY session_key,source_id,epoch_id''' + detail_limit) if not summary else [],
             withheld_counts=rows('SELECT withheld_reason AS reason, count(*) AS sources FROM sources WHERE withheld_reason IS NOT NULL GROUP BY withheld_reason ORDER BY withheld_reason'),
             source_roles=rows('SELECT source_role, count(*) AS sources FROM sources GROUP BY source_role ORDER BY source_role'),
             event_counts=rows('SELECT event_type, count(*) AS events FROM events GROUP BY event_type ORDER BY event_type'),

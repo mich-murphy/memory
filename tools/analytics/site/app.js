@@ -103,6 +103,8 @@ function publicationView(root) {
   root.append(heading('Publication coverage & freshness', 'Coverage is producer-declared, not a completeness guarantee'));
   const health = r.refresh_health;
   if (!health?.healthy) root.append(node('p', 'warning', `Publication refresh incomplete / unknown (${health?.mode || 'partial'}). Imported sessions are a subset, not archive coverage. Endpoint errors: ${text(health?.endpoint_errors)}; discovery errors: ${text(health?.discovery_errors)}; unimported: ${text(health?.unimported)}; target errors: ${text(health?.target_errors)}; stale: ${text(health?.stale)}.`));
+  else root.append(node('p', 'warning', 'Refresh is healthy for configured endpoints and known targets only. It does not prove all source files were discovered or captured, or that both machines and all roots are covered.'));
+  root.append(node('p', 'small muted', `Exact projection totals: ${number(r.totals?.sessions)} sessions · ${number(r.totals?.sources)} source epochs · ${number(r.totals?.failures)} outstanding import failures. The tables below show at most ${number(r.detail_limit)} entries each; use Explore sources / epochs for paginated detail.`));
   root.append(details('Independent publication refresh health', health || {mode: 'partial', healthy: false}, true));
   root.append(details('Selected / withheld source counts', r.source_counts, true));
   const freshness = node('dl', 'kv');
@@ -113,7 +115,7 @@ function publicationView(root) {
     [s.machine_id, s.agent, s.session_id].join(' / '), `${s.publication_id} / ${s.sequence}`,
     `${s.coverage?.discovery} / ${s.coverage?.enrichment} · missing: ${arr(s.coverage?.missing).join(', ') || 'none declared'}`,
     s.normalization, publicationTime(s.captured_at_ns), publicationTime(s.published_at_ns)])));
-  root.append(details('Import failures (empty does not prove complete capture)', r.failures, true));
+  root.append(details(`Import failures (showing ${arr(r.failures).length} of ${number(r.totals?.failures)}; empty does not prove complete capture)`, r.failures, true));
   root.append(details('Normalization observations', r.issue_counts, true));
   root.append(node('p', 'muted', 'Project is unknown unless explicitly projected; it is never guessed from a filename. One trace is one effective source hash and epoch. Overlapping epochs are not merged. Opaque artifacts are not transcript line views.'));
   root.append(button('Explore sources / epochs →', () => switchTab('trace')));
@@ -375,7 +377,7 @@ function readHash() {
   state.trace = p.get('trace'); state.line = /^\d+$/.test(p.get('line') || '') ? Number(p.get('line')) : null; state.traceOffset = 0; state.query = ''; state.role = ''; switchTab('trace');
 }
 function populateFilters() {
-  [['#agent-filter', 'agent', state.report.source === 'publications' ? arr(state.report.sessions).map(s => s.agent) : arr(state.report.agents).map(a => a.agent), 'All agents'], ['#project-filter', 'project', arr(state.report.projects).map(p => p.project), 'All projects']].forEach(([selector, key, values, label]) => {
+  [['#agent-filter', 'agent', arr(state.report.agents).map(a => a.agent), 'All agents'], ['#project-filter', 'project', arr(state.report.projects).map(p => p.project), 'All projects']].forEach(([selector, key, values, label]) => {
     const select = $(selector); select.replaceChildren(); const all = node('option', '', label); all.value = ''; select.append(all);
     const unique = [...new Set([...values, state[key]].filter(Boolean))].sort(); unique.forEach(v => { const o = node('option', '', v); o.value = v; select.append(o); }); select.value = state[key];
   });

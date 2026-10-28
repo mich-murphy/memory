@@ -50,6 +50,39 @@ class PublicationsTests(unittest.TestCase):
         with duckdb.connect(str(self.db), read_only=True) as db:
             return db.execute(sql).fetchall()
 
+    def test_summary_exact_totals_bounded_detail_and_offline_exhaustive(self):
+        self.fixture()
+        publications.import_export(self.export, self.db)
+        # SQL expansion is intentionally synthetic: no repeated capture/import setup.
+        with duckdb.connect(str(self.db)) as db:
+            db.execute('''INSERT INTO sessions SELECT sessions.* REPLACE
+                ('bulk-'||i::VARCHAR AS session_key, 'bulk-'||i::VARCHAR AS session_id)
+                FROM sessions, range(240) t(i) WHERE session_id='session' ''')
+            db.execute('''INSERT INTO sources SELECT sources.* REPLACE
+                ('bulk-'||i::VARCHAR AS session_key, trace_id||'-'||i::VARCHAR AS trace_id)
+                FROM sources, range(240) t(i)''')
+            db.execute('''INSERT INTO failures(session_key,archive_id,machine_id,agent,
+                session_id,publication_id,sequence,failed_at_ns,reason,attempts)
+                SELECT 'bulk-'||i::VARCHAR,'archive','machine','claude',
+                    'bulk-'||i::VARCHAR,'p2',2,10,'import_failed',1 FROM range(90) t(i)''')
+        full = publications.report(self.db, now_ns=1000)
+        summary = publications.report(self.db, now_ns=1000, summary=True)
+        self.assertEqual((len(full['sessions']), len(full['sources']), len(full['failures'])), (241, 241, 90))
+        self.assertEqual(summary['totals'], dict(sessions=241, sources=241, failures=90))
+        self.assertEqual(summary['detail_limit'], 50)
+        self.assertEqual((len(summary['sessions']), len(summary['sources']), len(summary['failures'])), (50, 0, 50))
+        self.assertEqual(summary['agents'], [dict(agent='claude', sessions=241)])
+        self.assertEqual(summary['freshness'], full['freshness'])
+        self.assertEqual(summary['source_counts'], full['source_counts'])
+        self.assertEqual(summary['event_counts'], full['event_counts'])
+        self.assertEqual(summary['issue_counts'], full['issue_counts'])
+        self.assertEqual(summary['source_roles'], full['source_roles'])
+        self.assertEqual([s['session_key'] for s in summary['sessions']],
+                         [s['session_key'] for s in full['sessions'][:50]])
+        self.assertEqual([f['session_key'] for f in summary['failures']],
+                         [f['session_key'] for f in full['failures'][:50]])
+        self.assertEqual(summary['sessions'], full['sessions'][:50], 'failed row staleness remains exact')
+
     def test_wire_nil_arrays_are_legal_not_unsupported_empty(self):
         data = self.fixture()
         data['manifest']['coverage']['missing'] = None

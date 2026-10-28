@@ -136,7 +136,7 @@ class PublicationDashboard:
 
     def report(self):
         with projection_access.access(self.database):
-            result = publications.report(self.database)
+            result = publications.report(self.database, summary=True)
         result['refresh_health'] = self.refresh_health()
         result.update(dashboard_wired=True, source='publications',
                       review_status='unavailable: legacy research is archive-separated',

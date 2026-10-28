@@ -61,6 +61,30 @@ class PublicationDashboardTests(unittest.TestCase):
         self.thread.start()
         self.addCleanup(self.stop_server)
 
+    def test_http_report_is_bounded_without_losing_exact_projection_totals(self):
+        import duckdb
+        with duckdb.connect(str(self.database)) as db:
+            db.execute('''INSERT INTO sessions SELECT sessions.* REPLACE
+                ('bulk-'||i::VARCHAR AS session_key, 'bulk-'||i::VARCHAR AS session_id)
+                FROM sessions,range(180) t(i) WHERE session_id='session' ''')
+            db.execute('''INSERT INTO failures(session_key,archive_id,machine_id,agent,
+                session_id,publication_id,sequence,failed_at_ns,reason,attempts)
+                SELECT 'bulk-'||i::VARCHAR,'archive','machine','claude',
+                    'bulk-'||i::VARCHAR,'p2',2,10,'import_failed',1 FROM range(80) t(i)''')
+        r = self.adapter.report()
+        self.assertEqual(r['totals'], dict(sessions=181, sources=4, failures=80))
+        self.assertEqual((len(r['sessions']), len(r['failures']), len(r['sources'])), (50, 50, 0))
+        self.assertEqual(r['agents'], [dict(agent='claude', sessions=181)])
+        self.assertTrue(any(s['stale'] for s in r['sessions']))
+        connection = http.client.HTTPConnection('127.0.0.1', self.server.server_port)
+        self.addCleanup(connection.close)
+        connection.request('GET', '/api/report')
+        response = connection.getresponse()
+        self.assertEqual(response.status, 200)
+        payload = json.loads(response.read())
+        self.assertEqual(payload['totals'], r['totals'])
+        self.assertEqual(len(payload['sessions']), 50)
+
     def test_refresh_health_is_independent_readonly_and_never_green_when_missing(self):
         import contextlib
         import time
