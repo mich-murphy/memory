@@ -160,8 +160,8 @@ def open_status(path):
     db.execute('PRAGMA synchronous=FULL')
     db.execute('CREATE TABLE IF NOT EXISTS binding(version INTEGER, configuration_id TEXT)')
     if db.execute('SELECT version FROM binding').fetchone() is None:
-        db.execute('INSERT INTO binding VALUES (3,NULL)')
-    if db.execute('SELECT version FROM binding').fetchall() != [(3,)]:
+        db.execute('INSERT INTO binding VALUES (4,NULL)')
+    if db.execute('SELECT version FROM binding').fetchall() not in ([(3,)], [(4,)]):
         db.close()
         raise RefreshFailure('status_contract')
     db.execute('''CREATE TABLE IF NOT EXISTS expected_endpoints(name TEXT PRIMARY KEY,
@@ -171,10 +171,28 @@ def open_status(path):
     db.execute('''CREATE TABLE IF NOT EXISTS targets(endpoint TEXT, identity TEXT,
         sequence INTEGER, publication_id TEXT, imported_sequence INTEGER,
         imported_publication TEXT, imported_ns INTEGER, error TEXT,
+        fingerprint TEXT NOT NULL DEFAULT '', imported_fingerprint TEXT NOT NULL DEFAULT '',
         PRIMARY KEY(endpoint,identity))''')
     db.execute('''CREATE TABLE IF NOT EXISTS head_failures(endpoint TEXT, identity TEXT,
         reason TEXT NOT NULL, attempts INTEGER NOT NULL, first_observed_ns INTEGER NOT NULL,
-        last_observed_ns INTEGER NOT NULL, PRIMARY KEY(endpoint,identity))''')
+        last_observed_ns INTEGER NOT NULL, fingerprint TEXT NOT NULL DEFAULT '', PRIMARY KEY(endpoint,identity))''')
+    # v3 lacked target ownership. Preserve its rows but do not qualify them until
+    # rediscovery under the current endpoint fingerprint.
+    if db.execute('SELECT version FROM binding').fetchone() == (3,):
+        # sqlite3's context manager does not start a transaction for DDL.
+        # Begin explicitly so interruption cannot leave v3 with half-added columns.
+        db.execute('BEGIN IMMEDIATE')
+        try:
+            db.execute("ALTER TABLE targets ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''")
+            db.execute("ALTER TABLE targets ADD COLUMN imported_fingerprint TEXT NOT NULL DEFAULT ''")
+            db.execute("ALTER TABLE head_failures ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''")
+            db.execute('UPDATE endpoints SET completed_ns=NULL')
+            db.execute('UPDATE binding SET version=4')
+            db.commit()
+        except BaseException:
+            db.rollback()
+            db.close()
+            raise
     db.commit()
     return db
 
@@ -203,23 +221,32 @@ def bind_endpoints(status, endpoints):
         status.execute('UPDATE binding SET configuration_id=?', (configuration,))
 
 
+def summary(db):
+    """Active-binding target scope shared by CLI and dashboard."""
+    targets = db.execute('''SELECT count(*),
+        sum(t.fingerprint='' OR t.imported_fingerprint!=t.fingerprint OR t.imported_sequence IS NULL
+            OR t.imported_sequence<t.sequence),sum(t.error IS NOT NULL)
+        FROM targets t JOIN expected_endpoints x ON x.name=t.endpoint
+            AND x.active=1 AND (x.fingerprint=t.fingerprint OR t.fingerprint='')''').fetchone()
+    discovery_errors = db.execute('''SELECT count(*) FROM head_failures f
+        JOIN expected_endpoints x ON x.name=f.endpoint AND (x.fingerprint=f.fingerprint OR f.fingerprint='') WHERE x.active=1''').fetchone()[0]
+    expected_targets = db.execute('''SELECT count(*) FROM (
+        SELECT t.endpoint,t.identity FROM targets t JOIN expected_endpoints x
+            ON x.name=t.endpoint AND x.active=1 AND (x.fingerprint=t.fingerprint OR t.fingerprint='')
+        UNION SELECT f.endpoint,f.identity FROM head_failures f
+            JOIN expected_endpoints x ON x.name=f.endpoint AND (x.fingerprint=f.fingerprint OR f.fingerprint='') WHERE x.active=1)''').fetchone()[0]
+    return dict(expected_targets=expected_targets, unimported=targets[1] or 0,
+                target_errors=targets[2] or 0, discovery_errors=discovery_errors)
+
+
 def report(db):
     endpoints = db.execute('''SELECT count(*),sum(error IS NOT NULL),sum(completed_ns IS NULL)
         FROM expected_endpoints x LEFT JOIN endpoints e USING(name) WHERE active=1''').fetchone()
-    targets = db.execute('''SELECT count(*),sum(imported_sequence IS NULL OR imported_sequence<sequence),
-        sum(error IS NOT NULL) FROM targets''').fetchone()
-    discovery_errors = db.execute('''SELECT count(*) FROM head_failures f
-        JOIN expected_endpoints x ON x.name=f.endpoint WHERE x.active=1''').fetchone()[0]
-    expected_targets = db.execute('''SELECT count(*) FROM (SELECT endpoint,identity FROM targets
-        UNION SELECT f.endpoint,f.identity FROM head_failures f
-        JOIN expected_endpoints x ON x.name=f.endpoint WHERE x.active=1)''').fetchone()[0]
     return {'contract': 'session-publication-refresh-status/v1',
             'endpoints': endpoints[0], 'endpoint_errors': endpoints[1] or 0,
             'incomplete_endpoints': endpoints[2] or 0,
             'omitted_endpoints': db.execute('SELECT count(*) FROM expected_endpoints WHERE active=0').fetchone()[0],
-            'expected_targets': expected_targets, 'unimported': targets[1] or 0,
-            'discovery_errors': discovery_errors,
-            'target_errors': targets[2] or 0,
+            **summary(db),
             'endpoint_health': [dict(zip(('name', 'attempted_ns', 'completed_ns', 'error'), row))
                 for row in db.execute('''SELECT name,attempted_ns,completed_ns,error FROM expected_endpoints x
                     LEFT JOIN endpoints e USING(name) WHERE active=1 ORDER BY name''')]}
@@ -256,12 +283,14 @@ def sweep(endpoints, database, status, *, timeout=300, max_bytes=256 * 1024 * 10
                         # Persist failed coordinates before importing healthy siblings.
                         # A new sweep/empty page cannot erase a known unreadable current.
                         with status:
+                            fingerprint = status.execute('SELECT fingerprint FROM expected_endpoints WHERE name=?', (name,)).fetchone()[0]
                             for failure, key in failures:
                                 now = time.time_ns()
-                                status.execute("""INSERT INTO head_failures VALUES (?,?,?,1,?,?)
+                                status.execute("""INSERT INTO head_failures VALUES (?,?,?,1,?,?,?)
                                     ON CONFLICT(endpoint,identity) DO UPDATE SET reason=excluded.reason,
-                                    attempts=head_failures.attempts+1,last_observed_ns=excluded.last_observed_ns""",
-                                    (name, key, failure['reason'], now, now))
+                                    attempts=head_failures.attempts+1,last_observed_ns=excluded.last_observed_ns,
+                                    fingerprint=excluded.fingerprint""",
+                                    (name, key, failure['reason'], now, now, fingerprint))
                         for head, key in heads:
                             _target(status, endpoint, head, key, database, root, timeout, max_bytes)
                     except (KeyError, TypeError, ValueError) as exc:
@@ -275,6 +304,15 @@ def sweep(endpoints, database, status, *, timeout=300, max_bytes=256 * 1024 * 10
                     cursors.add(cursor)
                 else:
                     raise RefreshFailure('sweep_page_limit')
+            if endpoint.get('discovery', 'queue') == 'remote-current':
+                # Only completed current-root enumeration proves absence. Unreadable
+                # heads are in seen; partial/queue sweeps never infer disappearance.
+                fingerprint = status.execute('SELECT fingerprint FROM expected_endpoints WHERE name=?', (name,)).fetchone()[0]
+                for (key,) in status.execute('SELECT identity FROM targets WHERE endpoint=? AND fingerprint=?',
+                                             (name, fingerprint)):
+                    if key not in seen:
+                        status.execute('UPDATE targets SET error=? WHERE endpoint=? AND identity=?',
+                                       ('current_missing', name, key))
             status.execute('UPDATE endpoints SET completed_ns=?,error=NULL WHERE name=?', (time.time_ns(), name))
         except Exception as exc:
             code = str(exc) if isinstance(exc, RefreshFailure) else 'enumeration_failed'
@@ -387,24 +425,27 @@ def _projection_coordinate_locked(database, head, prior):
 
 def _target(status, endpoint, head, key, database, root, timeout, max_bytes):
     name = endpoint['name']
-    old = status.execute('SELECT sequence,publication_id FROM targets WHERE endpoint=? AND identity=?',
+    fingerprint = status.execute('SELECT fingerprint FROM expected_endpoints WHERE name=?', (name,)).fetchone()[0]
+    old = status.execute('SELECT sequence,publication_id,fingerprint FROM targets WHERE endpoint=? AND identity=?',
                          (name, key)).fetchone()
-    if old and (head['sequence'] < old[0] or
+    if old and old[2] == fingerprint and (head['sequence'] < old[0] or
                 (head['sequence'] == old[0] and head['publication_id'] != old[1])):
         status.execute('UPDATE targets SET error=? WHERE endpoint=? AND identity=?', ('head_regression', name, key))
         status.commit()
         return
-    status.execute('''INSERT INTO targets(endpoint,identity,sequence,publication_id) VALUES (?,?,?,?)
-        ON CONFLICT(endpoint,identity) DO UPDATE SET sequence=excluded.sequence,publication_id=excluded.publication_id''',
-                   (name, key, head['sequence'], head['publication_id']))
+    status.execute('''INSERT INTO targets(endpoint,identity,sequence,publication_id,fingerprint)
+        VALUES (?,?,?,?,?) ON CONFLICT(endpoint,identity) DO UPDATE SET
+        sequence=excluded.sequence,publication_id=excluded.publication_id,
+        fingerprint=excluded.fingerprint,error=NULL''',
+                   (name, key, head['sequence'], head['publication_id'], fingerprint))
     status.execute('DELETE FROM head_failures WHERE endpoint=? AND identity=?', (name, key))
     status.commit()
     prior = status.execute('SELECT imported_sequence,imported_publication FROM targets WHERE endpoint=? AND identity=?',
                            (name, key)).fetchone()
     healthy = _projection_coordinate(database, head, prior)
     if healthy is not None:
-        status.execute('UPDATE targets SET imported_sequence=?,imported_publication=?,imported_ns=?,error=NULL WHERE endpoint=? AND identity=?',
-                       (*healthy, name, key))
+        status.execute('UPDATE targets SET imported_sequence=?,imported_publication=?,imported_ns=?,imported_fingerprint=?,error=NULL WHERE endpoint=? AND identity=?',
+                       (*healthy, fingerprint, name, key))
         status.commit()
         return
     try:
@@ -421,8 +462,8 @@ def _target(status, endpoint, head, key, database, root, timeout, max_bytes):
             # Importer idempotence preserves projection freshness; reflect that
             # actual timestamp rather than treating validation as new capture.
             imported_ns = _imported_time(database, head['identity'])
-            status.execute('''UPDATE targets SET imported_sequence=?,imported_publication=?,imported_ns=?,error=NULL
-                WHERE endpoint=? AND identity=?''', (manifest['sequence'], manifest['publication_id'], imported_ns, name, key))
+            status.execute('''UPDATE targets SET imported_sequence=?,imported_publication=?,imported_ns=?,imported_fingerprint=?,error=NULL
+                WHERE endpoint=? AND identity=?''', (manifest['sequence'], manifest['publication_id'], imported_ns, fingerprint, name, key))
     except Exception as exc:
         code = str(exc) if isinstance(exc, (RefreshFailure, projection_access.ProjectionBusy)) else 'import_failed'
         status.execute('UPDATE targets SET error=? WHERE endpoint=? AND identity=?', (code, name, key))

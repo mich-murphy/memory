@@ -86,6 +86,83 @@ class RefreshTests(unittest.TestCase):
         self.heads['Mac'].insert(0, self.head('Mac', '0'))
         self.assertEqual(self.sweep()['expected_targets'], 5)
 
+    def test_remote_current_missing_only_after_complete_and_reappears_after_restart(self):
+        self.endpoints[0]['discovery'] = 'remote-current'
+        self.assertEqual(self.sweep()['expected_targets'], 4)
+        prior = self.status.execute("SELECT imported_sequence,imported_ns FROM targets WHERE endpoint='Mac' ORDER BY identity").fetchall()
+        self.heads['Mac'] = [self.head('Mac', 'b')]
+        # A valid first page followed by transport failure cannot prove absence.
+        partial = json.dumps(dict(contract='session-publication-heads/v1', archive_id='archive',
+                                  heads=self.heads['Mac'], next_cursor='b', complete=False)).encode()
+        with patch.object(refresh, 'export', side_effect=self.exporter), \
+             patch.object(refresh.publications, '_load', side_effect=self.loader), \
+             patch.object(refresh.publications, 'import_export', side_effect=self.importer), \
+             patch.object(refresh, '_imported_time', return_value=123), \
+             patch.object(refresh, 'run', side_effect=[partial, refresh.RefreshFailure('process_failed'),
+                                                       json.dumps(dict(contract='session-publication-heads/v1',
+                                                           archive_id='archive', heads=self.heads['BC01'],
+                                                           next_cursor='', complete=True)).encode()]):
+            self.assertEqual(refresh.sweep(self.endpoints, self.database, self.status)['endpoint_errors'], 1)
+        self.assertEqual(self.status.execute("SELECT count(*) FROM targets WHERE error='current_missing'").fetchone(), (0,))
+        result = self.sweep()
+        self.assertEqual((result['target_errors'], result['expected_targets']), (1, 4))
+        self.assertEqual(prior, self.status.execute("SELECT imported_sequence,imported_ns FROM targets WHERE endpoint='Mac' ORDER BY identity").fetchall())
+        self.status.close()
+        self.status = refresh.open_status(self.root / 'status.sqlite')
+        self.addCleanup(self.status.close)
+        self.assertEqual(refresh.report(self.status)['target_errors'], 1)
+        self.heads['Mac'].insert(0, self.head('Mac', 'a'))
+        self.assertEqual(self.sweep()['target_errors'], 0)
+        self.assertEqual(prior, self.status.execute("SELECT imported_sequence,imported_ns FROM targets WHERE endpoint='Mac' ORDER BY identity").fetchall())
+
+    def test_queue_empty_does_not_infer_absence(self):
+        self.sweep()
+        self.heads['Mac'] = []
+        self.assertEqual(self.sweep()['target_errors'], 0)
+
+    def test_removed_readded_and_same_name_repoint_excludes_old_binding(self):
+        self.sweep()
+        self.status.execute("UPDATE targets SET error='import_failed' WHERE endpoint='Mac'")
+        self.status.commit()
+        refresh.bind_endpoints(self.status, self.endpoints[1:])
+        self.assertEqual((refresh.report(self.status)['expected_targets'], refresh.report(self.status)['target_errors']), (2, 0))
+        self.status.close()
+        self.status = refresh.open_status(self.root / 'status.sqlite')
+        self.addCleanup(self.status.close)
+        refresh.bind_endpoints(self.status, self.endpoints)
+        self.assertEqual(refresh.report(self.status)['target_errors'], 2)
+        self.endpoints[0]['config'] = '/private/repointed'
+        refresh.bind_endpoints(self.status, self.endpoints)
+        self.assertEqual((refresh.report(self.status)['expected_targets'], refresh.report(self.status)['target_errors']), (2, 0))
+        self.assertEqual(self.status.execute("SELECT count(*) FROM targets WHERE endpoint='Mac' AND error='import_failed'").fetchone(), (2,))
+        self.heads['Mac'] = []
+        self.assertEqual(self.sweep()['expected_targets'], 2)
+        self.heads['Mac'] = [self.head('Mac', 'a')]
+        self.assertEqual(self.sweep()['expected_targets'], 3)
+        self.assertEqual(self.status.execute("SELECT imported_sequence FROM targets WHERE endpoint='Mac' ORDER BY identity").fetchall(), [(1,), (1,)])
+        self.assertEqual(self.status.execute("SELECT count(*) FROM targets WHERE endpoint='Mac'").fetchone(), (2,))
+
+    def test_v3_upgrade_preserves_unqualified_expectations_and_failure(self):
+        self.sweep()
+        refresh.bind_endpoints(self.status, self.endpoints)
+        key = json.dumps(self.head('Mac', 'a')['identity'], sort_keys=True)
+        if 'fingerprint' in [row[1] for row in self.status.execute('PRAGMA table_info(targets)')]:
+            self.status.execute('ALTER TABLE targets DROP COLUMN fingerprint')
+            self.status.execute('ALTER TABLE targets DROP COLUMN imported_fingerprint')
+            self.status.execute('ALTER TABLE head_failures DROP COLUMN fingerprint')
+        self.status.execute("INSERT INTO head_failures VALUES ('Mac',?,'current-unreadable',1,1,1)", (key,))
+        self.status.execute('UPDATE binding SET version=3')
+        self.status.commit()
+        self.status.close()
+        self.status = refresh.open_status(self.root / 'status.sqlite')
+        self.addCleanup(self.status.close)
+        self.assertEqual(self.status.execute('SELECT version FROM binding').fetchone(), (4,))
+        self.assertEqual(self.status.execute('SELECT count(*) FROM targets').fetchone(), (4,))
+        self.assertEqual((refresh.report(self.status)['unimported'], refresh.report(self.status)['discovery_errors']), (4, 1))
+        self.assertEqual(refresh.report(self.status)['incomplete_endpoints'], 2)
+        self.assertEqual(self.sweep()['unimported'], 0)
+        self.assertEqual(refresh.report(self.status)['discovery_errors'], 0)
+
     def test_healthy_actual_projection_skips_reader_without_advancing_freshness(self):
         self.sweep()
         self.imports.clear()
@@ -252,6 +329,38 @@ class RefreshTests(unittest.TestCase):
                 with contextlib.closing(sqlite3.connect(path)) as old:
                     self.assertEqual(old.execute('SELECT version FROM binding').fetchall(), [(version,)])
                     self.assertEqual(old.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall(), [('binding',)])
+
+    def test_v3_upgrade_interruption_rolls_back_all_ddl_and_completion(self):
+        import contextlib
+        import sqlite3
+        path = self.root / 'interrupted.sqlite'
+        with contextlib.closing(refresh.open_status(path)) as status:
+            refresh.bind_endpoints(status, self.endpoints[:1])
+            status.execute("UPDATE endpoints SET completed_ns=123 WHERE name='Mac'")
+            status.execute('ALTER TABLE targets DROP COLUMN fingerprint')
+            status.execute('ALTER TABLE targets DROP COLUMN imported_fingerprint')
+            status.execute('ALTER TABLE head_failures DROP COLUMN fingerprint')
+            status.execute('UPDATE binding SET version=3')
+            status.commit()
+        original = sqlite3.connect
+
+        class Interrupt(sqlite3.Connection):
+            def execute(self, sql, *args, **kwargs):
+                if sql.startswith('ALTER TABLE head_failures'):
+                    raise RuntimeError('injected upgrade interruption')
+                return super().execute(sql, *args, **kwargs)
+
+        with patch.object(refresh.sqlite3, 'connect',
+                          side_effect=lambda *args, **kwargs: original(*args, factory=Interrupt, **kwargs)):
+            with self.assertRaisesRegex(RuntimeError, 'injected upgrade interruption'):
+                refresh.open_status(path)
+        with contextlib.closing(original(path)) as status:
+            self.assertEqual(status.execute('SELECT version FROM binding').fetchone(), (3,))
+            self.assertEqual(status.execute("SELECT completed_ns FROM endpoints WHERE name='Mac'").fetchone(), (123,))
+            self.assertNotIn('fingerprint', [row[1] for row in status.execute('PRAGMA table_info(targets)')])
+        with contextlib.closing(refresh.open_status(path)) as status:
+            self.assertEqual(status.execute('SELECT version FROM binding').fetchone(), (4,))
+            self.assertEqual(status.execute("SELECT completed_ns FROM endpoints WHERE name='Mac'").fetchone(), (None,))
 
     def test_export_monitor_tolerates_atomic_metadata_rename_between_walk_and_stat(self):
         import subprocess

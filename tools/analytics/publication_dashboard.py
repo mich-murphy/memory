@@ -14,6 +14,7 @@ import time
 import duckdb
 import publications
 import projection_access
+import publication_refresh
 
 
 MAX_RAW = 1024 * 1024
@@ -84,7 +85,7 @@ class PublicationDashboard:
                     status.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
                     status.execute('PRAGMA query_only=ON')
                     status.execute('BEGIN')
-                    if status.execute('SELECT version FROM binding').fetchall() != [(3,)]:
+                    if status.execute('SELECT version FROM binding').fetchall() != [(4,)]:
                         return result
                     binding = status.execute('SELECT configuration_id FROM binding').fetchall()
                     expected = status.execute('SELECT name,fingerprint FROM expected_endpoints WHERE active=1 ORDER BY name LIMIT 17').fetchall()
@@ -97,13 +98,7 @@ class PublicationDashboard:
                     omitted = status.execute('SELECT count(*) FROM expected_endpoints WHERE active=0').fetchone()[0]
                     unknown = status.execute('''SELECT count(*) FROM endpoints e WHERE NOT EXISTS
                         (SELECT 1 FROM expected_endpoints x WHERE x.name=e.name)''').fetchone()[0]
-                    targets = status.execute('''SELECT count(*),sum(imported_sequence IS NULL OR imported_sequence<sequence),
-                        sum(error IS NOT NULL) FROM targets''').fetchone()
-                    discovery_errors = status.execute("""SELECT count(*) FROM head_failures f
-                        JOIN expected_endpoints x ON x.name=f.endpoint WHERE x.active=1""").fetchone()[0]
-                    expected_targets = status.execute("""SELECT count(*) FROM (SELECT endpoint,identity FROM targets
-                        UNION SELECT f.endpoint,f.identity FROM head_failures f
-                        JOIN expected_endpoints x ON x.name=f.endpoint WHERE x.active=1)""").fetchone()[0]
+                    counts = publication_refresh.summary(status)
                     after = self.refresh_status.stat(follow_symlinks=False)
                     if (after.st_dev, after.st_ino) != (info.st_dev, info.st_ino):
                         return result
@@ -111,14 +106,14 @@ class PublicationDashboard:
             stale = not endpoints or any(row[2] is None or now-row[2] > self.refresh_stale_seconds*10**9 for row in endpoints)
             errors = sum(row[3] is not None for row in endpoints)
             completed = min((row[2] for row in endpoints if row[2] is not None), default=None)
-            result.update(mode='configured', endpoint_errors=errors, expected_targets=expected_targets,
-                          discovery_errors=discovery_errors,
-                          unimported=targets[1] or 0, target_errors=targets[2] or 0,
+            result.update(mode='configured', endpoint_errors=errors, expected_targets=counts['expected_targets'],
+                          discovery_errors=counts['discovery_errors'],
+                          unimported=counts['unimported'], target_errors=counts['target_errors'],
                           last_completed_sweep_ns=completed, stale=stale,
                           expected_endpoints=len(expected), omitted_endpoints=omitted,
                           incomplete_endpoints=sum(row[2] is None for row in endpoints),
                           endpoint_scope='configured endpoints only; omitted endpoints are not covered',
-                          healthy=bool(endpoints) and len(endpoints)<=16 and not (unknown or stale or errors or targets[1] or targets[2] or discovery_errors))
+                          healthy=bool(endpoints) and len(endpoints)<=16 and not (unknown or stale or errors or counts['unimported'] or counts['target_errors'] or counts['discovery_errors']))
         except (OSError, sqlite3.Error, ValueError):
             pass
         return result

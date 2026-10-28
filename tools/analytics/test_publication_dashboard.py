@@ -99,6 +99,38 @@ class PublicationDashboardTests(unittest.TestCase):
                 self.assertTrue(health['stale'])
                 self.assertFalse(health['archive_coverage_claim'])
 
+    def test_refresh_health_matches_cli_active_binding_scope_after_repoint(self):
+        import contextlib
+        import publication_refresh as refresh
+        path = self.root / 'scope.sqlite'
+        adapter = PublicationDashboard(self.database, path)
+        mac = dict(name='Mac', binary='/reader', config='/private/mac')
+        bc = dict(name='BC', binary='/reader', config='/private/bc')
+        with contextlib.closing(refresh.open_status(path)) as status:
+            refresh.bind_endpoints(status, [mac, bc])
+            mac_fp = status.execute("SELECT fingerprint FROM expected_endpoints WHERE name='Mac'").fetchone()[0]
+            bc_fp = status.execute("SELECT fingerprint FROM expected_endpoints WHERE name='BC'").fetchone()[0]
+            if 'fingerprint' in [row[1] for row in status.execute('PRAGMA table_info(targets)')]:
+                status.execute("INSERT INTO targets(endpoint,identity,sequence,publication_id,error,fingerprint) "
+                               "VALUES ('Mac','a',1,'p','import_failed',?)", (mac_fp,))
+                status.execute("INSERT INTO targets(endpoint,identity,sequence,publication_id,imported_sequence,imported_fingerprint,fingerprint) "
+                               "VALUES ('BC','b',1,'p',1,?,?)", (bc_fp, bc_fp))
+            else:
+                status.execute("INSERT INTO targets(endpoint,identity,sequence,publication_id,error) "
+                               "VALUES ('Mac','a',1,'p','import_failed')")
+                status.execute("INSERT INTO targets(endpoint,identity,sequence,publication_id,imported_sequence) "
+                               "VALUES ('BC','b',1,'p',1)")
+            status.commit()
+            for configured, counts in (([bc], (1, 0, 0)),
+                                       ([mac, bc], (2, 1, 1)),
+                                       ([dict(mac, config='/private/new'), bc], (1, 0, 0))):
+                refresh.bind_endpoints(status, configured)
+                cli, health = refresh.report(status), adapter.refresh_health()
+                for field, value in zip(('expected_targets', 'unimported', 'target_errors'), counts):
+                    self.assertEqual(cli[field], value)
+                    self.assertEqual(health[field], value)
+                self.assertEqual(status.execute('SELECT count(*) FROM targets').fetchone(), (2,))
+
     def test_old_refresh_status_versions_are_unavailable_not_migrated(self):
         import contextlib
         import publication_refresh as refresh
