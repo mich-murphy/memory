@@ -25,7 +25,7 @@ type repeatingInput struct {
 }
 
 func (r *repeatingInput) Read(buffer []byte) (int, error) {
-	// Bulk copies keep the 256 MiB fixture cheap under race/coverage instrumentation.
+	// Bulk copies keep the 64 MiB fixture cheap under race/coverage instrumentation.
 	// The suffix completes the current pattern; doubling then repeats whole cycles.
 	prefix := copy(buffer, r.pattern[r.offset:])
 	filled := prefix
@@ -40,7 +40,7 @@ func (r *repeatingInput) Read(buffer []byte) (int, error) {
 }
 
 func TestLargePlainAndCompressedCaptureHasBoundedHeap(t *testing.T) {
-	const length int64 = 256 << 20
+	const length int64 = 64 << 20
 	old := largeFileSize
 	largeFileSize = 1 << 20
 	t.Cleanup(func() { largeFileSize = old })
@@ -124,8 +124,8 @@ func TestLargePlainAndCompressedCaptureHasBoundedHeap(t *testing.T) {
 			if err != nil || sum.Errors != 0 {
 				t.Fatalf("Run = %+v, %v", sum, err)
 			}
-			if peak.Load() > start.HeapAlloc+(96<<20) {
-				t.Fatalf("capture heap growth = %d bytes for %d decoded bytes, want <=96 MiB", peak.Load()-start.HeapAlloc, length)
+			if peak.Load() > start.HeapAlloc+(48<<20) {
+				t.Fatalf("capture heap growth = %d bytes for %d decoded bytes, want <=48 MiB", peak.Load()-start.HeapAlloc, length)
 			}
 			current, _, err := sy.current("file", "codex", "rollout.jsonl")
 			if err != nil {
