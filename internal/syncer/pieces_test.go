@@ -123,6 +123,7 @@ func TestAppendBoundaryFoldRetainsBaseAndEveryHistoricalVersion(t *testing.T) {
 }
 
 func TestFoldKeepsLargeEarlierPiecesAndRecompressesOnlyTheSmallTail(t *testing.T) {
+	SetMaxSegments(t, 8) // the fold rule is count-independent; the real 64 is covered by the boundary test
 	f := newPieceFixture(t, "transcript.jsonl", adapters.RoleAux)
 	body := []byte("base\n")
 	f.run(t, body)
@@ -175,15 +176,16 @@ func TestFoldFromMergesComparablePiecesButNeverTheBase(t *testing.T) {
 }
 
 func TestContinuousGrowthFoldsAcknowledgedParentBeforeAppending(t *testing.T) {
+	SetMaxSegments(t, 8)
 	f := newPieceFixture(t, "file", adapters.RoleAux)
 	body := []byte("base")
 	first, _ := f.run(t, body)
 	folds := 0
-	for i := 1; i <= 130; i++ {
+	for i := 1; i <= 2*maxSegments+2; i++ {
 		body = append(body, byte(i))
 		p, sum := f.run(t, body)
 		folds += sum.Folded
-		if p.File.Kind != "append" || sum.Segments != 1 || len(p.File.Pieces) > 64 || p.File.Pieces[0] != first.File.Pieces[0] {
+		if p.File.Kind != "append" || sum.Segments != 1 || len(p.File.Pieces) > maxSegments || p.File.Pieces[0] != first.File.Pieces[0] {
 			t.Fatalf("growth %d = %+v, %+v", i, p.File, sum)
 		}
 		if sum.Folded > 0 {
@@ -402,7 +404,7 @@ func TestFoldTransitionMustRetainAPrefixAndMergeTheRest(t *testing.T) {
 	}
 	for name, p := range map[string]*publication{
 		"noBase":     fold(0, 0),
-		"noMerge":    fold(maxSegments-1, maxSegments-1),
+		"noMerge":    fold(maxSegments-1, int64(maxSegments-1)),
 		"gap":        fold(3, 4),
 		"changedKey": fold(3, 3),
 	} {

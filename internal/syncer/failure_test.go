@@ -244,6 +244,8 @@ func TestLostAppendAnswersNeverRequireRemoteDeletion(t *testing.T) {
 }
 
 func TestAFoldWhoseAnswerWasLostRemainsReadableAfterAnotherAppend(t *testing.T) {
+	const segments = 8 // lowered fold boundary; the real 64 is covered by the boundary test
+	syncer.SetMaxSegments(t, segments)
 	e := testenv.New(t)
 	local := store.NewLocal(e.Bucket)
 	sweep(t, local)
@@ -252,7 +254,7 @@ func TestAFoldWhoseAnswerWasLostRemainsReadableAfterAnotherAppend(t *testing.T) 
 	testenv.Append(t, path, testenv.JSONL(t, map[string]any{"type": "user", "message": "more"}))
 	testenv.Backdate(t, path, 2*time.Minute)
 	sweep(t, local)
-	appendArchivePieces(t, path, 62)
+	appendArchivePieces(t, path, segments-2)
 	faults := &flakyStore{Store: local, lost: []string{key + "commits/", "v3/blobs/zstd/"}}
 	sweep(t, faults)
 	faults.assertFired(t)

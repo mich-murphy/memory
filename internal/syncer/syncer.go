@@ -31,12 +31,13 @@ var (
 	snapshotRecheck       = 600 * time.Second
 	largeFileSize   int64 = 64 << 20
 	chunkSize       int64 = 1 << 20
+	// maxSegments is a var only so in-package tests can lower the fold boundary; production never writes it.
+	maxSegments = 64
 )
 
 const (
 	inSessionWindow   = 900 * time.Second
 	partialLineWindow = 60 * time.Second
-	maxSegments       = 64
 	recopyAfter       = time.Hour
 	uploadWorkers     = 8
 	maxHeldSize       = 128 << 20
