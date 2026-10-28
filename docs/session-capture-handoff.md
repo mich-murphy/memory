@@ -592,8 +592,31 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   remain (max 378), draining at about 7–9 publications per minute. No retry-cost problem was
   observed, so resumable upload progress is not pursued.
 
+- **Load episode after the `88451ad` install, and W28 `8ec8282`, accepted.** From about 11:50
+  AEDT, unrelated host work (other agents' `syncer.test` runs and a `turbo`/`bun` build) pushed
+  load to 30–79 with heavy disk I/O. Delivery steps then ran past the 60s operation deadline
+  (stderr gained 8 `step skipped, will retry: context deadline exceeded` lines, and
+  `step_errors` rose). There was no pause and no quarantine, and publishing continued at a
+  reduced rate. One job was recorded `integrity-error` while its siblings recorded `timeout`.
+  Cause: in `Queue.verify`, the decode `io.Copy` reads through `contextReader`, but any copy
+  error was returned as `ErrIntegrity: decode` with the cause dropped. `classify` tests
+  `ErrIntegrity` before `DeadlineExceeded`, so a timeout was labelled integrity, and a
+  shutdown during decode spent an attempt (it defeated W20's pure-cancellation check). Fix:
+  when `ctx.Err() != nil` and the copy error is that context error, `verify` returns it
+  unwrapped; every other decode failure still returns `ErrIntegrity`. Tests in
+  `verify_ctx_test.go`: a context end during decode is not integrity (cancel and deadline;
+  deadline classifies `timeout`); corrupt payloads with a live context stay integrity
+  (encoded hash, decoded hash/size, corrupt zstd); end to end, a shutdown during dependency
+  decode restores attempts with `last_error='shutdown'` and no quarantine. The first and third
+  fail without the fix. Existing tests unmodified; worker gates: lint 0, `-race` on
+  sessioncapture/publication/cli, capture-acceptance. Audit residual, not fixed:
+  `enrichment_result.go:49` can still label a DB deadline as integrity. Operational note: an
+  unindexed read-only scan of the 1.4 GB spool timed out under that I/O load; monitoring uses
+  small, indexed queries only.
+
 ### Next action
 
-Monitor (read-only) until the backlog drains, including the K=378 session. Then record
-steady-state CPU, the `usage()` scan cost and refresher freshness, and begin the 24–48h
-autonomous run (Mac on AC, no sleep) before BC-01 and R2 acceptance.
+W29 (sole verifier under `caffeinate`, explicit `ANALYTICS_PYTHON`, on AC with load checked
+before each gate) runs the aggregate gates on the W28 merge. If green: Mac install (SQLite
+backup-API copy if sidecars exist). Then monitor read-only until the backlog drains, including
+the K=378 session, and begin the 24–48h autonomous run before BC-01 and R2 acceptance.
