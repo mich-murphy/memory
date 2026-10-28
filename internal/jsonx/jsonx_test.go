@@ -81,6 +81,9 @@ func TestDecodeAndMap(t *testing.T) {
 	if _, ok := Map([]byte(`[1]`)); ok {
 		t.Error("Map accepted an array")
 	}
+	if m, ok := Map([]byte(`{"a": 1}`)); !ok || m["a"] == nil {
+		t.Errorf("Map = %v, %v", m, ok)
+	}
 }
 
 func FuzzParseObjectRoundTrip(f *testing.F) {

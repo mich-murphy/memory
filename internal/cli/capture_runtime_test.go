@@ -82,9 +82,15 @@ func TestRuntimeRunValidatesArchiveAndJoinsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { _, err := runCaptureRuntime(ctx, "run", []string{"--config", config}, o); done <- err }()
+	startup := time.Now().Add(5 * time.Second)
 	for {
 		if _, err := sessioncapture.ReadRuntime(t.Context(), c.Spool, c.ArchiveID, 0, 1); err == nil {
 			break
+		}
+		if time.Now().After(startup) {
+			cancel()
+			<-done
+			t.Fatal("runtime did not start")
 		}
 		select {
 		case err := <-done:
@@ -93,8 +99,13 @@ func TestRuntimeRunValidatesArchiveAndJoinsCancellation(t *testing.T) {
 		}
 	}
 	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runtime failed to join")
 	}
 }
 

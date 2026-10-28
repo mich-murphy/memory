@@ -91,16 +91,18 @@ func TestRuntimeRemoteInspectionAndReplayNeverRequireCredentials(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { _, err := runCaptureRuntime(ctx, "run", []string{"--config", config}, io); done <- err }()
 	t.Cleanup(cancel)
+	deadline := time.Now().Add(5 * time.Second)
 	for {
 		view, err := sessioncapture.ReadRuntime(t.Context(), c.Spool, c.ArchiveID, 0, 256)
 		if err == nil && len(view.Sources) > 0 && view.Sources[0].CapturedAtNS > 0 && view.Runtime.Paused {
 			break
 		}
-		select {
-		case err := <-done:
-			t.Fatalf("runtime exited before raw capture and paused delivery without credentials: %v", err)
-		case <-time.After(5 * time.Millisecond):
+		if time.Now().After(deadline) {
+			cancel()
+			<-done
+			t.Fatal("missing remote credentials blocked raw capture or failed to pause delivery")
 		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	cancel()
 	if err := <-done; err != nil {
