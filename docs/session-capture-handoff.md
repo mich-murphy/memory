@@ -694,6 +694,45 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   compact existing rows in place without changing result ids. Then replay the quota
   quarantines.
 
+- **W30 `8038411`, accepted: enrichment asset lists stored once.** New table
+  `enrichment_asset_lists` (id = digest of exact list bytes), charged to the `enrichment` budget.
+  A result row may hold a compact body in which `"Assets"` becomes `"assetlist:<id>"`. The result
+  id stays digest(original body), and load verifies both the list digest and the rebuilt body
+  digest (`ErrIntegrity` otherwise). Compaction only happens when the rebuild is byte-identical;
+  anything else stays inline. Legacy rows are compacted in `Queue.Open` (writer path only; the
+  `mode=ro` status readers never compact) in batches of 32, rows shrinking before the list insert
+  so a full budget cannot block it. Results are never deleted, so lists cannot be orphaned.
+  Projected live usage after compaction is about 8.5 MB of 128 MiB; this is not yet measured.
+  Gates run by the worker: lint, race `sessioncapture`/`cli`, `capture-acceptance`. Not yet installed.
+- **Test review (2026-10-28).** Three read-only audits (sessioncapture, legacy, remaining) found
+  little tautological code; the cost sat in a few oversized fixtures. A whole-repo race run
+  under load had `internal/syncer` FAIL at its 600s timeout (`/tmp/test-audit/race.json`).
+  Accepted changes, each mutation-checked so the reduced test still fails the regression it
+  guards:
+  - W32 (`b93744f`, `34de982`, `f49b4b7`), syncer: heap fixture 256 to 64 MiB with a 48 MiB
+    limit (measured 22–24 MB; `io.ReadAll` mutation fails it); `maxSegments` became an in-package
+    var (still 64) so three fold tests use 8, while `TestAppendBoundaryFold…` keeps the real 64;
+    three hermetic boundary matrices run `t.Parallel`. Solo race 337–368s, cover run 318s
+    (previously about 530–600s). `TestSimulatedSessions` (8 seeds × 40 steps) is unchanged.
+  - W33 (`c9280fe`, `4083af2`), sessioncapture: deleted the no-assertion
+    `TestMeasureDiscoveryChurn`; linearity tests K to {10,30} and {12,40} (the full-recheck
+    mutation exceeds 40×K at every K); one-mode Deliver in the negative-timestamp test; one
+    fixture per stage in the error-tree test; a test-only `Queue.discoveryLimit` (0 means
+    `MaxDiscoveryRecords`) for the backpressure test, while the metadata test still fills the
+    real 4096 and asserts the default. Package 188s to 135s; coverage 83.8% unchanged.
+  - W34 (`8098cb4`, `882dddc`, `e77eb8b`), cli: one shared instrumented isolation-fixture build
+    per test binary (about 20s to about 3s); the vacuous `Sleep(50ms)` cancel became a startup
+    poll. The parent rejected W34's removal of the 5s deadlines (that is widening to the 10m
+    binary timeout) and of the jsonx `Map` success assertion, and restored both.
+  - Kept on mutation evidence: the classifier pass-through loop and
+    `TestRuntimeQueueInventoryQuotaConfiguration` are each the only guard of their branch.
+- **Discovery freshness under load (observed 15:02–15:52).** While the test workers ran (5-min
+  load 9–35), every sweep had one batch hit the 60s operation budget, so `completed_generation`
+  stayed at 2605 for 50 minutes. It was visible (`sweep_error='timeout'`, stale `completed_at`)
+  and recovered at 15:52:16 once load fell. A normal batch takes about 50s for 1,365 entries
+  (about 36 ms per entry), so moderate load stalls freshness. This is a freshness risk, not
+  only idle CPU; measure where per-entry time goes before designing a fix.
+
 ### Next action
 
 Step 4 is installed and delivering, with the backlog drained (`463ddf3`). Next:
