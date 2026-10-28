@@ -562,9 +562,23 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   K=123 ≈10 s, K=378 ≈31 s, K=1000 ≈83 s (over the 60 s budget; no live session that large is
   pending, max K=378). Not yet installed.
 
+- **W27 gates on `2e6b3ec`, then parent fix `34a586f`: green.** W27: `make test`, analytics
+  97/97, `.mjs` 8/8 and fuzz all passed, but `make check` failed twice (first run on battery at
+  load 12–40, parent rerun at load ≈10). Both times `internal/syncer` hit the default 10m
+  `go test` timeout under `make cover` (600.9s, 600.7s); `TestSimulatedSessions` alone passed
+  3/3. Cause: W26's `TestFirstPublicationPolicyChecksAreLinear` at K=378. Its fixture makes K
+  sequential captures, each writing a K-sized manifest, so setup is O(K²): 83s under race, and
+  `sessioncapture` under cover went 173s → 407s, which competes with `syncer` for CPU. `34a586f`
+  limits that test to K=10/50/150 (13.5s; same counts, 32×K; bound and assertions unchanged; the
+  40×K bound already fails the old code at K=10). Parent `make check` on `34a586f`: exit 0 in
+  800s, cover 87.2%, 0/10 functions over CRAP 30, AC power, no sleep. Gates 2–4 were not rerun:
+  the production code is identical to `2e6b3ec`. **Risk:** `internal/syncer` (legacy) took 597.4s
+  against the 600s package timeout under cover. The timeout is not widened. Retiring legacy v3
+  (Step 5) removes this package; until then, a cover failure in `syncer` near 600s needs a load
+  and timing check before it is treated as a regression.
+
 ### Next action
 
-W27 (sole verifier under `caffeinate`, explicit `ANALYTICS_PYTHON`) runs the aggregate gates on
-the W26 merge. If green: Mac install, replay quarantine 22, and confirm sessions with K≥150
-publish. Measure retry cost (re-PUT/412 reconcile of untrusted objects) before considering
-resumable upload progress.
+Mac install of `34a586f`, replay quarantine 22, and confirm sessions with K≥150 publish. Measure
+retry cost (re-PUT/412 reconcile of untrusted objects) before considering resumable upload
+progress.
