@@ -33,8 +33,11 @@ are lists like `parse_qs`. HTTP paths remain `/api/report`, `/api/sessions`, `/a
 not invented persisted legacy `files`. `trace_id` is the importer's archive/session/
 effective-source-hash/epoch identity. Source, epoch, role, revision, publication, machine,
 archive and withholding coordinates are explicit; project is unknown, never guessed.
-The report is the actual `publications.report` v2 result copied with
-`dashboard_wired=true` **only by this adapter**. Direct `publications.report` remains false.
+The dashboard uses `publications.report(summary=True)`: exact SQL totals and at most
+50 session/failure details, with source epochs available through paginated exploration.
+This is a row cap, not a universal response-byte cap. The adapter alone sets
+`dashboard_wired=true`. Direct `publications.report` remains exhaustive by default and
+keeps that flag false; use the offline report for the full failure list.
 Nanoseconds, sequences, revisions and body sizes are exact decimal strings in HTTP
 JSON. The UI converts nanoseconds explicitly for display, treating zero as unknown.
 
@@ -480,7 +483,7 @@ python tools/analytics/serve.py --source publications \
 ```
 
 GET requests read only local projection/status files, never import or contact readers.
-The report retains per-session v2 details and adds `refresh_health` with endpoint errors,
+The bounded report retains selected per-session v2 details and adds `refresh_health` with endpoint errors,
 expected/unimported/failed target counts, active discovery errors, oldest endpoint
 completion and staleness.
 Missing/unavailable status is not green. Without `--refresh-status`, the dashboard is
@@ -488,9 +491,11 @@ explicitly partial: its imported subset is not an archive-coverage claim. Even h
 consumer delivery status is not proof of complete source inventory. The UI warns on
 incomplete, unavailable, stale or partial refresh health.
 
-The refresh status database now requires **schema version 3**. Versions 1 and 2 are
-explicitly rejected, not silently migrated, cleared or treated as healthy; choose a deliberate
-new status destination for the candidate (the publications database is unchanged).
+The refresh status database requires **schema version 4**. The writer atomically upgrades
+v3, binding retained targets/failures to their recorded endpoint fingerprints and clearing
+completion/import qualification until rediscovery. Unmappable expectations fail without
+partial upgrade. Versions 1 and 2 remain rejected; no projection or historical data is
+silently cleared. The dashboard is read-only and does not perform upgrades.
 Before any enumeration/export, one SQLite transaction durably binds the **entire**
 expected endpoint set and fingerprints each endpoint's name/binary/config/SSH host
 and explicit discovery mode (omission retains default queue behavior).
@@ -498,7 +503,11 @@ New or changed configuration invalidates every active endpoint completion until 
 configured sweep has completed; a crash leaves unattempted endpoints incomplete.
 The dashboard validates this binding and cannot treat a partially created endpoint
 list or unbound old success rows as healthy. Removed endpoints remain explicit as
-`omitted_endpoints`; they cannot supply completion for the currently configured scope.
+`omitted_endpoints`; their target/failure history cannot supply completion or errors for
+the currently configured scope. Same-name repoints require reader verification under the
+new binding, including after failed attempts/restarts. A completed remote-current sweep
+marks previously known but absent targets `current_missing`, preserving previous projection
+and specific head failures. Partial or local-queue sweeps cannot establish remote absence.
 Healthy means delivery for that configured scope only, never all-machine inventory or
 coverage of intentionally omitted endpoints. Endpoint fingerprints/paths are not
 printed in reports.

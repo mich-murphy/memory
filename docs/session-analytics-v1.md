@@ -33,11 +33,15 @@ From `tools/analytics` on Python's module path:
   Success is `status='imported'` or `'unchanged'`. Errors raise `ImportFailure` with
   a content-free reason code. Unsupported wire versions fail before creating or
   opening the database. Other malformed metadata also fails before DB writes.
-- `report(db_path, *, now_ns=None, stale_after_ns=86400 * 10**9)` returns a
+- `report(db_path, *, now_ns=None, stale_after_ns=86400 * 10**9, summary=False)` returns a
   JSON-safe report with actual indexed-event / issue counts, exact source roles,
   source coordinates, per-session coverage, integer nanosecond stage timestamps,
   capture age, stale flags, failures, and report generation (`served_at_ns`). This
   served timestamp is **not** a claim that a dashboard served this projection.
+  The exhaustive default remains the offline acceptance/export interface. The dashboard
+  selects `summary=True`: exact SQL aggregates, at most 50 session/failure details, and
+  no materialized source list; source exploration remains paginated. Detail is row-bounded,
+  not universally byte-bounded for arbitrary metadata.
 - `export_session(binary, store, archive, machine, agent, session, output, *, config=None)` invokes
   the built authoritative reader with an argv list and suppressed output, never a
   shell. Export has a 300-second subprocess budget; timeout kills/waits for the
@@ -232,8 +236,11 @@ recover after outages and rebuild empty projections. Counts and endpoint health 
 `session-publication-refresh-status/v1`; errors are fixed safe codes, not transcript or
 credential-bearing subprocess output. `--once` and bounded autonomous polling are
 available; the destination has single-refresh-writer flock ownership. No network call
-runs inside a status or projection transaction. Status schema v3 adds `head_failures`
-keyed by endpoint/full identity, with fixed reason, attempts and first/last observed
+runs inside a status or projection transaction. Status schema v4 binds targets, successful
+imports and head failures to endpoint fingerprints. The writer atomically upgrades v3;
+unknown ownership fails without partial mutation, and imported successes require renewed
+qualification. Inactive/repointed historical rows cannot qualify the current binding.
+`head_failures` are keyed by endpoint/full identity, with fixed reason, attempts and first/last observed
 nanoseconds, not an invented publication coordinate. Prior successful targets/projections
 are preserved. Only a returning valid head clears its identity's failure; starting or
 completing another sweep, or an empty page, cannot hide it. Full sweeps retry automatically.
@@ -241,6 +248,10 @@ completing another sweep, or an empty page, cannot hide it. Full sweeps retry au
 one-shot success and dashboard health. Expected targets are the union of valid target
 and active failure keys, without double-counting a previously imported A. Omitted
 endpoint failure history is retained but does not count as active discovery coverage.
+Only a complete remote-current sweep can mark a known absent target `current_missing`;
+it retains previous projection and more specific head failures. Partial/local-queue
+sweeps do not establish remote absence. New bindings require actual reader verification,
+including after an unsuccessful repoint attempt and restart.
 
 See the [analytics README](../tools/analytics/README.md#explicit-all-machine-publication-refresh-candidate)
 for the endpoint configuration, private remote staging/cleanup, process/byte/time
