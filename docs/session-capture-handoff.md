@@ -810,12 +810,29 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   18:46:22. Retries rose to 34, 31 of them `transient`, which matches the W23 DarkWake pattern.
   Before that, at 18:10, load hit 59 while the service was at 0.1% CPU, so the spike was external.
   The run's continuity is broken; it restarts with the next install, on AC power.
-- **Quarantine 23 (delivery, 8 × `timeout`, created 18:48:05): cause not established.** The
-  timeouts started at 17:40, with 5-min load about 9. They accumulated through the gate runs
-  (load 10–12), the external spike (59 at 18:10), and the post-wake period (5-min load about 22).
-  Published heads carrying up to 39,681 assets passed the same per-asset checks within the 60s
-  budget, so asset count alone does not explain it. Load and asset-check growth are both open
-  hypotheses. Do not replay it until it has been measured. Facts: session
+- **Quarantine 23 (delivery, 8 × `timeout`, created 18:48:05): cause established 19:12 AEDT —
+  duplicate selected enrichment artifacts multiply delivery asset checks; load pushed it over.**
+  W39 (`830258c` on unmerged `wt/asset-checks`, synthetic) verified with a counting
+  `CheckEnrichmentAsset` that one Deliver runs it `A × (5 × R_sel + U)` times. The five full
+  passes are `attemptManifest`→`verifyDependencies`, `deliverOne`→`verifyDependencies`, the
+  post-upload `recheck`, the manifest `PutFile` and the root `CompareAndSwap`; `U` counts newly
+  uploaded artifacts. For seq 40 (R=5, A=777, U=0) that is 19,425 calls. The parent's live
+  read-only harness (`8be2613`, same branch; `mode=ro` spool, live config, timings only; battery,
+  load about 9) measured one full pass at 4.31s (1.11 ms/call). Five passes take about 21.5s
+  before source checks, decode and verify; at 5-min load 10–22 that exceeds 60s. Per call:
+  `runtimeFilesystemPolicy` 0.109 ms per path × 3 paths, `exclusion.Load` 0.040,
+  `Resolve` 0.042, `NewSet` 0.041, `validateRuntimeEnrichment` 0.034. **Why the copies exist:**
+  `stableEnrichmentSource` is keyed on the transcript `Source.SourceID`, so the main transcript
+  and every subagent each attach their own artifact. The equal-bytes short-cut in
+  `attachEnrichment` only applies to the same source id. All 5 seq-40 artifacts share one
+  object sha256. Open sessions carry up to 17 selected copies of one object (13,209 selected
+  assets; 29 sessions over 5,000, 12 over 10,000). **The earlier contradiction is resolved:**
+  every published head with 9,000–39,681 assets has all its artifacts withheld for policy, so
+  none of those assets are checked at delivery. The largest selected published head has 3,280.
+  The contract already requires that "equivalent safe selections do not manufacture
+  publications"; the per-source key breaks that across sources. History: the delivery
+  rechecks date from `b68a412` (10-24); later commits only removed work. Fix plan (W40, W41)
+  below. Replay quarantine 23 only after the fix is installed. Original facts: session
   seq 40 adds no new object bytes against published seq 39. It adds a fifth optional enrichment
   artifact (K 37 to 38), and all 5 results share one asset list. Each full-session policy pass
   therefore runs `CheckEnrichmentAsset` 3,885 times for 777 distinct (scope, asset) pairs. The
@@ -823,9 +840,17 @@ admission gap/intent, all authority/exclusion code. Reduced scope: drop append-o
   `exclusion.Load`, alias exclusion, `Resolve`, and root plus `runtimeFilesystemPolicy` for every
   path identity. The result specs differ only in `BasisPublication`, `BasisSequence` and
   `Source`. 159 sessions are open; 35 carry more than 3,000 assets, the largest 9,492. Published
-  heads reach 39,681 assets (749 distinct); when they were published is not established. Next:
-  a measure-first worker (W39) counts checks and time per Deliver against session asset totals,
-  before anything is designed.
+  heads reach 39,681 assets (749 distinct), all withheld (see above).
+  **Fix plan.** W40 (`internal/sessioncapture`): in `attachEnrichment`, extend the existing
+  equal-bytes short-cut across source ids. If an active, selected artifact in the latest view
+  already carries the identical `Object`, record the per-basis result without a new source or
+  sequence. This only ever publishes less, so it is fail-closed. It stops new copies but does not
+  remove existing ones, because coordinates cannot disappear. W41 (`internal/cli`): inside one
+  `checkRuntimeEnrichmentAsset` call, check each distinct path once and reuse that call's
+  `Resolve` and `NewSet`. That is the W37 pattern, with nothing cached across calls, assets,
+  entries or passes. Both need the operator's sign-off, so neither is done autonomously:
+  dropping the back-to-back second `verifyDependencies` pass (`attemptManifest` then
+  `deliverOne`), and withholding existing byte-identical duplicates.
 
 ### Next action
 
