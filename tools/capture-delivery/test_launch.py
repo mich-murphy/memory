@@ -76,6 +76,21 @@ class LaunchTests(unittest.TestCase):
                 self.assertNotIn('R2_ACCESS_KEY_ID', env)
                 self.assertNotIn('R2_SECRET_ACCESS_KEY', env)
 
+    def test_run_without_valid_credentials_never_inherits_ambient(self):
+        for body in (None, 'R2_ACCESS_KEY_ID=$(private-value)\n'):
+            if body is None:
+                self.config.unlink()
+            else:
+                self.config.write_text(body)
+                self.config.chmod(0o600)
+            with patch.dict(os.environ, {'R2_ACCESS_KEY_ID': 'ambient-private', 'R2_SECRET_ACCESS_KEY': 'ambient-private'}):
+                _, _, env = launch.arguments([*self.argv[:-1], 'run'])
+            self.assertNotIn('R2_ACCESS_KEY_ID', env)
+            self.assertNotIn('R2_SECRET_ACCESS_KEY', env)
+            for command in ('init', 'export', 'current-heads'):
+                with self.assertRaises((OSError, ValueError)):
+                    launch.arguments([*self.argv[:-1], command])
+
     def test_failure_diagnostic_contains_no_values(self):
         with patch.object(launch.os, 'execve', side_effect=OSError('synthetic-secret')), patch('sys.stderr') as err:
             self.assertEqual(launch.main(self.argv), 1)

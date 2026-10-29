@@ -88,3 +88,130 @@ func TestServicePlansBoundRestartStorms(t *testing.T) {
 		}
 	}
 }
+
+func TestReadableSupervisorParent(t *testing.T) {
+	home := sandbox(t)
+	p, err := ServicePlan("darwin", home, filepath.Join(home, "candidate"), filepath.Join(home, "config"), 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(p.Path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Dir(p.Path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := func(context.Context, string, ...string) error { return nil }
+	if err := Apply(t.Context(), p, "install", true, runner); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(p.Path)
+	if err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatal("supervisor file not private", err)
+	}
+	st, err = os.Stat(filepath.Dir(p.Path))
+	if err != nil || st.Mode().Perm() != 0o755 {
+		t.Fatal("parent changed", err)
+	}
+	if err := WritePrivate(filepath.Join(filepath.Dir(p.Path), "secret"), []byte("secret")); err == nil {
+		t.Fatal("secret writer relaxed")
+	}
+	if err := os.Chmod(filepath.Dir(p.Path), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(t.Context(), p, "install", true, runner); err == nil {
+		t.Fatal("writable parent accepted")
+	}
+}
+
+func TestForeignServiceFileRejectedBeforeSupervisor(t *testing.T) {
+	home := sandbox(t)
+	p, err := ServicePlan("darwin", home, filepath.Join(home, "candidate"), filepath.Join(home, "config"), 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WritePrivate(p.Path, []byte("foreign private file")); err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"stop", "uninstall", "install"} {
+		calls := 0
+		err := Apply(t.Context(), p, action, true, func(context.Context, string, ...string) error { calls++; return nil })
+		if err == nil || calls != 0 {
+			t.Fatalf("%s acted on foreign file", action)
+		}
+	}
+}
+
+func TestManagedServiceUpgradeAndDriftedTeardown(t *testing.T) {
+	for _, platform := range []string{"darwin", "linux"} {
+		t.Run(platform, func(t *testing.T) {
+			home := sandbox(t)
+			oldExe := filepath.Join(home, "old candidate $ %")
+			oldConfig := filepath.Join(home, "old config")
+			old, err := ServicePlan(platform, home, oldExe, oldConfig, 42)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runner := func(context.Context, string, ...string) error { return nil }
+			if err := Apply(t.Context(), old, "install", true, runner); err != nil {
+				t.Fatal(err)
+			}
+			next, err := ServicePlan(platform, home, filepath.Join(home, "new candidate"), filepath.Join(home, "new config"), 42)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The old executable never existed. Changed desired argv and tuning must not
+			// make a managed service foreign or prevent an operator from stopping it.
+			old.Unit = strings.ReplaceAll(old.Unit, "300", "301")
+			old.Unit = strings.ReplaceAll(old.Unit, "RestartSec=60", "RestartSec=61")
+			if err := WritePrivate(old.Path, []byte(old.Unit)); err != nil {
+				t.Fatal(err)
+			}
+			if err := Apply(t.Context(), next, "stop", true, runner); err != nil {
+				t.Fatal(err)
+			}
+			if err := Apply(t.Context(), next, "install", true, runner); err != nil {
+				t.Fatal("managed upgrade blocked", err)
+			}
+			if err := Apply(t.Context(), old, "uninstall", true, runner); err != nil {
+				t.Fatal("drifted teardown blocked", err)
+			}
+			if _, err := os.Stat(old.Path); !os.IsNotExist(err) {
+				t.Fatal("managed plan retained", err)
+			}
+		})
+	}
+}
+
+func TestManagedServiceIdentityBoundary(t *testing.T) {
+	for _, platform := range []string{"darwin", "linux"} {
+		t.Run(platform, func(t *testing.T) {
+			home := sandbox(t)
+			p, err := ServicePlan(platform, home, filepath.Join(home, "candidate"), filepath.Join(home, "config"), 42)
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreign := strings.ReplaceAll(p.Unit, ServiceName, "foreign-service")
+			if platform == "linux" {
+				foreign = strings.ReplaceAll(p.Unit, serviceDescription, "foreign description")
+			}
+			for _, body := range []string{
+				foreign,
+				strings.ReplaceAll(p.Unit, "capture-v1", "sync"),
+				strings.ReplaceAll(p.Unit, filepath.Join(home, "config"), "/unsafe/../config"),
+			} {
+				if err := WritePrivate(p.Path, []byte(body)); err != nil {
+					t.Fatal(err)
+				}
+				calls := 0
+				err := Apply(t.Context(), p, "uninstall", true, func(context.Context, string, ...string) error { calls++; return nil })
+				if err == nil || calls != 0 {
+					t.Fatal("foreign or unsafe service identity accepted")
+				}
+				if _, err := os.Stat(p.Path); err != nil {
+					t.Fatal("foreign file removed", err)
+				}
+			}
+		})
+	}
+}

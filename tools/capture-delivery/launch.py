@@ -64,7 +64,17 @@ def arguments(argv=None):
     for name in REQUIRED:
         env.pop(name, None)
     if len(command) >= 2 and command[1] in ('init', 'run', 'export', 'current-heads'):
-        env.update(credentials(args.credentials_env))
+        try:
+            env.update(credentials(args.credentials_env))
+        except (OSError, ValueError, UnicodeError):
+            if command[1] != 'run':
+                raise
+            # The coordinator owns durable capture independently of destination
+            # readiness. No values from a partially parsed file or ambient env
+            # survive this failure. Repair requires a deliberate process restart.
+            print('candidate destination credentials unavailable; local capture only '
+                  '(private details withheld; repair credentials and restart, then resume)',
+                  file=sys.stderr)
     # A supervisor launch must not incidentally opt into any development live gate.
     for name in ('AGENT_SESSIONS_TEST_R2', 'AGENT_SESSIONS_LIVE', 'AGENT_SESSIONS_CAPTURE_NATIVE', 'CANDIDATE_R2_LIVE_ACCEPTANCE'):
         env.pop(name, None)

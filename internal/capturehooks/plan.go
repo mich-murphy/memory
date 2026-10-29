@@ -191,6 +191,9 @@ func validateOptions(o Options) error {
 	if err != nil || !st.Mode().IsRegular() || st.Mode().Perm() != 0o600 {
 		return errors.New("hook config must be a private regular file")
 	}
+	if o.Remove {
+		return nil
+	}
 	st, err = os.Stat(o.Executable)
 	if err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0o022 != 0 || st.Mode().Perm()&0o111 == 0 {
 		return errors.New("hook executable must be a non-writable regular executable")

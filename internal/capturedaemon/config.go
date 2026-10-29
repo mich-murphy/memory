@@ -55,7 +55,14 @@ type Config struct {
 
 // Load rejects unknown fields, trailing values, oversized input and unsafe paths.
 // Diagnostics deliberately never include configuration contents.
-func Load(path string) (Config, error) {
+func Load(path string) (Config, error) { return load(path, Config.Validate) }
+
+// LoadControl loads trusted local control/inspection configuration without
+// requiring effective policy to be present. It retains strict parsing and path,
+// declaration, identity and storage validation; it grants no capture authority.
+func LoadControl(path string) (Config, error) { return load(path, Config.validateControl) }
+
+func load(path string, validate func(Config) error) (Config, error) {
 	var c Config
 	if err := SafePath(path); err != nil {
 		return c, err
@@ -64,7 +71,7 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return c, errors.New("capture config unavailable")
 	}
-	if !st.Mode().IsRegular() || st.Mode().Perm()&0o077 != 0 {
+	if !st.Mode().IsRegular() || !owned(st) || st.Mode().Perm()&0o077 != 0 {
 		return c, errors.New("capture config must be a private regular file")
 	}
 	f, err := os.Open(path)
@@ -84,7 +91,7 @@ func Load(path string) (Config, error) {
 	if err = dec.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return Config{}, errors.New("capture config has trailing JSON")
 	}
-	if err := c.Validate(); err != nil {
+	if err := validate(c); err != nil {
 		return Config{}, err
 	}
 	for _, p := range c.LocalProtectedPaths() {
@@ -101,6 +108,13 @@ func Load(path string) (Config, error) {
 func (c Config) ConfigPath() string { return c.sourcePath }
 
 func (c Config) Validate() error {
+	if err := c.validateControl(); err != nil {
+		return err
+	}
+	return c.validatePolicy()
+}
+
+func (c Config) validateControl() error {
 	if c.Version != ConfigVersion || !validID(c.ArchiveID) || !validID(c.MachineID) {
 		return errors.New("capture config version or identity invalid")
 	}
@@ -116,7 +130,7 @@ func (c Config) Validate() error {
 	if err := c.validateBudgets(); err != nil {
 		return err
 	}
-	return c.validatePolicy()
+	return SafePath(filepath.Join(c.PolicyDir, "exclusions"))
 }
 
 func (c Config) validateStorage() error {
@@ -288,6 +302,12 @@ func WritePrivate(path string, body []byte) error {
 	if st.Mode().Perm()&0o077 != 0 {
 		return errors.New("private file directory must be private")
 	}
+	return writePrivateAtomic(path, body)
+}
+
+// Callers separately validate their directory trust requirements.
+func writePrivateAtomic(path string, body []byte) error {
+	dir := filepath.Dir(path)
 	f, err := os.CreateTemp(dir, ".capture-")
 	if err != nil {
 		return err

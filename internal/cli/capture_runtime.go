@@ -91,7 +91,11 @@ func runCaptureRuntime(ctx context.Context, cmd string, args []string, o IO) (co
 	if err != nil {
 		return exitUsage, err
 	}
-	c, err := capturedaemon.Load(f.config)
+	load := capturedaemon.Load
+	if runtimeControlCommand(cmd, f.action) {
+		load = capturedaemon.LoadControl
+	}
+	c, err := load(f.config)
 	if err != nil {
 		return exitFailed, err
 	}
@@ -122,6 +126,20 @@ func runCaptureRuntime(ctx context.Context, cmd string, args []string, o IO) (co
 	default:
 		return exitUsage, errors.New("unsupported capture runtime command")
 	}
+}
+
+// Only nonactivating local operations bypass live policy readiness. Replay,
+// resume, policy changes and every activation retain full fail-closed validation.
+func runtimeControlCommand(cmd, action string) bool {
+	switch cmd {
+	case "service":
+		return action == "stop" || action == "uninstall"
+	case "hooks":
+		return action == "uninstall"
+	case "work-status", "quarantine", "enrichment-status", "optional-status":
+		return true
+	}
+	return false
 }
 
 // All writable operations share exclusive queue ownership. Inspection and hooks
@@ -236,6 +254,11 @@ func runCaptureService(ctx context.Context, c capturedaemon.Config, f runtimeFla
 	plan, err := capturedaemon.ServicePlan(f.platform, c.Home, f.executable, f.config, os.Getuid())
 	if err != nil {
 		return exitUsage, err
+	}
+	if f.apply && (f.action == "install" || f.action == "start" || f.action == "restart") {
+		if err := capturedaemon.ExecutableReady(f.executable); err != nil {
+			return exitFailed, err
+		}
 	}
 	if f.action != "plan" {
 		err = capturedaemon.Apply(ctx, plan, f.action, f.apply, func(ctx context.Context, name string, args ...string) error {

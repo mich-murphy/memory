@@ -16,7 +16,10 @@ func runCaptureHooks(ctx context.Context, c capturedaemon.Config, f runtimeFlags
 	if f.apply && f.action == "plan" {
 		return exitUsage, errors.New("hooks plan does not accept --apply")
 	}
-	roots := c.SourceRoots()
+	roots, err := c.HookRoots()
+	if err != nil {
+		return exitFailed, err
+	}
 	if len(roots) == 0 {
 		return exitUsage, errors.New("hooks require a nonempty configured source inventory")
 	}

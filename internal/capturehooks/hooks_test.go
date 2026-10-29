@@ -426,3 +426,17 @@ func TestApplyRevalidatesProtectedInputsAndIgnoresExportedFacts(t *testing.T) {
 		}
 	})
 }
+
+func TestRemovalWithoutOldExecutable(t *testing.T) {
+	o := sandbox(t)
+	apply(t, build(t, o))
+	if err := os.Remove(o.Executable); err != nil {
+		t.Fatal(err)
+	}
+	o.Remove = true
+	apply(t, build(t, o))
+	o.Remove = false
+	if _, err := Build(o); err == nil {
+		t.Fatal("activation accepted missing executable")
+	}
+}
