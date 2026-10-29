@@ -69,6 +69,9 @@ func TestAttemptVerifiesPayloadsOnce(t *testing.T) {
 			encoded += s.Object.EncodedSize
 		}
 	}
+	if expected <= 0 {
+		t.Fatal("local verifier read calibration did not observe any reads")
+	}
 	counter.reads.Store(0)
 	if err := q.attemptManifest(counter, newBackend(t), r.Identity, m.Sequence, m, es); err != nil {
 		t.Fatal(err)

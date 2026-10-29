@@ -75,6 +75,9 @@ func (q *Queue) enrichmentNext(ctx context.Context, o RuntimeOptions) (did bool,
 	if err != nil {
 		return true, q.finishEnrichment(ctx, id, attempts+1, err, o)
 	}
+	if err := q.fault("enrichment-result-stored"); err != nil {
+		return true, err
+	}
 	// Once the result is stored, retain its pointer even if shutdown arrives
 	// before attachment. Restart must not need the optional callback again.
 	save, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.OperationTimeout)

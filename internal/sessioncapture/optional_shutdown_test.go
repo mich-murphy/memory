@@ -1,6 +1,7 @@
 package sessioncapture
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -386,5 +387,90 @@ func TestShutdownRefundDoesNotChangeAnotherClaim(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// Cancellation must land after successful result storage but before the FIRST
+// work-row pointer save, not while reusing a pointer installed by the fixture.
+func TestEnrichmentShutdownBeforeFirstResultPointerSave(t *testing.T) {
+	dir, o, r := setup(t)
+	o.EnableEnrichment = true
+	var q *Queue
+	var stop context.CancelFunc
+	reached := false
+	o.Fault = func(stage string) error {
+		if stage != "enrichment-result-stored" || stop == nil {
+			return nil
+		}
+		var results, pointers int
+		if err := q.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM enrichment_results`).Scan(&results); err != nil {
+			t.Fatal(err)
+		}
+		if err := q.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM enrichment_work WHERE result IS NOT NULL AND length(result)>0`).Scan(&pointers); err != nil {
+			t.Fatal(err)
+		}
+		if results != 1 || pointers != 0 {
+			t.Fatalf("wrong first-pointer boundary: results=%d pointers=%d", results, pointers)
+		}
+		reached = true
+		stop()
+		return nil // The durable pointer save must still run, using its protected context.
+	}
+	q = open(t, dir, o)
+	capture(t, q, r)
+	if err := q.InitRuntime(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	if err := q.db.QueryRowContext(t.Context(), `SELECT id FROM enrichment_work WHERE state='pending' AND (result IS NULL OR length(result)=0)`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.db.ExecContext(t.Context(), `UPDATE enrichment_work SET attempts=7 WHERE id=?`, id); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	stop = cancel
+	calls := 0
+	opts := snapshotOptions("newly built durable result")
+	build := opts.Enrich
+	opts.Enrich = func(c context.Context, s EnrichmentSpec) (EnrichmentArtifact, error) { calls++; return build(c, s) }
+	did, err := q.enrichmentNext(ctx, opts)
+	stop = nil
+	if !did || !reached || calls != 1 || !errors.Is(err, context.Canceled) {
+		t.Fatalf("boundary not exercised: did=%v reached=%v callbacks=%d err=%v", did, reached, calls, err)
+	}
+	var state, code string
+	var saved []byte
+	var attempts int
+	var next int64
+	if err := q.db.QueryRowContext(t.Context(), `SELECT state,result,attempts,next_retry,last_error FROM enrichment_work WHERE id=?`, id).Scan(&state, &saved, &attempts, &next, &code); err != nil {
+		t.Fatal(err)
+	}
+	if state != "ready" || len(saved) == 0 || attempts != 7 || next != 0 || code != "shutdown" {
+		t.Fatalf("first result pointer lost: state=%s pointer=%t attempts=%d next=%d code=%s", state, len(saved) > 0, attempts, next, code)
+	}
+	result, err := q.loadEnrichmentResult(t.Context(), string(saved))
+	if err != nil {
+		t.Fatalf("invalid saved result pointer: %v", err)
+	}
+	if err := q.verify(t.Context(), result.Object); err != nil {
+		t.Fatalf("invalid saved result payload: %v", err)
+	}
+	if err := q.Close(); err != nil {
+		t.Fatal(err)
+	}
+	q = open(t, dir, o)
+	if err := q.InitRuntime(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	// No new hook and no callback: successful attachment requires the first pointer.
+	enrichOnce(t, q, runtimeDefaults(RuntimeOptions{}))
+	var after []byte
+	if err := q.db.QueryRowContext(t.Context(), `SELECT state,result,attempts FROM enrichment_work WHERE id=?`, id).Scan(&state, &after, &attempts); err != nil {
+		t.Fatal(err)
+	}
+	if state != "attached" || !bytes.Equal(after, saved) || attempts != 8 {
+		t.Fatalf("new result restart failed: state=%s same-pointer=%v attempts=%d", state, bytes.Equal(after, saved), attempts)
 	}
 }
