@@ -58,7 +58,8 @@ capture-acceptance:
 		CAPTURE_V1_BINARY="$$tmp/agent-sessions" PYTHONDONTWRITEBYTECODE=1 \
 		$(ANALYTICS_PYTHON) -m unittest discover -s tools/analytics -p 'test_*journey.py' -v && \
 		PYTHONDONTWRITEBYTECODE=1 $(ANALYTICS_PYTHON) -m unittest discover -s tools/candidate-live-r2 -p 'test_*.py' -v && \
-		PYTHONDONTWRITEBYTECODE=1 $(ANALYTICS_PYTHON) -m unittest discover -s tools/capture-delivery -p 'test_*.py' -v
+		CAPTURE_V1_BINARY="$$tmp/agent-sessions" PYTHONDONTWRITEBYTECODE=1 \
+		$(ANALYTICS_PYTHON) -m unittest discover -s tools/capture-delivery -p 'test_*.py' -v
 
 cover:
 	rm -rf $(COVER_DIR) && mkdir -p $(COVER_DIR)/unit $(COVER_DIR)/e2e

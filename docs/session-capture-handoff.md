@@ -19,15 +19,30 @@ new deployment, live ingestion, host/cloud changes or deletion authority is exer
 Installed source/qualification below remains unchanged.
 
 - Reconciled base: `3ea6752599ca5ea59d1c26d08969e92043b3e04b`; integration checkout
-  `/Users/mm/dev/memory`. Review/handoff edits are parent-authored task artifacts;
-  the three frozen untracked research paths remain untouched. Existing unrelated
+  `/Users/mm/dev/memory`, now stack child `delivery/adversarial-resolutions`.
+  Review/plan committed as `468bc63`; production base unchanged.
+  The three frozen untracked research paths remain untouched. Existing unrelated
   worktrees/stashes stay untouched. No PR exists for the current integration branch;
   no hosted checks were started. `gh stack` available; use a new child branch.
 - Parent owns integration, this brief, commits/stack, expensive serial gates and final
   requirements acceptance. Subagent background status/inspection/steering/resume are
   available. All implementation/review workers use `gpt-6.1-sol`, medium thinking.
   Prior review workers are completed/released; new implementations use separate
-  worktrees and disjoint domains. No owner yet assigned to implementation paths.
+  worktrees and disjoint domains, all based on `468bc63`:
+
+  | Owner | Worker ID | Worktree suffix under `/Users/mm/dev/memory-wt/` | Scope/status |
+  | --- | --- | --- | --- |
+  | Analytics | `69a2cbd5-57fb-431` | `adversarial-analytics` | R2/R3/R6; completed/released,62deae2→abc7ee8 |
+  | Queue | `3f979a6a-c281-40e` | `adversarial-queue` | R4/R7;82c351f→d374948; review test correction reassigned |
+  | Lifecycle | `41958d93-8f7d-41a` | `adversarial-lifecycle` |89f78f2→2ecdf10; independent parser blocker reassigned |
+  | Discovery | `9071ea81-b195-42b` | `adversarial-discovery` | R5/R8 after tests/lint pass; finalizing commit/report |
+  | Publication | `bf60a965-380d-477` | `adversarial-publication` | R10 implemented; stopped awaiting after slot; ownership retained |
+
+  Reports/checkpoints: `/tmp/memory-resolution-<domain>/report.md`. All five startup,
+  actual Sol model and early approach verified. Stopped/waiting workers retain their
+  paths: resume same IDs, no takeover. Queue C1 owns next Go slot, then publication;
+  lifecycle parser correction prepares tests meanwhile. Full gates not started. Workers own implementation/tests only in their worktrees; parent alone
+  changes this brief. Parent inspected live diffs: only owned paths changed.
 - Acceptance per item: targeted failing-before/passing-after regression, minimal repair,
   retained privacy/durability/identity/budget negatives, independent review, exact checks
   tied to commit+diff, parent verification on integrated source. Overall: unchanged
@@ -37,10 +52,46 @@ Installed source/qualification below remains unchanged.
   discovery/ownership R5/R8; publication/export R10. Parent serializes costly Go gates;
   workers may prepare focused tests and request execution slots. No quality-gate edits,
   speculative frameworks, ambient credentials, second reader, GC or legacy retirement.
-- Status: implementation pending; review probes exist in `/tmp/memory-adversarial-*`.
-  Historical review results prove defects, not repaired behavior. AC power verified.
-- Next action: create stack branch and isolated worktrees, dispatch owners, confirm
-  startup and inspect early designs before changes harden; maintain per-item evidence.
+- Status: all R1–R10/I1/I2 pending final acceptance. Analytics integrated as
+  `abc7ee8`: parent reviewed actual diff/tests and verified requested BaseException
+  rollback/all-components validation/dedupe invariants in code. Worker77 tests pass,
+  py_compile/diff check; initial regressions failed before. Independent read-only
+  reviewer `92827ab8-d1ab-44c` completed scoped approval against62deae2; no blocking
+  finding. Commit-boundary interruption was not dynamically tested; INSERT-boundary
+  rollback was. Parent retains this precise evidence limit. Existing venv is Python3.13.15/
+  DuckDB1.5.6 inside pinned Nix (shell Python3.14.8), not a claim the venv uses3.14.
+- Queue before-probes show24 vs12 verifier read checks and terminal cancellation
+  quarantine. Worker after-regressions pass race/shuffle count2/17.003s. Parent
+  correction: broad fatal propagation could revive optional-source absence shutdown;
+  worker acknowledged and narrowed to cancellation-containing trees, with absence
+  isolation tests. Refund/release now guarded by expected attempts/state, terminal
+  rows not reopened. Integrated82c351f→d374948; parent inspected diff. Final worker
+  regressions17.643s/count2 and unchanged safety subset40.716s pass, lint0. R7 read work
+  halves; paired wall/CPU samples overlap, so no latency improvement claimed.
+  Independent reviewer `e16a15e2-127d-496` found no production regression but requires
+  newly-built result cancellation before FIRST pointer save (existing tests preinstalled
+  pointer); owner resumed for this test and positive verifier calibration assertion. Lifecycle baseline Go/Python
+  failures recorded for R1/R9/I1/I2. Parent approved test-only injected SDK HTTP peer
+  for credential-repair delivery evidence, separately from unmodified binary+wrapper
+  startup/capture proof; no shipped environment bypass or cloud/host operations.
+  Parent challenged exact service-plan comparison blocking legitimate upgrades;
+  worker acknowledged and implemented bounded stable managed identity parsing plus
+  both-platform upgrade/drifted-teardown negatives. Lifecycle focused checks/lint and
+  production+SDK-peer journeys pass; integrated89f78f2→2ecdf10, acceptance pending.
+  Independent reviewer `a879bb00-e792-481` found parser bypasses: launchd Program
+  overrides ProgramArguments; systemd whitespace/reset/extra execution directives
+  can evade recognized ExecStart. Parent reassigned owner to strict generated grammar
+  and failing-before no-runner/no-deletion regressions, not a general service parser.
+  Owner had a harness abort after completed commit; parent reconciled clean worktree,
+  logs/no Go process and resumed same ID without repeating completed checks. Parent
+  narrowly updated Makefile to pass the already-built CAPTURE_V1_BINARY to launcher
+  tests, making the new production-startup journey run in existing capture-acceptance;
+  no gate/timeout/threshold weakened. R10 baseline limit+1 accepted and did2 GETs
+  before rejection; writer/export shared8MiB preflight repair underway.
+  Review probes remain `/tmp/memory-adversarial-*`; AC power verified.
+- Next action: confirm startup and inspect early designs, coordinate focused execution,
+  review committed diffs and independent findings, integrate and run full gates. Record
+  each item's before/after evidence and acceptance here; no completion from dispatch.
 
 ## Adversarial code review — completed
 
