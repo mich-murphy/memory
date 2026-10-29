@@ -72,6 +72,40 @@ class RefreshTests(unittest.TestCase):
              patch.object(refresh, '_imported_time', return_value=123):
             return refresh.sweep(self.endpoints, self.database, self.status)
 
+    def test_interrupted_same_target_retry_preserves_dashboard_error_until_verified(self):
+        from publication_dashboard import PublicationDashboard
+        self.endpoints = self.endpoints[:1]
+        self.heads['Mac'] = self.heads['Mac'][:1]
+        self.sweep()
+        self.failed.add(('Mac', 'a'))
+        self.sweep()
+        dashboard = object.__new__(PublicationDashboard)
+        dashboard.refresh_status = self.root / 'status.sqlite'
+        dashboard.refresh_stale_seconds = 300
+        before = dashboard.refresh_health()
+        self.assertFalse(before['healthy'])
+        self.assertEqual(before['target_errors'], 1)
+        imported = self.status.execute('SELECT imported_ns FROM targets').fetchone()[0]
+        head = self.heads['Mac'][0]
+        key = json.dumps(head['identity'], sort_keys=True)
+        with patch.object(refresh, '_projection_coordinate', side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                refresh._target(self.status, self.endpoints[0], head, key, self.database, self.root, 300, 1024*1024)
+        self.status.close()
+        self.status = refresh.open_status(self.root / 'status.sqlite')
+        self.addCleanup(self.status.close)
+        after = dashboard.refresh_health()
+        self.assertFalse(after['healthy'])
+        self.assertEqual(after['target_errors'], 1)
+        self.assertFalse(after['stale'])
+        self.assertEqual(after['last_completed_sweep_ns'], before['last_completed_sweep_ns'])
+        # Only successful projection verification may clear the failure. Reuse
+        # retains actual import freshness instead of inventing a new import time.
+        with patch.object(refresh, '_projection_coordinate', return_value=(1, 'pub-1', imported)):
+            refresh._target(self.status, self.endpoints[0], head, key, self.database, self.root, 300, 1024*1024)
+        self.assertTrue(dashboard.refresh_health()['healthy'])
+        self.assertEqual(self.status.execute('SELECT imported_ns,error FROM targets').fetchone(), (imported, None))
+
     def test_two_endpoints_sessions_restart_full_sweeps_and_rebuilt_destination(self):
         result = self.sweep()
         self.assertEqual((result['expected_targets'], result['unimported']), (4, 0))

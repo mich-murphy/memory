@@ -50,6 +50,89 @@ class PublicationsTests(unittest.TestCase):
         with duckdb.connect(str(self.db), read_only=True) as db:
             return db.execute(sql).fetchall()
 
+    def test_failure_replacement_interruption_retains_durable_watermark(self):
+        self.fixture()
+        publications.import_export(self.export, self.db)
+        self.manifest.update(sequence=2, publication_id='p2')
+        self.fixture()
+        with patch.object(publications, '_copy_verified', side_effect=OSError('synthetic')):
+            with self.assertRaises(publications.ImportFailure):
+                publications.import_export(self.export, self.db)
+        prior = self.query('SELECT * FROM failures')
+        original = publications._insert
+        for interruption in (KeyboardInterrupt, OSError):
+            with self.subTest(interruption=interruption.__name__):
+                self.manifest.update(sequence=3, publication_id='p3')
+                self.fixture()
+                def interrupted(db, table, row):
+                    if table == 'failures':
+                        raise interruption('synthetic replacement interruption')
+                    return original(db, table, row)
+                with patch.object(publications, '_copy_verified', side_effect=OSError('synthetic')), \
+                     patch.object(publications, '_insert', side_effect=interrupted):
+                    with self.assertRaises(interruption):
+                        publications.import_export(self.export, self.db)
+                # Each query/report opens a new connection, not an uncommitted view.
+                self.assertEqual(self.query('SELECT * FROM failures'), prior)
+                report = publications.report(self.db, now_ns=self.manifest['captured_at_ns'])
+                self.assertEqual(report['sessions'][0]['publication_id'], 'p1')
+                self.assertTrue(report['sessions'][0]['stale'])
+        with patch.object(publications, '_copy_verified', side_effect=OSError('synthetic')):
+            with self.assertRaises(publications.ImportFailure):
+                publications.import_export(self.export, self.db)
+        self.assertEqual(self.query('SELECT publication_id,sequence,attempts FROM failures'), [('p3', 3, 2)])
+        self.manifest.update(sequence=2, publication_id='p2')
+        self.fixture()
+        with patch.object(publications, '_copy_verified', side_effect=OSError('synthetic')):
+            with self.assertRaises(publications.ImportFailure):
+                publications.import_export(self.export, self.db)
+        self.assertEqual(self.query('SELECT publication_id,sequence,attempts FROM failures'), [('p3', 3, 3)])
+
+    def test_malformed_unicode_isolated_with_raw_coordinates_and_idempotence(self):
+        lines = [self.text.replace(b'hello', 'héllo 🌏'.encode())]
+        # All normalized string fields, including nested tool arguments. A bad
+        # second component must not leak the first component of the same record.
+        for surrogate in ('\ud800', '\udfff'):
+            records = [
+                dict(type='user', uuid='bad-content', message=dict(content=surrogate)),
+                dict(type='user', uuid=surrogate, message=dict(content='id')),
+                dict(type='user', parentUuid=surrogate, message=dict(content='parent')),
+                dict(type='user', timestamp=surrogate, message=dict(content='timestamp')),
+                dict(type='user', message=dict(role=surrogate, content='role')),
+                dict(type=surrogate, content='unknown type'),
+                dict(type='assistant', message=dict(model=surrogate, content='model')),
+                dict(type='assistant', uuid='later-valid', message=dict(content=[dict(type='text', text='no partial event'),
+                    dict(type='tool_use', name=surrogate, id='call', input={})])),
+                dict(type='assistant', message=dict(content=[dict(type='tool_use', name='read', id=surrogate, input={})])),
+                dict(type='assistant', message=dict(content=[dict(type='tool_use', name='read', id='call', input={'nested': [surrogate]})])),
+            ]
+            lines.extend((json.dumps(record) + '\n').encode() for record in records)
+        lines.append(b'{"type":"assistant","uuid":"later-valid","message":{"content":"\\ud83d\\ude00"}}\n')
+        raw = b''.join(lines)
+        self.fixture([('s', 'e', 'main', raw)])
+        result = publications.import_export(self.export, self.db)
+        self.assertEqual((result['events'], result['issues']), (2, 20))
+        self.assertEqual(self.query('SELECT text FROM events ORDER BY line'), [('héllo 🌏',), ('😀',)])
+        self.assertEqual(self.query("SELECT native_id,duplicate,duplicate_of,ordinal FROM events WHERE native_id='later-valid'"),
+                         [('later-valid', False, None, 0)])
+        event_ids = self.query('SELECT event_id FROM events ORDER BY line')
+        expected, offset = [], 0
+        for number, line in enumerate(lines, 1):
+            if 1 < number < len(lines):
+                expected.append((number, offset, len(line), 'malformed_record', None))
+            offset += len(line)
+        self.assertEqual(self.query('SELECT line,"offset",length,kind,record_type FROM issues ORDER BY line'), expected)
+        for number, offset, length, _, _ in expected:
+            self.assertEqual(raw[offset:offset+length], lines[number-1])
+        self.assertEqual(self.query('SELECT normalization FROM sessions'), [('partial',)])
+        self.assertEqual(self.query('SELECT count(*) FROM failures'), [(0,)])
+        owned = self.db.with_name(self.db.name + '.bodies') / hashlib.sha256(raw).hexdigest()
+        self.assertEqual(owned.read_bytes(), raw)
+        self.assertEqual(publications.import_export(self.export, self.db)['status'], 'unchanged')
+        self.assertEqual(self.query('SELECT count(*) FROM events'), [(2,)])
+        self.assertEqual(self.query('SELECT count(*) FROM issues'), [(20,)])
+        self.assertEqual(self.query('SELECT event_id FROM events ORDER BY line'), event_ids)
+
     def test_typed_batch_preserves_bigint_null_boolean_unicode_and_json(self):
         _, events = publications._dependencies()
         columns = dict(events.EVENT_COLUMNS, session_key='VARCHAR', archive_id='VARCHAR',
@@ -101,6 +184,21 @@ class PublicationsTests(unittest.TestCase):
                 batch.add({'tool_args': value})
                 batch.flush()
             self.assertEqual(db.execute('SELECT tool_args FROM events').fetchone()[0], baseline)
+
+    def test_projection_storage_errors_are_failures_not_bad_records(self):
+        self.fixture()
+        publications.import_export(self.export, self.db)
+        self.manifest.update(sequence=2, publication_id='p2')
+        self.fixture()
+        for error in (OSError('synthetic staging I/O'), duckdb.Error('synthetic DB error')):
+            with self.subTest(error=type(error).__name__):
+                with patch.object(publications._ProjectionBatch, 'add', side_effect=error):
+                    with self.assertRaisesRegex(publications.ImportFailure, '^import_failed$'):
+                        publications.import_export(self.export, self.db)
+                self.assertEqual(self.query('SELECT publication_id FROM sessions'), [('p1',)])
+                self.assertEqual(self.query('SELECT count(*) FROM issues'), [(0,)])
+                self.assertEqual(self.query('SELECT publication_id,reason FROM failures'), [('p2', 'import_failed')])
+        self.assertEqual(self.query('SELECT attempts FROM failures'), [(2,)])
 
     def test_second_batch_failure_rolls_back_prior_success_and_retries(self):
         self.fixture()

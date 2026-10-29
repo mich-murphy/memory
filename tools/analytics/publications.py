@@ -403,15 +403,23 @@ def import_export(export_dir, db_path, *, reset=False):
                     raise
         except Exception as exc:
             reason = str(exc) if isinstance(exc, ImportFailure) else 'import_failed'
-            prior = db.execute('SELECT sequence, attempts FROM failures WHERE session_key=?', [session]).fetchone()
-            if prior and prior[0] > manifest['sequence']:
-                # An older retry is not evidence that the newer target disappeared.
-                db.execute('UPDATE failures SET attempts=attempts+1 WHERE session_key=?', [session])
-            else:
-                db.execute('DELETE FROM failures WHERE session_key=?', [session])
-                _insert(db, 'failures', dict(coords, sequence=manifest['sequence'],
-                    failed_at_ns=time.time_ns(), reason=reason, attempts=(prior[1] if prior else 0) + 1))
-            db.execute('UPDATE publication_binding SET archive_id=? WHERE archive_id IS NULL', [archive])
+            # Replacing a failure must not expose a committed gap in its watermark.
+            # Keep the previous failure if any replacement write is interrupted.
+            db.execute('BEGIN')
+            try:
+                prior = db.execute('SELECT sequence, attempts FROM failures WHERE session_key=?', [session]).fetchone()
+                if prior and prior[0] > manifest['sequence']:
+                    # An older retry is not evidence that the newer target disappeared.
+                    db.execute('UPDATE failures SET attempts=attempts+1 WHERE session_key=?', [session])
+                else:
+                    db.execute('DELETE FROM failures WHERE session_key=?', [session])
+                    _insert(db, 'failures', dict(coords, sequence=manifest['sequence'],
+                        failed_at_ns=time.time_ns(), reason=reason, attempts=(prior[1] if prior else 0) + 1))
+                db.execute('UPDATE publication_binding SET archive_id=? WHERE archive_id IS NULL', [archive])
+                db.execute('COMMIT')
+            except BaseException:
+                db.execute('ROLLBACK')
+                raise
             raise ImportFailure(reason) from None
 
 

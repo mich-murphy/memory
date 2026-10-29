@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import duckdb
 
@@ -29,6 +30,40 @@ class EventsTest(unittest.TestCase):
         database = self.root / 'events.duckdb'
         counts = events.build(index, database)
         return duckdb.connect(str(database), read_only=True), counts
+
+    def test_record_isolation_does_not_swallow_io_or_database_errors(self):
+        entry = self.body('claude', [{'type': 'user', 'message': {'content': 'valid'}}])
+        # Only normalization data errors belong to a framed-record issue. Neither
+        # an input read failure nor a DB failure is evidence of a bad record.
+        with patch.object(Path, 'open', side_effect=OSError('synthetic read failure')):
+            with self.assertRaises(OSError):
+                list(events.iter_events(entry['path'], 'claude', 'trace'))
+        with patch.object(events, 'normalize_record', side_effect=duckdb.Error('synthetic DB failure')):
+            with self.assertRaises(duckdb.Error):
+                list(events.iter_events(entry['path'], 'claude', 'trace'))
+
+    def test_pi_tool_result_surrogates_do_not_poison_inherited_model_or_siblings(self):
+        records = [dict(type='model_change', modelId='good-model')]
+        for value in ('\ud800', '\udfff'):
+            records.extend([
+                dict(type='message', id='bad-model', message=dict(role='toolResult', model=value, content='bad')),
+                dict(type='message', id='bad-name', message=dict(role='toolResult', toolName=value, content='bad')),
+                dict(type='message', id='bad-call', message=dict(role='toolResult', toolCallId=value, content='bad')),
+            ])
+        records.append(dict(type='message', id='valid', message=dict(role='toolResult', content='healthy')))
+        raw = b''.join((json.dumps(record) + '\n').encode() for record in records)
+        entry = self.body('pi', [raw])
+        pairs = list(events.iter_events(entry['path'], 'pi', 'trace'))
+        rows = [event for event, _ in pairs if event]
+        issues = [issue for _, issue in pairs if issue]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(len(issues), 6)
+        self.assertEqual((rows[-1]['text'], rows[-1]['model']), ('healthy', 'good-model'))
+        lines = raw.splitlines(keepends=True)
+        for issue in issues:
+            self.assertEqual(issue['kind'], 'malformed_record')
+            self.assertIsNone(issue['record_type'])
+            self.assertEqual(raw[issue['offset']:issue['offset']+issue['length']], lines[issue['line']-1])
 
     def test_all_agents_tools_errors_humans_and_offsets(self):
         claude = self.body('claude', [

@@ -201,6 +201,17 @@ def iter_events(path, agent, trace):
                 continue
             try:
                 components = normalize_record(record, agent)
+                # JSON permits escaped lone surrogates that cannot be represented
+                # in UTF-8 storage. Validate every component before yielding any,
+                # so a bad field quarantines only this framed record, not siblings
+                # or a partially emitted record. Do not reparse JSON column text.
+                for component in components:
+                    for value in component.values():
+                        if isinstance(value, str):
+                            value.encode('utf-8')
+            except UnicodeError:
+                yield None, dict(loc, kind='malformed_record', record_type=None)
+                continue
             except (TypeError, AttributeError, ValueError):
                 yield None, dict(loc, kind='malformed_record', record_type=str(record.get('type', 'unknown')))
                 continue

@@ -439,10 +439,12 @@ def _target(status, endpoint, head, key, database, root, timeout, max_bytes):
         status.execute('UPDATE targets SET error=? WHERE endpoint=? AND identity=?', ('head_regression', name, key))
         status.commit()
         return
+    # Registering an expectation is not repair evidence. Keep any prior error
+    # until projection verification or reader/import success below clears it.
     status.execute('''INSERT INTO targets(endpoint,identity,sequence,publication_id,fingerprint)
         VALUES (?,?,?,?,?) ON CONFLICT(endpoint,identity) DO UPDATE SET
         sequence=excluded.sequence,publication_id=excluded.publication_id,
-        fingerprint=excluded.fingerprint,error=NULL''',
+        fingerprint=excluded.fingerprint''',
                    (name, key, head['sequence'], head['publication_id'], fingerprint))
     status.execute('DELETE FROM head_failures WHERE endpoint=? AND identity=?', (name, key))
     status.commit()
