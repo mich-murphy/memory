@@ -15,7 +15,10 @@ import (
 // a claim that inventories larger than this limit have been fully captured.
 const MaxDiscoveryRecords = 4096
 
-var errDiscoveryMetadata = errors.New("sessioncapture: invalid discovery metadata")
+var (
+	errDiscoveryMetadata    = errors.New("sessioncapture: invalid discovery metadata")
+	errDiscoveryPersistence = errors.New("sessioncapture: discovery failure could not be durably recorded")
+)
 
 // DiscoveryBatch describes one bounded part of a sweep, not a fresh complete
 // inventory. Complete may be set only after every configured root was examined.
@@ -224,8 +227,21 @@ func (q *Queue) discoverOnce(ctx context.Context, o RuntimeOptions) error {
 		// Try every healthy request even if another request or root was rejected.
 		err = errors.Join(err, q.Hint(save, batch.Requests[j]))
 	}
-	if err := q.saveDiscoveryBatch(save, batch, err); err != nil {
-		return err
+	if saveErr := q.saveDiscoveryBatch(save, batch, err); saveErr != nil {
+		// A budget exhausted by admission (or by the metadata transaction)
+		// cannot silently lose the failure for this generation. Retry the
+		// bounded metadata transaction without re-admitting requests; if even
+		// the release budget fails, stop Run instead of allowing a later clean
+		// batch to resolve unseen issues in this same generation.
+		release, releaseDone := releaseCtx(ctx)
+		defer releaseDone()
+		if recordErr := q.saveDiscoveryBatch(release, batch, errors.Join(err, saveErr, ctx.Err())); recordErr != nil {
+			return errors.Join(errDiscoveryPersistence, saveErr, recordErr)
+		}
+		if !transientStepError(ctx, errors.Is(save.Err(), context.DeadlineExceeded), saveErr) {
+			return saveErr
+		}
+		return nil
 	}
 	return q.finishDiscoveryHints(save, batch.Complete)
 }

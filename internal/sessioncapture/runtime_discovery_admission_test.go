@@ -2,6 +2,8 @@ package sessioncapture
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -88,6 +90,82 @@ func TestRuntimeDiscoveryExpiredCallbackPublishesAutonomously(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("runtime workers did not stop")
+	}
+}
+
+// Admission exhausts the save budget, then a later clean Complete batch must
+// not resolve an issue observed in the preceding generation.
+func TestRuntimeDiscoveryExpiredSaveCannotResolvePriorIssue(t *testing.T) {
+	dir, o, req := setup(t)
+	q := open(t, dir, o)
+	if err := q.InitRuntime(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	issue, _ := discoveryFixture(t)
+	recordDiscovery(t, q, DiscoveryBatch{Issues: []DiscoveryIssue{issue}, Complete: true}, nil)
+	req.ObservedAtNS = 0 // Hint calls Now while preparing this request.
+	var expire atomic.Bool
+	o.Now = func() time.Time {
+		if expire.CompareAndSwap(true, false) {
+			// Expire admission before Hint can write the source row.
+			time.Sleep(100 * time.Millisecond)
+		}
+		return time.Now()
+	}
+	q.opts.Now = o.Now
+	options := runtimeDefaults(RuntimeOptions{OperationTimeout: 20 * time.Millisecond, DiscoverBatch: func(context.Context) (DiscoveryBatch, error) {
+		expire.Store(true)
+		return DiscoveryBatch{Requests: []Request{req}}, nil
+	}})
+	if err := q.discoverOnce(t.Context(), options); err != nil {
+		t.Fatalf("release-budget failure recording did not succeed: %v", err)
+	}
+	sources, err := q.WorkStatus(t.Context(), 0, 64)
+	if err != nil || len(sources) != 0 {
+		t.Fatalf("expired admission unexpectedly accepted source: %+v %v", sources, err)
+	}
+	options.DiscoverBatch = func(context.Context) (DiscoveryBatch, error) { return DiscoveryBatch{Complete: true}, nil }
+	if err := q.discoverOnce(t.Context(), options); err != nil {
+		t.Fatal(err)
+	}
+	status, err := q.RuntimeStatus(t.Context())
+	if err != nil || status.DiscoveryComplete || status.DiscoveryError != "timeout" || status.ActiveDiscoveryIssues != 1 || status.CompletedSweep != 1 {
+		t.Fatalf("failed admission/metadata became healthy coverage: %+v %v", status, err)
+	}
+}
+
+func TestRuntimeDiscoveryUnrecordableFailureStopsLoop(t *testing.T) {
+	dir, o, _ := setup(t)
+	q := open(t, dir, o)
+	if err := q.InitRuntime(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	issue, _ := discoveryFixture(t)
+	recordDiscovery(t, q, DiscoveryBatch{Issues: []DiscoveryIssue{issue}, Complete: true}, nil)
+	oldRelease := runtimeReleaseTimeout
+	runtimeReleaseTimeout = 20 * time.Millisecond
+	defer func() { runtimeReleaseTimeout = oldRelease }()
+	var expire atomic.Int32
+	o.Now = func() time.Time {
+		if expire.Add(-1) >= 0 {
+			// Expire both the ordinary metadata write and its bounded
+			// release-budget retry before either can commit.
+			time.Sleep(100 * time.Millisecond)
+		}
+		return time.Now()
+	}
+	q.opts.Now = o.Now
+	options := runtimeDefaults(RuntimeOptions{OperationTimeout: 20 * time.Millisecond, DiscoverBatch: func(context.Context) (DiscoveryBatch, error) {
+		expire.Store(2)
+		return DiscoveryBatch{Complete: true}, nil
+	}})
+	err := q.discoverLoop(t.Context(), options)
+	if !errors.Is(err, errDiscoveryPersistence) || transientStepError(t.Context(), true, err) {
+		t.Fatalf("unrecorded failure was swallowed: %v", err)
+	}
+	status, err := q.RuntimeStatus(t.Context())
+	if err != nil || status.DiscoveryComplete || status.ActiveDiscoveryIssues != 1 || status.CompletedSweep != 1 {
+		t.Fatalf("unrecorded failure resolved issue: %+v %v", status, err)
 	}
 }
 
