@@ -56,15 +56,37 @@ func checkExportBudget(m Manifest, maxBytes int64) error {
 	return nil
 }
 
+// exportMetadata is the shared prospective consumer envelope. Body coordinates
+// depend only on the pinned manifest, never on body I/O or destination state.
+func exportMetadata(m Manifest) (Export, []byte, error) {
+	out := Export{Contract: ReaderContract, Manifest: m, Bodies: make([]Body, 0, len(m.Sources))}
+	for n := range m.Sources {
+		s := &m.Sources[n]
+		if IsSelected(*s) {
+			out.Bodies = append(out.Bodies, Body{SourceID: s.SourceID, EpochID: s.EpochID, Path: fmt.Sprintf("bodies/%04d.bin", n), SHA256: s.Object.SHA256, Size: s.Object.Size})
+		}
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return out, nil, err
+	}
+	if len(data) > MaxMetadata {
+		return out, nil, errors.New("export metadata exceeds limit")
+	}
+	return out, data, nil
+}
+
 func exportPinned(ctx context.Context, b Backend, m Manifest, dest string) (Export, error) {
-	var out Export
+	out, data, err := exportMetadata(m)
+	if err != nil {
+		return out, err
+	}
 	if err := noSymlinks(dest); err != nil {
 		return out, err
 	}
 	if err := os.Mkdir(dest, 0o700); err != nil {
 		return out, err
 	}
-	out = Export{Contract: ReaderContract, Manifest: m, Bodies: make([]Body, 0, len(m.Sources))}
 	r, err := os.OpenRoot(dest)
 	if err != nil {
 		return out, err
@@ -73,12 +95,14 @@ func exportPinned(ctx context.Context, b Backend, m Manifest, dest string) (Expo
 	if err := mkdirWithin(r, "bodies"); err != nil {
 		return out, err
 	}
+	selected := 0
 	for n := range m.Sources {
 		s := &m.Sources[n]
 		if !IsSelected(*s) {
 			continue
 		}
-		name := fmt.Sprintf("bodies/%04d.bin", n)
+		name := out.Bodies[selected].Path
+		selected++
 		f, e := r.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if e != nil {
 			return out, e
@@ -88,17 +112,9 @@ func exportPinned(ctx context.Context, b Backend, m Manifest, dest string) (Expo
 		if e != nil {
 			return out, e
 		}
-		out.Bodies = append(out.Bodies, Body{SourceID: s.SourceID, EpochID: s.EpochID, Path: name, SHA256: s.Object.SHA256, Size: s.Object.Size})
 	}
 	if err := syncDir(r, "bodies"); err != nil {
 		return out, err
-	}
-	data, err := json.Marshal(out)
-	if err != nil {
-		return out, err
-	}
-	if len(data) > MaxMetadata {
-		return out, errors.New("export metadata exceeds limit")
 	}
 	f, err := r.OpenFile(".metadata.tmp", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {

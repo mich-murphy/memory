@@ -195,7 +195,10 @@ func ValidateManifest(m Manifest) error {
 	if err != nil || len(data) > MaxMetadata {
 		return errors.New("metadata exceeds limit")
 	}
-	return nil
+	// A durable publication must fit the consumer envelope too: selected source
+	// and epoch identities are repeated in the export's exact body table.
+	_, _, err = exportMetadata(m)
+	return err
 }
 
 // validateSource checks one source's provenance and selected object. Uniqueness

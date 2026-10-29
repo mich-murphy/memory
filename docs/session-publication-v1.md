@@ -105,7 +105,12 @@ nonnegative (zero is allowed for unknown fixture timestamps); wall clocks never
 elect a winner. Sequence and revision are positive integers no larger than signed
 int64 maximum (Go stores them in uint64; Python/DuckDB consumers use BIGINT). JSON decoding rejects
 unknown fields, trailing values, unsupported contracts, malformed digests and
-metadata larger than 8 MiB. A manifest has at most 1024 sources. JSON duplicate-key
+metadata larger than 8 MiB. Both the manifest and its prospective complete
+`session-reader/v2` export metadata must fit this bound (exactly 8 MiB is allowed).
+The export envelope repeats selected source/epoch identities in its body table;
+withheld entries have no body records. Writer validation measures that deterministic
+JSON envelope before accepting a publication, without truncating identities or
+increasing consumer limits. A manifest has at most 1024 sources. JSON duplicate-key
 rejection is not implemented: producers must emit unique keys (the Go writer does).
 
 ## Backend and writer API
@@ -142,8 +147,9 @@ after successful writes. Local implements the fence under its writer lock, synci
 the existing file and every required parent entry even after reopening the store.
 
 `ValidateManifest(Manifest) error` validates the complete wire shape without backend
-access; producers can reject invalid generated manifests before durable acceptance.
-It does not verify dependency existence/content, archive binding, or source ordering.
+access, including the prospective export metadata bound; producers can reject
+invalid generated manifests before durable acceptance. It does not verify dependency
+existence/content, archive binding, or source ordering.
 
 `WriteArchive(ctx,backend,Archive) error` creates or confirms the identical archive;
 `ReadArchive(ctx,backend) (Archive,error)` verifies the supported archive contract.
@@ -184,8 +190,10 @@ history. Missing/corrupt required or selected dependencies return errors, not
 successful-empty sessions. Explicit optional withholding remains visible and partial.
 
 `ExportSession(ctx,backend,identity,dest) (Export,error)` selects once and writes
-that pinned manifest's exact selected decoded source bytes. Withheld entries have
-metadata only and cannot cause object access. Destination must not exist;
+that pinned manifest's exact selected decoded source bytes. It preflights the exact
+export metadata envelope and aggregate decoded-body budget before body access or
+destination creation. Withheld entries have metadata only and cannot cause object
+access. Destination must not exist;
 its parent must be trusted/private. It creates 0700 directories, 0600 files, syncs
 bodies, and writes `metadata.json` last via a temporary file and rename. A reader
 must treat absent metadata as incomplete. Errors may leave a private partial
