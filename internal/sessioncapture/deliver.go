@@ -144,7 +144,9 @@ func (q *Queue) deliverAccepted(ctx context.Context, b publication.Backend, i pu
 }
 
 func (q *Queue) deliverOne(ctx context.Context, b publication.Backend, m publication.Manifest, es []evidence) error {
-	if e := q.verifyDependencies(ctx, m, es); e != nil {
+	// attemptManifest already verified immutable bytes before marking optional
+	// delivery. Only policy/latch authority can have changed across that marker.
+	if e := q.checkDependencies(ctx, m, es); e != nil {
 		return e
 	}
 	body, token, e := b.Current(ctx, m.Identity.CurrentKey())
@@ -247,6 +249,23 @@ func (b faultBackend) CompareAndSwap(ctx context.Context, key, token string, bod
 }
 
 func (q *Queue) verifyDependencies(ctx context.Context, m publication.Manifest, es []evidence) error {
+	if err := q.checkDependencies(ctx, m, es); err != nil {
+		return err
+	}
+	for j := range m.Sources {
+		s := &m.Sources[j]
+		if publication.IsSelected(*s) {
+			if err := q.verify(ctx, s.Object); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// checkDependencies rechecks mutable policy and unavailable latches without
+// repeating immutable local byte verification within a delivery attempt.
+func (q *Queue) checkDependencies(ctx context.Context, m publication.Manifest, es []evidence) error {
 	if err := q.recheckScopes(ctx, es); err != nil {
 		return err
 	}
@@ -270,9 +289,6 @@ func (q *Queue) verifyDependencies(ctx context.Context, m publication.Manifest, 
 			}
 		}
 		if _, e := q.check(ctx, es[j], true); e != nil {
-			return e
-		}
-		if e := q.verify(ctx, s.Object); e != nil {
 			return e
 		}
 	}

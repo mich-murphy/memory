@@ -89,14 +89,14 @@ func (q *Queue) releaseSessionClaim(ctx context.Context, id int64) {
 	_, _ = q.db.ExecContext(save, "UPDATE runtime_sessions SET claim=0 WHERE id=?", id)
 }
 
-func (q *Queue) releaseOptionalRepair(ctx context.Context, id string) {
+func (q *Queue) releaseOptionalRepair(ctx context.Context, id string, attempts int) {
 	save, cancel := releaseCtx(ctx)
 	defer cancel()
-	_, _ = q.db.ExecContext(save, `UPDATE optional_repairs SET state='retry' WHERE id=? AND state='working'`, id)
+	_, _ = q.db.ExecContext(save, `UPDATE optional_repairs SET state='retry' WHERE id=? AND state='working' AND attempts=?`, id, attempts)
 }
 
-func (q *Queue) releaseEnrichment(ctx context.Context, id string) {
+func (q *Queue) releaseEnrichment(ctx context.Context, id string, attempts int) {
 	save, cancel := releaseCtx(ctx)
 	defer cancel()
-	_, _ = q.db.ExecContext(save, `UPDATE enrichment_work SET state='pending' WHERE id=? AND state='working'`, id)
+	_, _ = q.db.ExecContext(save, `UPDATE enrichment_work SET state='pending' WHERE id=? AND state='working' AND attempts=?`, id, attempts)
 }

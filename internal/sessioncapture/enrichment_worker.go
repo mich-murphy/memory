@@ -15,7 +15,7 @@ import (
 	"github.com/mich-murphy/memory/internal/publication"
 )
 
-func (q *Queue) enrichmentNext(ctx context.Context, o RuntimeOptions) (bool, error) {
+func (q *Queue) enrichmentNext(ctx context.Context, o RuntimeOptions) (did bool, resultErr error) {
 	if err := q.retryEnrichmentAdmission(ctx); err != nil {
 		return false, err
 	}
@@ -38,10 +38,30 @@ func (q *Queue) enrichmentNext(ctx context.Context, o RuntimeOptions) (bool, err
 		_, err := q.db.ExecContext(save, `UPDATE enrichment_work SET state='quarantined',attempts=attempts+1,last_error='integrity-error',next_retry=0,software=? WHERE id=? AND state IN ('pending','retry','ready')`, o.SoftwareVersion, id)
 		return true, metadataError(err)
 	}
-	if _, err := q.db.ExecContext(ctx, `UPDATE enrichment_work SET state='working',attempts=attempts+1,software=? WHERE id=?`, o.SoftwareVersion, id); err != nil {
+	claim, err := q.db.ExecContext(ctx, `UPDATE enrichment_work SET state='working',attempts=attempts+1,software=? WHERE id=? AND state IN ('pending','retry','ready') AND attempts=?`, o.SoftwareVersion, id, attempts)
+	if err != nil {
 		return true, err
 	}
-	defer q.releaseEnrichment(ctx, id)
+	claimed, err := claim.RowsAffected()
+	if err != nil || claimed == 0 {
+		return false, err
+	}
+	defer q.releaseEnrichment(ctx, id, attempts+1)
+	defer func() {
+		if !shutdownCancellation(ctx, resultErr) {
+			return
+		}
+		save, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.OperationTimeout)
+		defer cancel()
+		// Keep a durable ready result (or completed attachment). Only an
+		// interrupted working claim needs releasing back to retry.
+		released := "retry"
+		if len(saved) > 0 {
+			released = "ready"
+		}
+		_, err := q.db.ExecContext(save, `UPDATE enrichment_work SET state=CASE WHEN state='working' THEN ? ELSE state END,attempts=?,last_error='shutdown',next_retry=0 WHERE id=? AND attempts=? AND state IN ('working','ready')`, released, attempts, id, attempts+1)
+		resultErr = errors.Join(resultErr, metadataError(err))
+	}()
 	var result enrichmentResult
 	if len(saved) > 0 {
 		result, err = q.loadEnrichmentResult(ctx, string(saved))
@@ -55,7 +75,11 @@ func (q *Queue) enrichmentNext(ctx context.Context, o RuntimeOptions) (bool, err
 	if err != nil {
 		return true, q.finishEnrichment(ctx, id, attempts+1, err, o)
 	}
-	if _, err := q.db.ExecContext(ctx, `UPDATE enrichment_work SET result=?,state='ready' WHERE id=?`, []byte(resultID), id); err != nil {
+	// Once the result is stored, retain its pointer even if shutdown arrives
+	// before attachment. Restart must not need the optional callback again.
+	save, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.OperationTimeout)
+	defer cancel()
+	if _, err := q.db.ExecContext(save, `UPDATE enrichment_work SET result=?,state='ready' WHERE id=?`, []byte(resultID), id); err != nil {
 		return true, metadataError(err)
 	}
 
@@ -72,6 +96,10 @@ func (q *Queue) enrichmentNext(ctx context.Context, o RuntimeOptions) (bool, err
 }
 
 func (q *Queue) finishEnrichment(ctx context.Context, id string, attempts int, cause error, o RuntimeOptions) error {
+	if shutdownCancellation(ctx, cause) {
+		// The claim defer refunds/releases with the original operation context.
+		return cause
+	}
 	state := "retry"
 	if attempts >= o.MaxAttempts {
 		state = "quarantined"
@@ -80,6 +108,12 @@ func (q *Queue) finishEnrichment(ctx context.Context, id string, attempts int, c
 	save, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.OperationTimeout)
 	defer cancel()
 	_, err := q.db.ExecContext(save, `UPDATE enrichment_work SET state=?,last_error=?,next_retry=? WHERE id=?`, state, code, q.opts.Now().Add(retryDelay(attempts, o.Jitter)).UnixNano(), id)
+	// Optional source/callback outcomes retain their existing isolation. A mixed
+	// cancellation tree, however, must survive bookkeeping for the caller's
+	// all-leaf shutdown check rather than being silently treated as a clean stop.
+	if errors.Is(cause, context.Canceled) {
+		return errors.Join(runtimeFatalCause(cause), metadataError(err))
+	}
 	return metadataError(err)
 }
 

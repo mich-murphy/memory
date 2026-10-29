@@ -141,7 +141,7 @@ func (q *Queue) persistOptionalRepairState(ctx context.Context, i publication.Id
 	return err
 }
 
-func (q *Queue) optionalRepairNext(ctx context.Context, b publication.Backend, o RuntimeOptions) (bool, error) {
+func (q *Queue) optionalRepairNext(ctx context.Context, b publication.Backend, o RuntimeOptions) (did bool, resultErr error) {
 	paused, err := q.destinationPaused(ctx)
 	if err != nil || paused {
 		return false, err
@@ -164,7 +164,7 @@ func (q *Queue) optionalRepairNext(ctx context.Context, b publication.Backend, o
 		return true, ErrIntegrity
 	}
 	if state != "verified_attachment_pending" {
-		claim, claimErr := q.db.ExecContext(ctx, `UPDATE optional_repairs SET state='working',attempts=attempts+1 WHERE id=? AND state IN ('pending','retry')`, id)
+		claim, claimErr := q.db.ExecContext(ctx, `UPDATE optional_repairs SET state='working',attempts=attempts+1 WHERE id=? AND state IN ('pending','retry') AND attempts=?`, id, attempts)
 		if claimErr != nil {
 			return true, claimErr
 		}
@@ -177,12 +177,16 @@ func (q *Queue) optionalRepairNext(ctx context.Context, b publication.Backend, o
 			return false, nil
 		}
 		// No-op once a terminal state was saved; frees 'working' after a failed save.
-		defer q.releaseOptionalRepair(ctx, id)
+		defer q.releaseOptionalRepair(ctx, id, attempts+1)
+		defer func() { resultErr = q.refundOptionalRepairShutdown(ctx, id, attempts, resultErr, o) }()
 		err = q.repairOptionalObject(ctx, b, s, e)
 	}
 	save, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.OperationTimeout)
 	defer cancel()
 	if err != nil {
+		if shutdownCancellation(ctx, err) {
+			return true, err
+		}
 		return true, q.saveOptionalRepairFailure(save, id, attempts+1, err, o)
 	}
 	// Verification and attachment are separate durable facts. Recovery retries
@@ -203,6 +207,18 @@ func (q *Queue) optionalRepairNext(ctx context.Context, b publication.Backend, o
 	}
 	_, err = q.db.ExecContext(save, `UPDATE optional_repairs SET state='repaired',last_error='',next_retry=0 WHERE id=?`, id)
 	return true, err
+}
+
+// refundOptionalRepairShutdown retains a completed verification while releasing
+// only the interrupted claim; delivery/newer claims own their own state/budget.
+func (q *Queue) refundOptionalRepairShutdown(ctx context.Context, id string, attempts int, cause error, o RuntimeOptions) error {
+	if !shutdownCancellation(ctx, cause) {
+		return cause
+	}
+	save, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.OperationTimeout)
+	defer cancel()
+	_, err := q.db.ExecContext(save, `UPDATE optional_repairs SET state=CASE WHEN state='working' THEN 'retry' ELSE state END,attempts=?,last_error='shutdown',next_retry=0 WHERE id=? AND attempts=? AND state IN ('working','verified_attachment_pending')`, attempts, id, attempts+1)
+	return errors.Join(cause, err)
 }
 
 func (q *Queue) repairOptionalObject(ctx context.Context, b publication.Backend, s publication.Source, e evidence) error {
