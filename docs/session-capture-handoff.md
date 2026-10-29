@@ -15,16 +15,21 @@ current rollout authority.
 passes the full local development gates at `e8c96f8`.** The operator approved completing
 all six phases, with parent-owned quality, independent review and final verification.
 Representative operating budgets, installed acceptance and cutover remain incomplete.
+**Operator approval received:** proceed with a separate R2 bucket/fresh archive and the
+controlled fresh-state rebuild. Parent owns cloud/host actions; old archive, identities,
+privacy, original sources and research remain protected.
 The replacement is **not release-accepted, production-ready or cut over**. Defaults
-remain legacy. No host change, remote deletion or original-source deletion has occurred
-in this delivery session. Existing containment remains until its controlled re-enable
-boundary is resolved; offline green alone does not lift it.
+remain legacy. This preflight changed no installed service/configuration, old archive
+object or original source. Private preflight inventories, binaries and new inactive configs are now
+staged on the hosts. New bucket creation returned403; no new binding or capture began.
+Containment remains; offline green and approval alone do not establish release acceptance.
 
 ### Checkout and preservation
 
 - Integration checkout `/Users/mm/dev/memory`, branch
-  `delivery/queue-and-resource-simplification`; local `gh stack`: `main` →
-  `delivery/holistic-baseline` → `delivery/correctness` → current branch. Local `main`
+  `delivery/fresh-archive-qualification`; local `gh stack`: `main` →
+  `delivery/holistic-baseline` → `delivery/correctness` →
+  `delivery/queue-and-resource-simplification` → current branch. Local `main`
   already contains 88 commits beyond `origin/main`; this session has not pushed them.
 - Starting implementation `4c9aca5c5cb178316e9eed32626dbf56f7dbaac9`; adopted the review
   report and handoff edits as `06c6da4`. No preexisting implementation changes in this checkout.
@@ -46,7 +51,7 @@ boundary is resolved; offline green alone does not lift it.
 | Mac capture | Fresh `launchctl print-disabled` on October 29: disabled. Last recorded installed binary `efbb99e`, sha `d5592fca…`; binary/process not freshly inspected here. |
 | Mac consumers | Fresh launchd query: `com.agent-sessions.publication-refresh` and `publication-dashboard` also disabled. Do not repeat the older claim that refresh is running. |
 | BC-01 | Parent resolved the apparent access blocker: SSH alias is lowercase `bc-01`; uppercase bypassed its Host stanza. Fresh read-only query reports capture `UnitFileState=disabled`, `ActiveState=inactive`, `SubState=dead`, `ExecMainStatus=0`. Last installed source record remains dirty `b23712bc`, not freshly qualified. |
-| Re-enable | A controlled release action after combined gates and explicit containment reconciliation. No worker has host authority. |
+| Re-enable | Controlled fresh rebuild approved; still requires verified separate destination/binding and privacy/containment reconciliation. New bucket access is blocked. No worker has host authority. |
 | Cutover | Inventory, operating acceptance, final switch and reviewed retired-key deletion remain incomplete. No legacy code removal before accepted replacement. |
 
 The machines handover's newest top section withdraws the custom `bc-heavy` tool; it was
@@ -69,9 +74,9 @@ binary swap/replay. Read-only planning confirmed an empty Queue starts at sequen
 and cannot reconstruct prior source epochs or unpublished evidence; publishing against
 existing R2 heads is not safe continuation. Production `capture-v1/archive.json` is a
 global bucket binding: changing archive ID alone is not independent isolation. Existing
-configuration supports a separate bucket. Parent recommended a fresh bucket/archive
-and requested that release-boundary decision; no same-bucket namespace framework or
-old-binding overwrite is authorized by this plan.
+configuration supports a separate bucket. The operator approved that fresh bucket/archive
+approach on October 29; no same-bucket namespace framework or old-binding overwrite is
+authorized by this plan.
 Do not recreate deleted generated data incidentally or treat local source availability
 as proof every deleted accepted byte can be recovered. Preserve the containment plist
 (failure-only KeepAlive, throttle 300s), build exact gated source, and back up any new
@@ -86,7 +91,7 @@ inputs, not current spool statistics. Parent informed the operator of this bound
 | 2 | Source absence, analytics scope/disappearance, current-state docs | Defects have before/after regressions; fail-closed boundaries retained | Implemented, independently reviewed; local full gates passed; installed R1 acceptance remains phase 5 |
 | 3 | Typed queue state, inventory reuse, evidence correspondence, shared delivery outcomes, malformed work | Fewer interpretations/invalid states; invariant tests unchanged or stronger | Implemented, independently reviewed; local full gates passed |
 | 4 | Representative measurements; bounded report/import/scheduling improvements where justified | Stated resource/freshness/retention envelope demonstrated | Synthetic measurements justify three narrow changes; representative operating envelope remains open |
-| 5 | Combined full gates, installed Mac/BC-01/native/R2 acceptance and autonomous observation | Actual installed end-to-end path, privacy negatives, restart/retry and sustained operation | Local gates passed; fresh destination/containment decision and installed operating acceptance remain |
+| 5 | Combined full gates, installed Mac/BC-01/native/R2 acceptance and autonomous observation | Actual installed end-to-end path, privacy negatives, restart/retry and sustained operation | Local gates passed; separate destination approved, creation denied403; installed operating acceptance remains |
 | 6 | Controlled cutover, reviewed remote retirement, legacy code removal | One supported architecture; preserved data/policy; post-cutover checks | Dependent on phase 5 |
 
 Non-negotiable: preserve source epochs, durable pending ownership, privacy exclusions,
@@ -250,15 +255,74 @@ or installed acceptance was run; local green is not release acceptance.
 | R10 local state/corruption | Typed singleton fields and explicit malformed enrichment quarantine validated; no speculative lock eviction. |
 | Retirement/retention | Pending controlled acceptance/cutover. No GC, old-key deletion, legacy removal or indefinite-retention claim. |
 
+### Approved fresh-destination preflight — October 29
+
+Approval is recorded above; it does not need to be requested again. Parent performed:
+
+- Existing private credential parser passed; old-bucket `HeadBucket` succeeded.
+  New-name `HeadBucket` and `CreateBucket` returned403 (creation `AccessDenied`). No
+  new bucket/binding was confirmed. No ambient Cloudflare provisioning token was present;
+  `op whoami` failed for each of the three configured accounts. Credentials were not printed.
+- Planned bucket **`agent-sessions-capture-20261029-e3d6dd6e8bab4e8f`**, archive
+  **`session-capture-20261029-e3d6dd6e8bab4e8f`**. Keep these coordinates for continuation;
+  verify actual ownership/emptiness/access before initialization, including if a human
+  provisions it. No fallback to the old bucket.
+- Bounded metadata-only walk on both hosts:30k entries/root,30s/root,60s/host; no source
+  bodies opened, symlinks not followed, `.git`/`node_modules` omitted. All six configured
+  roots enumerated within bounds; no unreadable entries,16 Mac/20 BC symlinks skipped.
+  Disk-size candidates (JSONL/compressed JSONL/SQLite/DB suffixes, **not eligible coverage**):
+  Mac4,150 files/4,366,522,606bytes; BC2,192/2,334,244,660bytes. Largest candidate files:
+  Mac615,165,952bytes; BC231,567,360bytes. No largest-line, deduplication or retention claim.
+- Both configured machine IDs match their preserved identity files and differ from one
+  another. Both old archive IDs match. Legacy root registries queried read-only: zero
+  learned roots on each; existing candidate configs also have no custom roots/aliases.
+  Mac's first scratch query omitted Python's `uri=True` and could not open its URI;
+  corrected read-only query succeeded. Use `mac-inventory-corrected.json`, not the first result.
+- Local exclusion registries and unresolved native-policy markers: zero on both hosts,
+  no parse/access failures. Bounded old-bucket `v3/machines/<preserved-id>/exclusions/`
+  listings completed for both machines: zero remote records, no missing local opt-outs.
+  These are scoped observations, not permission to omit fresh pre-capture/pre-upload checks.
+- Built darwin/arm64 and linux/amd64 from a clean detached **`e8c96f8`** worktree using
+  pinned Nix, `CGO_ENABLED=0 go build -buildvcs=true -trimpath`. Both build records show
+  Go1.27.3, exact qualified revision and `vcs.modified=false`. SHA256:
+  Mac`d2fe528f5e32b0a011b9e95d1e3f1e5651bff746332788fb71a0bad2dbe5e58d`;
+  Linux`eeaabf4ebe460f062f3ae8d7a19251155ba633b45ce220f3987a053daa212b77`.
+  Copied Linux binary into its private staging directory and verified identical SHA256;
+  did not replace an installed executable. Removed only this newly created clean build
+  worktree after completion; unrelated worktrees untouched.
+- Staged private configs on both hosts, changing **only** archive ID, bucket and new
+  spool path; preserved machine ID, policy, roots, aliases and all budgets. Verified old
+  config bytes unchanged. Gated binaries on each host passed `capture-v1 policy-pauses`
+  (zero markers) and `capture-v1 service --action plan` (valid JSON), with credentials
+  removed from their environments. The service plan used the staged binary only for
+  config validation; the final supervisor must use the credential-scoped launcher wrapper.
+  Neither `init`, `run` nor service/hook apply was run.
+  Fresh spools remain absent; final launchd/systemd checks confirm capture disabled and
+  BC inactive. Mac refresh/dashboard remain disabled.
+
+Private evidence/staging on each host:
+`~/.local/state/agent-sessions-release/20261029-e3d6dd6e8bab4e8f/`.
+Mac contains `destination.json`, the bounded `inventory.py`, corrected Mac and BC inventory
+JSON and `remote-policy-inventory.json`; both hosts have inactive `capture-runtime.json`
+and their gated binary. Do not commit private inventories/configuration or credentials.
+
+Sol/medium read-only preflight worker `5ec650de-241b-4e9` completed and released ownership.
+It confirmed there is no source-only inventory or one-shot candidate backfill command:
+`run` captures and can grow the spool even when destination access fails. Legacy `backfill`
+is not a substitute, and `service install --apply` starts the supervisor. Parent's actual
+preflight used only the safe existing commands above; no new runtime code or gates changed.
+
 ## Next action / actual release boundary
 
-1. **Operator decision pending:** approve the recommended separate R2 bucket/fresh archive
-   and controlled fresh-state rebuild, or explicitly require same-bucket isolation (a new
-   design scope). Existing bucket configuration is sufficient for the recommended option;
-   do not overwrite old `archive.json` or invent queue-resume compatibility.
-2. Parent then checks destination access and inventories preserved original sources,
-   identities, learned roots and effective exclusions on Mac/BC-01 without exposing
-   credentials/transcripts. BC-01 is reachable through lowercase `bc-01`.
+1. **External access blocker, not an approval request:** supply an accessible provisioning
+   credential, or create the planned separate bucket and grant the intended capture
+   credential read/write access. Use the existing private-file/1Password mechanism, never
+   paste secrets in chat. Account console (provided to operator when403 occurred):
+   https://dash.cloudflare.com/cdb56f368268629bd2374fb3f5c12e85/r2/overview
+2. Parent verifies new destination emptiness/access, initializes its fresh archive binding
+   explicitly and reconciles both staged configs/credentials and the credential-scoped
+   launcher wrappers before any supervisor install. Recheck changing privacy and
+   inventory facts above; BC-01 is reachable through lowercase `bc-01`.
 3. Build/install exact gated source only at the controlled containment boundary; validate
    writer→R2→sole reader→importer→events→report, native hooks, exclusions and restart/retry.
    Qualify representative budgets, spool/offline/retention horizon and24–48h autonomous
@@ -266,6 +330,7 @@ or installed acceptance was run; local green is not release acceptance.
 4. Only after acceptance: controlled cutover, fence old writers, reviewed authorized
    retired-key deletion and legacy-only code/operator-path removal, followed by checks.
 
-No further implementation worker is active. Parent owns the remaining operating work;
-this is an authority/acceptance boundary, not a request for the operator to run tests or
-perform routine engineering. All six phases are **not** complete.
+No worker remains active. Parent owns the remaining operating work. All six phases are
+**not** complete. Existing full-development qualification remains applicable because
+production code is unchanged; private preflight and cross-builds are not installed/live
+acceptance. Do not turn the credential-access blocker into silent cutover or a legacy reset.
