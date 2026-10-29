@@ -51,8 +51,10 @@ func runtimeClaimedRecordAliases(inventory *capturecoordinates.Inventory, adapte
 			return false, err
 		}
 		for _, position := range positions {
-			sf, ok := adapters.ClassifyLogical(adapter, position.LogicalPath, position.Root)
-			if ok && sessioncapture.OwnershipSession(sf.Root, session, sf.SessionKey) {
+			// The preserved tuple is authoritative, not a fresh filesystem search
+			// from an artifact path (whose UUID can have multiple project owners).
+			key := runtimeClaimedLegacyKey(adapter, record.Root, position.Root, record.SessionKey)
+			if sessioncapture.OwnershipSession(position.Root, session, key) {
 				return true, nil
 			}
 		}
@@ -80,7 +82,7 @@ func runtimeClaimedRecordAliases(inventory *capturecoordinates.Inventory, adapte
 // Translate only the legacy root prefix; keep the complete session name, not a
 // UUID suffix. The destination root is already proven equivalent by inventory.
 func runtimeClaimedLegacyKey(adapter adapters.Adapter, oldRoot, root, key string) string {
-	if oldRoot == root {
+	if key == "" || oldRoot == root {
 		return key
 	}
 	oldSum := sha256.Sum256([]byte(oldRoot))

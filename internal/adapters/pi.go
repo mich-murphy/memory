@@ -156,7 +156,15 @@ func piSession(parts []string) (string, Role) {
 }
 
 func (p *Pi) Classify(path, root string) (SessionFile, bool) {
-	return p.classifyLayout(path, root, p.isAgentDir(root))
+	rel, ok := relative(path, root)
+	if !ok {
+		return SessionFile{}, false
+	}
+	// Interpret the admitted path, never mutable sibling-directory existence.
+	// Canonical agent state remains agent state; custom roots can contain both
+	// sessions/ agent layout and flat transcripts without demoting either.
+	agentRoot := root == p.CanonicalRoot() || root == p.Dir() || strings.HasPrefix(rel, "sessions/") || topRole(piRoles, rel) != RoleUnknown
+	return p.classifyLayout(path, root, agentRoot)
 }
 
 func (p *Pi) classifyLayout(path, root string, agentDir bool) (SessionFile, bool) {
@@ -198,7 +206,7 @@ func (p *Pi) classifyLayout(path, root string, agentDir bool) (SessionFile, bool
 func (p *Pi) Related(sf SessionFile) Discovery {
 	prefix := "dirs/" + rootTag(sf.Root) + "/"
 	base := sf.Root
-	if p.isAgentDir(sf.Root) {
+	if strings.HasPrefix(sf.SessionKey, keyPrefix(p, sf.Root)) {
 		prefix, base = keyPrefix(p, sf.Root), filepath.Join(sf.Root, "sessions")
 	}
 	local, ok := strings.CutPrefix(sf.SessionKey, prefix)

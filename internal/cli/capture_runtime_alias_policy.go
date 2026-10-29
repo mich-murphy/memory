@@ -123,12 +123,13 @@ func (r runtimeComposition) aliasExcluded(req sessioncapture.Request, owner adap
 		return false, errors.New("source agent unsupported")
 	}
 	for _, position := range positions {
-		sf, ok := adapters.ClassifyLogical(adapter, position.LogicalPath, position.Root)
-		if !ok {
-			sf = owner
-			sf.Root = position.Root
-			sf.Path = position.LogicalPath
-		}
+		// Ownership was independently validated before this call (including the
+		// bounded durable index for external artifacts). A second classification
+		// would both scan unrelated projects and possibly choose a different slug.
+		sf := owner
+		sf.SessionKey = runtimeClaimedLegacyKey(adapter, owner.Root, position.Root, owner.SessionKey)
+		sf.Root = position.Root
+		sf.Path = position.LogicalPath
 		sf.SourcePath = position.Path
 		if registry.Excludes(sf) {
 			return true, nil
