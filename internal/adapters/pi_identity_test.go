@@ -68,3 +68,55 @@ func TestPiStructuralIdentity(t *testing.T) {
 		})
 	}
 }
+
+// Top-level logs are explicit agent resources, including custom agent roots.
+// Their identity must not depend on the sessions sibling or root availability.
+func TestPiStructuralLogResource(t *testing.T) {
+	for _, layout := range []string{"custom", "canonical", "environment"} {
+		t.Run(layout, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("PI_CODING_AGENT_DIR", "")
+			root := filepath.Join(home, "custom-agent")
+			if layout == "canonical" {
+				root = filepath.Join(home, ".pi", "agent")
+			}
+			if layout == "environment" {
+				root = filepath.Join(home, "env-agent")
+				t.Setenv("PI_CODING_AGENT_DIR", root)
+			}
+			p := NewPi(home)
+			path := filepath.Join(root, "pi-debug.log")
+			if err := os.MkdirAll(filepath.Join(root, "sessions", "--project--"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("synthetic log\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			key := "roots/" + rootTag(root) + "/pi-debug.log"
+			if layout == "canonical" {
+				key = "pi-debug.log"
+			}
+			expected := SessionFile{Agent: "pi", Root: root, Path: path, Key: key, SessionKey: "", Role: RoleLog}
+			check := func(stage string) {
+				t.Helper()
+				ordinary, ok := p.Classify(path, root)
+				if !ok || ordinary != expected {
+					t.Fatalf("%s: got %#v want %#v", stage, ordinary, expected)
+				}
+				logical, ok := ClassifyLogical(p, path, root)
+				if !ok || logical != expected {
+					t.Fatalf("%s logical: got %#v want %#v", stage, logical, expected)
+				}
+			}
+			check("sessions present")
+			if err := os.RemoveAll(filepath.Join(root, "sessions")); err != nil {
+				t.Fatal(err)
+			}
+			check("sessions removed")
+			if err := os.RemoveAll(root); err != nil {
+				t.Fatal(err)
+			}
+			check("logical root absent")
+		})
+	}
+}

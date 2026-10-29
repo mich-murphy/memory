@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/mich-murphy/memory/internal/adapters"
@@ -56,9 +59,14 @@ func TestAdversarialPiIdentityMutation(t *testing.T) {
 					t.Error(err)
 				}
 			}()
-			if _, err := q.Capture(t.Context(), before); err != nil {
+			first, err := q.Capture(t.Context(), before)
+			if err != nil {
 				t.Fatal(err)
 			}
+			if first.Identity != before.Identity || len(first.Sources) != 1 || first.Sources[0].EpochID == "" {
+				t.Fatalf("invalid initial capture: %#v", first)
+			}
+			previous := first.Sources[0]
 			check := func(stage string) {
 				t.Helper()
 				current, err := newRuntimeComposition(loaded)
@@ -75,6 +83,33 @@ func TestAdversarialPiIdentityMutation(t *testing.T) {
 				if err := current.policy(false)(t.Context(), before); err != nil {
 					t.Fatalf("%s rejected previously queued identity: %v", stage, err)
 				}
+
+				// Reopen using the current composition's actual queue policy, append real
+				// bytes, and prove the retained source epoch advances rather than splits.
+				if err := q.Close(); err != nil {
+					t.Fatal(err)
+				}
+				q, err = sessioncapture.Open(t.Context(), c.Spool, current.queueOptions())
+				if err != nil {
+					t.Fatal(err)
+				}
+				runtimeAppendSynthetic(t, path)
+				after, err = capturesource.Classify(t.Context(), current.sourceOptions(config), "pi", path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				manifest, err := q.Capture(t.Context(), after)
+				if err != nil {
+					t.Fatalf("%s append capture: %v", stage, err)
+				}
+				if manifest.Identity != first.Identity || len(manifest.Sources) != 1 {
+					t.Fatalf("%s split session or source: %#v", stage, manifest)
+				}
+				source := manifest.Sources[0]
+				if source.SourceID != previous.SourceID || source.SourceID != before.SourceID || source.EpochID != previous.EpochID || source.Role != previous.Role || source.Role != want || source.Revision != previous.Revision+1 || source.Object.Size != previous.Object.Size+int64(len("synthetic append\n")) {
+					t.Fatalf("%s broke append epoch/revision continuity: %#v -> %#v", stage, previous, source)
+				}
+				previous = source
 			}
 			if err := os.Mkdir(filepath.Join(root, "sessions"), 0o700); err != nil {
 				t.Fatal(err)
@@ -188,5 +223,59 @@ func TestAdversarialAliasExternalOptOutMismatch(t *testing.T) {
 	}
 	if !denied {
 		t.Fatal("validated durable owner lost old-root opt-out")
+	}
+}
+
+func runtimeAppendSynthetic(t *testing.T, path string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, writeErr := f.WriteString("synthetic append\n")
+	closeErr := f.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAdversarialPiCustomLogResourceIdentity(t *testing.T) {
+	c, config := runtimeFixture(t)
+	root := filepath.Join(c.Home, "custom-pi-agent")
+	path := filepath.Join(root, "pi-debug.log")
+	runtimeWrite(t, path)
+	if err := os.MkdirAll(filepath.Join(root, "sessions", "--project--"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	c.DefaultRoots = false
+	c.Roots = []capturedaemon.Root{{Agent: "pi", Path: root}}
+	if err := capturedaemon.Save(config, c); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := capturedaemon.Load(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := newRuntimeComposition(loaded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(root))
+	namespace := hex.EncodeToString(sum[:])
+	key := "roots/" + namespace[:10] + "/pi-debug.log"
+	identity := publication.Identity{ArchiveID: c.ArchiveID, MachineID: c.MachineID, Agent: "pi", SessionID: "resource/" + namespace + "/" + key}
+	for _, stage := range []string{"sessions present", "sessions removed"} {
+		if stage == "sessions removed" {
+			if err := os.RemoveAll(filepath.Join(root, "sessions")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		req, err := capturesource.Classify(t.Context(), r.sourceOptions(config), "pi", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if req.SourceID != key || req.Identity != identity || req.Role != "artifact" || !slices.Contains(req.Associations, "adapter-role:log") || !slices.Contains(req.Associations, "ownership:agent-resource") {
+			t.Fatalf("%s changed explicit log resource: %#v", stage, req)
+		}
 	}
 }

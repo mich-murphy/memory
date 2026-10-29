@@ -163,7 +163,8 @@ func (p *Pi) Classify(path, root string) (SessionFile, bool) {
 	// Interpret the admitted path, never mutable sibling-directory existence.
 	// Canonical agent state remains agent state; custom roots can contain both
 	// sessions/ agent layout and flat transcripts without demoting either.
-	agentRoot := root == p.CanonicalRoot() || root == p.Dir() || strings.HasPrefix(rel, "sessions/") || topRole(piRoles, rel) != RoleUnknown
+	agentLog := !strings.Contains(rel, "/") && strings.HasSuffix(rel, ".log")
+	agentRoot := root == p.CanonicalRoot() || root == p.Dir() || strings.HasPrefix(rel, "sessions/") || topRole(piRoles, rel) != RoleUnknown || agentLog
 	return p.classifyLayout(path, root, agentRoot)
 }
 
