@@ -15,9 +15,19 @@ Only `capture-v1` commands are accepted. The executable must be an owned regular
 non-symlinked executable and not group/world writable. Trusted ancestors must remain
 trusted; this is not a defense against a malicious owner concurrently replacing them.
 
-Only `init`, `run`, `export` and `current-heads` receive `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`.
-Those two values are parsed as bounded data from an explicitly named owned/private
-regular no-follow file. No shell expansion, code evaluation, ambient AWS lookup,
+Only `init`, `run`, `export` and `current-heads` receive destination credentials.
+The fixed file keys `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` are parsed as
+bounded data from an explicitly named owned/private regular no-follow file. When
+an explicit runtime config selects other credential environment references, only
+these successfully parsed values are mapped to those references; their ambient
+values are removed first, including on credential-file failure.
+
+The wrapper reads only the bounded credential-reference projection of a private
+runtime JSON; the binary still validates the full configuration. This accepts one
+`--config PATH`, `-config PATH`, `--config=PATH` or `-config=PATH`. Duplicate config
+flags and duplicate JSON keys (including case aliases) are rejected rather than
+choosing a winner. Invalid/unavailable config is a safe launcher failure, never an
+ambient fallback. Other CLI options are left to the binary. No shell expansion, code evaluation, ambient AWS lookup,
 credential arguments or value-bearing error diagnostic is used. Other commands,
 including hooks and publication/status inspection, neither open that file nor inherit
 those two ambient values. A sandboxed native producer therefore needs no credential
@@ -50,6 +60,18 @@ Capture, replay/resume and activation still fail closed on policy loss. Hook rem
 requires the declared old executable path to be safe, not the old file to exist.
 Applied service activation requires an owned safe executable. Service changes reject
 foreign installed unit contents before invoking a supervisor or deleting a file.
+Installed service trust recognizes only the supported generated unit grammar, not
+general plist/systemd configuration. For stop/removal and replacement install, old safe executable/config paths may
+differ from the desired plan and need not still exist. Start/restart do not replace
+the installed unit: its executable/config argv must match the currently qualified
+desired coordinates, otherwise explicitly install the new plan first. Safe restart
+tuning drift alone does not require reinstallation. Supported tuning is limited to
+canonical positive decimal integers (at most six digits): launchd
+`ThrottleInterval`, or systemd `StartLimitIntervalSec`, `StartLimitBurst`,
+`RestartSec`, `RestartSteps`, and `RestartMaxDelaySec`. Unknown keys/directives,
+execution overrides, duplicate/reset directives, and alternate whitespace/layout
+are rejected before any supervisor action. This restriction deliberately does not
+attempt to interpret arbitrary operator-modified unit files.
 
 Native hook targets use the existing declared coordinate inventory: each root route
 and every live resolution identity must map to the same logical root. A single safe

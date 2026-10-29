@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Explicit supervisor credential handoff; never evaluates a shell or logs values."""
 import argparse
+import json
 import os
 from pathlib import Path
 import re
@@ -11,7 +12,7 @@ import sys
 REQUIRED = {'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'}
 
 
-def credentials(path):
+def private_bytes(path):
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, 'rb') as stream:
         info = os.fstat(stream.fileno())
@@ -20,6 +21,11 @@ def credentials(path):
         raw = stream.read(65537)
     if len(raw) > 65536:
         raise ValueError('credential file exceeds bound')
+    return raw
+
+
+def credentials(path):
+    raw = private_bytes(path)
     values = {}
     for line in raw.decode('utf-8').splitlines():
         line = line.strip()
@@ -39,6 +45,57 @@ def credentials(path):
     if set(values) != REQUIRED:
         raise ValueError('missing explicit credential reference')
     return values
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        # Go matches JSON struct field names case-insensitively. Normalize this
+        # projection too, and reject case aliases instead of choosing a winner.
+        key = key.casefold()
+        if key in result:
+            raise ValueError('duplicate runtime config field')
+        result[key] = value
+    return result
+
+
+def credential_references(command):
+    # This is only a bounded credential-reference projection. The binary remains
+    # authoritative for full runtime validation; no source/config interpretation
+    # or generic CLI parser is duplicated here.
+    paths = []
+    for n, word in enumerate(command[2:], 2):
+        if word in ('--config', '-config'):
+            if n + 1 >= len(command):
+                raise ValueError('missing explicit runtime config')
+            paths.append(command[n + 1])
+        elif word.startswith(('--config=', '-config=')):
+            paths.append(word.split('=', 1)[1])
+    if len(paths) > 1:
+        raise ValueError('ambiguous explicit runtime config')
+    default = ('R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY')
+    if not paths:
+        return default
+    path = Path(paths[0])
+    if not path.is_absolute():
+        raise ValueError('runtime config requires absolute path')
+    try:
+        config = json.loads(private_bytes(path), object_pairs_hook=unique_object)
+    except RecursionError:
+        raise ValueError('invalid runtime config nesting') from None
+    if not isinstance(config, dict):
+        raise ValueError('invalid runtime config object')
+    backend = config.get('backend')
+    if backend is None:
+        return default
+    if not isinstance(backend, dict):
+        raise ValueError('invalid runtime backend object')
+    if backend.get('kind') != 'r2':
+        return default
+    refs = (backend.get('access_key_env'), backend.get('secret_key_env'))
+    if any(not isinstance(ref, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', ref) for ref in refs) or refs[0] == refs[1]:
+        raise ValueError('invalid explicit credential references')
+    return refs
 
 
 def arguments(argv=None):
@@ -64,8 +121,12 @@ def arguments(argv=None):
     for name in REQUIRED:
         env.pop(name, None)
     if len(command) >= 2 and command[1] in ('init', 'run', 'export', 'current-heads'):
+        refs = credential_references(command)
+        for ref in refs:
+            env.pop(ref, None)
         try:
-            env.update(credentials(args.credentials_env))
+            explicit = credentials(args.credentials_env)
+            env.update({refs[0]: explicit['R2_ACCESS_KEY_ID'], refs[1]: explicit['R2_SECRET_ACCESS_KEY']})
         except (OSError, ValueError, UnicodeError):
             if command[1] != 'run':
                 raise

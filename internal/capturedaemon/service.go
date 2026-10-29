@@ -97,7 +97,7 @@ func Apply(ctx context.Context, p Plan, action string, apply bool, run Runner) e
 	if err := SafePath(p.Path); err != nil {
 		return err
 	}
-	if err := validateServiceFile(p); err != nil {
+	if err := validateServiceFile(p, action); err != nil {
 		return err
 	}
 	if action == "install" {

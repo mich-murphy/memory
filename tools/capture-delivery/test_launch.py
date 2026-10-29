@@ -91,6 +91,63 @@ class LaunchTests(unittest.TestCase):
                 with self.assertRaises((OSError, ValueError)):
                     launch.arguments([*self.argv[:-1], command])
 
+    def test_configured_credential_references_use_only_explicit_file(self):
+        import json
+        runtime = self.root / 'runtime.json'
+        runtime.write_text(json.dumps({'backend': {'kind': 'r2', 'access_key_env': 'ALT_ACCESS', 'secret_key_env': 'ALT_SECRET'}}))
+        runtime.chmod(0o600)
+        command = [*self.argv[:-1], 'run', '--config', str(runtime)]
+        with patch.dict(os.environ, {'ALT_ACCESS': 'ambient-private', 'ALT_SECRET': 'ambient-private'}):
+            _, _, env = launch.arguments(command)
+            self.assertEqual(env.get('ALT_ACCESS'), 'synthetic-key')
+            self.assertEqual(env.get('ALT_SECRET'), 'synthetic-secret')
+            self.config.unlink()
+            _, _, env = launch.arguments(command)
+            self.assertNotIn('ALT_ACCESS', env)
+            self.assertNotIn('ALT_SECRET', env)
+            self.config.write_text('R2_ACCESS_KEY_ID=$(private-value)\n')
+            self.config.chmod(0o600)
+            _, _, env = launch.arguments(command)
+            self.assertNotIn('ALT_ACCESS', env)
+            self.assertNotIn('ALT_SECRET', env)
+
+    def test_runtime_reference_projection_is_bounded_and_unambiguous(self):
+        import json
+        runtime = self.root / 'runtime.json'
+        original = json.dumps({'backend': {'kind': 'r2', 'access_key_env': 'ALT_ACCESS', 'secret_key_env': 'ALT_SECRET'}})
+        runtime.write_text(original)
+        runtime.chmod(0o600)
+        for flag in ('--config', '-config'):
+            for flags in ([flag, str(runtime)], [flag + '=' + str(runtime)]):
+                _, _, env = launch.arguments([*self.argv[:-1], 'run', *flags])
+                self.assertEqual(env['ALT_ACCESS'], 'synthetic-key')
+                self.assertEqual(env['ALT_SECRET'], 'synthetic-secret')
+        for body in ('{', '[]', '{"backend":{},"backend":{}}',
+                     '{"backend":{"kind":"r2","access_key_env":"ALT_ACCESS","secret_key_env":"ALT_ACCESS"}}',
+                     '{"backend":{"kind":"r2","access_key_env":"BAD-NAME","secret_key_env":"ALT_SECRET"}}',
+                     'x' * 65537):
+            runtime.write_text(body)
+            with self.assertRaises((OSError, ValueError)):
+                launch.arguments([*self.argv[:-1], 'run', '--config', str(runtime)])
+        runtime.write_text(original)
+        with self.assertRaises(ValueError):
+            launch.arguments([*self.argv[:-1], 'run', '--config', str(runtime), '-config=' + str(runtime)])
+        runtime.chmod(0o644)
+        with self.assertRaises(ValueError):
+            launch.arguments([*self.argv[:-1], 'run', '--config', str(runtime)])
+
+    def test_case_insensitive_runtime_reference_names(self):
+        runtime = self.root / 'runtime.json'
+        runtime.write_text('{"Backend":{"KIND":"r2","ACCESS_KEY_ENV":"ALT_ACCESS","SECRET_KEY_ENV":"ALT_SECRET"}}')
+        runtime.chmod(0o600)
+        with patch.dict(os.environ, {'ALT_ACCESS': 'ambient-private', 'ALT_SECRET': 'ambient-private'}):
+            _, _, env = launch.arguments([*self.argv[:-1], 'run', '--config', str(runtime)])
+            self.assertEqual(env.get('ALT_ACCESS'), 'synthetic-key')
+            self.assertEqual(env.get('ALT_SECRET'), 'synthetic-secret')
+        runtime.write_text('{"backend":{},"Backend":{}}')
+        with self.assertRaises(ValueError):
+            launch.arguments([*self.argv[:-1], 'run', '--config', str(runtime)])
+
     def test_failure_diagnostic_contains_no_values(self):
         with patch.object(launch.os, 'execve', side_effect=OSError('synthetic-secret')), patch('sys.stderr') as err:
             self.assertEqual(launch.main(self.argv), 1)

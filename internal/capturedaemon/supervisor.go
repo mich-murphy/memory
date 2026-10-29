@@ -55,12 +55,15 @@ func validateSupervisorParent(path string) error {
 	return nil
 }
 
-func validateServiceFile(p Plan) error {
+func validateServiceFile(p Plan, action string) error {
 	if err := validateSupervisorParent(p.Path); err != nil {
 		return err
 	}
 	st, err := os.Lstat(p.Path)
 	if errors.Is(err, os.ErrNotExist) {
+		if action == "start" || action == "restart" {
+			return errors.New("installed service unavailable; install before activation")
+		}
 		return nil
 	}
 	if err != nil || !st.Mode().IsRegular() || !owned(st) || st.Mode().Perm()&0o077 != 0 || st.Size() > maxConfigBytes {
@@ -69,6 +72,9 @@ func validateServiceFile(p Plan) error {
 	body, err := os.ReadFile(p.Path)
 	if err != nil || !managedService(p.Path, body) {
 		return errors.New("foreign service plan file")
+	}
+	if action == "start" || action == "restart" {
+		return validateActivationCoordinates(p, body)
 	}
 	return nil
 }
