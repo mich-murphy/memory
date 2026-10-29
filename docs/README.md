@@ -38,6 +38,13 @@ mechanisms do not override the replacement contract:
   inspection/defaults and explicit publication-backed import/query/dashboard; candidate
   consumers use the authoritative reader.
 
+## Current development review evidence
+
+- [Adversarial review](adversarial-review-20261029.md) — baseline findings and rationale.
+- [Resolution evidence](adversarial-resolution-evidence-20261029.md) — per-item repairs,
+  independent reviews and passing combined development gates. This is not installed,
+  live-R2 or two-host operating acceptance; the handoff retains that boundary.
+
 ## Historical evidence, not rollout instructions
 
 Keep dated results as evidence; do not apply old release/reset plans to the replacement.

@@ -11,6 +11,11 @@ proof limits below; the parent accepted the bounded-input R10 from source/probe 
 Production code was not changed. Findings are not claims about observed incidents on
 installed hosts.
 
+**Subsequent implementation:** [resolution evidence](adversarial-resolution-evidence-20261029.md)
+records the completed repairs, independent rechecks and combined development gates.
+The findings below remain the historical assessment of the reviewed baseline, not the
+post-repair source or installed operating acceptance.
+
 ## Judgment
 
 **The direction is sound; the implementation is not yet dependable enough to accept.**

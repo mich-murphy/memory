@@ -9,7 +9,7 @@ The previous checkpoint and detailed October 28 ledger are preserved verbatim in
 [progress history](session-capture-progress-history.md). Historical instructions are not
 current rollout authority.
 
-## Adversarial resolutions — implementation active
+## Adversarial resolutions — completed (offline/development scope)
 
 The operator now authorizes implementation of the review resolutions, with parent
 verification and per-item evidence. Scope: R1–R10 in the
@@ -33,15 +33,22 @@ Installed source/qualification below remains unchanged.
   | Owner | Worker ID | Worktree suffix under `/Users/mm/dev/memory-wt/` | Scope/status |
   | --- | --- | --- | --- |
   | Analytics | `69a2cbd5-57fb-431` | `adversarial-analytics` | R2/R3/R6; completed/released,62deae2→abc7ee8 |
-  | Queue | `3f979a6a-c281-40e` | `adversarial-queue` | R4/R7;82c351f→d374948; review test correction reassigned |
-  | Lifecycle | `41958d93-8f7d-41a` | `adversarial-lifecycle` |89f78f2→2ecdf10; independent parser blocker reassigned |
-  | Discovery | `9071ea81-b195-42b` | `adversarial-discovery` | R5/R8 after tests/lint pass; finalizing commit/report |
-  | Publication | `bf60a965-380d-477` | `adversarial-publication` | R10 implemented; stopped awaiting after slot; ownership retained |
+  | Queue | `3f979a6a-c281-40e` | `adversarial-queue` | R4/R7 complete/released;82c351f→d374948,eb66ed7→6b81b33 |
+  | Lifecycle | `41958d93-8f7d-41a` | `adversarial-lifecycle` | complete/released;89f78f2→2ecdf10,4a07de0→5401cc8 |
+  | Discovery | `9071ea81-b195-42b` | `adversarial-discovery` | complete/released;25a595b→b0b4f9c,79d6b13→c8fdf7a |
+  | Publication | `bf60a965-380d-477` | `adversarial-publication` | R10 complete/released;9a8af9b→e5393fc |
 
   Reports/checkpoints: `/tmp/memory-resolution-<domain>/report.md`. All five startup,
   actual Sol model and early approach verified. Stopped/waiting workers retain their
-  paths: resume same IDs, no takeover. Queue C1 owns next Go slot, then publication;
-  lifecycle parser correction prepares tests meanwhile. Full gates not started. Workers own implementation/tests only in their worktrees; parent alone
+  paths: resume same IDs, no takeover. All implementation owners now released;
+  parent owned the sole expensive gate slot. Qualified source:
+  `c8fdf7ac3ceecc6b6ecfef92f68542f055927374`; during gates only this brief was dirty.
+  Final evidence documentation was added afterward, with no source/test/gate changes.
+  Full unchanged gates ran on AC under caffeinate in pinned Nix. `make check`
+  PASS atc8fdf7a (511.76s), coverage87.4% (13933/15943), CRAP/package thresholds,
+  lint/fmt/fix/tidy/deadcode/vulnerability/bench/actionlint and actual consumer gates.
+  Log `/tmp/memory-resolutions-check.log`; launcher SDK-overlay-only case skipped
+  in ordinary gate, to run separately against integrated source. No gate relaxed. Workers own implementation/tests only in their worktrees; parent alone
   changes this brief. Parent inspected live diffs: only owned paths changed.
 - Acceptance per item: targeted failing-before/passing-after regression, minimal repair,
   retained privacy/durability/identity/budget negatives, independent review, exact checks
@@ -52,7 +59,11 @@ Installed source/qualification below remains unchanged.
   discovery/ownership R5/R8; publication/export R10. Parent serializes costly Go gates;
   workers may prepare focused tests and request execution slots. No quality-gate edits,
   speculative frameworks, ambient credentials, second reader, GC or legacy retirement.
-- Status: all R1–R10/I1/I2 pending final acceptance. Analytics integrated as
+- Status: **all R1–R10/I1/I2 parent-accepted for offline/development scope**.
+  Per-item implementation, failing-before/passing-after regressions, safety negatives,
+  review corrections, exact commands and limitations are in
+  [resolution evidence](adversarial-resolution-evidence-20261029.md).
+  Analytics integrated as
   `abc7ee8`: parent reviewed actual diff/tests and verified requested BaseException
   rollback/all-components validation/dedupe invariants in code. Worker77 tests pass,
   py_compile/diff check; initial regressions failed before. Independent read-only
@@ -70,36 +81,83 @@ Installed source/qualification below remains unchanged.
   halves; paired wall/CPU samples overlap, so no latency improvement claimed.
   Independent reviewer `e16a15e2-127d-496` found no production regression but requires
   newly-built result cancellation before FIRST pointer save (existing tests preinstalled
-  pointer); owner resumed for this test and positive verifier calibration assertion. Lifecycle baseline Go/Python
+  pointer); correctioneb66ed7→6b81b33 adds actual first-store/first-pointer/reopen
+  proof and positive calibration. Targeted unprotected-context mutation fails; corrected
+  count2 race/shuffle18.373s and lint pass. Original reviewer session expired/released;
+  fresh read-only `2913e2df-f51b-450` independently approved exact correction. Lifecycle baseline Go/Python
   failures recorded for R1/R9/I1/I2. Parent approved test-only injected SDK HTTP peer
   for credential-repair delivery evidence, separately from unmodified binary+wrapper
   startup/capture proof; no shipped environment bypass or cloud/host operations.
   Parent challenged exact service-plan comparison blocking legitimate upgrades;
   worker acknowledged and implemented bounded stable managed identity parsing plus
   both-platform upgrade/drifted-teardown negatives. Lifecycle focused checks/lint and
-  production+SDK-peer journeys pass; integrated89f78f2→2ecdf10, acceptance pending.
+  production+SDK-peer journeys passed; integrated89f78f2→2ecdf10 was initially
+  withheld from acceptance until the L1–L4 corrections below.
   Independent reviewer `a879bb00-e792-481` found parser bypasses: launchd Program
   overrides ProgramArguments; systemd whitespace/reset/extra execution directives
   can evade recognized ExecStart. Parent reassigned owner to strict generated grammar
   and failing-before no-runner/no-deletion regressions, not a general service parser.
+  Further reviewer L3: start/restart must bind validated desired executable/config to
+  installed argv actually activated; L4: arbitrary configured credential env references
+  can retain ambient values despite fixed-name scrubbing. Parent approved activation-only
+  argv match, and bounded private config-reference extraction/clearing + mapping only
+  explicit credential-file values; actual ALT-env before probe must use no-network SDK
+  peer. L1–L4 before tests failed and final focused checks/lint plus12 actual-wrapper
+  tests/no skips pass; mixed-case configured refs also covered. Followup4a07de0→5401cc8
+  integrated. New independent reviewer `344cc1ad-0ac7-4b6` approved exact correction;
+  no remaining blocker. Strict generated grammar supports documented numeric tuning,
+  not arbitrary unit edits. Full integrated development qualification passed below.
   Owner had a harness abort after completed commit; parent reconciled clean worktree,
   logs/no Go process and resumed same ID without repeating completed checks. Parent
   narrowly updated Makefile to pass the already-built CAPTURE_V1_BINARY to launcher
   tests, making the new production-startup journey run in existing capture-acceptance;
   no gate/timeout/threshold weakened. R10 baseline limit+1 accepted and did2 GETs
-  before rejection; writer/export shared8MiB preflight repair underway.
+  before rejection; shared8MiB repair now integratede5393fc. Entire publication
+  package40 top-level tests passes race/shuffle20.853s/lint0; independent read-only
+  reviewer `9e9182f2-fc14-470` approved exact9a8af9b; parent inspected production diff.
+- Discovery independent reviewer `128da02e-59e7-4a0` approved R8 but found omitted
+  supported top-level Pi .log resource recognition in R5. Parent reassigned narrow
+  structural correction + established role/key/missing-root negatives and actual
+  epoch/append continuity test. Followup79d6b13→c8fdf7a integrated after parent
+  inspection; before log test fails, after focused race/shuffle/lint passes, actual
+  main/task/fork/run appends retain EpochID and exactly+1 revision through all four
+  transitions. Fresh reviewer `c600f9e8-898b-421` completed/approved exact correction
+  read-only; all scoped independent review corrections now closed.
+  Initial R8 baseline instrumented legacy-classifier calls15→0.
   Review probes remain `/tmp/memory-adversarial-*`; AC power verified.
-- Next action: confirm startup and inspect early designs, coordinate focused execution,
-  review committed diffs and independent findings, integrate and run full gates. Record
-  each item's before/after evidence and acceptance here; no completion from dispatch.
+### Final combined evidence — source `c8fdf7a`
+
+- `make check` PASS511.76s; coverage87.4% (13933/15943), all unchanged static,
+  package/CRAP/coverage/benchmark/actionlint and consumer/launcher gates.
+- `make test` PASS352.22s; full race/shuffle (CLI77.603s, publication53.619s,
+  sessioncapture163.437s, syncer296.339s) and process acceptance.
+- `make fuzz` PASS286.07s; all9 configured targets, unchanged30s each.
+- Full analytics:117 discovered/12 skipped, PASS17.101s. The12 process journeys
+  passed separately in both make gates; no skipped acceptance substituted for evidence.
+- Final integrated builds: unmodified actual launcher process proof12 discovered/
+  1 SDK-only skip PASS1.623s; additional explicit socket-free SDK-peer overlay proof
+  **12/12, no skips**, PASS2.938s (alternate refs/mixed-case/no ambient runtime request,
+  repaired stopped-state resume/restart delivery after synthetic source deletion).
+- Logs `/tmp/memory-resolutions-{check,test,fuzz,analytics,launcher-final}.log`;
+  final synthetic overlay/generator/builds `/tmp/memory-resolutions-final/`.
+  `node --check tools/analytics/site/app.js` and diff/whitespace checks pass.
+- No quality threshold, timeout, race check, simulation count or fuzz duration changed.
+  No installed/native/live R2/Linux/hosted CI gates or deployment performed. No
+  original-source data, privacy, archive, installed queue or frozen research changes. Development acceptance
+  is not production/operating acceptance.
+
+**Next action:** the requested implementation delivery is complete. Any continuation
+must reconcile this source/evidence with the still-unqualified installed checkpoint
+below before the separately controlled two-host operating/rollout sequence. Do not
+replay archive switches/installers or remove legacy paths from this development result.
 
 ## Adversarial code review — completed
 
 User requested a fresh, brutal review of existing code for dependability, efficiency,
 and unnecessary complexity against the replacement direction; explicitly requested
-`gpt-6.1-sol` workers at medium effort. This task is review-only: historical deployment
-authority is not being exercised; no live ingestion, host/cloud changes, deletion,
-implementation edits, or release acceptance. The installed checkpoint below is unchanged.
+`gpt-6.1-sol` workers at medium effort. That initial review was read-only and exercised
+no deployment authority. Subsequent operator-authorized implementation and evidence are
+recorded above; neither task changed the installed checkpoint below.
 
 - Review base: `3ea6752599ca5ea59d1c26d08969e92043b3e04b`, branch
   `delivery/fresh-archive-qualification`, `/Users/mm/dev/memory`.
@@ -140,10 +198,10 @@ implementation edits, or release acceptance. The installed checkpoint below is u
 - Review acceptance: complete. Ten prioritized findings (3 P1,6 P2,1 P3), evidence,
   safe simplifications and limits consolidated; source changes remain absent. Parent
   diff/whitespace checks passed. Only report/handoff task artifacts added/modified.
-- Next action for implementation: follow report's ordered repairs with failing-before/
-  passing-after regressions, unchanged full gates, then outstanding installed operating
-  acceptance. No fixes or rollout were performed or newly authorized by this review.
-  Reconcile this brief/source state and temporary probes before any continuation.
+- The review's implementation recommendations were subsequently authorized and delivered
+  above with before/after regressions and unchanged full gates. The review itself did
+  not authorize rollout; installed operating acceptance remains separate. Reconcile
+  this brief/source state and temporary probes before any continuation.
 
 ## Current session checkpoint
 
@@ -176,10 +234,12 @@ acceptance or perform cleanup.
 
 ### Checkout and preservation
 
-- Integration checkout `/Users/mm/dev/memory`, branch
-  `delivery/fresh-archive-qualification`; local `gh stack`: `main` →
+- Integration checkout `/Users/mm/dev/memory`, now branch
+  `delivery/adversarial-resolutions`; local `gh stack`: `main` →
   `delivery/holistic-baseline` → `delivery/correctness` →
-  `delivery/queue-and-resource-simplification` → current branch. Local `main`
+  `delivery/queue-and-resource-simplification` → `delivery/fresh-archive-qualification`
+  → current branch. The installed qualification below predates the adversarial repairs.
+  Local `main`
   already contains 88 commits beyond `origin/main`; this session has not pushed them.
 - Starting implementation `4c9aca5c5cb178316e9eed32626dbf56f7dbaac9`; adopted the review
   report and handoff edits as `06c6da4`. No preexisting implementation changes in this checkout.
