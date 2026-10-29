@@ -11,8 +11,10 @@ current rollout authority.
 
 ## Current session checkpoint
 
-**2026-10-29: corrective/simplification implementation is independently reviewed and
-passes the full local development gates at `e8c96f8`.** The operator approved completing
+**2026-10-29: latest installed/qualified source is `b8cbed2` on both hosts.** The original
+corrective/simplification source `e8c96f8` and discovery follow-ups `36dcef4`/`b8cbed2` pass
+unchanged full local gates; both follow-ups also pass the actual Mac native gate.
+The operator approved completing
 all six phases, with parent-owned quality, independent review and final verification.
 Representative operating budgets, installed acceptance and cutover remain incomplete.
 **Latest operator direction:** reset the **existing configured R2 bucket**, replacing all
@@ -22,12 +24,19 @@ Parent owns cloud/host actions. Local identities, privacy, original sources and 
 remain protected. Inventory, live validation and old-writer fencing precede deletion.
 The existing bucket's global binding was conditionally switched and readback-verified
 at **2026-10-29 00:38:59 UTC**. Exact gated `e8c96f8` binaries and fresh configurations
-are now installed and capturing on both hosts; Mac refresh/dashboard serve the fresh
-archive. Selected actual two-host source-to-report journeys and the native Mac gate pass.
+were installed and capturing on both hosts; both have since been upgraded to qualified
+`b8cbed2`. The temporary 1Password SSH signing block was resolved before BC's upgrade.
+Mac refresh/dashboard serve the fresh archive. Selected actual two-host
+source-to-report journeys and the native Mac gate pass.
 **Backfill/coverage and operating acceptance remain incomplete; the replacement is not
 release-accepted or production-ready.** No bulk old-object deletion or legacy code removal
 has happened. Repository defaults remain legacy; these hosts are explicitly opted in.
 The abandoned new-bucket creation403 is historical, not a current access blocker.
+**Latest operating correction is installed:** failed discovery metadata persistence now
+records a sticky failure under a bounded release budget or stops rather than falsely
+completing a generation. Older completion counters are not accepted coverage proof.
+Finite read-only24h measurements started on both hosts at03:27 UTC; they do not grant
+acceptance or perform cleanup.
 
 ### Checkout and preservation
 
@@ -53,9 +62,9 @@ The abandoned new-bucket creation403 is historical, not a current access blocker
 
 | Area | Evidence / current limit |
 | --- | --- |
-| Mac capture | Qualified `e8c96f8`, Darwin SHA256 recorded below; installed candidate wrapper/config, initialized fresh archive and running launchd capture. At01:04 UTC PID89390, last exit0. Prior installed files backed up privately. |
+| Mac capture | Qualified `b8cbed2` installed/restarted03:07:56 UTC without config/queue reset. At03:27 PID28171/exit0;964 pre-upgrade pending jobs subsequently published, no prior jobs/manifests lost or changed. SQLite/binary backups retained privately. |
 | Mac consumers | Refresh and dashboard enabled/running against qualified analytics source and fresh release-private database/status. Dashboard loopback8766 returns HTTP200 with correct fresh archive and explicit incomplete health. Existing8765 dashboard unchanged. |
-| BC-01 | SSH alias `bc-01`. Qualified `e8c96f8` Linux binary installed, configured `init` passed, systemd capture enabled/active/running. At01:04 UTC PID1959258,0 restarts, exit0. Previous installed files backed up privately. |
+| BC-01 | SSH alias `bc-01`; signing access restored. Qualified `b8cbed2` installed/restarted03:08:09 UTC, skipping intermediate36dcef4. At03:27 PID3483559, enabled/active/running,0 automatic restarts/exit0;1,541 prior pending jobs subsequently published with no prior job/manifest loss/change. |
 | Authority | Parent owns all host/cloud/configuration actions. Existing bucket reuse/reset authorized; no provisioning credential or new bucket needed. Both PATH wrappers fence legacy commands; native managed hooks enqueue candidate hints. |
 | Cutover | Global binding switch and controlled activation completed for qualification. Full operating acceptance, old-object retirement and legacy-only code removal remain incomplete. No bulk deletion before accepted replacement. |
 
@@ -413,19 +422,161 @@ is in-process, not durably checkpointed, and restart begins re-traversal. These 
 remain explicit. Parent reassigned `dbb9cacd-4a19-4e9` to a narrow regression/fix in isolated
 `/Users/mm/dev/memory-wt/review-discovery-admission`, branch `delivery/discovery-admission-fix`:
 only runtime discovery admission and related tests, no host/cloud authority or handoff edits.
-Installed source remains `e8c96f8` until the repair is reviewed, gated and deliberately installed.
+The worker committed `922aaae`, integrated as `36dcef4`; implementation ownership is now
+released. Independent Sol/medium reviewer `46e1e90a-cd41-404` approved the scoped repair
+and ran focused race/shuffle tests. The fix records the callback deadline before canceling
+it and uses the existing separate bounded persistence budget for admission. No timeout
+was extended; timed-out batches cannot falsely complete. Parent cancellation is respected.
+Admission/save-budget expiry and non-durable cursor recovery remain explicit limitations.
 
 The parent probe initially selected top-level `Sources` (details), not `Runtime.Sources`
 (count); use **`work-status.Runtime` scalar fields only** in public summaries. Detailed
 source identifiers belong in private evidence, not routine output.
 
+### Discovery admission follow-up qualification — `36dcef4143c05a4f84ec7368e0e43df5068368b6`
+
+- Deterministic regression failed before the fix: a valid returned request was not admitted
+  after callback expiry. New tests prove admission without false completion, actual `q.Run`
+  publication without another hint, and parent-cancellation behavior. Worker focused
+  race/shuffle repeats and lint passed; independent review approved scope, not release.
+- Parent unchanged pinned-Nix `make check` passed: coverage87.3% (13731/15733), all package/
+  CRAP thresholds, lint/format/tidy/deadcode/vulnerability/benchmark/actionlint and12+6+6
+  process/launcher acceptance. `/tmp/memory-discovery-admission-check.log`.
+- Unchanged `make test` passed race/shuffle: CLI64.623s, sessioncapture155.275s,
+  syncer303.876s, plus12+6+6 acceptance. `/tmp/memory-discovery-admission-test.log`.
+  All nine default30s fuzz campaigns passed; `/tmp/memory-discovery-admission-fuzz.log`.
+- Actual Mac native gate reran against the clean qualified source: all three agents,
+  byte-exact export/index/report, idempotence, uninstall and Codex trust-hash negatives
+  passed; test25.26s/package28.029s. `/tmp/memory-native-36dcef4.log`.
+  No hosted CI or Linux full/native gate was run. Analytics source is unchanged from the
+  qualified `e8c96f8` installation; no unrelated suite evidence is substituted for live checks.
+- Built clean detached36dcef4 with pinned Go1.27.3, CGO0, trimpath/buildvcs;
+  both `vcs.modified=false`. Darwin SHA256
+  `25a665433b0bff0363af9e0f693485e6c0a26d71fbfea987cbe1dd8104d32e98`;
+  Linux `c68b667e77d9036db64593364b169556c3601fa1caaa45651a3a404fef6de4a7`.
+  Removed only the newly created clean build worktree after use.
+- Mac identity and empty policy-marker checks passed; queue SQLite backup API and
+  `quick_check` passed. Atomically replaced only the binary and restarted the owned service.
+  Config bytes unchanged. At the first restart verification, all prior jobs/manifests
+  remained exact and117 pre-restart pending jobs were now published. Current sweep8 had
+  no discovery error yet, but **no completed sweep**; source counts11,022/pending capture89,
+  pending publication~5,560. Nine cumulative delivery-deadline step errors had timestamps
+  **before** this restart; retries remain visible. Do not claim the admission fix repairs
+  delivery timeouts, fully captured inventory or completed operating observation.
+- BC transfer attempt timed out60s. Bounded diagnostic reached server-key acceptance but
+  not signing/authentication/command execution; a further45s check likewise stalled.
+  Parent immediately requested 1Password unlock/approval, not new bucket/credential authority.
+  No BC installed-binary replacement was issued; staged-transfer completion is unconfirmed.
+  [SSH authorization guidance](https://developer.1password.com/docs/ssh/agent/security/).
+- Additional actual main-transcript resource slice:84,656,404bytes,9,522 lines, largest
+  line353,973bytes within that selected body. Sole reader1.383s/37,044,224bytes maximum RSS;
+  importer1.082s/302,612,480bytes RSS,16,635 events/0 issues. This was the largest main body
+  among published Mac jobs at selection, **not** an exhaustive largest-record claim.
+  Private `large-main-measurement.json` retains the bounded probe.
+- Full frozen-inventory metadata check confirms only2 legacy machine namespaces and
+  **zero exclusion keys across both**, consistent with prior per-machine reconciliation.
+- Read-only Sol/medium refresh audit `ee981de0-a18c-44a` completed/released: current-head
+  validation already has8 bounded workers and5s per-coordinate budgets. Do **not** add
+  speculative concurrency. Actual page samples:16 Mac heads0.759s;64 BC heads0.959s,
+  zero failures. Initial export/import backlog differs from steady-state page/projection-
+  hash cost. Measure a complete settled sweep before changing scheduling or verification.
+  Later consumer sample:6,758 sessions/7,321 sources, no head failures (the earlier error
+  resolved autonomously), one target `process_failed`, BC sweep incomplete/stale. That
+  target independently exported successfully in4.07s; status was not manually cleared.
+
+Follow-up binaries, SQLite/binary backups and receipts live under the existing private
+release directory's `discovery-admission-36dcef4/`; parent installer script is
+`install_discovery_admission.py`. It refuses unexpected prior binary/config identities.
+Parent retains all host/cloud authority. The subsequent operating correction was identified
+and then closed in code as follows:
+
+- At02:20 Mac reported completed sweep8/current9 and no discovery error, but cumulative
+  step errors increased9→20; latest was `discovery: context deadline exceeded` at02:18.
+  Source count12,766/pending capture0;7,619 published/~5,803 pending publication;
+  spool2,358,558,720bytes, native evidence6, no quarantine/destination pause. These are
+  retained in private `mac-operating-post-repair.json`, not accepted as clean coverage.
+- Parent identified an unclosed failure path: admission may exhaust the shared save budget,
+  so metadata persistence fails before recording `sweep_error`. The discovery loop can
+  swallow that deadline as transient and only update generic step-error diagnostics;
+  a subsequent complete batch can falsely complete the generation/resolve unseen issues.
+  This is not excused by the documented non-durable cursor limitation.
+- Original worker's session was released after retention; its completed ownership is clear.
+  New Sol/medium owner `dfe52705-d8c4-4b4`, worktree
+  `/Users/mm/dev/memory-wt/review-discovery-error-persistence`, branch
+  `delivery/discovery-error-persistence`, base36dcef4, owns only narrow discovery/error
+  persistence source and regression tests. Required evidence: failure-before/later-complete
+  regression, retained prior issues, fail-closed authoritative error durability and cancellation.
+  No timeout extension, admission discard, policy bypass or generic cursor/work framework.
+  Worker committed `b45c1c2`, integrated as `b8cbed2`, and released implementation ownership.
+  Independent Sol/medium reviewer `47a483ee-5e2c-4c4` approved the scoped correction and ran
+  focused race/shuffle tests twice. Failure recording retries only metadata, never request
+  admission. If that bounded retry fails, a non-transient sentinel stops the runtime.
+  Dedicated before-fail/after-pass tests retain prior issues across a later complete batch
+  and verify an unrecordable failure stops the discovery loop. No durable cursor guarantee.
+
+### Final discovery follow-up — `b8cbed27f79718a0f13eee808cfbe03e6c4bc019`
+
+- Parent reran unchanged full gates serially in pinned Nix with live opt-ins unset and
+  `caffeinate -i`: **make check/test/fuzz all passed**. Coverage87.2% (13732/15739), all
+  package/CRAP thresholds; CLI74.995s, sessioncapture190.404s, syncer373.362s under race/
+  shuffle; all9 default30s fuzz campaigns. Both make gates include12+6+6 process/launcher
+  acceptance. Logs `/tmp/memory-discovery-persistence-{check,test,fuzz}.log`.
+- Actual Mac native gate passed again from clean source: Claude/Codex/Pi, exact export,
+  import/index/report, idempotence and trust/uninstall negatives; test24.94s/package27.661s.
+  `/tmp/memory-native-b8cbed2.log`. No hosted CI or Linux full/native gate claimed.
+- Clean pinned Go1.27.3, CGO0/trimpath/buildvcs builds, `vcs.modified=false`:
+  Darwin SHA256 `6beae15af8c0957ac19c2eff4130df63441ad4a509e651677c11d6c067246d66`;
+  Linux SHA256 `9373dca451e89b91cc1574b912781f7344da674bf98cb6e1e874fc5b8e73ef90`.
+  Newly created clean build worktree removed afterward; unrelated trees untouched.
+- SSH signing access recheck succeeded3.82s. BC was freshly reconciled before installation:
+  original e8c96f8 service still active with0 restarts,28,700 sources/16,207 published jobs,
+  no quarantine/pause. Final Linux binary transferred and hash checked; intermediate36dcef4
+  was not installed there. Both final installs verified machine identity, empty policy
+  markers, prior/new binary hashes, SQLite backup API/quick_check and unchanged config bytes.
+- Final binary-only restarts03:07:56 Mac/03:08:09 BC. At03:27, all pre-upgrade job rows and
+  manifest bytes remained exact;964/1,541 previously pending jobs were now published.
+  Mac published11,963/pending~4,715; BC18,018/pending~11,546. Both still report partial
+  discovery/timeout, no quarantine or destination pause. Mac's last generic step error
+  predates this final restart; BC has6 capture-deadline step errors and visible retries.
+  **No clean post-final-install complete sweep or settled operating budget is claimed.**
+- Later consumer sample at03:41 UTC:14,723 sessions/15,303 sources,0 projection failures; one
+  target error, BC sweep incomplete and health stale. No head failures. Report HTTP200
+  and increasing counts do not imply complete source coverage or healthy refresh.
+- Current release-private subdirectory `discovery-persistence-b8cbed2/` on each host has
+  `install.json`, `queue-before.sqlite`, `previous-agent-sessions.bin` and
+  `restart-verification.json`. Current guarded installer is `install_discovery_persistence.py`.
+  Do not replay older installers or archive-switch scripts.
+
+### Bounded operating observation in progress
+
+Parent started a **temporary, read-only, finite24h sampler** on each host, using the
+already validated scalar `operating_snapshot.py`. It does not read source bodies, mutate
+configuration/services, access R2, decide acceptance or delete anything. No permanent
+watcher/service or new runtime authority was added. Every300s it records local queue,
+role/transform debt, source/sweep/error counters, supervisor state, disk/RSS and binary/
+config digests. Sample failures and wall-clock gaps remain visible; sleep/reboot gaps do
+not become synthetic catch-up samples or a claim of uninterrupted operation.
+
+- Mac observer PID70279, started2026-10-29T03:27:25.983693Z.
+- BC observer PID3667502, started2026-10-29T03:27:34.734970Z.
+- Both first two samples verified,0 sampler failures. Intended end approximately
+  **2026-10-30T03:28 UTC**, subject to actual host availability.
+- Artifacts per host: `discovery-persistence-b8cbed2/observation/{started.json,samples.jsonl,completed.json}`;
+  process diagnostics in the parent directory's `observation-process.log`.
+- Sol/medium read-only deferred reviewer `39f3f357-a580-473` is verified running its one
+  bounded wait. It may read only the Mac aggregate observation/installation receipts and
+  this brief, then report gaps via the supported completion notification. No SSH/cloud/
+  host-action authority. Parent must inspect BC and consumer evidence separately; session
+  termination may interrupt the reviewer, while local sampler evidence remains private.
+
 ## Next action / actual release boundary
 
-1. Parent diagnoses initial discovery timeouts, coverage exclusions and backlog/freshness.
-   Integrate/review the scoped expired-context admission repair from Sol/medium worker
-   `dbb9cacd-4a19-4e9`, rerun required gates, then controlled install/restart qualification.
-   No worker has host/cloud authority. Do not equate that narrow repair with durable cursors
-   or complete resolution of every timeout/coverage limitation.
+1. Parent reviews the completed observation and any earlier material failures; verify an
+   actual completed-sweep timestamp **after the final03:07/03:08 install**, stable identities/
+   policy/configuration, backlogs, retries and representative capacity. Earlier36dcef4
+   completion counters are not qualification. Inspect both host artifacts and supervisor
+   state; do not equate a finished sampler or reviewer with acceptance. No queue reset or
+   archive rebind. No active implementation worker remains.
 2. Complete full fresh-reader consumer sweeps; independently verify actual installed
    restart/retry/privacy/source-absence behavior and two-host independence. No status edits,
    queue resets, timeout increases or gate bypass to obtain green.
