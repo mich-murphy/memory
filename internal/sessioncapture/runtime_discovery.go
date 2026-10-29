@@ -203,19 +203,27 @@ func (q *Queue) discoverOnce(ctx context.Context, o RuntimeOptions) error {
 	} else {
 		batch.Requests, err = o.Discover(op)
 	}
+	// The callback may return requests after its deadline, having already advanced
+	// an in-process cursor past them. Preserve its timeout before canceling; never
+	// turn a timed-out Complete batch into successful coverage.
+	err = errors.Join(err, op.Err())
+	cancel()
+	if ctx.Err() != nil {
+		return nil
+	}
+	// Admission and metadata persistence share a separate bounded budget rooted
+	// in the live parent, not the expired discovery-operation context. This does
+	// not guarantee admission if this budget also expires: a subsequent complete
+	// sweep (or independent hint) must revisit any unadmitted coordinates.
+	save, done := context.WithTimeout(ctx, o.OperationTimeout)
+	defer done()
 	if len(batch.Requests) > limit {
 		err = errors.Join(err, ErrQuota)
 	}
 	for j := range min(len(batch.Requests), limit) {
 		// Try every healthy request even if another request or root was rejected.
-		err = errors.Join(err, q.Hint(op, batch.Requests[j]))
+		err = errors.Join(err, q.Hint(save, batch.Requests[j]))
 	}
-	cancel()
-	if ctx.Err() != nil {
-		return nil
-	}
-	save, done := context.WithTimeout(ctx, o.OperationTimeout)
-	defer done()
 	if err := q.saveDiscoveryBatch(save, batch, err); err != nil {
 		return err
 	}
