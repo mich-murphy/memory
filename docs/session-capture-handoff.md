@@ -9,6 +9,91 @@ The previous checkpoint and detailed October 28 ledger are preserved verbatim in
 [progress history](session-capture-progress-history.md). Historical instructions are not
 current rollout authority.
 
+## Adversarial resolutions — implementation active
+
+The operator now authorizes implementation of the review resolutions, with parent
+verification and per-item evidence. Scope: R1–R10 in the
+[adversarial review](adversarial-review-20261029.md), plus explicit resolution of the
+alias-hook and readable-supervisor-directory integration limitations (I1/I2). No
+new deployment, live ingestion, host/cloud changes or deletion authority is exercised.
+Installed source/qualification below remains unchanged.
+
+- Reconciled base: `3ea6752599ca5ea59d1c26d08969e92043b3e04b`; integration checkout
+  `/Users/mm/dev/memory`. Review/handoff edits are parent-authored task artifacts;
+  the three frozen untracked research paths remain untouched. Existing unrelated
+  worktrees/stashes stay untouched. No PR exists for the current integration branch;
+  no hosted checks were started. `gh stack` available; use a new child branch.
+- Parent owns integration, this brief, commits/stack, expensive serial gates and final
+  requirements acceptance. Subagent background status/inspection/steering/resume are
+  available. All implementation/review workers use `gpt-6.1-sol`, medium thinking.
+  Prior review workers are completed/released; new implementations use separate
+  worktrees and disjoint domains. No owner yet assigned to implementation paths.
+- Acceptance per item: targeted failing-before/passing-after regression, minimal repair,
+  retained privacy/durability/identity/budget negatives, independent review, exact checks
+  tied to commit+diff, parent verification on integrated source. Overall: unchanged
+  pinned-Nix `make check`, `make test`, `make fuzz`, focused/full analytics as applicable.
+  Native/live/installed two-host acceptance remains separate, not inferred from offline.
+- Planned ownership: analytics R2/R3/R6; queue R4/R7; lifecycle R1/R9/I1/I2;
+  discovery/ownership R5/R8; publication/export R10. Parent serializes costly Go gates;
+  workers may prepare focused tests and request execution slots. No quality-gate edits,
+  speculative frameworks, ambient credentials, second reader, GC or legacy retirement.
+- Status: implementation pending; review probes exist in `/tmp/memory-adversarial-*`.
+  Historical review results prove defects, not repaired behavior. AC power verified.
+- Next action: create stack branch and isolated worktrees, dispatch owners, confirm
+  startup and inspect early designs before changes harden; maintain per-item evidence.
+
+## Adversarial code review — completed
+
+User requested a fresh, brutal review of existing code for dependability, efficiency,
+and unnecessary complexity against the replacement direction; explicitly requested
+`gpt-6.1-sol` workers at medium effort. This task is review-only: historical deployment
+authority is not being exercised; no live ingestion, host/cloud changes, deletion,
+implementation edits, or release acceptance. The installed checkpoint below is unchanged.
+
+- Review base: `3ea6752599ca5ea59d1c26d08969e92043b3e04b`, branch
+  `delivery/fresh-archive-qualification`, `/Users/mm/dev/memory`.
+- Preexisting changes: only untracked `docs/research/README.md`,
+  `docs/research/agent-navigation-context-graphs/`, and
+  `docs/research/agent-navigation-handover.md`; preserve untouched.
+- Parent owns this brief and consolidated review; workers are read-only for repository
+  code, with isolated temporary report/probe paths. Supported tools provide background
+  status, full activity inspection, steering and resume. No hosted CI/live state checked.
+- Acceptance: prioritized, code-located findings with concrete failure/cost mechanism,
+  contract justification, minimal correction, verification evidence and honest limits;
+  reject speculative abstractions and unsafe early legacy deletion. Independently
+  inspect strongest findings and distinguish reproduced defects from static risks.
+- Consolidated deliverable: [adversarial review](adversarial-review-20261029.md),
+  ten prioritized findings, two conditional integration limitations, minimal repairs,
+  regression requirements, exact commands and evidence limits. Parent reviewed code
+  and probes, rejected the remote-object-deletion overclaim, and distinguished alias
+  helper/discovery inconsistency from the actual full-identity callback's correct denial.
+- Completed/released workers (reports under `/tmp/memory-adversarial-<domain>/`):
+  queue `8a13b48a-253d-42d`, discovery `dd5ae2c6-6e0a-4e9`, publication
+  `a0b101d2-e5a6-406`, analytics `d9295473-0567-4b3`, architecture
+  `09c320aa-b3eb-4e1`. Startup/activity and actual `openai/gpt-6.1-sol` verified;
+  all medium thinking. Queue/discovery/architecture harness aborts were reconciled
+  against artifacts/processes and resumed on the same IDs, without duplicate owners
+  or repeated completed tests. No worker retains the Go execution slot.
+- Independent final challenge `9e4f24d0-8d16-41e`, Sol/medium: completed/released,
+  startup/model/activity verified; upheld R1–R9. Parent incorporated explicit limits:
+  startup rather than existing-process failure, mocked initial import versus real
+  persisted health, injected interruption versus OS crash, and source-only missing-
+  executable teardown evidence. No new tests or repository writes by challenger.
+- Parent verification: pinned Nix Go1.27.3/Python3.14.8, existing DuckDB1.5.6.
+  Reproduced both analytics false-health/persistence defects and malformed-Unicode
+  isolation; actual launcher missing-credential startup failure; combined Go
+  race/shuffle overlay reproduced shutdown quarantine, Pi identity mutation and alias
+  discrepancy, with no race report. Intended defect assertions FAIL, not green gates.
+  Unchanged focused analytics tests:64 PASS/11.806s. Exact commands/logs in report.
+  No production/test source edits, full/native/live/hosted gates, or host operations.
+- Review acceptance: complete. Ten prioritized findings (3 P1,6 P2,1 P3), evidence,
+  safe simplifications and limits consolidated; source changes remain absent. Parent
+  diff/whitespace checks passed. Only report/handoff task artifacts added/modified.
+- Next action for implementation: follow report's ordered repairs with failing-before/
+  passing-after regressions, unchanged full gates, then outstanding installed operating
+  acceptance. No fixes or rollout were performed or newly authorized by this review.
+  Reconcile this brief/source state and temporary probes before any continuation.
+
 ## Current session checkpoint
 
 **2026-10-29: latest installed/qualified source is `b8cbed2` on both hosts.** The original
