@@ -1,7 +1,21 @@
 # Offline matched runtime diagnostic (not qualification)
 
 This is an experimental, opt-in Linux Go test overlay. **No completed matched
-primary performance comparison or production optimization is accepted.** As of
+primary performance comparison or release qualification is accepted.**
+
+**Quick rerun, 2026-10-30:** runtime restored from the recorded pinned public base
+as a new environment. Investigation exposed a preexisting shared raw/optional scan
+cursor starvation mechanism; narrow repair `881b04e` is integrated with deterministic
+old-source RED/repaired GREEN coverage. The corrected native-EXT4 sessioncapture
+package passed212 top-level tests (401 with subtests), zero failures,26.916s.
+This is package correctness evidence, not a new performance comparison. Go1.27
+`t.TempDir` honors `GOTMPDIR`: the earlier full-package run that set it under
+host-bound `/out` was not native, despite `TMPDIR` pointing to tmpfs. Its failures
+remain preserved with an explicit correction; no safety assertions were weakened.
+After the user questioned elapsed time, the parent narrowed this rerun and launched
+no further profiling/benchmark/race/consumer/release gates. See the [current brief](../../docs/session-capture-handoff.md).
+
+**Prior blocked checkpoint:** As of
 2026-10-30 01:14 UTC, execution is externally blocked: the pinned Docker image is
 missing; parent independently observed zero images and running containers while
 private/shared volumes remain. No replacement image or host restoration was attempted.

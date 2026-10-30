@@ -1,5 +1,28 @@
 # Diagnostic failure history and filesystem prerequisite evidence
 
+**Quick-rerun status (2026-10-30 02:52 UTC):** missing-image prerequisite resolved
+using the recorded public base as a new pinned environment. Baseline's120s watchdog
+and read-only snapshot exposed actual due unpublished work (194/201 published,
+7 unattempted). Deterministic tests demonstrated preexisting shared-lane-cursor
+starvation; repair `881b04e` separates only in-memory raw/optional scan cursors.
+Old-source adverse schedules failed; repaired schedules4×20 and70 focused tests
+passed. Independent safety review found no removed/relaxed checks.
+
+A subsequent full-package failure ran fixtures on the Mac host bind because
+Go1.27 `t.TempDir` honors `GOTMPDIR=/out/go-build`; the initial native-tmpfs claim
+is invalid. Its append-only correction and original failure remain under private
+`lane-progress-v10/`. Correcting BOTH TMPDIR/GOTMPDIR to native EXT4 yielded four
+previously failing tests×20 PASS on both source variants, then the unchanged full
+package PASS:212 top-level/401 including subtests,26.916s, seed1793327324077306753,
+count1/Go300s, actual Go/Docker0/OOMfalse. Parent verified actual logs, final status
+and child filesystem/identity/lock probe in
+`fs-contrast-v11/full-native-1793328508889825000/`. These paths are under the private
+runtime owner root, not its `jobs/` directory below. No fresh matched performance,
+new-source race/consumer/native/live/release acceptance is claimed. All workers
+stopped; parent narrowed the rerun after the user questioned elapsed time.
+
+## Prior checkpoint and earlier attempts
+
 **Status (2026-10-30 01:14 UTC): no accepted matched primary performance comparison;
 execution is blocked by the missing pinned worker image.**
 The distinct attempts below must not be collapsed into a passing result or a
