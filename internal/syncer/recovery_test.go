@@ -224,6 +224,7 @@ func (b *reviewCrashStore) Head(ctx context.Context, key string) (store.Object, 
 }
 
 func TestArchiveCrashAtEveryFilePublicationBoundary(t *testing.T) {
+	t.Parallel() // hermetic: private temp dirs and stores, no env or package globals
 	for _, phase := range []string{"dirtyCheckpoint", "plan", "dependency", "commit", "completeCheckpoint"} {
 		for _, after := range []bool{false, true} {
 			name := phase + "Before"
@@ -231,6 +232,7 @@ func TestArchiveCrashAtEveryFilePublicationBoundary(t *testing.T) {
 				name = phase + "After"
 			}
 			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 				home := t.TempDir()
 				cfg := &config.Config{Home: home, StateDir: t.TempDir(), LocalStore: t.TempDir(), MachineID: "review-machine"}
 				path := filepath.Join(home, "aux")
@@ -305,8 +307,10 @@ func (b *reviewLostACK) Put(ctx context.Context, key string, body []byte, meta m
 }
 
 func TestArchiveLostACKAtEveryFilePublicationBoundary(t *testing.T) {
+	t.Parallel() // hermetic: private temp dirs and stores, no env or package globals
 	for _, phase := range []string{"dirtyCheckpoint", "plan", "dependency", "commit", "completeCheckpoint"} {
 		t.Run(phase, func(t *testing.T) {
+			t.Parallel()
 			home := t.TempDir()
 			cfg := &config.Config{Home: home, StateDir: t.TempDir(), LocalStore: t.TempDir(), MachineID: "review-machine"}
 			path := filepath.Join(home, "aux")

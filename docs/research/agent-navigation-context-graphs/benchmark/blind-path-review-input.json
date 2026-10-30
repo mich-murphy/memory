@@ -1,0 +1,173 @@
+{
+  "policy": "All unique pilot-returned paths, sorted and with condition identity removed. Supplemental review only; original frozen qrels/results retained.",
+  "items": [
+    {
+      "id": "bcnav-03",
+      "query": "Where does Finance get revised contract value including variations, and which rules determine GST basis? Trace domain logic and Classic definitions.",
+      "answerability": "repository_navigation",
+      "candidate_paths": [
+        "classic/src/dbl/Foundation/Defines/rd222a.def",
+        "web/agent/packages/bc-model/content/contracts/analytical-counts.rules.ts",
+        "web/agent/packages/bc-model/content/contracts/finance-summary.rules.ts",
+        "web/packages/contracts/src/contract-billing-schedule.ts",
+        "web/packages/contracts/src/contract-finance-repository.ts",
+        "web/packages/contracts/src/contract-finance.ts",
+        "web/packages/contracts/src/contract-money.ts"
+      ]
+    },
+    {
+      "id": "bcnav-04",
+      "query": "Where does Ask prevent users without Finance access from seeing Contract money, including the capability catalogue and redisplayed evidence?",
+      "answerability": "repository_navigation",
+      "candidate_paths": [
+        "web/agent/packages/bc-agent-runtime/src/ingress.ts",
+        "web/apps/web/lib/agent/bc-agent-contract-aggregate.ts",
+        "web/apps/web/lib/agent/bc-agent-contract-milestones.ts",
+        "web/apps/web/lib/agent/bc-agent-contract-summary-authority.ts",
+        "web/apps/web/lib/agent/bc-agent-contract-summary.test.ts",
+        "web/apps/web/lib/agent/bc-agent-contract-values.ts",
+        "web/apps/web/lib/agent/bc-agent-records.ts"
+      ]
+    },
+    {
+      "id": "bcnav-05",
+      "query": "For \u201cjobs in a suburb or a state\u201d, where can I distinguish jobs from Contracts, site state from customer state, and lifecycle state?",
+      "answerability": "repository_navigation",
+      "candidate_paths": [
+        "docs/knowledge/modules/contracts/residential-building-lifecycle.md",
+        "web/packages/contracts/src/headless/analytics/contract-aggregate-read.ts",
+        "web/packages/contracts/src/headless/analytics/contract-aggregate.ts",
+        "web/packages/contracts/src/headless/contract-closure.ts",
+        "web/packages/db/src/schema/ar-customer.ts",
+        "web/packages/db/src/schema/co-contracts.ts",
+        "web/packages/db/src/schema/jc-jobs.ts",
+        "web/packages/job-costing/src/jobs/read-repository.ts"
+      ]
+    },
+    {
+      "id": "bcnav-06",
+      "query": "Which Web estimating screens and domain reads exist, and how do sales estimates differ from estimates attached to a job?",
+      "answerability": "repository_navigation",
+      "candidate_paths": [
+        "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/estimates/[section]/[department]/[costCentre]/page.tsx",
+        "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/estimates/estimates-data.ts",
+        "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/estimates/page.tsx",
+        "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/quotes/page.tsx",
+        "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/quotes/quotes-data.ts",
+        "web/packages/job-costing/src/production-estimates/read-repository.ts",
+        "web/packages/job-costing/src/sales-estimates/read-model.ts",
+        "web/packages/job-costing/src/sales-estimates/read-repository.ts",
+        "web/packages/nav/src/modules.ts"
+      ]
+    },
+    {
+      "id": "bcnav-09",
+      "query": "What does \u201ccurrently at Event X\u201d mean? Find event ordering, registration state and lifecycle derivation rather than assuming the largest Event number is current.",
+      "answerability": "repository_navigation",
+      "candidate_paths": [
+        "web/agent/packages/bc-model/content/contracts/analytical-counts.rules.ts",
+        "web/agent/packages/bc-model/content/contracts/event-registration-state.rules.ts",
+        "web/agent/packages/bc-model/content/contracts/event-schedule.rules.ts",
+        "web/packages/contracts/src/contract-maintenance-repository.ts",
+        "web/packages/contracts/src/headless/analytics/contract-aggregate-read.ts",
+        "web/packages/contracts/src/headless/analytics/contract-aggregate.ts",
+        "web/packages/contracts/src/headless/contract-closure.ts",
+        "web/packages/contracts/tests/contract-aggregate-read.integration.test.ts"
+      ]
+    },
+    {
+      "id": "bcnav-10",
+      "query": "Where is CSV export authority enforced, and is exporting a grid equivalent to merely having read access?",
+      "answerability": "repository_navigation",
+      "candidate_paths": [
+        "docs/knowledge/internal/product/web-transaction-filter-and-export-source-map.md",
+        "web/apps/web/components/data-grid.tsx",
+        "web/apps/web/lib/filters/filter-grid-route.ts",
+        "web/apps/web/lib/filters/grid-filter-resources.test.ts",
+        "web/apps/web/lib/filters/grid-filter-resources.ts",
+        "web/apps/web/lib/grids/csv-export.ts",
+        "web/apps/web/lib/grids/server-grid-actions.ts",
+        "web/apps/web/lib/grids/server-grid-route.ts",
+        "web/apps/web/lib/security/route-access.ts"
+      ]
+    },
+    {
+      "id": "bcnav-12",
+      "query": "Where are Classic SQL transaction and lock semantics implemented, and where is the authority boundary between company ERP databases and Web-owned data documented?",
+      "answerability": "repository_navigation",
+      "candidate_paths": [
+        "classic/src/runtimes/dbl-sql/src/db/postgres.rs",
+        "classic/src/runtimes/dbl-sql/src/ops/lock.rs",
+        "classic/src/runtimes/dbl-sql/src/ops/write.rs",
+        "classic/src/runtimes/dbl-sql/src/server_api.rs",
+        "classic/src/runtimes/dbl-sql/src/state.rs",
+        "docs/engineering/businesscraft-agent/specification/05-capabilities-and-erp-transactions.md",
+        "docs/knowledge/internal/data-access/sql-bridge.md",
+        "docs/web/bc-web-database-boundary.md",
+        "docs/web/db-connections.md"
+      ]
+    },
+    {
+      "id": "bcnav-13",
+      "query": "After an Ask task completes, where can runtime-version-specific behavior still affect delivery, redisplay or a follow-up?",
+      "answerability": "repository_navigation",
+      "candidate_paths": [
+        "web/agent/apps/bc-agent-service/src/activities.ts",
+        "web/agent/packages/bc-agent-protocol/src/conversation/runtime-versions.ts",
+        "web/agent/packages/bc-agent-protocol/tests/runtime-citation-compatibility.test.ts",
+        "web/agent/packages/bc-agent-protocol/tests/runtime-version-gates.test.ts",
+        "web/agent/packages/bc-agent-runtime/src/agent-runtime-evidence.ts",
+        "web/agent/packages/bc-agent-runtime/src/evidence-authority.ts",
+        "web/agent/packages/bc-agent-runtime/src/follow-up-route.ts",
+        "web/agent/packages/bc-agent-runtime/src/ingress.ts",
+        "web/agent/packages/bc-agent-runtime/src/store.ts"
+      ]
+    },
+    {
+      "id": "bcnav-14",
+      "query": "Where should I investigate the Agent worker crashing when PostgreSQL drops an already checked-out connection, and what tests cover that failure?",
+      "answerability": "repository_navigation",
+      "candidate_paths": [
+        "web/agent/apps/bc-agent-service/tests/integration/database-outage.test.ts",
+        "web/agent/apps/bc-agent-service/tests/integration/worker-health.test.ts",
+        "web/agent/packages/bc-agent-runtime/src/configuration.ts",
+        "web/agent/packages/bc-agent-runtime/src/database.ts",
+        "web/agent/packages/bc-agent-runtime/tests/unit/database-configuration.test.ts",
+        "web/packages/db/src/connection.ts",
+        "web/packages/db/tests/query-instrumentation.test.ts"
+      ]
+    },
+    {
+      "id": "bcnav-16",
+      "query": "Which workflows and directly invoked code build a Web release and move it through dev and staging, including deployment safety controls?",
+      "answerability": "repository_navigation",
+      "candidate_paths": [
+        ".github/workflows/web-deploy-env.yaml",
+        ".github/workflows/web-dev.yaml",
+        ".github/workflows/web-image.yaml",
+        ".github/workflows/web-release.yaml",
+        "tools/ci/src/cli.ts"
+      ]
+    },
+    {
+      "id": "bcnav-18",
+      "query": "Using first-party Azure documentation, establish regional PostgreSQL availability and whether private-network modes allow an on-premises logical replication publisher. Can repository files alone establish these current service facts?",
+      "answerability": "external_evidence_required",
+      "candidate_paths": []
+    },
+    {
+      "id": "bcnav-20",
+      "query": "Where are tool replay safety policies enforced, and where are workflow replay and crash/unknown-outcome scenarios tested and gated?",
+      "answerability": "repository_navigation",
+      "candidate_paths": [
+        ".github/actions/agent-tests/action.yaml",
+        "web/agent/apps/bc-agent-service/src/activities.ts",
+        "web/agent/apps/bc-agent-service/tests/integration/model-step-claim.test.ts",
+        "web/agent/apps/bc-agent-service/tests/integration/temporal-operation-recovery.test.ts",
+        "web/agent/apps/bc-agent-service/tests/unit/prompt-render.test.ts",
+        "web/agent/apps/bc-agent-service/tests/unit/workflow-replay.test.ts",
+        "web/agent/packages/bc-agent-runtime/src/prompt-bundles/tool-sets.ts"
+      ]
+    }
+  ]
+}

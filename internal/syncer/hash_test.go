@@ -25,6 +25,9 @@ func hashOf(t *testing.T, data string, prev *state.Upload, saved *state.Resume) 
 	return h
 }
 
+// Resume inputs (including corrupt state) must not change the result. The current
+// implementation ignores them and hashes the full content; this is not a benchmark
+// or proof of saved-prefix resume optimization.
 func TestHashContentMatchesAFullReadWithOrWithoutAResume(t *testing.T) {
 	defer func(old int64) { chunkSize = old }(chunkSize)
 	chunkSize = 7 // reads cross the old size mid-chunk

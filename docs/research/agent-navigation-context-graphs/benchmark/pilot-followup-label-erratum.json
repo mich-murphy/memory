@@ -1,0 +1,6 @@
+{
+  "original": "pilot-followup-results.json",
+  "corrected": "pilot-followup-results-v2.json",
+  "change": "Static six-agent protocol label corrected to dynamic eight-agent count; follow-up reuse of tasks explicitly labelled exploratory.",
+  "metrics_and_answers_identical": true
+}

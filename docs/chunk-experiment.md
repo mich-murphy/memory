@@ -1,5 +1,7 @@
 # Offline SQLite chunk-sizing experiment
 
+> **Status (2026-10-23):** Legacy v3 database-representation experiment, still useful as a bounded offline measurement tool, not a target storage decision. The agreed canonical [session-capture contract](session-capture-contract.md) uses complete source-epoch snapshots as its baseline; chunks require measurements under that contract. The synthetic v3 plan/commit metrics below are not replacement metadata costs or end-to-end acceptance.
+
 This is a test-only, opt-in experiment on macOS/Linux, not a production CLI or a
 production performance claim. It uses no collector configuration, state database,
 credentials, hooks, network store or discovery. It reads **only explicitly supplied

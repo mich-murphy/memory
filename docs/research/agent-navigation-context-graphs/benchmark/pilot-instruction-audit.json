@@ -1,0 +1,5 @@
+{
+  "policy": "Heuristic audit of NEW pilot outputs for grep-style denied-instruction content references; filename-only listings do not count. Raw output not copied.",
+  "flagged": [],
+  "limits": "Not a universal instruction-exposure audit or proof of prompt assembly."
+}

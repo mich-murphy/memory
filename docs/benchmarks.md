@@ -1,5 +1,7 @@
 # Benchmarks
 
+> **Status (2026-10-23):** Existing v3 benchmark methodology and dated results, not replacement performance or acceptance evidence. Keep the exact workload/bound assertions below when interpreting historical comparisons. The agreed canonical [session-capture contract](session-capture-contract.md) starts with complete source-epoch snapshots; measure their bytes, requests, CPU, freshness and operational cost before choosing chunks. Do not preserve all collector generations merely to match these legacy fixtures.
+
 The benchmarks run the collector the way it runs on a machine, against a generated home that looks like a real one, so a change is measured on the work it will actually do. A golden test pins what reaches the bucket, so a faster collector can't quietly capture less.
 
 ## What they model
@@ -45,7 +47,7 @@ Acceptance tests supplement timing samples with deterministic bounds:
 - `TestWarmIdleRequestsDoNotGrowWithFilesOrHistory`: at most eight warm-idle requests with either 1 or 30 files and 20 prior changed generations; no immutable-record requests.
 - `TestChangedStreamDoesNotHeadItsEntireHistory`: at most one historical descriptor HEAD for a changed stream with 30 generations.
 - `TestWarmHookDoesNotDownloadArchivedTranscriptBodies`: zero archived transcript-body reads for a warm unchanged capture.
-- `TestLargePlainAndCompressedCaptureHasBoundedHeap`: 256 MiB decoded plain and zstd inputs, actual whole-content SHA and streamed restore checks, with sampled capture heap growth at most 96 MiB. The highly compressible fixture is a streaming regression bound, not a universal bound on all metadata or concurrent machine workloads.
+- `TestLargePlainAndCompressedCaptureHasBoundedHeap`: 64 MiB decoded plain and zstd inputs (1 MiB large-file threshold), actual whole-content SHA and streamed restore checks, with sampled capture heap growth at most 48 MiB (measured 22–24 MB; whole-file buffering fails it). The highly compressible fixture is a streaming regression bound, not a universal bound on all metadata or concurrent machine workloads.
 
 Historical descriptor bodies are replayed one at a time from SQL cursors. Stream lists and per-session launch/snapshot/version metadata still grow with cardinality; see [storage-layout.md](storage-layout.md) for per-record limits and archive growth. Request bounds assume clean matching checkpoints and normal single-writer operation, not an external corruption audit.
 

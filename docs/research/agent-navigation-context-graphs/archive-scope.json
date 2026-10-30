@@ -1,0 +1,88 @@
+{
+  "observed_at": "2026-10-20T11:56:23.950336+00:00",
+  "archive_snapshot_build": [
+    "2026-10-16 12:34:49.297834+00",
+    4272,
+    802468,
+    10290,
+    true,
+    false,
+    0
+  ],
+  "scope_sql": "(f.project like '/Users/mm/businesscraft/businesscraft%' OR f.project like '/home/dev/businesscraft/businesscraft%' OR f.project like '/home/dev/businesscraft/worktrees/businesscraft/%' OR f.project like '/home/dev/.herdr/worktrees/businesscraft/%' OR f.project like '/home/dev/.t3/worktrees/businesscraft/%' OR f.project like '/Users/mm/.herdr-worktrees/businesscraft%')",
+  "notes": [
+    "Existing read-only R2-derived analytics snapshot; not a current bucket census.",
+    "Only event_type=tool_call is counted as a call, excluding flagged duplicate components. Earlier conversational counts included tool results too and were approximately doubled; these supersede them.",
+    "Native-event deduplication is limited; inherited context and cross-machine copies are not universally deduplicated.",
+    "Calls to named tools do not include equivalent shell commands, and counts alone do not identify avoidable work."
+  ],
+  "named_tools": [
+    {
+      "name": "bash",
+      "calls": 61085,
+      "traces": 1498
+    },
+    {
+      "name": "read",
+      "calls": 18007,
+      "traces": 1104
+    },
+    {
+      "name": "exec",
+      "calls": 5875,
+      "traces": 112
+    },
+    {
+      "name": "grep",
+      "calls": 2061,
+      "traces": 294
+    },
+    {
+      "name": "subagent",
+      "calls": 1481,
+      "traces": 60
+    },
+    {
+      "name": "find",
+      "calls": 852,
+      "traces": 210
+    },
+    {
+      "name": "agent",
+      "calls": 516,
+      "traces": 85
+    },
+    {
+      "name": "ls",
+      "calls": 385,
+      "traces": 186
+    }
+  ],
+  "traces": [
+    {
+      "agent": "claude",
+      "source_role": "main",
+      "traces": 78
+    },
+    {
+      "agent": "claude",
+      "source_role": "subagent",
+      "traces": 892
+    },
+    {
+      "agent": "codex",
+      "source_role": "main",
+      "traces": 121
+    },
+    {
+      "agent": "pi",
+      "source_role": "main",
+      "traces": 193
+    },
+    {
+      "agent": "pi",
+      "source_role": "subagent",
+      "traces": 967
+    }
+  ]
+}

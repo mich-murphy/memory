@@ -1,0 +1,94 @@
+{
+  "review_policy": {
+    "criterion": "Useful current entry point for query-intent location, not full-task proof.",
+    "grades": {
+      "3": "Direct implementation or test",
+      "2": "Supporting material or navigation",
+      "0": "Irrelevant",
+      "null": "Unknown / insufficient inspectable evidence"
+    },
+    "blinding": "Origin conditions remain unknown. Used only the supplied blind input and actual candidate files in the Businesscraft repository; no outcomes, registries, pilot results, qrels, research reports, sessions or retrieval algorithm code consulted.",
+    "status": "Post-outcome supplemental adjudication; not held-out confirmation.",
+    "evidence": "Inclusive 1-based line ranges; SHA-256 of complete raw file bytes, recomputed and checked against initial inspection hashes for all six pairs."
+  },
+  "judgments": [
+    {
+      "task_id": "bcnav-03",
+      "path": "classic/src/dbl/Net/Misc/bsndtomanager.dbl",
+      "grade": 3,
+      "facet": "Classic Finance contract totals and GST components",
+      "reason": "LoadContract directly populates original, variation and total values for Finance: total excluding GST is co_value + co_varamt, GST is co_gst_co + co_gst_var, and inclusive value adds all four. This is a direct Classic implementation entry point, not proof of all variation eligibility or GST-selection rules.",
+      "evidence": {
+        "line_start": 299,
+        "line_end": 309,
+        "sha256": "623c0d0d498cdccd23235e4cf2ec400dc55cbcd7775fa929d04dd111887abcc3"
+      }
+    },
+    {
+      "task_id": "bcnav-05",
+      "path": "docs/engineering/businesscraft-agent/analytical-questions.md",
+      "grade": 2,
+      "facet": "Contract/job terminology, site geography and lifecycle navigation",
+      "reason": "The note explicitly says job means Contract for these questions and geography comes from the Contract site address (lines 32-35). Its dataset section names co_city/co_state/co_zip and separately defines lifecycle using Close Event and Cancel Status, with pointers to domain and adapter files. Useful navigation and terminology support, not executable implementation; its planning statements require verification.",
+      "evidence": {
+        "line_start": 199,
+        "line_end": 222,
+        "sha256": "65f23c55443289a141067c89a1549b906dcd43fe0cb410d5156b4741cb41d7c6"
+      }
+    },
+    {
+      "task_id": "bcnav-09",
+      "path": "docs/engineering/businesscraft-agent/analytical-questions.md",
+      "grade": 2,
+      "facet": "Current Event registration ordering and lifecycle navigation",
+      "reason": "Documents latest usable Register Date, exclusion of unregistered placeholders, highest Event number only as a tie-breaker, and Classic routine/definition names. Adjacent lifecycle discussion points to Close Event and Cancel Status derivation. Strong supporting navigation, but this design note is not itself implementation or a parity test.",
+      "evidence": {
+        "line_start": 217,
+        "line_end": 239,
+        "sha256": "65f23c55443289a141067c89a1549b906dcd43fe0cb410d5156b4741cb41d7c6"
+      }
+    },
+    {
+      "task_id": "bcnav-10",
+      "path": "web/apps/web/app/api/c/[company]/ar/transactions/for-customer/[customer]/[mode]/filtered/[resource]/handler.ts",
+      "grade": 2,
+      "facet": "Grid resource read-authority wiring",
+      "reason": "Wires the filtered grid handler to customer and transaction-mode checkGridReadAccess checks plus customer sales-work scope, and delegates resources to gridFilterResources. Useful route-level entry into the read/resource authority chain; there is no explicit CSV-specific export permission here, so this alone cannot establish export/read equivalence.",
+      "evidence": {
+        "line_start": 22,
+        "line_end": 59,
+        "sha256": "6669457606943e68741ff143a874f1a1a29a98c2fa3bc749202f9b27ccc7087d"
+      }
+    },
+    {
+      "task_id": "bcnav-10",
+      "path": "web/packages/bc-grid/packages/react/src/serverGridCsvExport.ts",
+      "grade": 2,
+      "facet": "CSV execution path versus authorization boundary",
+      "reason": "Implements CSV streaming from serverExportRows and an export plan; the module also provides browser download mechanics. Useful for tracing how grid export consumes rows, but it has no business authority checks and cannot by itself prove whether read permission authorizes export. Supporting export-path entry point rather than the authority implementation.",
+      "evidence": {
+        "line_start": 32,
+        "line_end": 86,
+        "sha256": "f5c507b40c7620e9393edd287fe3dc335ed0721b465711bea2344b69d87b5e23"
+      }
+    },
+    {
+      "task_id": "bcnav-14",
+      "path": "web/agent/packages/bc-agent-runtime/tests/unit/database-transaction.test.ts",
+      "grade": 3,
+      "facet": "Failed checked-out transaction connection disposal tests",
+      "reason": "Direct TaskDatabase unit tests assert failed transactions attempt rollback and destroy their checked-out connection whether rollback succeeds or fails; the successful case commits and retains the connection. The import provides a direct implementation lead. These mocks cover failed-transaction cleanup, not an actual PostgreSQL disconnect or an emitted client error crashing the worker.",
+      "evidence": {
+        "line_start": 1,
+        "line_end": 53,
+        "sha256": "7a1580a1b4bb515e2d04b804048f7e89c41b935865c4732b745a6a53021f67bd"
+      }
+    }
+  ],
+  "limits": [
+    "Six query/path pairs across five unique candidate files inspected; no broader repository search or linked-file verification.",
+    "Documentation is supporting navigation, not proof that planned behavior is implemented.",
+    "No tests executed; mocked transaction tests do not reproduce a real checked-out PostgreSQL connection loss.",
+    "No source edits or frozen-qrel changes; only this supplemental review artifact written."
+  ]
+}

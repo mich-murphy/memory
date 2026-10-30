@@ -96,7 +96,9 @@ func pathsFromInput(data map[string]any) []string {
 	return out
 }
 
-// claimPending queues at most one sync per key: a transcript's path, or sweepKey.
+// claimPending debounces detached sync attempts per key: a transcript's path, or sweepKey.
+// The marker owns no source bytes and is not a durable capture queue or acknowledgement;
+// retries still depend on later hooks/sweeps, not an autonomous delivery worker.
 func claimPending(stateDir, key string) (marker string) {
 	pending := filepath.Join(stateDir, "pending")
 	if err := os.MkdirAll(pending, 0o700); err != nil {

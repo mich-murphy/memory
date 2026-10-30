@@ -23,7 +23,7 @@
           fileset = pkgs.lib.fileset.unions [./go.mod ./go.sum ./cmd ./internal];
         };
         # Update after changing go.mod or go.sum: set lib.fakeHash, build, and copy the reported hash.
-        vendorHash = "sha256-oDYOGUOTTja2031RAkKGWR7FYOgnZOYm0XI0ycBeVxs=";
+        vendorHash = "sha256-ngoOGVEr4tjlXVZyOY53k0jffp+FvYfkJkRTcuVmPtM=";
         subPackages = ["cmd/agent-sessions"];
         env.CGO_ENABLED = 0;
         ldflags = ["-s" "-w" "-X main.version=${version}"];
@@ -56,6 +56,10 @@
             pkgs.jq
             # The verification helper uses compression.zstd and sqlite3.
             pkgs.python314
+            # Analytics fixture tests invoke the CLI, not Python compression.zstd.
+            pkgs.zstd
+            # Generated producer-handler tests strip types and mock spawn; no SDK is run.
+            pkgs.nodejs_24
             pkgs.shellcheck
             pkgs.zizmor
             pkgs.goreleaser

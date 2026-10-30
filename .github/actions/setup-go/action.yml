@@ -1,5 +1,5 @@
 name: Set up Go
-description: Installs the Go named on go.mod's toolchain line.
+description: Installs the Go named on go.mod's toolchain line and Node for generated-producer tests.
 inputs:
   cache:
     description: Restore and save the Go module and build caches.
@@ -10,6 +10,10 @@ runs:
     - id: toolchain
       shell: bash
       run: echo "version=$(sed -n 's/^toolchain go//p' go.mod)" >> "$GITHUB_OUTPUT"
+    - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+      with:
+        node-version: "24.21.0"
+        package-manager-cache: false
     - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
         go-version: ${{ steps.toolchain.outputs.version }}

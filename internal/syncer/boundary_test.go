@@ -80,9 +80,11 @@ func (f *interruptedArchive) Head(ctx context.Context, key string) (store.Object
 }
 
 func TestEveryPublicationBoundaryPreservesAcknowledgedGenerations(t *testing.T) {
+	t.Parallel() // hermetic: private temp dirs and stores, no env or package globals
 	for _, stage := range []string{"plan", "blob", "commit", "clean"} {
 		for _, land := range []bool{false, true} {
 			t.Run(stage+map[bool]string{false: "Before", true: "AfterLostACK"}[land], func(t *testing.T) {
+				t.Parallel()
 				root := t.TempDir()
 				path := filepath.Join(root, "file")
 				cfg := &config.Config{Home: root, StateDir: t.TempDir(), LocalStore: t.TempDir(), MachineID: "machine"}

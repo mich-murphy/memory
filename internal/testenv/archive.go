@@ -246,9 +246,13 @@ func (e *Env) FileRecords(agent string) []Record {
 	return out
 }
 
-// Audit is an independent physical-contract oracle. Every committed generation and
-// dependency is readable, every chain is unique, and every blob is attributable to a
-// discoverable plan (including an incomplete publication left by an interrupted writer).
+// Audit is an independent oracle for the current v3 physical contract, not the
+// replacement's shared authoritative reader or writer-reader-importer acceptance gate
+// (see docs/session-capture-contract.md). Its historical-generation checks remain
+// required for this legacy implementation, not a retention requirement for the replacement.
+// Every committed generation and dependency is readable, every chain is unique,
+// and every blob is attributable to a discoverable plan (including an incomplete
+// publication left by an interrupted writer).
 // Archive caches expensive decoding only after proving immutable body identities.
 // Audit rechecks every previously observed object's existence and SHA on every call;
 // cached evidence therefore never excuses mutation, deletion or a newly broken chain.

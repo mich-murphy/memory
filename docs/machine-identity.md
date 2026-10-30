@@ -1,10 +1,18 @@
 # Machine identity: explicit creation and recovery
 
+> **Scope (2026-10-23):** Identity creation/recovery guidance remains relevant. The agreed [session-capture contract](session-capture-contract.md) keeps stable machine identity through the authorized archive rebuild; a fresh archive-instance identity is separate, not a reason to rotate either machine ID. Preserve effective exclusions and learned roots as well as identities before replacing local state or resetting R2.
+
 The machine ID selects this collector's remote archive namespace. Hostnames are
 only descriptive: they can collide or change, and are never used to guess a lost
 identity. The local SQLite upload cache does not establish which machine you are.
 Losing both SQLite and the identity must not silently select a new, apparently
 empty namespace and hide earlier history.
+
+The commands below describe legacy installation/configuration. Candidate runtime
+configuration binds the preserved machine ID separately from its fresh archive ID;
+see [candidate backends](session-capture-backends.md) and
+[phase 3](session-capture-phase3.md). Offline candidate passes do not establish
+installed-path or two-machine acceptance and are not a reason to create new IDs.
 
 ## A deliberately new machine
 

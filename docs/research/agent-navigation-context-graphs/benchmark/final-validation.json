@@ -1,0 +1,17 @@
+{
+  "verified_at": "2026-10-20T12:51:00.122048+00:00",
+  "status": "passed",
+  "deployed_runtime_sha256": "ec5bef8e9529fc2b2e8fa9c02234fda29a4769bdf5a275740a1dab3d076f8581",
+  "source_and_runtime_hashes_valid": true,
+  "all_first_run_captured_source_hashes_unchanged": true,
+  "complete_compressed_400_query_evidence_hashes_valid": true,
+  "all_evidence_json_parse_and_python_compile_passed": true,
+  "both_repo_diff_checks_passed": true,
+  "current_unittest_evidence": "benchmark/production-tests.log (37 passed), independently confirmed in production-review.md",
+  "boundaries": [
+    "No full BusinessCraft application test suite or CI/deployment run.",
+    "No commit/stage/push.",
+    "Root instruction files left untouched because disabled.",
+    "R2 task provenance and evidence contain no raw historical session transcripts."
+  ]
+}

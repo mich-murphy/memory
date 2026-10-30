@@ -1,0 +1,519 @@
+{
+  "policy": "Supplemental blind review of all 85 unique returned task/path pairs; condition identity removed before adjudication.",
+  "source_checks": "All cited file hashes and line ranges verified.",
+  "limits": [
+    "Original frozen qrels and pilot scores remain unchanged.",
+    "Broad useful-entrypoint relevance, not full task correctness, sufficient facet coverage, or downstream coding quality.",
+    "Post-outcome adjudication is not independent held-out confirmation or a significance test."
+  ],
+  "summary": {
+    "baseline": {
+      "judged_tasks": 11,
+      "useful_entrypoint_hit@5": 1.0,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    "hybrid": {
+      "judged_tasks": 11,
+      "useful_entrypoint_hit@5": 1.0,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    "map": {
+      "judged_tasks": 11,
+      "useful_entrypoint_hit@5": 0.9090909090909091,
+      "mrr": 0.9090909090909091,
+      "unknown_paths": 0
+    }
+  },
+  "details": [
+    {
+      "condition": "baseline",
+      "bundle": "A",
+      "task_id": "bcnav-03",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        2
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "baseline",
+      "bundle": "A",
+      "task_id": "bcnav-05",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "baseline",
+      "bundle": "A",
+      "task_id": "bcnav-09",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "baseline",
+      "bundle": "A",
+      "task_id": "bcnav-12",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        2
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "baseline",
+      "bundle": "A",
+      "task_id": "bcnav-14",
+      "grades": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "baseline",
+      "bundle": "B",
+      "task_id": "bcnav-04",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "baseline",
+      "bundle": "B",
+      "task_id": "bcnav-06",
+      "grades": [
+        2,
+        3,
+        3,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "baseline",
+      "bundle": "B",
+      "task_id": "bcnav-10",
+      "grades": [
+        2,
+        2,
+        3,
+        3,
+        2
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "baseline",
+      "bundle": "B",
+      "task_id": "bcnav-13",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "baseline",
+      "bundle": "B",
+      "task_id": "bcnav-16",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        2
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "baseline",
+      "bundle": "B",
+      "task_id": "bcnav-20",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "map",
+      "bundle": "A",
+      "task_id": "bcnav-03",
+      "grades": [
+        3,
+        3,
+        2,
+        3,
+        2
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "map",
+      "bundle": "A",
+      "task_id": "bcnav-05",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "map",
+      "bundle": "A",
+      "task_id": "bcnav-09",
+      "grades": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "map",
+      "bundle": "A",
+      "task_id": "bcnav-12",
+      "grades": [
+        3,
+        3,
+        2,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "map",
+      "bundle": "A",
+      "task_id": "bcnav-14",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "map",
+      "bundle": "B",
+      "task_id": "bcnav-04",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "map",
+      "bundle": "B",
+      "task_id": "bcnav-06",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        2
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "map",
+      "bundle": "B",
+      "task_id": "bcnav-10",
+      "grades": [],
+      "useful_entrypoint_hit@5": 0,
+      "mrr": 0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "map",
+      "bundle": "B",
+      "task_id": "bcnav-13",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "map",
+      "bundle": "B",
+      "task_id": "bcnav-16",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        2
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "map",
+      "bundle": "B",
+      "task_id": "bcnav-20",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "hybrid",
+      "bundle": "A",
+      "task_id": "bcnav-03",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "hybrid",
+      "bundle": "A",
+      "task_id": "bcnav-05",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        2
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "hybrid",
+      "bundle": "A",
+      "task_id": "bcnav-09",
+      "grades": [
+        3,
+        3,
+        2,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "hybrid",
+      "bundle": "A",
+      "task_id": "bcnav-12",
+      "grades": [
+        2,
+        3,
+        3,
+        2,
+        2
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "hybrid",
+      "bundle": "A",
+      "task_id": "bcnav-14",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "hybrid",
+      "bundle": "B",
+      "task_id": "bcnav-04",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        2
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "hybrid",
+      "bundle": "B",
+      "task_id": "bcnav-06",
+      "grades": [
+        2,
+        3,
+        3,
+        2,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "hybrid",
+      "bundle": "B",
+      "task_id": "bcnav-10",
+      "grades": [
+        3,
+        3,
+        2,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "hybrid",
+      "bundle": "B",
+      "task_id": "bcnav-13",
+      "grades": [
+        3,
+        3,
+        2,
+        2,
+        2
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "hybrid",
+      "bundle": "B",
+      "task_id": "bcnav-16",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        2
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    },
+    {
+      "condition": "hybrid",
+      "bundle": "B",
+      "task_id": "bcnav-20",
+      "grades": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "useful_entrypoint_hit@5": 1,
+      "mrr": 1.0,
+      "unknown_paths": 0
+    }
+  ],
+  "review_sha256": "8041755f5c066f92bfadc4b331a8ed026dcec41cf9ace47cd3151d1bb3ae238c"
+}

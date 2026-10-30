@@ -1,0 +1,9 @@
+{
+  "uncompressed_file": "queries.jsonl",
+  "uncompressed_bytes": 123158887,
+  "uncompressed_sha256": "620c60edd4d8912b9b2232e88b7e5d3d860a186dbc3ca20e356189cc931223a9",
+  "gzip_file": "queries.jsonl.gz",
+  "gzip_bytes": 7224691,
+  "gzip_sha256": "ea990f6f536fa49187a830a2b4d48fb1a1eba219ae4e3299f5aa51591022181b",
+  "policy": "Complete immutable first-run rankings and selected outputs preserved, losslessly compressed for Git. Original JSONL remains local and ignored. Decompress with gzip -dc to a new private file."
+}

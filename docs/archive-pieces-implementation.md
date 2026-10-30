@@ -1,5 +1,7 @@
 # Pieces/delta integration notes
 
+> **Status (2026-10-23):** Historical v3 implementation-worktree notes. “Parent”, “now” and pending gate statements below refer to that work, not a current implementation plan or release status. Preserve these exact piece/fold test contracts as evidence. The agreed canonical [session-capture contract](session-capture-contract.md) supersedes this architecture for the replacement: complete source-epoch snapshots first; chunking only as a measured optimization, without a legacy compatibility engine.
+
 Parent owns storage-layout/golden updates (neither edited here).
 
 ## Wire and semantics

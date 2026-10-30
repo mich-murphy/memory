@@ -1,6 +1,17 @@
 # Installation and removal
 
-There are two supported ways to install, both pinned to a release tag you choose.
+> **Scope:** These are binary installation/removal and legacy managed-hook mechanics,
+> not candidate service activation or controlled cutover instructions. Preserve machine
+> IDs, exclusions, learned roots, original sources and pending state. See the
+> [contract](session-capture-contract.md) for acceptance and the
+> [current handoff](session-capture-handoff.md#current-session-checkpoint) for deployment
+> and next action.
+
+The Nix and release routes below install a selected binary; `agent-sessions install`
+configures the legacy managed hooks/extension. The opt-in
+[candidate lifecycle](session-capture-phase3.md) separately provides service/hook
+planning and apply commands. Neither installing a binary nor applying candidate hooks
+is final default cutover or evidence of native/R2/two-machine acceptance.
 
 ## Nix (built from source)
 

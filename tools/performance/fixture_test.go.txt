@@ -1,0 +1,1530 @@
+//go:build linux
+
+package cli
+
+// This file is injected only by tools/performance/prepare.py. Never production code.
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"reflect"
+	"runtime/pprof"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/klauspost/compress/zstd"
+	"github.com/mich-murphy/memory/internal/adapters"
+	"github.com/mich-murphy/memory/internal/capturedaemon"
+	"github.com/mich-murphy/memory/internal/capturesource"
+	"github.com/mich-murphy/memory/internal/publication"
+	"github.com/mich-murphy/memory/internal/safefile"
+	"github.com/mich-murphy/memory/internal/scrub"
+	"github.com/mich-murphy/memory/internal/sessioncapture"
+	"golang.org/x/sys/unix"
+	"modernc.org/sqlite"
+)
+
+// Diagnostic limits, not release budgets. In particular neither the 3-CPU-second
+// settled target nor the 10-second append target is a correctness test gate.
+const perfCPU = 30.0
+const perfFootprint = 256 << 20
+const perfSpool = 64 << 20
+
+// Attempt counts, including failed attempts. Read bytes count bytes actually read;
+// put/CAS bytes count offered bytes. Sync is forwarded: never weaken Local durability.
+type perfBackend struct {
+	publication.Backend
+	mu     sync.Mutex
+	counts map[string]int64
+}
+
+func (b *perfBackend) add(k string, n int64) { b.mu.Lock(); b.counts[k] += n; b.mu.Unlock() }
+func (b *perfBackend) snapshot() map[string]int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	m := map[string]int64{}
+	for k, v := range b.counts {
+		m[k] = v
+	}
+	return m
+}
+
+type perfRead struct {
+	io.ReadCloser
+	b *perfBackend
+}
+
+func (r perfRead) Read(p []byte) (int, error) {
+	n, e := r.ReadCloser.Read(p)
+	r.b.add("backend_read_bytes", int64(n))
+	return n, e
+}
+func (b *perfBackend) Open(c context.Context, k string) (io.ReadCloser, error) {
+	b.add("backend_open", 1)
+	r, e := b.Backend.Open(c, k)
+	if e != nil {
+		return nil, e
+	}
+	return perfRead{r, b}, nil
+}
+func (b *perfBackend) Current(c context.Context, k string) ([]byte, string, error) {
+	b.add("backend_current", 1)
+	p, t, e := b.Backend.Current(c, k)
+	b.add("backend_read_bytes", int64(len(p)))
+	return p, t, e
+}
+func (b *perfBackend) PutFile(c context.Context, k, p string) error {
+	b.add("backend_put", 1)
+	s, e := os.Stat(p)
+	if e != nil {
+		return e
+	}
+	b.add("backend_put_bytes", s.Size())
+	return b.Backend.PutFile(c, k, p)
+}
+func (b *perfBackend) CompareAndSwap(c context.Context, k, t string, p []byte) error {
+	b.add("backend_cas", 1)
+	b.add("backend_cas_bytes", int64(len(p)))
+	return b.Backend.CompareAndSwap(c, k, t, p)
+}
+func (b *perfBackend) Sync(c context.Context, k string) error {
+	b.add("backend_sync", 1)
+	return b.Backend.(publication.DurabilityFence).Sync(c, k)
+}
+
+type perfSample struct {
+	WallNS           int64            `json:"wall_ns"`
+	CPUSeconds       float64          `json:"cpu_seconds"`
+	UserCPUSeconds   float64          `json:"user_cpu_seconds"`
+	SystemCPUSeconds float64          `json:"system_cpu_seconds"`
+	IO               map[string]int64 `json:"linux_process_io"`
+	Counts           map[string]int64 `json:"counts"`
+}
+
+func perfNow(b *perfBackend) perfSample {
+	var r syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &r); err != nil {
+		panic(err)
+	}
+	p, e := os.ReadFile("/proc/self/io")
+	if e != nil {
+		panic(e)
+	}
+	m := map[string]int64{}
+	for _, line := range strings.Split(string(p), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 2 {
+			n, e := strconv.ParseInt(f[1], 10, 64)
+			if e != nil {
+				panic(e)
+			}
+			m[strings.TrimSuffix(f[0], ":")] = n
+		}
+	}
+	cpu := float64(r.Utime.Sec+r.Stime.Sec) + float64(r.Utime.Usec+r.Stime.Usec)/1e6
+	return perfSample{WallNS: time.Now().UnixNano(), CPUSeconds: cpu,
+		UserCPUSeconds:   float64(r.Utime.Sec) + float64(r.Utime.Usec)/1e6,
+		SystemCPUSeconds: float64(r.Stime.Sec) + float64(r.Stime.Usec)/1e6,
+		IO:               m, Counts: b.snapshot()}
+}
+func perfDelta(a, z perfSample) perfSample {
+	// Samples remain cumulative and immutable, including an ACK recorder's endpoint.
+	// A struct copy alone still aliases these maps.
+	difference := func(start, end map[string]int64) map[string]int64 {
+		out := make(map[string]int64, len(start)+len(end))
+		for k, v := range start {
+			out[k] = -v
+		}
+		for k, v := range end {
+			out[k] += v
+		}
+		return out
+	}
+	return perfSample{WallNS: z.WallNS - a.WallNS, CPUSeconds: z.CPUSeconds - a.CPUSeconds,
+		UserCPUSeconds: z.UserCPUSeconds - a.UserCPUSeconds, SystemCPUSeconds: z.SystemCPUSeconds - a.SystemCPUSeconds,
+		IO: difference(a.IO, z.IO), Counts: difference(a.Counts, z.Counts)}
+}
+
+// Sequence and sample are published together only after sampling finishes. The
+// backend ACK count may already be visible while a callback is still sampling;
+// that count is never an endpoint-readiness signal.
+type perfACKRecorder struct {
+	mu       sync.Mutex
+	sequence int64
+	last     perfSample
+}
+
+func (a *perfACKRecorder) record(b *perfBackend, sample func() perfSample) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	b.add("fault_ack-committed", 1)
+	s := sample()
+	a.sequence++
+	a.last = s
+}
+func (a *perfACKRecorder) endpoint(required int64) (perfSample, bool) {
+	// A callback still sampling is not a published endpoint. Do not block the
+	// observer or return the previous sample while that callback holds the lock.
+	if !a.mu.TryLock() {
+		return perfSample{}, false
+	}
+	defer a.mu.Unlock()
+	return a.last, a.sequence >= required
+}
+func (a *perfACKRecorder) count() int64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.sequence
+}
+
+func TestPerfDeltaPreservesInputs(t *testing.T) {
+	a := perfSample{WallNS: 10, CPUSeconds: 2, UserCPUSeconds: 1.5, SystemCPUSeconds: 0.5, IO: map[string]int64{"read": 7, "only_start": 3}, Counts: map[string]int64{"ack": 4}}
+	z := perfSample{WallNS: 40, CPUSeconds: 5, UserCPUSeconds: 3.5, SystemCPUSeconds: 1.5, IO: map[string]int64{"read": 19, "only_end": 8}, Counts: map[string]int64{"ack": 6}}
+	wantA := perfSample{WallNS: 10, CPUSeconds: 2, UserCPUSeconds: 1.5, SystemCPUSeconds: 0.5, IO: map[string]int64{"read": 7, "only_start": 3}, Counts: map[string]int64{"ack": 4}}
+	wantZ := perfSample{WallNS: 40, CPUSeconds: 5, UserCPUSeconds: 3.5, SystemCPUSeconds: 1.5, IO: map[string]int64{"read": 19, "only_end": 8}, Counts: map[string]int64{"ack": 6}}
+	want := perfSample{WallNS: 30, CPUSeconds: 3, UserCPUSeconds: 2, SystemCPUSeconds: 1, IO: map[string]int64{"read": 12, "only_start": -3, "only_end": 8}, Counts: map[string]int64{"ack": 2}}
+	d := perfDelta(a, z)
+	if !reflect.DeepEqual(d, want) || !reflect.DeepEqual(a, wantA) || !reflect.DeepEqual(z, wantZ) {
+		t.Fatal("delta mutated input or produced wrong result")
+	}
+	d.IO["read"] = 999
+	d.Counts["ack"] = 999
+	if !reflect.DeepEqual(a, wantA) || !reflect.DeepEqual(z, wantZ) {
+		t.Fatal("delta maps alias inputs")
+	}
+	if again := perfDelta(a, z); !reflect.DeepEqual(again, want) {
+		t.Fatal("repeated delta changed cumulative endpoint")
+	}
+}
+
+func TestPerfACKEndpointWaitsForFinalSample(t *testing.T) {
+	b := &perfBackend{counts: map[string]int64{}}
+	var a perfACKRecorder
+	a.record(b, func() perfSample { return perfSample{WallNS: 1, Counts: b.snapshot()} })
+	// Two staged jobs require two published samples, not one ACK plus a
+	// drained queue. The previous endpoint cannot satisfy the final boundary.
+	if _, ready := a.endpoint(2); ready {
+		t.Fatal("one ACK satisfied two staged jobs")
+	}
+	beforeCallback, beginCallback := make(chan struct{}), make(chan struct{})
+	entered, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	go func() {
+		close(beforeCallback)
+		<-beginCallback
+		a.record(b, func() perfSample { close(entered); <-release; return perfSample{WallNS: 2, Counts: b.snapshot()} })
+		close(finished)
+	}()
+	<-beforeCallback
+	// Model the final DB commit becoming visible BEFORE its hook even begins.
+	// The prior ACK sample exists and the queue is drained, but the exact two-job
+	// boundary must still reject it. Testing only a delayed lock-holder misses this.
+	drained := true
+	_, beforeReady := a.endpoint(2)
+	beforeCount := b.snapshot()["fault_ack-committed"]
+	close(beginCallback)
+	<-entered
+	// The barrier models a drained work store and an already incremented ACK
+	// hook count, with the FINAL sample still unavailable. No timing/sleep race.
+	countVisible := b.snapshot()["fault_ack-committed"] == 2
+	_, early := a.endpoint(2)
+	close(release)
+	<-finished
+	if !drained || beforeCount != 1 || beforeReady {
+		t.Fatal("drained queue returned previous sample before final callback began")
+	}
+	if !countVisible {
+		t.Fatal("barrier did not expose old count/sample race")
+	}
+	if early {
+		t.Fatal("endpoint returned before delayed final sample")
+	}
+	s, ready := a.endpoint(2)
+	if !ready || s.WallNS != 2 || s.Counts["fault_ack-committed"] != 2 || a.count() != 2 {
+		t.Fatal("final endpoint omitted staged ACK or used previous sample")
+	}
+}
+
+// This observes queue policy only. Discovery keeps the actual r.discovery closure
+// and has its existing callback/request counters; it is not intercepted here.
+func perfCountPolicy(b *perfBackend, check func(context.Context, sessioncapture.Request) error) func(context.Context, sessioncapture.Request) error {
+	return func(ctx context.Context, req sessioncapture.Request) error {
+		transform := "other"
+		switch req.Transform {
+		case "":
+			transform = "raw"
+		case "zstd", "sqlite-backup", "scrubbed-config":
+			transform = req.Transform
+		}
+		b.add("policy_calls/"+perfSafeAgent(req.Identity.Agent)+"/"+transform, 1)
+		return check(ctx, req) // Exactly once; original context, request and error.
+	}
+}
+
+// NONATOMIC: RuntimeStatus uses separate SQL statements. These bits classify
+// existing poll observations, not transactional snapshots or proof of starvation.
+// Bits 0..3: complete, pending sources == 0, pending publications == 0, exact size.
+func perfWarmupMask(st sessioncapture.RuntimeStatus, expectedSources int64) int {
+	mask := 0
+	for bit, yes := range []bool{st.DiscoveryComplete, st.PendingSources == 0, st.PendingPublications == 0, st.Sources == expectedSources} {
+		if yes {
+			mask |= 1 << bit
+		}
+	}
+	return mask
+}
+
+type perfWarmupReport struct {
+	Diagnostic    bool       `json:"diagnostic"`
+	PrimaryTiming bool       `json:"primary_timing"`
+	Nonatomic     bool       `json:"nonatomic_status_observations"`
+	Reason        string     `json:"reason"`
+	Histogram     [16]int64  `json:"histogram_mask_0_to_15"`
+	Sample        perfSample `json:"sample"`
+}
+
+func perfEmitWarmup(t *testing.T, reason string, a, z perfSample, histogram [16]int64) {
+	t.Helper()
+	p, e := json.Marshal(perfWarmupReport{true, false, true, reason, histogram, perfDelta(a, z)})
+	if e != nil {
+		t.Log("PERF_WARMUP_SCALAR diagnostic=true encoding_failed=true")
+		return
+	}
+	t.Log("PERF_WARMUP_SCALAR " + string(p))
+}
+
+func TestPerfPolicyCountsForwardOnceAndPreserveError(t *testing.T) {
+	const private = "synthetic-private-coordinate-transcript-error"
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // Even a canceled context must still reach the original policy once.
+	req := sessioncapture.Request{Identity: publication.Identity{Agent: private}, Path: private, Transform: private}
+	for _, want := range []error{nil, errors.New(private), errors.Join(context.Canceled, errors.New(private))} {
+		b := &perfBackend{counts: map[string]int64{}}
+		calls := 0
+		check := perfCountPolicy(b, func(gotCtx context.Context, got sessioncapture.Request) error {
+			calls++
+			if gotCtx != ctx || !reflect.DeepEqual(got, req) {
+				t.Fatal("policy wrapper changed arguments")
+			}
+			return want
+		})
+		if got := check(ctx, req); got != want || calls != 1 {
+			t.Fatal("policy wrapper changed error or forward count")
+		}
+		if !reflect.DeepEqual(b.snapshot(), map[string]int64{"policy_calls/other/other": 1}) {
+			t.Fatal("policy wrapper leaked unknown labels or miscounted")
+		}
+		data, err := json.Marshal(perfWarmupReport{true, false, true, "cpu_guard", [16]int64{}, perfSample{Counts: b.snapshot()}})
+		if err != nil || bytes.Contains(data, []byte(private)) {
+			t.Fatal("warmup failure report leaked private policy input/error")
+		}
+	}
+	b := &perfBackend{counts: map[string]int64{}}
+	check := perfCountPolicy(b, func(context.Context, sessioncapture.Request) error { return nil })
+	for _, agent := range []string{"claude", "codex", "pi"} {
+		for _, transform := range []string{"", "zstd", "sqlite-backup", "scrubbed-config"} {
+			req.Identity.Agent, req.Transform = agent, transform
+			if err := check(t.Context(), req); err != nil {
+				t.Fatal("successful policy changed")
+			}
+		}
+	}
+	counts := b.snapshot()
+	if len(counts) != 12 {
+		t.Fatal("fixed policy buckets missing")
+	}
+	for _, count := range counts {
+		if count != 1 {
+			t.Fatal("fixed policy bucket miscounted")
+		}
+	}
+}
+
+func TestPerfWarmupHistogramExactBoundaries(t *testing.T) {
+	var histogram [16]int64
+	for want := range 16 {
+		st := sessioncapture.RuntimeStatus{DiscoveryComplete: want&1 != 0, PendingSources: 1, PendingPublications: 1, Sources: 200}
+		if want&2 != 0 {
+			st.PendingSources = 0
+		}
+		if want&4 != 0 {
+			st.PendingPublications = 0
+		}
+		if want&8 != 0 {
+			st.Sources = 201
+		}
+		got := perfWarmupMask(st, 201)
+		if got != want {
+			t.Fatal("warmup mask bit mismatch")
+		}
+		histogram[got]++
+	}
+	for _, n := range histogram {
+		if n != 1 {
+			t.Fatal("warmup histogram lost or merged observations")
+		}
+	}
+	// Neither overcount nor negative pending values may satisfy an equality bit.
+	if perfWarmupMask(sessioncapture.RuntimeStatus{PendingSources: -1, PendingPublications: -1, Sources: 202}, 201) != 0 {
+		t.Fatal("warmup mask weakened exact boundaries")
+	}
+}
+
+func perfEmit(t *testing.T, phase string, a, z perfSample) {
+	t.Helper()
+	d := perfDelta(a, z)
+	p, e := json.Marshal(struct {
+		Phase               string     `json:"phase"`
+		Profiled            bool       `json:"profiled"`
+		Diagnostic          bool       `json:"diagnostic"`
+		WorkCounts          bool       `json:"work_counts"`
+		PrimaryTiming       bool       `json:"primary_timing"`
+		Sample              perfSample `json:"sample"`
+		SettledTargetCPU    float64    `json:"settled_target_cpu_seconds"`
+		AppendTargetSeconds int        `json:"append_target_seconds"`
+	}{phase, os.Getenv("MEMORY_PERF_PROFILE") != "", os.Getenv("MEMORY_PERF_DIAGNOSTIC") == "1" || os.Getenv("MEMORY_PERF_PROFILE") != "",
+		os.Getenv("MEMORY_PERF_WORK_COUNTS") == "1", os.Getenv("MEMORY_PERF_DIAGNOSTIC") != "1" && os.Getenv("MEMORY_PERF_PROFILE") == "" && os.Getenv("MEMORY_PERF_WORK_COUNTS") != "1", d, 3, 10})
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Log("PERF_SCALAR " + string(p))
+	if d.CPUSeconds > perfCPU {
+		t.Fatal("phase CPU diagnostic limit exceeded")
+	}
+}
+func perfSize(root string) (int64, error) {
+	var n int64
+	e := filepath.WalkDir(root, func(_ string, d fs.DirEntry, e error) error {
+		if e != nil {
+			return e
+		}
+		if d.Type().IsRegular() {
+			s, e := d.Info()
+			if e != nil {
+				return e
+			}
+			n += s.Size()
+		}
+		return nil
+	})
+	return n, e
+}
+func perfWrite(t *testing.T, p string, b []byte) {
+	t.Helper()
+	if e := os.MkdirAll(filepath.Dir(p), 0700); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.WriteFile(p, b, 0600); e != nil {
+		t.Fatal(e)
+	}
+}
+func perfBody(n, seed int) []byte {
+	if n > 4096 {
+		var out []byte
+		for i := 0; i < n/4096; i++ {
+			out = append(out, perfBody(4096, seed*32+i)...)
+		}
+		return out
+	}
+	prefix := []byte("{\"type\":\"synthetic\",\"text\":\"")
+	suffix := []byte("\"}\n")
+	p := make([]byte, n)
+	copy(p, prefix)
+	x := uint64(seed + 1)
+	for i := len(prefix); i < n-len(suffix); i++ {
+		x ^= x << 13
+		x ^= x >> 7
+		x ^= x << 17
+		p[i] = "abcdefghijklmnopqrstuvwxyz0123456789"[x%36]
+	}
+	copy(p[n-len(suffix):], suffix)
+	return p
+}
+func perfHash(b []byte) string { s := sha256.Sum256(b); return hex.EncodeToString(s[:]) }
+
+type perfSource struct {
+	req    sessioncapture.Request
+	body   []byte
+	append bool
+}
+
+func perfFixture(t *testing.T, root string) (capturedaemon.Config, string, []perfSource) {
+	t.Helper()
+	c := capturedaemon.Config{Version: capturedaemon.ConfigVersion, ArchiveID: "performance-synthetic", MachineID: "machine-synthetic", Home: filepath.Join(root, "home"), Store: filepath.Join(root, "store"), Spool: filepath.Join(root, "spool"), PolicyDir: filepath.Join(root, "policy"), DefaultRoots: true, CaptureWorkers: 1, DeliveryWorkers: 1, PollSeconds: 1, OperationSeconds: 10, MaxAttempts: 2, MaxSpoolBytes: perfSpool, EntriesPerRoot: 4096}
+	perfWrite(t, filepath.Join(c.PolicyDir, "exclusions", ".fixture"), nil)
+	config := filepath.Join(root, "runtime.json")
+	if e := capturedaemon.Save(config, c); e != nil {
+		t.Fatal(e)
+	}
+	r, e := newRuntimeComposition(c)
+	if e != nil {
+		t.Fatal(e)
+	}
+	opts := r.sourceOptions(config)
+	var sources []perfSource
+	add := func(agent, p string, body, expected []byte, appendMain bool) {
+		perfWrite(t, p, body)
+		q, e := capturesource.Classify(t.Context(), opts, agent, p)
+		if e != nil {
+			t.Fatalf("fixture classification agent=%s: %v", agent, e)
+		}
+		sources = append(sources, perfSource{q, expected, appendMain})
+	}
+	for ai, agent := range []string{"claude", "codex", "pi"} {
+		ar := filepath.Join(c.Home, "."+agent)
+		if agent == "pi" {
+			ar = filepath.Join(ar, "agent")
+		}
+		for i := range 32 {
+			uuid := fmt.Sprintf("11111111-1111-4111-8111-%012d", i)
+			stem := "2026-01-01T00-00-00Z_" + uuid
+			var main, artifact string
+			switch agent {
+			case "claude":
+				main = filepath.Join(ar, "projects", "synthetic", uuid+".jsonl")
+				artifact = filepath.Join(ar, "projects", "synthetic", uuid, "tool-results", "result.txt")
+			case "codex":
+				main = filepath.Join(ar, "sessions", "2026", "rollout-2026-01-01T00-00-00-"+uuid+".jsonl")
+				artifact = filepath.Join(ar, "log", uuid+".log")
+			case "pi":
+				main = filepath.Join(ar, "sessions", "--synthetic--", stem+".jsonl")
+				artifact = filepath.Join(ar, "sessions", "--synthetic--", stem, "result.txt")
+			}
+			body := perfBody(64<<10, 1000*ai+i)
+			add(agent, main, body, body, i == 0)
+			body = perfBody(4<<10, 4000+1000*ai+i)
+			add(agent, artifact, body, body, false)
+		}
+		// A distinct supported compressed transcript, never a competing Codex copy.
+		uuid := "22222222-2222-4222-8222-222222222222"
+		rel := filepath.Join("projects", "synthetic", uuid+".jsonl.zst")
+		if agent == "codex" {
+			rel = filepath.Join("sessions", "2026", "rollout-2026-01-01T00-00-00-"+uuid+".jsonl.zst")
+		}
+		if agent == "pi" {
+			rel = filepath.Join("sessions", "--synthetic--", "2026-01-01T00-00-00Z_"+uuid+".jsonl.zst")
+		}
+		body := perfBody(64<<10, 8000+ai)
+		enc, e := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
+		if e != nil {
+			t.Fatal(e)
+		}
+		compressed := enc.EncodeAll(body, nil)
+		if e = enc.Close(); e != nil {
+			t.Fatal(e)
+		}
+		add(agent, filepath.Join(ar, rel), compressed, body, false)
+		name := "settings.json"
+		body = []byte("{\"diagnostic\":true}\n")
+		if agent == "codex" {
+			name = "config.toml"
+			body = []byte("diagnostic = true\n")
+		}
+		expected, e := scrub.Identities(agent, []string{filepath.Join(ar, name)}, body)
+		if e != nil {
+			t.Fatal(e)
+		}
+		add(agent, filepath.Join(ar, name), body, expected, false)
+		dbpath := filepath.Join(ar, "state.sqlite")
+		db, e := sql.Open("sqlite", dbpath)
+		if e != nil {
+			t.Fatal(e)
+		}
+		_, e = db.ExecContext(t.Context(), "PRAGMA page_size=4096; CREATE TABLE evidence(body TEXT); INSERT INTO evidence VALUES ('synthetic-sqlite-only')")
+		if e = errors.Join(e, db.Close()); e != nil {
+			t.Fatal(e)
+		}
+		body, e = os.ReadFile(dbpath)
+		if e != nil {
+			t.Fatal(e)
+		}
+		// Establish normalized backup bytes before timing, not raw database bytes.
+		// This is a same-adapter oracle, supplemented by a SQL row/schema assertion.
+		reference := filepath.Join(root, "reference.sqlite")
+		perfWrite(t, reference, nil)
+		e = adapters.BackupSQLiteAuthorized(t.Context(), dbpath, reference, 1<<20, func() error { return nil }, adapters.SQLiteAuthorizedOptions{Authorize: func(context.Context, adapters.SQLiteAuthorization) error { return nil }})
+		if e != nil {
+			t.Fatal(e)
+		}
+		expected, e = os.ReadFile(reference)
+		if e != nil {
+			t.Fatal(e)
+		}
+		check, e := sql.Open("sqlite", reference)
+		if e != nil {
+			t.Fatal(e)
+		}
+		var value string
+		e = check.QueryRowContext(t.Context(), "SELECT body FROM evidence").Scan(&value)
+		if e = errors.Join(e, check.Close()); e != nil || value != "synthetic-sqlite-only" {
+			t.Fatal("SQLite normalization oracle failed")
+		}
+		if e = os.Remove(reference); e != nil {
+			t.Fatal(e)
+		}
+		add(agent, dbpath, body, expected, false)
+		forbidden := filepath.Join(ar, "auth.json")
+		perfWrite(t, forbidden, []byte("{\"token\":\"synthetic-forbidden\"}"))
+		if _, e = capturesource.Classify(t.Context(), opts, agent, forbidden); e == nil {
+			t.Fatal("credential-path negative accepted")
+		}
+	}
+	return c, config, sources
+}
+
+// ExportSessionBounded is the authoritative reader. No direct object decoding.
+// Checks every expected source, not merely one readable main; rejects extras too.
+func perfVerify(t *testing.T, root string, b publication.Backend, sources []perfSource) map[string]publication.Source {
+	t.Helper()
+	groups := map[publication.Identity][]perfSource{}
+	for _, s := range sources {
+		groups[s.req.Identity] = append(groups[s.req.Identity], s)
+	}
+	out := map[string]publication.Source{}
+	n := 0
+	for id, want := range groups {
+		dest := filepath.Join(root, fmt.Sprintf("export-%04d", n))
+		n++
+		exp, e := publication.ExportSessionBounded(t.Context(), b, id, dest, 2<<20)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if exp.Manifest.Identity != id || len(exp.Manifest.Sources) != len(want) || len(exp.Bodies) != len(want) {
+			t.Fatal("reader identity/source coverage mismatch")
+		}
+		byID := map[string]perfSource{}
+		for _, s := range want {
+			byID[s.req.SourceID] = s
+		}
+		for _, s := range exp.Manifest.Sources {
+			w, ok := byID[s.SourceID]
+			if !ok || s.Path != w.req.Path || s.Withheld != nil || s.EpochID == "" || s.Revision == 0 {
+				t.Fatal("unexpected source/epoch/path")
+			}
+			if s.Object.SHA256 != perfHash(w.body) || s.Object.Size != int64(len(w.body)) {
+				t.Fatalf("exact synthetic body commitment mismatch transform=%s", w.req.Transform)
+			}
+			key := id.BaseKey() + "/" + s.SourceID
+			if _, ok := out[key]; ok {
+				t.Fatal("duplicate source identity")
+			}
+			out[key] = s
+		}
+		for _, body := range exp.Bodies {
+			p, e := os.ReadFile(filepath.Join(dest, body.Path))
+			if e != nil {
+				t.Fatal(e)
+			}
+			w, ok := byID[body.SourceID]
+			if !ok || !bytes.Equal(p, w.body) || body.SHA256 != perfHash(p) {
+				t.Fatal("reader exact body mismatch")
+			}
+		}
+		if e = os.RemoveAll(dest); e != nil {
+			t.Fatal(e)
+		}
+	}
+	return out
+}
+
+// capWriter leaves profiles private and fails at a fixed byte bound.
+type perfCapWriter struct {
+	f        *os.File
+	n        int64
+	exceeded bool
+}
+
+func (w *perfCapWriter) Write(p []byte) (int, error) {
+	if w.n+int64(len(p)) > 64<<20 {
+		w.exceeded = true
+		return 0, errors.New("profile limit")
+	}
+	n, e := w.f.Write(p)
+	w.n += int64(n)
+	return n, e
+}
+func perfProfile(t *testing.T, phase string) func() {
+	t.Helper()
+	dir := os.Getenv("MEMORY_PERF_PROFILE")
+	if dir == "" {
+		return func() {}
+	}
+	f, e := os.OpenFile(filepath.Join(dir, phase+".pprof"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if e != nil {
+		t.Fatal(e)
+	}
+	w := &perfCapWriter{f: f}
+	if e = pprof.StartCPUProfile(w); e != nil {
+		t.Fatal(e)
+	}
+	var once sync.Once
+	finish := func() {
+		once.Do(func() {
+			pprof.StopCPUProfile()
+			if e := f.Close(); e != nil {
+				t.Error(e)
+			}
+			if w.exceeded {
+				t.Error("profile diagnostic limit")
+			}
+		})
+	}
+	// Cleanup runs after runtime cancel/join defers, including t.Fatal paths.
+	// Earlier successful phases cannot stop a later profile: finish is idempotent.
+	t.Cleanup(finish)
+	return finish
+}
+
+// This fallback callback is opt-in diagnostic evidence, not primary timing.
+// Production classify() checks all known classes BEFORE invoking it. Always return
+// exactly its existing default FailureTransient, regardless of diagnostic content.
+type perfFallbackReport struct {
+	Diagnostic bool     `json:"diagnostic"`
+	SQLiteCode *int     `json:"sqlite_code,omitempty"`
+	Errno      *uint64  `json:"errno,omitempty"`
+	Signatures []string `json:"signatures"`
+}
+
+func perfFallbackClassify(err error, report func(perfFallbackReport)) sessioncapture.FailureClass {
+	r := perfFallbackReport{Diagnostic: true}
+	var se *sqlite.Error
+	if errors.As(err, &se) {
+		code := se.Code()
+		r.SQLiteCode = &code
+	}
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		code := uint64(errno)
+		r.Errno = &code
+	}
+	seen := map[string]bool{}
+	for _, known := range []struct {
+		err  error
+		code string
+	}{{context.Canceled, "context_canceled"}, {context.DeadlineExceeded, "context_deadline"}, {fs.ErrNotExist, "fs_not_exist"}, {fs.ErrPermission, "fs_permission"}, {adapters.ErrSQLiteRollbackJournal, "sqlite_rollback_journal"}} {
+		if errors.Is(err, known.err) {
+			seen[known.code] = true
+		}
+	}
+	var visit func(error)
+	visit = func(e error) {
+		if e == nil {
+			return
+		}
+		// Equality against fixed source signatures only. Never emit Error(), a
+		// type name, wrapper text, coordinates, or dynamically matched substrings.
+		code := ""
+		switch e.Error() {
+		case "sqlite authorized: invalid options":
+			code = "sqlite_invalid_options"
+		case "sqlite authorized: private empty output required":
+			code = "sqlite_output_invalid"
+		case "sqlite authorized: main identity changed":
+			code = "sqlite_main_identity_changed"
+		case "sqlite authorized: original identity changed":
+			code = "sqlite_original_identity_changed"
+		case "sqlite authorized: source changed":
+			code = "sqlite_source_identity_changed"
+		case "sqlite authorized: source bytes changed":
+			code = "sqlite_source_bytes_changed"
+		case "sqlite authorized: nonregular WAL":
+			code = "sqlite_wal_nonregular"
+		case "sqlite authorized: unresolved WAL entry":
+			code = "sqlite_wal_unresolved"
+		case "sqlite authorized: WAL alias changed":
+			code = "sqlite_wal_alias_changed"
+		case "sqlite authorized: sidecar parent changed":
+			code = "sqlite_sidecar_parent_changed"
+		case "sqlite authorized: WAL appeared":
+			code = "sqlite_wal_appeared"
+		case "sqlite authorized: source pair exceeds limit":
+			code = "sqlite_source_pair_limit"
+		case "sqlite authorized: identity metadata limit exceeded":
+			code = "sqlite_identity_limit"
+		case "sqlite authorized: excluded identity":
+			code = "sqlite_identity_excluded"
+		case "authorized sqlite VFS missing":
+			code = "sqlite_vfs_missing"
+		case "sqlite methods allocation failed":
+			code = "sqlite_methods_allocation"
+		case "sqlite backup unavailable", "sqlite driver has no backup API":
+			code = "sqlite_driver_backup_unavailable"
+		case "sqlite backup working limit exceeded":
+			code = "sqlite_backup_working_limit"
+		case "sessioncapture: source changed during observation":
+			code = "capture_source_changed"
+		case "sessioncapture: regular source required":
+			code = "capture_nonregular_source"
+		case "safefile: replaced or nonregular input":
+			code = "safefile_replaced_or_nonregular"
+		case "safefile: canonical absolute path required":
+			code = "safefile_noncanonical_path"
+		}
+		if code != "" {
+			seen[code] = true
+		}
+		if joined, ok := e.(interface{ Unwrap() []error }); ok {
+			for _, child := range joined.Unwrap() {
+				visit(child)
+			}
+		} else if wrapped, ok := e.(interface{ Unwrap() error }); ok {
+			visit(wrapped.Unwrap())
+		}
+	}
+	visit(err)
+	for code := range seen {
+		r.Signatures = append(r.Signatures, code)
+	}
+	if len(r.Signatures) == 0 {
+		r.Signatures = []string{"unknown"}
+	}
+	slices.Sort(r.Signatures)
+	report(r)
+	return sessioncapture.FailureTransient
+}
+func TestPerfFallbackDiagnosticPreservesClassAndPrivacy(t *testing.T) {
+	const private = "synthetic-private-path-transcript-and-error"
+	for _, err := range []error{nil, errors.New(private), fmt.Errorf("%s: %w", private, errors.New("sqlite authorized: source bytes changed")), errors.Join(errors.New(private), context.Canceled, fs.ErrNotExist, syscall.EIO), new(sqlite.Error), sessioncapture.ErrPolicy} {
+		calls := 0
+		class := perfFallbackClassify(err, func(r perfFallbackReport) {
+			calls++
+			p, e := json.Marshal(r)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if bytes.Contains(p, []byte(private)) {
+				t.Fatal("private diagnostic text escaped")
+			}
+			if !r.Diagnostic {
+				t.Fatal("diagnostic evidence unlabeled")
+			}
+		})
+		if class != sessioncapture.FailureTransient || calls != 1 {
+			t.Fatal("fallback classification changed")
+		}
+	}
+	perfFallbackClassify(errors.Join(errors.New("sqlite authorized: source bytes changed"), syscall.EIO), func(r perfFallbackReport) {
+		if !slices.Contains(r.Signatures, "sqlite_source_bytes_changed") || r.Errno == nil || *r.Errno != uint64(syscall.EIO) {
+			t.Fatal("fixed signature or errno lost")
+		}
+	})
+	perfFallbackClassify(new(sqlite.Error), func(r perfFallbackReport) {
+		if r.SQLiteCode == nil || *r.SQLiteCode != 0 {
+			t.Fatal("typed SQLite numeric code lost")
+		}
+	})
+	perfFallbackClassify(errors.New(private+" sqlite authorized: source bytes changed"), func(r perfFallbackReport) {
+		if !reflect.DeepEqual(r.Signatures, []string{"unknown"}) {
+			t.Fatal("substring treated as exact signature")
+		}
+	})
+}
+
+// Never return raw stored errors, coordinates or status structs in public logs.
+func perfSafeCategory(value string) string {
+	switch value {
+	case "":
+		return "none"
+	case "transient", "destination", "policy-blocked", "integrity-error", "quota", "timeout", "absent", "shutdown":
+		return value
+	default:
+		return "other"
+	}
+}
+func perfSafeAgent(agent string) string {
+	switch agent {
+	case "claude", "codex", "pi":
+		return agent
+	default:
+		return "other"
+	}
+}
+func perfSafeStep(value string) (string, string) {
+	if value == "" {
+		return "none", "none"
+	}
+	worker, _, _ := strings.Cut(value, ":")
+	switch worker {
+	case "capture", "delivery", "discovery", "enrichment", "optional-repair":
+	default:
+		worker = "other"
+	}
+	code := "other"
+	// These fixed signatures yield category codes only; never echo any substring.
+	switch {
+	case strings.Contains(value, "SQLITE_BUSY"):
+		code = "sqlite_busy"
+	case strings.Contains(value, "SQLITE_LOCKED"):
+		code = "sqlite_locked"
+	case strings.Contains(value, "SQLITE_INTERRUPT"):
+		code = "sqlite_interrupt"
+	case strings.Contains(value, "context deadline exceeded"):
+		code = "deadline"
+	case strings.Contains(value, "context canceled"):
+		code = "canceled"
+	}
+	return worker, code
+}
+func perfFailureDiagnostic(t *testing.T, phase string, st sessioncapture.RuntimeStatus, q *sessioncapture.Queue, ctx context.Context) {
+	t.Helper()
+	worker, stepCode := perfSafeStep(st.LastStepError)
+	categories := map[string]int64{}
+	// Bounded diagnostic-only reads. No Request, path, identity, raw reason or
+	// status string escapes; unknown values map to fixed "other" tokens.
+	rows, e := q.WorkStatus(ctx, 0, 256)
+	sourceReadOK := e == nil
+	if sourceReadOK {
+		for _, row := range rows {
+			if row.LastError != "" {
+				categories["source/"+perfSafeAgent(row.Request.Identity.Agent)+"/"+perfSafeCategory(row.LastError)]++
+			}
+		}
+	}
+	quarantine, e := q.Quarantine(ctx, 0, 256)
+	quarantineReadOK := e == nil
+	if quarantineReadOK {
+		for _, row := range quarantine {
+			if row.Active {
+				categories["quarantine/"+perfSafeCategory(row.Reason)]++
+			}
+		}
+	}
+	p, e := json.Marshal(struct {
+		Phase               string           `json:"phase"`
+		Operation           string           `json:"operation"`
+		Quarantined         int64            `json:"quarantined"`
+		Paused              bool             `json:"paused"`
+		StepErrors          int64            `json:"step_errors"`
+		Sources             int64            `json:"sources"`
+		PendingSources      int64            `json:"pending_sources"`
+		PendingPublications int64            `json:"pending_publications"`
+		DiscoveryComplete   bool             `json:"discovery_complete"`
+		PauseCode           string           `json:"pause_code"`
+		StepWorker          string           `json:"step_worker"`
+		StepCode            string           `json:"step_code"`
+		SourceReadOK        bool             `json:"source_diagnostic_read_ok"`
+		QuarantineReadOK    bool             `json:"quarantine_diagnostic_read_ok"`
+		PageLimit           int              `json:"diagnostic_page_limit"`
+		Categories          map[string]int64 `json:"categories"`
+	}{phase, "runtime_status_guard", st.Quarantined, st.Paused, st.StepErrors, st.Sources, st.PendingSources, st.PendingPublications, st.DiscoveryComplete, perfSafeCategory(st.PausedReason), worker, stepCode, sourceReadOK, quarantineReadOK, 256, categories})
+	if e != nil {
+		t.Log("PERF_FAILURE_SCALAR encoding_failed=true")
+		return
+	}
+	t.Log("PERF_FAILURE_SCALAR " + string(p))
+}
+func TestPerfSafeDiagnosticCategories(t *testing.T) {
+	const secret = "synthetic-private-coordinate-and-transcript"
+	if perfSafeCategory(secret) != "other" || perfSafeAgent(secret) != "other" {
+		t.Fatal("unknown diagnostic text escaped")
+	}
+	if perfSafeCategory("policy-blocked") != "policy-blocked" || perfSafeCategory("") != "none" {
+		t.Fatal("safe category lost")
+	}
+	worker, code := perfSafeStep(secret + ": " + secret)
+	if worker != "other" || code != "other" {
+		t.Fatal("raw stored step error escaped")
+	}
+	worker, code = perfSafeStep("discovery: " + secret + " (SQLITE_BUSY)")
+	if worker != "discovery" || code != "sqlite_busy" {
+		t.Fatal("safe step category lost")
+	}
+}
+
+// Standalone filesystem prerequisite probe, never primary performance evidence.
+// Caller selects an exclusively new root on host-bind OR VM-native scratch; the
+// same bytes run on each. No production assertion is bypassed by this probe.
+func TestOfflineSafeFileIdentityDiagnostic(t *testing.T) {
+	root := os.Getenv("MEMORY_PERF_IDENTITY_ROOT")
+	if root == "" {
+		t.Skip("opt-in synthetic filesystem identity prerequisite probe")
+	}
+	if !filepath.IsAbs(root) || filepath.Clean(root) != root || root == "/" {
+		t.Fatal("new canonical absolute synthetic root required")
+	}
+	if e := os.Mkdir(root, 0700); e != nil {
+		t.Fatal("identity root must not exist")
+	}
+	defer func() {
+		if t.Failed() && os.Getenv("MEMORY_PERF_KEEP_FAILED") == "1" {
+			t.Log("PERF_FAILURE_FIXTURE retained=true")
+			return
+		}
+		if e := os.RemoveAll(root); e != nil {
+			t.Error("synthetic cleanup failed")
+		}
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	defer cancel()
+	for _, key := range []string{"CLAUDE_CONFIG_DIR", "CODEX_HOME", "PI_CODING_AGENT_DIR"} {
+		t.Setenv(key, "")
+	}
+	c := capturedaemon.Config{Version: capturedaemon.ConfigVersion, ArchiveID: "identity-synthetic", MachineID: "machine-synthetic", Home: filepath.Join(root, "home"), Store: filepath.Join(root, "store"), Spool: filepath.Join(root, "spool"), PolicyDir: filepath.Join(root, "policy"), DefaultRoots: true, CaptureWorkers: 1, DeliveryWorkers: 1, PollSeconds: 1, OperationSeconds: 10, MaxAttempts: 2, MaxSpoolBytes: perfSpool, EntriesPerRoot: 16}
+	t.Setenv("HOME", c.Home)
+	write := func(path string, body []byte) {
+		if e := os.MkdirAll(filepath.Dir(path), 0700); e != nil {
+			t.Fatal("synthetic probe directory setup failed")
+		}
+		if e := os.WriteFile(path, body, 0600); e != nil {
+			t.Fatal("synthetic probe file setup failed")
+		}
+	}
+	write(filepath.Join(c.PolicyDir, "exclusions", ".fixture"), nil)
+	r, e := newRuntimeComposition(c)
+	if e != nil {
+		t.Fatal("identity composition setup failed")
+	}
+	paths := []string{filepath.Join(c.Home, ".claude", "state.sqlite"), filepath.Join(c.Home, ".codex", "state.sqlite"), filepath.Join(c.Home, ".pi", "agent", "state.sqlite")}
+	// Every emitted value is scalar/fixed; paths and payloads are never serialized.
+	emit := func(index, round int, phase, observation string, expected, observed fs.FileInfo, err error) {
+		var ed, ei, od, oi uint64
+		er, or := false, false
+		if expected != nil {
+			er = expected.Mode().IsRegular()
+			if s, ok := expected.Sys().(*syscall.Stat_t); ok {
+				ed, ei = uint64(s.Dev), s.Ino
+			}
+		}
+		if observed != nil {
+			or = observed.Mode().IsRegular()
+			if s, ok := observed.Sys().(*syscall.Stat_t); ok {
+				od, oi = uint64(s.Dev), s.Ino
+			}
+		}
+		failure := perfFallbackReport{Diagnostic: true, Signatures: []string{"none"}}
+		if err != nil {
+			perfFallbackClassify(err, func(report perfFallbackReport) { failure = report })
+		}
+		p, e := json.Marshal(struct {
+			Diagnostic        bool               `json:"diagnostic"`
+			SourceIndex       int                `json:"source_index"`
+			Round             int                `json:"round"`
+			Phase             string             `json:"phase"`
+			Observation       string             `json:"observation"`
+			ExpectedAvailable bool               `json:"expected_available"`
+			ObservedAvailable bool               `json:"observed_available"`
+			ExpectedRegular   bool               `json:"expected_regular"`
+			ObservedRegular   bool               `json:"observed_regular"`
+			SameFile          bool               `json:"same_file"`
+			ExpectedDev       uint64             `json:"expected_dev"`
+			ExpectedInode     uint64             `json:"expected_inode"`
+			ObservedDev       uint64             `json:"observed_dev"`
+			ObservedInode     uint64             `json:"observed_inode"`
+			Error             bool               `json:"error"`
+			Failure           perfFallbackReport `json:"failure"`
+		}{true, index, round, phase, observation, expected != nil, observed != nil, er, or, expected != nil && observed != nil && os.SameFile(expected, observed), ed, ei, od, oi, err != nil, failure})
+		if e != nil {
+			t.Fatal("identity scalar encoding failed")
+		}
+		t.Log("PERF_IDENTITY_SCALAR " + string(p))
+	}
+	for i, path := range paths {
+		if e := os.MkdirAll(filepath.Dir(path), 0700); e != nil {
+			t.Fatal("synthetic DB parent setup failed")
+		}
+		db, e := sql.Open("sqlite", path)
+		if e != nil {
+			emit(i, 0, "sqlite_create", "none", nil, nil, e)
+			t.Fatal("synthetic DB open failed")
+		}
+		_, e = db.ExecContext(ctx, "PRAGMA page_size=4096; CREATE TABLE evidence(body TEXT); INSERT INTO evidence VALUES ('synthetic-sqlite-only')")
+		e = errors.Join(e, db.Close())
+		if e != nil {
+			emit(i, 0, "sqlite_create", "none", nil, nil, e)
+			t.Fatal("synthetic DB creation/close failed")
+		}
+	}
+	b := &perfBackend{counts: map[string]int64{}}
+	start := perfNow(b)
+	checkLimits := func() {
+		if ctx.Err() != nil {
+			t.Fatal("identity probe deadline")
+		}
+		if perfNow(b).CPUSeconds-start.CPUSeconds > perfCPU {
+			t.Fatal("identity probe CPU diagnostic limit")
+		}
+	}
+	openFailures, openAttempts, safeAttempts, followupAttempts := 0, 0, 0, 0
+	for attempt := 0; openAttempts < 1000; attempt++ {
+		index := attempt % 3
+		path := paths[index]
+		// No retained FileInfo across setup or earlier observations.
+		expected, e := os.Lstat(path)
+		if e != nil {
+			emit(index, attempt, "safe_open", "none", nil, nil, e)
+			t.Fatal("synthetic Lstat failed")
+		}
+		openAttempts++
+		safeAttempts++
+		f, openErr := safefile.OpenResolved(ctx, path, expected)
+		var observed fs.FileInfo
+		if openErr == nil {
+			observed, e = f.Stat()
+			e = errors.Join(e, f.Close())
+		} else if openAttempts < 1000 {
+			// OpenResolved already closed its rejected descriptor. Obtain a NEW
+			// nofollow read-only descriptor only as a labeled follow-up observation,
+			// never as a replacement authorization or a successful production open.
+			openAttempts++
+			followupAttempts++
+			fd, followErr := unix.Open(path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+			if followErr == nil {
+				follow := os.NewFile(uintptr(fd), path)
+				observed, e = follow.Stat()
+				e = errors.Join(e, follow.Close())
+			}
+			e = errors.Join(e, followErr)
+		}
+		same := observed != nil && observed.Mode().IsRegular() && os.SameFile(expected, observed)
+		if openErr != nil || e != nil || !expected.Mode().IsRegular() || !same {
+			openFailures++
+			observation := "accepted_descriptor"
+			if openErr != nil {
+				observation = "followup_descriptor"
+			}
+			emit(index, attempt, "safe_open", observation, expected, observed, errors.Join(openErr, e))
+		} else if attempt < 3 {
+			emit(index, attempt, "safe_open", "accepted_descriptor", expected, observed, nil)
+		}
+		if attempt%50 == 0 {
+			checkLimits()
+		}
+	}
+	q, e := sessioncapture.Open(ctx, c.Spool, r.queueOptions())
+	if e != nil {
+		emit(-1, 0, "queue_open", "none", nil, nil, e)
+		t.Fatal("identity synthetic queue setup failed")
+	}
+	defer func() {
+		if e := q.Close(); e != nil {
+			t.Error("identity synthetic queue close failed")
+		}
+	}()
+	agents := []string{"claude", "codex", "pi"}
+	requests := make([]sessioncapture.Request, 3)
+	expectedBodies := make([][]byte, 3)
+	for i, path := range paths {
+		requests[i], e = capturesource.Classify(ctx, r.sourceOptions(""), agents[i], path)
+		if e != nil {
+			emit(i, 0, "classify", "none", nil, nil, e)
+			t.Fatal("synthetic SQLite classification failed")
+		}
+		reference := filepath.Join(root, fmt.Sprintf("reference-%d.sqlite", i))
+		write(reference, nil)
+		e = adapters.BackupSQLiteAuthorized(ctx, path, reference, 1<<20, func() error { return nil }, adapters.SQLiteAuthorizedOptions{Authorize: func(context.Context, adapters.SQLiteAuthorization) error { return nil }})
+		if e != nil {
+			emit(i, 0, "sqlite_reference", "none", nil, nil, e)
+			t.Fatal("synthetic SQLite reference failed")
+		}
+		expectedBodies[i], e = os.ReadFile(reference)
+		if e != nil {
+			t.Fatal("synthetic SQLite reference read failed")
+		}
+	}
+	previous := make([]publication.Source, 3)
+	captureFailures := 0
+	for round := range 20 {
+		for i, req := range requests {
+			checkLimits()
+			before, beforeErr := os.Lstat(req.Path)
+			if beforeErr != nil {
+				emit(i, round, "sqlite_capture", "path_before_capture", nil, nil, beforeErr)
+				t.Fatal("synthetic source metadata unavailable")
+			}
+			var m publication.Manifest
+			op, finish := context.WithTimeout(ctx, 10*time.Second)
+			if round == 0 {
+				m, e = q.Capture(op, req)
+			} else {
+				m, e = q.CaptureIfChanged(op, req)
+			}
+			finish()
+			if e != nil {
+				captureFailures++
+				after, afterErr := os.Lstat(req.Path)
+				emit(i, round, "sqlite_capture", "path_after_capture", before, after, errors.Join(e, afterErr))
+				continue
+			}
+			if len(m.Sources) != 1 {
+				t.Fatal("SQLite probe exact source coverage mismatch")
+			}
+			source := m.Sources[0]
+			if source.Object.SHA256 != perfHash(expectedBodies[i]) || source.Object.Size != int64(len(expectedBodies[i])) {
+				t.Fatal("SQLite probe normalized body mismatch")
+			}
+			if previous[i].EpochID != "" && (source.SourceID != previous[i].SourceID || source.EpochID != previous[i].EpochID || source.Revision != previous[i].Revision || source.Object != previous[i].Object) {
+				t.Fatal("SQLite probe unchanged identity/revision/object advanced")
+			}
+			previous[i] = source
+		}
+	}
+	n, e := perfSize(root)
+	if e != nil || n > perfFootprint {
+		t.Fatal("identity fixture footprint diagnostic limit")
+	}
+	n, e = perfSize(c.Spool)
+	if e != nil || n > perfSpool {
+		t.Fatal("identity spool footprint diagnostic limit")
+	}
+	t.Logf("PERF_IDENTITY_SUMMARY diagnostic=true sources=3 open_attempts=%d safe_open_attempts=%d followup_open_attempts=%d open_failures=%d capture_rounds=20 capture_attempts=60 capture_failures=%d", openAttempts, safeAttempts, followupAttempts, openFailures, captureFailures)
+	if openFailures != 0 || captureFailures != 0 {
+		t.Fatal("synthetic filesystem/SQLite prerequisite failed; assertions retained")
+	}
+}
+
+func TestOfflineMatchedPerformance(t *testing.T) {
+	root := os.Getenv("MEMORY_PERF_ROOT")
+	if root == "" {
+		t.Skip("opt-in synthetic Linux diagnostic; requires admitted worker")
+	}
+	workCounts := os.Getenv("MEMORY_PERF_WORK_COUNTS") == "1"
+	if workCounts && os.Getenv("MEMORY_PERF_DIAGNOSTIC") != "1" {
+		t.Fatal("work counts require diagnostic mode")
+	}
+	if !filepath.IsAbs(root) || filepath.Clean(root) == "/" {
+		t.Fatal("private absolute root required")
+	}
+	if e := os.Mkdir(root, 0700); e != nil {
+		t.Fatal("root must not exist")
+	}
+	// Registered first, executed LAST: runtime cancel/join, discovery close and
+	// q.Close must finish before any retention/removal decision. This can retain
+	// only the synthetic root created exclusively above, never an existing source.
+	defer func() {
+		if t.Failed() && os.Getenv("MEMORY_PERF_KEEP_FAILED") == "1" {
+			t.Log("PERF_FAILURE_FIXTURE retained=true")
+			return
+		}
+		if e := os.RemoveAll(root); e != nil {
+			t.Error(e)
+		}
+	}()
+	// No inherited producer homes or privacy overrides. Do not clear disable policy.
+	for _, k := range []string{"CLAUDE_CONFIG_DIR", "CODEX_HOME", "PI_CODING_AGENT_DIR"} {
+		t.Setenv(k, "")
+	}
+	c, config, sources := perfFixture(t, root)
+	t.Setenv("HOME", c.Home)
+	local := publication.NewLocal(c.Store)
+	if e := publication.WriteArchive(t.Context(), local, publication.Archive{Contract: publication.Contract, ArchiveID: c.ArchiveID}); e != nil {
+		t.Fatal(e)
+	}
+	r, e := newRuntimeComposition(c)
+	if e != nil {
+		t.Fatal(e)
+	}
+	b := &perfBackend{Backend: local, counts: map[string]int64{}}
+	var acknowledgements perfACKRecorder
+	var diagnosticClassify func(error) sessioncapture.FailureClass
+	if os.Getenv("MEMORY_PERF_DIAGNOSTIC") == "1" {
+		diagnosticClassify = func(err error) sessioncapture.FailureClass {
+			return perfFallbackClassify(err, func(r perfFallbackReport) {
+				p, e := json.Marshal(r)
+				if e != nil {
+					t.Log("PERF_FALLBACK_SCALAR diagnostic=true encoding_failed=true")
+					return
+				}
+				t.Log("PERF_FALLBACK_SCALAR " + string(p))
+			})
+		}
+	}
+	opts := r.queueOptions()
+	if workCounts {
+		opts.CheckPolicy = perfCountPolicy(b, opts.CheckPolicy)
+	}
+	opts.Fault = func(point string) error {
+		if point == "ack-committed" {
+			acknowledgements.record(b, func() perfSample { return perfNow(b) })
+		} else {
+			b.add("fault_"+point, 1)
+		}
+		return nil
+	}
+	q, e := sessioncapture.Open(t.Context(), c.Spool, opts)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer func() {
+		if e := q.Close(); e != nil {
+			t.Error(e)
+		}
+	}()
+	discovery, closeDiscovery := r.discovery(config)
+	defer func() {
+		if e := closeDiscovery(); e != nil {
+			t.Error(e)
+		}
+	}()
+	discover := func(ctx context.Context) (sessioncapture.DiscoveryBatch, error) {
+		b.add("discovery_calls", 1)
+		batch, e := discovery(ctx)
+		b.add("discovery_requests", int64(len(batch.Requests)))
+		return batch, e
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	exited := make(chan struct{})
+	var runErr error
+	// Accepted unpublished queue setup is deliberately outside delivery timing.
+	for _, source := range sources {
+		if _, e := q.Capture(ctx, source.req); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if e := q.InitRuntime(ctx); e != nil {
+		t.Fatal(e)
+	}
+	staged, e := q.RuntimeStatus(ctx)
+	if e != nil || staged.PendingPublications == 0 {
+		t.Fatal("no staged delivery backlog")
+	}
+	// Enumerate actual accepted jobs, not source count: Capture may already have
+	// superseded earlier jobs. No capture/discovery/enrichment runs during delivery,
+	// so this finite pending set cannot grow or coalesce after the boundary is fixed.
+	type jobKey struct {
+		identity publication.Identity
+		sequence uint64
+	}
+	stagedJobs := map[jobKey]bool{}
+	jobs, e := q.Status(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, job := range jobs {
+		if job.State != "published" && job.State != "superseded" {
+			stagedJobs[jobKey{job.Identity, job.Sequence}] = true
+		}
+	}
+	if int64(len(stagedJobs)) != staged.PendingPublications {
+		t.Fatal("staged pending job inventory mismatch")
+	}
+	// deliverAccepted visits each remaining job in sequence order; acknowledge
+	// updates exactly one job before firing its hook. Every enumerated pending job
+	// must be published afterward (asserted below), not merely disappear via coalescing.
+	activeACKBoundary := acknowledgements.count() + int64(len(stagedJobs))
+	runctx, stopRun := context.WithCancel(ctx)
+	phaseStart := perfNow(b)
+	finishProfile := perfProfile(t, "active")
+	go func() {
+		runErr = q.Run(runctx, b, sessioncapture.RuntimeOptions{Classify: diagnosticClassify, PollInterval: time.Second, OperationTimeout: 10 * time.Second, CaptureWorkers: 1, DeliveryWorkers: 1, MaxAttempts: 2})
+		done <- runErr
+		close(exited)
+	}()
+	defer func() {
+		cancel()
+		<-exited
+		if runErr != nil {
+			t.Error(runErr)
+		}
+	}()
+	phase := "active_delivery"
+	var warmupHistogram [16]int64
+	var warmupLastStatus sessioncapture.RuntimeStatus
+	// Status polling adds observer work, identically on both refs. Last-ACK samples
+	// end active/append measurements at the actual durable ACK, not polling success.
+	wait := func(requiredACK int64, requireDiscovery bool) perfSample {
+		t.Helper()
+		tick := time.NewTicker(20 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-exited:
+				t.Fatalf("runtime exited: %v", runErr)
+			case <-ctx.Done():
+				t.Fatal("total diagnostic deadline")
+			case <-tick.C:
+			}
+			now := perfNow(b)
+			if now.CPUSeconds-phaseStart.CPUSeconds > perfCPU {
+				if workCounts && phase == "discovery_warmup" {
+					// The last existing observation, NOT a new atomic status read.
+					perfFailureDiagnostic(t, phase, warmupLastStatus, q, ctx)
+					perfEmitWarmup(t, "cpu_guard", phaseStart, now, warmupHistogram)
+				}
+				t.Fatal("phase CPU diagnostic limit")
+			}
+			if workCounts {
+				b.add("status_polls", 1)
+			}
+			st, e := q.RuntimeStatus(ctx)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if workCounts && phase == "discovery_warmup" {
+				warmupLastStatus = st
+				warmupHistogram[perfWarmupMask(st, int64(len(sources)))]++
+			}
+			if st.Quarantined != 0 || st.Paused || st.StepErrors != 0 {
+				perfFailureDiagnostic(t, phase, st, q, ctx)
+				t.Fatal("runtime failure/partial work")
+			}
+			if st.PendingPublications == 0 && (!requireDiscovery || (st.Sources == int64(len(sources)) && st.PendingSources == 0 && st.DiscoveryComplete)) {
+				if endpoint, ready := acknowledgements.endpoint(requiredACK); ready {
+					return endpoint
+				}
+			}
+		}
+	}
+	activeEnd := wait(activeACKBoundary, false)
+	if activeEnd.Counts["fault_ack-committed"] != activeACKBoundary {
+		t.Fatal("active ACK endpoint does not include exactly all staged jobs")
+	}
+	finishProfile()
+	perfEmit(t, "active_delivery_to_final_ack", phaseStart, activeEnd)
+	stopRun()
+	if e := <-done; e != nil {
+		t.Fatal(e)
+	}
+	<-exited
+	jobs, e = q.Status(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, job := range jobs {
+		key := jobKey{job.Identity, job.Sequence}
+		if stagedJobs[key] {
+			if job.State != "published" {
+				t.Fatal("initial staged job was not acknowledged as published")
+			}
+			delete(stagedJobs, key)
+		}
+	}
+	if len(stagedJobs) != 0 {
+		t.Fatal("initial staged job disappeared")
+	}
+	phase = "discovery_warmup"
+	finishProfile = perfProfile(t, "warmup")
+	done = make(chan error, 1)
+	exited = make(chan struct{})
+	runctx, stopRun = context.WithCancel(ctx)
+	defer stopRun()
+	go func() {
+		runErr = q.Run(runctx, b, sessioncapture.RuntimeOptions{Classify: diagnosticClassify, DiscoverBatch: discover, PollInterval: time.Second, OperationTimeout: 10 * time.Second, CaptureWorkers: 1, DeliveryWorkers: 1, MaxAttempts: 2})
+		done <- runErr
+		close(exited)
+	}()
+	phaseStart = perfNow(b)
+	_ = wait(activeACKBoundary, true)
+	var warmupEnd perfSample
+	if workCounts {
+		warmupEnd = perfNow(b) // Not the stale initial-delivery ACK sample.
+	}
+	finishProfile()
+	if workCounts {
+		perfEmitWarmup(t, "ready", phaseStart, warmupEnd, warmupHistogram)
+	}
+	before := perfVerify(t, root, local, sources)
+	phase = "settled"
+	settledStart := perfNow(b)
+	phaseStart = settledStart
+	finishProfile = perfProfile(t, "settled")
+	timer := time.NewTimer(30 * time.Second)
+	tick := time.NewTicker(time.Second)
+	settled := false
+	for !settled {
+		select {
+		case <-exited:
+			t.Fatalf("runtime exited: %v", runErr)
+		case <-ctx.Done():
+			t.Fatal("total diagnostic deadline")
+		case <-timer.C:
+			settled = true
+		case <-tick.C:
+			if perfNow(b).CPUSeconds-settledStart.CPUSeconds > perfCPU {
+				t.Fatal("settled phase CPU diagnostic limit")
+			}
+			n, e := perfSize(root)
+			if e != nil || n > perfFootprint {
+				t.Fatal("fixture footprint diagnostic limit")
+			}
+			n, e = perfSize(c.Spool)
+			if e != nil || n > perfSpool {
+				t.Fatal("spool footprint diagnostic limit")
+			}
+		}
+	}
+	tick.Stop()
+	settledEnd := perfNow(b)
+	finishProfile()
+	perfEmit(t, "settled_unchanged_30s", settledStart, settledEnd)
+	if settledEnd.Counts["discovery_calls"] <= settledStart.Counts["discovery_calls"] {
+		t.Fatal("no continuing periodic discovery")
+	}
+	for _, key := range []string{"backend_put", "backend_cas", "fault_upload-before", "fault_manifest-before", "fault_ack-committed"} {
+		if settledEnd.Counts[key] != settledStart.Counts[key] {
+			t.Fatalf("settled unexpected delivery operation: %s", key)
+		}
+	}
+	after := perfVerify(t, root, local, sources)
+	for k, s := range before {
+		z := after[k]
+		if s.SourceID != z.SourceID || s.EpochID != z.EpochID || s.Revision != z.Revision || s.Object != z.Object {
+			t.Fatal("unchanged source advanced")
+		}
+	}
+	// Append only raw mains, one per adapter. No Hint, WriteHint, hook or wake call.
+	phase = "append"
+	appendACKBoundary := acknowledgements.count() + 3
+	phaseStart = perfNow(b)
+	finishProfile = perfProfile(t, "append")
+	for i := range sources {
+		if sources[i].append {
+			suffix := []byte("{\"type\":\"synthetic-append\"}\n")
+			f, e := os.OpenFile(sources[i].req.Path, os.O_APPEND|os.O_WRONLY, 0600)
+			if e != nil {
+				t.Fatal(e)
+			}
+			_, e = f.Write(suffix)
+			e = errors.Join(e, f.Sync(), f.Close())
+			if e != nil {
+				t.Fatal(e)
+			}
+			sources[i].body = append(sources[i].body, suffix...)
+		}
+	}
+	appendEnd := wait(appendACKBoundary, true)
+	if appendEnd.Counts["fault_ack-committed"] != appendACKBoundary {
+		t.Fatal("append ACK endpoint boundary mismatch")
+	}
+	finishProfile()
+	perfEmit(t, "unhinted_append_to_final_ack", phaseStart, appendEnd)
+	after = perfVerify(t, root, local, sources)
+	affected := 0
+	for _, w := range sources {
+		k := w.req.Identity.BaseKey() + "/" + w.req.SourceID
+		a, z := before[k], after[k]
+		if a.SourceID != z.SourceID || a.EpochID != z.EpochID {
+			t.Fatal("append changed source/epoch identity")
+		}
+		if w.append {
+			affected++
+			if z.Revision != a.Revision+1 {
+				t.Fatal("affected revision not exactly +1")
+			}
+		} else if z.Revision != a.Revision || z.Object != a.Object {
+			t.Fatal("unrelated source changed")
+		}
+	}
+	if affected != 3 {
+		t.Fatal("append fixture coverage")
+	}
+	n, e := perfSize(root)
+	if e != nil || n > perfFootprint {
+		t.Fatal("fixture footprint diagnostic limit")
+	}
+	t.Logf("PERF_CORRECTNESS ordinary_mains=96 artifacts=96 compressed=3 configs=3 sqlite=3 sources=%d changed=3 exact_reader_hashes=true stable_epochs=true unrelated_unchanged=true credential_negatives=3 fixture_bytes=%d", len(sources), n)
+}

@@ -1,3 +1,10 @@
+# Private local analytics data and Python environment.
+.analytics/
+.analytics-venv/
+tools/analytics/__pycache__/
+tools/candidate-live-r2/__pycache__/
+tools/capture-delivery/__pycache__/
+
 .cover/
 .direnv/
 cover.out

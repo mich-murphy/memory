@@ -120,17 +120,16 @@ func runSync(ctx context.Context, cmd string, args []string, version string, o I
 		return exitFailed, err
 	}
 	defer unlock()
+	agents := flags.agents.orAll()
+	log.Info("sync start", "trigger", flags.trigger, "agents", strings.Join(agents, ","), "paths", len(flags.paths))
 	if flags.marker != "" {
 		// From here on a new hook should queue another sync: this one is about to read the file.
 		_ = os.Remove(flags.marker) // already gone is fine
 	}
 	summary, err := syncLocked(ctx, cfg, bucket, flags, version, log, started)
 	if err != nil {
+		log.Error("sync failed", "error", err, "trigger", flags.trigger)
 		return exitFailed, err
-	}
-	agents := flags.agents.orAll()
-	if body, err := jsonx.Compact(summary.Trimmed()); err == nil {
-		log.Info("sync done", "agents", strings.Join(agents, ","), "summary", string(body))
 	}
 	if !flags.quiet {
 		o.printf("uploaded %d files (%.1f MB compressed), %d unchanged, %d manifests, %d errors\n",
@@ -140,14 +139,18 @@ func runSync(ctx context.Context, cmd string, args []string, version string, o I
 		}
 	}
 	if summary.Errors > 0 {
+		log.Error("sync failed", "error", strings.Join(summary.Trimmed().ErrorMessages, "; "), "trigger", flags.trigger)
 		return exitFailed, nil
+	}
+	if body, err := jsonx.Compact(summary.Trimmed()); err == nil {
+		log.Info("sync done", "agents", strings.Join(agents, ","), "summary", string(body))
 	}
 	return exitOK, nil
 }
 
 func syncLocked(ctx context.Context, cfg *config.Config, bucket store.Store, flags *syncFlags, version string, log *slog.Logger,
 	started float64,
-) (*syncer.Summary, error) {
+) (summary *syncer.Summary, err error) {
 	db, err := state.Open(ctx, cfg.StateDir)
 	if err != nil {
 		return nil, err
@@ -160,6 +163,16 @@ func syncLocked(ctx context.Context, cfg *config.Config, bucket store.Store, fla
 	sy := syncer.New(cfg, bucket, db, adapters.All(cfg.Home), syncer.Options{
 		Trigger: flags.trigger, Logger: log, Version: version,
 	})
+	summary = &sy.Summary
+	defer func() {
+		if err != nil {
+			summary.Errors++
+			summary.ErrorMessages = append(summary.ErrorMessages, err.Error())
+		}
+		if recordErr := db.RecordRun(started, flags.trigger, summary.Trimmed()); recordErr != nil {
+			err = errors.Join(err, recordErr)
+		}
+	}()
 	if err := sy.Recover(ctx); err != nil {
 		return &sy.Summary, err
 	}
@@ -170,17 +183,10 @@ func syncLocked(ctx context.Context, cfg *config.Config, bucket store.Store, fla
 	recordLaunches(ctx, sy, cfg.StateDir, excluded, adapters.All(cfg.Home), log)
 	files, err := filesToSync(ctx, sy, flags)
 	if err != nil {
-		return nil, err
+		return summary, err
 	}
 	files = slices.DeleteFunc(files, excluded.Excludes)
-	summary, err := sy.Run(ctx, files)
-	if err != nil {
-		return nil, err
-	}
-	if err := db.RecordRun(started, flags.trigger, summary.Trimmed()); err != nil {
-		return nil, err
-	}
-	return summary, nil
+	return sy.Run(ctx, files)
 }
 
 type pendingLaunch struct {

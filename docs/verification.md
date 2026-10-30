@@ -1,6 +1,13 @@
 # Executed verification — 2026-10-14
 
-Use the maintained [verification skill](../.agents/skills/verify-agent-sessions/SKILL.md) and its five-feature map to reproduce user-path checks. This report records an executed run, not a claim that every production environment is verified.
+> **Status (2026-10-23):** Historical executed v3 verification only. The commands, counts and hashes below record that dated run, not current deployment health or a replacement pass. The agreed canonical [session-capture contract](session-capture-contract.md) requires durable spool/restart/failure-isolation checks and the real shared-reader/analytics/report consumer path; these older isolated archive oracles alone do not establish that acceptance.
+
+The [verification skill](../.agents/skills/verify-agent-sessions/SKILL.md) and its
+five-feature map were used for the historical user-path checks below. The skill is
+operator-blocked for the current documentation audit: it was not read, executed or
+revalidated, and no replacement coverage claim is made for it. Current candidate
+checks are recorded separately in [offline evidence](session-capture-offline-evidence.md).
+This report records an executed run, not a claim that every production environment is verified.
 
 ## Final end-to-end run
 
@@ -38,4 +45,4 @@ The helper executed had SHA-256 `23513228c56ef3118f5a4b9f703178e0913f05e537948b1
 
 ## Boundaries still unverified
 
-No live R2 credentials were supplied for this original local/native-agent run. Subsequently, the operator supplied credentials and the [isolated live R2 acceptance](r2-acceptance.md#executed-live-result) passed, including multipart transfer, archive recovery, durable exclusions and verified cleanup. That is separate backend-plus-engine evidence, not native CLI/hook-to-R2 acceptance or proof of lifecycle policy, full-scale throughput or every network failure mode. Release downloads/upgrades, real-provider authentication/model behavior, actual Codex approval, specialised lifecycle variants and other-OS runtime acceptance remain outside this run. Cross-building is not runtime acceptance. No fresh full mutation campaign was run. See the feature map for entry-point-specific gaps; do not promote unverified entries to passes.
+No live R2 credentials were supplied for this original local/native-agent run. Subsequently, the operator supplied credentials and the [isolated live R2 acceptance](r2-acceptance.md#earlier-executed-live-result) passed, including multipart transfer, archive recovery, durable exclusions and verified cleanup. That is separate backend-plus-engine evidence, not native CLI/hook-to-R2 acceptance or proof of lifecycle policy, full-scale throughput or every network failure mode. Release downloads/upgrades, real-provider authentication/model behavior, actual Codex approval, specialised lifecycle variants and other-OS runtime acceptance remain outside this run. Cross-building is not runtime acceptance. No fresh full mutation campaign was run. See the feature map for entry-point-specific gaps; do not promote unverified entries to passes.

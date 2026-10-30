@@ -1,0 +1,4 @@
+.cache/
+__pycache__/
+# Full evidence is retained losslessly as queries.jsonl.gz with SHA-256 metadata.
+first_run/queries.jsonl

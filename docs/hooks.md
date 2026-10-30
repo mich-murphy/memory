@@ -1,5 +1,7 @@
 # How agent-sessions hooks into each agent
 
+> **Scope (2026-10-23):** The hook protocols, trust and privacy constraints below remain relevant; detached sync/debounce/sweep behavior describes the existing implementation, not durable queue acceptance. Under the agreed [session-capture contract](session-capture-contract.md), hooks supply discovery hints; bytes count as locally accepted only when durably owned by the spool, with autonomous retry and per-source progress. The opt-in `capture-v1` candidate now implements durable hints, autonomous discovery/retry, native-context capture and independent enrichment; see [phase 3](session-capture-phase3.md) and [offline evidence](session-capture-offline-evidence.md). The commands and no-timer behavior below describe default legacy hooks, not the candidate. Actual native/installed candidate acceptance is still outstanding; no defaults were activated. Preserve learned nondefault roots and effective opt-outs at cutover; stop old hook launch paths and workers before switching writers.
+
 Checked on 2026-10-10 against:
 
 - **Claude Code** v2.1.296, using the docs at https://code.claude.com/docs/en/hooks, `/claude-directory` and `/settings-reference`.
@@ -27,7 +29,8 @@ Why each part matters:
 
 ## The sweep at session start and end
 
-Nothing runs on a schedule. When any agent's session starts (`SessionStart`, `session_start`) or ends (`SessionEnd`, `session_shutdown`), the hook also starts a sweep: `agent-sessions sync --trigger sweep:<event>` over every agent's directories, 3 s later so a session-start sync gets the lock first. It is what makes capture complete, together with `agent-sessions backfill` once at install. It picks up:
+Nothing runs on a schedule. When any agent's session starts (`SessionStart`, `session_start`) or ends (`SessionEnd`, `session_shutdown`), the hook also starts a sweep: `agent-sessions sync --trigger sweep:<event>` over every agent's directories, 3 s later so a session-start sync gets the lock first. It is the existing best-effort catch-up mechanism, together with `agent-sessions backfill`
+once at install, not proof that all source events have been captured. It picks up:
 
 - the end of a session that crashed, was killed or was interrupted after its last hook;
 - uploads and manifests that failed, for example while the machine was offline;
@@ -45,7 +48,9 @@ One marker in the state directory's `pending/` means only one sweep is queued at
 - keeps allowlisted environment variables (`CLAUDE_CODE_*`, `CODEX_*`, `PI_*`, `ANTHROPIC_MODEL`, `MAX_THINKING_TOKENS`...), dropping any with a word in its name that marks a secret (`TOKEN`, `KEY`, `AUTH`, or `SECRET`, `PASSWORD`, `CREDENTIAL`, `COOKIE` anywhere). Whole words only, so limits such as `MAX_THINKING_TOKENS` are kept.
 - saves the hook's whole payload (`source`, `cwd`, `permission_mode`, `model`...).
 
-It writes that to a file and starts a detached sync with no delay and no debounce. The sync snapshots the harness and the repo's git state before the first prompt (`timing: pre_session`) and stores the launch in the session's manifest. A resumed session gets another launch entry.
+It writes that to a file and starts a detached sync with no delay and no debounce. The sync snapshots the harness and the repo's git state at actual capture time
+(`timing: captured`) and associates the launch with the session. The old `pre_session` label
+was not proof of pre-prompt capture; detached execution can run after the first prompt. A resumed session gets another launch entry.
 
 ## Claude Code
 
@@ -102,7 +107,7 @@ The trust hash covers the command string, so a hook that changes needs approving
 - `sessions/YYYY/MM/DD/rollout-*.jsonl` and `archived_sessions/`.
   - **Recompression.** Rollouts untouched for 7 days are recompressed to `.jsonl.zst` (`rollout/src/compression.rs:364`), and resuming one decompresses it again (`:121`). agent-sessions keys rollouts without the date folder or `.zst`, and hashes the decompressed bytes. So recompression, archiving and resuming never cause a re-upload.
 - `history.jsonl`, `session_index.jsonl`, `memories/`, `log/`, `config.toml`, `skills/`, `rules/`, `prompts/`.
-- **Databases.** `state_<n>.sqlite` (titles, token totals, sandbox and approval mode), `logs_<n>.sqlite`, `memories_*`, `goals_*`, `thread_history_*` and `queue_*` are uploaded as SQLite backup-API copies under `db/`, so rows still in the `-wal` file are included. Codex's current "paginated" history mode keeps some thread metadata only in SQLite (`rollout/src/metadata.rs:315`). The rollout is still the full record of the conversation. One limit: in paginated mode, Codex itself truncates very large command output before writing it to the rollout.
+- **Databases.** `state_<n>.sqlite` (titles, token totals, sandbox and approval mode), `memories_*`, `goals_*`, `thread_history_*` and `queue_*` are uploaded as SQLite backup-API copies under `db/`, so rows still in the `-wal` file are included. Codex's current "paginated" history mode keeps some thread metadata only in SQLite (`rollout/src/metadata.rs:315`). The rollout is the agent's persisted conversation record, not proof that capture observed every transient source event. Diagnostic `logs_*` databases are excluded by current capture policy. One limit: in paginated mode, Codex itself truncates very large command output before writing it to the rollout.
 
 ## Pi
 
@@ -137,6 +142,8 @@ pi.on("session_shutdown", (_e, ctx) => kick(ctx.sessionManager.getSessionFile(),
 - **Config dirs set only in your shell.** `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and Pi's session dir settings can differ between shells. Hooks run with the agent's environment, so the first hook from a non-default directory teaches agent-sessions that root, and later sweeps include it, whichever agent's hook starts them.
 - **Half-written lines.** A transcript written in the last minute that ends mid-line is uploaded up to its last complete line, and re-read on the next sync.
 - **Hooks and the sweep at once.** One lock serialises syncs. A hook's sync gives up after 30 s, and a sweep after 60 s, if a long backfill holds the lock, so waiting syncs can't pile up; the next hook or sweep covers it, and records any session-start launch the one that gave up left behind. A pending marker older than 2 minutes, left by a sync that died, is taken over.
-- **Offline machines.** A failed upload isn't recorded as done, so the session's next hook or the next sweep retries it. Nothing is lost while the transcript stays on disk, which is why `cleanupPeriodDays` is raised.
+- **Offline machines.** A failed upload isn't recorded as done, so the session's next hook or the next sweep retries it. Recovery depends on the eligible bytes still being available when that retry runs; truncation,
+rewrite or source expiry can lose uncaptured content. Raising `cleanupPeriodDays` reduces
+expiry risk but is not a durable spool or autonomous retry guarantee.
 - **Settings files.** The installer never rewrites a settings file it can't parse. It backs up every file before changing it, keeps other hooks in place, and replaces only its own entries, which it recognises by the `agent-sessions … hook <agent>` command. It replaces each one where it is, so a reinstall moves no hook: Codex keys each trust record by the hook's position, and would skip a moved hook, ours or yours, until it was approved again.
 - **No session, no sweep.** Without a timer, what only a sweep picks up waits for the next session to start or end on that machine. A crashed session's last turns, a failed upload from another session, or a database that changed while a long session ran stay on disk until then; `agent-sessions sync` uploads them at any time.

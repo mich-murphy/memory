@@ -1,0 +1,43 @@
+test_context_limit_and_result_limit (test_nav.NavigationTest.test_context_limit_and_result_limit) ... ok
+test_db_escape_and_cli (test_nav.NavigationTest.test_db_escape_and_cli) ... ok
+test_dead_links_and_escape (test_nav.NavigationTest.test_dead_links_and_escape) ... ok
+test_fts5_and_no_results (test_nav.NavigationTest.test_fts5_and_no_results) ... ok
+test_import_confidence_package_dependency (test_nav.NavigationTest.test_import_confidence_package_dependency) ... ok
+test_modes_seed_stability_and_scope (test_nav.NavigationTest.test_modes_seed_stability_and_scope) ... ok
+test_owner_last_match_and_no_traversal (test_nav.NavigationTest.test_owner_last_match_and_no_traversal) ... ok
+test_source_refs_mentions_and_stopwords (test_nav.NavigationTest.test_source_refs_mentions_and_stopwords) ... ok
+test_stale_added_tracked_file (test_nav.NavigationTest.test_stale_added_tracked_file) ... ok
+test_stale_content (test_nav.NavigationTest.test_stale_content) ... ok
+test_stale_deleted_file (test_nav.NavigationTest.test_stale_deleted_file) ... ok
+test_stale_head (test_nav.NavigationTest.test_stale_head) ... ok
+test_stale_other_worktree (test_nav.NavigationTest.test_stale_other_worktree) ... ok
+test_stale_routes_and_route_escape (test_nav.NavigationTest.test_stale_routes_and_route_escape) ... ok
+test_symlink_and_exclusions (test_nav.NavigationTest.test_symlink_and_exclusions) ... ok
+test_untracked_files_not_corpus (test_nav.NavigationTest.test_untracked_files_not_corpus) ... ok
+test_cache_parent_alias_is_canonical (test_runtime.RuntimeTest.test_cache_parent_alias_is_canonical) ... ok
+test_cache_private_and_external (test_runtime.RuntimeTest.test_cache_private_and_external) ... ok
+test_cli_auto_root_locate_and_strict (test_runtime.RuntimeTest.test_cli_auto_root_locate_and_strict) ... ok
+test_detect_change_during_build (test_runtime.RuntimeTest.test_detect_change_during_build) ... ok
+test_directory_symlink_open_race (test_runtime.RuntimeTest.test_directory_symlink_open_race) ... ok
+test_fast_does_not_hash_inventory (test_runtime.RuntimeTest.test_fast_does_not_hash_inventory) ... ok
+test_instruction_backup_exclusions (test_runtime.RuntimeTest.test_instruction_backup_exclusions) ... ok
+test_instruction_exclusion_guards_actual_open (test_runtime.RuntimeTest.test_instruction_exclusion_guards_actual_open) ... ok
+test_invalid_schema_and_database (test_runtime.RuntimeTest.test_invalid_schema_and_database) ... ok
+test_leaf_symlink_open_race (test_runtime.RuntimeTest.test_leaf_symlink_open_race) ... ok
+test_malformed_package_shapes (test_runtime.RuntimeTest.test_malformed_package_shapes) ... ok
+test_related_exact_edges (test_runtime.RuntimeTest.test_related_exact_edges) ... ok
+test_related_source_refs_not_mentions_and_caps (test_runtime.RuntimeTest.test_related_source_refs_not_mentions_and_caps) ... ok
+test_rename_tracked (test_runtime.RuntimeTest.test_rename_tracked) ... ok
+test_same_size_same_mtime_edit (test_runtime.RuntimeTest.test_same_size_same_mtime_edit) ... ok
+test_signature_parent_stats_deduplicated (test_runtime.RuntimeTest.test_signature_parent_stats_deduplicated) ... ok
+test_signature_shape_and_blocked_ancestors (test_runtime.RuntimeTest.test_signature_shape_and_blocked_ancestors) ... ok
+test_skipped_binary_and_oversize_signatures (test_runtime.RuntimeTest.test_skipped_binary_and_oversize_signatures) ... ok
+test_strict_hashes_and_catches_content (test_runtime.RuntimeTest.test_strict_hashes_and_catches_content) ... ok
+test_text_presentation_properties (test_runtime.RuntimeTest.test_text_presentation_properties) ... ok
+test_unstable_read_rejected (test_runtime.RuntimeTest.test_unstable_read_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 37 tests in 5.710s
+
+OK
+{"status":"error","error":"unsafe related path"}

@@ -1,4 +1,7 @@
-// Package syncer publishes immutable, remotely recoverable capture records.
+// Package syncer implements the legacy default v3 collector: immutable capture records,
+// parent-chain recovery, and a machine-wide checkpoint. It does not implement the
+// session-local durable queue, full epoch snapshots, or current-root reader described
+// by the replacement target in docs/session-capture-contract.md.
 package syncer
 
 import (
@@ -28,12 +31,13 @@ var (
 	snapshotRecheck       = 600 * time.Second
 	largeFileSize   int64 = 64 << 20
 	chunkSize       int64 = 1 << 20
+	// maxSegments is a var only so in-package tests can lower the fold boundary; production never writes it.
+	maxSegments = 64
 )
 
 const (
 	inSessionWindow   = 900 * time.Second
 	partialLineWindow = 60 * time.Second
-	maxSegments       = 64
 	recopyAfter       = time.Hour
 	uploadWorkers     = 8
 	maxHeldSize       = 128 << 20
@@ -221,15 +225,28 @@ func (s *Syncer) tombstone(ctx context.Context, agent, root string, onDisk []ada
 	for _, sf := range onDisk {
 		present[sf.Key] = true
 	}
-	streams, err := s.db.ArchiveStreams("file")
-	if err != nil {
-		return err
-	}
-	for _, stream := range streams {
-		record, err := s.db.CurrentArchive("file", stream)
+	var after *string
+	for {
+		records, err := s.db.CurrentArchivePage("file", after)
 		if err != nil {
 			return err
 		}
+		if len(records) == 0 {
+			return nil
+		}
+		if err := s.tombstonePage(ctx, agent, root, records, present, fences); err != nil {
+			return err
+		}
+		last := records[len(records)-1].Stream
+		after = &last
+	}
+}
+
+// Page selection has already closed its read cursor. Source absence and privacy
+// fences are checked here before any remote deletion publication.
+func (s *Syncer) tombstonePage(ctx context.Context, agent, root string, records []state.Record, present map[string]bool, fences *deletionFences) error {
+	for i := range records {
+		record := &records[i]
 		p, err := decodePublication(record.Body)
 		if err != nil {
 			return err

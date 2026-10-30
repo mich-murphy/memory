@@ -95,6 +95,7 @@ type Record struct {
 	Parent    string
 	Sequence  uint64
 	Committed bool
+	Applied   bool // Populated by WalkArchive from the disposable projection marker.
 	Body      []byte
 }
 
@@ -124,28 +125,40 @@ func (s *State) ArchiveRecords(kind, stream string) ([]Record, error) {
 // CurrentArchive returns a unique validated chain tip, rejecting all branch conflicts.
 // Timestamps and response order cannot select a winner. Plans do not select current data.
 func (s *State) CurrentArchive(kind, stream string) (*Record, error) {
-	var count, maxSequence, distinct int64
-	_, err := s.queryRow("SELECT COUNT(*),COALESCE(MAX(sequence),0),COUNT(DISTINCT sequence) FROM archive_records WHERE kind=? AND stream=? AND committed=1", []any{kind, stream}, &count, &maxSequence, &distinct)
-	if err != nil {
+	// All validation and tip selection share one SQLite statement snapshot. Only the
+	// tip body is returned; historical descriptors remain in SQLite.
+	const query = `WITH chain AS (
+ SELECT COUNT(*) AS n,COALESCE(MAX(sequence),0) AS maximum,COUNT(DISTINCT sequence) AS distinct_n
+ FROM archive_records WHERE kind=? AND stream=? AND committed=1
+), invalid AS (
+ SELECT COUNT(*) AS n FROM archive_records AS a
+ WHERE a.kind=? AND a.stream=? AND a.committed=1 AND
+ ((a.sequence=1 AND a.parent<>'') OR (a.sequence>1 AND NOT EXISTS
+ (SELECT 1 FROM archive_records AS b WHERE b.kind=a.kind AND b.stream=a.stream
+ AND b.committed=1 AND b.sequence=a.sequence-1 AND b.id=a.parent)))
+), tip AS (
+ SELECT key,kind,stream,id,parent,sequence,committed,body FROM archive_records
+ WHERE kind=? AND stream=? AND committed=1 ORDER BY sequence DESC LIMIT 1
+)
+SELECT chain.n,chain.maximum,chain.distinct_n,invalid.n,
+ tip.key,tip.kind,tip.stream,tip.id,tip.parent,tip.sequence,tip.committed,tip.body
+ FROM chain CROSS JOIN invalid CROSS JOIN tip`
+	var count, maxSequence, distinct, invalid, tipSequence int64
+	var record Record
+	found, err := s.queryRow(query, []any{kind, stream, kind, stream, kind, stream},
+		&count, &maxSequence, &distinct, &invalid, &record.Key, &record.Kind,
+		&record.Stream, &record.ID, &record.Parent, &tipSequence, &record.Committed, &record.Body)
+	if err != nil || !found {
 		return nil, err
-	}
-	if count == 0 {
-		return nil, nil
 	}
 	if count != maxSequence || distinct != count {
 		return nil, fmt.Errorf("state archive: divergent or incomplete chain for %s", stream)
 	}
-	var invalid int
-	_, err = s.queryRow("SELECT COUNT(*) FROM archive_records AS a WHERE a.kind=? AND a.stream=? AND a.committed=1 AND ((a.sequence=1 AND a.parent<>'') OR (a.sequence>1 AND NOT EXISTS (SELECT 1 FROM archive_records AS b WHERE b.kind=a.kind AND b.stream=a.stream AND b.committed=1 AND b.sequence=a.sequence-1 AND b.id=a.parent)))", []any{kind, stream}, &invalid)
-	if err != nil {
-		return nil, err
-	}
 	if invalid != 0 {
 		return nil, fmt.Errorf("state archive: missing or conflicting parent for %s", stream)
 	}
-	var record Record
-	_, err = s.queryRow("SELECT key,kind,stream,id,parent,sequence,committed,body FROM archive_records WHERE kind=? AND stream=? AND committed=1 ORDER BY sequence DESC LIMIT 1", []any{kind, stream}, &record.Key, &record.Kind, &record.Stream, &record.ID, &record.Parent, &record.Sequence, &record.Committed, &record.Body)
-	return &record, err
+	record.Sequence = uint64(tipSequence)
+	return &record, nil
 }
 
 // PruneCopiedManifests forgets the schema 3 manifests of sessions that have a records/session/
@@ -192,6 +205,49 @@ func (s *State) ArchiveRecord(key string) (*Record, error) {
 		return nil, err
 	}
 	return &r, nil
+}
+
+// ArchiveRecordSize reads only immutable metadata, without copying the descriptor body.
+// A missing key is distinct from a present zero-length body.
+func (s *State) ArchiveRecordSize(key string) (size int64, found bool, err error) {
+	found, err = s.queryRow("SELECT length(body) FROM archive_records WHERE key=?", []any{key}, &size)
+	return size, found, err
+}
+
+// ArchiveRecordSizes reads a bounded LIST page in one statement. Missing keys are
+// absent from the result, while present empty bodies have size zero. Variable-sized
+// SQL is deliberately not retained in the prepared-statement cache.
+func (s *State) ArchiveRecordSizes(keys []string) (map[string]int64, error) {
+	if len(keys) > ArchiveSeenBatchSize {
+		return nil, errors.New("state archive: size batch exceeds limit")
+	}
+	sizes := make(map[string]int64, len(keys))
+	if len(keys) == 0 {
+		return sizes, nil
+	}
+	args := make([]any, len(keys))
+	for i, key := range keys {
+		args[i] = key
+	}
+	//nolint:gosec // Only bounded placeholder count enters SQL; all keys are bound parameters.
+	query := "SELECT key,length(body) FROM archive_records WHERE key IN (" + strings.Repeat("?,", len(keys)-1) + "?)"
+	rows, err := s.conn.QueryContext(s.ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }() // read-only; rows.Err reports cursor failures
+	for rows.Next() {
+		var key string
+		var size int64
+		if err := rows.Scan(&key, &size); err != nil {
+			return nil, err
+		}
+		sizes[key] = size
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return sizes, rows.Close()
 }
 
 func (s *State) ArchiveStreams(kind string) ([]string, error) {
@@ -327,7 +383,27 @@ func (s *State) Binding() (*Binding, error) {
 }
 
 func (s *State) MarkArchiveSeen(key, token string) error {
-	return s.Atomic(func() error { return s.exec("INSERT OR REPLACE INTO archive_scan VALUES(?,?)", key, token) })
+	return s.MarkArchiveSeenBatch([]string{key}, token)
+}
+
+// ArchiveSeenBatchSize bounds each scan-marker transaction to database-only work.
+const ArchiveSeenBatchSize = 1000
+
+func (s *State) MarkArchiveSeenBatch(keys []string, token string) error {
+	if len(keys) > ArchiveSeenBatchSize {
+		return errors.New("state archive: seen batch exceeds limit")
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	return s.Atomic(func() error {
+		for _, key := range keys {
+			if err := s.exec("INSERT OR REPLACE INTO archive_scan VALUES(?,?)", key, token); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *State) MissingArchive(prefix, token string) (string, error) {
@@ -452,11 +528,11 @@ func snapshotIdentity(entry SnapshotEntry) (string, error) {
 // WalkArchive bounds historical metadata memory to one descriptor. The callback may update
 // disposable projections; the immutable record cursor itself is never changed during replay.
 func (s *State) WalkArchive(kind, stream string, visit func(Record) error) error {
-	return s.walkArchive("SELECT key,kind,stream,id,parent,sequence,committed,body FROM archive_records WHERE kind=? AND stream=? ORDER BY sequence,key", []any{kind, stream}, visit)
+	return s.walkArchive("SELECT a.key,a.kind,a.stream,a.id,a.parent,a.sequence,a.committed,a.body,EXISTS(SELECT 1 FROM archive_applied WHERE key=a.key) FROM archive_records AS a WHERE a.kind=? AND a.stream=? ORDER BY a.sequence,a.key", []any{kind, stream}, visit)
 }
 
 func (s *State) WalkPendingChildren(kind, stream string, sequence uint64, parent string, visit func(Record) error) error {
-	return s.walkArchive("SELECT a.key,a.kind,a.stream,a.id,a.parent,a.sequence,a.committed,a.body FROM archive_records AS a WHERE a.kind=? AND a.stream=? AND a.sequence=? AND a.parent=? AND a.committed=0 AND NOT EXISTS(SELECT 1 FROM archive_records AS c WHERE c.kind=a.kind AND c.stream=a.stream AND c.id=a.id AND c.committed=1) ORDER BY a.key", []any{kind, stream, sequence, parent}, visit)
+	return s.walkArchive("SELECT a.key,a.kind,a.stream,a.id,a.parent,a.sequence,a.committed,a.body,EXISTS(SELECT 1 FROM archive_applied WHERE key=a.key) FROM archive_records AS a WHERE a.kind=? AND a.stream=? AND a.sequence=? AND a.parent=? AND a.committed=0 AND NOT EXISTS(SELECT 1 FROM archive_records AS c WHERE c.kind=a.kind AND c.stream=a.stream AND c.id=a.id AND c.committed=1) ORDER BY a.key", []any{kind, stream, sequence, parent}, visit)
 }
 
 func (s *State) walkArchive(query string, args []any, visit func(Record) error) error {
@@ -470,7 +546,7 @@ func (s *State) walkArchive(query string, args []any, visit func(Record) error) 
 	defer func() { _ = rows.Close() }() // read-only; rows.Err reports cursor failures
 	for rows.Next() {
 		var record Record
-		if err := rows.Scan(&record.Key, &record.Kind, &record.Stream, &record.ID, &record.Parent, &record.Sequence, &record.Committed, &record.Body); err != nil {
+		if err := rows.Scan(&record.Key, &record.Kind, &record.Stream, &record.ID, &record.Parent, &record.Sequence, &record.Committed, &record.Body, &record.Applied); err != nil {
 			return err
 		}
 		if err := visit(record); err != nil {

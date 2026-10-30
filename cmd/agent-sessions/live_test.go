@@ -721,7 +721,8 @@ func (l liveRun) runHeld(t *testing.T, agent, binary string, args []string) []by
 }
 
 // Deliberately decode the wire format, not syncer/state's private Go types. The
-// same harness can be cherry-picked before or after archive v3 integration.
+// harness checks the current v3 collector independently of its private types; it
+// does not establish replacement-format reader/importer compatibility.
 type livePublication struct {
 	Schema       int             `json:"schema"`
 	Kind         string          `json:"kind"`

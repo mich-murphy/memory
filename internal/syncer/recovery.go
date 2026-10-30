@@ -99,6 +99,18 @@ func (s *Syncer) bind(ctx context.Context) error {
 }
 
 func (s *Syncer) list(ctx context.Context, prefix string, visit func(store.Object) error) error {
+	return s.listPages(ctx, prefix, func(objects []store.Object) error {
+		for _, object := range objects {
+			if err := visit(object); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// listPages keeps page-scoped metadata work separate from remote LIST calls.
+func (s *Syncer) listPages(ctx context.Context, prefix string, visit func([]store.Object) error) error {
 	token := ""
 	for {
 		if err := ctx.Err(); err != nil {
@@ -112,9 +124,9 @@ func (s *Syncer) list(ctx context.Context, prefix string, visit func(store.Objec
 			if !strings.HasPrefix(object.Key, prefix) || !raw.ValidKey(object.Key) {
 				return errors.New("archive list: invalid object key")
 			}
-			if err := visit(object); err != nil {
-				return err
-			}
+		}
+		if err := visit(page.Objects); err != nil {
+			return err
 		}
 		if page.Next == "" {
 			return nil
@@ -388,11 +400,7 @@ func (s *Syncer) replayStream(kind, stream string) error {
 		if err := validateFileTransition(p, previous); err != nil {
 			return err
 		}
-		applied, err := s.db.ArchiveApplied(record.Key)
-		if err != nil {
-			return err
-		}
-		if !applied {
+		if !record.Applied {
 			if err := s.applyPublication(record, p, previous); err != nil {
 				return err
 			}

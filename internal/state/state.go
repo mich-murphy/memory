@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS archive_records (
  parent TEXT NOT NULL, sequence INTEGER NOT NULL, committed INTEGER NOT NULL, body BLOB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS archive_stream ON archive_records(kind,stream,sequence);
+CREATE INDEX IF NOT EXISTS archive_current ON archive_records(kind,stream,committed,sequence,id,parent);
 
 CREATE TABLE IF NOT EXISTS files (
     path TEXT NOT NULL,
