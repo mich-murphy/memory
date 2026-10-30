@@ -83,7 +83,8 @@ func TestTerminalSyncFailuresAreRecorded(t *testing.T) {
 			want := "archive root: unsupported path identity"
 			if phase == "discovery" {
 				// A hook-inferred root must reject invalid UTF-8 before publication.
-				flags.paths = []string{filepath.Join(e.Tmp, "invalid-\xff", testenv.PiKey+".jsonl")}
+				invalidName := "invalid-" + string([]byte{0xff})
+				flags.paths = []string{filepath.Join(e.Tmp, invalidName, testenv.PiKey+".jsonl")}
 			} else {
 				// No source files: reach Run's terminal checkpoint without uploads.
 				flags.paths = []string{filepath.Join(e.Tmp, "unclassified.txt")}
