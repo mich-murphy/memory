@@ -1,6 +1,7 @@
 # Diagnostic failure history and filesystem prerequisite evidence
 
-**Status (2026-10-29): no completed matched primary performance comparison.**
+**Status (2026-10-30 01:14 UTC): no accepted matched primary performance comparison;
+execution is blocked by the missing pinned worker image.**
 The distinct attempts below must not be collapsed into a passing result or a
 production root-cause claim. Parent owns integrated evidence/acceptance. Results
 are parent/runtime-owner reports except where explicitly marked as the fixture
@@ -55,8 +56,9 @@ added only an opt-in supported fallback-classification diagnostic. Parent inspec
 `Queue.Capture` setup loop **before `q.Run`**, reported line 889, in 4.39 seconds,
 with fixed signature `safefile: replaced or nonregular input`. The root was
 preserved. The runtime fallback callback could not observe this pre-runtime error.
-Parent initially reported build/all-four-unit checks apparently passing; do not
-promote that pending owner summary into stronger evidence here.
+Parent subsequently verified the runtime owner's completed result: baseline build
+`build-1793316805505676000` passed module verification and all four then-existing
+units x20. That build pass does not make the failed diagnostic a pass.
 
 The captured state was on a Mac host-bind exposed through Docker. This made
 filesystem prerequisite suitability a concrete diagnostic question, not proof
@@ -92,16 +94,104 @@ They accept only the measured VM-native scratch environment as suitable for this
 bounded prerequisite probe. They do not qualify a full primary, race/native/live
 capture, optional work or operating-scale performance.
 
-## Current next action / interpretation boundary
+## 5. Full native-state pilot, then corrected native-TMP pair
 
-Parent authorized one full baseline primary on task-owned VM-native scratch,
-owned by the runtime worker. Its result is pending at this documentation update;
-no success is implied. The `ea7…` Go overlay remains byte-identical while it runs.
-Future matched baseline/current runs must use the same VM-native root paths,
-toolchain, overlay, seed, settings and admitted resource profile. Mac host-bind is
-not an accepted captured-state location for the full measurement. Host-side log
-copies or prepared read-only source input are separate from runtime captured state.
-No production optimization or source repair is justified by the evidence so far.
+`primary-1793318183068977000` passed all 201 exact reader hashes, stable epochs,
+credential negatives and three exact appends. Its settled sample used 8.206265
+process CPU-seconds over 30.008671 wall seconds, 6,030 discovery requests and 270
+preparations with zero publication churn. Parent then found `TMPDIR=/out/tmp`
+remained host-bound; `publication.writeMetadata` uses the default temp directory.
+This is explicitly an **unmatched pilot**, not all-native performance acceptance.
+
+Runtime TMP was moved to `/scratch/runtime-tmp` identically for both refs:
+
+| Job / ref | Actual result | Active wall / CPU | Settled wall / CPU | Append wall / CPU |
+| --- | --- | --- | --- | --- |
+| `primary-1793318817849421000` / `b8cbed2` | PASS, full correctness | 36.289658s / 3.911607s | 30.002873s / 10.274496s | 0.804011s / 0.450022s |
+| `primary-1793318924869156000` / `c8fdf7a` | FAIL, original 30-CPU-second discovery-warm-up bound | 38.006161s / 11.674618s | Absent | Absent |
+
+Both active samples had 201 ACKs, 201 CAS, 402 PUTs and 530 backend opens. This is
+one partial pair, **not** an accepted speedup/regression estimate or complete
+candidate result. The three-CPU-second settled target is diagnostic, not a release
+budget. No bound or readiness predicate was weakened. Roots and exact failures
+were preserved; OOM was false and exact owned CIDs removed.
+
+## 6. Whole-test failure profile, canonical bounded analysis
+
+`failure-profile-1793319639828564000` reproduced the candidate warm-up CPU failure
+in 86.88 seconds. It used the unchanged `ea7…` overlay and an external Go test CPU
+profile, explicitly diagnostic/non-primary. Its `profiled:false` scalar field
+referred only to the internal phase profiler; it does not make this externally
+profiled run a primary timing run.
+
+The ordinary test failure flushed a 155,949-byte profile, SHA256
+`26489b041ee4dad2d689f81435ea203eee6209e232d9f417c3305c4f3722f08c`.
+Canonical `failure-embedded-analysis-1793320154117077000` passed with the original
+8-second per-command / 60-second aggregate limits, embedded symbols only and no
+binary argument. It decoded 4,135 samples / 41.35 sampled CPU-seconds over 86.89
+wall seconds. No loss marker was observed; sampling loss was not independently
+measured. Inclusive policy 16.88s, discovery 15.93s, filesystem policy 10.83s and
+delivery-lane selection 9.55s **overlap**; Syscall6 was 12.16s flat. Setup, active
+and failed warm-up are combined, not phase-isolated or comparative attribution.
+
+The initial local-symbol analysis timed out at eight seconds. An intermediate
+45-second-per-command analysis is preserved as **noncompliant/noncanonical and
+rejected for acceptance**. Only the independently reproduced original-bound
+embedded analysis is canonical; the diagnostic workload itself never passed.
+
+Closed synthetic progress showed 201 jobs / zero pending publications, stable
+raw versions and repeated completed discovery generations. These post-shutdown
+snapshots do not establish the live readiness conjunction, identity churn,
+starvation or a causal link to the historical Mac service exit.
+
+## 7. Attribution-v4 build passes, unexpected baseline stall
+
+Parent and independent reviewer accepted the test-only instrumentation statically:
+queue policy forwarding/counts, split user/system rusage, warm-up profile and a
+fixed non-atomic status histogram. Actual discovery, source fixtures, guard
+predicates, polling and limits remain unchanged. Overlay SHA256:
+`f35cfc3e9f2816beb8f02a72f9ac9a0c21fa83e3ca6aa29c35a3d725fd13e9d7`.
+
+Both `build-1793321643112997000` (baseline) and `build-1793321678885400000`
+(candidate) passed offline module verification and all six units x20. Nevertheless,
+baseline `profile-1793321712170839000`, native slot07, timed out at the original
+300-second payload bound: actual Docker exit124, OOMfalse. It emitted only test
+start, **no** phase scalars/work counts/histogram. `active.pprof` was zero bytes
+and unusable; the other profiles were missing; no analysis ran. The EXIT trap's
+`PAYLOAD_STATUS=0` under signal was misleading; actual final exit124 is authoritative.
+Candidate attribution was not launched and slot08 was not reserved. The standalone
+unit passes do not prove this runtime harness can complete or that its stall is a
+production defect.
+
+## 8. Shorter-watchdog diagnostic blocked before execution
+
+Parent authorized one baseline-only stall diagnostic using a **lowered 120-second
+Go test watchdog**, unchanged original 300-second internal context/outer payload
+and CPU guards, fresh slot09, private traceback preservation and optional read-only
+prior metadata. `profile-1793322681083342000` failed at Docker create: pinned image
+`sha256:b60c73ed15920a0fd3faf286a269ccb1e207bf7b1a0deed19a7635559e0bad05`
+was absent. Driver70 / CIDnull means **no worker, lease payload, Go test, prior
+metadata query or traceback ran**. It is a prerequisite failure, not a gate result.
+
+Parent independently checked at 2026-10-30 01:14:23 UTC: exact image inspect exit1,
+image inventory0, running containers0, daemon still4CPU/10,417,442,816B; expected
+task/shared volumes remained. The disappearance's cause and relation to the prior
+stall are unknown. No pull, replacement, daemon/service restoration, source reset
+or volume cleanup was attempted. Slot09's reservation remains evidence, not reusable
+space. Private `STALL-V5-BLOCKED-RESULTS.json` SHA256:
+`12a0d680f9e91fc54857c7ec863ed671462a132e086ee57bb946195706c61b65`.
+
+## Current interpretation boundary
+
+The [delivery brief](../../docs/session-capture-handoff.md) owns current next action
+and authority. Supported pinned-worker availability must be restored before another
+admitted diagnostic; native Darwin admission is separately absent. Neither a new
+image nor the unrelated services may be silently substituted/restored. Retain all
+old roots, volumes, reservations and exact failures. No production fix, completed
+performance comparison, race/native/live acceptance, deployment or activation has
+been established. Mac host-bind remains unqualified for captured runtime state;
+future comparisons require matched VM-native state/temp paths, overlay, toolchain,
+seed, settings, resource profile and honest contention/cache evidence.
 
 ## Corrected early Pi-layout hypothesis
 

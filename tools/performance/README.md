@@ -1,13 +1,21 @@
 # Offline matched runtime diagnostic (not qualification)
 
-This is a deliberately small, opt-in Linux Go test overlay. **No completed primary
-comparison yet.** Parent reported distinct baseline warm-up/setup failures, then
-module verification/all four units x20 passing and an identical focused filesystem
-probe failing on Mac host-bind but passing on task-owned VM-native scratch. See
-[dated failure/probe evidence and limits](DIAGNOSTIC-FAILURE.md). One full baseline
-on VM-native scratch is authorized/in progress; no result is implied here.
-The historical runs used overlay `ea7ce33a08d044cc21feb18c4c0f8e8526fb11ae5f2204a22571447d90486f5a`.
-The attribution-v4 overlay below is a new test-only diagnostic, not yet built or run.
+This is an experimental, opt-in Linux Go test overlay. **No completed matched
+primary performance comparison or production optimization is accepted.** As of
+2026-10-30 01:14 UTC, execution is externally blocked: the pinned Docker image is
+missing; parent independently observed zero images and running containers while
+private/shared volumes remain. No replacement image or host restoration was attempted.
+
+The corrected VM-native baseline completed all three phases; `c8fdf7a` failed the
+unchanged warm-up CPU guard. Attribution-v4 builds passed all six focused units x20
+on both refs, but its baseline profile timed out at the original 300-second bound
+with an unusable zero-byte profile; candidate attribution did not run. The planned
+shorter-watchdog stall diagnostic failed before container creation because the image
+was absent. See [dated attempts, exact evidence and limits](DIAGNOSTIC-FAILURE.md)
+and the [current delivery brief](../../docs/session-capture-handoff.md).
+
+Historical runs used overlay `ea7ce33a08d044cc21feb18c4c0f8e8526fb11ae5f2204a22571447d90486f5a`;
+attribution-v4 is `f35cfc3e9f2816beb8f02a72f9ac9a0c21fa83e3ca6aa29c35a3d725fd13e9d7`.
 It compares `b8cbed2` with `c8fdf7a`; it is not a new quality gate
 or evidence of an optimization. No production source replacements, instrumentation
 package, hook, service, installed spool, source inventory, cloud or credentials.
