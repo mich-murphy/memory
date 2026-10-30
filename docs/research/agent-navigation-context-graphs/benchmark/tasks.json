@@ -1,0 +1,1871 @@
+{
+  "schema_version": 1,
+  "dataset_id": "businesscraft-r2-navigation-v1",
+  "status": "frozen-v1",
+  "intent_split_sha256": "b897a239e6ae4f2c232d7f91927dc6447d678a99fb959c2b94822aeb3068a4b8",
+  "split_policy": {
+    "method": "fixed deterministic task-ID membership chosen before any navigation implementation/run",
+    "dev_ids": [
+      "bcnav-01",
+      "bcnav-02",
+      "bcnav-07",
+      "bcnav-08",
+      "bcnav-11",
+      "bcnav-15",
+      "bcnav-17",
+      "bcnav-19"
+    ],
+    "test_ids": [
+      "bcnav-03",
+      "bcnav-04",
+      "bcnav-05",
+      "bcnav-06",
+      "bcnav-09",
+      "bcnav-10",
+      "bcnav-12",
+      "bcnav-13",
+      "bcnav-14",
+      "bcnav-16",
+      "bcnav-18",
+      "bcnav-20"
+    ],
+    "family_policy": "same-source slices kept in one split; obvious repeated requests represented once"
+  },
+  "target_revision": "e4fbe8f3768b3348c349667f37f500b478950fed",
+  "archive_build": [
+    [
+      "2026-10-16 12:34:49.297834+00",
+      4272,
+      802468,
+      10290,
+      true,
+      false,
+      0
+    ]
+  ],
+  "tasks": [
+    {
+      "id": "bcnav-01",
+      "split": "dev",
+      "domain": "UI/grid",
+      "query": "Where are user-defined grid filters implemented, saved and applied through profiles?",
+      "answerability": "repository_navigation",
+      "source_family": "0103b9c6d0d5a6ae4f3e99a5161efcbd",
+      "derivation": "Repository-only part; deployment status excluded",
+      "source": {
+        "event_id": "0103b9c6d0d5a6ae4f3e99a5161efcbd:9:0",
+        "origin_label": "human",
+        "event_role": "user",
+        "byte_offset": 102647,
+        "byte_length": 564,
+        "source_file_sha256": "bb60f03be3e83c4e24e1f3450e02d6db3141702bc1a15279ff30dba955cae947",
+        "source_role": "main",
+        "archive_agent": "pi",
+        "trace_id": "0103b9c6d0d5a6ae4f3e99a5161efcbd",
+        "line": 9,
+        "component_text_sha256": "3e6102c9033b5a5853f33abf6bc5cada317dde63dfd76ad5f70047b7d1529c53"
+      },
+      "qrels": [
+        {
+          "path": "web/packages/bc-grid/packages/filters/src/index.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "filter-engine",
+          "rationale": "Reusable filter representation and compilation entrypoint",
+          "verification": {
+            "sha256": "c108f470581ceb7f354d1084f757e91f813e894041cf38b79b1794c840267fcb",
+            "line_start": 1,
+            "line_end": 8,
+            "anchor_regex": "export"
+          }
+        },
+        {
+          "path": "web/apps/web/lib/grids/server-grid-filter-sql.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "screen-filter-sql",
+          "rationale": "Connects grid filter semantics to SQL reads",
+          "verification": {
+            "sha256": "90e0457c0112b9b529f13680b7be1653dc713418a0a3e228e2e91ced284db0c9",
+            "line_start": 2,
+            "line_end": 9,
+            "anchor_regex": "export"
+          }
+        },
+        {
+          "path": "web/packages/bc-grid/packages/filters/tests/filters.test.ts",
+          "grade": 2,
+          "kind": "test",
+          "facet": "filter-semantics",
+          "rationale": "Executable filter behavior examples",
+          "verification": {
+            "sha256": "c7cf2e29e33a04a67d36c07687a0cd31645b82119c7a4c8b3f128f0a4bdfbe62",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "test"
+          }
+        },
+        {
+          "path": "docs/web/profile-filters-and-settings-implementation-spec.md",
+          "grade": 2,
+          "kind": "entrypoint_doc",
+          "facet": "profile-filter-routing",
+          "rationale": "Profile filter integration design and routing",
+          "verification": {
+            "sha256": "fc6e233ce17226c22926de3b6abddf1d86ccac72ec7014c858b8c9d0d3a5e090",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "[Pp]rofile"
+          }
+        },
+        {
+          "path": "web/apps/web/app/(app)/[company]/catalogue/items/filter-catalogue.ts",
+          "grade": 2,
+          "kind": "source",
+          "facet": "catalogue-filter-example",
+          "rationale": "Concrete Catalogue item filter integration; one example of shared filtering, not entire feature",
+          "verification": {
+            "sha256": "02fd3885840f20202fdbe9cfa41ac50920ead21bcf8f46c4ff62a3758b805ca1",
+            "line_start": 1,
+            "line_end": 1,
+            "anchor_regex": "export"
+          }
+        },
+        {
+          "path": "web/agent/packages/bc-agent-runtime/src/grid-filter-delivery.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Ask filter delivery is not the general user/profile grid-filter implementation",
+          "verification": {
+            "sha256": "e9dfc04620839e73843b469c02d923a331ef51c1e92941da80e2bcea1b6007a1",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-02",
+      "split": "dev",
+      "domain": "catalogue/UI",
+      "query": "In consolidated Catalogue settings, where are setup tabs and Add/create actions wired? Trace the shared header and a concrete setup screen.",
+      "answerability": "repository_navigation",
+      "source_family": "267b5582ce5451ab0079c884ab860b97",
+      "derivation": "All-module tab audit narrowed to Catalogue",
+      "source": {
+        "event_id": "267b5582ce5451ab0079c884ab860b97:1:0",
+        "origin_label": "agent",
+        "event_role": "user",
+        "byte_offset": 0,
+        "byte_length": 3956,
+        "source_file_sha256": "efed2d2a4663e37ffcb05cfda0882c3080b7d3b71023f052913610e79c58c0c7",
+        "source_role": "subagent",
+        "archive_agent": "claude",
+        "trace_id": "267b5582ce5451ab0079c884ab860b97",
+        "line": 1,
+        "component_text_sha256": "5690cf44388b073017bb341890b9d2b1ec9f4421076d3037fed0eafb3b3b5eea"
+      },
+      "qrels": [
+        {
+          "path": "web/packages/nav/src/modules.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "navigation-tabs",
+          "rationale": "Catalogue navigation and page-mode tab definitions",
+          "verification": {
+            "sha256": "b1ad9dd7ef3bd30f101b4953994ae29936504ef2bfecc776e064d638f58f98d8",
+            "line_start": 71,
+            "line_end": 78,
+            "anchor_regex": "catalogue"
+          }
+        },
+        {
+          "path": "web/apps/web/app/(app)/[company]/catalogue/setup/departments/config.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "setup-screen",
+          "rationale": "Concrete Catalogue setup screen configuration",
+          "verification": {
+            "sha256": "278cc5468ef1ad4ca63d87d8202a1808bec33452d5e31cf35d7fe778c2ec3523",
+            "line_start": 8,
+            "line_end": 15,
+            "anchor_regex": "export"
+          }
+        },
+        {
+          "path": "web/apps/web/components/edit-grid-screen.tsx",
+          "grade": 3,
+          "kind": "source",
+          "facet": "shared-create-action",
+          "rationale": "Shared create-action rendering",
+          "verification": {
+            "sha256": "5e9929e65c22792cde3af124601b89545f8e6aa0ba21201194ad575cd8fbec1b",
+            "line_start": 696,
+            "line_end": 703,
+            "anchor_regex": "primaryAction"
+          }
+        },
+        {
+          "path": "web/apps/web/app/_shared/admin-settings/catalogue.ts",
+          "grade": 2,
+          "kind": "source",
+          "facet": "settings-host",
+          "rationale": "Module settings host registry",
+          "verification": {
+            "sha256": "1f43ca73fcb3fb0d2391adf84d0ee863772d077191f4aad3c42bbda96a8e94c3",
+            "line_start": 2,
+            "line_end": 9,
+            "anchor_regex": "CATALOGUE"
+          }
+        },
+        {
+          "path": "web/apps/web/app/(app)/[company]/catalogue/admin/settings/page.tsx",
+          "grade": 2,
+          "kind": "source",
+          "facet": "catalogue-settings-route",
+          "rationale": "Concrete Catalogue settings host route",
+          "verification": {
+            "sha256": "f0c3febb380ccb38b527f21038172b986c5fbce5853453497f9a0caa9de07589",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "import"
+          }
+        },
+        {
+          "path": "web/apps/web/lib/features/features-server.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Feature visibility is not setup-tab create/header wiring",
+          "verification": {
+            "sha256": "96dbebe0b35253dfbf8407b704351b505829d9609e01c781e606cedce6a5716a",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-03",
+      "split": "test",
+      "domain": "finance/contracts",
+      "query": "Where does Finance get revised contract value including variations, and which rules determine GST basis? Trace domain logic and Classic definitions.",
+      "answerability": "repository_navigation",
+      "source_family": "13a75485252d708c1162ba0de6a3aecf",
+      "derivation": "Section 2",
+      "source": {
+        "event_id": "13a75485252d708c1162ba0de6a3aecf:1:0",
+        "origin_label": "agent",
+        "event_role": "user",
+        "byte_offset": 0,
+        "byte_length": 3048,
+        "source_file_sha256": "f1d55a2d6abac550929efc01d3d9e268f396114129db5020adbf17608ee17e1d",
+        "source_role": "subagent",
+        "archive_agent": "claude",
+        "trace_id": "13a75485252d708c1162ba0de6a3aecf",
+        "line": 1,
+        "component_text_sha256": "4cde94c14b47de5fd7748f1bd6486bfeacc8e08a97040db35f62c89b485faf45"
+      },
+      "qrels": [
+        {
+          "path": "web/packages/contracts/src/contract-finance.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "finance-domain",
+          "rationale": "Finance calculation semantics including variations",
+          "verification": {
+            "sha256": "2d6242bccf3287367341d6b3b8570c4e3e99be2f3b56212b62cf520f68719cdb",
+            "line_start": 32,
+            "line_end": 39,
+            "anchor_regex": "[Vv]ariation"
+          }
+        },
+        {
+          "path": "web/packages/contracts/src/contract-finance-repository.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "finance-data",
+          "rationale": "Database sources feeding Finance calculations",
+          "verification": {
+            "sha256": "ce7f4c55bb656386403522b6b94d20c9b61a71bdb8f4e8a81a032c548ae63aa2",
+            "line_start": 33,
+            "line_end": 40,
+            "anchor_regex": "export"
+          }
+        },
+        {
+          "path": "web/packages/contracts/tests/contract-finance.test.ts",
+          "grade": 2,
+          "kind": "test",
+          "facet": "finance-behavior",
+          "rationale": "Behavior examples for financial calculations",
+          "verification": {
+            "sha256": "38158aead2387d64845e6e7e56e0e2c3b87f138cec963b23565a85df76763f80",
+            "line_start": 7,
+            "line_end": 14,
+            "anchor_regex": "[Vv]ariation"
+          }
+        },
+        {
+          "path": "classic/src/dbl/Foundation/Defines/conhdra.def",
+          "grade": 2,
+          "kind": "source",
+          "facet": "classic-finance-labels",
+          "rationale": "Classic display-field descriptions distinguish Contract plus variations and GST totals; supporting labels, not calculation implementation",
+          "verification": {
+            "sha256": "16b5060fdfef625aaa37527b87f0ce2f41a1662a0c46c6d476698db194592c3b",
+            "line_start": 240,
+            "line_end": 247,
+            "anchor_regex": "Contract.*Variations Total"
+          }
+        },
+        {
+          "path": "web/apps/web/lib/agent/bc-agent-contract-values.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Original Contract value reader explicitly excludes GST; not revised Finance value including variations",
+          "verification": {
+            "sha256": "7dd235b13fbc58d71e0921c6ce92cddb7303331839cdb7405d36731bb5ddc9bf",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "judgment_note": "Classic Define files are display labels, not financial calculation code. Original-value Ask reader is a hard negative for revised/GST-inclusive value.",
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-04",
+      "split": "test",
+      "domain": "finance/agent",
+      "query": "Where does Ask prevent users without Finance access from seeing Contract money, including the capability catalogue and redisplayed evidence?",
+      "answerability": "repository_navigation",
+      "source_family": "9dc5527c8f9f97e402e4b24fb91515fc",
+      "derivation": "Security-review intent; not current defect assertion",
+      "source": {
+        "event_id": "9dc5527c8f9f97e402e4b24fb91515fc:1:0",
+        "origin_label": "agent",
+        "event_role": "user",
+        "byte_offset": 0,
+        "byte_length": 2775,
+        "source_file_sha256": "52aca5342167a85bd27b7ed706c280d0b8bfb1bc1efd4fc281ef9235f1873938",
+        "source_role": "subagent",
+        "archive_agent": "claude",
+        "trace_id": "9dc5527c8f9f97e402e4b24fb91515fc",
+        "line": 1,
+        "component_text_sha256": "747478cacd4e0917beca82d7e39f58b3afb7a5bd1f31f0c43f40cc5705869dee"
+      },
+      "qrels": [
+        {
+          "path": "web/apps/web/lib/agent/bc-agent-contract-summary-authority.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "finance-permission",
+          "rationale": "Authority check and summary authority identity",
+          "verification": {
+            "sha256": "b3f687698888d652f9cd16f1f85c8a48989b0cff04c5fcbb4a857e2dbbc4448e",
+            "line_start": 14,
+            "line_end": 21,
+            "anchor_regex": "hasContractFinanceAccess"
+          }
+        },
+        {
+          "path": "web/apps/web/lib/agent/bc-agent-contract-values.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "money-reader",
+          "rationale": "Money dataset refusal boundary",
+          "verification": {
+            "sha256": "7dd235b13fbc58d71e0921c6ce92cddb7303331839cdb7405d36731bb5ddc9bf",
+            "line_start": 103,
+            "line_end": 110,
+            "anchor_regex": "[Ff]inance"
+          }
+        },
+        {
+          "path": "web/apps/web/lib/agent/bc-agent-records.ts",
+          "grade": 2,
+          "kind": "source",
+          "facet": "catalogue-redisplay",
+          "rationale": "Record capability selection and current authority integration",
+          "verification": {
+            "sha256": "adcb09864a97b0ffb8f9f4855141d00700500ba25d080df862c662e2ac689207",
+            "line_start": 45,
+            "line_end": 52,
+            "anchor_regex": "[Ff]inance"
+          }
+        },
+        {
+          "path": "web/apps/web/lib/agent/bc-agent-contract-values.test.ts",
+          "grade": 2,
+          "kind": "test",
+          "facet": "money-read-contract",
+          "rationale": "Money reader behavior tests; Finance-specific enforcement is in authority source, not established by this test alone",
+          "verification": {
+            "sha256": "855b87dc4774db32de1a5b2db83a91f845ab682bb7f8639b8c4f95a0fc9c2f55",
+            "line_start": 4,
+            "line_end": 11,
+            "anchor_regex": "contract|value"
+          }
+        },
+        {
+          "path": "web/packages/contracts/src/contract-finance.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Money arithmetic alone does not enforce Ask access or redisplay authority",
+          "verification": {
+            "sha256": "2d6242bccf3287367341d6b3b8570c4e3e99be2f3b56212b62cf520f68719cdb",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-05",
+      "split": "test",
+      "domain": "jobs/contracts",
+      "query": "For \u201cjobs in a suburb or a state\u201d, where can I distinguish jobs from Contracts, site state from customer state, and lifecycle state?",
+      "answerability": "repository_navigation",
+      "source_family": "33840b9e5d8cc6a43fe93036f860d058",
+      "derivation": "Section 2; ambiguity retained",
+      "source": {
+        "event_id": "33840b9e5d8cc6a43fe93036f860d058:1:0",
+        "origin_label": "agent",
+        "event_role": "user",
+        "byte_offset": 0,
+        "byte_length": 2889,
+        "source_file_sha256": "7997ee27c07c9f7d08ea8172499db437b47c121db7db13b21931b8708d4ba109",
+        "source_role": "subagent",
+        "archive_agent": "claude",
+        "trace_id": "33840b9e5d8cc6a43fe93036f860d058",
+        "line": 1,
+        "component_text_sha256": "911c5d4973e90ed84fe5b4b86d25e7d636c7116e571ce9fe4073c96a73a12737"
+      },
+      "qrels": [
+        {
+          "path": "web/packages/db/src/schema/co-contracts.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "contract-address",
+          "rationale": "Contract record and address fields",
+          "verification": {
+            "sha256": "75b3beca97340cc73c4359fb0ca85432f9c5de5e0c5cc0060aee9a9872ad0f48",
+            "line_start": 30,
+            "line_end": 37,
+            "anchor_regex": "co_state"
+          }
+        },
+        {
+          "path": "web/packages/db/src/schema/jc-jobs.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "job-identity",
+          "rationale": "Separate Job header schema",
+          "verification": {
+            "sha256": "cee186d5ed4c54281d9fa82da50b023dd74e92337a992e893c88469ab6fe5754",
+            "line_start": 27,
+            "line_end": 34,
+            "anchor_regex": "jobHeaders"
+          }
+        },
+        {
+          "path": "web/packages/contracts/src/headless/analytics/contract-aggregate-read.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "state-meaning",
+          "rationale": "Analytical predicates and state/lifecycle distinctions",
+          "verification": {
+            "sha256": "2949c5c2efcf4439453cc1149afd05f0affa4c2f7fbcd5c3016be0a9efc9a455",
+            "line_start": 12,
+            "line_end": 19,
+            "anchor_regex": "[Ss]tate"
+          }
+        },
+        {
+          "path": "docs/knowledge/internal/modules/estimating/residential-job-sales-web-boundary.md",
+          "grade": 2,
+          "kind": "entrypoint_doc",
+          "facet": "job-contract-boundary",
+          "rationale": "Current relocated residential Job versus sales boundary",
+          "verification": {
+            "sha256": "a6f51a7a82ea534e74810a3bab3de34dea050e91fc12b0e275927282bd51d51a",
+            "line_start": 20,
+            "line_end": 27,
+            "anchor_regex": "contract"
+          }
+        },
+        {
+          "path": "web/packages/job-costing/src/estimate-statuses.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Estimate status is not Contract lifecycle or geographical state",
+          "verification": {
+            "sha256": "72b14eb703f77a3d9556ba24b4438677207214e8b546a61450765b9b1b6aa366",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-06",
+      "split": "test",
+      "domain": "estimates/jobs",
+      "query": "Which Web estimating screens and domain reads exist, and how do sales estimates differ from estimates attached to a job?",
+      "answerability": "repository_navigation",
+      "source_family": "33840b9e5d8cc6a43fe93036f860d058",
+      "derivation": "Section 1 narrowed to estimating",
+      "source": {
+        "event_id": "33840b9e5d8cc6a43fe93036f860d058:1:0",
+        "origin_label": "agent",
+        "event_role": "user",
+        "byte_offset": 0,
+        "byte_length": 2889,
+        "source_file_sha256": "7997ee27c07c9f7d08ea8172499db437b47c121db7db13b21931b8708d4ba109",
+        "source_role": "subagent",
+        "archive_agent": "claude",
+        "trace_id": "33840b9e5d8cc6a43fe93036f860d058",
+        "line": 1,
+        "component_text_sha256": "911c5d4973e90ed84fe5b4b86d25e7d636c7116e571ce9fe4073c96a73a12737"
+      },
+      "qrels": [
+        {
+          "path": "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/estimates/page.tsx",
+          "grade": 3,
+          "kind": "source",
+          "facet": "job-estimate-screen",
+          "rationale": "Concrete job estimates route",
+          "verification": {
+            "sha256": "14b015719f781ad7d3850ebdbc25692064e533c56957a3cabba277defda7ed18",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "import"
+          }
+        },
+        {
+          "path": "web/packages/job-costing/src/sales-estimates/read-repository.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "sales-estimate-read",
+          "rationale": "Sales estimate domain read entrypoint",
+          "verification": {
+            "sha256": "077e044f7735bed1ec9f6d402c238ffeb7800de93cabfaee687a820124b1e945",
+            "line_start": 148,
+            "line_end": 155,
+            "anchor_regex": "export"
+          }
+        },
+        {
+          "path": "web/packages/job-costing/src/production-estimates/read-repository.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "production-estimate-read",
+          "rationale": "Job production-estimate domain read entrypoint",
+          "verification": {
+            "sha256": "2d3d96952dc7d1540dd6760369f92814e4faea5d959eca4be77171cdba3f9db2",
+            "line_start": 77,
+            "line_end": 84,
+            "anchor_regex": "export"
+          }
+        },
+        {
+          "path": "web/packages/job-costing/src/sales-estimates/read-model.ts",
+          "grade": 2,
+          "kind": "source",
+          "facet": "sales-read-model",
+          "rationale": "Sales estimate read representation, distinct from job estimate route",
+          "verification": {
+            "sha256": "0778e1942994653fb28fb3b8f2daeb554aeafe0c0393a4e2fddc5ede7a2f654e",
+            "line_start": 26,
+            "line_end": 33,
+            "anchor_regex": "export"
+          }
+        },
+        {
+          "path": "web/packages/job-costing/src/estimate-statuses.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Setup status definitions alone do not identify estimating screen/read surfaces",
+          "verification": {
+            "sha256": "72b14eb703f77a3d9556ba24b4438677207214e8b546a61450765b9b1b6aa366",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-07",
+      "split": "dev",
+      "domain": "jobs/configuration",
+      "query": "Where is the Jobs feature gate checked, and which configuration and tests explain enabling it without confusing Jobs with Job Information?",
+      "answerability": "repository_navigation",
+      "source_family": "6625b4e5f6763132c995c0a3550f78a3",
+      "derivation": "Repository portion; no live-state claim",
+      "source": {
+        "event_id": "6625b4e5f6763132c995c0a3550f78a3:9:0",
+        "origin_label": "human",
+        "event_role": "user",
+        "byte_offset": 78981,
+        "byte_length": 2688,
+        "source_file_sha256": "7737192d1ab2183cc5e0578c9f74ca90ce07c1690599d97528fcda5721e436f4",
+        "source_role": "main",
+        "archive_agent": "codex",
+        "trace_id": "6625b4e5f6763132c995c0a3550f78a3",
+        "line": 9,
+        "component_text_sha256": "6deac5d417885b30f4a9af5421fba769717c77ca91f3786dea7ce905eb135d2e"
+      },
+      "qrels": [
+        {
+          "path": "web/apps/web/app/(app)/[company]/job-costing/jobs/page.tsx",
+          "grade": 3,
+          "kind": "source",
+          "facet": "jobs-route",
+          "rationale": "Concrete gated Jobs route",
+          "verification": {
+            "sha256": "40eae6818f127f1d1722157830fbcff3ffc1de64fd598da7ee3ae9ffa990cfbe",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "import"
+          }
+        },
+        {
+          "path": "web/apps/web/lib/features/features-server.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "feature-state",
+          "rationale": "Company feature configuration resolution",
+          "verification": {
+            "sha256": "96dbebe0b35253dfbf8407b704351b505829d9609e01c781e606cedce6a5716a",
+            "line_start": 2,
+            "line_end": 9,
+            "anchor_regex": "readFeatureCompanyStates"
+          }
+        },
+        {
+          "path": "web/apps/web/app/(app)/[company]/job-costing/jobs/jobs-feature-flag.test.ts",
+          "grade": 3,
+          "kind": "test",
+          "facet": "jobs-gate",
+          "rationale": "Explicit Jobs gate tests",
+          "verification": {
+            "sha256": "73f5b264b59e84f09e21f1d7c17110cf3c08a3168ef6f257d10ac253d5cb80d3",
+            "line_start": 7,
+            "line_end": 14,
+            "anchor_regex": "[Jj]ob"
+          }
+        },
+        {
+          "path": "docs/web/feature-flags.md",
+          "grade": 2,
+          "kind": "entrypoint_doc",
+          "facet": "feature-operation",
+          "rationale": "Feature flag operation and boundary guidance",
+          "verification": {
+            "sha256": "3c08a1977a0274de2b8de8c616816e79442c7000078f3d02f293b0ea83c77b65",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "[Ff]eature"
+          }
+        },
+        {
+          "path": "web/apps/web/lib/features/feature-gate.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "feature-gate-implementation",
+          "rationale": "Shared screen/API feature gating implementation",
+          "verification": {
+            "sha256": "50503feaed73772775796204e3c2d0b8ac74a0e647df83c3303c8bf36ef7ed2c",
+            "line_start": 13,
+            "line_end": 20,
+            "anchor_regex": "export"
+          }
+        },
+        {
+          "path": "web/packages/db/src/schema/jc-job-information.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Job Information schema is not the Jobs feature gate",
+          "verification": {
+            "sha256": "e828d01c654647a095d8dff1a60290cd40e257645b27fe7c3b53c76b33d33f20",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-08",
+      "split": "dev",
+      "domain": "Classic DBL/schema",
+      "query": "Where should a data dictionary obtain original Classic table and field explanations? Use Contract header and Event lines as examples and trace to Web schema.",
+      "answerability": "repository_navigation",
+      "source_family": "68b4654c7ae418e3b3a59c963cb7d874",
+      "derivation": "Broad documentation request narrowed to representative tables",
+      "source": {
+        "event_id": "68b4654c7ae418e3b3a59c963cb7d874:273:0",
+        "origin_label": "human",
+        "event_role": "user",
+        "byte_offset": 1509608,
+        "byte_length": 585,
+        "source_file_sha256": "4c9070425699bc1bc668e7243170ab3abe5e5123187f693a52f56f61ed2f3eaf",
+        "source_role": "main",
+        "archive_agent": "pi",
+        "trace_id": "68b4654c7ae418e3b3a59c963cb7d874",
+        "line": 273,
+        "component_text_sha256": "bd42ac0a41462c09b8f81605a09cde0ea192de61101465b98113b72b8f806d32"
+      },
+      "qrels": [
+        {
+          "path": "web/packages/db/src/schema/co-contracts.ts",
+          "grade": 2,
+          "kind": "source",
+          "facet": "web-header",
+          "rationale": "Web mapping to Classic Contract table",
+          "verification": {
+            "sha256": "75b3beca97340cc73c4359fb0ca85432f9c5de5e0c5cc0060aee9a9872ad0f48",
+            "line_start": 21,
+            "line_end": 28,
+            "anchor_regex": "conhdra"
+          }
+        },
+        {
+          "path": "web/packages/db/src/schema/co-events.ts",
+          "grade": 2,
+          "kind": "source",
+          "facet": "web-events",
+          "rationale": "Web mapping to Classic Event table",
+          "verification": {
+            "sha256": "a47659ad08346429400047518ea7e842ad80c97e8e1f8cf54fed73b84c6f64ee",
+            "line_start": 20,
+            "line_end": 27,
+            "anchor_regex": "conline"
+          }
+        },
+        {
+          "path": "classic/src/dbl/Foundation/Defines/conhdra.def",
+          "grade": 2,
+          "kind": "source",
+          "facet": "classic-header-labels",
+          "rationale": "Classic field descriptions and labels; follow record includes for storage layout",
+          "verification": {
+            "sha256": "16b5060fdfef625aaa37527b87f0ce2f41a1662a0c46c6d476698db194592c3b",
+            "line_start": 150,
+            "line_end": 157,
+            "anchor_regex": "fldd_conhdra"
+          }
+        },
+        {
+          "path": "classic/src/dbl/Foundation/Defines/conline.def",
+          "grade": 2,
+          "kind": "source",
+          "facet": "classic-event-labels",
+          "rationale": "Classic Event UI field labels; not the storage record layout",
+          "verification": {
+            "sha256": "ba910667c8bbfdbd9874cc092f297e7c729d67d478aee67d967f6cb458cd49ae",
+            "line_start": 6,
+            "line_end": 13,
+            "anchor_regex": "fld"
+          }
+        },
+        {
+          "path": "classic/src/dbl/Foundation/Includes/conhdrap.dbl",
+          "grade": 3,
+          "kind": "source",
+          "facet": "classic-record-layout",
+          "rationale": "DBL Contract record field definition, complementing UI labels and Web schema",
+          "verification": {
+            "sha256": "06ea24710de5fca8f15de0fea4440e065c08f05739728ff2c28156bb95e7b1ab",
+            "line_start": 54,
+            "line_end": 61,
+            "anchor_regex": "co_value"
+          }
+        },
+        {
+          "path": "web/agent/packages/bc-agent-protocol/src/conversation/runtime-versions.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Agent runtime versions do not explain Classic table fields",
+          "verification": {
+            "sha256": "e43f3ace9a6d2d8c22e47a2c9e8877f4971526c11aa1af33809cdb3168718951",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "judgment_note": "Labels, record includes and generated Web schema provide complementary evidence; no claim that comments cover every table.",
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-09",
+      "split": "test",
+      "domain": "contracts/Classic rules",
+      "query": "What does \u201ccurrently at Event X\u201d mean? Find event ordering, registration state and lifecycle derivation rather than assuming the largest Event number is current.",
+      "answerability": "repository_navigation",
+      "source_family": "13a75485252d708c1162ba0de6a3aecf",
+      "derivation": "Section 1",
+      "source": {
+        "event_id": "13a75485252d708c1162ba0de6a3aecf:1:0",
+        "origin_label": "agent",
+        "event_role": "user",
+        "byte_offset": 0,
+        "byte_length": 3048,
+        "source_file_sha256": "f1d55a2d6abac550929efc01d3d9e268f396114129db5020adbf17608ee17e1d",
+        "source_role": "subagent",
+        "archive_agent": "claude",
+        "trace_id": "13a75485252d708c1162ba0de6a3aecf",
+        "line": 1,
+        "component_text_sha256": "4cde94c14b47de5fd7748f1bd6486bfeacc8e08a97040db35f62c89b485faf45"
+      },
+      "qrels": [
+        {
+          "path": "web/packages/db/src/schema/co-events.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "event-fields",
+          "rationale": "Event master and registration-line schema",
+          "verification": {
+            "sha256": "a47659ad08346429400047518ea7e842ad80c97e8e1f8cf54fed73b84c6f64ee",
+            "line_start": 98,
+            "line_end": 105,
+            "anchor_regex": "eventCodeMaster"
+          }
+        },
+        {
+          "path": "web/packages/contracts/src/headless/analytics/contract-aggregate-read.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "current-event-query",
+          "rationale": "Executable analytical Event predicates",
+          "verification": {
+            "sha256": "2949c5c2efcf4439453cc1149afd05f0affa4c2f7fbcd5c3016be0a9efc9a455",
+            "line_start": 2,
+            "line_end": 9,
+            "anchor_regex": "[Ee]vent"
+          }
+        },
+        {
+          "path": "docs/knowledge/modules/contracts/workflows/contract-stage-milestones.md",
+          "grade": 2,
+          "kind": "entrypoint_doc",
+          "facet": "milestone-rules",
+          "rationale": "Stage and Event milestone meaning",
+          "verification": {
+            "sha256": "c4ffdccdaf2f62647d2388fc890e8db94f69c08241b4b73658700cb85a1c664f",
+            "line_start": 1,
+            "line_end": 8,
+            "anchor_regex": "[Ss]tage"
+          }
+        },
+        {
+          "path": "classic/src/dbl/Foundation/Defines/conline.def",
+          "grade": 2,
+          "kind": "source",
+          "facet": "classic-event-labels",
+          "rationale": "Classic Event registration-related UI field definitions; corroborating context only",
+          "verification": {
+            "sha256": "ba910667c8bbfdbd9874cc092f297e7c729d67d478aee67d967f6cb458cd49ae",
+            "line_start": 12,
+            "line_end": 19,
+            "anchor_regex": "canreg"
+          }
+        },
+        {
+          "path": "web/packages/contracts/src/contract-finance.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Finance totals do not establish current Event ordering",
+          "verification": {
+            "sha256": "2d6242bccf3287367341d6b3b8570c4e3e99be2f3b56212b62cf520f68719cdb",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-10",
+      "split": "test",
+      "domain": "UI/security",
+      "query": "Where is CSV export authority enforced, and is exporting a grid equivalent to merely having read access?",
+      "answerability": "repository_navigation",
+      "source_family": "13a75485252d708c1162ba0de6a3aecf",
+      "derivation": "Section 4",
+      "source": {
+        "event_id": "13a75485252d708c1162ba0de6a3aecf:1:0",
+        "origin_label": "agent",
+        "event_role": "user",
+        "byte_offset": 0,
+        "byte_length": 3048,
+        "source_file_sha256": "f1d55a2d6abac550929efc01d3d9e268f396114129db5020adbf17608ee17e1d",
+        "source_role": "subagent",
+        "archive_agent": "claude",
+        "trace_id": "13a75485252d708c1162ba0de6a3aecf",
+        "line": 1,
+        "component_text_sha256": "4cde94c14b47de5fd7748f1bd6486bfeacc8e08a97040db35f62c89b485faf45"
+      },
+      "qrels": [
+        {
+          "path": "web/apps/web/lib/grids/csv-export.ts",
+          "grade": 2,
+          "kind": "source",
+          "facet": "export-flow",
+          "rationale": "Shared CSV export mechanics; callers still need authority review",
+          "verification": {
+            "sha256": "5366c673323ebf04cfbc4b259dd01863f13c5769ac810d833dc47140b965603f",
+            "line_start": 11,
+            "line_end": 18,
+            "anchor_regex": "exportCursorGridCsv"
+          }
+        },
+        {
+          "path": "web/apps/web/lib/grids/csv-export.test.ts",
+          "grade": 2,
+          "kind": "test",
+          "facet": "export-behavior",
+          "rationale": "CSV pagination/export behavior, not proof of authorization alone",
+          "verification": {
+            "sha256": "0832a3f3376025c4dd848cc2c966d54e9e1963488359a4f07636e9f55031bfd6",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "test"
+          }
+        },
+        {
+          "path": "docs/knowledge/internal/product/web-transaction-filter-and-export-source-map.md",
+          "grade": 2,
+          "kind": "entrypoint_doc",
+          "facet": "export-security-context",
+          "rationale": "Source map for export and transaction-filter integration",
+          "verification": {
+            "sha256": "2e2b1d6ac82f654df0535676642ff079b8401adc2572cb1c4fc7e5eb14307fbf",
+            "line_start": 1,
+            "line_end": 8,
+            "anchor_regex": "[Ee]xport"
+          }
+        },
+        {
+          "path": "web/packages/bc-grid/packages/filters/src/index.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Filter compilation does not grant export authority",
+          "verification": {
+            "sha256": "c108f470581ceb7f354d1084f757e91f813e894041cf38b79b1794c840267fcb",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "judgment_note": "CSV helper is mechanics, not proof of permission policy. Follow actual callers and security wrappers; authority adjudication is incomplete.",
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-11",
+      "split": "dev",
+      "domain": "SQL/provisioning",
+      "query": "Why can provisioning an empty qualification company fail on a missing Classic table? Find bootstrap schema and the Web provisioning/migration boundary.",
+      "answerability": "repository_navigation",
+      "source_family": "5937b13eb9a314b5855a6880bbe75150",
+      "derivation": "Navigation prerequisite of implementation assignment",
+      "source": {
+        "event_id": "5937b13eb9a314b5855a6880bbe75150:1:0",
+        "origin_label": "agent",
+        "event_role": "user",
+        "byte_offset": 0,
+        "byte_length": 5646,
+        "source_file_sha256": "1583eeca809964597aac20b6f993683b6a5e463b7c8f7685b0b91fb1aa27b595",
+        "source_role": "subagent",
+        "archive_agent": "claude",
+        "trace_id": "5937b13eb9a314b5855a6880bbe75150",
+        "line": 1,
+        "component_text_sha256": "e1f2a5f9cfd5c2dba233d853c4f0b8985050d094fb086cc296499945bea14485"
+      },
+      "qrels": [
+        {
+          "path": "web/scripts/provision-qualification-tenant.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "provision-company",
+          "rationale": "Qualification provisioning and bootstrap wiring",
+          "verification": {
+            "sha256": "20944384500eacecb2a033e3b3e5cb6f22ea38d78b8deb531230bf20065b0d6e",
+            "line_start": 59,
+            "line_end": 66,
+            "anchor_regex": "[Ss]chema"
+          }
+        },
+        {
+          "path": "classic/src/runtimes/dbl-sql/generated/tables.sql",
+          "grade": 3,
+          "kind": "source",
+          "facet": "classic-ddl",
+          "rationale": "Classic base schema required before company Web migrations",
+          "verification": {
+            "sha256": "1ad79d741edd09da2ed4febc1179b1552705a74a3167954529b352f81fda91b3",
+            "line_start": 1,
+            "line_end": 8,
+            "anchor_regex": "CREATE TABLE"
+          }
+        },
+        {
+          "path": "web/scripts/provision-qualification-tenant.test.ts",
+          "grade": 2,
+          "kind": "test",
+          "facet": "provision-contract",
+          "rationale": "Provisioning contract and failure coverage",
+          "verification": {
+            "sha256": "e3fa3d21dad3dd9aa8fd5a815f3bcfa64431c07c5d82fdcd992f72acaa3ee79a",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "test"
+          }
+        },
+        {
+          "path": "docs/web/bc-web-database-boundary.md",
+          "grade": 2,
+          "kind": "entrypoint_doc",
+          "facet": "db-boundary",
+          "rationale": "Explains Web-owned versus company schema boundary",
+          "verification": {
+            "sha256": "e839320c332c0da6550d914afb85c8be265bae03b39be25b205ccb705f3767b3",
+            "line_start": 43,
+            "line_end": 50,
+            "anchor_regex": "[Cc]ompany"
+          }
+        },
+        {
+          "path": "web/agent/packages/bc-agent-runtime/src/database.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Agent state transactions do not bootstrap ERP company schema",
+          "verification": {
+            "sha256": "405579f68edf8ac5ad6aa191638f9b71e3c19830c7086fd3ed7256ca57196b47",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-12",
+      "split": "test",
+      "domain": "SQL/Classic architecture",
+      "query": "Where are Classic SQL transaction and lock semantics implemented, and where is the authority boundary between company ERP databases and Web-owned data documented?",
+      "answerability": "repository_navigation",
+      "source_family": "63cfbad40e51387c5184e93f967c4803",
+      "derivation": "Repository constraints subset; historical PR excluded",
+      "source": {
+        "event_id": "63cfbad40e51387c5184e93f967c4803:6:0",
+        "origin_label": "human",
+        "event_role": "user",
+        "byte_offset": 975,
+        "byte_length": 944,
+        "source_file_sha256": "a493efd815815e36214b8b0babb149b1990efa3427d501cd00c4799d920008aa",
+        "source_role": "main",
+        "archive_agent": "pi",
+        "trace_id": "63cfbad40e51387c5184e93f967c4803",
+        "line": 6,
+        "component_text_sha256": "49e37e36a4753ded6aac90b7a4ce7a54f38b2a45f7f32487338cf1f4ca27aa4b"
+      },
+      "qrels": [
+        {
+          "path": "classic/src/runtimes/dbl-sql/src/ops/lock.rs",
+          "grade": 3,
+          "kind": "source",
+          "facet": "record-lock",
+          "rationale": "Classic SQL record-lock implementation",
+          "verification": {
+            "sha256": "faa5a764378f3850500fce3d59e1ad85e2260f7400ff2ac378124ae0e2d75c02",
+            "line_start": 75,
+            "line_end": 82,
+            "anchor_regex": "pub fn lock"
+          }
+        },
+        {
+          "path": "classic/src/runtimes/dbl-sql/src/db/postgres.rs",
+          "grade": 3,
+          "kind": "source",
+          "facet": "database-transaction",
+          "rationale": "PostgreSQL transaction and database behavior",
+          "verification": {
+            "sha256": "c00b9c2ec2fe69f3307ffa51f089fec874a00cce6b9676fa62237c50505da78a",
+            "line_start": 274,
+            "line_end": 281,
+            "anchor_regex": "[Tt]ransaction"
+          }
+        },
+        {
+          "path": "docs/web/bc-web-database-boundary.md",
+          "grade": 2,
+          "kind": "entrypoint_doc",
+          "facet": "ownership",
+          "rationale": "Data ownership boundary",
+          "verification": {
+            "sha256": "e839320c332c0da6550d914afb85c8be265bae03b39be25b205ccb705f3767b3",
+            "line_start": 43,
+            "line_end": 50,
+            "anchor_regex": "[Cc]ompany"
+          }
+        },
+        {
+          "path": "web/agent/packages/bc-agent-runtime/src/database.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Agent task advisory transactions are not Classic ERP lock semantics",
+          "verification": {
+            "sha256": "405579f68edf8ac5ad6aa191638f9b71e3c19830c7086fd3ed7256ca57196b47",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-13",
+      "split": "test",
+      "domain": "agent runtime",
+      "query": "After an Ask task completes, where can runtime-version-specific behavior still affect delivery, redisplay or a follow-up?",
+      "answerability": "repository_navigation",
+      "source_family": "0d4ffce0cb35163228bfadb1cdc395a3",
+      "derivation": "Whole navigation question",
+      "source": {
+        "event_id": "0d4ffce0cb35163228bfadb1cdc395a3:1:0",
+        "origin_label": "agent",
+        "event_role": "user",
+        "byte_offset": 0,
+        "byte_length": 2860,
+        "source_file_sha256": "af076eeaf586ae8f1631b62cb800b24fcf26daa0e7aaf2134bad1d0101c45f41",
+        "source_role": "subagent",
+        "archive_agent": "claude",
+        "trace_id": "0d4ffce0cb35163228bfadb1cdc395a3",
+        "line": 1,
+        "component_text_sha256": "104090340e6e4181675b4fdeda4935a55b75d94f40465dffb4674f9bc22a1ced"
+      },
+      "qrels": [
+        {
+          "path": "web/agent/packages/bc-agent-runtime/src/release.ts",
+          "grade": 2,
+          "kind": "source",
+          "facet": "release-identity",
+          "rationale": "Release identity and compatibility context",
+          "verification": {
+            "sha256": "2c2a3d6026d385947399df773299aa625c024b9e6a3311715a96b3a38e8d667b",
+            "line_start": 2,
+            "line_end": 9,
+            "anchor_regex": "export"
+          }
+        },
+        {
+          "path": "web/agent/packages/bc-agent-runtime/tests/unit/release.test.ts",
+          "grade": 2,
+          "kind": "test",
+          "facet": "release-behavior",
+          "rationale": "Release compatibility examples",
+          "verification": {
+            "sha256": "8be87340fa7ed5aee2dae0102f2d9d504cf02076f59710bb04c072fda070fae9",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "test"
+          }
+        },
+        {
+          "path": "web/agent/packages/bc-agent-protocol/src/conversation/runtime-versions.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "current-version-contract",
+          "rationale": "Current version schema/comparison entrypoint; historical helpers must not be assumed still present",
+          "verification": {
+            "sha256": "e43f3ace9a6d2d8c22e47a2c9e8877f4971526c11aa1af33809cdb3168718951",
+            "line_start": 74,
+            "line_end": 78,
+            "anchor_regex": "isCurrentRuntime"
+          }
+        },
+        {
+          "path": "web/packages/contracts/src/contract-lifecycle-definition.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Business Contract lifecycle is not an Agent task runtime version",
+          "verification": {
+            "sha256": "293abac2179c4facfe1268a86ca2f9cba85a114b43ac46b8771da0dfe718c151",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "judgment_note": "Current Web Agent sources inspected did not retain historical runtimeAtLeast/frozenRuntimes branch references. Relevant current schema/release sources are entrypoints for verifying that absence; do not assert redisplay branches still exist.",
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-14",
+      "split": "test",
+      "domain": "agent runtime/SQL",
+      "query": "Where should I investigate the Agent worker crashing when PostgreSQL drops an already checked-out connection, and what tests cover that failure?",
+      "answerability": "repository_navigation",
+      "source_family": "9bd82bcb6b46bf524071e65d907b012d",
+      "derivation": "Handover symptom; not current bug assertion",
+      "source": {
+        "event_id": "9bd82bcb6b46bf524071e65d907b012d:10:0",
+        "origin_label": "human",
+        "event_role": "user",
+        "byte_offset": 26250,
+        "byte_length": 8244,
+        "source_file_sha256": "0ee0adfc929108c8ec6ec155b9c6729ae4fa7b62cdff573eb17a89a958ed2fbe",
+        "source_role": "main",
+        "archive_agent": "pi",
+        "trace_id": "9bd82bcb6b46bf524071e65d907b012d",
+        "line": 10,
+        "component_text_sha256": "2e0dade1986f39058ade6a8809669f97a6e284170229efbffee671478913ad1c"
+      },
+      "qrels": [
+        {
+          "path": "web/agent/apps/bc-agent-service/tests/integration/database-outage.test.ts",
+          "grade": 3,
+          "kind": "test",
+          "facet": "outage-integration",
+          "rationale": "Real database-outage integration coverage",
+          "verification": {
+            "sha256": "2de87b12b89804d73110c69cafb14d339ddb462f7c89b50e6da1dfe85afa214c",
+            "line_start": 86,
+            "line_end": 93,
+            "anchor_regex": "[Cc]onnection"
+          }
+        },
+        {
+          "path": "web/agent/packages/bc-agent-runtime/tests/unit/database-transaction.test.ts",
+          "grade": 2,
+          "kind": "test",
+          "facet": "transaction-unit",
+          "rationale": "Task transaction failure behavior",
+          "verification": {
+            "sha256": "7a1580a1b4bb515e2d04b804048f7e89c41b935865c4732b745a6a53021f67bd",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "test"
+          }
+        },
+        {
+          "path": "web/agent/packages/bc-agent-backend/src/postgres-transport.ts",
+          "grade": 2,
+          "kind": "source",
+          "facet": "knowledge-postgres",
+          "rationale": "Related PostgreSQL transport lifetime and error handling",
+          "verification": {
+            "sha256": "ab5f658eab8982aeedbc1751eab56c104b5cd9423589eee95510ed3ff99a8327",
+            "line_start": 2,
+            "line_end": 9,
+            "anchor_regex": "[Ee]rror"
+          }
+        },
+        {
+          "path": "web/agent/packages/bc-agent-runtime/src/database.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "checked-out-transaction",
+          "rationale": "Checked-out transaction acquisition, rollback, error mapping and release",
+          "verification": {
+            "sha256": "405579f68edf8ac5ad6aa191638f9b71e3c19830c7086fd3ed7256ca57196b47",
+            "line_start": 80,
+            "line_end": 87,
+            "anchor_regex": "this.pool.connect"
+          }
+        },
+        {
+          "path": "web/agent/packages/bc-agent-runtime/src/thread-changes.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "connection-error-listener",
+          "rationale": "Explicit checked-out connection error listener on thread change path",
+          "verification": {
+            "sha256": "512105b20f0e1700cfe0c51671b3020a4effc53920e136d9d35247983dd68a80",
+            "line_start": 109,
+            "line_end": 116,
+            "anchor_regex": "client.on"
+          }
+        },
+        {
+          "path": "classic/src/runtimes/dbl-sql/src/db/postgres.rs",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Classic SQL connection implementation is not the Agent worker connection path",
+          "verification": {
+            "sha256": "c00b9c2ec2fe69f3307ffa51f089fec874a00cce6b9676fa62237c50505da78a",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "judgment_note": "Navigation based on an archived failure symptom; neither reproduces nor asserts the defect exists now.",
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-15",
+      "split": "dev",
+      "domain": "agent configuration",
+      "query": "Where are worker, gateway and Web Ask settings parsed and validated now? Find typed environment configuration rather than assuming old JSON profiles remain authoritative.",
+      "answerability": "repository_navigation",
+      "source_family": "431323c334886dd8f08edc3d6cc8c574",
+      "derivation": "Configuration migration converted to navigation",
+      "source": {
+        "event_id": "431323c334886dd8f08edc3d6cc8c574:1:0",
+        "origin_label": "agent",
+        "event_role": "user",
+        "byte_offset": 0,
+        "byte_length": 9735,
+        "source_file_sha256": "d22f543e3c2e6d4c4eff548a509e97b5c2f3183eefc36da6454dd98d751edaf1",
+        "source_role": "subagent",
+        "archive_agent": "claude",
+        "trace_id": "431323c334886dd8f08edc3d6cc8c574",
+        "line": 1,
+        "component_text_sha256": "f4a53fd35d1a4a726b715cf5108be2ec4eb6566b43b76c09d7b31957474c69f1"
+      },
+      "qrels": [
+        {
+          "path": "web/agent/apps/bc-agent-service/src/environment-configuration.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "process-config",
+          "rationale": "Typed worker and gateway environment composition",
+          "verification": {
+            "sha256": "adfe6dff5804827f72b02173de4155e7a6322aca85bcf9e05d89b7b36563835a",
+            "line_start": 56,
+            "line_end": 63,
+            "anchor_regex": "composeWorkerConfiguration"
+          }
+        },
+        {
+          "path": "web/apps/web/lib/agent/bc-agent-runtime-configuration.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "web-config",
+          "rationale": "Web Ask runtime configuration adapter",
+          "verification": {
+            "sha256": "19a3d9bfb8fd0f82e797578b7e573c355f50a61747aceabb03d07578e6a9f9ff",
+            "line_start": 1,
+            "line_end": 7,
+            "anchor_regex": "export"
+          }
+        },
+        {
+          "path": "web/agent/apps/bc-agent-service/src/configuration-variables.ts",
+          "grade": 2,
+          "kind": "source",
+          "facet": "variable-catalogue",
+          "rationale": "Named process configuration variables",
+          "verification": {
+            "sha256": "e4f15da61e83408b9253d96e64f9a94fc75ede30d0fa5a1c59e466de8a2344ca",
+            "line_start": 3,
+            "line_end": 10,
+            "anchor_regex": "export"
+          }
+        },
+        {
+          "path": "docs/engineering/businesscraft-agent/local-development.md",
+          "grade": 2,
+          "kind": "entrypoint_doc",
+          "facet": "local-setup",
+          "rationale": "Development setup routing; verify current code before operational use",
+          "verification": {
+            "sha256": "f7dcea1a71381a2bc3933d9e19f4364bb168488919d92734506a586ede07b889",
+            "line_start": 4,
+            "line_end": 11,
+            "anchor_regex": "[Cc]onfig"
+          }
+        },
+        {
+          "path": "web/packages/nav/src/modules.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Menu configuration is not Agent worker/gateway environment composition",
+          "verification": {
+            "sha256": "b1ad9dd7ef3bd30f101b4953994ae29936504ef2bfecc776e064d638f58f98d8",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-16",
+      "split": "test",
+      "domain": "CI/release",
+      "query": "Which workflows and directly invoked code build a Web release and move it through dev and staging, including deployment safety controls?",
+      "answerability": "repository_navigation",
+      "source_family": "d58755ed777433c7d5107e487fbc3032",
+      "derivation": "Discovery-group scope; current checkout only",
+      "source": {
+        "event_id": "d58755ed777433c7d5107e487fbc3032:6:0",
+        "origin_label": "human",
+        "event_role": "user",
+        "byte_offset": 984,
+        "byte_length": 932,
+        "source_file_sha256": "354664d51ae10dcc636668a59f920ac2e90c69e07629a6fa0ae1d7713420eac2",
+        "source_role": "main",
+        "archive_agent": "pi",
+        "trace_id": "d58755ed777433c7d5107e487fbc3032",
+        "line": 6,
+        "component_text_sha256": "905e1f5b401e2119853e8791fd5ee19a5eb892069cb8f77414a49b5463d01f57"
+      },
+      "qrels": [
+        {
+          "path": ".github/workflows/web-release.yaml",
+          "grade": 3,
+          "kind": "source",
+          "facet": "release-workflow",
+          "rationale": "Release orchestration workflow",
+          "verification": {
+            "sha256": "5f12e7ed3594919d3a670a917c1c4cbc240ac26e761c060f0ca22aeaf5d7b71f",
+            "line_start": 34,
+            "line_end": 41,
+            "anchor_regex": "jobs:"
+          }
+        },
+        {
+          "path": ".github/workflows/web-deploy-env.yaml",
+          "grade": 3,
+          "kind": "source",
+          "facet": "deploy-workflow",
+          "rationale": "Reusable environment deployment and controls",
+          "verification": {
+            "sha256": "3cb05d98a90aec3fc3728e9ac51cfe2bbac99263aa431d1c62dca690e7e56786",
+            "line_start": 160,
+            "line_end": 167,
+            "anchor_regex": "jobs:"
+          }
+        },
+        {
+          "path": "tools/ci/src/deploy/migration-admission.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "migration-admission",
+          "rationale": "Concrete deployment safety implementation",
+          "verification": {
+            "sha256": "5396aac8a1bffadfd5bd75cb71108615d5c7ef59cf7b26fa015b51b4210dad24",
+            "line_start": 8,
+            "line_end": 15,
+            "anchor_regex": "export"
+          }
+        },
+        {
+          "path": "docs/devops/dev-staging-cicd.md",
+          "grade": 2,
+          "kind": "entrypoint_doc",
+          "facet": "delivery-map",
+          "rationale": "Human entrypoint to current delivery flow",
+          "verification": {
+            "sha256": "c50c55b286e7caba3ee00876e76241fc5775ba20e6db60c63954cb2ad05ae508",
+            "line_start": 14,
+            "line_end": 21,
+            "anchor_regex": "[Rr]elease"
+          }
+        },
+        {
+          "path": "classic/src/runtimes/dbl-sql/src/cli/codegen.rs",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Classic schema codegen is not the Web release graph",
+          "verification": {
+            "sha256": "e0c01de8a087b62b3fea250b25b850bfc6e5e6ed1a8bda7c354d907cb09046ba",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-17",
+      "split": "dev",
+      "domain": "CI/testing",
+      "query": "Where are deployed smoke and browser E2E suites selected and run, and which release gates depend on them?",
+      "answerability": "repository_navigation",
+      "source_family": "8be78a65e3003d97ae3481c727ce66b0",
+      "derivation": "Suite/trigger mapping subset",
+      "source": {
+        "event_id": "8be78a65e3003d97ae3481c727ce66b0:6:0",
+        "origin_label": "human",
+        "event_role": "user",
+        "byte_offset": 984,
+        "byte_length": 870,
+        "source_file_sha256": "84b5c4413e7f6aeaf1503b3f2d98fa2036642c9f97434e054a1d78ef91208274",
+        "source_role": "main",
+        "archive_agent": "pi",
+        "trace_id": "8be78a65e3003d97ae3481c727ce66b0",
+        "line": 6,
+        "component_text_sha256": "0a5bcf80ad0ffdd315ed5978e3f223c7cf19eec4d2493ab159fe1f57cf1c3e73"
+      },
+      "qrels": [
+        {
+          "path": ".github/workflows/web-acceptance.yaml",
+          "grade": 3,
+          "kind": "source",
+          "facet": "acceptance-workflow",
+          "rationale": "Acceptance selection and execution orchestration",
+          "verification": {
+            "sha256": "a43b22fe7cafc25d5f6c29c00504b337ca6b7d4bbfc686d449b51a1fd3c972b0",
+            "line_start": 33,
+            "line_end": 40,
+            "anchor_regex": "jobs:"
+          }
+        },
+        {
+          "path": "web/apps/web/playwright.config.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "browser-config",
+          "rationale": "Browser suite configuration",
+          "verification": {
+            "sha256": "c48b6fc56dc2195c1023b0c49c0afea4e08384be8463b782f31ca19b3ea9c9a3",
+            "line_start": 1,
+            "line_end": 8,
+            "anchor_regex": "defineConfig"
+          }
+        },
+        {
+          "path": "tools/ci/src/deploy/playwright-smoke.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "smoke-runner",
+          "rationale": "Deployed Playwright smoke implementation",
+          "verification": {
+            "sha256": "24345f265ad6417b455e62761add64fb3899df979e615fe22f4f9d0d54404c08",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "export"
+          }
+        },
+        {
+          "path": ".github/workflows/web-deploy-env.yaml",
+          "grade": 2,
+          "kind": "source",
+          "facet": "release-gate",
+          "rationale": "Smoke placement in deployment gates",
+          "verification": {
+            "sha256": "3cb05d98a90aec3fc3728e9ac51cfe2bbac99263aa431d1c62dca690e7e56786",
+            "line_start": 39,
+            "line_end": 46,
+            "anchor_regex": "[Ss]moke"
+          }
+        },
+        {
+          "path": "web/packages/contracts/tests/contract-finance.test.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Domain unit tests are not deployed smoke/E2E selection",
+          "verification": {
+            "sha256": "38158aead2387d64845e6e7e56e0e2c3b87f138cec963b23565a85df76763f80",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-18",
+      "split": "test",
+      "domain": "external architecture",
+      "query": "Using first-party Azure documentation, establish regional PostgreSQL availability and whether private-network modes allow an on-premises logical replication publisher. Can repository files alone establish these current service facts?",
+      "answerability": "external_evidence_required",
+      "source_family": "66f3a82c38878b73981c43e08007972e",
+      "derivation": "External-doc-only assignment; repository sufficiency question added",
+      "source": {
+        "event_id": "66f3a82c38878b73981c43e08007972e:5:0",
+        "origin_label": "human",
+        "event_role": "user",
+        "byte_offset": 721,
+        "byte_length": 992,
+        "source_file_sha256": "86b60b33629a514fde56028b7e052d9ef05d7e2c78117c436d4c74cb6242c737",
+        "source_role": "main",
+        "archive_agent": "pi",
+        "trace_id": "66f3a82c38878b73981c43e08007972e",
+        "line": 5,
+        "component_text_sha256": "be049293cb27aebb19df3ec39f0fe81861199707f55656096a4d87c78eb2f10e"
+      },
+      "qrels": [
+        {
+          "path": "classic/src/runtimes/dbl-sql/src/db/postgres.rs",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "PostgreSQL client implementation cannot establish current Azure managed-service availability/network guarantees",
+          "verification": {
+            "sha256": "c00b9c2ec2fe69f3307ffa51f089fec874a00cce6b9676fa62237c50505da78a",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        },
+        {
+          "path": "docs/web/bc-web-database-boundary.md",
+          "grade": 0,
+          "kind": "entrypoint_doc",
+          "facet": "non-authoritative-local-proposal",
+          "rationale": "Repository ownership documentation is not first-party Azure service evidence",
+          "verification": {
+            "sha256": "e839320c332c0da6550d914afb85c8be265bae03b39be25b205ccb705f3767b3",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "judgment_note": "Expected action: abstain from authoritative repository-only answer and request current first-party Azure evidence. Do not infer a service guarantee from local desired topology.",
+      "multi_hop": false,
+      "expected_action": "abstain_and_request_external_evidence"
+    },
+    {
+      "id": "bcnav-19",
+      "split": "dev",
+      "domain": "Classic automation",
+      "query": "Where does Classic automation resolve approved local fixtures and perform compensation, and which tests protect behavior during refactoring?",
+      "answerability": "repository_navigation",
+      "source_family": "177ba348fc44bf01d5e1d75ba3292339",
+      "derivation": "Fixture-provider review subset",
+      "source": {
+        "event_id": "177ba348fc44bf01d5e1d75ba3292339:1:0",
+        "origin_label": "agent",
+        "event_role": "user",
+        "byte_offset": 0,
+        "byte_length": 2721,
+        "source_file_sha256": "9ebeec2e3d78323ef263734e76eaaeea53d792e230c001c456c19c71e60d7d06",
+        "source_role": "subagent",
+        "archive_agent": "claude",
+        "trace_id": "177ba348fc44bf01d5e1d75ba3292339",
+        "line": 1,
+        "component_text_sha256": "74e5281cfd20082f537161088f0d553380984be8a88104c4f706aa921b03c98b"
+      },
+      "qrels": [
+        {
+          "path": "web/agent/packages/knowledge-automation/src/approved-local-fixture-provider.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "fixture-provider",
+          "rationale": "Fixture selection, resolver and compensation logic",
+          "verification": {
+            "sha256": "68851aa2b2e38f2ee3f2e05692ace7860e36deb98312735dfbc11317a4c567b6",
+            "line_start": 789,
+            "line_end": 796,
+            "anchor_regex": "[Cc]ompensat"
+          }
+        },
+        {
+          "path": "web/agent/packages/knowledge-automation/tests/approved-local-fixture-provider.test.ts",
+          "grade": 3,
+          "kind": "test",
+          "facet": "fixture-behavior",
+          "rationale": "Observable provider behavior and compensation tests",
+          "verification": {
+            "sha256": "fad5d4fb98d458d2550e4a03ba8a39c86efda934ce9e649dbc87f4593374b888",
+            "line_start": 3001,
+            "line_end": 3008,
+            "anchor_regex": "[Cc]ompensat"
+          }
+        },
+        {
+          "path": "web/agent/packages/knowledge-automation/src/windows-approved-local-fixture-runtime.ts",
+          "grade": 2,
+          "kind": "source",
+          "facet": "windows-runtime",
+          "rationale": "Windows execution adapter for approved fixtures",
+          "verification": {
+            "sha256": "1a35767a0827d95317a00506b4e891424bf03009825e5ed2c2ad1de222c454d5",
+            "line_start": 146,
+            "line_end": 153,
+            "anchor_regex": "export"
+          }
+        },
+        {
+          "path": "web/agent/packages/bc-agent-backend/src/postgres-transport.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Agent knowledge transport is not approved Classic fixture compensation",
+          "verification": {
+            "sha256": "ab5f658eab8982aeedbc1751eab56c104b5cd9423589eee95510ed3ff99a8327",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    },
+    {
+      "id": "bcnav-20",
+      "split": "test",
+      "domain": "agent runtime/CI",
+      "query": "Where are tool replay safety policies enforced, and where are workflow replay and crash/unknown-outcome scenarios tested and gated?",
+      "answerability": "repository_navigation",
+      "source_family": "54d5f2e5da31b004d396ede9b2de930b",
+      "derivation": "Navigation prerequisite of replay assignment",
+      "source": {
+        "event_id": "54d5f2e5da31b004d396ede9b2de930b:1:0",
+        "origin_label": "agent",
+        "event_role": "user",
+        "byte_offset": 0,
+        "byte_length": 3710,
+        "source_file_sha256": "3d6add887c768950f6164753f376320d338deabb0afad4ffca60c274428f29a6",
+        "source_role": "subagent",
+        "archive_agent": "claude",
+        "trace_id": "54d5f2e5da31b004d396ede9b2de930b",
+        "line": 1,
+        "component_text_sha256": "8c656a1983fa38afc7c0ae8077d3d98d85948bd1327bdeb4bf849fbc31fe21bd"
+      },
+      "qrels": [
+        {
+          "path": "web/agent/apps/bc-agent-service/src/workflows.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "workflow",
+          "rationale": "Durable workflow replay implementation",
+          "verification": {
+            "sha256": "53fb7791cb3479acaecea7cdc9c56afad05fc930a28d7d9b34d07c6336f5e5e3",
+            "line_start": 40,
+            "line_end": 47,
+            "anchor_regex": "[Rr]eplay"
+          }
+        },
+        {
+          "path": "web/agent/apps/bc-agent-service/tests/unit/workflow-replay.test.ts",
+          "grade": 3,
+          "kind": "test",
+          "facet": "replay-test",
+          "rationale": "Replay regression test entrypoint",
+          "verification": {
+            "sha256": "7511d9a78a9f9cf343780177c44aad839bb0e30f5848c88072c82f97ccbe4aa2",
+            "line_start": 18,
+            "line_end": 25,
+            "anchor_regex": "[Rr]eplay"
+          }
+        },
+        {
+          "path": "web/agent/packages/bc-agent-runtime/src/capabilities/reads/tools.ts",
+          "grade": 2,
+          "kind": "source",
+          "facet": "read-policy",
+          "rationale": "Replay policy assigned to read tools",
+          "verification": {
+            "sha256": "0474a53ec797fd6ba418b425d246d5b4cfb780e642682ebef020ec826bf6a874",
+            "line_start": 72,
+            "line_end": 79,
+            "anchor_regex": "replay"
+          }
+        },
+        {
+          "path": "web/agent/apps/bc-agent-service/src/activities.ts",
+          "grade": 3,
+          "kind": "source",
+          "facet": "replay-enforcement",
+          "rationale": "Activity-layer safe replay handling; current descriptor contract is not in historical capabilities registry",
+          "verification": {
+            "sha256": "8e2dd3f52eb581f66f09067d0d8dc9b4ab3fd5d76c73b5583a529cdaa7e7e273",
+            "line_start": 1543,
+            "line_end": 1550,
+            "anchor_regex": "replaySafeReadResult"
+          }
+        },
+        {
+          "path": "web/agent/packages/bc-agent-protocol/src/conversation/capabilities.ts",
+          "grade": 0,
+          "kind": "source",
+          "facet": "plausible-negative",
+          "rationale": "Current capability registry does not itself declare or enforce tool replay safety",
+          "verification": {
+            "sha256": "cd2d131bad1abee8e0727d7bc50d517099a50e8a7970e0bcb5cb33b14d7ca763",
+            "line_start": 1,
+            "line_end": 6,
+            "anchor_regex": "."
+          }
+        }
+      ],
+      "judgment_note": "Historical capabilities.ts location is a negative for current replay declarations; inspect read-tool descriptors and activity implementation.",
+      "multi_hop": true,
+      "expected_action": "return_ranked_entrypoints_with_reasons"
+    }
+  ],
+  "qrel_policy": {
+    "grades": {
+      "3": "direct implementation, behavioral proof or authoritative contract answering a major facet",
+      "2": "useful entrypoint or supporting implementation/test",
+      "1": "context only; insufficient alone",
+      "0": "plausible but non-answering for this task"
+    },
+    "kinds": [
+      "source",
+      "test",
+      "entrypoint_doc"
+    ],
+    "closed_world": false,
+    "path_match": "exact repo-relative file for automatic qrel lookup; unjudged paths are unknown, not irrelevant",
+    "success": "Alternative relevant paths accepted; no requirement to retrieve every qrel. Multi-hop facet coverage is separate from first-entrypoint success.",
+    "verification": "Current working-tree files read and regex anchors checked; hashes cover full bytes. Line windows are navigation spot checks, not exhaustive behavioral verification."
+  },
+  "provenance_inputs": {
+    "tools/analytics/README.md": "abb7b0998f70fcfb8f01b09ed1ab9967c7aac8168bc0826dce335243dc6b2235",
+    ".analytics/report/discovery-groups.json": "0e40e6254fbaae6c1a7da8d24b0a6450d9cc87e5194b146b8749b11f2f20f19b"
+  },
+  "target_snapshot_note": "HEAD plus working tree inspected; pre-existing dirty staging tfvars and untracked .pi/docs audit paths were not used as qrels. Every judged file has its own content hash."
+}

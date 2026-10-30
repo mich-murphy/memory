@@ -1,0 +1,60 @@
+{
+  "query": "purchase order terms setup",
+  "measurements": [
+    {
+      "strict": false,
+      "repeat": 0,
+      "exit": 0,
+      "wall_seconds": 2.6804007499595173,
+      "output_bytes": 2139,
+      "freshness_seconds": 2.556055,
+      "retrieval_seconds": 0.05227
+    },
+    {
+      "strict": false,
+      "repeat": 1,
+      "exit": 0,
+      "wall_seconds": 2.685909458959941,
+      "output_bytes": 2140,
+      "freshness_seconds": 2.562842,
+      "retrieval_seconds": 0.048457
+    },
+    {
+      "strict": false,
+      "repeat": 2,
+      "exit": 0,
+      "wall_seconds": 2.6613188330084085,
+      "output_bytes": 2139,
+      "freshness_seconds": 2.54152,
+      "retrieval_seconds": 0.049666
+    },
+    {
+      "strict": true,
+      "repeat": 0,
+      "exit": 0,
+      "wall_seconds": 6.157645084022079,
+      "output_bytes": 2124,
+      "freshness_seconds": 6.038183,
+      "retrieval_seconds": 0.047509
+    },
+    {
+      "strict": true,
+      "repeat": 1,
+      "exit": 0,
+      "wall_seconds": 6.170340790995397,
+      "output_bytes": 2124,
+      "freshness_seconds": 6.053091,
+      "retrieval_seconds": 0.047862
+    },
+    {
+      "strict": true,
+      "repeat": 2,
+      "exit": 0,
+      "wall_seconds": 6.099822374992073,
+      "output_bytes": 2124,
+      "freshness_seconds": 5.978497,
+      "retrieval_seconds": 0.048318
+    }
+  ],
+  "note": "Generic pre-optimization timing; preserved before any further runtime adjustments."
+}

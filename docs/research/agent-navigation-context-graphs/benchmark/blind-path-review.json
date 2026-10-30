@@ -1,0 +1,1065 @@
+{
+  "review_policy": {
+    "purpose": "Independent condition-blinded supplementary post-outcome file-location adjudication; not a new heldout test. Frozen qrels and results are unchanged.",
+    "inputs_read": [
+      "blind-path-review-input.json",
+      "Actual candidate source/documentation files under /Users/mm/businesscraft/businesscraft"
+    ],
+    "blinding": "No pilot results, registry, task qrels, benchmark outcomes, agent sessions or navigation prototype algorithms were read. Candidate condition identities were unavailable.",
+    "question": "Is the candidate a useful current entrypoint to answer any material part of its query, not whether it independently proves all behavior?",
+    "grades": {
+      "3": "Direct implementation, test, authoritative definition or directly targeted current rule/documentation.",
+      "2": "Supporting entrypoint, source map, actual routing/delegation or context that bridges a relevant facet.",
+      "0": "Clearly irrelevant to all material query facets.",
+      "null": "Unknown when inspection cannot establish relevance; never force a grade."
+    },
+    "evidence": "Inclusive 1-based lines from bounded inspected spans; SHA-256 of complete raw file bytes at review time. Grade reflects location relevance, not certification of documented claims.",
+    "excluded": "No symlink files/ancestors, AGENTS instructions or skills loaded."
+  },
+  "judgments": [
+    {
+      "task_id": "bcnav-03",
+      "path": "classic/src/dbl/Foundation/Defines/rd222a.def",
+      "grade": 3,
+      "facet": "Classic fields",
+      "reason": "Classic header explicitly defines original value ex GST and Variation amount; direct schema entrypoint, not itself the full Finance calculation.",
+      "evidence": {
+        "line_start": 33,
+        "line_end": 41,
+        "sha256": "7cea0eed4dc4838cdd7365200fa56c41b77c800acf96068ded446ccd37c9a429"
+      }
+    },
+    {
+      "task_id": "bcnav-03",
+      "path": "web/agent/packages/bc-model/content/contracts/analytical-counts.rules.ts",
+      "grade": 2,
+      "facet": "aggregate Finance bridge",
+      "reason": "Money rule connects current value to original plus approved Variations, named GST fields and shared Finance helpers.",
+      "evidence": {
+        "line_start": 39,
+        "line_end": 48,
+        "sha256": "9a30d36a8ec7f268d8f684ed462f4359865ff3bf11b7c6945c8e4747c3ad96c4"
+      }
+    },
+    {
+      "task_id": "bcnav-03",
+      "path": "web/agent/packages/bc-model/content/contracts/finance-summary.rules.ts",
+      "grade": 3,
+      "facet": "Finance rules",
+      "reason": "Rule states original plus approved Variations and separate ex/GST/inc components, with Classic source links.",
+      "evidence": {
+        "line_start": 91,
+        "line_end": 105,
+        "sha256": "bc1c16500613846c3a0aac490e5e7509243463d0d7bec5ed9234957f144dd9d2"
+      }
+    },
+    {
+      "task_id": "bcnav-03",
+      "path": "web/packages/contracts/src/contract-billing-schedule.ts",
+      "grade": 2,
+      "facet": "billing projection",
+      "reason": "Shared billing projection explicitly feeds Finance; supporting entrypoint, not the owner of revised header value.",
+      "evidence": {
+        "line_start": 110,
+        "line_end": 115,
+        "sha256": "81eff236845425c82dd7132a9d15660b8ba9d223f5e57e9a22c2e8dedf8082db"
+      }
+    },
+    {
+      "task_id": "bcnav-03",
+      "path": "web/packages/contracts/src/contract-finance-repository.ts",
+      "grade": 3,
+      "facet": "Finance source read",
+      "reason": "Reads original value/GST and approved Variation value/GST directly from Contract header.",
+      "evidence": {
+        "line_start": 216,
+        "line_end": 233,
+        "sha256": "ce7f4c55bb656386403522b6b94d20c9b61a71bdb8f4e8a81a032c548ae63aa2"
+      }
+    },
+    {
+      "task_id": "bcnav-03",
+      "path": "web/packages/contracts/src/contract-finance.ts",
+      "grade": 3,
+      "facet": "Finance calculation",
+      "reason": "Builds separate money breakdowns and sums original plus approved Variations into current value.",
+      "evidence": {
+        "line_start": 237,
+        "line_end": 260,
+        "sha256": "2d6242bccf3287367341d6b3b8570c4e3e99be2f3b56212b62cf520f68719cdb"
+      }
+    },
+    {
+      "task_id": "bcnav-03",
+      "path": "web/packages/contracts/src/contract-money.ts",
+      "grade": 3,
+      "facet": "GST representation",
+      "reason": "Implements shared ex/GST/inc breakdown and including-GST addition; directly answers component basis, not tax-rate selection.",
+      "evidence": {
+        "line_start": 3,
+        "line_end": 19,
+        "sha256": "973649d06f7f2925cf3250800f1928675e222642796cb82b839b0a08c9e0cc98"
+      }
+    },
+    {
+      "task_id": "bcnav-04",
+      "path": "web/agent/packages/bc-agent-runtime/src/ingress.ts",
+      "grade": 2,
+      "facet": "redisplayed evidence bridge",
+      "reason": "Live citation path invokes source-owner inspect after the private read for fresh ERP authority; generic delegate, not Finance-specific gate.",
+      "evidence": {
+        "line_start": 985,
+        "line_end": 1000,
+        "sha256": "cdf1128dacd719db6eda1fbc7cb1a5ea2c0356ad60f2200871ab50e02585d704"
+      }
+    },
+    {
+      "task_id": "bcnav-04",
+      "path": "web/apps/web/lib/agent/bc-agent-contract-aggregate.ts",
+      "grade": 3,
+      "facet": "aggregate gate",
+      "reason": "Determines Finance requirement for money measure and requires Contract Finance before aggregate reading.",
+      "evidence": {
+        "line_start": 39,
+        "line_end": 46,
+        "sha256": "bd7a3b48cd59e57e52d5fb5f6fb176f35d1e538511efb4a94918a06daef0e221"
+      }
+    },
+    {
+      "task_id": "bcnav-04",
+      "path": "web/apps/web/lib/agent/bc-agent-contract-milestones.ts",
+      "grade": 3,
+      "facet": "milestone disclosure",
+      "reason": "Rechecks authority and nulls Contract value without Finance while retaining Event amounts.",
+      "evidence": {
+        "line_start": 229,
+        "line_end": 255,
+        "sha256": "fea5340e58f3976b492073d9ae5c5036d48461ef51dfa4c6c01e8c2e6fa97e3b"
+      }
+    },
+    {
+      "task_id": "bcnav-04",
+      "path": "web/apps/web/lib/agent/bc-agent-contract-summary-authority.ts",
+      "grade": 3,
+      "facet": "Finance route authority",
+      "reason": "Resolves Finance route metadata and checks runtime menu access; direct shared gate.",
+      "evidence": {
+        "line_start": 16,
+        "line_end": 33,
+        "sha256": "b3f687698888d652f9cd16f1f85c8a48989b0cff04c5fcbb4a857e2dbbc4448e"
+      }
+    },
+    {
+      "task_id": "bcnav-04",
+      "path": "web/apps/web/lib/agent/bc-agent-contract-summary.test.ts",
+      "grade": 3,
+      "facet": "Finance denial tests",
+      "reason": "Tests pre-read refusal, milestone withholding and saved evidence refusal after Finance is removed.",
+      "evidence": {
+        "line_start": 254,
+        "line_end": 317,
+        "sha256": "6243001e950e4c2aa8d3b7735c609fb3536725707f73438a17d0959c103199db"
+      }
+    },
+    {
+      "task_id": "bcnav-04",
+      "path": "web/apps/web/lib/agent/bc-agent-contract-values.ts",
+      "grade": 3,
+      "facet": "Contract value gate",
+      "reason": "Refuses without Finance and checks authority again after reading.",
+      "evidence": {
+        "line_start": 103,
+        "line_end": 117,
+        "sha256": "7dd235b13fbc58d71e0921c6ce92cddb7303331839cdb7405d36731bb5ddc9bf"
+      }
+    },
+    {
+      "task_id": "bcnav-04",
+      "path": "web/apps/web/lib/agent/bc-agent-records.ts",
+      "grade": 3,
+      "facet": "capability catalogue",
+      "reason": "Adds Contract value entity only after Contract and Finance catalogue authority checks; milestones remain separately offered.",
+      "evidence": {
+        "line_start": 551,
+        "line_end": 566,
+        "sha256": "adcb09864a97b0ffb8f9f4855141d00700500ba25d080df862c662e2ac689207"
+      }
+    },
+    {
+      "task_id": "bcnav-05",
+      "path": "docs/knowledge/modules/contracts/residential-building-lifecycle.md",
+      "grade": 2,
+      "facet": "business lifecycle context",
+      "reason": "Describes Contract/customer creation followed by Job construction costs; useful conceptual bridge rather than address filter implementation.",
+      "evidence": {
+        "line_start": 59,
+        "line_end": 80,
+        "sha256": "e35e9f2a9d1c75594adbc2e1ee3e8c1307c43b772aea73213be7e229b08b1b75"
+      }
+    },
+    {
+      "task_id": "bcnav-05",
+      "path": "web/packages/contracts/src/headless/analytics/contract-aggregate-read.ts",
+      "grade": 3,
+      "facet": "Contract site geography",
+      "reason": "Address dimensions explicitly use Contract city/state/zip rather than Customer columns.",
+      "evidence": {
+        "line_start": 125,
+        "line_end": 130,
+        "sha256": "2949c5c2efcf4439453cc1149afd05f0affa4c2f7fbcd5c3016be0a9efc9a455"
+      }
+    },
+    {
+      "task_id": "bcnav-05",
+      "path": "web/packages/contracts/src/headless/analytics/contract-aggregate.ts",
+      "grade": 3,
+      "facet": "geography versus lifecycle schema",
+      "reason": "Defines address dimensions separately from open/closed/cancelled/unknown lifecycle.",
+      "evidence": {
+        "line_start": 3,
+        "line_end": 20,
+        "sha256": "b1173269e2a021e18d836d628f95847242e906f85b7e112a75f81c6d4b984be0"
+      }
+    },
+    {
+      "task_id": "bcnav-05",
+      "path": "web/packages/contracts/src/headless/contract-closure.ts",
+      "grade": 3,
+      "facet": "lifecycle derivation",
+      "reason": "Computes cancellation then configured Close Event actual-date closure, with missing setup unknown.",
+      "evidence": {
+        "line_start": 29,
+        "line_end": 42,
+        "sha256": "149ae5c21fd5f8b280c6b73709af15928a08344864e0476a92d7c927c8d9e276"
+      }
+    },
+    {
+      "task_id": "bcnav-05",
+      "path": "web/packages/db/src/schema/ar-customer.ts",
+      "grade": 3,
+      "facet": "customer geography",
+      "reason": "Customer city/state/postcode columns establish the distinct customer address source.",
+      "evidence": {
+        "line_start": 45,
+        "line_end": 50,
+        "sha256": "992c9da0bd4a282a4d1957995adedcfc7af4d5b36ab7bf6cec2db3804470ee7c"
+      }
+    },
+    {
+      "task_id": "bcnav-05",
+      "path": "web/packages/db/src/schema/co-contracts.ts",
+      "grade": 3,
+      "facet": "Contract geography",
+      "reason": "Contract city/state/zip source differs from customer schema; useful direct schema entrypoint.",
+      "evidence": {
+        "line_start": 30,
+        "line_end": 33,
+        "sha256": "75b3beca97340cc73c4359fb0ca85432f9c5de5e0c5cc0060aee9a9872ad0f48"
+      }
+    },
+    {
+      "task_id": "bcnav-05",
+      "path": "web/packages/db/src/schema/jc-jobs.ts",
+      "grade": 3,
+      "facet": "Job identity/status",
+      "reason": "Defines Job master address lines, Job status and completion date; Job is a distinct entity, not Contract state.",
+      "evidence": {
+        "line_start": 29,
+        "line_end": 55,
+        "sha256": "cee186d5ed4c54281d9fa82da50b023dd74e92337a992e893c88469ab6fe5754"
+      }
+    },
+    {
+      "task_id": "bcnav-05",
+      "path": "web/packages/job-costing/src/jobs/read-repository.ts",
+      "grade": 3,
+      "facet": "Job versus Contract read",
+      "reason": "Job detail selects Job address/status and a separate Contract link, clarifying entity distinctions.",
+      "evidence": {
+        "line_start": 60,
+        "line_end": 78,
+        "sha256": "391960a0cd9bd4f8d4b24cbc00b2536a40eb3dc0585db327471b5933988a49dd"
+      }
+    },
+    {
+      "task_id": "bcnav-06",
+      "path": "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/estimates/[section]/[department]/[costCentre]/page.tsx",
+      "grade": 2,
+      "facet": "detail route redirect",
+      "reason": "Route decodes Job and estimate section selection into destination; useful routing entrypoint, not a separate estimate implementation.",
+      "evidence": {
+        "line_start": 24,
+        "line_end": 29,
+        "sha256": "1d994441ca8d79fb30867b46a428da7af508264ff0b423a6ff658c0f33ad9a3c"
+      }
+    },
+    {
+      "task_id": "bcnav-06",
+      "path": "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/estimates/estimates-data.ts",
+      "grade": 3,
+      "facet": "production screen reads",
+      "reason": "Web production bill read enforces feature and Job access then obtains production capabilities; imports production domain reads.",
+      "evidence": {
+        "line_start": 42,
+        "line_end": 51,
+        "sha256": "5a7a7af332f759e461b55653db275528d6cdb07973f2485d6030c22597f8fa98"
+      }
+    },
+    {
+      "task_id": "bcnav-06",
+      "path": "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/estimates/page.tsx",
+      "grade": 2,
+      "facet": "production screen route",
+      "reason": "Current Job estimates route delegates to page-content under company context.",
+      "evidence": {
+        "line_start": 1,
+        "line_end": 13,
+        "sha256": "14b015719f781ad7d3850ebdbc25692064e533c56957a3cabba277defda7ed18"
+      }
+    },
+    {
+      "task_id": "bcnav-06",
+      "path": "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/quotes/page.tsx",
+      "grade": 2,
+      "facet": "sales quote screen route",
+      "reason": "Current Job quotes route delegates to page-content; useful screen locator.",
+      "evidence": {
+        "line_start": 1,
+        "line_end": 14,
+        "sha256": "4e8902ae05357c0447c054ff9476280129128a3a4700ad1d60aa8d9da7c5a733"
+      }
+    },
+    {
+      "task_id": "bcnav-06",
+      "path": "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/quotes/quotes-data.ts",
+      "grade": 3,
+      "facet": "sales quote data",
+      "reason": "Quote screen imports sales estimate repository, editable records and line/bill readers; direct sales-domain bridge.",
+      "evidence": {
+        "line_start": 19,
+        "line_end": 30,
+        "sha256": "0295e29f8eae518e940b412a874f65aebec01215f8299f5d1248d7b7e3d36b46"
+      }
+    },
+    {
+      "task_id": "bcnav-06",
+      "path": "web/packages/job-costing/src/production-estimates/read-repository.ts",
+      "grade": 3,
+      "facet": "production estimate read",
+      "reason": "Reads Job production sections with estFlag distinct from 1; direct domain implementation.",
+      "evidence": {
+        "line_start": 71,
+        "line_end": 90,
+        "sha256": "2d3d96952dc7d1540dd6760369f92814e4faea5d959eca4be77171cdba3f9db2"
+      }
+    },
+    {
+      "task_id": "bcnav-06",
+      "path": "web/packages/job-costing/src/sales-estimates/read-model.ts",
+      "grade": 3,
+      "facet": "sales estimate projection",
+      "reason": "Maps sales sections, classification, linked Contract and capability-gated sell/cost values.",
+      "evidence": {
+        "line_start": 318,
+        "line_end": 343,
+        "sha256": "0778e1942994653fb28fb3b8f2daeb554aeafe0c0393a4e2fddc5ede7a2f654e"
+      }
+    },
+    {
+      "task_id": "bcnav-06",
+      "path": "web/packages/job-costing/src/sales-estimates/read-repository.ts",
+      "grade": 3,
+      "facet": "sales estimate repository",
+      "reason": "Reads by Job number and selects sales sections via nonzero estFlag; sales estimates are also Job-scoped, not simply non-Job estimates.",
+      "evidence": {
+        "line_start": 326,
+        "line_end": 370,
+        "sha256": "077e044f7735bed1ec9f6d402c238ffeb7800de93cabfaee687a820124b1e945"
+      }
+    },
+    {
+      "task_id": "bcnav-06",
+      "path": "web/packages/nav/src/modules.ts",
+      "grade": 2,
+      "facet": "screen catalogue",
+      "reason": "Registers Quotes and Estimates Job routes and feature flags; useful navigation/security bridge.",
+      "evidence": {
+        "line_start": 2354,
+        "line_end": 2370,
+        "sha256": "b1ad9dd7ef3bd30f101b4953994ae29936504ef2bfecc776e064d638f58f98d8"
+      }
+    },
+    {
+      "task_id": "bcnav-09",
+      "path": "web/agent/packages/bc-model/content/contracts/analytical-counts.rules.ts",
+      "grade": 3,
+      "facet": "current Event and lifecycle rules",
+      "reason": "Defines current by usable Register Date then Event tie-break, distinct from reached Actual Date and lifecycle.",
+      "evidence": {
+        "line_start": 55,
+        "line_end": 69,
+        "sha256": "9a30d36a8ec7f268d8f684ed462f4359865ff3bf11b7c6945c8e4747c3ad96c4"
+      }
+    },
+    {
+      "task_id": "bcnav-09",
+      "path": "web/agent/packages/bc-model/content/contracts/event-registration-state.rules.ts",
+      "grade": 3,
+      "facet": "registration state",
+      "reason": "Explains Actual versus operational Register Date and pending-row registration semantics.",
+      "evidence": {
+        "line_start": 19,
+        "line_end": 27,
+        "sha256": "88e9a1d7b02775979b408b0de853a5b714cf3b1a69cb6e000a8a3bc2135f8715"
+      }
+    },
+    {
+      "task_id": "bcnav-09",
+      "path": "web/agent/packages/bc-model/content/contracts/event-schedule.rules.ts",
+      "grade": 3,
+      "facet": "schedule order versus state",
+      "reason": "Defines saved display order and Actual-Date registration classification; avoids equating Event code/display order with current.",
+      "evidence": {
+        "line_start": 30,
+        "line_end": 47,
+        "sha256": "8c4ff1a9335fa4a67446c491e0f12da668bb8bcc9f40fcb982ab1bf7a18f1b83"
+      }
+    },
+    {
+      "task_id": "bcnav-09",
+      "path": "web/packages/contracts/src/contract-maintenance-repository.ts",
+      "grade": 2,
+      "facet": "Event read projection",
+      "reason": "Projects Actual and Register dates separately; supporting repository path, not current-Event ranking owner.",
+      "evidence": {
+        "line_start": 599,
+        "line_end": 603,
+        "sha256": "54beb8e8e99e91eadbd659b64a2fe2b864d41528636848d7fb07a541f07a21e8"
+      }
+    },
+    {
+      "task_id": "bcnav-09",
+      "path": "web/packages/contracts/src/headless/analytics/contract-aggregate-read.ts",
+      "grade": 3,
+      "facet": "current Event ranking",
+      "reason": "Partitions Events per Contract, ranks Register Date descending then Event number and excludes unusable Register Dates.",
+      "evidence": {
+        "line_start": 702,
+        "line_end": 717,
+        "sha256": "2949c5c2efcf4439453cc1149afd05f0affa4c2f7fbcd5c3016be0a9efc9a455"
+      }
+    },
+    {
+      "task_id": "bcnav-09",
+      "path": "web/packages/contracts/src/headless/analytics/contract-aggregate.ts",
+      "grade": 3,
+      "facet": "query model",
+      "reason": "Separates currentlyAt Event filter from lifecycle filter; useful direct request definition.",
+      "evidence": {
+        "line_start": 61,
+        "line_end": 74,
+        "sha256": "b1173269e2a021e18d836d628f95847242e906f85b7e112a75f81c6d4b984be0"
+      }
+    },
+    {
+      "task_id": "bcnav-09",
+      "path": "web/packages/contracts/src/headless/contract-closure.ts",
+      "grade": 3,
+      "facet": "lifecycle implementation",
+      "reason": "Lifecycle uses cancellation status and Close Event usable Actual Date, not highest Event.",
+      "evidence": {
+        "line_start": 29,
+        "line_end": 42,
+        "sha256": "149ae5c21fd5f8b280c6b73709af15928a08344864e0476a92d7c927c8d9e276"
+      }
+    },
+    {
+      "task_id": "bcnav-09",
+      "path": "web/packages/contracts/tests/contract-aggregate-read.integration.test.ts",
+      "grade": 3,
+      "facet": "ordering regression test",
+      "reason": "Integration test explicitly covers latest usable Register Date and higher Event tie-break.",
+      "evidence": {
+        "line_start": 441,
+        "line_end": 462,
+        "sha256": "05cd458a99146042af2208e16f260a05344d17f098e71dc3250e6a3767f42130"
+      }
+    },
+    {
+      "task_id": "bcnav-10",
+      "path": "docs/knowledge/internal/product/web-transaction-filter-and-export-source-map.md",
+      "grade": 2,
+      "facet": "export admission source map",
+      "reason": "Documents current route/menu/package/party scope and limitations; does not establish a universal separate CSV privilege.",
+      "evidence": {
+        "line_start": 93,
+        "line_end": 113,
+        "sha256": "2e2b1d6ac82f654df0535676642ff079b8401adc2572cb1c4fc7e5eb14307fbf"
+      }
+    },
+    {
+      "task_id": "bcnav-10",
+      "path": "web/apps/web/components/data-grid.tsx",
+      "grade": 3,
+      "facet": "grid export bridge",
+      "reason": "Implements export option and cursor-page exporter delegation; useful for determining whether export shares read transport, not an authority gate itself.",
+      "evidence": {
+        "line_start": 3270,
+        "line_end": 3300,
+        "sha256": "fd05202ece2cec339d23ae700e80fc0c4e033b5a102b2c8d7b38ce7eb62143ed"
+      }
+    },
+    {
+      "task_id": "bcnav-10",
+      "path": "web/apps/web/lib/filters/filter-grid-route.ts",
+      "grade": 3,
+      "facet": "export resource authorization",
+      "reason": "Shared handler authorizes before selecting any resource, including supplied export adapters.",
+      "evidence": {
+        "line_start": 29,
+        "line_end": 53,
+        "sha256": "5fe62adcf4f879d1844d1a7db68e80ce5e8c8b0cbd89921c391982eaa96e5643"
+      }
+    },
+    {
+      "task_id": "bcnav-10",
+      "path": "web/apps/web/lib/filters/grid-filter-resources.test.ts",
+      "grade": 3,
+      "facet": "export denial tests",
+      "reason": "Tests export/summary 401 and 403 before document or adapter execution.",
+      "evidence": {
+        "line_start": 115,
+        "line_end": 139,
+        "sha256": "a650c01f22c23abf513b4a2328ae88bc17c892da782fc12c2ce07a8935d5194b"
+      }
+    },
+    {
+      "task_id": "bcnav-10",
+      "path": "web/apps/web/lib/filters/grid-filter-resources.ts",
+      "grade": 2,
+      "facet": "export routing",
+      "reason": "Registers adapter export as shared resource; bridges CSV to shared authorization handler rather than deciding permissions.",
+      "evidence": {
+        "line_start": 143,
+        "line_end": 145,
+        "sha256": "40232e5b07a958d603fefd44913a93a812332b02e0918786e19426404400a709"
+      }
+    },
+    {
+      "task_id": "bcnav-10",
+      "path": "web/apps/web/lib/grids/csv-export.ts",
+      "grade": 3,
+      "facet": "CSV execution",
+      "reason": "Cursor CSV implementation consumes read-page loader and export plan; direct export path, not a separate permission policy.",
+      "evidence": {
+        "line_start": 13,
+        "line_end": 30,
+        "sha256": "5366c673323ebf04cfbc4b259dd01863f13c5769ac810d833dc47140b965603f"
+      }
+    },
+    {
+      "task_id": "bcnav-10",
+      "path": "web/apps/web/lib/grids/server-grid-actions.ts",
+      "grade": 2,
+      "facet": "read authority helper",
+      "reason": "Checks authenticated package read permission before supplying company DB; supporting read-path authority, not CSV-specific.",
+      "evidence": {
+        "line_start": 18,
+        "line_end": 35,
+        "sha256": "0fb3647fc42d0751da508813e98da36a3444a25b5874cc66035fcab6ec48efe4"
+      }
+    },
+    {
+      "task_id": "bcnav-10",
+      "path": "web/apps/web/lib/grids/server-grid-route.ts",
+      "grade": 2,
+      "facet": "read route authorization",
+      "reason": "Generic route calls supplied authorization before parsing/loading; supporting seam for export/read authority.",
+      "evidence": {
+        "line_start": 119,
+        "line_end": 127,
+        "sha256": "880bed75092da9f1a99a65c011f36852fa0dbb22278e338ba59d4dd32533443f"
+      }
+    },
+    {
+      "task_id": "bcnav-10",
+      "path": "web/apps/web/lib/security/route-access.ts",
+      "grade": 3,
+      "facet": "grid read permission",
+      "reason": "Directly implements fresh menu cascade plus package read check. Useful to compare underlying read authority; no standalone universal CSV grant shown.",
+      "evidence": {
+        "line_start": 159,
+        "line_end": 212,
+        "sha256": "970975e4eb65b77dc5aab93bd273e78fea7c17d35666bd3b2fd1dc70fa58c5f9"
+      }
+    },
+    {
+      "task_id": "bcnav-12",
+      "path": "classic/src/runtimes/dbl-sql/src/db/postgres.rs",
+      "grade": 3,
+      "facet": "PostgreSQL lock/session semantics",
+      "reason": "Documents session advisory locks and no explicit runtime transactions; direct backend entrypoint, but default-mode comment must be read alongside newer lease-table mode in state.rs.",
+      "evidence": {
+        "line_start": 292,
+        "line_end": 300,
+        "sha256": "c00b9c2ec2fe69f3307ffa51f089fec874a00cce6b9676fa62237c50505da78a"
+      }
+    },
+    {
+      "task_id": "bcnav-12",
+      "path": "classic/src/runtimes/dbl-sql/src/ops/lock.rs",
+      "grade": 3,
+      "facet": "record locking",
+      "reason": "Implements channel automatic unlock, record_try_lock and locked/error return semantics.",
+      "evidence": {
+        "line_start": 75,
+        "line_end": 123,
+        "sha256": "faa5a764378f3850500fce3d59e1ad85e2260f7400ff2ac378124ae0e2d75c02"
+      }
+    },
+    {
+      "task_id": "bcnav-12",
+      "path": "classic/src/runtimes/dbl-sql/src/ops/write.rs",
+      "grade": 3,
+      "facet": "write atomicity boundary",
+      "reason": "Executes generated INSERT via connection and releases allocator advisory lock; direct write boundary, not evidence of a multi-operation business transaction.",
+      "evidence": {
+        "line_start": 890,
+        "line_end": 930,
+        "sha256": "4eb4bd435f3832e6ffdfc899c1f645891bf47e94d965b1aced19529196131a87"
+      }
+    },
+    {
+      "task_id": "bcnav-12",
+      "path": "classic/src/runtimes/dbl-sql/src/server_api.rs",
+      "grade": 2,
+      "facet": "server lock delegation",
+      "reason": "Public API delegates lock/unlock and retained locks to ops; relevant actual bridge rather than lock owner.",
+      "evidence": {
+        "line_start": 610,
+        "line_end": 631,
+        "sha256": "a420c61428453add795f14b19271bdda61cdd4481347dfde3df838e83c457ebb"
+      }
+    },
+    {
+      "task_id": "bcnav-12",
+      "path": "classic/src/runtimes/dbl-sql/src/state.rs",
+      "grade": 3,
+      "facet": "connection lock dispatch",
+      "reason": "record_try_lock dispatches by backend and lock mode; current connection implementation is essential alongside default advisory documentation.",
+      "evidence": {
+        "line_start": 2483,
+        "line_end": 2487,
+        "sha256": "7d27f86095383af64bcb4dfca114ee034ed12b8bdc309d746ac68da0d235fa65"
+      }
+    },
+    {
+      "task_id": "bcnav-12",
+      "path": "docs/engineering/businesscraft-agent/specification/05-capabilities-and-erp-transactions.md",
+      "grade": 2,
+      "facet": "ERP authority design",
+      "reason": "States ERP-owned operation permission/transaction boundary and explicitly labels contracts as design requirements, not implemented-behavior proof.",
+      "evidence": {
+        "line_start": 5,
+        "line_end": 32,
+        "sha256": "eea27ff459da0544b9fee7a188f892c822baa20405b5f7805b2df16dbfe300e5"
+      }
+    },
+    {
+      "task_id": "bcnav-12",
+      "path": "docs/knowledge/internal/data-access/sql-bridge.md",
+      "grade": 2,
+      "facet": "SQL bridge map with caveat",
+      "reason": "Useful bridge documentation, but its broad transaction-wrapping statement is not sufficient to infer explicit multi-write transactions; inspect runtime code.",
+      "evidence": {
+        "line_start": 165,
+        "line_end": 169,
+        "sha256": "99655faed91582fed990107b5fc9904a2f1dce62724e906f17e75128e04cb3f9"
+      }
+    },
+    {
+      "task_id": "bcnav-12",
+      "path": "docs/web/bc-web-database-boundary.md",
+      "grade": 3,
+      "facet": "database ownership boundary",
+      "reason": "Explicitly assigns legacy company tables to company DBs and new tenant-keyed Web records to bc_web.",
+      "evidence": {
+        "line_start": 23,
+        "line_end": 55,
+        "sha256": "e839320c332c0da6550d914afb85c8be265bae03b39be25b205ccb705f3767b3"
+      }
+    },
+    {
+      "task_id": "bcnav-12",
+      "path": "docs/web/db-connections.md",
+      "grade": 2,
+      "facet": "database handle routing",
+      "reason": "Maps system, web and per-company DB pool owners; supporting connection entrypoint, not complete authority policy.",
+      "evidence": {
+        "line_start": 1,
+        "line_end": 11,
+        "sha256": "3977ea54d332de776a092c3bdbb5e1154cdccfc2f885c3097ed13ff3376f4f4f"
+      }
+    },
+    {
+      "task_id": "bcnav-13",
+      "path": "web/agent/apps/bc-agent-service/src/activities.ts",
+      "grade": 3,
+      "facet": "stored runtime identity",
+      "reason": "Rejects existing first-step pin from a different current runtime; relevant continuation behavior, not historical version-specific capability branches.",
+      "evidence": {
+        "line_start": 578,
+        "line_end": 582,
+        "sha256": "8e2dd3f52eb581f66f09067d0d8dc9b4ab3fd5d76c73b5583a529cdaa7e7e273"
+      }
+    },
+    {
+      "task_id": "bcnav-13",
+      "path": "web/agent/packages/bc-agent-protocol/src/conversation/runtime-versions.ts",
+      "grade": 3,
+      "facet": "runtime version identity",
+      "reason": "Defines current label and distinct strict runtime versus opaque citation schemas; direct compatibility entrypoint.",
+      "evidence": {
+        "line_start": 58,
+        "line_end": 73,
+        "sha256": "e43f3ace9a6d2d8c22e47a2c9e8877f4971526c11aa1af33809cdb3168718951"
+      }
+    },
+    {
+      "task_id": "bcnav-13",
+      "path": "web/agent/packages/bc-agent-protocol/tests/runtime-citation-compatibility.test.ts",
+      "grade": 3,
+      "facet": "newer citation redisplay test",
+      "reason": "Tests snapshot acceptance of newer opaque runtime citation while execution version schema rejects it.",
+      "evidence": {
+        "line_start": 36,
+        "line_end": 63,
+        "sha256": "5e707f587170948bfaae5abf025a22c192c5202cfb430b2b3ee0ad3c645029d6"
+      }
+    },
+    {
+      "task_id": "bcnav-13",
+      "path": "web/agent/packages/bc-agent-protocol/tests/runtime-version-gates.test.ts",
+      "grade": 3,
+      "facet": "obsolete gate regression guard",
+      "reason": "Test explicitly requires no runtime-selected behavior beyond listed identity checks; essential correction to premise of old version gates.",
+      "evidence": {
+        "line_start": 50,
+        "line_end": 69,
+        "sha256": "d3ed4cbe219ddb59e72241521d6de3c3e5c78bb18e6f1f16000a387626f21357"
+      }
+    },
+    {
+      "task_id": "bcnav-13",
+      "path": "web/agent/packages/bc-agent-runtime/src/agent-runtime-evidence.ts",
+      "grade": 3,
+      "facet": "runtime evidence provenance",
+      "reason": "Labels runtime evidence with current version and reauthorizes it; relevant delivery source, not a historical-version feature switch.",
+      "evidence": {
+        "line_start": 99,
+        "line_end": 108,
+        "sha256": "ba359d208fe306016deaa82771c72b276e8a03858df254390c3adbfb2f982b14"
+      }
+    },
+    {
+      "task_id": "bcnav-13",
+      "path": "web/agent/packages/bc-agent-runtime/src/evidence-authority.ts",
+      "grade": 2,
+      "facet": "evidence authority delegation",
+      "reason": "Delegates delivery/reauthorization to source owners including runtime evidence; current bridge, no version gate found in inspected authority code.",
+      "evidence": {
+        "line_start": 21,
+        "line_end": 44,
+        "sha256": "f1388c588765f47b9fe13e2c1a6a801ddc9bab9aa0d1c94beb4749980219f500"
+      }
+    },
+    {
+      "task_id": "bcnav-13",
+      "path": "web/agent/packages/bc-agent-runtime/src/follow-up-route.ts",
+      "grade": 2,
+      "facet": "follow-up admission",
+      "reason": "Follow-up delegates to store, checks knowledge applicability and current authority. Product applicability is not itself runtime-version branching.",
+      "evidence": {
+        "line_start": 35,
+        "line_end": 53,
+        "sha256": "c2316052e62b66a06a046f135e53b805e72fa04c50099eb1c6cc188a235cb828"
+      }
+    },
+    {
+      "task_id": "bcnav-13",
+      "path": "web/agent/packages/bc-agent-runtime/src/ingress.ts",
+      "grade": 3,
+      "facet": "current-runtime attachment gate",
+      "reason": "Reads stored runtime label and blocks attachments to noncurrent tasks; also routes retained citations through current evidence owners.",
+      "evidence": {
+        "line_start": 649,
+        "line_end": 657,
+        "sha256": "cdf1128dacd719db6eda1fbc7cb1a5ea2c0356ad60f2200871ab50e02585d704"
+      }
+    },
+    {
+      "task_id": "bcnav-13",
+      "path": "web/agent/packages/bc-agent-runtime/src/store.ts",
+      "grade": 2,
+      "facet": "stored runtime label read",
+      "reason": "Provides persisted runtime label used by ingress gate; supporting delegate path rather than version behavior implementation.",
+      "evidence": {
+        "line_start": 511,
+        "line_end": 523,
+        "sha256": "10d614a53c5f014d910b15d9df06cce68bb2d4dc358667cb197774f80ea7742d"
+      }
+    },
+    {
+      "task_id": "bcnav-14",
+      "path": "web/agent/apps/bc-agent-service/tests/integration/database-outage.test.ts",
+      "grade": 3,
+      "facet": "backend termination integration test",
+      "reason": "Terminates checked-out transaction backend; covers affected transaction failing without process-wide crash.",
+      "evidence": {
+        "line_start": 57,
+        "line_end": 73,
+        "sha256": "2de87b12b89804d73110c69cafb14d339ddb462f7c89b50e6da1dfe85afa214c"
+      }
+    },
+    {
+      "task_id": "bcnav-14",
+      "path": "web/agent/apps/bc-agent-service/tests/integration/worker-health.test.ts",
+      "grade": 3,
+      "facet": "worker outage recovery test",
+      "reason": "Actual worker test revokes login and terminates backends, then checks readiness failure with liveness retained.",
+      "evidence": {
+        "line_start": 176,
+        "line_end": 180,
+        "sha256": "f7ceada919a81b1b8c0534b26f8d84420a40b788f0b3af1f34f8886423683949"
+      }
+    },
+    {
+      "task_id": "bcnav-14",
+      "path": "web/agent/packages/bc-agent-runtime/src/configuration.ts",
+      "grade": 3,
+      "facet": "checked-out connection listener",
+      "reason": "Attaches client error listener on pool connect because pg-pool detaches its listener while checked out; direct crash fix.",
+      "evidence": {
+        "line_start": 347,
+        "line_end": 352,
+        "sha256": "14a450bbb07917fe17bb5dce1608ea2930ef9a9cdd7aed7a77d50a63fc5373b9"
+      }
+    },
+    {
+      "task_id": "bcnav-14",
+      "path": "web/agent/packages/bc-agent-runtime/src/database.ts",
+      "grade": 3,
+      "facet": "transaction failure handling",
+      "reason": "Maps acquisition/query failures, attempts rollback and discards failed client; direct adjacent recovery implementation.",
+      "evidence": {
+        "line_start": 82,
+        "line_end": 119,
+        "sha256": "405579f68edf8ac5ad6aa191638f9b71e3c19830c7086fd3ed7256ca57196b47"
+      }
+    },
+    {
+      "task_id": "bcnav-14",
+      "path": "web/agent/packages/bc-agent-runtime/tests/unit/database-configuration.test.ts",
+      "grade": 3,
+      "facet": "checked-out client regression test",
+      "reason": "Explicit test emits connection-terminated error on checked-out client and expects no throw.",
+      "evidence": {
+        "line_start": 55,
+        "line_end": 68,
+        "sha256": "2528425fd278e9ec9e3f050d262beb0dd81af4e7838ef348140b1c63642b4381"
+      }
+    },
+    {
+      "task_id": "bcnav-14",
+      "path": "web/packages/db/src/connection.ts",
+      "grade": 3,
+      "facet": "shared DB pool error handling",
+      "reason": "Shared DB instrumenter installs connection listeners and pool error observer; relevant parallel implementation, not necessarily Agent pool factory.",
+      "evidence": {
+        "line_start": 310,
+        "line_end": 324,
+        "sha256": "aa3f5e10751b3b2c4f06905bfdf1042dbfa3f8a4bab08e650917c4806402824c"
+      }
+    },
+    {
+      "task_id": "bcnav-14",
+      "path": "web/packages/db/tests/query-instrumentation.test.ts",
+      "grade": 3,
+      "facet": "shared pool regression tests",
+      "reason": "Tests client error listener, query failure without replay and idle error handling; relevant companion tests, not Agent-specific integration.",
+      "evidence": {
+        "line_start": 269,
+        "line_end": 283,
+        "sha256": "6bfed3f26542f47b47e2c303a0c2b376e1a789dffa3a536978454e620f4175d5"
+      }
+    },
+    {
+      "task_id": "bcnav-16",
+      "path": ".github/workflows/web-deploy-env.yaml",
+      "grade": 3,
+      "facet": "deployment safety workflow",
+      "reason": "Reusable blue-green deployment across environments specifies immutable digests, no cancellation after mutation and traffic-flip rollback.",
+      "evidence": {
+        "line_start": 3,
+        "line_end": 27,
+        "sha256": "3cb05d98a90aec3fc3728e9ac51cfe2bbac99263aa431d1c62dca690e7e56786"
+      }
+    },
+    {
+      "task_id": "bcnav-16",
+      "path": ".github/workflows/web-dev.yaml",
+      "grade": 3,
+      "facet": "dev promotion workflow",
+      "reason": "Invokes CI candidate validator then deploys dev with noncancelling environment concurrency.",
+      "evidence": {
+        "line_start": 78,
+        "line_end": 93,
+        "sha256": "f08b80d6867f419fc1a54c67e1d3541bebc5b06f00cd60f8c987737eb5a01b1c"
+      }
+    },
+    {
+      "task_id": "bcnav-16",
+      "path": ".github/workflows/web-image.yaml",
+      "grade": 3,
+      "facet": "release image workflow",
+      "reason": "Reusable release image build exports image/version identity and requires release source-map credentials; direct build workflow.",
+      "evidence": {
+        "line_start": 3,
+        "line_end": 48,
+        "sha256": "e3a6f8e14ce899d28dfe23eabfa5d6c63f23d94cb9a159cddbc513759bc19843"
+      }
+    },
+    {
+      "task_id": "bcnav-16",
+      "path": ".github/workflows/web-release.yaml",
+      "grade": 3,
+      "facet": "release orchestration",
+      "reason": "Release queues do not cancel, invoke web-image workflow and proceed to staging deployment.",
+      "evidence": {
+        "line_start": 29,
+        "line_end": 69,
+        "sha256": "5f12e7ed3594919d3a670a917c1c4cbc240ac26e761c060f0ca22aeaf5d7b71f"
+      }
+    },
+    {
+      "task_id": "bcnav-16",
+      "path": "tools/ci/src/cli.ts",
+      "grade": 2,
+      "facet": "directly invoked CI dispatcher",
+      "reason": "Deploy commands dispatch to candidate validation, traffic-policy and migration implementations; useful actual caller bridge, not full safety logic.",
+      "evidence": {
+        "line_start": 39,
+        "line_end": 52,
+        "sha256": "a283e42cb0b49a40429a6a091d0a4112fddead2656dea60d196eec352c94c5e6"
+      }
+    },
+    {
+      "task_id": "bcnav-20",
+      "path": ".github/actions/agent-tests/action.yaml",
+      "grade": 3,
+      "facet": "CI test gating",
+      "reason": "Runs service unit suites except none and disposable PostgreSQL/Temporal integrations only for full suite; defines actual gate conditions.",
+      "evidence": {
+        "line_start": 106,
+        "line_end": 137,
+        "sha256": "0e4d3f540c6a18ffff4d5755c1f36247baa1a898fdd1f46550b77b037ace306e"
+      }
+    },
+    {
+      "task_id": "bcnav-20",
+      "path": "web/agent/apps/bc-agent-service/src/activities.ts",
+      "grade": 3,
+      "facet": "replay enforcement",
+      "reason": "Replays read result only when saved offered descriptor explicitly marks matching tool safe.",
+      "evidence": {
+        "line_start": 1545,
+        "line_end": 1562,
+        "sha256": "8e2dd3f52eb581f66f09067d0d8dc9b4ab3fd5d76c73b5583a529cdaa7e7e273"
+      }
+    },
+    {
+      "task_id": "bcnav-20",
+      "path": "web/agent/apps/bc-agent-service/tests/integration/model-step-claim.test.ts",
+      "grade": 3,
+      "facet": "replay policy regression test",
+      "reason": "Exercises safe, unsafe and missing saved replay descriptor; unsafe/undeclared must not read.",
+      "evidence": {
+        "line_start": 485,
+        "line_end": 511,
+        "sha256": "ddc4c7165ab630ca13a547063e8bbe46299f12475c49b7e0b273f3be5e5c483f"
+      }
+    },
+    {
+      "task_id": "bcnav-20",
+      "path": "web/agent/apps/bc-agent-service/tests/integration/temporal-operation-recovery.test.ts",
+      "grade": 3,
+      "facet": "crash recovery integration",
+      "reason": "SIGKILL tests at company commit and consent wake assert once-only change and settlement; direct crash-boundary coverage.",
+      "evidence": {
+        "line_start": 275,
+        "line_end": 277,
+        "sha256": "847babee68e43466e93e151350ee79d1d282b83976bb478d9c5eaf8309c14eaf"
+      }
+    },
+    {
+      "task_id": "bcnav-20",
+      "path": "web/agent/apps/bc-agent-service/tests/unit/prompt-render.test.ts",
+      "grade": 3,
+      "facet": "tool policy declaration tests",
+      "reason": "Requires every offered tool to declare replay policy and record-changing tools to be unsafe.",
+      "evidence": {
+        "line_start": 17,
+        "line_end": 30,
+        "sha256": "a3fb016ad4a2bb498e3622d5dc0cc412c54df48f7ced8feb0125cea4359cb527"
+      }
+    },
+    {
+      "task_id": "bcnav-20",
+      "path": "web/agent/apps/bc-agent-service/tests/unit/workflow-replay.test.ts",
+      "grade": 3,
+      "facet": "workflow history replay test",
+      "reason": "Replays recorded task histories against current coordinator without dispatching live activities; direct workflow compatibility test.",
+      "evidence": {
+        "line_start": 19,
+        "line_end": 25,
+        "sha256": "7511d9a78a9f9cf343780177c44aad839bb0e30f5848c88072c82f97ccbe4aa2"
+      }
+    },
+    {
+      "task_id": "bcnav-20",
+      "path": "web/agent/packages/bc-agent-runtime/src/prompt-bundles/tool-sets.ts",
+      "grade": 3,
+      "facet": "tool replay policy catalogue",
+      "reason": "Tool descriptor constructor includes typed replay policy; individual read/write descriptors explicitly declare safe/unsafe.",
+      "evidence": {
+        "line_start": 40,
+        "line_end": 49,
+        "sha256": "7675a30a396ddbd88eab46c2785490ae9368fdb496f6c01c31f5b4308a196551"
+      }
+    }
+  ],
+  "limits": {
+    "coverage": {
+      "queries": 12,
+      "task_path_pairs": 85,
+      "judged": 85,
+      "unknown": 0
+    },
+    "external_evidence_required": [
+      {
+        "task_id": "bcnav-18",
+        "judgment": "abstain",
+        "candidate_paths": [],
+        "reason": "Repository files alone cannot establish current first-party Azure regional availability or managed private-network replication service constraints. No file judgment fabricated."
+      }
+    ],
+    "inspection": "Bounded source snippets and targeted pattern matches, not exhaustive execution or complete security/transaction audit; tests inspected but not run. No network or Azure documentation consulted.",
+    "key_ambiguities": [
+      "Finance gates distinguish Contract header money from Event money: Events access can legitimately expose Event amounts without Contract Finance.",
+      "CSV uses multiple transports; inspected current grid/read/export bridges do not justify a universal distinct export permission or a universal claim that all exports equal all read access.",
+      "SQL bridge prose says writes wrapped in transactions, while default runtime backend commentary says no explicit runtime transactions. Multi-operation atomicity must not be inferred; current state also has opt-in lease-table locking.",
+      "Runtime registry retains historical labels, but current tests prohibit historical feature gates beyond identity checks; delivery authority and product applicability are not equivalent to old runtime-version branches.",
+      "Sales estimates are themselves Job-scoped; production versus sales selection uses distinct section flags. Thin page/CLI/server delegates are useful locators, not independent behavior proofs."
+    ]
+  }
+}

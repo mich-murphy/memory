@@ -1,0 +1,187 @@
+{
+  "query": "purchase order terms setup",
+  "python": "3.14.7",
+  "phase": "Final runtime adaptation, generic smoke query, post-integration tracked docs edits. No ranking tuning.",
+  "measurements": [
+    {
+      "mode": "lexical",
+      "strict": false,
+      "repeat": 0,
+      "exit": 0,
+      "wall_seconds": 0.46848608303116634,
+      "output_bytes": 2142,
+      "freshness_seconds": 0.345077,
+      "retrieval_seconds": 0.048037,
+      "paths": [
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/loading.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/mutations.test.ts",
+        "web/packages/purchase-orders/tests/setup.test.ts",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/config.test.ts",
+        "web/agent/packages/bc-model/dictionary/purchasing/terms.dictionary.ts",
+        "docs/knowledge/internal/modules/purchase-orders/setup-tables.md"
+      ]
+    },
+    {
+      "mode": "hybrid",
+      "strict": false,
+      "repeat": 0,
+      "exit": 0,
+      "wall_seconds": 0.4785992919933051,
+      "output_bytes": 2141,
+      "freshness_seconds": 0.355342,
+      "retrieval_seconds": 0.050212,
+      "paths": [
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/loading.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/mutations.test.ts",
+        "web/packages/purchase-orders/tests/setup.test.ts",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/config.test.ts",
+        "web/agent/packages/bc-model/dictionary/purchasing/terms.dictionary.ts",
+        "docs/knowledge/internal/modules/purchase-orders/setup-tables.md"
+      ]
+    },
+    {
+      "mode": "lexical",
+      "strict": true,
+      "repeat": 0,
+      "exit": 0,
+      "wall_seconds": 3.662620541988872,
+      "output_bytes": 2126,
+      "freshness_seconds": 3.544492,
+      "retrieval_seconds": 0.047189,
+      "paths": [
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/loading.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/mutations.test.ts",
+        "web/packages/purchase-orders/tests/setup.test.ts",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/config.test.ts",
+        "web/agent/packages/bc-model/dictionary/purchasing/terms.dictionary.ts",
+        "docs/knowledge/internal/modules/purchase-orders/setup-tables.md"
+      ]
+    },
+    {
+      "mode": "lexical",
+      "strict": false,
+      "repeat": 1,
+      "exit": 0,
+      "wall_seconds": 0.47508475003996864,
+      "output_bytes": 2142,
+      "freshness_seconds": 0.357192,
+      "retrieval_seconds": 0.046901,
+      "paths": [
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/loading.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/mutations.test.ts",
+        "web/packages/purchase-orders/tests/setup.test.ts",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/config.test.ts",
+        "web/agent/packages/bc-model/dictionary/purchasing/terms.dictionary.ts",
+        "docs/knowledge/internal/modules/purchase-orders/setup-tables.md"
+      ]
+    },
+    {
+      "mode": "hybrid",
+      "strict": false,
+      "repeat": 1,
+      "exit": 0,
+      "wall_seconds": 0.4640242079622112,
+      "output_bytes": 2141,
+      "freshness_seconds": 0.346331,
+      "retrieval_seconds": 0.046639,
+      "paths": [
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/loading.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/mutations.test.ts",
+        "web/packages/purchase-orders/tests/setup.test.ts",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/config.test.ts",
+        "web/agent/packages/bc-model/dictionary/purchasing/terms.dictionary.ts",
+        "docs/knowledge/internal/modules/purchase-orders/setup-tables.md"
+      ]
+    },
+    {
+      "mode": "lexical",
+      "strict": true,
+      "repeat": 1,
+      "exit": 0,
+      "wall_seconds": 3.793574124982115,
+      "output_bytes": 2126,
+      "freshness_seconds": 3.678795,
+      "retrieval_seconds": 0.046114,
+      "paths": [
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/loading.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/mutations.test.ts",
+        "web/packages/purchase-orders/tests/setup.test.ts",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/config.test.ts",
+        "web/agent/packages/bc-model/dictionary/purchasing/terms.dictionary.ts",
+        "docs/knowledge/internal/modules/purchase-orders/setup-tables.md"
+      ]
+    },
+    {
+      "mode": "lexical",
+      "strict": false,
+      "repeat": 2,
+      "exit": 0,
+      "wall_seconds": 0.47350033302791417,
+      "output_bytes": 2142,
+      "freshness_seconds": 0.351446,
+      "retrieval_seconds": 0.046986,
+      "paths": [
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/loading.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/mutations.test.ts",
+        "web/packages/purchase-orders/tests/setup.test.ts",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/config.test.ts",
+        "web/agent/packages/bc-model/dictionary/purchasing/terms.dictionary.ts",
+        "docs/knowledge/internal/modules/purchase-orders/setup-tables.md"
+      ]
+    },
+    {
+      "mode": "hybrid",
+      "strict": false,
+      "repeat": 2,
+      "exit": 0,
+      "wall_seconds": 0.46591862494824454,
+      "output_bytes": 2141,
+      "freshness_seconds": 0.348137,
+      "retrieval_seconds": 0.047192,
+      "paths": [
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/loading.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/mutations.test.ts",
+        "web/packages/purchase-orders/tests/setup.test.ts",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/config.test.ts",
+        "web/agent/packages/bc-model/dictionary/purchasing/terms.dictionary.ts",
+        "docs/knowledge/internal/modules/purchase-orders/setup-tables.md"
+      ]
+    },
+    {
+      "mode": "lexical",
+      "strict": true,
+      "repeat": 2,
+      "exit": 0,
+      "wall_seconds": 3.6799835840356536,
+      "output_bytes": 2126,
+      "freshness_seconds": 3.564092,
+      "retrieval_seconds": 0.046624,
+      "paths": [
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/page.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/terms/[code]/loading.tsx",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/mutations.test.ts",
+        "web/packages/purchase-orders/tests/setup.test.ts",
+        "web/apps/web/app/(app)/[company]/purchase-orders/setup/_shared/config.test.ts",
+        "web/agent/packages/bc-model/dictionary/purchasing/terms.dictionary.ts",
+        "docs/knowledge/internal/modules/purchase-orders/setup-tables.md"
+      ]
+    }
+  ]
+}

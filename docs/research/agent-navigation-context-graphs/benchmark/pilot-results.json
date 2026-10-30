@@ -1,0 +1,1746 @@
+{
+  "protocol": "Six fresh same-model medium-effort agents; two bundles of six held-out tasks per condition; 18 tool-call budget per run.",
+  "limits": [
+    "One run per condition/bundle, not a powered statistical experiment.",
+    "Qrels incomplete: unjudged answers remain unknown; scores are judged entrypoint metrics, not full correctness.",
+    "Tool-result UTF-8 bytes are actual observed text; request usage includes repeated prompt prefixes and is not unique context.",
+    "Provider-reported token fields retained separately; no dollar savings inferred.",
+    "Source transcripts are NEW experiment logs, not the source of historical tasks; tasks come from verified R2 archive.",
+    "Wall times include model reasoning/queue-independent experiment processing and do not isolate retrieval latency."
+  ],
+  "summary": {
+    "baseline": {
+      "runs": 2,
+      "tasks": 12,
+      "judged_tasks": 11,
+      "judged_hit@5": 1.0,
+      "judged_mrr": 0.7454545454545454,
+      "judged_group_coverage@5": 0.5590909090909091,
+      "tool_calls": 36,
+      "tool_result_utf8_bytes": 631225,
+      "reported_input_tokens": 198127,
+      "reported_cache_read_tokens": 1355136,
+      "reported_output_tokens": 7490,
+      "recorded_wall_seconds_sum": 290.26300000000003,
+      "all_returned_paths_exist": true
+    },
+    "hybrid": {
+      "runs": 2,
+      "tasks": 12,
+      "judged_tasks": 11,
+      "judged_hit@5": 0.9090909090909091,
+      "judged_mrr": 0.6848484848484848,
+      "judged_group_coverage@5": 0.3742424242424242,
+      "tool_calls": 36,
+      "tool_result_utf8_bytes": 282303,
+      "reported_input_tokens": 86158,
+      "reported_cache_read_tokens": 693760,
+      "reported_output_tokens": 5686,
+      "recorded_wall_seconds_sum": 319.18600000000004,
+      "all_returned_paths_exist": true
+    },
+    "map": {
+      "runs": 2,
+      "tasks": 12,
+      "judged_tasks": 11,
+      "judged_hit@5": 0.9090909090909091,
+      "judged_mrr": 0.7000000000000001,
+      "judged_group_coverage@5": 0.47575757575757577,
+      "tool_calls": 35,
+      "tool_result_utf8_bytes": 488745,
+      "reported_input_tokens": 136598,
+      "reported_cache_read_tokens": 1044096,
+      "reported_output_tokens": 7277,
+      "recorded_wall_seconds_sum": 304.314,
+      "all_returned_paths_exist": true
+    }
+  },
+  "runs": [
+    {
+      "source_sha256": "b5fe24c5dc4dc4c05ed3a40e637942d8c27e2c6bb55644bd36fef7c4530aa700",
+      "recorded_wall_seconds": 146.055,
+      "model_observations": [
+        [
+          "openai",
+          "gpt-6.1-sol",
+          "medium"
+        ]
+      ],
+      "usage_sum": {
+        "input": 124005,
+        "output": 3827,
+        "cacheRead": 693248,
+        "cacheWrite": 0,
+        "reasoning": 189,
+        "totalTokens": 821080
+      },
+      "tool_calls": 18,
+      "tool_names": {
+        "bash": 18
+      },
+      "tool_result_utf8_bytes": 345217,
+      "largest_tool_result_bytes": 46510,
+      "answer": {
+        "condition": "baseline",
+        "bundle": "A",
+        "answers": [
+          {
+            "id": "bcnav-03",
+            "paths": [
+              "web/packages/contracts/src/contract-finance-repository.ts",
+              "web/packages/contracts/src/contract-finance.ts",
+              "web/packages/contracts/src/contract-money.ts",
+              "classic/src/dbl/Foundation/Defines/rd222a.def",
+              "web/agent/packages/bc-model/content/contracts/analytical-counts.rules.ts"
+            ],
+            "abstain": false,
+            "reason": "Finance adds header Contract and approved Variation values, preserves their separate stored GST, and exposes explicit excluding-GST, GST-only and including-GST bases.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.6666666666666666,
+                "group_coverage@5": 0.6666666666666666,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.6666666666666666,
+                "group_coverage@10": 0.6666666666666666
+              },
+              "doc": null,
+              "test": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-05",
+            "paths": [
+              "web/packages/db/src/schema/jc-jobs.ts",
+              "web/packages/db/src/schema/co-contracts.ts",
+              "web/packages/db/src/schema/ar-customer.ts",
+              "web/packages/contracts/src/headless/analytics/contract-aggregate-read.ts",
+              "web/packages/contracts/src/headless/contract-closure.ts"
+            ],
+            "abstain": false,
+            "reason": "These distinguish linked Job and Contract identities, Contract-site versus Customer geography, and configured lifecycle derivation rather than postal state or active status.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.75,
+                "group_coverage@5": 0.75,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.75,
+                "group_coverage@10": 0.75
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 1.0,
+                "group_coverage@5": 1.0,
+                "hit@10": 1,
+                "graded_group_coverage@10": 1.0,
+                "group_coverage@10": 1.0
+              },
+              "doc": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "test": null
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-09",
+            "paths": [
+              "web/packages/contracts/src/headless/analytics/contract-aggregate-read.ts",
+              "web/agent/packages/bc-model/content/contracts/analytical-counts.rules.ts",
+              "web/agent/packages/bc-model/content/contracts/event-schedule.rules.ts",
+              "web/agent/packages/bc-model/content/contracts/event-registration-state.rules.ts",
+              "web/packages/contracts/src/headless/contract-closure.ts"
+            ],
+            "abstain": false,
+            "reason": "Currently-at analytics ranks usable Register Dates descending with Event number only as a tie-break, separately from display ordering, Actual-Date completion and lifecycle.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.25,
+                "group_coverage@5": 0.25,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.25,
+                "group_coverage@10": 0.25
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.3333333333333333,
+                "group_coverage@5": 0.3333333333333333,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.3333333333333333,
+                "group_coverage@10": 0.3333333333333333
+              },
+              "doc": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "test": null
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-12",
+            "paths": [
+              "classic/src/runtimes/dbl-sql/src/db/postgres.rs",
+              "classic/src/runtimes/dbl-sql/src/ops/lock.rs",
+              "classic/src/runtimes/dbl-sql/src/ops/write.rs",
+              "docs/web/bc-web-database-boundary.md",
+              "docs/knowledge/internal/data-access/sql-bridge.md"
+            ],
+            "abstain": false,
+            "reason": "The native runtime implements SQL writes and session advisory locking, while the boundary document separates restorable ERP databases from tenant-keyed Web-owned records.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 1.0,
+                "group_coverage@5": 1.0,
+                "hit@10": 1,
+                "graded_group_coverage@10": 1.0,
+                "group_coverage@10": 1.0
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 1.0,
+                "group_coverage@5": 1.0,
+                "hit@10": 1,
+                "graded_group_coverage@10": 1.0,
+                "group_coverage@10": 1.0
+              },
+              "doc": {
+                "mrr": 0.25,
+                "hit@5": 1,
+                "graded_group_coverage@5": 1.0,
+                "group_coverage@5": 1.0,
+                "hit@10": 1,
+                "graded_group_coverage@10": 1.0,
+                "group_coverage@10": 1.0
+              },
+              "test": null
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-14",
+            "paths": [
+              "web/agent/packages/bc-agent-runtime/src/configuration.ts",
+              "web/agent/packages/bc-agent-runtime/src/database.ts",
+              "web/agent/packages/bc-agent-runtime/tests/unit/database-configuration.test.ts",
+              "web/agent/apps/bc-agent-service/tests/integration/database-outage.test.ts"
+            ],
+            "abstain": false,
+            "reason": "Pool creation installs checked-out-client error listeners, transaction handling sanitizes failures, and unit plus backend-termination integration tests cover connection loss.",
+            "metrics": {
+              "all": {
+                "mrr": 0.5,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.4,
+                "group_coverage@5": 0.4,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.4,
+                "group_coverage@10": 0.4
+              },
+              "source": {
+                "mrr": 0.5,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.3333333333333333,
+                "group_coverage@5": 0.3333333333333333,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.3333333333333333,
+                "group_coverage@10": 0.3333333333333333
+              },
+              "doc": null,
+              "test": {
+                "mrr": 0.25,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-18",
+            "paths": [],
+            "abstain": true,
+            "reason": "Current regional availability and private-network logical-replication support require first-party Azure documentation outside the repository, which this no-network task cannot establish.",
+            "metrics": {
+              "all": null,
+              "source": null,
+              "doc": null,
+              "test": null
+            },
+            "external_abstention_correct": true,
+            "existing_paths": true
+          }
+        ]
+      },
+      "agent_id": "4edb266b-da3a-48d",
+      "filename": "2026-10-20T12-00-27-446Z_01a1592f-3136-70e0-a64c-d32320915ac8.jsonl"
+    },
+    {
+      "source_sha256": "e336a97ceeaa065c395ec408cabd6f8e79880267ba2b158befc53d579c12d90f",
+      "recorded_wall_seconds": 144.208,
+      "model_observations": [
+        [
+          "openai",
+          "gpt-6.1-sol",
+          "medium"
+        ]
+      ],
+      "usage_sum": {
+        "input": 74122,
+        "output": 3663,
+        "cacheRead": 661888,
+        "cacheWrite": 0,
+        "reasoning": 170,
+        "totalTokens": 739673
+      },
+      "tool_calls": 18,
+      "tool_names": {
+        "bash": 18
+      },
+      "tool_result_utf8_bytes": 286008,
+      "largest_tool_result_bytes": 29520,
+      "answer": {
+        "condition": "baseline",
+        "bundle": "B",
+        "answers": [
+          {
+            "id": "bcnav-04",
+            "paths": [
+              "web/apps/web/lib/agent/bc-agent-contract-summary-authority.ts",
+              "web/apps/web/lib/agent/bc-agent-records.ts",
+              "web/apps/web/lib/agent/bc-agent-contract-values.ts",
+              "web/apps/web/lib/agent/bc-agent-contract-aggregate.ts",
+              "web/apps/web/lib/agent/bc-agent-contract-summary.test.ts"
+            ],
+            "abstain": false,
+            "reason": "These enforce Finance menu authority, filter the capability catalogue, guard Contract money reads and aggregates, and test withholding saved evidence after access revocation.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.75,
+                "group_coverage@5": 0.75,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.75,
+                "group_coverage@10": 0.75
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 1.0,
+                "group_coverage@5": 1.0,
+                "hit@10": 1,
+                "graded_group_coverage@10": 1.0,
+                "group_coverage@10": 1.0
+              },
+              "doc": null,
+              "test": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-06",
+            "paths": [
+              "web/packages/nav/src/modules.ts",
+              "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/quotes/quotes-data.ts",
+              "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/estimates/estimates-data.ts",
+              "web/packages/job-costing/src/sales-estimates/read-repository.ts",
+              "web/packages/job-costing/src/production-estimates/read-repository.ts"
+            ],
+            "abstain": false,
+            "reason": "Web separates job Quotes backed by sales-estimate sections/headings/paragraphs/details from production Estimates backed by sections/cost centres/bills, with distinct routes, gates and domain reads.",
+            "metrics": {
+              "all": {
+                "mrr": 0.25,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "source": {
+                "mrr": 0.25,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "doc": null,
+              "test": null
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-10",
+            "paths": [
+              "web/apps/web/lib/grids/server-grid-actions.ts",
+              "web/apps/web/lib/grids/server-grid-route.ts",
+              "web/apps/web/components/data-grid.tsx",
+              "web/apps/web/lib/grids/csv-export.ts",
+              "docs/knowledge/internal/product/web-transaction-filter-and-export-source-map.md"
+            ],
+            "abstain": false,
+            "reason": "Grid CSV uses authorized source reads and screen-controlled export availability rather than a universal separate export permission, so read access is necessary but not a blanket export entitlement.",
+            "metrics": {
+              "all": {
+                "mrr": 0.25,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.6666666666666666,
+                "group_coverage@5": 0.6666666666666666,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.6666666666666666,
+                "group_coverage@10": 0.6666666666666666
+              },
+              "source": {
+                "mrr": 0.25,
+                "hit@5": 1,
+                "graded_group_coverage@5": 1.0,
+                "group_coverage@5": 1.0,
+                "hit@10": 1,
+                "graded_group_coverage@10": 1.0,
+                "group_coverage@10": 1.0
+              },
+              "doc": {
+                "mrr": 0.2,
+                "hit@5": 1,
+                "graded_group_coverage@5": 1.0,
+                "group_coverage@5": 1.0,
+                "hit@10": 1,
+                "graded_group_coverage@10": 1.0,
+                "group_coverage@10": 1.0
+              },
+              "test": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-13",
+            "paths": [
+              "web/agent/packages/bc-agent-protocol/tests/runtime-version-gates.test.ts",
+              "web/agent/packages/bc-agent-protocol/tests/runtime-citation-compatibility.test.ts",
+              "web/agent/packages/bc-agent-runtime/src/ingress.ts",
+              "web/agent/apps/bc-agent-service/src/activities.ts",
+              "web/agent/packages/bc-agent-protocol/src/conversation/runtime-versions.ts"
+            ],
+            "abstain": false,
+            "reason": "Current code prohibits version-selected behavior beyond identity checks, preserves opaque retired/newer citation labels for redisplay, and checks current-runtime identity for resumed work and file-bearing replies.",
+            "metrics": {
+              "all": {
+                "mrr": 0.2,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.3333333333333333,
+                "group_coverage@5": 0.3333333333333333,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.3333333333333333,
+                "group_coverage@10": 0.3333333333333333
+              },
+              "source": {
+                "mrr": 0.2,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "doc": null,
+              "test": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-16",
+            "paths": [
+              ".github/workflows/web-release.yaml",
+              ".github/workflows/web-image.yaml",
+              ".github/workflows/web-dev.yaml",
+              ".github/workflows/web-deploy-env.yaml",
+              "tools/ci/src/cli.ts"
+            ],
+            "abstain": false,
+            "reason": "These build immutable images, dispatch dev and staging deployment, enforce serialized blue-green qualification and rollback controls, and map directly invoked deployment commands to their implementations.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.6666666666666666,
+                "group_coverage@5": 0.6666666666666666,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.6666666666666666,
+                "group_coverage@10": 0.6666666666666666
+              },
+              "doc": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "test": null
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-20",
+            "paths": [
+              "web/agent/apps/bc-agent-service/src/activities.ts",
+              "web/agent/apps/bc-agent-service/tests/integration/model-step-claim.test.ts",
+              "web/agent/apps/bc-agent-service/tests/unit/workflow-replay.test.ts",
+              "web/agent/apps/bc-agent-service/tests/integration/temporal-operation-recovery.test.ts",
+              ".github/actions/agent-tests/action.yaml"
+            ],
+            "abstain": false,
+            "reason": "These enforce safe-only tool replay, test unsafe or undeclared policies, replay recorded workflows, exercise SIGKILL and unknown paid-request outcomes, and gate integration suites with disposable PostgreSQL and Temporal.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.3333333333333333,
+                "group_coverage@5": 0.3333333333333333,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.3333333333333333,
+                "group_coverage@10": 0.3333333333333333
+              },
+              "doc": null,
+              "test": {
+                "mrr": 0.3333333333333333,
+                "hit@5": 1,
+                "graded_group_coverage@5": 1.0,
+                "group_coverage@5": 1.0,
+                "hit@10": 1,
+                "graded_group_coverage@10": 1.0,
+                "group_coverage@10": 1.0
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          }
+        ]
+      },
+      "agent_id": "cb22a71f-d9f9-4b2",
+      "filename": "2026-10-20T12-01-16-189Z_01a1592f-ef9d-70e0-a64c-d3263bdedb05.jsonl"
+    },
+    {
+      "source_sha256": "10b94f77acc0e63858e8273851217aea14a39fcf7bb0eaaff14511212575ff38",
+      "recorded_wall_seconds": 150.573,
+      "model_observations": [
+        [
+          "openai",
+          "gpt-6.1-sol",
+          "medium"
+        ]
+      ],
+      "usage_sum": {
+        "input": 64823,
+        "output": 3729,
+        "cacheRead": 451456,
+        "cacheWrite": 0,
+        "reasoning": 251,
+        "totalTokens": 520008
+      },
+      "tool_calls": 17,
+      "tool_names": {
+        "read": 1,
+        "bash": 16
+      },
+      "tool_result_utf8_bytes": 226431,
+      "largest_tool_result_bytes": 30104,
+      "answer": {
+        "condition": "map",
+        "bundle": "A",
+        "answers": [
+          {
+            "id": "bcnav-03",
+            "paths": [
+              "web/packages/contracts/src/contract-finance-repository.ts",
+              "web/packages/contracts/src/contract-finance.ts",
+              "web/agent/packages/bc-model/content/contracts/analytical-counts.rules.ts",
+              "classic/src/dbl/Foundation/Defines/rd222a.def",
+              "web/packages/contracts/src/contract-billing-schedule.ts"
+            ],
+            "abstain": false,
+            "reason": "Finance reads original value and approved Variation roll-ups with their stored GST, while domain rules distinguish GST presentation and progress-billing bases.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.6666666666666666,
+                "group_coverage@5": 0.6666666666666666,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.6666666666666666,
+                "group_coverage@10": 0.6666666666666666
+              },
+              "doc": null,
+              "test": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-05",
+            "paths": [
+              "web/packages/job-costing/src/jobs/read-repository.ts",
+              "web/packages/contracts/src/headless/analytics/contract-aggregate-read.ts",
+              "web/packages/db/src/schema/co-contracts.ts",
+              "web/packages/db/src/schema/ar-customer.ts",
+              "web/packages/contracts/src/headless/contract-closure.ts"
+            ],
+            "abstain": false,
+            "reason": "These distinguish Job records and linked Contracts, Contract-site geography and Customer geography, and separately configured Contract lifecycle.",
+            "metrics": {
+              "all": {
+                "mrr": 0.5,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "source": {
+                "mrr": 0.5,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.6666666666666666,
+                "group_coverage@5": 0.6666666666666666,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.6666666666666666,
+                "group_coverage@10": 0.6666666666666666
+              },
+              "doc": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "test": null
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-09",
+            "paths": [
+              "web/packages/contracts/src/headless/analytics/contract-aggregate-read.ts",
+              "web/packages/contracts/src/headless/contract-closure.ts",
+              "web/agent/packages/bc-model/content/contracts/analytical-counts.rules.ts",
+              "web/packages/contracts/src/headless/analytics/contract-aggregate.ts"
+            ],
+            "abstain": false,
+            "reason": "Currently-at ranks usable Register Dates descending with Event number only as a tie-break, whereas reached and lifecycle depend on Actual Dates and configured controls.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.25,
+                "group_coverage@5": 0.25,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.25,
+                "group_coverage@10": 0.25
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.3333333333333333,
+                "group_coverage@5": 0.3333333333333333,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.3333333333333333,
+                "group_coverage@10": 0.3333333333333333
+              },
+              "doc": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "test": null
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-12",
+            "paths": [
+              "classic/src/runtimes/dbl-sql/src/db/postgres.rs",
+              "classic/src/runtimes/dbl-sql/src/ops/lock.rs",
+              "classic/src/runtimes/dbl-sql/src/server_api.rs",
+              "classic/src/runtimes/dbl-sql/src/state.rs",
+              "docs/web/bc-web-database-boundary.md"
+            ],
+            "abstain": false,
+            "reason": "The runtime implements connection and session-scoped locking semantics, while the boundary document separates legacy company ERP tables from tenant-keyed Web-owned data.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 1.0,
+                "group_coverage@5": 1.0,
+                "hit@10": 1,
+                "graded_group_coverage@10": 1.0,
+                "group_coverage@10": 1.0
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 1.0,
+                "group_coverage@5": 1.0,
+                "hit@10": 1,
+                "graded_group_coverage@10": 1.0,
+                "group_coverage@10": 1.0
+              },
+              "doc": {
+                "mrr": 0.2,
+                "hit@5": 1,
+                "graded_group_coverage@5": 1.0,
+                "group_coverage@5": 1.0,
+                "hit@10": 1,
+                "graded_group_coverage@10": 1.0,
+                "group_coverage@10": 1.0
+              },
+              "test": null
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-14",
+            "paths": [
+              "web/agent/packages/bc-agent-runtime/src/configuration.ts",
+              "web/agent/packages/bc-agent-runtime/src/database.ts",
+              "web/agent/packages/bc-agent-runtime/tests/unit/database-configuration.test.ts",
+              "web/agent/apps/bc-agent-service/tests/integration/database-outage.test.ts",
+              "web/agent/apps/bc-agent-service/tests/integration/worker-health.test.ts"
+            ],
+            "abstain": false,
+            "reason": "Pool configuration explicitly handles checked-out client error events, with unit coverage and integration tests for terminated backends, transaction recovery and worker health.",
+            "metrics": {
+              "all": {
+                "mrr": 0.5,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.4,
+                "group_coverage@5": 0.4,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.4,
+                "group_coverage@10": 0.4
+              },
+              "source": {
+                "mrr": 0.5,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.3333333333333333,
+                "group_coverage@5": 0.3333333333333333,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.3333333333333333,
+                "group_coverage@10": 0.3333333333333333
+              },
+              "doc": null,
+              "test": {
+                "mrr": 0.25,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-18",
+            "paths": [],
+            "abstain": true,
+            "reason": "Repository files alone cannot establish current Azure regional availability or private-network logical-replication constraints; current first-party Azure documentation is required and web research is prohibited.",
+            "metrics": {
+              "all": null,
+              "source": null,
+              "doc": null,
+              "test": null
+            },
+            "external_abstention_correct": true,
+            "existing_paths": true
+          }
+        ]
+      },
+      "agent_id": "750ed326-62c4-4ef",
+      "filename": "2026-10-20T12-03-40-436Z_01a15932-2314-70e0-a64c-d32b1542c144.jsonl"
+    },
+    {
+      "source_sha256": "f596e16bf271ab6b9a8e9c676d617a0b386dd081a4862311e1ba39583a8ac9de",
+      "recorded_wall_seconds": 153.741,
+      "model_observations": [
+        [
+          "openai",
+          "gpt-6.1-sol",
+          "medium"
+        ]
+      ],
+      "usage_sum": {
+        "input": 71775,
+        "output": 3548,
+        "cacheRead": 592640,
+        "cacheWrite": 0,
+        "reasoning": 122,
+        "totalTokens": 667963
+      },
+      "tool_calls": 18,
+      "tool_names": {
+        "read": 1,
+        "bash": 17
+      },
+      "tool_result_utf8_bytes": 262314,
+      "largest_tool_result_bytes": 51289,
+      "answer": {
+        "condition": "map",
+        "bundle": "B",
+        "answers": [
+          {
+            "id": "bcnav-04",
+            "paths": [
+              "web/apps/web/lib/agent/bc-agent-contract-summary-authority.ts",
+              "web/apps/web/lib/agent/bc-agent-records.ts",
+              "web/apps/web/lib/agent/bc-agent-contract-values.ts",
+              "web/apps/web/lib/agent/bc-agent-contract-aggregate.ts",
+              "web/apps/web/lib/agent/bc-agent-contract-summary.test.ts"
+            ],
+            "abstain": false,
+            "reason": "These files gate Contract money on Finance access, filter the capability catalogue, and verify withholding saved evidence after access changes.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.75,
+                "group_coverage@5": 0.75,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.75,
+                "group_coverage@10": 0.75
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 1.0,
+                "group_coverage@5": 1.0,
+                "hit@10": 1,
+                "graded_group_coverage@10": 1.0,
+                "group_coverage@10": 1.0
+              },
+              "doc": null,
+              "test": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-06",
+            "paths": [
+              "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/quotes/quotes-data.ts",
+              "web/packages/job-costing/src/sales-estimates/read-repository.ts",
+              "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/estimates/estimates-data.ts",
+              "web/packages/job-costing/src/production-estimates/read-repository.ts",
+              "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/estimates/[section]/[department]/[costCentre]/page.tsx"
+            ],
+            "abstain": false,
+            "reason": "Job Quotes reads the sales section/heading/paragraph/detail hierarchy, while job Estimates reads the production section/cost-centre/bill hierarchy.",
+            "metrics": {
+              "all": {
+                "mrr": 0.5,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "source": {
+                "mrr": 0.5,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "doc": null,
+              "test": null
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-10",
+            "paths": [],
+            "abstain": true,
+            "reason": "I located grid CSV serialization and transaction export callers but could not verify the export-authority enforcement boundary within the navigation budget.",
+            "metrics": {
+              "all": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "source": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "doc": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "test": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-13",
+            "paths": [
+              "web/agent/packages/bc-agent-protocol/tests/runtime-version-gates.test.ts",
+              "web/agent/packages/bc-agent-protocol/tests/runtime-citation-compatibility.test.ts",
+              "web/agent/packages/bc-agent-runtime/src/ingress.ts",
+              "web/agent/apps/bc-agent-service/src/activities.ts",
+              "web/agent/packages/bc-agent-protocol/src/conversation/runtime-versions.ts"
+            ],
+            "abstain": false,
+            "reason": "Version checks are limited to stored-label identity and follow-up attachment compatibility, while saved citations remain readable without version-selected delivery behavior.",
+            "metrics": {
+              "all": {
+                "mrr": 0.2,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.3333333333333333,
+                "group_coverage@5": 0.3333333333333333,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.3333333333333333,
+                "group_coverage@10": 0.3333333333333333
+              },
+              "source": {
+                "mrr": 0.2,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "doc": null,
+              "test": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-16",
+            "paths": [
+              ".github/workflows/web-release.yaml",
+              ".github/workflows/web-image.yaml",
+              ".github/workflows/web-dev.yaml",
+              ".github/workflows/web-deploy-env.yaml",
+              "tools/ci/src/cli.ts"
+            ],
+            "abstain": false,
+            "reason": "These entrypoints build immutable images, independently deliver dev and qualify staging, and invoke deployment controls for health, traffic, migration and recovery.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.6666666666666666,
+                "group_coverage@5": 0.6666666666666666,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.6666666666666666,
+                "group_coverage@10": 0.6666666666666666
+              },
+              "doc": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "test": null
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-20",
+            "paths": [
+              "web/agent/apps/bc-agent-service/src/activities.ts",
+              "web/agent/packages/bc-agent-runtime/src/prompt-bundles/tool-sets.ts",
+              "web/agent/apps/bc-agent-service/tests/unit/workflow-replay.test.ts",
+              "web/agent/apps/bc-agent-service/tests/integration/temporal-operation-recovery.test.ts",
+              ".github/actions/agent-tests/action.yaml"
+            ],
+            "abstain": false,
+            "reason": "Tool descriptors and activities enforce replay safety, with recorded-history replay and process-crash operation recovery exercised by the shared Agent test gate.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.3333333333333333,
+                "group_coverage@5": 0.3333333333333333,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.3333333333333333,
+                "group_coverage@10": 0.3333333333333333
+              },
+              "doc": null,
+              "test": {
+                "mrr": 0.3333333333333333,
+                "hit@5": 1,
+                "graded_group_coverage@5": 1.0,
+                "group_coverage@5": 1.0,
+                "hit@10": 1,
+                "graded_group_coverage@10": 1.0,
+                "group_coverage@10": 1.0
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          }
+        ]
+      },
+      "agent_id": "3475f6ec-9e0f-499",
+      "filename": "2026-10-20T12-04-11-496Z_01a15932-9c68-70e0-a64c-d32fbb596750.jsonl"
+    },
+    {
+      "source_sha256": "d9bafd0d484f87188669e77c43e3035d6d86aea8f5f6b66af00b00f4113d240e",
+      "recorded_wall_seconds": 169.679,
+      "model_observations": [
+        [
+          "openai",
+          "gpt-6.1-sol",
+          "medium"
+        ]
+      ],
+      "usage_sum": {
+        "input": 46870,
+        "output": 2777,
+        "cacheRead": 360832,
+        "cacheWrite": 0,
+        "reasoning": 40,
+        "totalTokens": 410479
+      },
+      "tool_calls": 18,
+      "tool_names": {
+        "bash": 18
+      },
+      "tool_result_utf8_bytes": 153097,
+      "largest_tool_result_bytes": 24119,
+      "answer": {
+        "condition": "hybrid",
+        "bundle": "A",
+        "answers": [
+          {
+            "id": "bcnav-03",
+            "paths": [
+              "web/packages/contracts/src/contract-finance.ts",
+              "web/packages/contracts/src/contract-finance-repository.ts",
+              "web/packages/contracts/src/contract-money.ts",
+              "classic/src/dbl/Foundation/Defines/rd222a.def",
+              "web/agent/packages/bc-model/content/contracts/finance-summary.rules.ts"
+            ],
+            "abstain": false,
+            "reason": "Finance reads original value and approved variations from the Contract header and composes explicit excluding-GST, GST and including-GST amounts using fields defined in Classic.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.6666666666666666,
+                "group_coverage@5": 0.6666666666666666,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.6666666666666666,
+                "group_coverage@10": 0.6666666666666666
+              },
+              "doc": null,
+              "test": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-05",
+            "paths": [
+              "web/packages/contracts/src/headless/analytics/contract-aggregate-read.ts",
+              "web/packages/contracts/src/headless/analytics/contract-aggregate.ts",
+              "web/packages/contracts/src/headless/contract-closure.ts",
+              "web/packages/db/src/schema/co-contracts.ts",
+              "docs/knowledge/modules/contracts/residential-building-lifecycle.md"
+            ],
+            "abstain": false,
+            "reason": "These distinguish Contract-grain queries and site-address fields from linked Jobs and customer identity, while deriving lifecycle separately from geographic state.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.6666666666666666,
+                "group_coverage@5": 0.6666666666666666,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.6666666666666666,
+                "group_coverage@10": 0.6666666666666666
+              },
+              "doc": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "test": null
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-09",
+            "paths": [
+              "web/packages/contracts/src/headless/analytics/contract-aggregate-read.ts",
+              "web/packages/contracts/src/headless/contract-closure.ts",
+              "web/packages/contracts/src/contract-maintenance-repository.ts",
+              "web/packages/contracts/src/headless/analytics/contract-aggregate.ts",
+              "web/packages/contracts/tests/contract-aggregate-read.integration.test.ts"
+            ],
+            "abstain": false,
+            "reason": "CurrentlyAt ranks usable registration dates descending with Event number only as a tie-breaker, whereas reached and lifecycle use actual dates and configured closure rules.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.25,
+                "group_coverage@5": 0.25,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.25,
+                "group_coverage@10": 0.25
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.3333333333333333,
+                "group_coverage@5": 0.3333333333333333,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.3333333333333333,
+                "group_coverage@10": 0.3333333333333333
+              },
+              "doc": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "test": null
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-12",
+            "paths": [
+              "classic/src/runtimes/dbl-sql/src/server_api.rs",
+              "classic/src/runtimes/dbl-sql/src/ops/lock.rs",
+              "classic/src/runtimes/dbl-sql/src/state.rs",
+              "docs/web/db-connections.md",
+              "docs/engineering/businesscraft-agent/specification/05-capabilities-and-erp-transactions.md"
+            ],
+            "abstain": false,
+            "reason": "The Classic runtime exposes SQL execution and session-scoped record locks, while database-ownership and ERP-operation documents describe the separate authority boundaries.",
+            "metrics": {
+              "all": {
+                "mrr": 0.5,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.3333333333333333,
+                "group_coverage@5": 0.3333333333333333,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.3333333333333333,
+                "group_coverage@10": 0.3333333333333333
+              },
+              "source": {
+                "mrr": 0.5,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "doc": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "test": null
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-14",
+            "paths": [
+              "web/agent/packages/bc-agent-runtime/src/configuration.ts",
+              "web/agent/apps/bc-agent-service/tests/integration/database-outage.test.ts",
+              "web/packages/db/src/connection.ts",
+              "web/packages/db/tests/query-instrumentation.test.ts",
+              "web/agent/apps/bc-agent-service/tests/integration/worker-health.test.ts"
+            ],
+            "abstain": false,
+            "reason": "Agent pool configuration contains checked-out client error listeners, with backend-termination integration tests and shared-pool tests covering containment without query replay.",
+            "metrics": {
+              "all": {
+                "mrr": 0.5,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.2,
+                "group_coverage@5": 0.2,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.2,
+                "group_coverage@10": 0.2
+              },
+              "source": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "doc": null,
+              "test": {
+                "mrr": 0.5,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-18",
+            "paths": [],
+            "abstain": true,
+            "reason": "Repository configuration cannot establish current Azure regional availability or private-network logical-replication support; those facts require current first-party Azure documentation, outside this repository-only navigation task.",
+            "metrics": {
+              "all": null,
+              "source": null,
+              "doc": null,
+              "test": null
+            },
+            "external_abstention_correct": true,
+            "existing_paths": true
+          }
+        ]
+      },
+      "agent_id": "ee3f17ee-d864-498",
+      "filename": "2026-10-20T12-07-04-415Z_01a15935-3fdf-70e0-a64c-d333b1bfd7fe.jsonl"
+    },
+    {
+      "source_sha256": "b0f8caa3706eff6ca055614628637c153b67b7be98bc232a3954485dcc7b716f",
+      "recorded_wall_seconds": 149.507,
+      "model_observations": [
+        [
+          "openai",
+          "gpt-6.1-sol",
+          "medium"
+        ]
+      ],
+      "usage_sum": {
+        "input": 39288,
+        "output": 2909,
+        "cacheRead": 332928,
+        "cacheWrite": 0,
+        "reasoning": 63,
+        "totalTokens": 375125
+      },
+      "tool_calls": 18,
+      "tool_names": {
+        "bash": 18
+      },
+      "tool_result_utf8_bytes": 129206,
+      "largest_tool_result_bytes": 16918,
+      "answer": {
+        "condition": "hybrid",
+        "bundle": "B",
+        "answers": [
+          {
+            "id": "bcnav-04",
+            "paths": [
+              "web/apps/web/lib/agent/bc-agent-contract-summary-authority.ts",
+              "web/apps/web/lib/agent/bc-agent-contract-aggregate.ts",
+              "web/apps/web/lib/agent/bc-agent-records.ts",
+              "web/apps/web/lib/agent/bc-agent-contract-milestones.ts",
+              "web/agent/packages/bc-agent-runtime/src/ingress.ts"
+            ],
+            "abstain": false,
+            "reason": "These entrypoints check Contract Finance authority, restrict money reads and catalogue fields, and reauthorize evidence before redisplay.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.6666666666666666,
+                "group_coverage@5": 0.6666666666666666,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.6666666666666666,
+                "group_coverage@10": 0.6666666666666666
+              },
+              "doc": null,
+              "test": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-06",
+            "paths": [
+              "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/quotes/page.tsx",
+              "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/quotes/quotes-data.ts",
+              "web/packages/job-costing/src/sales-estimates/read-model.ts",
+              "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/estimates/page.tsx",
+              "web/apps/web/app/(app)/[company]/job-costing/jobs/[jobNumber]/estimates/estimates-data.ts"
+            ],
+            "abstain": false,
+            "reason": "Quotes expose sales-estimate reads, while job estimates expose production structure, cost centres and bill specifications through distinct screens and domain readers.",
+            "metrics": {
+              "all": {
+                "mrr": 0.3333333333333333,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "source": {
+                "mrr": 0.3333333333333333,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "doc": null,
+              "test": null
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-10",
+            "paths": [
+              "web/apps/web/lib/filters/filter-grid-route.ts",
+              "web/apps/web/lib/security/route-access.ts",
+              "web/apps/web/lib/filters/grid-filter-resources.ts",
+              "web/apps/web/lib/filters/grid-filter-resources.test.ts",
+              "web/apps/web/lib/grids/csv-export.ts"
+            ],
+            "abstain": false,
+            "reason": "Export resources pass the owning route's authorization before execution, while client CSV generation itself grants no authority beyond the authorized data loaders.",
+            "metrics": {
+              "all": {
+                "mrr": 0.2,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.3333333333333333,
+                "group_coverage@5": 0.3333333333333333,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.3333333333333333,
+                "group_coverage@10": 0.3333333333333333
+              },
+              "source": {
+                "mrr": 0.2,
+                "hit@5": 1,
+                "graded_group_coverage@5": 1.0,
+                "group_coverage@5": 1.0,
+                "hit@10": 1,
+                "graded_group_coverage@10": 1.0,
+                "group_coverage@10": 1.0
+              },
+              "doc": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "test": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-13",
+            "paths": [
+              "web/agent/packages/bc-agent-runtime/src/ingress.ts",
+              "web/agent/packages/bc-agent-runtime/src/agent-runtime-evidence.ts",
+              "web/agent/packages/bc-agent-runtime/src/evidence-authority.ts",
+              "web/agent/packages/bc-agent-runtime/src/store.ts",
+              "web/agent/packages/bc-agent-runtime/src/follow-up-route.ts"
+            ],
+            "abstain": false,
+            "reason": "Completed-task delivery still revalidates evidence, runtime evidence carries a version, and follow-up ingress checks the saved task runtime version.",
+            "metrics": {
+              "all": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "source": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "doc": null,
+              "test": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-16",
+            "paths": [
+              ".github/workflows/web-release.yaml",
+              ".github/workflows/web-image.yaml",
+              ".github/workflows/web-dev.yaml",
+              ".github/workflows/web-deploy-env.yaml",
+              "tools/ci/src/cli.ts"
+            ],
+            "abstain": false,
+            "reason": "These workflows build release images and deploy dev and staging through directly invoked CI commands with candidate validation, serialized deployment, health checks, staged traffic and rollback controls.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.6666666666666666,
+                "group_coverage@5": 0.6666666666666666,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.6666666666666666,
+                "group_coverage@10": 0.6666666666666666
+              },
+              "doc": {
+                "mrr": 0,
+                "hit@5": 0,
+                "graded_group_coverage@5": 0.0,
+                "group_coverage@5": 0.0,
+                "hit@10": 0,
+                "graded_group_coverage@10": 0.0,
+                "group_coverage@10": 0.0
+              },
+              "test": null
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          },
+          {
+            "id": "bcnav-20",
+            "paths": [
+              "web/agent/apps/bc-agent-service/src/activities.ts",
+              "web/agent/apps/bc-agent-service/tests/unit/prompt-render.test.ts",
+              "web/agent/apps/bc-agent-service/tests/unit/workflow-replay.test.ts",
+              "web/agent/apps/bc-agent-service/tests/integration/temporal-operation-recovery.test.ts",
+              "web/agent/apps/bc-agent-service/tests/integration/model-step-claim.test.ts"
+            ],
+            "abstain": false,
+            "reason": "Activities require explicit safe replay descriptors, with catalogue-policy, recorded-workflow replay, crash recovery and unsafe or undeclared replay cases covered by these tests.",
+            "metrics": {
+              "all": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.5,
+                "group_coverage@5": 0.5,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.5,
+                "group_coverage@10": 0.5
+              },
+              "source": {
+                "mrr": 1.0,
+                "hit@5": 1,
+                "graded_group_coverage@5": 0.3333333333333333,
+                "group_coverage@5": 0.3333333333333333,
+                "hit@10": 1,
+                "graded_group_coverage@10": 0.3333333333333333,
+                "group_coverage@10": 0.3333333333333333
+              },
+              "doc": null,
+              "test": {
+                "mrr": 0.3333333333333333,
+                "hit@5": 1,
+                "graded_group_coverage@5": 1.0,
+                "group_coverage@5": 1.0,
+                "hit@10": 1,
+                "graded_group_coverage@10": 1.0,
+                "group_coverage@10": 1.0
+              }
+            },
+            "external_abstention_correct": null,
+            "existing_paths": true
+          }
+        ]
+      },
+      "agent_id": "00fdba48-0a52-4f4",
+      "filename": "2026-10-20T12-07-24-882Z_01a15935-8fd2-70e0-a64c-d3360b1f3a26.jsonl"
+    }
+  ]
+}

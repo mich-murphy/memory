@@ -1,0 +1,12 @@
+{
+  "positive_qrels": 77,
+  "unreachable_positive_qrels": [
+    {
+      "task_id": "bcnav-11",
+      "path": "classic/src/runtimes/dbl-sql/generated/tables.sql",
+      "grade": 3,
+      "kind": "source"
+    }
+  ],
+  "note": "Preserved rather than silently removed from first-run judgments; all methods share the same allowed corpus. Judged coverage is a conservative limited metric."
+}

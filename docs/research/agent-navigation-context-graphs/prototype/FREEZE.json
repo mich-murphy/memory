@@ -1,0 +1,14 @@
+{
+  "version": "navigation-v1",
+  "status": "frozen-before-benchmark",
+  "tests_passed": 16,
+  "python": "3.14.7",
+  "sqlite": "3.53.3",
+  "sha256": {
+    "nav.py": "2d017cd35e553a0d5763928f740ff5360a75feed9bbe8032e54c28b5bc53b867",
+    "routing.json": "244ef989b0ac594b457092081dd334819eec7a4bf77c4a1b0daf296a81affc1f",
+    "map.md": "6f61262476cf4d639c0e0c6f0ea32ba21cda68e5df1643a057e6e77a9a30b412",
+    "README.md": "01a4e91478cbf59e981ce9a09cd9d863beb4eea250e2fa90223241e8ba084906",
+    "test_nav.py": "6e67a51f5a96c6007c2a78babd312ad0e1e7e73d0e0628d0ed35eeb249efd8b6"
+  }
+}

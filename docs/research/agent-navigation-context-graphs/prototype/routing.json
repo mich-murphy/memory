@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "basis": ["docs/repository/README.md", "repo.yaml"],
+  "routes": [
+    {"id":"web-screens", "terms":"web screens navigation browser frontend", "prefixes":["web/apps/web"], "docs":["docs/web/contributing.md"], "source":"docs/repository/README.md:13"},
+    {"id":"web-shared", "terms":"business rules data access shared ui web packages", "prefixes":["web/packages"], "docs":["docs/web/README.md"], "source":"docs/repository/README.md:14"},
+    {"id":"agent", "terms":"businesscraft agent hosted service cli desktop knowledge", "prefixes":["web/agent"], "docs":["web/agent/README.md","docs/engineering/businesscraft-agent/README.md"], "source":"docs/repository/README.md:15"},
+    {"id":"classic-rules", "terms":"classic business routines definitions dbl legacy", "prefixes":["classic/src/dbl"], "docs":["docs/knowledge/legacy/source-navigation.md"], "source":"docs/repository/README.md:16"},
+    {"id":"windows", "terms":"classic windows client", "prefixes":["classic/src/windows"], "docs":["ONBOARDING.md"], "source":"docs/repository/README.md:17"},
+    {"id":"runtime", "terms":"sql automation runtime bridges isam dbl rpc", "prefixes":["classic/src/runtimes"], "docs":["docs/engineering/sql/isam-sql-testing.md"], "source":"docs/repository/README.md:18"},
+    {"id":"abc", "terms":"abc build generation language proof tooling", "prefixes":["tools/abc"], "docs":["tools/abc/docs/command-surface.md"], "source":"docs/repository/README.md:19"},
+    {"id":"automation", "terms":"classic automation scenarios coverage runtime runbook", "prefixes":["classic/automation"], "docs":["classic/automation/runbooks/rpc-agent-runbook.md"], "source":"docs/repository/README.md:20"},
+    {"id":"knowledge", "terms":"product knowledge modernisation scope", "prefixes":["docs/knowledge"], "docs":["docs/knowledge/README.md"], "source":"docs/repository/README.md:21"},
+    {"id":"model", "terms":"bc model facts intent bindings", "prefixes":["web/agent/packages/bc-model"], "docs":["docs/knowledge/model/README.md"], "source":"docs/repository/README.md:22"},
+    {"id":"delivery", "terms":"cloud delivery customer stamps infra development staging", "prefixes":["infra/web"], "docs":["docs/devops/dev-staging-cicd.md"], "source":"docs/repository/README.md:23"},
+    {"id":"helpers", "terms":"repository worker helpers scripts", "prefixes":["scripts"], "docs":["scripts/README.md"], "source":"docs/repository/README.md:24"}
+  ]
+}

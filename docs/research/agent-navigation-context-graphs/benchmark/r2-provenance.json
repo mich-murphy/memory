@@ -1,0 +1,191 @@
+{
+  "verified_at": "2026-10-20T11:59:41.703994+00:00",
+  "operations": "R2 GET immutable file commits only",
+  "unique_gets": 17,
+  "tasks": [
+    {
+      "task_id": "bcnav-01",
+      "trace_id": "0103b9c6d0d5a6ae4f3e99a5161efcbd",
+      "source_line": 9,
+      "r2_file_commit": "v3/machines/2d527d12-4e8d-4089-8e26-6019aebc8925/records/file/cb704f7b27b2a69324988673fe6d3994caca3f7b47756338951865f72beea44b/commits/00000000000000000001-dac65e574cfddda81efd84a9d5e31e9731e7a4eebf442dbc5e4bec00f55b0c61.json",
+      "descriptor_sha256": "dac65e574cfddda81efd84a9d5e31e9731e7a4eebf442dbc5e4bec00f55b0c61",
+      "transcript_sha256": "bb60f03be3e83c4e24e1f3450e02d6db3141702bc1a15279ff30dba955cae947",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-02",
+      "trace_id": "267b5582ce5451ab0079c884ab860b97",
+      "source_line": 1,
+      "r2_file_commit": "v3/machines/2d527d12-4e8d-4089-8e26-6019aebc8925/records/file/86ee109557d1c2b85b5dffc918b2f18a41765940bd10e87b9b4a15680df367b0/commits/00000000000000000001-68d19e8e4a413aca23e818819ac5450d134587054ce6325da017f91fbf80e06c.json",
+      "descriptor_sha256": "68d19e8e4a413aca23e818819ac5450d134587054ce6325da017f91fbf80e06c",
+      "transcript_sha256": "efed2d2a4663e37ffcb05cfda0882c3080b7d3b71023f052913610e79c58c0c7",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-03",
+      "trace_id": "13a75485252d708c1162ba0de6a3aecf",
+      "source_line": 1,
+      "r2_file_commit": "v3/machines/2d527d12-4e8d-4089-8e26-6019aebc8925/records/file/1022d36ceb7e21b50d62d5f7f6a55b43d2b4b0e867af1b92ff49b75b338b3763/commits/00000000000000000001-4970abe7b9e22abfe72c1f2dc2819bfef95a59cc570f860ef0e49cbc5208f43c.json",
+      "descriptor_sha256": "4970abe7b9e22abfe72c1f2dc2819bfef95a59cc570f860ef0e49cbc5208f43c",
+      "transcript_sha256": "f1d55a2d6abac550929efc01d3d9e268f396114129db5020adbf17608ee17e1d",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-04",
+      "trace_id": "9dc5527c8f9f97e402e4b24fb91515fc",
+      "source_line": 1,
+      "r2_file_commit": "v3/machines/2d527d12-4e8d-4089-8e26-6019aebc8925/records/file/7f6032c13089dd44336de79de939e9d53f69a533e1d2aa399f0079f901c86469/commits/00000000000000000001-48cd400f8d38594785d3fa7fb6255229a1796319177f19ccba3ab491357a4cab.json",
+      "descriptor_sha256": "48cd400f8d38594785d3fa7fb6255229a1796319177f19ccba3ab491357a4cab",
+      "transcript_sha256": "52aca5342167a85bd27b7ed706c280d0b8bfb1bc1efd4fc281ef9235f1873938",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-05",
+      "trace_id": "33840b9e5d8cc6a43fe93036f860d058",
+      "source_line": 1,
+      "r2_file_commit": "v3/machines/2d527d12-4e8d-4089-8e26-6019aebc8925/records/file/12697a1e824aea4495f6839ba6812833ef8d0098d24b7439281c97562f2bff5b/commits/00000000000000000001-5399323cf3b8c50faf1fb7ac1206ef4f460aa05560c122975ef4a6d1d6c656ed.json",
+      "descriptor_sha256": "5399323cf3b8c50faf1fb7ac1206ef4f460aa05560c122975ef4a6d1d6c656ed",
+      "transcript_sha256": "7997ee27c07c9f7d08ea8172499db437b47c121db7db13b21931b8708d4ba109",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-06",
+      "trace_id": "33840b9e5d8cc6a43fe93036f860d058",
+      "source_line": 1,
+      "r2_file_commit": "v3/machines/2d527d12-4e8d-4089-8e26-6019aebc8925/records/file/12697a1e824aea4495f6839ba6812833ef8d0098d24b7439281c97562f2bff5b/commits/00000000000000000001-5399323cf3b8c50faf1fb7ac1206ef4f460aa05560c122975ef4a6d1d6c656ed.json",
+      "descriptor_sha256": "5399323cf3b8c50faf1fb7ac1206ef4f460aa05560c122975ef4a6d1d6c656ed",
+      "transcript_sha256": "7997ee27c07c9f7d08ea8172499db437b47c121db7db13b21931b8708d4ba109",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-07",
+      "trace_id": "6625b4e5f6763132c995c0a3550f78a3",
+      "source_line": 9,
+      "r2_file_commit": "v3/machines/8e96ba3e-0af0-4261-bc72-caa5ae6cf4bc/records/file/a57a87c630d7cfae433448910b1c0ef5c14a9f3b76d22a49de120981196da1a1/commits/00000000000000000001-f41c0a15b74d1c46740397b3deb07ab680650f9ce826690da133e397e7a37932.json",
+      "descriptor_sha256": "f41c0a15b74d1c46740397b3deb07ab680650f9ce826690da133e397e7a37932",
+      "transcript_sha256": "7737192d1ab2183cc5e0578c9f74ca90ce07c1690599d97528fcda5721e436f4",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-08",
+      "trace_id": "68b4654c7ae418e3b3a59c963cb7d874",
+      "source_line": 273,
+      "r2_file_commit": "v3/machines/8e96ba3e-0af0-4261-bc72-caa5ae6cf4bc/records/file/eddb5acfc7cdceed50d80fe83f59f5fb5e21ffda0b697df56351b84ab057a73a/commits/00000000000000000001-d909c250c41a4967132fe8ad24ca3759afd63314c146093137be427685688ae0.json",
+      "descriptor_sha256": "d909c250c41a4967132fe8ad24ca3759afd63314c146093137be427685688ae0",
+      "transcript_sha256": "4c9070425699bc1bc668e7243170ab3abe5e5123187f693a52f56f61ed2f3eaf",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-09",
+      "trace_id": "13a75485252d708c1162ba0de6a3aecf",
+      "source_line": 1,
+      "r2_file_commit": "v3/machines/2d527d12-4e8d-4089-8e26-6019aebc8925/records/file/1022d36ceb7e21b50d62d5f7f6a55b43d2b4b0e867af1b92ff49b75b338b3763/commits/00000000000000000001-4970abe7b9e22abfe72c1f2dc2819bfef95a59cc570f860ef0e49cbc5208f43c.json",
+      "descriptor_sha256": "4970abe7b9e22abfe72c1f2dc2819bfef95a59cc570f860ef0e49cbc5208f43c",
+      "transcript_sha256": "f1d55a2d6abac550929efc01d3d9e268f396114129db5020adbf17608ee17e1d",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-10",
+      "trace_id": "13a75485252d708c1162ba0de6a3aecf",
+      "source_line": 1,
+      "r2_file_commit": "v3/machines/2d527d12-4e8d-4089-8e26-6019aebc8925/records/file/1022d36ceb7e21b50d62d5f7f6a55b43d2b4b0e867af1b92ff49b75b338b3763/commits/00000000000000000001-4970abe7b9e22abfe72c1f2dc2819bfef95a59cc570f860ef0e49cbc5208f43c.json",
+      "descriptor_sha256": "4970abe7b9e22abfe72c1f2dc2819bfef95a59cc570f860ef0e49cbc5208f43c",
+      "transcript_sha256": "f1d55a2d6abac550929efc01d3d9e268f396114129db5020adbf17608ee17e1d",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-11",
+      "trace_id": "5937b13eb9a314b5855a6880bbe75150",
+      "source_line": 1,
+      "r2_file_commit": "v3/machines/8e96ba3e-0af0-4261-bc72-caa5ae6cf4bc/records/file/3b4747332fdd799d6e805c69c027660255283fe24bf2154bcf523d776542e39a/commits/00000000000000000001-6c1c828f7d8663337e7f1f621db1f67b21a1d1ba3c3318733dd755a6e7554a3d.json",
+      "descriptor_sha256": "6c1c828f7d8663337e7f1f621db1f67b21a1d1ba3c3318733dd755a6e7554a3d",
+      "transcript_sha256": "1583eeca809964597aac20b6f993683b6a5e463b7c8f7685b0b91fb1aa27b595",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-12",
+      "trace_id": "63cfbad40e51387c5184e93f967c4803",
+      "source_line": 6,
+      "r2_file_commit": "v3/machines/8e96ba3e-0af0-4261-bc72-caa5ae6cf4bc/records/file/834aa2601a30f6eeeefd6807b980f5f552ec103d868481a6d8c7819e5c5e15e7/commits/00000000000000000001-d3879112a77e8a2790503182826d8ffdeb10679460e187e0008563a12152afec.json",
+      "descriptor_sha256": "d3879112a77e8a2790503182826d8ffdeb10679460e187e0008563a12152afec",
+      "transcript_sha256": "a493efd815815e36214b8b0babb149b1990efa3427d501cd00c4799d920008aa",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-13",
+      "trace_id": "0d4ffce0cb35163228bfadb1cdc395a3",
+      "source_line": 1,
+      "r2_file_commit": "v3/machines/8e96ba3e-0af0-4261-bc72-caa5ae6cf4bc/records/file/7cc33fd1cb5f9f7cf80282c0eb99dd2f0a0ddfcfdcee1db4027686aecdcfe7a8/commits/00000000000000000001-2f5507820bd84d7293fac1f850bccb3a1603ae63c3b778b13a2204bce451b4b7.json",
+      "descriptor_sha256": "2f5507820bd84d7293fac1f850bccb3a1603ae63c3b778b13a2204bce451b4b7",
+      "transcript_sha256": "af076eeaf586ae8f1631b62cb800b24fcf26daa0e7aaf2134bad1d0101c45f41",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-14",
+      "trace_id": "9bd82bcb6b46bf524071e65d907b012d",
+      "source_line": 10,
+      "r2_file_commit": "v3/machines/2d527d12-4e8d-4089-8e26-6019aebc8925/records/file/e8278b8e639d48755b81c3e85053ca45a3f260a6c5d13cdf999ec7700eaf207e/commits/00000000000000000001-58fc3bb1d1d6797f1416744d0053bcbeac58d20fcfb63b14a09381bb1018b047.json",
+      "descriptor_sha256": "58fc3bb1d1d6797f1416744d0053bcbeac58d20fcfb63b14a09381bb1018b047",
+      "transcript_sha256": "0ee0adfc929108c8ec6ec155b9c6729ae4fa7b62cdff573eb17a89a958ed2fbe",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-15",
+      "trace_id": "431323c334886dd8f08edc3d6cc8c574",
+      "source_line": 1,
+      "r2_file_commit": "v3/machines/2d527d12-4e8d-4089-8e26-6019aebc8925/records/file/f23807fb7d3919418278fdb860c8a2b1db033c5007bbc2721e47089058695be1/commits/00000000000000000001-7e96156c58339265bf6b151c75815477a96c3857e689303b171912d42607f84a.json",
+      "descriptor_sha256": "7e96156c58339265bf6b151c75815477a96c3857e689303b171912d42607f84a",
+      "transcript_sha256": "d22f543e3c2e6d4c4eff548a509e97b5c2f3183eefc36da6454dd98d751edaf1",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-16",
+      "trace_id": "d58755ed777433c7d5107e487fbc3032",
+      "source_line": 6,
+      "r2_file_commit": "v3/machines/8e96ba3e-0af0-4261-bc72-caa5ae6cf4bc/records/file/49936b1ec74aec39024c7488573d30b76470edd2e332107eaa24e8793aeb6eca/commits/00000000000000000001-8577a50169f7bf1a744a6da2af3df90b291735e8ef5ccdc277855e8e0922c50c.json",
+      "descriptor_sha256": "8577a50169f7bf1a744a6da2af3df90b291735e8ef5ccdc277855e8e0922c50c",
+      "transcript_sha256": "354664d51ae10dcc636668a59f920ac2e90c69e07629a6fa0ae1d7713420eac2",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-17",
+      "trace_id": "8be78a65e3003d97ae3481c727ce66b0",
+      "source_line": 6,
+      "r2_file_commit": "v3/machines/8e96ba3e-0af0-4261-bc72-caa5ae6cf4bc/records/file/41ef19efe55906d986b4dc01e8f018a82bf2c1d1e3665ed21c5c9afc2a71ba29/commits/00000000000000000001-9ccaa59f6fb2108815a987a58d771aebb9e7404fd37fc5d2f9d2d1f062e93914.json",
+      "descriptor_sha256": "9ccaa59f6fb2108815a987a58d771aebb9e7404fd37fc5d2f9d2d1f062e93914",
+      "transcript_sha256": "84b5c4413e7f6aeaf1503b3f2d98fa2036642c9f97434e054a1d78ef91208274",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-18",
+      "trace_id": "66f3a82c38878b73981c43e08007972e",
+      "source_line": 5,
+      "r2_file_commit": "v3/machines/8e96ba3e-0af0-4261-bc72-caa5ae6cf4bc/records/file/c52d6b2d704c35be1f1ff353a5594b372e97d8d8b8d5775da10531f0a7f0c991/commits/00000000000000000001-5b26ae36f0560328f76f2671f52d69f1b2be18e3c5cb8eef515b9db20433500c.json",
+      "descriptor_sha256": "5b26ae36f0560328f76f2671f52d69f1b2be18e3c5cb8eef515b9db20433500c",
+      "transcript_sha256": "86b60b33629a514fde56028b7e052d9ef05d7e2c78117c436d4c74cb6242c737",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-19",
+      "trace_id": "177ba348fc44bf01d5e1d75ba3292339",
+      "source_line": 1,
+      "r2_file_commit": "v3/machines/2d527d12-4e8d-4089-8e26-6019aebc8925/records/file/d927e133b2af6efe01cdf566aa6dbaf7883d0a9d99acc486127fbae4431df97b/commits/00000000000000000001-f1a00b01bf0adb942427d06d865965e2e441ccb726e05b5476f374d38b711ac3.json",
+      "descriptor_sha256": "f1a00b01bf0adb942427d06d865965e2e441ccb726e05b5476f374d38b711ac3",
+      "transcript_sha256": "9ebeec2e3d78323ef263734e76eaaeea53d792e230c001c456c19c71e60d7d06",
+      "verified": true
+    },
+    {
+      "task_id": "bcnav-20",
+      "trace_id": "54d5f2e5da31b004d396ede9b2de930b",
+      "source_line": 1,
+      "r2_file_commit": "v3/machines/2d527d12-4e8d-4089-8e26-6019aebc8925/records/file/d27ae9fee098d1dec098ce805fd5c50778fa90a2fe42fc45dd5dd4d8f7a54502/commits/00000000000000000001-27cfbb55cd6cc4590df8a722af05a4db44d4b625ad9bd01626f12972c903f994.json",
+      "descriptor_sha256": "27cfbb55cd6cc4590df8a722af05a4db44d4b625ad9bd01626f12972c903f994",
+      "transcript_sha256": "3d6add887c768950f6164753f376320d338deabb0afad4ffca60c274428f29a6",
+      "verified": true
+    }
+  ],
+  "limitations": [
+    "Checks selected archived generations, not latest bucket state or complete chain audit.",
+    "No raw transcript bodies or private configuration copied into proof."
+  ]
+}

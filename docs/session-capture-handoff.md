@@ -9,6 +9,692 @@ The previous checkpoint and detailed October 28 ledger are preserved verbatim in
 [progress history](session-capture-progress-history.md). Historical instructions are not
 current rollout authority.
 
+## Current session checkpoint
+
+### PR cleanup and complete-main integration — October 30 (in progress)
+
+The user explicitly authorizes verifying existing PRs, closing superseded work,
+putting all relevant local changes into PRs and merging once ready. Every delegated
+worker uses **medium effort**. This is source integration authority, NOT deployment,
+capture activation, installed-state changes or release publication authority.
+
+- Parent owns this brief, main checkout, source/PR mutations and final merge acceptance.
+  Read-only maintenance auditor363103e0 ownsPR23/26/27/28 relevance/security/diffs;
+  read-only local auditor d21c0417 owns all-branch/worktree coverage and frozen research
+  privacy/publication review. CI/runtime babysitter0e7b2607 is the SINGLE CI watcher
+  and sole possible expensive local validator; prior runtime owners are released.
+- Reconciled current54e5981 and origin/main9078a3e. Local main4c9aca5 is88 commits ahead
+  of origin/main; seven delivery branches add the remaining qualified candidate work.
+  PR30 currently targets the performance parent, so its existing small delta does NOT
+  by itself integrate the complete replacement into main. Plan: one complete qualified
+  main-targeted PR rather than merging intermediate states missing later repairs;
+  retain the local stack/branches and source identities. Exact final base/head pending.
+- Current dirty handoff (including earlier pre-existing material) and three untracked
+  frozen research paths are preserved. Explicit user publication scope includes relevant
+  local documentation after privacy review; no blanket add/reset or other-worktree
+  cleanup. Audit will distinguish already integrated/cherry-picked changes, deliberately
+  retired cold-recovery work and nonshipping measurement/snapshot evidence from any
+  genuinely unrepresented production changes. Never publish credentials/transcripts.
+- Acceptance: source-tied review and unchanged applicable local gates, exact-head green
+  hosted checks, no blocking reviews/conflicts, then ordinary non-bypassing merge.
+  CI worker uses `gh run watch <id> --interval 60 --exit-status`, one at a time; no
+  polling loops or `gh pr checks`. Healthy milestones are not stopping conditions.
+  Existing source74c/CI54e evidence below remains applicable only to unchanged inputs.
+- Next: accept both early audit results, close obsolete PRs with reasons, publish all
+  safe relevant local changes, resolve remaining maintenance deltas and babysit their
+  exact heads through merge. No activation or new performance experiment.
+
+### Release qualification complete; operating authorization gate — October 30
+
+**Source/platform qualification and offline release preparation are accepted. Not
+installed, activated, published or operating-budget accepted.** Medium-effort workers
+completed; parent independently checked source invariants, raw checks, CI and assets.
+
+- Code `74c00f4a985d9b2ad3ebe0028458e324f14c6b20` retains881 scheduling repair plus
+  OS-specific stat numeric adapters. Exact stat-v1 bytes (including negative Darwin
+  device wrapping), quota arithmetic/errors and safety checks are unchanged; golden/
+  extreme tests added, no suppressions or weakened gates. Docs HEAD `54e5981`, branch
+  `delivery/release-qualification`, new child of the preserved delivery stack. At startup
+  fetched origin/main was ancestor (130 ahead/0 behind); no main/maintenance merge.
+- Local PASS: configured fmt/lint (zero issues), full CGO/race/shuffle (30 tested
+  packages +two without tests), actual capture consumer12+6+12 (one existing optional
+  explicit SDK-repair-peer skip), complete analytics117/no skips, nine unchanged30s
+  fuzz campaigns, offline pedantic zizmor and ALLmake-check prerequisites as a staged
+  union. Final merged coverage87.4% (13,942/15,958), maxCRAP29.40/limit30.
+  Aggregate makecheck-v2 genuinely exited2 at missing-Git-metadata actionlint AFTER
+  benchmark smoke; unchanged actionlint then passed with RO private Git metadata.
+  Earlier source-identical consumer completes the prerequisite set; no false aggregate0.
+  Pinned govulncheck used supported-db=file:///vulndb via audited exec-only adapter,
+  complete4,712-ID/three-index public mirror, no advisory filtering/tool changes.
+- **All seven hosted CI jobs PASS on exact54e5981**, including native macos-26
+  coverage/CRAP and Darwin vuln, Linux amd64/arm64, static checks, writer/analytics,
+  fuzz and online workflow security. One parent `gh run watch --interval60 --exit-status`
+  completed0. Local native admission was not bypassed or invented; hosted native source
+  evidence does not establish this Mac's installed paths/hooks or analytics ABI.
+  CI: https://github.com/mich-murphy/memory/actions/runs/41006465439
+  Ready-for-review top-of-stack PR: https://github.com/mich-murphy/memory/pull/30
+- Official pinned GoReleaser/Syft snapshot `0.5.0-SNAPSHOT-74c00f4` COMPLETE: four
+  Linux/Darwin amd64/arm64 binaries, four actual SPDX SBOMs, unchanged installer and
+  nine official checksums. Parent independently hashed allnine assets and20 analytics/
+  launcher components against source74c; build info Go1.27.3/CGO0/trimpath and native
+  Linux version checked. Private snapshot is NOT a tag, signed immutable release or
+  normal-installer-ready published artifact; installer not invoked. Linux analytics
+  venv is NOT Darwin ABI-compatible; Mac runtime/coordinates still require operating
+  verification. ReaderContract was already session-reader/v2 onb8: no invented reset
+  or protocol-migration prerequisite. BC remote-current uses a Mac-local reader bound
+  to BC identity/archive, not autonomous interactive SSH.
+- Evidence root `~/.local/state/machines-validation-pilot/memory-release-20261030/`:
+  `RESULTS.json`, `RELEASE-BUNDLE.md`, `bundle-asset-verification.json`,
+  `release-components-manifest.json`, `runtime-final-cleanup.json`, `evidence.sha256`.
+  Parent proved all615 frozen files/input coverage; manifest85ffde15… matches74c
+  executable/gate inputs (two later nonconsumed performance markdown differences only).
+  Initial Linux lint,300/600 aggregate timeouts, prep/trap corrections and failed bundle
+  prerequisites remain failures/history. Native Go600s/test limits unchanged; actual
+  full suite passed with measured900s aggregate allowance. Standalone87.3% raw report
+  remains but its profile was overwritten before freezing; final87.4% profile retained.
+  Runtime6adb4ed8, sourcea62e9651 and read-only05a5f688 completed/released; all37 exact
+  owned CIDs inspected removed/OOMfalse, final inventory empty. No queued validators.
+- **Next action is a genuine operating authorization/policy gate, not more offline
+  experimentation:** controlled Mac → BC-01 → combined observable acceptance, with
+  assistant-owned inventory, coordinated capture/reader/wrapper/Mac analytics staging,
+  native/R2/publication→reader→importer→index→report verification and visible failures/
+  freshness/resource acceptance. Full plan/authorization reference posted immediately:
+  https://github.com/mich-murphy/memory/pull/30#issuecomment-6515658801
+  Capture remains disabled. No installed/original-source/R2/SSH inventory or mutation,
+  host install, service/hook apply, refresh, tag/publication, reset/rebind/deletion or
+  legacy retirement occurred. Preserve accepted payloads/DB-WAL-SHM, identities,
+  exclusions/roots/archive binding, original sources/research, analytics/cache/locks.
+  Service install--apply starts capture; rollback must never replace advanced state
+  with stale copies. Settled CPU/budgets and historical Mac-exit cause remain open.
+  Dirty handoff and frozen research are preserved; this brief remains intentionally
+  uncommitted with its pre-existing content. No additional authority inferred fromCI.
+
+Earlier dated checkpoints below are historical evidence, not renewed execution authority.
+
+## Experiment outcome and decision — October 30, 03:14 UTC
+
+**Keep the narrow per-lane scheduling repair `881b04e`. A fresh bounded offline
+pair is now COMPLETE, both correct; this is not full release or operating-budget
+acceptance.** The user was right that the earlier package-only checkpoint did not
+answer the original performance question. Their timing question was not a stop
+request; parent corrected that unilateral scope reduction and finished the pair.
+
+| Unprofiled phase | Original b8 wall / process CPU | Repaired881 wall / process CPU |
+| --- | --- | --- |
+| Active backlog through final ACK | 178.272s /15.412s | 1.813s /0.913s |
+| Settled unchanged | 30.005s /7.670s | 30.001s /7.553s |
+| Three unhinted appends through final ACK | 0.709s /0.268s | 0.510s /0.262s |
+
+- Same f35 overlay, approved public node6f7 image, preserved pinned Go1.27.3/Nix2.28.5
+  environment, medium1.5CPU/4GiB shared lease, native EXT4 state and BOTH temporary
+  variables, unchanged300s deadlines/30CPU phase guards. Fixed881 ran FIRST, thenb8;
+  ONE pair only. Both actual Go/Docker0/OOMfalse, reader/correctness201 sources,
+  stable epochs/unrelated sources, exactly3 append revisions and3 credential negatives.
+  Active work on BOTH was201 ACK/201 CAS/402 PUT, identical offered bytes; settled
+  had30 sweeps/6030 requests/270 preparations and ZERO publication churn.
+- This supports fixing demonstrated preexisting starvation; it is not a general
+  98× speed claim, a repeated distribution or an isolated c8-only causal comparison.
+  Source is c8 PLUS repair, not unchangedc8. Existing deterministic old-source RED,
+  repaired4×20 GREEN,70 focused tests, full212-top-level package PASS and independent
+  safety review support the code decision. No privacy/order/durability checks removed.
+- Settled CPU is effectively unchanged in this pair, and BOTH miss the exploratory
+  3CPU-seconds/30s target. Background efficiency is NOT solved or budget-accepted.
+  Nine derived sources still prepare repeatedly; no speculative caching/check-removal
+  optimization or storage redesign is justified by this comparison alone.
+- New fixed build `build-1793329678597016000` passed six overlay units×20;
+  binarySHA `f219f1d8fecdca4a7e74d8c233e532ecbfb40ab9d15800dab51ead722a7e462d`.
+  Primaries: fixed `primary-1793329740297078000` (35.47s total), baseline
+  `primary-1793329805893811000` (212.45s total). Parent independently read actual
+  three-phase scalars, correctness lines, final Docker statuses, build120 PASS rows,
+  matching environment/overlay/runner identities and native-temp invocation.
+- Evidence: private runtime `fresh-pair-v12/{RESULTS.json,FINAL-RUNTIME-HANDOFF.md,evidence.sha256}`.
+  Medium runtime ownercab9f02a completed/released after predecessor resume expired;
+  exact owned CIDs removed, no new runs. All earlier failed roots/slots/history remain.
+  Approved private preparer added only exact fixed-ref identity; no mislabelingasc8.
+- Decision: retain durable independent snapshots/reader design and all safety checks;
+  carry repaired881 forward, not untouchedc8 or an experimental policy shortcut.
+  New-source canonical format/lint/race/consumer plus native/installed-path gates
+  remain outstanding; native Darwin admission and live activation authority remain
+  separate constraints. Do NOT deploy/enable capture or reset archives from this result.
+  Installed state and frozen research remain untouched; repair is on the local
+  delivery stack, not a claim of merge to main or a two-machine release.
+
+## Quick rerun result — October 30, 02:52 UTC
+
+- User questioned the elapsed time and expected quick checks. Parent acknowledged
+  excessive serial setup/investigation and narrowed the rerun: finish corrected
+  filesystem discrimination and one unchanged full sessioncapture package run;
+  no further profiling, benchmarks, lint/race/consumer or release gates launched.
+- Corrected VM-native EXT4 run **PASS**: 212 top-level tests,401 including subtests,
+  zero failures,26.916s; same shuffle seed1793327324077306753/count1/Go300s.
+  Parent independently read actual Go log/status, Docker final0/OOMfalse and child
+  probe (t.TempDir native EXT4, executable fixtures, SameFile and lock-conflict checks).
+  Prior four failures also passed20 times each on BOTH unfixed/fixed binaries on
+  this filesystem; no production ownership/identity/dedupe assertion was changed.
+- Integrated narrow preexisting-starvation repair as `881b04e` on existing delivery
+  stack (`fb4da5c` source-worktree commit). Source is now c8 plus per-lane scan
+  cursors, NOT unchanged c8. Regression-only old-source RED and repaired GREEN4×20,
+  70 existing focused tests and independent safety review support this repair.
+  Package evidence binds formatted patchc776/source manifestd938515d, not HEAD alone.
+- Full native evidence: private runtime `fs-contrast-v11/full-native-1793328508889825000/`.
+  The earlier host-bind full-package failure remains preserved with append-only
+  `lane-progress-v10/FULL-PACKAGE-ENVIRONMENT-CORRECTION.json`; it is not a native
+  regression or pass. Go1.27 t.TempDir honors GOTMPDIR as well as the usual TMPDIR.
+- Runtime and dependency workers completed/released; parent observed no running
+  containers. Private Linux analytics dependencies are prepared/readiness-only,
+  not consumer acceptance. Source worktree is clean; dirty handoff and frozen
+  research remain preserved. No new gates are running or queued.
+- **Not release/performance acceptance:** no completed fresh matched performance
+  comparison; new-source full format/lint/race/consumer and Darwin/live/installed
+  acceptance remain outstanding. No installed capture, queue, identity, archive,
+  analytics data, service or credential launcher was changed or activated.
+
+## Resumed recovery and verification — October 30, 01:34 UTC
+
+The operator confirms the missing Docker images resulted from their cleanup and
+explicitly asks to continue and rerun checks. This resolves the image-disappearance
+question only; it does not establish the cause of either the baseline stall or the
+historical Mac exit, and does not authorize live activation or unrelated restoration.
+
+- Checkout reconciled: `delivery/performance-qualification`, HEAD `70f16c4`, prior
+  dirty handoff and frozen research preserved; production diff from `c8fdf7a` is zero.
+  Docker image/running-container inventories remain empty; volumes are preserved.
+- Parent owns this brief and acceptance. Previous runtime owner115f3a52 is completed;
+  its resume retention expired. New medium worker `e84b5585-9a9f-427` explicitly owns
+  only the private runtime artifacts, image provenance/restoration and admitted checks.
+  Medium worker `cc91b683-1057-433` is read-only on fixture stall/locking risks.
+- Restore the recorded exact runtime where possible; a changed image must be explicitly
+  pinned and get fresh environment-bound readiness before any comparison. Preserve
+  Nix/store/tools/locks, all failed roots and reservations. Never restore unrelated
+  services, enlarge the VM, bypass admission or install native host validators.
+- First authorized payload after exact restoration/readiness is the baseline-only
+  stall diagnostic with the LOWER120s Go watchdog, original300s context/outer and
+  original CPU guards, fresh slot10. Source/template remain unchanged. Inspect the
+  trace/result before further candidate profiling, comparisons or source repairs.
+- Exact deleted custom OCI index could not be recovered: its unpinned apt/npm
+  layers and empty BuildKit cache do not permit an identical rebuild. Parent accepted
+  the recorded original public base `node@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d`
+  as a NEW Linux environment after actual index/platform/config/layer verification
+  and one admitted readiness worker. Config is `9be410e06dadc1794f44aa4c0fd107a7ecb2edb5cb6bcc6a71c7888caf3cfa12`.
+  Preserved Nix2.28.5/Go1.27.3, modules and both immutable f35 binaries verified;
+  six focused units ×20 passed on EACH revision (240 total PASS rows). Parent read
+  actual logs/config/final0/OOMfalse; exact readiness CID removed. No apt/npm build.
+  Old-image timings remain historical, not a new-environment matched comparison.
+- Fresh-slot10 `profile-1793325003566244000` baseline-only diagnostic actually ran:
+  Docker/Go/driver2 at the LOWER120s Go watchdog, OOMfalse; original300s context/outer
+  and30CPU guard unchanged. Its private traceback maps test SELECT to the ACTIVE
+  `wait(activeACKBoundary,false)` loop; workers sampled idle SELECT. No SQL, ACK
+  sampler, profiler-stop or shutdown-join block in the test stack. This narrows but
+  does not identify the pending/ACK predicate cause. No scalar/correctness phase;
+  active.pprof0B is unusable, other profiles absent. No candidate run/timeout raise.
+- Runtime owner now owns one admitted read-only numeric inspection of stopped10
+  (copy DB/WAL/SHM if needed, original RO/hash-preserved), not another benchmark.
+  New medium read-only source reviewer `2a429da6-c83b-435` owns the concrete active
+  pending/ACK endpoint investigation; prior reviewer completed with no lock cycle.
+  Parent must inspect this evidence before instrumentation/repair/further full runs.
+  No performance/native/installed-path acceptance. Exact prior attempts remain
+  historical and are not overwritten; no live capture or unrelated service restored.
+- Slot10 inspection completed actual0/OOMfalse: 201 jobs,194 published,7 pending,
+  all7 due at watchdog with zero attempts/errors/retry delays; no pause/quarantine/
+  step error. DB/WAL/SHM copied first (5,811,800 bytes), originals RO/hash-preserved.
+  This rules out an ACK-only observation failure; it does not recover live scheduling.
+- Source review found shared raw/optional scan-cursor starvation in BOTH b8 and c8.
+  A wrong-lane worker can advance the cursor before rejecting the head, repeatedly
+  consuming the right lane's turn. New deterministic regression on unchanged c8
+  actually FAILED both adverse schedules and PASSED both reverse-order calibrations.
+  This demonstrates a preexisting scheduling defect, not a candidate-specific cause.
+- A narrow per-lane memory-cursor repair is prepared in worktree
+  `/Users/mm/dev/memory-wt/performance-lane-progress` (four Go files, no schema change).
+  Medium coder343cb47b completed/released; parent took over only pinned-formatter
+  alignment. Independent reviewer872a518c found no removed/weakened safety invariant.
+  Final formatted patch `c776b05dc9c3e44f4e4f06c53d57b5a860f77b61b0839d0a0c296cb728b24a49`
+  passed the SAME regression4×20 and70 existing focused tests, actual0/OOMfalse.
+  Earlier patch-hash mismatch blocked before payload; intermediate format failure
+  blocked before build/tests. Both remain failures, not hidden passes.
+- Full sessioncapture package ran and FAILED four existing tests (ownership×2,
+  sealed-copy dedupe and zstd safe identity), seed1793327324077306753,52.685s,
+  Docker/Go1/OOMfalse. Its initial classification as native tmpfs is INVALID:
+  read-only reviewer0d9d68df traced Go1.27 `t.TempDir` to `GOTMPDIR=/out/go-build`,
+  which was host-bound. Merely recording TMPDIR/native-work was insufficient.
+  Runtime owner must confirm exact guest GOROOT, append a correction (never rewrite
+  old evidence), then run paired isolated tests and the unchanged full package with
+  BOTH TMPDIR and GOTMPDIR on validated native EXT4. Do not weaken any assertion.
+- Medium worker4429bdd2 owns only a new private Linux analytics dependency environment
+  and VM scratch subpath `analytics-env-v1`; public registry preparation is authorized
+  through the SAME shared admission, offline verification separately network-none.
+  Runtime owner keeps source gates; at most two medium leases (3CPU/8GiB total), no
+  benchmarks during provisioning. Source repair is not integrated/committed yet;
+  full format/lint/race/consumer/primary/native/live acceptance remains outstanding.
+
+## Prior blocked checkpoint — October 30, 01:14 UTC
+
+- **Blocked, not accepted:** no completed matched performance comparison, production
+  repair, release, native/live qualification or activation. Production remains
+  `c8fdf7a`; installed baseline comparison remains `b8cbed2`. New stack commits
+  `20c395b` and `b813b71` add only opt-in test tooling; production diff is zero.
+- Linux pinned Nix/Go runtime preparation and focused fixture builds succeeded.
+  Both attribution-v4 builds passed six units ×20; source-bound prior offline gates
+  remain distinct from new runtime/installed-path evidence. Race/native/live gates
+  were not run by this task.
+- Corrected all-native baseline completed delivery, settled30s and fresh append.
+  Candidate failed the original30-CPU-second warm-up guard; a bounded whole-test
+  profile locates policy/filesystem/SQL cost but does not explain the partial pair.
+  Attribution-v4 then stalled on baseline at original300s; its zero-byte profile is
+  unusable. No gate, predicate or timeout was weakened to obtain a pass.
+- **Actual external blocker:** the shorter120s stall diagnostic failed before
+  container creation. Parent independently verified pinned image
+  `sha256:b60c73ed15920a0fd3faf286a269ccb1e207bf7b1a0deed19a7635559e0bad05`
+  absent, image inventory0/running containers0; task/shared volumes remain. Cause
+  and relation to the previous stall are unknown. No image substitution, unrelated
+  service restoration, host install, shared-volume cleanup or live-state change.
+- Next executable action is the preserved baseline-only stall diagnostic after
+  supported shared-worker provisioning restores an approved pinned runtime. A changed
+  runtime requires fresh environment-bound evidence. Native Darwin admission is an
+  independent unresolved prerequisite. Do not bypass either with a host semaphore,
+  bare-host validator or new pool. No repeated primary/profile/race run is authorized
+  merely by this brief; reconcile the blocked attempt and allocate a fresh owned slot.
+- Parent accepts only this **blocked checkpoint**, independently audited by medium
+  reviewer `a25e60bf-d484-470`; no acceptance gate is greenwashed. Parent verified
+  both actual build logs (120 focused PASS rows each), current source diff0, final
+  Docker inventory and documentation checks. Full/new race/native/live gates remain
+  outstanding. The audit found no destructive Docker reconciliation in inspected
+  helpers, but cannot establish the image disappearance's cause.
+- All workers completed/released, no owned runtime worker remains. Runtime artifacts
+  are under `~/.local/state/machines-validation-pilot/memory-perf-20261029/runtime/owner-20261029-linuxprep/`;
+  latest `STALL-V5-BLOCKED-RESULTS.json` records driver70/CIDnull/no payload. Preserve
+  slots01–07/09 and earlier failed roots; slot08 was never used. See the
+  [dated diagnostic evidence](../tools/performance/DIAGNOSTIC-FAILURE.md) for exact
+  attempts, statuses, profile hashes and the rejected noncanonical analysis.
+- Origin fetched again: both main refs remain ancestors, so no main integration.
+  Existing dirty handoff work and frozen research remain preserved. Historical Mac
+  exit cause is still unknown. Future release must still be coordinated and
+  state-preserving; Mac → BC-01 → combined activation requires separate authority.
+
+## Dated performance delivery ledger — started October 29, 22:52 UTC
+
+- User authorized doing the bounded qualification work with medium-effort subagents;
+  parent retains verification and requirements acceptance. Integration is new stack
+  child `delivery/performance-qualification`, HEAD/task base `13d834a`; production
+  candidate remains `c8fdf7a`, comparison baseline `b8cbed2`. Existing dirty handoff
+  reconciliation and all frozen research remain preserved. No main delta to integrate.
+- Parent owns this brief, integration, shared execution scheduling and acceptance.
+  Worker `db30c345-b8da-427` owns private container-local runtime/dependency preparation
+  under `~/.local/state/machines-validation-pilot/memory-perf-20261029/runtime`.
+  Worker `50151fa8-6a0b-400` owns test-only matched runner in isolated worktree
+  `/Users/mm/dev/memory-wt/performance-fixture`, branch `work/performance-fixture`.
+  Both use Sol/medium; startup acknowledgements and live activity verified. Prior read-only workers
+  completed/released; attempting to resume runtime reviewer confirmed its retention
+  expired, so the new runtime owner is explicit. No prior implementation paths taken.
+- Available capabilities: background status/full activity/steering/resume; no gap in
+  supervision. Runtime owner alone has costly execution slot for bounded admitted
+  container setup; fixture owner may edit/static-review only until assigned a slot.
+- Deliverable: reproducible identical overlay on both candidates, three matched
+  scenarios with CPU-seconds/I/O/work counts and exact reader/identity assertions;
+  separate profiling to locate remaining work; narrow repair only if demonstrated.
+  Proposed diagnostic limits from review remain diagnostic, not release sign-off.
+- Authority excludes live capture, original sources/installed queues, deployment,
+  archive/policy changes, native host installs or resource-policy bypass. Container-
+  local public dependency preparation is allowed under the shared worker admission;
+  actual measurements must be network-none. Native-Darwin admission is still absent
+  from current policy; no native job will be launched by inference from Linux limits.
+- Validation policy reread; shared VM has no active validation workers at reconciliation
+  (only three unrelated production containers, untouched). Source-bound prior gates
+  retained; new runner/source/environment evidence remains pending.
+- Parent inspected the runtime approach: task-owned UID501 container `/nix` bootstrap,
+  official versioned/checksummed Nix, unchanged flake lock and full pinned dev shell;
+  no root host install. Missing xz stopped the first bounded attempt; narrow verified
+  public extraction prerequisite is being resolved inside admission. Parent caught
+  initial permissive private-artifact modes; owner acknowledged, restricted only owned
+  paths and added umask077. Cgroup counters must be retained before container removal.
+- Fixture seam approved: one byte-identical CLI test overlay using actual composition,
+  queue/runtime, discovery/backend wrappers and existing fault hooks. Cross-package
+  production-instrumentation overlays rejected as unnecessary scope. Exact internal
+  hashing/accounting counts remain unmeasured; separate profiles provide attribution.
+  Adapter-correct Codex standalone artifact publications may increase publication count
+  above96; explicit expected source coverage is required. No optional enrichment in the
+  first slice; no production CPU-fix conclusion may follow from its omission.
+- Runtime worker harness aborted after successful bootstrap; parent reconciled no
+  surviving owned containers and resumed the same ID. First read-only Nix smoke failed
+  on its database lock; corrected by sourcing checksum-bound actual locked
+  `nix print-dev-env` output generated during preparation, not bypassing the pin.
+  Final network-none/read-only smoke exits0 with Go1.27.3; public module preparation
+  and offline replay pass. Independent runtime reviewer `3ba37eb8-aeaa-433` required
+  exact actual-worker identity, fixed Nix archive pin, honest pre-exit accounting and
+  cleanup evidence; owner acknowledged/implemented; independent recheck accepted runtime
+  readiness only. Parent inspected final smoke and helper code. Prior failures
+  retained. No native job or performance run yet. Slot released after preparation.
+- Parent created clean detached baseline/candidate snapshots under private
+  `.../memory-perf-20261029/qualification/snapshots/`; only sanitized tracked Go/flake
+  inputs may be staged into workers. Runtime owner now prepares the narrow lifecycle
+  helper; no execution until the reviewed overlay identity is approved.
+- Parent caught initial ingestion inside delivery timing; fixture owner corrected to
+  preaccepted queue, delivery-only runtime, stop/join, then actual discovery warm-up.
+  Independent fixture reviewer `045070db-1ee8-4a1` confirmed those corrections but found
+  aliased-map delta mutation and ACK-sample publication race. Same fixture owner repaired
+  both with deterministic regressions; independent recheck approved static corrections.
+  Active ACK count now binds enumerated pending jobs and verifies each becomes published;
+  delta maps preserve cumulative samples. No production file or gate was changed.
+- Parent independently verified overlay SHA256
+  `91914f96c3277a8b67e800765917ced5d7c29fca9319ade045def9b49fc4fe2a` and inspected
+  corrections. Runtime owner has sole costly slot for candidate then baseline admitted
+  development builds, offline `go mod verify`, and20 repeats of both measurement unit
+  tests. Initial candidate cold build is running with300s payload bound; no performance
+  window or profile is authorized until build results are reviewed. Immutable sanitized
+  stages, exact-CID lifecycle/cleanup and read-only runtime/modules are in place.
+- Next: diagnose any build/test failure locally, verify both binaries and unit results,
+  then run matched primary pairs and separate profiles. Native/release acceptance remains
+  pending; no production repair is justified by static hypotheses or runtime readiness.
+- Development builds passed on both exact refs with the approved overlay: candidate
+  job `build-1793315360246391000` (binary SHA256 `208e9b026ab207f5092321e8436f42a0ff8f366a9d0a6c39c047afec67d2a5c5`),
+  baseline `build-1793315598116898000` (`e2419759ffd7fe3c16006401da8766e2536fbc240a560d99e9ade8b3753882e2`).
+  Offline module verification and both measurement regressions×20 pass; parent read
+  actual candidate log. Initial baseline cold build was deliberately cancelled143 to
+  reuse the read-only candidate cache seed; not counted as a passing check.
+- First baseline primary `primary-1793315653259407000` exits1/OOMKilled=false during
+  second-runtime discovery warm-up, before settled/append. Active delivery alone reports
+  35.523483072s wall/11.730356 process CPU-seconds; **not an accepted comparison**.
+  Generic failure guard obscures quarantine/pause/step-error distinction; root cleanup
+  removed synthetic evidence. Fixture owner resumes minimal scalar diagnostics and
+  opt-in private failed-state preservation, without weakening the guard. Initial-vs-
+  completed fixture classification is a hypothesis to examine, not an accepted cause.
+  All owned workers stopped/removed; no candidate primary, race or profiles ran yet.
+- Diagnostic-only overlay `f2748a7579a528a3f4eeeb02084ed9c53ed37ce46ded1897771b9da22a91dcf4`
+  built baseline and all3units×20 pass. Preserved synthetic run
+  `primary-1793316070264664000` fails warm-up:1 quarantined Pi SQLite source,2 transient
+  attempts, zero pause/step errors/pending publications; other200 sources captured and
+  all201 jobs acknowledged. Source had already recaptured through observed version6;
+  no original-data change or identity hypothesis is established. Failed synthetic root
+  retained only in this private job output, after queue/worker teardown; parent inspected
+  logs/aggregate. The underlying error was not durably stored, so a diagnostic fallback
+  classifier (always the same default FailureTransient) is the next minimal probe.
+- Parent corrected its speculative sibling-directory Pi explanation after inspecting
+  canonical-root classification; worker acknowledged. No classification fixture change
+  or source repair was made. Approved diagnostic overlay
+  `212f89bb4a81ca885e7211c9adf0ba0144ec0b8a2afd444577b026f2ed481756` adds only opt-in
+  fixed signatures/numeric SQLite/errno output and privacy/class-preservation unit test.
+  Baseline build `build-1793316805505676000` and all4units×20 pass; diagnostic
+  `diagnostic-1793316844155291000` instead fails before runtime in initial Capture with
+  fixed `safefile: replaced or nonregular input`. Retained synthetic queue has66 jobs,
+  consistent with the next Claude SQLite input; no callback signature was reached.
+  No timeout/OOM or relaxed identity check. These diagnostic rows are not primary timing.
+- Current fixture/output is Mac-host bind-backed inside Linux Docker. Parent approved
+  a bounded safe-file/three-closed-DB recapture prerequisite probe, comparing host-bind
+  with task-owned VM-native local scratch under the SAME admission and virtual paths.
+  Fixture owner prepares test-only probe; runtime owner prepares private local volume/
+  helper (no host install, VM change, new admission pool or original-state access).
+  Probe overlay `ea7ce33a08d044cc21feb18c4c0f8e8526fb11ae5f2204a22571447d90486f5a`
+  passed independent review and baseline build `build-1793317643779187000` +4units×20.
+  Same binary/virtualroot probe: hostbind `fs-probe-1793317682526270000` failed7/60
+  SQLite captures, VMnative `fs-probe-1793317714477135000` passed60/60. Both passed
+  1000 direct safe opens. Original-path before/after metadata remained unchanged;
+  this does NOT identify the rejected internal descriptor or establish a general cause.
+  Parent independently read actual logs and accepts ONLY VM-local suitability for
+  this bounded prerequisite. No identity gate changed. One full201-source baseline
+  primary is now authorized on fresh private VM-local scratch, with the same existing
+  phase/resource/reader checks. Full baseline pilot `primary-1793318183068977000`
+  passed all201 reader hashes/stableepochs/credential negatives and3exactappends;
+  zero settled publication churn. Settled30.0087s used8.206265CPU seconds,6030
+  requests/270preparations,16,628,676logical-write/22,507,520accounted-write bytes;
+  append0.914251s/0.313144CPU. This exceeds the3CPU diagnostic target, NOT a gate.
+  Parent also caught runtime TMPDIR still on host-bind: publication.writeMetadata
+  uses os.CreateTemp(""). All capture-owned sources/spool/backend were VM-local,
+  so integrity and settled-work evidence stand, but this full run is an unmatched
+  pilot, not final all-native timing evidence. Runtime owner now moves runtime
+  TMPDIR too, replays one matched baseline then candidate, then separate bounded
+  paired profiles (no primary/profile mixing); alllimits unchanged.
+  Corrected native-TMP baseline `primary-1793318817849421000` passed all phases:
+  active36.289658s/3.911607CPU; settled30.002873s/10.274496CPU; append0.804011s/
+  0.450022CPU. Candidate build `build-1793318616167057000` +4units×20 passed, but
+  candidate primary `primary-1793318924869156000` FAILED original30CPU discovery-
+  warmup limit after active38.006161s/11.674618CPU (201ACK/201CAS/402PUT).
+  No candidate settled/append/full-correctness result; sequence stopped, root retained,
+  OOMfalse and exactCIDremoved. Conditional paired profiles did NOT run.
+  Next authorized diagnostic is ONE unchanged-byte externally whole-test CPU profile
+  of candidate (-test.cpuprofile, diagnostic=true, NOT phase-isolated/primary timing),
+  plus closed synthetic progress aggregates; same bounds/64MiB profile cap, no relaxed
+  CPU guard. Source analyst maps changed paths; no production repair until attribution.
+  No race/remaining two comparison pairs authorized.
+  Whole-test diagnostic `failure-profile-1793319639828564000` reproduced CPUguard
+  failure (86.88s), preserving155949B profile SHA26489b041ee4dad2d689f81435ea203eee6209e232d9f417c3305c4f3722f08c.
+  Canonical `failure-embedded-analysis-1793320154117077000` passed ORIGINAL8s/cmd,
+  60s aggregate with embedded symbols/no binary:4135samples/41.35sampledCPU seconds.
+  Earlier8s local-symbol timeout is failed evidence; an intermediate45s/cmd analysis
+  is explicitly NONCOMPLIANT/noncanonical and rejected for acceptance, not hidden.
+  Canonical independently reproduces symbols within original bounds. Inclusive hot
+  stacks overlap: policy16.88s, discovery15.93s, filesystempolicy10.83s, deliverylane
+  selection9.55s; Syscall6 flat12.16s. Setup+active+failedwarmup are combined—no
+  comparative/phase causal claim. Closed prior-state201captured/pending0, rawv1,
+  derivedv19-20 and completed_generation20 show neither identity churn nor the live
+  guard conjunction. Source investigatorc154 verified hotpolicy/fingerprint/schedule/
+  protected-path code unchanged; no demonstrated production root cause or safefix.
+  Parent now authorizes MINIMALtest-only attribution delta in isolatedworktree
+  `memory-wt/performance-attribution`: queuepolicy forward-once counters, separate
+  user/system rusage, warmup profile, bounded non-atomic warmup status histogram;
+  actual production discovery closure/predicate/polling/limits remain unchanged.
+  ConfigPath() omission in fixture is documented fidelity limit, sameonbothrefs,
+  not shown regression cause. Parent must review hash/independent safety before
+  two new diagnostic profiles, NOT another unprofiled comparison/productionrepair.
+  Runtime ownerdb30completed/released; freshruntime115f3a52 takes privateinfra
+  ownership after readonly reconciliation. Reviewed attributionv4 hashf35cfc3e9f2816beb8f02a72f9ac9a0c21fa83e3ca6aa29c35a3d725fd13e9d7
+  independently approved by parent+aeb1c719 and integrated as `b813b71` (testonly).
+  Builds `build-1793321643112997000`/`build-1793321678885400000` each passed offline
+  module verification and6units×20. Baselineprofile `profile-1793321712170839000`
+  unexpectedly hit ORIGINAL300s payload timeout, actualDockerexit124/OOMfalse;
+  only test-start, no phase scalars/hist/counts. Activeprofile0B isUNUSABLE;
+  no warmup/settled/append/analysis. EXIT-trap PAYLOAD_STATUS0 was misleading under
+  signal; actualfinal124 authoritative. CandidateprofileNOTlaunched, slot08unused.
+  Parent approved ONE baseline stall diagnostic at LOWER Go testtimeout120s with
+  unchanged original300s outer/context/CPUguards, freshslot09, privately preserved
+  goroutine trace and bounded symbol/blockstate report. Prior07read-only metadata
+  maybe queried WAL-aware mode=ro; neverimmutable withWAL or mutate/recoveroriginal.
+  No follow-on candidate/production optimization authorized before stall diagnosis.
+  Sourcec154 released testworktree clean. Read-only semantic review found the
+  scrubbed filesystem-policy branch overwrites the first Excludes result with
+  ExcludesClaudeConfig and retains no latch/provenance from the first pass; this
+  is only a future narrowmeasurement hypothesis, NOT b8→c8 cause or approvedfix.
+- Parent integrated reviewed fixture-only commit89eec19 as `20c395b`; exactea7ce33
+  Go bytes preserved. No production code change. Maintenance reviewer49e58daf and
+  parent inspected actual patches for PR28/26/27: no dependency for offline
+  network-none Linuxqualification, so no integration/pin/tool/CI changes now.
+  PR28 updates the entire nixpkgs pin (newenvironment-bound evidence needed; later
+  launcher trust-store qualification still required); PR26 is separate goplsmodule;
+  PR27 narrowzizmor action bump only, preserve newer consumerCI iflaterintegrated.
+
+## Continuation review — October 29, 22:30 UTC
+
+- User requested a fresh project/upstream reconciliation and review of the proposed
+  bounded performance-first sequence, using medium-effort exploratory workers.
+  Base: `13d834a78af63a8492180296e5eacb24f0b9f8d4`, branch
+  `delivery/adversarial-resolutions`; candidate source `c8fdf7a`.
+- Preexisting changes: the earlier handoff reconciliation/observation review is already
+  dirty; preserve it and all three frozen untracked research paths. No production,
+  test, deployment or service-state change is part of this review.
+- Parent owns this brief and requirements acceptance. Read-only Sol/medium workers:
+  `d849b224-0505-460` upstream/main reconciliation (fetch allowed, no integration),
+  `41161c26-c3d4-446` matched fixture/instrumentation and bounded Go/Nix prerequisites,
+  `56a27675-1ad7-457` local sanitized restart evidence and coherent dormant release.
+  All three startup acknowledgements and actual tool activity verified; all are now
+  completed/released. Background inspection/steering/resume are available. No previous worker
+  ownership is taken over; the previous ledger records implementation owners released.
+- Acceptance: identify exact source divergence and relevant upstream changes; retain
+  existing source-bound gates; specify a bounded measurable three-scenario comparison;
+  distinguish native-admission prerequisites and restart cause from CPU hypotheses;
+  retain dormant, state-preserving release and separately authorized activation.
+- Current validation policy was reread before any workload. No tests/builds/profiles,
+  original-source/spool access, SSH/cloud calls, installers or activation ran. One
+  admitted no-source/no-network runtime-readiness probe ran as recorded below. Native
+  Darwin execution is not authorized by the Linux Docker worker profiles alone.
+
+### Reconciled findings and verification
+
+- `git fetch origin` succeeded. Parent independently verified `HEAD...main = 36/0`
+  and `HEAD...origin/main = 124/0`; local main is88 ahead of origin/main. Both main
+  refs are ancestors; **nothing needs pulling/merging from main**. HEAD remains
+  `13d834a`; `git diff --quiet c8fdf7a HEAD -- . ':!docs'` exits0. Existing source-bound
+  `c8fdf7a` development results remain applicable, not installed-path acceptance.
+- Separate unintegrated maintenance PRs: [Nix trust-store update #28](https://github.com/mich-murphy/memory/pull/28)
+  (`b656da9`), [gopls/tool advisory updates #26](https://github.com/mich-murphy/memory/pull/26)
+  (`f178fa1`), and [zizmor action update #27](https://github.com/mich-murphy/memory/pull/27)
+  (`7f77f8c`). These are not missing-main capture repairs. Review separately; a changed
+  Nix lock/toolchain needs new environment-bound evidence. Do not replace newer CI
+  files from an older PR branch. Retired recovery PR23 remains out of scope.
+- Performance direction upheld: compare `b8cbed2` and `c8fdf7a` using identical
+  synthetic fixture/measurement overlays, private queues and local backends. Existing
+  tests provide components, **not an already executable three-scenario runner**.
+  Proposed initial diagnostic:96 sessions across Claude/Codex/Pi, ordinary bodies plus
+  recognized scrubbed config/compressed/SQLite transforms; settled30s, backlog drain
+  ending at final ACK, then one automatic append per agent. Three alternating matched
+  pairs, same toolchain/settings/seed and no forced cache flush. No original sources,
+  installed queue, cloud credentials or service activation. Optional enrichment is
+  omitted from that first slice and therefore not qualified by it.
+- Require integrated user+system CPU-seconds, logical and accounted-device I/O (cache/
+  filesystem limitations explicit), per-phase work counts and separate bounded CPU
+  profiles. Assert unchanged revisions/no publication churn while settled; exact reader
+  body hashes after delivery; stable source/epoch identities and exactly one revision
+  advance after append. Retain policy/integrity/order checks. Parent inspected delivery
+  verification separation and capture/materialization order: transformed-input work,
+  existing-object verification, accounting and polling are **profiling candidates**,
+  not demonstrated causes or permission to remove checks. No speedup claim accepted.
+- Proposed run limits: medium worker1.5CPU/4GiB/weight3, shared count6, admission600s,
+  payload300s plus10s kill grace; explicit phase/fixture/profile size caps. A proposed
+  settled diagnostic target3 CPU-seconds/30s and append target10s are **not accepted
+  production budgets**. Final fixture parameters/thresholds need review with the runner.
+- Runtime prerequisite actually probed: pinned existing Linux image
+  `sha256:b60c73ed15920a0fd3faf286a269ccb1e207bf7b1a0deed19a7635559e0bad05`,
+  policy tools SHA verified before execution, worker-side shared lease weight3/count6,
+  network-none/read-only/no source/HOME/socket/credential mounts, GNU timeout30s.
+  `command -v go` and `command -v nix` independently exit1. Probe exits72 (prerequisite
+  missing, **not a failed test**); container exited, Running=false, OOMKilled=false.
+  Exact owned CID `43deca504045446ac589d0c00367995ea4700f2b069f128175e93d494fb0d25f`
+  verified stopped and removed; shared volumes unchanged. No installation was attempted.
+- Restart evidence independently checked using allowlisted sampler scalars:28171 alive
+  at03:42:28, no PID/last-exit1 at03:47:29,94093 present03:52:32 UTC. StepErrors remains42
+  with last timestamp03:07:25; it does not explain this exit. Current plist has no
+  stdout/stderr destination; no matching named crash report found. A local retained-log
+  query restricted to03:42–03:53 UTC, exact label/PIDs,30s/1MiB/1000-input-record cap
+  returned exit0 in1.651s, zero matching records. No raw log text emitted. **Cause stays
+  unknown**; old incidents, CPU samples and the fatal discovery sentinel are not proof.
+  Future authorized qualification needs safe bounded fatal-error diagnostics.
+- Dormant release must bind both host-specific capture/reader binaries, both credential
+  launchers/static wrappers, supervisor/hook argv, Mac analytics source/runtime and both
+  reader endpoint configurations. Preserve queues/accepted bytes, identities/policy/roots,
+  archive binding, analytics body cache/DuckDB/SQLite and refresh locks. Replacing a shared
+  reader or launcher can affect running analytics even while capture is off. Install/apply
+  and run are activation, not staging; credential absence does not prevent local capture.
+- Parent review accepted the state/sequence reconciliation, not performance or release
+  qualification. Parent `git diff --check` passes. Only this handoff changed; earlier dirty
+  handoff content and frozen research remain preserved. No new source/full/native/live/
+  hosted gates or fresh remote service-state verification. Containment is not changed.
+
+### Executable next action / actual blockers
+
+1. Establish an approved pinned Linux Go/Nix worker runtime in the existing shared pool;
+   separately obtain a supported native-Darwin admission/resource arrangement. The former
+   is demonstrably missing in the inspected image; the latter is absent from current policy.
+   Do not substitute bare-host Nix, host flock around Docker, or retired bc-heavy/Pueue.
+2. Prepare/review the small identical synthetic runner and measurement boundaries, then
+   execute the matched diagnostic under supported admission. Linux mechanism evidence is
+   useful but cannot qualify Mac resource behavior or resolve its historical restart.
+3. Repair only a measured material problem, independently review invariants, and run
+   applicable final integrated gates if source/environment changes. Reuse unchanged gates.
+4. Stage one coherent state-preserving release; under separate activation authority qualify
+   Mac, then BC, then combined coverage/freshness/retry/privacy/source-absence and actual
+   writer→reader→importer→index→report. No fixed24h requirement. Old-key deletion and legacy
+   retirement remain strictly post-acceptance. No reset/rebind is a new prerequisite.
+
+## Next-step reconciliation — planning only, October 29
+
+Operator requested awareness of background efficiency changes and discussion of next
+steps, not implementation/activation. Parent reconciled HEAD `13d834a`, source
+`c8fdf7a`, all Git refs and linked-worktree statuses. Main checkout has only this
+parent-owned documentation diff and preserved untracked research; the old dirty
+source-absence repair remains untouched. No newer production-source delta was found
+in the integration checkout. `c8fdf7a..HEAD` is documentation only.
+
+- Read-only reviewers `803f806d-e0b1-43e` (efficiency applicability) and
+  `b4a95cc3-f31b-405` (qualification/rollout) completed; actual tool-reported model
+  `openai/gpt-6.1-sol`, medium thinking, startup/activity verified. Parent inspected
+  the relevant diffs and policy/activation call sites. No tests/builds or host actions.
+- New versus measured `b8cbed2`: `d374948` removes the second immutable-payload
+  verification pass per delivery attempt (24→12 instrumented reader checks, not a
+  demonstrated overall2x speedup); `b0b4f9c` removes legacy ownership reclassification
+  in alias/preserved-exclusion policy (15→0 instrumented classifier calls). Structural
+  Pi identity repairs in `b0b4f9c`/`c8fdf7a` also avoid filesystem-dependent identity
+  discontinuities, but have no measured production CPU benefit.
+- Applicability correction acknowledged/verified: alias-owner work is gated by aliases,
+  absent in the documented installation. Claimed-session checks are not alias-gated,
+  but require preserved exclusion records; preflight had none. Stable config hashes do
+  not prove unchanged policy records. Thus no evidence ties R8 to observed188% CPU.
+  R7 saves delivery work, not necessarily settled discovery CPU. Do not dismiss the
+  improvements, double-count older optimizations, or assert they fix the operating issue.
+- Proposed next work: bounded, matched offline profiling of old/current candidates in
+  unchanged-source, delivery-active and fresh-append scenarios; correlate integrated
+  CPU/I/O with discovery, transforms, delivery and optional work. Explain the recorded
+  Mac restart separately. Keep original sources and live spools untouched; retain all
+  policy/ownership/integrity checks. Choose acceptance budgets before claiming success.
+- Reuse unchanged `c8fdf7a` development gates. Any actual source repair needs focused
+  regression, independent review and the applicable final combined gates once integrated.
+  First establish applicable bounded Go/Nix worker execution under current validation
+  policy; Linux Docker profiles do not establish native-Darwin admission or acceptance.
+- Later release planning must bind **binary + credential launcher + analytics source**,
+  not just a Go binary. Preserve queues/configuration/identities/privacy, existing archive
+  and consumer databases; no reset/migration prerequisite. `service install --apply`
+  starts capture and is not dormant preparation. Both collectors remain disabled.
+- Proposed operating sequence, subject to separate containment/activation authority:
+  bounded Mac qualification, then BC qualification and combined writer→reader→importer
+  →index→report/coverage/restart/retry/privacy checks. Acceptance is behavioral/resource-
+  based, not a24h timer. Old-key deletion/legacy retirement remains strictly post-acceptance.
+  This proposal is not rollout approval or a claim that new operating gates have passed.
+
+## Operating measurements reviewed — October 29
+
+Operator explicitly waived waiting for the full24h observation. Parent reviewed the
+available metadata and stopped only the two exact owned temporary samplers; preserved
+all samples and wrote private `observation/reviewed-window-20261029.json` on each host.
+No sampler-generated `completed.json` existed; no natural24h completion is claimed.
+The prior deferred reviewer is unavailable in this session; parent performed the review
+without waiting. No capture activation, deployment, queue/status change or cloud action.
+
+**Capture is currently off on both hosts.** Read-only supervisor checks confirm Mac's
+launchd job absent with its disabled override, and BC inactive/dead/PID0/disabled.
+The machines capacity handover documents separate operator-authorized containment:
+BC stopped at03:46 UTC; Mac later disabled/booted out. These were not sampler actions.
+Earlier statements below about services running describe historical installation evidence.
+Do not re-enable capture as part of measurement or documentation work.
+
+| Observation | Mac | BC-01 |
+| --- | --- | --- |
+| Samples | 210 total;59 successful,151 failed | 219 successful,0 failed |
+| Useful running window |03:27–08:19 UTC,4h52m span;58 running samples and1 stopped sample |4 running samples03:27–03:42; inactive from03:47 sample onward |
+| Collector progress |Published11,965→20,308; pending publication4,715→0; pending sources167→0 |Published18,020→19,113; pending publication11,545→10,475;22 pending sources remain marked absent |
+| Completed discovery |40 samples have completed-sweep timestamps after final install; latest completed generation55 |No completed sweep |
+| Coverage / errors |Coverage partial throughout; step errors42→42; timeout/transient discovery statuses in15 samples |Coverage partial; step errors6→20 before containment; later stored counters are not continued operation |
+| Allocated spool peak / configured cap |3,233,230,848B /8GiB |1,618,202,624B /6GiB |
+| Memory measurement |Peak process RSS258,179,072B (~246MiB) |Peak service cgroup MemoryCurrent800,534,528B (~764MiB), not process RSS |
+
+- **Material resource issue:** Mac sampled process CPU median191.7%, peak302.7%.
+  First zero publication backlog06:59 UTC; across17 subsequent zero-backlog samples,
+  median188.2%, peak204.1%. Backfill draining did not establish low steady-state CPU.
+  These are `ps` CPU samples, not integrated CPU-seconds or a quiet-host benchmark.
+- Mac PID28171 exited1 (03:47 sample), then PID94093 appeared by03:52. Cause is not
+  established by these metadata. After later containment, samples fail from08:24 onward;
+  the helper requires a loaded launchd row, so the151 sampler failures are not evidence
+  of151 capture failures. The observed running window was not uninterrupted.
+- BC's18h12m successful *measurement* span mostly sampled an inactive service (215/219
+  samples). Actual running samples span15m19s; the independently documented stop was
+  roughly19m after sampling began. Frozen debt/error values are not18h of failed retries.
+- Binary/config digests each have one value per host across successful samples;
+  no runtime pause/quarantine observed. Minimum free space168,645,599,232B Mac and
+  57,165,643,776B BC. Neither spool capacity nor free-space exhaustion was observed.
+- These measure installed `b8cbed2`, **not** newer offline-qualified `c8fdf7a` repairs.
+  No consumer health, retention/offline horizon or complete two-host operating acceptance
+  follows from these samples. No full/native/live/hosted gates were run for this review.
+
+**Conclusion:** enough elapsed evidence to close this measurement exercise without a
+24h wait; not enough evidence to accept the replacement. Preserve containment. Next
+operating work must reconcile the newer offline fixes, Mac CPU/restart and incomplete
+coverage under current resource limits, without incidental activation or old-key deletion.
+
 ## Adversarial resolutions — completed (offline/development scope)
 
 The operator now authorizes implementation of the review resolutions, with parent
@@ -229,8 +915,9 @@ The abandoned new-bucket creation403 is historical, not a current access blocker
 **Latest operating correction is installed:** failed discovery metadata persistence now
 records a sticky failure under a bounded release budget or stops rather than falsely
 completing a generation. Older completion counters are not accepted coverage proof.
-Finite read-only24h measurements started on both hosts at03:27 UTC; they do not grant
-acceptance or perform cleanup.
+Finite read-only measurements started on both hosts at03:27 UTC and were ended early
+at the operator's request; see the reviewed results above. Both collectors were separately
+contained and are now disabled/off. These observations do not grant release acceptance.
 
 ### Checkout and preservation
 
@@ -259,14 +946,16 @@ acceptance or perform cleanup.
 | Area | Evidence / current limit |
 | --- | --- |
 | Mac capture | Qualified `b8cbed2` installed/restarted03:07:56 UTC without config/queue reset. At03:27 PID28171/exit0;964 pre-upgrade pending jobs subsequently published, no prior jobs/manifests lost or changed. SQLite/binary backups retained privately. |
-| Mac consumers | Refresh and dashboard enabled/running against qualified analytics source and fresh release-private database/status. Dashboard loopback8766 returns HTTP200 with correct fresh archive and explicit incomplete health. Existing8765 dashboard unchanged. |
+| Mac consumers | Last checked enabled/running against qualified analytics source and fresh release-private database/status. Dashboard loopback8766 returned HTTP200 with correct fresh archive and explicit incomplete health. Existing8765 dashboard unchanged. Consumer health was not rechecked during the October29 observation review. |
 | BC-01 | SSH alias `bc-01`; signing access restored. Qualified `b8cbed2` installed/restarted03:08:09 UTC, skipping intermediate36dcef4. At03:27 PID3483559, enabled/active/running,0 automatic restarts/exit0;1,541 prior pending jobs subsequently published with no prior job/manifest loss/change. |
 | Authority | Parent owns all host/cloud/configuration actions. Existing bucket reuse/reset authorized; no provisioning credential or new bucket needed. Both PATH wrappers fence legacy commands; native managed hooks enqueue candidate hints. |
 | Cutover | Global binding switch and controlled activation completed for qualification. Full operating acceptance, old-object retirement and legacy-only code removal remain incomplete. No bulk deletion before accepted replacement. |
 
 The machines handover's newest top section withdraws the custom `bc-heavy` tool; it was
 removed deliberately. Do not reinstall it or follow historical admission instructions.
-Parent serializes expensive gates directly in pinned Nix, on AC with sleep prevented.
+For any future expensive validation, first read `~/.config/agents/validation.md` and
+use its current native limits and worker-side resource admission. Pinned Nix remains
+required; earlier serial host-gate evidence is not authority to bypass current policy.
 
 ### Fresh-state rebuild boundary (material reconciliation)
 
@@ -743,7 +1432,7 @@ and then closed in code as follows:
   `restart-verification.json`. Current guarded installer is `install_discovery_persistence.py`.
   Do not replay older installers or archive-switch scripts.
 
-### Bounded operating observation in progress
+### Bounded operating observation — historical startup
 
 Parent started a **temporary, read-only, finite24h sampler** on each host, using the
 already validated scalar `operating_snapshot.py`. It does not read source bodies, mutate
@@ -767,22 +1456,23 @@ not become synthetic catch-up samples or a claim of uninterrupted operation.
 
 ## Next action / actual release boundary
 
-1. Parent reviews the completed observation and any earlier material failures; verify an
-   actual completed-sweep timestamp **after the final03:07/03:08 install**, stable identities/
-   policy/configuration, backlogs, retries and representative capacity. Earlier36dcef4
-   completion counters are not qualification. Inspect both host artifacts and supervisor
-   state; do not equate a finished sampler or reviewer with acceptance. No queue reset or
-   archive rebind. No active implementation worker remains.
+1. Parent reviewed the available observation window and ended the samplers early at
+   operator direction; results are above. Mac has post-install completed-sweep evidence
+   but continued partial coverage/high CPU and a restart; BC has no completed sweep and
+   was mostly inactive. Both collectors remain disabled/off. Reconcile newer offline
+   source/evidence and these resource/coverage findings before any separately authorized
+   operating continuation. No incidental activation, queue reset or archive rebind.
 2. Complete full fresh-reader consumer sweeps; independently verify actual installed
    restart/retry/privacy/source-absence behavior and two-host independence. No status edits,
    queue resets, timeout increases or gate bypass to obtain green.
 3. Qualify representative resources, largest records, offline spool/retention horizon and
-   24–48h autonomous operation. Preserve unavailable/deleted unpublished-history caveats.
+   actual autonomous behavior. Operator waived the fixed24h measurement wait; elapsed
+   duration alone is not acceptance. Preserve unavailable/deleted unpublished-history caveats.
 4. Only after acceptance: separately reviewed deletion of frozen old inventory keys, excluding
    the **now replaced** global binding and every fresh-archive key; recheck fences and inventory
    drift first. Never blindly delete the original inventory wholesale. Then remove retired
    legacy-only code/operator paths and rerun checks.
 
-All six phases are **not** complete. Existing development qualification remains applicable
-because production code is unchanged. Binding replacement and controlled activation are
-completed milestones, not full release/operating acceptance.
+All six phases are **not** complete. Development qualification is tied to the source
+revisions listed above, not proof of installed behavior. Binding replacement and historical
+controlled activation are completed milestones, not full release/operating acceptance.

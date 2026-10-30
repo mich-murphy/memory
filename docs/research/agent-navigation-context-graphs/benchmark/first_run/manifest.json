@@ -1,0 +1,43 @@
+{
+  "started_utc": "2026-10-20T12:06:06Z",
+  "arguments": {
+    "repo": "/Users/mm/businesscraft/businesscraft",
+    "tasks": "/Users/mm/dev/memory/docs/research/agent-navigation-context-graphs/benchmark/tasks.json",
+    "output": "/Users/mm/dev/memory/docs/research/agent-navigation-context-graphs/benchmark/first_run",
+    "index": "/Users/mm/dev/memory/docs/research/agent-navigation-context-graphs/prototype/.cache/benchmark.sqlite3",
+    "repeats": "3",
+    "top_k": "10",
+    "max_bytes": "9600",
+    "self_test": "False"
+  },
+  "machine": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.1.8 ]",
+  "head": "e4fbe8f3768b3348c349667f37f500b478950fed",
+  "tracked_status": " M infra/web/stamp/envs/staging.tfvars\n",
+  "hashes": {
+    "benchmark/run.py": "aa21eee8c02208a32b99744c1c4dd8016705d66a7d2e3d48c2a06061e3e24af5",
+    "benchmark/dataset.md": "54b5027e45dbbf85726aa3ac436a085d9d8501764283516c37ffcf9a5bbb07ef",
+    "benchmark/r2-provenance.json": "ec55b40fea0ab88c10fb28013504668c528ad3e42eeb430f46bbcc9801887506",
+    "benchmark/validate_dataset.py": "6bbf29734797c413d0ecdd4a373d5a6b8f047b40685ddd42920dbd7e15845935",
+    "benchmark/tasks.json": "d3205c23a02eec91966d3182374a40e633c599ed946ec08a7612c1f364789afa",
+    "benchmark/SCORING.md": "c8786e38cb47b8e8ca54820cff304a53d12f642c8de0789ce06015abcfa6ae58",
+    "benchmark/verify_r2_provenance.py": "c957efa7f984a0d00431db5889f1e3e4aa46101c6b89ed5765715dc8fb0d34cd",
+    "prototype/map.md": "6f61262476cf4d639c0e0c6f0ea32ba21cda68e5df1643a057e6e77a9a30b412",
+    "prototype/VALIDATION.md": "6d6d77ed410abfed0926b88950645d865a7ab0ac5b2e357528588abcdfb4863b",
+    "prototype/README.md": "01a4e91478cbf59e981ce9a09cd9d863beb4eea250e2fa90223241e8ba084906",
+    "prototype/nav.py": "2d017cd35e553a0d5763928f740ff5360a75feed9bbe8032e54c28b5bc53b867",
+    "prototype/routing.json": "244ef989b0ac594b457092081dd334819eec7a4bf77c4a1b0daf296a81affc1f",
+    "prototype/FREEZE.json": "303530798f61918ab623b4dc3b6ba7d31545b381961a29d198a50a795ebc638c",
+    "prototype/test_nav.py": "6e67a51f5a96c6007c2a78babd312ad0e1e7e73d0e0628d0ed35eeb249efd8b6"
+  },
+  "scoring_contract_sha256": "c8786e38cb47b8e8ca54820cff304a53d12f642c8de0789ce06015abcfa6ae58",
+  "tools": {
+    "git": "/nix/store/gw7c7m0dwca5lg4152x9lpmxpj171bzw-git-2.55.0/bin/git",
+    "rg": "/etc/profiles/per-user/mm/bin/rg",
+    "python3": "/nix/store/0kcws5blwbdyxqxjd1w8hjipz61xny3k-python3-3.14.7/bin/python3"
+  },
+  "build_seconds": 25.675131500000134,
+  "baseline_allowed_paths": 30788,
+  "baseline_manifest_sha256": "e13ec66f66c30fee4ca1d7af5650b61f1e767fee43e8adeac00a5fd958db7c98",
+  "completed_utc": "2026-10-20T12:26:21Z"
+}

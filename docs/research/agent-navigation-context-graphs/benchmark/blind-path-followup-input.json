@@ -1,0 +1,46 @@
+{
+  "policy": "New unique query/path pairs from anonymous additional pilot runs; origin conditions withheld. Additions only; do not modify original judgments.",
+  "items": [
+    {
+      "id": "bcnav-03",
+      "query": "Where does Finance get revised contract value including variations, and which rules determine GST basis? Trace domain logic and Classic definitions.",
+      "answerability": "repository_navigation",
+      "candidate_paths": [
+        "classic/src/dbl/Net/Misc/bsndtomanager.dbl"
+      ]
+    },
+    {
+      "id": "bcnav-05",
+      "query": "For \u201cjobs in a suburb or a state\u201d, where can I distinguish jobs from Contracts, site state from customer state, and lifecycle state?",
+      "answerability": "repository_navigation",
+      "candidate_paths": [
+        "docs/engineering/businesscraft-agent/analytical-questions.md"
+      ]
+    },
+    {
+      "id": "bcnav-09",
+      "query": "What does \u201ccurrently at Event X\u201d mean? Find event ordering, registration state and lifecycle derivation rather than assuming the largest Event number is current.",
+      "answerability": "repository_navigation",
+      "candidate_paths": [
+        "docs/engineering/businesscraft-agent/analytical-questions.md"
+      ]
+    },
+    {
+      "id": "bcnav-10",
+      "query": "Where is CSV export authority enforced, and is exporting a grid equivalent to merely having read access?",
+      "answerability": "repository_navigation",
+      "candidate_paths": [
+        "web/apps/web/app/api/c/[company]/ar/transactions/for-customer/[customer]/[mode]/filtered/[resource]/handler.ts",
+        "web/packages/bc-grid/packages/react/src/serverGridCsvExport.ts"
+      ]
+    },
+    {
+      "id": "bcnav-14",
+      "query": "Where should I investigate the Agent worker crashing when PostgreSQL drops an already checked-out connection, and what tests cover that failure?",
+      "answerability": "repository_navigation",
+      "candidate_paths": [
+        "web/agent/packages/bc-agent-runtime/tests/unit/database-transaction.test.ts"
+      ]
+    }
+  ]
+}
