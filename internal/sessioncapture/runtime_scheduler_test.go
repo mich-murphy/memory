@@ -51,11 +51,11 @@ func TestSparseDueSelectionSingleClaim(t *testing.T) {
 				}
 			} else {
 				capture(t, q, r)
-				id, got, err := q.claimSession(t.Context())
+				id, got, err := q.claimSession(t.Context(), false)
 				if err != nil || id == 0 || got != r.Identity {
 					t.Fatalf("due first claim: %d %+v %v", id, got, err)
 				}
-				id, _, err = q.claimSession(t.Context())
+				id, _, err = q.claimSession(t.Context(), false)
 				if err != nil || id != 0 {
 					t.Fatalf("busy session: %d %v", id, err)
 				}
@@ -76,26 +76,26 @@ func TestDueSessionHeadBlocksLaterAndCursorWraps(t *testing.T) {
 	if _, err := q.db.ExecContext(t.Context(), `UPDATE jobs SET state='quarantined' WHERE session=? AND sequence=?`, r.Identity.BaseKey(), first.Sequence); err != nil {
 		t.Fatal(err)
 	}
-	id, _, err := q.claimSession(t.Context())
+	id, _, err := q.claimSession(t.Context(), false)
 	if err != nil || id != 0 {
 		t.Fatalf("quarantined head: %d %v", id, err)
 	}
 	if _, err = q.db.ExecContext(t.Context(), `UPDATE jobs SET state='retry',next_retry=? WHERE session=? AND sequence=?`, o.Now().UnixNano()+1, r.Identity.BaseKey(), first.Sequence); err != nil {
 		t.Fatal(err)
 	}
-	id, _, err = q.claimSession(t.Context())
+	id, _, err = q.claimSession(t.Context(), false)
 	if err != nil || id != 0 {
 		t.Fatalf("future head: %d %v", id, err)
 	}
 	if _, err = q.db.ExecContext(t.Context(), `UPDATE jobs SET next_retry=0 WHERE session=? AND sequence=?`, r.Identity.BaseKey(), first.Sequence); err != nil {
 		t.Fatal(err)
 	}
-	q.runtimeLocal().sessionCursor = 999999
-	id, _, err = q.claimSession(t.Context())
+	q.runtimeLocal().sessionCursors[0] = 999999
+	id, _, err = q.claimSession(t.Context(), false)
 	if err != nil || id != 0 {
 		t.Fatalf("wrap turn: %d %v", id, err)
 	}
-	id, got, err := q.claimSession(t.Context())
+	id, got, err := q.claimSession(t.Context(), false)
 	if err != nil || id == 0 || got != r.Identity {
 		t.Fatalf("wrapped due: %d %+v %v; later=%d", id, got, err, second.Sequence)
 	}

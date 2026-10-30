@@ -314,16 +314,20 @@ func (q *Queue) Resume(ctx context.Context) error {
 	return err
 }
 
-func (q *Queue) claimSession(ctx context.Context) (int64, publication.Identity, error) {
+func (q *Queue) claimSession(ctx context.Context, optional bool) (int64, publication.Identity, error) {
 	r := q.runtimeLocal()
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	lane := 0
+	if optional {
+		lane = 1
+	}
 	var zero publication.Identity
 	paused, err := q.destinationPaused(ctx)
 	if err != nil || paused {
 		return 0, zero, err
 	}
-	rows, err := q.db.QueryContext(ctx, `SELECT s.id,s.session,s.claim FROM jobs AS j INDEXED BY runtime_due_jobs JOIN runtime_sessions AS s ON s.session=j.session WHERE j.state NOT IN ('published','superseded','quarantined') AND j.next_retry<=? AND s.id>? AND s.claim=0 AND j.sequence=(SELECT sequence FROM jobs WHERE session=j.session AND state NOT IN ('published','superseded') ORDER BY sequence LIMIT 1) ORDER BY s.id LIMIT 64`, q.opts.Now().UnixNano(), r.sessionCursor)
+	rows, err := q.db.QueryContext(ctx, `SELECT s.id,s.session,s.claim FROM jobs AS j INDEXED BY runtime_due_jobs JOIN runtime_sessions AS s ON s.session=j.session WHERE j.state NOT IN ('published','superseded','quarantined') AND j.next_retry<=? AND s.id>? AND s.claim=0 AND j.sequence=(SELECT sequence FROM jobs WHERE session=j.session AND state NOT IN ('published','superseded') ORDER BY sequence LIMIT 1) ORDER BY s.id LIMIT 64`, q.opts.Now().UnixNano(), r.sessionCursors[lane])
 	if err != nil {
 		return 0, zero, err
 	}
@@ -346,7 +350,7 @@ func (q *Queue) claimSession(ctx context.Context) (int64, publication.Identity, 
 		return 0, zero, err
 	}
 	for _, c := range page {
-		r.sessionCursor = c.id
+		r.sessionCursors[lane] = c.id
 		if c.claim != 0 {
 			continue
 		}
@@ -361,7 +365,7 @@ func (q *Queue) claimSession(ctx context.Context) (int64, publication.Identity, 
 		return c.id, identity, err
 	}
 	if len(page) == 0 {
-		r.sessionCursor = 0
+		r.sessionCursors[lane] = 0
 	}
 	return 0, zero, nil
 }
@@ -371,7 +375,7 @@ func (q *Queue) deliveryNext(ctx context.Context, b publication.Backend, o Runti
 }
 
 func (q *Queue) deliveryLaneNext(ctx context.Context, b publication.Backend, o RuntimeOptions, optional bool) (bool, error) {
-	id, identity, err := q.claimSession(ctx)
+	id, identity, err := q.claimSession(ctx, optional)
 	released := false
 	if id != 0 {
 		defer func() {

@@ -54,15 +54,16 @@ type RuntimeOptions struct {
 }
 
 type runtimeLocal struct {
-	mu                          sync.Mutex
-	initialized, running        bool
-	sourceCursor, sessionCursor int64
-	nativeCursor                int
-	discoveryWake               chan struct{}
-	wakeSeen                    map[string]string
-	wakeSnapshot                map[string]discoveryHint
-	enrichmentOptions           atomic.Pointer[RuntimeOptions]
-	softwareVersion             atomic.Value // string; retained only for new quarantine entries
+	mu                   sync.Mutex
+	initialized, running bool
+	sourceCursor         int64
+	sessionCursors       [2]int64 // Raw and optional delivery scan independently.
+	nativeCursor         int
+	discoveryWake        chan struct{}
+	wakeSeen             map[string]string
+	wakeSnapshot         map[string]discoveryHint
+	enrichmentOptions    atomic.Pointer[RuntimeOptions]
+	softwareVersion      atomic.Value // string; retained only for new quarantine entries
 }
 
 func (q *Queue) runtimeLocal() *runtimeLocal {

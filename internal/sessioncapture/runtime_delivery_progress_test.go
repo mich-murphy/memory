@@ -58,6 +58,108 @@ func (b *progressMemoryBackend) CompareAndSwap(_ context.Context, key, token str
 	return nil
 }
 
+// A real wrong-lane turn seeds the adverse scan position. Subsequent worker
+// turns must drain accepted work without resetting either cursor or sleeping.
+func TestRuntimeDeliveryProgressLaneCursors(t *testing.T) {
+	for _, optional := range []bool{false, true} {
+		for _, correctFirst := range []bool{true, false} {
+			t.Run(fmt.Sprintf("optional=%v/correctFirst=%v", optional, correctFirst), func(t *testing.T) {
+				dir, o, req := setup(t)
+				o.EnableEnrichment = optional
+				acknowledgements := 0
+				o.Fault = func(point string) error {
+					if point == "ack-before-commit" {
+						acknowledgements++
+					}
+					return nil
+				}
+				q := open(t, dir, o)
+				capture(t, q, req)
+				if err := q.InitRuntime(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				b := &progressMemoryBackend{objects: make(map[string][]byte)}
+				if err := publication.WriteArchive(t.Context(), b, publication.Archive{Contract: publication.Contract, ArchiveID: "archive"}); err != nil {
+					t.Fatal(err)
+				}
+				if optional {
+					if err := q.Deliver(t.Context(), b, req.Identity); err != nil {
+						t.Fatal(err)
+					}
+					enrichOnce(t, q, snapshotOptions("synthetic optional"))
+				}
+				want, _, err := q.latest(t.Context(), req.Identity)
+				if err != nil {
+					t.Fatal(err)
+				}
+				head, err := q.optionalDeliveryHead(t.Context(), req.Identity)
+				if err != nil || head != optional {
+					t.Fatalf("wrong head: %v %v", head, err)
+				}
+				acknowledgements, b.puts, b.swaps = 0, 0, 0
+				opts := runtimeDefaults(RuntimeOptions{})
+				turn := func(lane bool) bool {
+					t.Helper()
+					puts, swaps := b.puts, b.swaps
+					did, err := q.deliveryLaneNext(t.Context(), b, opts, lane)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var claims int
+					if err := q.db.QueryRowContext(t.Context(), "SELECT sum(claim) FROM runtime_sessions").Scan(&claims); err != nil {
+						t.Fatal(err)
+					}
+					if claims != 0 {
+						t.Fatalf("lane=%v retained %d claims", lane, claims)
+					}
+					if lane != optional && (did || b.puts != puts || b.swaps != swaps) {
+						t.Fatal("wrong lane attempted publication")
+					}
+					return did
+				}
+				turn(!optional) // Legitimate selection/rejection, not a synthetic cursor write.
+				completed := 0
+				for range 8 {
+					if !correctFirst {
+						turn(!optional)
+					}
+					if turn(optional) {
+						completed++
+					}
+					if correctFirst {
+						turn(!optional)
+					}
+				}
+				if completed != 1 || acknowledgements != 1 || b.puts == 0 || b.swaps == 0 {
+					t.Fatalf("accepted head starved or duplicated: completed=%d acknowledgements=%d puts=%d publications=%d", completed, acknowledgements, b.puts, b.swaps)
+				}
+				status, err := q.Status(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, job := range status {
+					if job.State != "published" || job.LastError != "" {
+						t.Fatalf("accepted work not drained: %+v", job)
+					}
+				}
+				got, err := publication.Read(t.Context(), b, req.Identity)
+				if err != nil || got.PublicationID != want.PublicationID || got.Sequence != want.Sequence || got.Identity != req.Identity {
+					t.Fatalf("wrong publication: got=%+v want=%+v err=%v", got, want, err)
+				}
+				puts, swaps := b.puts, b.swaps
+				for range 4 {
+					if turn(false) || turn(true) {
+						t.Fatal("drained queue reported more work")
+					}
+				}
+				if acknowledgements != 1 || b.puts != puts || b.swaps != swaps {
+					t.Fatal("drained queue republished work")
+				}
+			})
+		}
+	}
+}
+
 func TestRuntimeDeliveryProgressIdleScheduling(t *testing.T) {
 	for _, optional := range []bool{false, true} {
 		for _, idle := range []string{"busy", "paused"} {
@@ -108,7 +210,11 @@ func TestRuntimeDeliveryProgressIdleScheduling(t *testing.T) {
 				for range 10 {
 					// claimSession uses a bounded cursor; reset it so every turn visits
 					// this accepted, due session rather than alternating with an empty page.
-					q.runtimeLocal().sessionCursor = 0
+					lane := 0
+					if optional {
+						lane = 1
+					}
+					q.runtimeLocal().sessionCursors[lane] = 0
 					did, err := q.deliveryLaneNext(t.Context(), b, runtimeDefaults(RuntimeOptions{}), optional)
 					if err != nil {
 						t.Fatal(err)
@@ -177,7 +283,7 @@ func TestRuntimeDeliveryProgressRechecks(t *testing.T) {
 			if err := q.InitRuntime(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			id, identity, err := q.claimSession(t.Context())
+			id, identity, err := q.claimSession(t.Context(), false)
 			if err != nil || id == 0 {
 				t.Fatalf("selection: %d %v", id, err)
 			}
