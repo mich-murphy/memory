@@ -13,7 +13,7 @@ func availableBytes(path string) (int64, error) {
 	if err := unix.Statfs(path, &st); err != nil {
 		return 0, err
 	}
-	return filesystemAvailable(st.Bavail, int64(st.Bsize))
+	return filesystemAvailable(st.Bavail, filesystemBlockSize(&st))
 }
 
 func filesystemAvailable(blocks uint64, blockSize int64) (int64, error) {

@@ -20,6 +20,6 @@ func statFingerprint(info os.FileInfo) string {
 		return ""
 	}
 	mt, ct := statTimes(st)
-	sum := sha256.Sum256([]byte(fmt.Sprintf("stat-v1:%d:%d:%d:%d:%d", uint64(st.Dev), st.Ino, st.Size, mt, ct)))
+	sum := sha256.Sum256([]byte(fmt.Sprintf("stat-v1:%d:%d:%d:%d:%d", statDeviceIdentity(st), st.Ino, st.Size, mt, ct)))
 	return hex.EncodeToString(sum[:])
 }

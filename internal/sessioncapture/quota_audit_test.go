@@ -132,6 +132,12 @@ func TestQuotaAuditArithmetic(t *testing.T) {
 		{3, 4096, 12288, false},
 		{math.MaxUint64, 4096, math.MaxInt64, false},
 		{math.MaxInt64, 1, math.MaxInt64, false},
+		{math.MaxInt64 / 4096, 4096, math.MaxInt64 - 4095, false},
+		{math.MaxInt64/4096 + 1, 4096, math.MaxInt64, false},
+		{1, math.MaxInt64, math.MaxInt64, false},
+		{2, math.MaxInt64, math.MaxInt64, false},
+		{0, 0, 0, true},
+		{0, -1, 0, true},
 		{1, 0, 0, true},
 		{1, -1, 0, true},
 	} {
