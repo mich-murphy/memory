@@ -1,5 +1,69 @@
 # Replacement capture: final offline evidence
 
+## 2026-10-30: repaired candidate release qualification
+
+This dated Linux record concerns source **`74c00f4a985d9b2ad3ebe0028458e324f14c6b20`**:
+keep the independently reviewed per-lane scheduling repair `881b04e`, plus portable
+Unix stat-field adapters. The adapters preserve the exact previous `stat-v1` bytes
+(including negative Darwin device wrapping) and quota arithmetic/error behavior.
+Golden/extreme regression tests were added; no linter suppression, privacy check,
+coverage threshold, fixture size, simulation history or native Go test deadline was
+relaxed. This is **offline qualification, not deployment or operating acceptance**.
+Current state and authorization remain in the [sole handoff](session-capture-handoff.md).
+
+| Check | Source-bound result |
+| --- | --- |
+| Configured `make fmt-check` and `make lint` | PASS; lint zero issues |
+| Complete `capturesource` and `sessioncapture` race/shuffle packages | PASS |
+| Full `CGO_ENABLED=1 go test -race -shuffle=on ./...` | PASS; 30 tested packages, two with no tests; syncer365.971s |
+| `make capture-acceptance` with actual writer and RO pinned analytics environment | PASS: 12 writer/analytics journeys, 6 candidate-launcher tests, 12 delivery tests; one existing optional explicit SDK-repair-peer test skipped |
+| Complete analytics discovery with actual candidate binary supplied | PASS: **117 tests, no skips** |
+| Unchanged merged atomic/race/subprocess coverage and CRAP | PASS: final **87.4%, 13,942/15,958 statements**; package/total/high-risk thresholds unchanged; maximum CRAP **29.40**, zero functions above30 |
+| All `make check` prerequisites, completed in staged workers | PASS: fmt, lint, fix, all three tidy checks, deadcode, vulnerability scan, coverage/CRAP, benchmark smoke, actionlint and actual consumer gate |
+| `make fuzz` | PASS: all **nine targets ×30s**, unchanged campaigns |
+| `zizmor --offline --persona pedantic .github` | PASS, no findings; online audits remain hosted-CI scope |
+
+Pinned environment: Nix2.28.5 / Go1.27.3 / Node24.21.0 / Python3.14.8, unchanged
+flake/tool/module identities, separately qualified public node6f7 runtime and prepared
+read-only analytics environment. All actual jobs used the shared worker-side Docker
+admission and complete approved resource profiles. Source/dependencies/runtime were
+read-only; test homes and **both `TMPDIR` and `GOTMPDIR`** were native executable EXT4.
+The full race suite completed under a900s aggregate worker allowance after preserved
+300s and600s aggregate timeouts. Go's native600s per-package limit, race/shuffle flags,
+all eight simulation histories and40 steps remained unchanged. No timeout is a pass.
+
+**Staged-check scope:** the full `make check` replay passed through benchmark smoke,
+then exited2 because actionlint could not discover a project in the deliberately
+Git-metadata-free source mount. The same unchanged `make actionlint` passed after
+read-only private Git metadata was supplied; the earlier source-identical consumer
+pass completes the prerequisite set. This is not a claim that the failed aggregate
+command exited0. The pinned vulnerability client uses its supported
+`-db=file:///vulndb` flag through a transparent `TOOL` adapter; all other pinned tool
+argv and exits are forwarded unchanged. The mirrored public database includes all
+**4,712 OSV IDs and three indexes**, with response/hash provenance, not a sparse
+advisory subset. The adapter SHA is
+`436b30c9e43017ce16c31b19154c64dece20c91e2373b39b25d741b6a4f452a5`.
+The earlier standalone87.3% coverage run's raw log remains; its profile was overwritten
+by the full replay before it was frozen. Do not reconstruct or claim that original
+profile was retained. The final87.4% profile is separately frozen.
+
+Private evidence: `~/.local/state/machines-validation-pilot/memory-release-20261030/`.
+Parent verified all615 frozen source files and all tracked gate-input coverage.
+Manifest `85ffde157f833c776b960a783c693fbe73ff6f6939df28b576ca1325f9755ffa`
+starts at881 plus reviewed patch13ea4169; all Go/tests/scripts/modules/workflows/gate
+configs match74c. Only two later, nonconsumed performance markdown files differ.
+Initial lint failures, incomplete preparation attempts and false Docker0/trap-status
+claims remain explicitly corrected in the ledger, not relabeled successful runs.
+
+No local native-Darwin admission was invented. The existing hosted macOS workflow is
+a separate platform route, not this Mac's installed paths, sandbox hooks, actual R2,
+Mac analytics runtime or combined two-machine acceptance. Neither this record nor an
+artifact build authorizes activation, archive reset/rebind, deletion or legacy
+retirement. Prior881 performance evidence still leaves settled/background CPU and
+operating-budget acceptance open; these release checks do not remeasure or solve it.
+
+## 2026-10-24: historical offline candidate
+
 Dated **2026-10-24 (AEDT)**. This records the opt-in, uncommitted candidate in the dirty
 `9078a3e` worktree, not a deployed release. Requirements remain
 [session-capture-contract.md](session-capture-contract.md) and
