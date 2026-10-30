@@ -6,10 +6,68 @@ module verification/all four units x20 passing and an identical focused filesyst
 probe failing on Mac host-bind but passing on task-owned VM-native scratch. See
 [dated failure/probe evidence and limits](DIAGNOSTIC-FAILURE.md). One full baseline
 on VM-native scratch is authorized/in progress; no result is implied here.
-The Go overlay remains `ea7ce33a08d044cc21feb18c4c0f8e8526fb11ae5f2204a22571447d90486f5a`.
+The historical runs used overlay `ea7ce33a08d044cc21feb18c4c0f8e8526fb11ae5f2204a22571447d90486f5a`.
+The attribution-v4 overlay below is a new test-only diagnostic, not yet built or run.
 It compares `b8cbed2` with `c8fdf7a`; it is not a new quality gate
 or evidence of an optimization. No production source replacements, instrumentation
 package, hook, service, installed spool, source inventory, cloud or credentials.
+
+## Attribution v4 — opt-in, not primary timing
+
+This version adds only the first paired attribution probe; all fixture data,
+composition, discovery, polling, readiness predicates and limits stay unchanged.
+Inside the separately authorized admitted worker, enable both:
+
+```sh
+MEMORY_PERF_DIAGNOSTIC=1 MEMORY_PERF_WORK_COUNTS=1 \
+MEMORY_PERF_PROFILE=/ABS/PRIVATE/profile-dir \
+  /ABS/PRIVATE/old.test -test.run '^TestOfflineMatchedPerformance$' -test.v -test.timeout=300s
+```
+
+The existing `MEMORY_PERF_ROOT` private fresh-root requirement still applies. Use
+identical overlay bytes and settings on each ref. This command is an interface,
+not execution authorization. Do not also enable external `-test.cpuprofile`.
+The runtime owner must retain the **aggregate hard 64 MiB profile cap**; the Go
+writer's per-file check alone does not provide an aggregate hard cap.
+
+- With work counts enabled, the original `Options.CheckPolicy` is wrapped once:
+  each call is counted as `policy_calls/<agent>/<transform>` and forwarded with
+  unchanged context, request and error. Fixed agent buckets: claude/codex/pi/other;
+  transforms: raw/zstd/sqlite-backup/scrubbed-config/other. Queue policy only:
+  **discovery policy is not intercepted**; the actual `r.discovery` closure and
+  existing discovery callback/request counters are unchanged.
+- `status_polls` counts the existing 20ms wait-loop `RuntimeStatus` invocations.
+  Counts remain cumulative, with phase deltas through `perfDelta`. No new timer,
+  per-policy resource sampling, live SQL observer or extra status poll is added.
+- Existing combined `cpu_seconds` arithmetic is unchanged; samples/deltas also
+  expose `user_cpu_seconds` and `system_cpu_seconds` separately.
+- Profiles: `active.pprof`, **`warmup.pprof`**, `settled.pprof`, `append.pprof`.
+  Each finish is idempotent and registered for cleanup, so ordinary test failure
+  flushes after runtime cancel/join defers. A failed warm-up profile can include
+  failure diagnostics and teardown before that cleanup; it excludes fixture setup
+  and initial delivery, but is not an exact guard-instant cutoff.
+- `PERF_WARMUP_SCALAR` records a 16-bin histogram of existing warm-up status
+  observations. Bits 0..3 mean DiscoveryComplete, PendingSources==0,
+  PendingPublications==0, Sources==201. **NONATOMIC:** those fields come from
+  separate SQL statements. No bin proves an atomic overlap or starvation.
+  On the unchanged CPU guard, the existing `perfFailureDiagnostic` receives the
+  last observed status, and the warm-up row records resource/count deltas at the
+  guard observation, before diagnostic reads. No guard or limit is relaxed.
+- Work counts require diagnostic mode. Profiled and diagnostic `PERF_SCALAR`
+  rows have `primary_timing:false`; warm-up rows are always diagnostic/non-primary.
+  With work counts off there is no policy wrapper, poll counter or histogram work.
+  Primary timing remains unprofiled with all diagnostic flags unset.
+
+New deterministic units (in addition to the existing four):
+`TestPerfPolicyCountsForwardOnceAndPreserveError` and
+`TestPerfWarmupHistogramExactBoundaries`. The existing delta unit also checks
+nonzero split-CPU deltas and immutability. No build or test result is implied.
+
+**Unchanged fixture limitation:** `Save` receives `Config` by value and this
+fixture does not reload it; `c.ConfigPath()` is empty on both refs. Queue policy
+protects synthetic-home `.config/agent-sessions/config.json` plus spool/policy/store;
+discovery separately receives explicit `runtime.json`. This probe does not repair
+that fidelity gap, add executable/cache protection, or change fixture context.
 
 ## Declared diagnostic bounds
 
@@ -84,7 +142,7 @@ creation, reference normalization and reader assertions are outside timed phases
 **hook events, not exact hash calls/bytes or housekeeping operations**. Internal
 fingerprint hashing, policy filesystem probes, accounting and housekeeping lacking
 hooks are explicitly uncounted. Do not claim a zero count means no such work.
-Separate active/settled/append CPU profiles provide attribution, not timed evidence.
+Separate active/warmup/settled/append CPU profiles provide attribution, not timed evidence.
 
 The identical observer polls `RuntimeStatus` every 20ms during active/append and
 samples resource counters at ACKs; that overhead is included. Status success can

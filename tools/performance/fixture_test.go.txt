@@ -107,10 +107,12 @@ func (b *perfBackend) Sync(c context.Context, k string) error {
 }
 
 type perfSample struct {
-	WallNS     int64            `json:"wall_ns"`
-	CPUSeconds float64          `json:"cpu_seconds"`
-	IO         map[string]int64 `json:"linux_process_io"`
-	Counts     map[string]int64 `json:"counts"`
+	WallNS           int64            `json:"wall_ns"`
+	CPUSeconds       float64          `json:"cpu_seconds"`
+	UserCPUSeconds   float64          `json:"user_cpu_seconds"`
+	SystemCPUSeconds float64          `json:"system_cpu_seconds"`
+	IO               map[string]int64 `json:"linux_process_io"`
+	Counts           map[string]int64 `json:"counts"`
 }
 
 func perfNow(b *perfBackend) perfSample {
@@ -134,7 +136,10 @@ func perfNow(b *perfBackend) perfSample {
 		}
 	}
 	cpu := float64(r.Utime.Sec+r.Stime.Sec) + float64(r.Utime.Usec+r.Stime.Usec)/1e6
-	return perfSample{time.Now().UnixNano(), cpu, m, b.snapshot()}
+	return perfSample{WallNS: time.Now().UnixNano(), CPUSeconds: cpu,
+		UserCPUSeconds:   float64(r.Utime.Sec) + float64(r.Utime.Usec)/1e6,
+		SystemCPUSeconds: float64(r.Stime.Sec) + float64(r.Stime.Usec)/1e6,
+		IO:               m, Counts: b.snapshot()}
 }
 func perfDelta(a, z perfSample) perfSample {
 	// Samples remain cumulative and immutable, including an ACK recorder's endpoint.
@@ -150,6 +155,7 @@ func perfDelta(a, z perfSample) perfSample {
 		return out
 	}
 	return perfSample{WallNS: z.WallNS - a.WallNS, CPUSeconds: z.CPUSeconds - a.CPUSeconds,
+		UserCPUSeconds: z.UserCPUSeconds - a.UserCPUSeconds, SystemCPUSeconds: z.SystemCPUSeconds - a.SystemCPUSeconds,
 		IO: difference(a.IO, z.IO), Counts: difference(a.Counts, z.Counts)}
 }
 
@@ -186,11 +192,11 @@ func (a *perfACKRecorder) count() int64 {
 }
 
 func TestPerfDeltaPreservesInputs(t *testing.T) {
-	a := perfSample{WallNS: 10, CPUSeconds: 2, IO: map[string]int64{"read": 7, "only_start": 3}, Counts: map[string]int64{"ack": 4}}
-	z := perfSample{WallNS: 40, CPUSeconds: 5, IO: map[string]int64{"read": 19, "only_end": 8}, Counts: map[string]int64{"ack": 6}}
-	wantA := perfSample{WallNS: 10, CPUSeconds: 2, IO: map[string]int64{"read": 7, "only_start": 3}, Counts: map[string]int64{"ack": 4}}
-	wantZ := perfSample{WallNS: 40, CPUSeconds: 5, IO: map[string]int64{"read": 19, "only_end": 8}, Counts: map[string]int64{"ack": 6}}
-	want := perfSample{WallNS: 30, CPUSeconds: 3, IO: map[string]int64{"read": 12, "only_start": -3, "only_end": 8}, Counts: map[string]int64{"ack": 2}}
+	a := perfSample{WallNS: 10, CPUSeconds: 2, UserCPUSeconds: 1.5, SystemCPUSeconds: 0.5, IO: map[string]int64{"read": 7, "only_start": 3}, Counts: map[string]int64{"ack": 4}}
+	z := perfSample{WallNS: 40, CPUSeconds: 5, UserCPUSeconds: 3.5, SystemCPUSeconds: 1.5, IO: map[string]int64{"read": 19, "only_end": 8}, Counts: map[string]int64{"ack": 6}}
+	wantA := perfSample{WallNS: 10, CPUSeconds: 2, UserCPUSeconds: 1.5, SystemCPUSeconds: 0.5, IO: map[string]int64{"read": 7, "only_start": 3}, Counts: map[string]int64{"ack": 4}}
+	wantZ := perfSample{WallNS: 40, CPUSeconds: 5, UserCPUSeconds: 3.5, SystemCPUSeconds: 1.5, IO: map[string]int64{"read": 19, "only_end": 8}, Counts: map[string]int64{"ack": 6}}
+	want := perfSample{WallNS: 30, CPUSeconds: 3, UserCPUSeconds: 2, SystemCPUSeconds: 1, IO: map[string]int64{"read": 12, "only_start": -3, "only_end": 8}, Counts: map[string]int64{"ack": 2}}
 	d := perfDelta(a, z)
 	if !reflect.DeepEqual(d, want) || !reflect.DeepEqual(a, wantA) || !reflect.DeepEqual(z, wantZ) {
 		t.Fatal("delta mutated input or produced wrong result")
@@ -251,6 +257,132 @@ func TestPerfACKEndpointWaitsForFinalSample(t *testing.T) {
 		t.Fatal("final endpoint omitted staged ACK or used previous sample")
 	}
 }
+
+// This observes queue policy only. Discovery keeps the actual r.discovery closure
+// and has its existing callback/request counters; it is not intercepted here.
+func perfCountPolicy(b *perfBackend, check func(context.Context, sessioncapture.Request) error) func(context.Context, sessioncapture.Request) error {
+	return func(ctx context.Context, req sessioncapture.Request) error {
+		transform := "other"
+		switch req.Transform {
+		case "":
+			transform = "raw"
+		case "zstd", "sqlite-backup", "scrubbed-config":
+			transform = req.Transform
+		}
+		b.add("policy_calls/"+perfSafeAgent(req.Identity.Agent)+"/"+transform, 1)
+		return check(ctx, req) // Exactly once; original context, request and error.
+	}
+}
+
+// NONATOMIC: RuntimeStatus uses separate SQL statements. These bits classify
+// existing poll observations, not transactional snapshots or proof of starvation.
+// Bits 0..3: complete, pending sources == 0, pending publications == 0, exact size.
+func perfWarmupMask(st sessioncapture.RuntimeStatus, expectedSources int64) int {
+	mask := 0
+	for bit, yes := range []bool{st.DiscoveryComplete, st.PendingSources == 0, st.PendingPublications == 0, st.Sources == expectedSources} {
+		if yes {
+			mask |= 1 << bit
+		}
+	}
+	return mask
+}
+
+type perfWarmupReport struct {
+	Diagnostic    bool       `json:"diagnostic"`
+	PrimaryTiming bool       `json:"primary_timing"`
+	Nonatomic     bool       `json:"nonatomic_status_observations"`
+	Reason        string     `json:"reason"`
+	Histogram     [16]int64  `json:"histogram_mask_0_to_15"`
+	Sample        perfSample `json:"sample"`
+}
+
+func perfEmitWarmup(t *testing.T, reason string, a, z perfSample, histogram [16]int64) {
+	t.Helper()
+	p, e := json.Marshal(perfWarmupReport{true, false, true, reason, histogram, perfDelta(a, z)})
+	if e != nil {
+		t.Log("PERF_WARMUP_SCALAR diagnostic=true encoding_failed=true")
+		return
+	}
+	t.Log("PERF_WARMUP_SCALAR " + string(p))
+}
+
+func TestPerfPolicyCountsForwardOnceAndPreserveError(t *testing.T) {
+	const private = "synthetic-private-coordinate-transcript-error"
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // Even a canceled context must still reach the original policy once.
+	req := sessioncapture.Request{Identity: publication.Identity{Agent: private}, Path: private, Transform: private}
+	for _, want := range []error{nil, errors.New(private), errors.Join(context.Canceled, errors.New(private))} {
+		b := &perfBackend{counts: map[string]int64{}}
+		calls := 0
+		check := perfCountPolicy(b, func(gotCtx context.Context, got sessioncapture.Request) error {
+			calls++
+			if gotCtx != ctx || !reflect.DeepEqual(got, req) {
+				t.Fatal("policy wrapper changed arguments")
+			}
+			return want
+		})
+		if got := check(ctx, req); got != want || calls != 1 {
+			t.Fatal("policy wrapper changed error or forward count")
+		}
+		if !reflect.DeepEqual(b.snapshot(), map[string]int64{"policy_calls/other/other": 1}) {
+			t.Fatal("policy wrapper leaked unknown labels or miscounted")
+		}
+		data, err := json.Marshal(perfWarmupReport{true, false, true, "cpu_guard", [16]int64{}, perfSample{Counts: b.snapshot()}})
+		if err != nil || bytes.Contains(data, []byte(private)) {
+			t.Fatal("warmup failure report leaked private policy input/error")
+		}
+	}
+	b := &perfBackend{counts: map[string]int64{}}
+	check := perfCountPolicy(b, func(context.Context, sessioncapture.Request) error { return nil })
+	for _, agent := range []string{"claude", "codex", "pi"} {
+		for _, transform := range []string{"", "zstd", "sqlite-backup", "scrubbed-config"} {
+			req.Identity.Agent, req.Transform = agent, transform
+			if err := check(t.Context(), req); err != nil {
+				t.Fatal("successful policy changed")
+			}
+		}
+	}
+	counts := b.snapshot()
+	if len(counts) != 12 {
+		t.Fatal("fixed policy buckets missing")
+	}
+	for _, count := range counts {
+		if count != 1 {
+			t.Fatal("fixed policy bucket miscounted")
+		}
+	}
+}
+
+func TestPerfWarmupHistogramExactBoundaries(t *testing.T) {
+	var histogram [16]int64
+	for want := range 16 {
+		st := sessioncapture.RuntimeStatus{DiscoveryComplete: want&1 != 0, PendingSources: 1, PendingPublications: 1, Sources: 200}
+		if want&2 != 0 {
+			st.PendingSources = 0
+		}
+		if want&4 != 0 {
+			st.PendingPublications = 0
+		}
+		if want&8 != 0 {
+			st.Sources = 201
+		}
+		got := perfWarmupMask(st, 201)
+		if got != want {
+			t.Fatal("warmup mask bit mismatch")
+		}
+		histogram[got]++
+	}
+	for _, n := range histogram {
+		if n != 1 {
+			t.Fatal("warmup histogram lost or merged observations")
+		}
+	}
+	// Neither overcount nor negative pending values may satisfy an equality bit.
+	if perfWarmupMask(sessioncapture.RuntimeStatus{PendingSources: -1, PendingPublications: -1, Sources: 202}, 201) != 0 {
+		t.Fatal("warmup mask weakened exact boundaries")
+	}
+}
+
 func perfEmit(t *testing.T, phase string, a, z perfSample) {
 	t.Helper()
 	d := perfDelta(a, z)
@@ -258,10 +390,13 @@ func perfEmit(t *testing.T, phase string, a, z perfSample) {
 		Phase               string     `json:"phase"`
 		Profiled            bool       `json:"profiled"`
 		Diagnostic          bool       `json:"diagnostic"`
+		WorkCounts          bool       `json:"work_counts"`
+		PrimaryTiming       bool       `json:"primary_timing"`
 		Sample              perfSample `json:"sample"`
 		SettledTargetCPU    float64    `json:"settled_target_cpu_seconds"`
 		AppendTargetSeconds int        `json:"append_target_seconds"`
-	}{phase, os.Getenv("MEMORY_PERF_PROFILE") != "", os.Getenv("MEMORY_PERF_DIAGNOSTIC") == "1", d, 3, 10})
+	}{phase, os.Getenv("MEMORY_PERF_PROFILE") != "", os.Getenv("MEMORY_PERF_DIAGNOSTIC") == "1" || os.Getenv("MEMORY_PERF_PROFILE") != "",
+		os.Getenv("MEMORY_PERF_WORK_COUNTS") == "1", os.Getenv("MEMORY_PERF_DIAGNOSTIC") != "1" && os.Getenv("MEMORY_PERF_PROFILE") == "" && os.Getenv("MEMORY_PERF_WORK_COUNTS") != "1", d, 3, 10})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -535,15 +670,22 @@ func perfProfile(t *testing.T, phase string) func() {
 	if e = pprof.StartCPUProfile(w); e != nil {
 		t.Fatal(e)
 	}
-	return func() {
-		pprof.StopCPUProfile()
-		if e := f.Close(); e != nil {
-			t.Error(e)
-		}
-		if w.exceeded {
-			t.Error("profile diagnostic limit")
-		}
+	var once sync.Once
+	finish := func() {
+		once.Do(func() {
+			pprof.StopCPUProfile()
+			if e := f.Close(); e != nil {
+				t.Error(e)
+			}
+			if w.exceeded {
+				t.Error("profile diagnostic limit")
+			}
+		})
 	}
+	// Cleanup runs after runtime cancel/join defers, including t.Fatal paths.
+	// Earlier successful phases cannot stop a later profile: finish is idempotent.
+	t.Cleanup(finish)
+	return finish
 }
 
 // This fallback callback is opt-in diagnostic evidence, not primary timing.
@@ -1048,6 +1190,10 @@ func TestOfflineMatchedPerformance(t *testing.T) {
 	if root == "" {
 		t.Skip("opt-in synthetic Linux diagnostic; requires admitted worker")
 	}
+	workCounts := os.Getenv("MEMORY_PERF_WORK_COUNTS") == "1"
+	if workCounts && os.Getenv("MEMORY_PERF_DIAGNOSTIC") != "1" {
+		t.Fatal("work counts require diagnostic mode")
+	}
 	if !filepath.IsAbs(root) || filepath.Clean(root) == "/" {
 		t.Fatal("private absolute root required")
 	}
@@ -1096,6 +1242,9 @@ func TestOfflineMatchedPerformance(t *testing.T) {
 		}
 	}
 	opts := r.queueOptions()
+	if workCounts {
+		opts.CheckPolicy = perfCountPolicy(b, opts.CheckPolicy)
+	}
 	opts.Fault = func(point string) error {
 		if point == "ack-committed" {
 			acknowledgements.record(b, func() perfSample { return perfNow(b) })
@@ -1183,6 +1332,8 @@ func TestOfflineMatchedPerformance(t *testing.T) {
 		}
 	}()
 	phase := "active_delivery"
+	var warmupHistogram [16]int64
+	var warmupLastStatus sessioncapture.RuntimeStatus
 	// Status polling adds observer work, identically on both refs. Last-ACK samples
 	// end active/append measurements at the actual durable ACK, not polling success.
 	wait := func(requiredACK int64, requireDiscovery bool) perfSample {
@@ -1199,11 +1350,23 @@ func TestOfflineMatchedPerformance(t *testing.T) {
 			}
 			now := perfNow(b)
 			if now.CPUSeconds-phaseStart.CPUSeconds > perfCPU {
+				if workCounts && phase == "discovery_warmup" {
+					// The last existing observation, NOT a new atomic status read.
+					perfFailureDiagnostic(t, phase, warmupLastStatus, q, ctx)
+					perfEmitWarmup(t, "cpu_guard", phaseStart, now, warmupHistogram)
+				}
 				t.Fatal("phase CPU diagnostic limit")
+			}
+			if workCounts {
+				b.add("status_polls", 1)
 			}
 			st, e := q.RuntimeStatus(ctx)
 			if e != nil {
 				t.Fatal(e)
+			}
+			if workCounts && phase == "discovery_warmup" {
+				warmupLastStatus = st
+				warmupHistogram[perfWarmupMask(st, int64(len(sources)))]++
 			}
 			if st.Quarantined != 0 || st.Paused || st.StepErrors != 0 {
 				perfFailureDiagnostic(t, phase, st, q, ctx)
@@ -1244,6 +1407,7 @@ func TestOfflineMatchedPerformance(t *testing.T) {
 		t.Fatal("initial staged job disappeared")
 	}
 	phase = "discovery_warmup"
+	finishProfile = perfProfile(t, "warmup")
 	done = make(chan error, 1)
 	exited = make(chan struct{})
 	runctx, stopRun = context.WithCancel(ctx)
@@ -1255,6 +1419,14 @@ func TestOfflineMatchedPerformance(t *testing.T) {
 	}()
 	phaseStart = perfNow(b)
 	_ = wait(activeACKBoundary, true)
+	var warmupEnd perfSample
+	if workCounts {
+		warmupEnd = perfNow(b) // Not the stale initial-delivery ACK sample.
+	}
+	finishProfile()
+	if workCounts {
+		perfEmitWarmup(t, "ready", phaseStart, warmupEnd, warmupHistogram)
+	}
 	before := perfVerify(t, root, local, sources)
 	phase = "settled"
 	settledStart := perfNow(b)
