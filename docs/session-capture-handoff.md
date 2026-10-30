@@ -11,38 +11,68 @@ current rollout authority.
 
 ## Current session checkpoint
 
-### PR cleanup and complete-main integration — October 30 (in progress)
+### Complete local-work source integration and operating boundary — October 30
 
 The user explicitly authorizes verifying existing PRs, closing superseded work,
 putting all relevant local changes into PRs and merging once ready. Every delegated
 worker uses **medium effort**. This is source integration authority, NOT deployment,
 capture activation, installed-state changes or release publication authority.
 
-- Parent owns this brief, main checkout, source/PR mutations and final merge acceptance.
-  Read-only maintenance auditor363103e0 ownsPR23/26/27/28 relevance/security/diffs;
-  read-only local auditor d21c0417 owns all-branch/worktree coverage and frozen research
-  privacy/publication review. CI/runtime babysitter0e7b2607 is the SINGLE CI watcher
-  and sole possible expensive local validator; prior runtime owners are released.
-- Reconciled current54e5981 and origin/main9078a3e. Local main4c9aca5 is88 commits ahead
-  of origin/main; seven delivery branches add the remaining qualified candidate work.
-  PR30 currently targets the performance parent, so its existing small delta does NOT
-  by itself integrate the complete replacement into main. Plan: one complete qualified
-  main-targeted PR rather than merging intermediate states missing later repairs;
-  retain the local stack/branches and source identities. Exact final base/head pending.
-- Current dirty handoff (including earlier pre-existing material) and three untracked
-  frozen research paths are preserved. Explicit user publication scope includes relevant
-  local documentation after privacy review; no blanket add/reset or other-worktree
-  cleanup. Audit will distinguish already integrated/cherry-picked changes, deliberately
-  retired cold-recovery work and nonshipping measurement/snapshot evidence from any
-  genuinely unrepresented production changes. Never publish credentials/transcripts.
-- Acceptance: source-tied review and unchanged applicable local gates, exact-head green
-  hosted checks, no blocking reviews/conflicts, then ordinary non-bypassing merge.
-  CI worker uses `gh run watch <id> --interval 60 --exit-status`, one at a time; no
-  polling loops or `gh pr checks`. Healthy milestones are not stopping conditions.
-  Existing source74c/CI54e evidence below remains applicable only to unchanged inputs.
-- Next: accept both early audit results, close obsolete PRs with reasons, publish all
-  safe relevant local changes, resolve remaining maintenance deltas and babysit their
-  exact heads through merge. No activation or new performance experiment.
+**Live integration/CI/merge disposition:**
+https://github.com/mich-murphy/memory/pull/30#issuecomment-6516354560
+That record is updated through final acceptance without changing validated code merely
+for CI/merge metadata. The source-dated ledger below records scope and safeguards;
+older checkpoints are evidence, not current execution instructions.
+
+- Complete main-targeted integration usesPR30, not just its original performance-parent
+  delta. Local main4c9aca5's88 unpushed commits and all seven delivery stages are ancestors
+  of54e5981 (132 ahead/0 behind origin/main9078a3e). Preserve the stack/history, but merge
+  the fully repaired aggregate rather than intermediate states missing later fixes.
+- All relevant main-checkout dirty work is committed:1a317db preserves the prior handoff
+  plus **62 Git-visible research files/8,162,474 bytes**, byte-identical to the frozen
+  artifacts. Parent independently checked all62 committed/worktree hashes. Bounded
+  privacy review found no credential/private-key/private-transcript flags; this is not
+  universal DLP certification. Ignored123MB raw query JSONL and source-bearing cache DBs
+  stay local/ignored, never force-added. A two-line historical auth-error log retains
+  original CRLF; one-off Git CR-at-EOL interpretation preserves its frozen bytes rather
+  than normalizing evidence. No code-format/security/quality gate is relaxed.
+- Exact wanted maintenance patches are retained:PR26→063277a (gopls0.24, x/mod0.41,
+  x/text0.42);PR27→04aef71 (pinned zizmor-action0.7.1, consumer workflow retained);
+  PR28→267bd3f (nixpkgsd3b13ad/cacert3.131.1, eMudhra distrust absent from old5adc).
+  Parent verified all three original/integrated patch IDs. Their original CI heads
+  really failed syncer Go600s package timeouts; never merge those red heads or call
+  their security intent obsolete. Close duplicates only after aggregate lands.
+- One actually unrepresented local leaf65dd2fc is included as7b55448: CLI failed-sync
+  logging and durable run recording, independently of its obsolete recovery ancestors.
+  Production commands.go is byte-identical to original leaf; two tests expanded for
+  cancellation/discovery/seal/SQLite-record faults, joined errors and source-path omission
+  in start logs. Parent read both test files and matched all three implementation files.
+- Read-only audit covered35 original local branches/24 worktrees. Integrated worker
+  branches were proved ancestral, patch-equivalent or explicitly adapted. Preserve but
+  exclude retired concurrent/pruned recovery, non-gate-passing preservation snapshots
+  and archived env-gated asset/discovery measurements. Old private Linux prototype
+  a959782/4664334 selects legacyTestLiveAgents/install/v3-archive checks, NOT independent
+  TestCaptureNativeLive; do not merge it as replacement coverage. Its source is safe to
+  archive, generated runtime/evidence remain private. Candidate Linux-native hook→queue→
+  reader→analytics operating acceptance is still an actual separately gated gap.
+- Source/lock/tool candidate7b55448 requires **new actual pinned Nix environment**,
+  gopls tool-graph verification (collector makevuln alone does NOT scan gopls), focused
+  CLI/full standard local gates and exact-head hosted CI before merge. Existing source74c/
+  hosted54e evidence below applies only to unchanged inputs; old snapshot74c is not a
+  newly source-aligned artifact for7b. Do not relabel old shell/build outputs as new.
+  Native Go600s/package, race/shuffle, fixture sizes/history counts, coverage and privacy
+  gates remain unchanged; no bypassed reviews/protection or speculative performance run.
+- Parent owns checkout/brief/mutations and final acceptance. Completed audit owners
+  363103e0/d21c0417 and implementation4433be8d are released; reviewer56eb3291 is read-only.
+  CI/runtime babysitter0e7b2607 is SINGLE watcher/sole expensive scheduler, using shared
+  worker-side admission and both native EXT4 temporary variables. CI wait is exactly
+  `gh run watch <id> --interval 60 --exit-status`, one at a time, never polling loops.
+- Source merge does not authorize installed-state changes. No capture activation,
+  original-source/R2/SSH inventory, host install, service/hook apply, analytics refresh,
+  release tag/publication, reset/rebind/deletion or legacy retirement. Preserve pending
+  bytes/DB-WAL-SHM, identities/exclusions/custom roots/archive binding, original research,
+  analytics/cache/locks. Mac→BC-01→combined operating gate and unresolved settled CPU/
+  resource acceptance remain; see the separate plan in the qualification checkpoint.
 
 ### Release qualification complete; operating authorization gate — October 30
 
