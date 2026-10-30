@@ -1,6 +1,14 @@
 # Diagnostic failure history and filesystem prerequisite evidence
 
-**Quick-rerun status (2026-10-30 02:52 UTC):** missing-image prerequisite resolved
+**Experiment disposition (2026-10-30 03:14 UTC):** one fresh unprofiled pair now
+completed: originalb8 and repaired881 both passed201-source correctness. Keep the
+per-lane scheduling repair. Active delivery178.272s→1.813s was observed in this
+single pair, not a repeated speedup guarantee; settled CPU7.670→7.553s/30s remains
+above the exploratory3CPU target. No full budget/native/release acceptance. See the
+[current decision and complete table](../../docs/session-capture-handoff.md) and
+private runtime `fresh-pair-v12/` bindings. Earlier failures below remain unchanged.
+
+**Prior quick-rerun status (2026-10-30 02:52 UTC):** missing-image prerequisite resolved
 using the recorded public base as a new pinned environment. Baseline's120s watchdog
 and read-only snapshot exposed actual due unpublished work (194/201 published,
 7 unattempted). Deterministic tests demonstrated preexisting shared-lane-cursor

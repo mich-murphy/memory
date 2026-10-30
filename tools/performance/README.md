@@ -1,9 +1,20 @@
 # Offline matched runtime diagnostic (not qualification)
 
-This is an experimental, opt-in Linux Go test overlay. **No completed matched
-primary performance comparison or release qualification is accepted.**
+This is an experimental, opt-in Linux Go test overlay. **One bounded unprofiled
+comparison is complete; full operating-budget/native/release qualification is not.**
 
-**Quick rerun, 2026-10-30:** runtime restored from the recorded pinned public base
+**Experiment outcome, 2026-10-30 03:14 UTC:** keep scheduling repair `881b04e`.
+Both originalb8 and repaired881 passed all201-source reader/correctness assertions.
+Active backlog→ACK was178.272s/15.412CPU on b8 and1.813s/0.913CPU on881;
+settled30s cost7.670 vs7.553CPU with zero publication churn; three fresh unhinted
+appends→ACK took0.709 vs0.510s. This single candidate-first pair supports the
+preexisting-starvation repair, not a general speedup estimate or steady-state CPU
+solution: both miss the exploratory3CPU/30s target. Identical f35 observer, pinned
+new image/environment, native EXT4 state/temp and all original guards were retained.
+Exact primaries/build/identities are in the [current brief](../../docs/session-capture-handoff.md)
+and private `fresh-pair-v12/` evidence. No installed activation or archive reset.
+
+**Prior quick rerun, 2026-10-30:** runtime restored from the recorded pinned public base
 as a new environment. Investigation exposed a preexisting shared raw/optional scan
 cursor starvation mechanism; narrow repair `881b04e` is integrated with deterministic
 old-source RED/repaired GREEN coverage. The corrected native-EXT4 sessioncapture
@@ -20,7 +31,7 @@ no further profiling/benchmark/race/consumer/release gates. See the [current bri
 missing; parent independently observed zero images and running containers while
 private/shared volumes remain. No replacement image or host restoration was attempted.
 
-The corrected VM-native baseline completed all three phases; `c8fdf7a` failed the
+In that earlier sequence, the corrected VM-native baseline completed all three phases; `c8fdf7a` failed the
 unchanged warm-up CPU guard. Attribution-v4 builds passed all six focused units x20
 on both refs, but its baseline profile timed out at the original 300-second bound
 with an unusable zero-byte profile; candidate attribution did not run. The planned
