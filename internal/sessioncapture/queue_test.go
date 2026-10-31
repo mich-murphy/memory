@@ -116,6 +116,20 @@ func TestRestartAndLostAck(t *testing.T) {
 			if !triggered {
 				t.Fatal("boundary not reached")
 			}
+			// Only these three boundaries precede the durable job commit. In
+			// particular, job-committed returns an error after accepting bytes.
+			committed := boundary != "payload-before-sync" && boundary != "payload-synced" && boundary != "job-before-commit"
+			var accepted publication.Manifest
+			if committed {
+				accepted, _, e = q.latest(t.Context(), r.Identity)
+				if e != nil || accepted.PublicationID == "" || len(accepted.Sources) != 1 {
+					t.Fatalf("committed capture missing before restart: %v", e)
+				}
+				// Recovery cannot repair lost accepted work from the original.
+				if e = os.Remove(r.Path); e != nil {
+					t.Fatal(e)
+				}
+			}
 			if e = q.Close(); e != nil {
 				t.Fatal(e)
 			}
@@ -125,14 +139,19 @@ func TestRestartAndLostAck(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
+			if committed && (len(st) != 1 || st[0].Identity != r.Identity || st[0].Sequence != 1 || st[0].PublicationID != accepted.PublicationID) {
+				t.Fatal("committed job lost or changed on reopen")
+			}
 			if len(st) == 0 {
 				if capErr == nil {
 					t.Fatal("acknowledged job vanished")
 				}
 				capture(t, q, r)
 			}
-			if e = os.Remove(r.Path); e != nil {
-				t.Fatal(e)
+			if !committed {
+				if e = os.Remove(r.Path); e != nil {
+					t.Fatal(e)
+				}
 			}
 			if e = q.Deliver(t.Context(), backend, r.Identity); e != nil {
 				t.Fatal(e)
@@ -144,8 +163,35 @@ func TestRestartAndLostAck(t *testing.T) {
 			if m.PublicationID != "" && got.PublicationID != m.PublicationID {
 				t.Fatal("unstable retry")
 			}
+			if got.Identity != r.Identity || got.Sequence != 1 || len(got.Sources) != 1 {
+				t.Fatal("recovered publication identity or coverage changed")
+			}
+			source := got.Sources[0]
+			if source.SourceID != r.SourceID || source.Role != r.Role || source.Path != r.Path || source.State != "active" || source.Revision != 1 || source.EpochID == "" {
+				t.Fatal("recovered source identity changed")
+			}
+			if committed && (got.PublicationID != accepted.PublicationID || source.EpochID != accepted.Sources[0].EpochID) {
+				t.Fatal("committed publication or epoch changed on restart")
+			}
+			dest := filepath.Join(t.TempDir(), "restored")
+			exported, e := publication.ExportSession(t.Context(), backend, r.Identity, dest)
+			if e != nil || len(exported.Bodies) != 1 {
+				t.Fatalf("recovered body missing: %v", e)
+			}
+			body := exported.Bodies[0]
+			if body.SourceID != r.SourceID || body.EpochID != source.EpochID {
+				t.Fatal("recovered body coordinates changed")
+			}
+			raw, e := os.ReadFile(filepath.Join(dest, body.Path))
+			if e != nil || string(raw) != "first\n" {
+				t.Fatalf("recovered bytes differ from accepted input: %v", e)
+			}
 			if e = q.Deliver(t.Context(), backend, r.Identity); e != nil {
 				t.Fatal(e)
+			}
+			st, e = q.Status(t.Context())
+			if e != nil || len(st) != 1 || st[0].State != "published" || st[0].Identity != r.Identity || st[0].Sequence != 1 || st[0].PublicationID != got.PublicationID {
+				t.Fatalf("recovered publication not durably acknowledged: %v", e)
 			}
 		})
 	}

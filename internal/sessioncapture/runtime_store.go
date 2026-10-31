@@ -400,7 +400,17 @@ func (q *Queue) deliveryLaneNext(ctx context.Context, b publication.Backend, o R
 	if head != optional {
 		return false, nil
 	}
-	return q.deliverDueWork(ctx, b, identity, o)
+	if err := q.fault("delivery-worker-lane-selected"); err != nil {
+		return false, err
+	}
+	// Recheck destination pause after selection, just as explicit DeliverDue
+	// does before selecting its lane. Neither path needs a second pause query
+	// inside the shared attempt helper.
+	paused, err := q.destinationPaused(ctx)
+	if err != nil || paused {
+		return false, err
+	}
+	return q.deliverDueLaneWork(ctx, b, identity, o, optional)
 }
 
 func (q *Queue) dueIdentity(ctx context.Context, session string) (publication.Identity, bool, error) {

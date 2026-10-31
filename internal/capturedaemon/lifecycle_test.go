@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -28,6 +29,29 @@ func TestRuntimeConfigurationMatchesDiscoveryBounds(t *testing.T) {
 	}
 }
 
+// These expectations deliberately do not read Plan command fields: generation
+// and dispatch must agree with the requested supervisor operation, not each other.
+func expectedServiceCommands(platform, home, action string) []Command {
+	const service = "agent-sessions-capture-experimental"
+	if platform == "darwin" {
+		path := filepath.Join(home, "Library", "LaunchAgents", service+".plist")
+		return map[string][]Command{
+			"install":   {{"launchctl", []string{"bootstrap", "gui/42", path}}},
+			"start":     {{"launchctl", []string{"bootstrap", "gui/42", path}}},
+			"stop":      {{"launchctl", []string{"bootout", "gui/42", path}}},
+			"uninstall": {{"launchctl", []string{"bootout", "gui/42", path}}},
+			"restart":   {{"launchctl", []string{"kickstart", "-k", "gui/42/" + service}}},
+		}[action]
+	}
+	return map[string][]Command{
+		"install":   {{"systemctl", []string{"--user", "daemon-reload"}}, {"systemctl", []string{"--user", "enable", "--now", service + ".service"}}},
+		"start":     {{"systemctl", []string{"--user", "daemon-reload"}}, {"systemctl", []string{"--user", "enable", "--now", service + ".service"}}},
+		"stop":      {{"systemctl", []string{"--user", "disable", "--now", service + ".service"}}},
+		"uninstall": {{"systemctl", []string{"--user", "disable", "--now", service + ".service"}}, {"systemctl", []string{"--user", "daemon-reload"}}},
+		"restart":   {{"systemctl", []string{"--user", "restart", service + ".service"}}},
+	}[action]
+}
+
 func TestServiceStopStartRestartPreserveStateAndPlan(t *testing.T) {
 	for _, platform := range []string{"darwin", "linux"} {
 		t.Run(platform, func(t *testing.T) {
@@ -48,6 +72,9 @@ func TestServiceStopStartRestartPreserveStateAndPlan(t *testing.T) {
 			if err := Apply(t.Context(), plan, "install", true, runner); err != nil {
 				t.Fatal(err)
 			}
+			if want := expectedServiceCommands(platform, home, "install"); !reflect.DeepEqual(calls, want) {
+				t.Fatalf("install commands = %#v, want %#v", calls, want)
+			}
 			for _, action := range []string{"stop", "start", "restart"} {
 				before := len(calls)
 				if err := Apply(t.Context(), plan, action, false, runner); err != nil || len(calls) != before {
@@ -56,8 +83,8 @@ func TestServiceStopStartRestartPreserveStateAndPlan(t *testing.T) {
 				if err := Apply(t.Context(), plan, action, true, runner); err != nil {
 					t.Fatal(err)
 				}
-				if len(calls) == before {
-					t.Fatal("lifecycle did not invoke the injected supervisor")
+				if got, want := calls[before:], expectedServiceCommands(platform, home, action); !reflect.DeepEqual(got, want) {
+					t.Fatalf("%s commands = %#v, want %#v", action, got, want)
 				}
 				if _, err := os.Stat(plan.Path); err != nil {
 					t.Fatal("lifecycle deleted the service plan")

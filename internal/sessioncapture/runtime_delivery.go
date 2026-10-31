@@ -3,6 +3,7 @@ package sessioncapture
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 
 	"github.com/mich-murphy/memory/internal/publication"
@@ -23,8 +24,8 @@ func (q *Queue) deliverDue(ctx context.Context, b publication.Backend, i publica
 	return err
 }
 
-// deliverDueWork reports work only once an attempt is reached. Scheduling or
-// finding an idle lane must not keep a runtime worker in its immediate loop.
+// deliverDueWork deliberately chooses either current lane for explicit DeliverDue.
+// Runtime workers instead retain their assigned lane through deliverDueLaneWork.
 func (q *Queue) deliverDueWork(ctx context.Context, b publication.Backend, i publication.Identity, o RuntimeOptions) (bool, error) {
 	if i.ArchiveID != q.opts.ArchiveID {
 		return false, errors.New("sessioncapture: archive mismatch")
@@ -40,6 +41,20 @@ func (q *Queue) deliverDueWork(ctx context.Context, b publication.Backend, i pub
 	if err != nil {
 		return false, err
 	}
+	return q.deliverDueLaneWork(ctx, b, i, o, optional)
+}
+
+// deliverDueLaneWork reports work only once an attempt is reached. A changed
+// head must still belong to this lane after locking; otherwise leave it to the
+// owning worker without consuming an attempt or another lane's I/O budget.
+// Both callers check destination pause before entering this attempt boundary.
+func (q *Queue) deliverDueLaneWork(ctx context.Context, b publication.Backend, i publication.Identity, o RuntimeOptions, optional bool) (bool, error) {
+	if i.ArchiveID != q.opts.ArchiveID {
+		return false, errors.New("sessioncapture: archive mismatch")
+	}
+	if err := q.fault("delivery-lane-selected"); err != nil {
+		return false, err
+	}
 	lock := q.deliveryLane(i, optional)
 	// Never consume a worker budget waiting behind another capture/delivery.
 	if !lock.TryLock() {
@@ -51,7 +66,7 @@ func (q *Queue) deliverDueWork(ctx context.Context, b publication.Backend, i pub
 	var attempts int
 	var state string
 	var next int64
-	err = q.db.QueryRowContext(ctx, `SELECT sequence,manifest,evidence,attempts,state,next_retry FROM jobs WHERE session=? AND state NOT IN ('published','superseded') ORDER BY sequence LIMIT 1`, i.BaseKey()).Scan(&seq, &body, &ev, &attempts, &state, &next)
+	err := q.db.QueryRowContext(ctx, `SELECT sequence,manifest,evidence,attempts,state,next_retry FROM jobs WHERE session=? AND state NOT IN ('published','superseded') ORDER BY sequence LIMIT 1`, i.BaseKey()).Scan(&seq, &body, &ev, &attempts, &state, &next)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -61,6 +76,12 @@ func (q *Queue) deliverDueWork(ctx context.Context, b publication.Backend, i pub
 	if state == "quarantined" || next > q.opts.Now().UnixNano() {
 		return false, nil
 	}
+	var head publication.Manifest
+	if json.Unmarshal(body, &head) == nil && hasSelectedOptional(head) != optional {
+		return false, nil
+	}
+	// Malformed metadata still follows the existing attempt/result quarantine
+	// path; a lane change alone is not a failed or successful delivery attempt.
 	attemptErr := q.attempt(ctx, b, i, seq, body, ev)
 	return true, q.deliveryResult(ctx, i, seq, attempts, attemptErr, o, false)
 }
