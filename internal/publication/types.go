@@ -15,6 +15,10 @@ const (
 	ArchiveKey     = Prefix + "/archive.json"
 	MaxMetadata    = 8 << 20
 	MaxSources     = 1024
+
+	// MaxEncodedObjectBytes bounds writer admission and single-object transport.
+	// This envelope does not change manifest validation or the reader contract.
+	MaxEncodedObjectBytes int64 = 1 << 30
 )
 
 var (

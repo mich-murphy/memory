@@ -3,6 +3,8 @@ package sessioncapture
 import (
 	"io"
 	"os"
+
+	"github.com/mich-murphy/memory/internal/publication"
 )
 
 // used includes durable payloads, crash orphans, temporary bytes and reservations
@@ -17,6 +19,14 @@ type quotaWriter struct {
 
 func (w *quotaWriter) Write(b []byte) (int, error) {
 	size := int64(len(b))
+	// Check the actual encoder stream before reserving quota or writing bytes.
+	// Validate the cumulative count first so subtraction cannot overflow.
+	if w.bytes < 0 || w.bytes > publication.MaxEncodedObjectBytes {
+		return 0, ErrIntegrity
+	}
+	if size > publication.MaxEncodedObjectBytes-w.bytes {
+		return 0, ErrEncodedSize
+	}
 	if err := w.q.reserve(size); err != nil {
 		return 0, err
 	}
