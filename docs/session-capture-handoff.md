@@ -294,7 +294,7 @@ and verification. Continue source/offline work; this is not activation or live-d
 - **Next:** no source/offline continuation item remains outstanding. The separately
   authorized operating sequence below remains the production-readiness boundary.
 
-## PR publication and merge request — October 30
+## PR publication and merge request — October 31
 
 The operator now authorizes publishing this reviewed change bundle as a PR, delegated
 babysitting with `gpt-6.1-sol` at medium effort, and merging when ready. This extends
@@ -308,10 +308,21 @@ source delivery authority only; all operating exclusions below remain in force.
 - Use one PR on a new single-layer `gh stack` branch rooted at current `main`, with
   logical commits for source fixes/tests and documentation. Preserve the old merged
   stack; do not force-push `main` or clean up historical worktrees/branches.
-- Parent owns acceptance and this brief. The new PR caretaker owns branch/commit/push,
-  review/CI supervision and eventual merge; startup/ID and the full PR URL will be
-  recorded after dispatch. Parent may update this section before the final PR head is
-  frozen; caretaker must coordinate that commit rather than race shared-file edits.
+- Parent owns acceptance and this brief. Caretaker **`9781c418-91df-46f`**, confirmed
+  running `openai/gpt-6.1-sol` at medium effort, owns branch/commit/push, review/CI
+  supervision and eventual merge. Startup and code identity were independently checked.
+  **PR: https://github.com/mich-murphy/memory/pull/31**
+  Branch `review/capture-hardening-20261030` contains all 24 accepted paths in four
+  logical source/documentation commits; this final brief update is documentation-only.
+  The prior merged stack is preserved. Initial stack submission encountered a collaborator
+  permission error; command-scoped use of the existing authorized owner account resolved
+  it without changing global authentication or exposing credentials.
+- This checkpoint records publication and the parent-approved final scope, **not a claim
+  that CI or merge has completed**. The linked PR and its final disposition comment are
+  authoritative for exact final-head checks, review resolution, merge SHA/tree comparison
+  and merged-main CI. This avoids inventing a future merge result in its own pre-merge
+  commit. Parent has released this brief update to the caretaker for the final commit;
+  no additional code change is authorized without review and appropriate local checks.
 - Acceptance: committed code must match qualified clean manifest `d79c4ea8…` unless a
   reviewed fix invalidates and reruns affected local gates. Inspect review feedback and
   all hosted jobs on the exact final head, not merely required-check labels. Use exactly
