@@ -61,7 +61,8 @@ acceptance**:
 | Retry backoff | Jittered, clamped to 1 second–5 minutes |
 | Failed attempts before quarantine | 8 |
 | Encoded spool | 1 GiB by service example; no eviction |
-| Source body | 1 GiB raw/encoded cap |
+| Decoded source body | 1 GiB |
+| Encoded source object | 1 GiB, independently enforced before local acceptance and by R2 transport |
 | Prepared derived working space | 4 nonwaiting slots × 1 GiB = **4 GiB**, separate from encoded quota |
 | Config input to scrubber | 5 MiB |
 | zstd decoder window/memory limit | 64 MiB per decoder; not a whole-process RSS claim |
@@ -78,6 +79,16 @@ Encoded quota includes retained payloads, orphans, live encoded temporary bytes 
 unwritten reservations. Duplicate temporary copies count until successfully removed.
 A short directory-metadata fence distinguishes internal rename/removal races from
 external missing evidence; the latter fails closed.
+
+The decoded and encoded bounds are independent: incompressible data can expand, so a
+source at or below the decoded limit is not guaranteed to fit the encoded envelope.
+The encoder's quota writer rejects an over-limit block before reservation or write;
+`ErrEncodedSize` also matches `ErrQuota`, preserving runtime quota classification.
+The rejected update does not install a payload or advance accepted progress. This is
+separate from aggregate spool exhaustion and does not lower the decoded bound, change
+reader/manifest validation, or remove/rewrite previously accepted objects. An oversized
+object accepted by an older writer still requires explicit handling; this guard is not
+an automatic repair or deletion policy. See the [current continuation evidence](session-capture-handoff.md#implementation-continuation--october-30).
 
 Prepared working slots are deliberately conservative. While a slot is active,
 free-space admission reserves its full 1 GiB plus **all remaining encoded spool
@@ -243,7 +254,10 @@ private evidence are restrictive checks even for withheld-only views.
 all nine unchanged **30s** fuzz targets (**285.31s** total), and analytics
 **73 tests / 23.744s** passed. That checkpoint's coverage/CRAP and eleven-journey
 evidence are in [dated offline evidence](session-capture-offline-evidence.md).
-Current-source full qualification remains incomplete; use the handoff scorecard.
+Merged-source development/platform qualification subsequently passed, including the
+actual canonical aggregate and PR/merged-main CI; see the newer source-bound entry in
+[qualification evidence](session-capture-offline-evidence.md). Live operating acceptance
+remains separate; use the sole current handoff, not these earlier checkpoint totals.
 
 ### Historical intermediate checks (superseded by the integrated result)
 
@@ -273,11 +287,14 @@ analytics tests passed; the intermediate seven-journey result above is chronolog
 not a list of currently pending repairs. SDK peers use injected in-memory HTTPS transports,
 not actual conditional-R2 endpoints.
 
-Operating-resource/freshness acceptance, sandboxed/actual native agents, conditional
-R2, and both machines' preserved policy/inventory/installed-path acceptance remain
-required. Caller/dashboard defaults are deliberately not activated; activation belongs
-to controlled cutover, not proof of candidate caller wiring. No production cutover or
-reviewed retired-key deletion is authorized by these offline tests.
+Full merged-source operating-resource/freshness and both machines' preserved policy/
+inventory/installed-path acceptance remain required. Earlier Mac scratch-native gates,
+isolated actual R2 tests and selected installed source-to-report journeys did pass;
+the handoff archive records their scope and later containment. They do not establish
+current merged-source automatic capture or comprehensive live health. Unselected
+repository defaults remain legacy; historical experimental consumer activation is not
+final default cutover. These offline tests authorize no new activation, production
+cutover or reviewed retired-key deletion.
 
 ### Measured inventory operating quota
 

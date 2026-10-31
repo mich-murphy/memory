@@ -1,6 +1,75 @@
-# Replacement capture: final offline evidence
+# Replacement capture: dated qualification evidence
 
-## 2026-10-30: repaired candidate release qualification
+Current deployment, authority and next action live in the
+[sole delivery handoff](session-capture-handoff.md#current-session-checkpoint).
+The records below are source-bound evidence, not a declaration that memory is working
+live on the Mac and BC-01. Earlier failed or staged aggregates retain their exact scope.
+
+## 2026-10-30: merged-source integration qualification
+
+**Accepted source:** `ef0f3d31aa76d9ba7c1370431006e1a3c2bb1f62`.
+[PR30](https://github.com/mich-murphy/memory/pull/30) merged as
+`b0f949c6a8de76b4a8cd3f0bdf48ae29d44b1026`; parent independently verified identical
+source trees. This integration adds the useful maintenance updates and failed-sync CLI
+leaf to the earlier repaired candidate. It includes all 139 commits / 458 changed paths,
+not merely the original stack-relative PR delta. No installed-state changes, capture
+activation, original-source/R2/SSH inventory, refresh, release publication, archive reset/
+rebind/deletion or legacy retirement occurred during this integration qualification.
+Earlier experimental live work is separately recorded in the handoff archive.
+
+| Check | Source-bound result |
+| --- | --- |
+| Actual canonical `make check` aggregate | **PASS, exit 0**, literal `ef0f3d3`; not a staged prerequisite union |
+| Configured format/lint, fix/tidy, deadcode, collector vulnerabilities, benchmark smoke and actionlint | PASS; lint zero issues; all three modules tidy/verify |
+| Full CGO/race/shuffle, atomic plus actual-subprocess coverage and CRAP | PASS; **87.5%, 13,963/15,963 statements**; maximum CRAP **29.40**, unchanged limit 30; syncer **509.493s** within native 600s/package |
+| New failed-sync regressions and complete CLI/cmd race/shuffle | PASS; six new focused groups; old-source regression contrast genuinely RED |
+| Actual writer → shared reader → importer → event index → report / launchers / delivery | PASS: **12 + 6 + 12**; one existing optional explicit SDK-repair-peer skip |
+| Complete analytics discovery with actual candidate | PASS: **117 tests, no skips**; nonfatal HTTPError ResourceWarning retained |
+| Real nested gopls dependency graph | PASS: actual pinned scanner in `tools/gopls`, **24 modules plus Go 1.27.3**, no vulnerabilities; collector-only scan was not substituted |
+| New-tool offline pedantic workflow-security scan | PASS; normal online audit also passed in hosted CI |
+| [Exact-head PR CI](https://github.com/mich-murphy/memory/actions/runs/41017288817) | **All seven jobs SUCCESS**, head `ef0f3d3`, base `main` |
+| [Exact merged-main push CI](https://github.com/mich-murphy/memory/actions/runs/41018839999) | **All seven jobs SUCCESS**, push `main` at `b0f949c` |
+
+Each hosted run includes Linux amd64/arm64, native macOS coverage/CRAP plus Darwin
+vulnerability checks, static checks, actual consumer/full analytics, all nine unchanged
+30s fuzz campaigns and workflow security. Fresh local timed fuzz campaigns were not
+rerun for this integration; their actual hosted execution is recorded above. Neither
+hosted native macOS nor Linux CI proves installed native-agent hooks or real R2 health.
+
+The new lock was actually realized: nixpkgs `d3b13ad` and cacert 3.131.1, not a relabeled
+older shell or CA. Recorded tools include Go 1.27.3, golangci-lint 2.15.0, Node 24.21.0,
+Python 3.14.8 and Nix 2.28.5. Accepted local jobs used shared worker-side admission,
+network-none validation, read-only source/private Git/Nix/tools/analytics/vulnerability
+inputs, and **both module-cache aliases plus prepared binaries enforced read-only**.
+Both `TMPDIR` and `GOTMPDIR` were executable VM-native EXT4. A bounded 1800s canonical
+aggregate allowance accommodates the measured combined check; Go 600s/package,
+race/shuffle, eight simulation histories × 40 steps, fixtures, privacy and quality gates
+remain unchanged. All five accepted local jobs exited 0, OOM false, with exact owned
+containers removed and pre-exit accounting retained.
+
+Earlier writable-module runs are **functional diagnostics, not accepted canonical
+validation**. Initial environment/TLS preparation, OCI mountpoint, missing/empty Git
+metadata and genuine fixture-lint failures remain recorded failures. Valid read-only
+source-bound Git metadata and the narrow same-byte invalid-UTF8 test-name correction
+resolved them; no `-buildvcs=false`, linter suppression or weakened gate was used.
+
+Private evidence:
+`~/.local/state/machines-validation-pilot/memory-pr-integration-20261030/`:
+`parent/FINAL-ACCEPTANCE.json`, `ci-runtime/LEDGER.md`, accepted `ro-*` job argv/log/
+created/final/cleanup/counters, and separate local/CI manifests. Parent matched **737
+source files and executable modes** to Git, verified **817 local evidence files** and
+**19 CI evidence files**, independently checked both exact-head events/all seven job
+conclusions, and verified merge-tree equality. The completed public disposition is
+https://github.com/mich-murphy/memory/pull/30#issuecomment-6516354560
+
+**Artifact and operating limits:** the earlier private snapshot
+`0.5.0-SNAPSHOT-74c00f4` is **not source-aligned with this merged integration**. It is
+not a published/installed release. No current-source artifact or source/CI pass proves
+fresh installed health, actual automatic capture/report freshness, restart/outage
+recovery, full two-machine coverage or settled/background CPU budgets. Those remain
+separately gated in the current handoff; no new activation or reset is authorized here.
+
+## 2026-10-30: earlier repaired-candidate release qualification
 
 This dated Linux record concerns source **`74c00f4a985d9b2ad3ebe0028458e324f14c6b20`**:
 keep the independently reviewed per-lane scheduling repair `881b04e`, plus portable

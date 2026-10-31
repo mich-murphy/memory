@@ -1,6 +1,16 @@
 # Production-readiness verification
 
-> **Status (2026-10-23):** Historical v3 readiness and deployment evidence, not present production health or replacement acceptance. The dated successful runs below do not supersede the subsequently degraded deployment. Follow the agreed canonical [session-capture contract](session-capture-contract.md) for the controlled Mac + BC-01 rebuild, not the old repair/rollout stack. An opt-in [replacement candidate](session-capture-phase3.md) is implemented with [passing 2026-10-24 offline gates](session-capture-offline-evidence.md), but is not release-accepted or deployed and has not activated defaults; an R2 reset is permitted only after replacement acceptance and reviewed cutover, preserving identities, exclusions, learned roots and original local sources.
+> **Status (reconciled 2026-10-30):** Historical v3 readiness and deployment evidence,
+> not present production health or replacement acceptance. The dated successful runs
+> below do not supersede subsequent degraded operation. The opt-in replacement's source
+> integration and development/platform qualification are complete; live operating
+> acceptance and final default cutover are not. Earlier replacement experimental installs,
+> selected live journeys, the controlled bucket-binding switch and later containment
+> are recorded in the [current handoff and its archive](session-capture-handoff.md).
+> Do not describe that history as never deployed, or infer that the merged source is
+> installed or working live. Use the [contract](session-capture-contract.md) and sole
+> handoff for the separately gated Mac → BC-01 → combined acceptance sequence, not the
+> old repair/rollout stack. This page authorizes no new activation, reset or deletion.
 
 This change follows the two-machine archive audit (a Mac and a Linux VM). The audit found
 correct checksums and retained generations, but also a secret-bearing Pi migration backup,
@@ -138,7 +148,13 @@ The new reader accepts matching legacy explicit dependencies. Older readers must
 before consuming the new append/derived-dependency records; mixed-version writers are not a
 supported rollout strategy.
 
-## Replacement deployment boundary (agreed direction, not executed)
+## Historical replacement planning boundary
+
+This preserves the earlier rebuild plan, not a new reset/rebind prerequisite or operating
+authority. Later experimental installation and archive-binding work did occur; see the
+[current handoff and preserved ledger](session-capture-handoff.md). Coordinate today's
+software with the existing identity/policy/binding and accepted in-flight state. The
+merged source still requires its separately gated operating acceptance.
 
 The operator accepts a controlled rebuild from eligible local sources on this Mac and
 BC-01, with an R2 reset after replacement acceptance. No legacy compatibility engine,

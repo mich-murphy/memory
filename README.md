@@ -7,8 +7,16 @@ Capture and analyze Claude Code, Codex, and Pi session evidence across machines.
 **Start with the [session capture contract](docs/session-capture-contract.md).** It is
 the agreed replacement direction: independent sessions, durable local work, scoped
 retries, complete readable publications, and analytics acceptance end to end.
-For the next implementation session, use the **[implementation handoff](docs/session-capture-handoff.md)**:
-it records the current checkout, phased build plan, acceptance gates, and pickup commands.
+Use the **[delivery handoff](docs/session-capture-handoff.md)** for the accepted source,
+last-recorded installed state, operating authorization boundary and next actions.
+
+**October 30 status: source integration is complete; live operating acceptance is not.**
+[PR30](https://github.com/mich-murphy/memory/pull/30) is merged, with local development
+qualification and all seven PR and merged-main CI jobs passing. This does **not** prove
+memory is now working live end to end. Earlier experimental installations and selected
+live journeys are historical evidence; current installed health was not freshly checked.
+The next stage is separately authorized **Mac → BC-01 → combined operating acceptance**,
+not more PR cleanup or activation inferred from a green build.
 
 An **opt-in replacement candidate** is implemented under the experimental
 `agent-sessions capture-v1` command prefix. Its publication, reader and report
@@ -31,7 +39,7 @@ this Mac and BC-01. That does not authorize incidental deletion of original sess
 identities, privacy exclusions, or local research. Follow the contract's inventory,
 validation, two-machine cutover, and scoped deletion sequence.
 
-### What we are building
+### Replacement flow and acceptance goals
 
 ```text
 agent hooks + periodic discovery
