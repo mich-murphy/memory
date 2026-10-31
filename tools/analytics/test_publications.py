@@ -133,6 +133,117 @@ class PublicationsTests(unittest.TestCase):
         self.assertEqual(self.query('SELECT count(*) FROM issues'), [(20,)])
         self.assertEqual(self.query('SELECT event_id FROM events ORDER BY line'), event_ids)
 
+    def test_codex_mirrors_pair_occurrences_within_epoch_and_preserve_raw_coordinates(self):
+        self.manifest['identity']['agent'] = 'codex'
+        def mirror(text):
+            return dict(type='event_msg', payload=dict(type='user_message', message=text))
+        def message(text, native):
+            return dict(type='response_item', payload=dict(type='message', id=native, role='user',
+                content=[dict(type='input_text', text=part) for part in text.split('\n')]))
+        records = [mirror('again\nparts'), message('again\nparts', 'u1'),
+                   message('again\nparts', 'u2'), mirror('again\nparts'),
+                   mirror('unpaired'), message('cross-epoch-only', 'u3')]
+        lines = [(json.dumps(record, ensure_ascii=False) + '\n').encode() for record in records]
+        raw = b''.join(lines)
+        other_raw = (json.dumps(mirror('cross-epoch-only')) + '\n').encode()
+        self.fixture([('s', 'e1', 'main', raw), ('s', 'e2', 'main', other_raw)])
+        result = publications.import_export(self.export, self.db)
+        traces = dict(self.query('SELECT epoch_id,trace_id FROM sources'))
+        self.assertEqual((result['events'], result['issues']), (9, 0))
+        trace = traces['e1']
+        self.assertNotEqual(trace, traces['e2'])
+        self.assertEqual(self.query('SELECT line,duplicate_of FROM events WHERE is_mirror ORDER BY line'),
+                         [(1, f'{trace}:2:0'), (4, f'{trace}:3:0')])
+        self.assertEqual(self.query('SELECT count(*) FROM events WHERE is_mirror AND duplicate AND NOT is_human'), [(2,)])
+        self.assertEqual(self.query('SELECT count(DISTINCT (trace_id,line)) FROM events WHERE is_human AND NOT duplicate'), [(5,)])
+        self.assertEqual(self.query("SELECT epoch_id,line,duplicate,is_mirror,is_human,duplicate_of FROM events "
+                                   "WHERE text='cross-epoch-only' ORDER BY epoch_id"),
+                         [('e1', 6, False, False, True, None), ('e2', 1, False, False, True, None)])
+        expected, offset = [], 0
+        for number, line in enumerate(lines, 1):
+            for ordinal in range(2 if number in (2, 3) else 1):
+                expected.append((number, ordinal, offset, len(line), f'{trace}:{number}:{ordinal}'))
+            offset += len(line)
+        self.assertEqual(self.query("SELECT line,ordinal,byte_offset,byte_length,event_id FROM events "
+                                   "WHERE epoch_id='e1' ORDER BY line,ordinal"), expected)
+        self.assertEqual(self.query("SELECT byte_offset,byte_length FROM events WHERE epoch_id='e2'"), [(0, len(other_raw))])
+        for body in (raw, other_raw):
+            digest = hashlib.sha256(body).hexdigest()
+            owned = self.db.with_name(self.db.name + '.bodies') / digest
+            self.assertEqual(owned.read_bytes(), body)
+            self.assertEqual(hashlib.sha256(owned.read_bytes()).hexdigest(), digest)
+        before = self.query('SELECT * FROM events ORDER BY event_id')
+        self.assertEqual(publications.import_export(self.export, self.db)['status'], 'unchanged')
+        self.assertEqual(self.query('SELECT * FROM events ORDER BY event_id'), before)
+        # A later revision normalizes anew but retains the exact trace/event and
+        # duplicate targets, rather than accumulating old mirror decisions.
+        self.manifest.update(sequence=2, publication_id='p2')
+        self.fixture([('s', 'e1', 'main', raw), ('s', 'e2', 'main', other_raw)])
+        publications.import_export(self.export, self.db)
+        self.assertEqual(self.query('SELECT line,duplicate_of FROM events WHERE is_mirror ORDER BY line'),
+                         [(1, f'{trace}:2:0'), (4, f'{trace}:3:0')])
+        self.assertEqual(self.query('SELECT count(*) FROM events'), [(9,)])
+
+    def test_recursion_records_are_partial_with_healthy_sibling_and_owned_raw_hash(self):
+        self.manifest['identity']['agent'] = 'pi'
+        # Pinned Linux Python 3.14.8 probe measured these native depth failures;
+        # C decoder bounds do not derive from Python's recursion counter. Keep
+        # explicit premises so another runtime fails honestly, never skips.
+        decoder_depth, normalizer_depth = 60000, 512
+        decoder = b'{"type":"message","content":' + b'[' * decoder_depth + b'0' + b']' * decoder_depth + b'}\n'
+        normalizer = (b'{"type":"message","id":"reused","message":{"role":"user",'
+                      b'"model":"poison-model","content":["must-not-leak",' + b'[' * normalizer_depth +
+                      b'"nested"' + b']' * normalizer_depth + b']}}\n')
+        self.assertEqual(len(decoder), 120031)
+        self.assertLessEqual(len(normalizer), 128 * 1024)
+        _, event_module = publications._dependencies()
+        with self.assertRaises(RecursionError):
+            json.loads(decoder)
+        decoded = json.loads(normalizer)
+        with self.assertRaises(RecursionError):
+            event_module.normalize_record(decoded, 'pi')
+        first = b'{"type":"model_change","modelId":"good-model"}\n'
+        following = b'{"type":"message","id":"reused","message":{"role":"user","content":"healthy"}}\n'
+        raw = first + decoder + normalizer + following
+        self.fixture([('s', 'e', 'main', raw)])
+        result = publications.import_export(self.export, self.db)
+        self.assertEqual((result['events'], result['issues']), (2, 2))
+        self.assertEqual(self.query('SELECT line,"offset",length,kind,record_type FROM issues ORDER BY line'),
+                         [(2, len(first), len(decoder), 'malformed_json', None),
+                          (3, len(first) + len(decoder), len(normalizer), 'malformed_record', None)])
+        self.assertEqual(self.query("SELECT text,model,duplicate,duplicate_of,ordinal,byte_offset,byte_length "
+                                   "FROM events WHERE native_id='reused'"),
+                         [('healthy', 'good-model', False, None, 0, len(raw) - len(following), len(following))])
+        self.assertEqual(self.query('SELECT normalization FROM sessions'), [('partial',)])
+        self.assertEqual(self.query('SELECT count(*) FROM failures'), [(0,)])
+        report = publications.report(self.db, now_ns=self.manifest['captured_at_ns'])
+        self.assertEqual(report['sessions'][0]['normalization'], 'partial')
+        digest = hashlib.sha256(raw).hexdigest()
+        owned = self.db.with_name(self.db.name + '.bodies') / digest
+        self.assertEqual(owned.read_bytes(), raw)
+        self.assertEqual(hashlib.sha256(owned.read_bytes()).hexdigest(), digest)
+        before = self.query('SELECT * FROM events ORDER BY event_id')
+        self.assertEqual(publications.import_export(self.export, self.db)['status'], 'unchanged')
+        self.assertEqual(self.query('SELECT * FROM events ORDER BY event_id'), before)
+        self.assertEqual(self.query('SELECT count(*) FROM issues'), [(2,)])
+
+    def test_mirror_pairing_database_failure_rolls_back_session(self):
+        self.manifest['identity']['agent'] = 'codex'
+        raw = b'{"type":"event_msg","payload":{"type":"user_message","message":"healthy"}}\n'
+        self.fixture([('s', 'e', 'main', raw)])
+        publications.import_export(self.export, self.db)
+        before = self.query('SELECT * FROM events')
+        self.manifest.update(sequence=2, publication_id='p2')
+        self.fixture([('s', 'e', 'main', raw)])
+        _, event_module = publications._dependencies()
+        with patch.object(event_module, 'pair_codex_mirrors', side_effect=duckdb.Error('synthetic pairing DB failure')):
+            with self.assertRaisesRegex(publications.ImportFailure, '^import_failed$'):
+                publications.import_export(self.export, self.db)
+        self.assertEqual(self.query('SELECT * FROM events'), before)
+        self.assertEqual(self.query('SELECT publication_id FROM sessions'), [('p1',)])
+        self.assertEqual(self.query('SELECT publication_id,reason FROM failures'), [('p2', 'import_failed')])
+        self.assertEqual(self.query('SELECT count(*) FROM issues'), [(0,)])
+
     def test_typed_batch_preserves_bigint_null_boolean_unicode_and_json(self):
         _, events = publications._dependencies()
         columns = dict(events.EVENT_COLUMNS, session_key='VARCHAR', archive_id='VARCHAR',

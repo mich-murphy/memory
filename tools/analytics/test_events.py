@@ -42,6 +42,45 @@ class EventsTest(unittest.TestCase):
             with self.assertRaises(duckdb.Error):
                 list(events.iter_events(entry['path'], 'claude', 'trace'))
 
+    def test_recursion_isolated_at_decoder_and_normalizer_boundaries(self):
+        # Measured on pinned Linux Python 3.14.8: C decoder stack bounds are
+        # distinct from sys.getrecursionlimit(). These finite fixtures must prove
+        # their native premises explicitly; no limit changes or platform skips.
+        decoder_depth, normalizer_depth = 60000, 512
+        decoder = (b'{"type":"message","content":' + b'[' * decoder_depth +
+                   b'0' + b']' * decoder_depth + b'}\n')
+        normalizer = (b'{"type":"message","id":"reused","message":{"role":"user",'
+                      b'"model":"poison-model","content":["must-not-leak",' +
+                      b'[' * normalizer_depth + b'"nested"' + b']' * normalizer_depth + b']}}\n')
+        self.assertEqual(len(decoder), 120031)
+        self.assertLessEqual(len(normalizer), 128 * 1024)
+        # Assert both actual-byte mechanisms before exercising the real iterator.
+        with self.assertRaises(RecursionError):
+            json.loads(decoder)
+        decoded = json.loads(normalizer)
+        with self.assertRaises(RecursionError):
+            events.normalize_record(decoded, 'pi')
+        first = b'{"type":"model_change","modelId":"good-model"}\n'
+        following = b'{"type":"message","id":"reused","message":{"role":"user","content":"healthy"}}\n'
+        lines = [first, decoder, normalizer, following]
+        raw = b''.join(lines)
+        entry = self.body('pi', [raw])
+        pairs = list(events.iter_events(entry['path'], 'pi', 'trace'))
+        rows = [event for event, _ in pairs if event]
+        issues = [issue for _, issue in pairs if issue]
+        self.assertEqual(len(rows), 2, 'no partial component from discarded record')
+        self.assertEqual((rows[-1]['text'], rows[-1]['model'], rows[-1]['duplicate'],
+                          rows[-1]['duplicate_of'], rows[-1]['ordinal']),
+                         ('healthy', 'good-model', False, None, 0))
+        self.assertEqual([(issue['line'], issue['offset'], issue['length'], issue['kind'], issue['record_type'])
+                          for issue in issues],
+                         [(2, len(first), len(decoder), 'malformed_json', None),
+                          (3, len(first) + len(decoder), len(normalizer), 'malformed_record', None)])
+        self.assertEqual(rows[-1]['byte_offset'], sum(map(len, lines[:-1])))
+        self.assertEqual(rows[-1]['byte_length'], len(following))
+        self.assertEqual(hashlib.sha256(Path(entry['path']).read_bytes()).hexdigest(), entry['sha256'])
+        self.assertEqual(Path(entry['path']).read_bytes(), raw)
+
     def test_pi_tool_result_surrogates_do_not_poison_inherited_model_or_siblings(self):
         records = [dict(type='model_change', modelId='good-model')]
         for value in ('\ud800', '\udfff'):
@@ -128,6 +167,31 @@ class EventsTest(unittest.TestCase):
             self.assertEqual(db.execute("SELECT is_error FROM events WHERE event_type='tool_result'").fetchone()[0], None)
             args = db.execute("SELECT tool_args FROM events WHERE event_type='tool_call'").fetchone()[0]
             self.assertEqual(json.loads(args), {'cmd': 'false'})
+
+    def test_mirror_pairing_explicit_trace_scope_does_not_reprocess_others(self):
+        records = [
+            {'type': 'event_msg', 'payload': {'type': 'user_message', 'message': 'same'}},
+            {'type': 'response_item', 'payload': {'type': 'message', 'role': 'user', 'content': 'same'}},
+        ]
+        left, right = self.body('codex', records), self.body('codex', records)
+        # Build normally, then restore the unpaired flags to exercise the scoped
+        # reusable operation independently of the complete-build entrypoint.
+        reader, _ = self.build([left, right])
+        reader.close()
+        trace = events.trace_id('machine', 'codex', left['file_key'])
+        other = events.trace_id('machine', 'codex', right['file_key'])
+        with duckdb.connect(str(self.root / 'events.duckdb')) as db:
+            db.execute('UPDATE events SET duplicate=false,is_mirror=false,is_human=true,duplicate_of=NULL')
+            events.pair_codex_mirrors(db, [trace])
+            self.assertEqual(db.execute('SELECT line,duplicate,is_mirror,is_human,duplicate_of FROM events '
+                                        'WHERE trace_id=? ORDER BY line', [trace]).fetchall(),
+                             [(1, True, True, False, f'{trace}:2:0'), (2, False, False, True, None)])
+            self.assertEqual(db.execute('SELECT count(*) FROM events WHERE trace_id=? '
+                                        'AND NOT duplicate AND NOT is_mirror AND is_human AND duplicate_of IS NULL',
+                                        [other]).fetchone(), (2,))
+            before = db.execute('SELECT * FROM events ORDER BY event_id').fetchall()
+            events.pair_codex_mirrors(db, [])
+            self.assertEqual(db.execute('SELECT * FROM events ORDER BY event_id').fetchall(), before)
 
     def test_relative_index_coverage_flags_and_structural_issues(self):
         body = self.body('pi', [
