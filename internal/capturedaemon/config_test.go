@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -145,9 +146,12 @@ func TestServicePlansEscapeAndApply(t *testing.T) {
 			if platform == "darwin" && (!strings.Contains(p.Unit, "&amp;") || !strings.Contains(p.Unit, "&#34;")) {
 				t.Fatal("XML escaping missing")
 			}
-			calls := 0
-			runner := func(context.Context, string, ...string) error { calls++; return nil }
-			if err = Apply(t.Context(), p, "install", false, runner); err != nil || calls != 0 {
+			var calls []Command
+			runner := func(_ context.Context, name string, args ...string) error {
+				calls = append(calls, Command{Name: name, Args: args})
+				return nil
+			}
+			if err = Apply(t.Context(), p, "install", false, runner); err != nil || len(calls) != 0 {
 				t.Fatal("dry run executed")
 			}
 			if _, err = os.Stat(p.Path); !errors.Is(err, os.ErrNotExist) {
@@ -156,8 +160,8 @@ func TestServicePlansEscapeAndApply(t *testing.T) {
 			if err = Apply(t.Context(), p, "install", true, runner); err != nil {
 				t.Fatal(err)
 			}
-			if calls != len(p.Start) {
-				t.Fatal("missing start commands")
+			if want := expectedServiceCommands(platform, home, "install"); !reflect.DeepEqual(calls, want) {
+				t.Fatalf("install commands = %#v, want %#v", calls, want)
 			}
 			if err = Apply(t.Context(), p, "uninstall", true, func(context.Context, string, ...string) error { return errors.New("host secret") }); err == nil || strings.Contains(err.Error(), "host secret") {
 				t.Fatal("stop failure leaked")
@@ -165,8 +169,12 @@ func TestServicePlansEscapeAndApply(t *testing.T) {
 			if _, err = os.Stat(p.Path); err != nil {
 				t.Fatal("deleted before stop")
 			}
+			before := len(calls)
 			if err = Apply(t.Context(), p, "uninstall", true, runner); err != nil {
 				t.Fatal(err)
+			}
+			if got, want := calls[before:], expectedServiceCommands(platform, home, "uninstall"); !reflect.DeepEqual(got, want) {
+				t.Fatalf("uninstall commands = %#v, want %#v", got, want)
 			}
 			if _, err = os.Stat(p.Path); !errors.Is(err, os.ErrNotExist) {
 				t.Fatal("unit retained")

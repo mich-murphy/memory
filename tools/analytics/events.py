@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Legacy body-index normalization; writes a private, atomically replaced DB.
+"""Shared record normalization and legacy body-index build/CLI.
 
-Not a candidate publication importer; source/epoch identities are absent.
+iter_events and mirror pairing also serve the candidate publication importer;
+that caller owns its source/epoch identities and session transaction. build()/CLI
+still writes the legacy body-index schema as a private, atomically replaced DB.
 See docs/session-capture-contract.md. Existing historical reports remain usable.
 
 Body index paths are interpreted relative to the index folder. Raw JSON is not copied: offsets reference verified body files.
@@ -196,7 +198,7 @@ def iter_events(path, agent, trace):
                 record = json.loads(raw)
                 if not isinstance(record, dict):
                     raise ValueError('not an object')
-            except (ValueError, UnicodeDecodeError):
+            except (ValueError, UnicodeDecodeError, RecursionError):
                 yield None, dict(loc, kind='malformed_json', record_type=None)
                 continue
             try:
@@ -209,7 +211,9 @@ def iter_events(path, agent, trace):
                     for value in component.values():
                         if isinstance(value, str):
                             value.encode('utf-8')
-            except UnicodeError:
+            except (UnicodeError, RecursionError):
+                # Framing survives decoder/normalizer depth exhaustion. Do not
+                # emit components or advance model/dedupe state for this record.
                 yield None, dict(loc, kind='malformed_record', record_type=None)
                 continue
             except (TypeError, AttributeError, ValueError):
@@ -233,6 +237,38 @@ def iter_events(path, agent, trace):
                     seen[key] = row['event_id']
                 issue = dict(loc, kind='unknown_record', record_type=str(record.get('type', 'unknown'))) if row['event_type'] == 'unknown' else None
                 yield row, issue
+
+
+def pair_codex_mirrors(db, trace_ids=None):
+    """Mark occurrence-paired user mirrors, preserving both events and raw offsets.
+
+    Call once per freshly normalized scope, before any mirror flags are applied;
+    this operation is not a general re-pairing pass over existing projections.
+    Candidate imports pass only their replaced traces; the legacy complete build
+    omits the scope. Pairing never crosses a trace (including source epochs).
+    """
+    params = [] if trace_ids is None else list(trace_ids)
+    if trace_ids is not None and not params:
+        return
+    scope = '' if trace_ids is None else ' AND trace_id IN (' + ','.join('?' for _ in params) + ')'
+    # Match whole-line normalized text, including multi-block messages. Ranking
+    # each representation separately preserves repeated real prompts/unpaired ones.
+    db.execute("""WITH lines AS (
+        SELECT trace_id,line,raw_type,
+            string_agg(text, '\n' ORDER BY ordinal) AS text,min(event_id) AS event_id
+        FROM events WHERE role='user' AND NOT duplicate
+            AND raw_type IN ('response_item.message','event_msg.user_message')""" + scope + """
+        GROUP BY trace_id,line,raw_type
+    ), ranked AS (
+        SELECT *,row_number() OVER(PARTITION BY trace_id,raw_type,text ORDER BY line) n
+        FROM lines
+    ), mirrors AS (
+        SELECT a.trace_id,a.line,b.event_id FROM ranked a JOIN ranked b
+            ON a.trace_id=b.trace_id AND a.text=b.text AND a.n=b.n
+        WHERE a.raw_type='event_msg.user_message' AND b.raw_type='response_item.message'
+    )
+    UPDATE events SET is_mirror=true,duplicate=true,is_human=false,duplicate_of=m.event_id
+        FROM mirrors m WHERE events.trace_id=m.trace_id AND events.line=m.line""", params)
 
 
 def _metadata(path):
@@ -335,26 +371,7 @@ def build(index=Path('.analytics/bodies/index.json'), database=Path('.analytics/
                 counts.update(files=1, events=file['event_count'], issues=file['issue_count'])
             for batch in batches.values():
                 batch.flush()
-            # Pair mirrors by occurrence, not just text: repeated real prompts count.
-            # Match the whole line's normalized text, including multi-block messages.
-            db.execute("""CREATE TEMP TABLE mirrors AS
-                WITH lines AS (
-                  SELECT trace_id,line,raw_type,
-                         string_agg(text, '\n' ORDER BY ordinal) AS text,
-                         min(event_id) AS event_id
-                  FROM events WHERE role='user' AND NOT duplicate
-                  AND raw_type IN ('response_item.message','event_msg.user_message')
-                  GROUP BY trace_id,line,raw_type
-                ), ranked AS (
-                  SELECT *, row_number() OVER(PARTITION BY trace_id,raw_type,text ORDER BY line) n
-                  FROM lines
-                )
-                SELECT a.trace_id,a.line,b.event_id FROM ranked a JOIN ranked b
-                ON a.trace_id=b.trace_id AND a.text=b.text AND a.n=b.n
-                WHERE a.raw_type='event_msg.user_message' AND b.raw_type='response_item.message'
-            """)
-            db.execute('''UPDATE events SET is_mirror=true,duplicate=true,is_human=false,duplicate_of=m.event_id
-                FROM mirrors m WHERE events.trace_id=m.trace_id AND events.line=m.line''')
+            pair_codex_mirrors(db)
             db.execute('''UPDATE files SET duplicate_count=(SELECT count(*) FROM events e
                 WHERE e.trace_id=files.trace_id AND e.duplicate)''')
             counts['duplicates'] = db.execute('SELECT count(*) FROM events WHERE duplicate').fetchone()[0]

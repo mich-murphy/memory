@@ -1,9 +1,13 @@
 # Corrected capture delivery ledger
 
-Status: controlled operating delivery in progress, not release acceptance.
-Reviewed implementation checkpoint: **`c9749da`** (after `b68a412`). Requirements remain the [capture contract](session-capture-contract.md).
-This ledger records new work after the checkpoint; prior passing gates remain dated
-evidence, not automatic proof for later changes.
+**Historical ledger — October 24, not current operating status or rollout authority.**
+The implementation checkpoint below is **`c9749da`** (after `b68a412`); its running
+services, pending fixes and next actions describe that earlier experiment. Later repairs,
+installs and containment supersede it. Use the **[sole current delivery handoff](session-capture-handoff.md#current-session-checkpoint)**
+for completed source integration/qualification, dated installed observations and the
+remaining separately gated operating acceptance. Requirements remain the
+[capture contract](session-capture-contract.md). Preserve the dated results below;
+they do not establish present health or authorize activation.
 
 ## Delivery ownership
 
@@ -14,7 +18,7 @@ record actual blockers and attempted checks rather than inventing human prerequi
 No legacy archive/analytics migration or refresh-compatibility work is required.
 Capacity/retention changes belong in a measured, validated vertical slice.
 
-## Current operating state — 2026-10-24
+## Recorded operating state — 2026-10-24
 
 - Final serial gates passed and scoped checkpoint review found no confirmed blocker;
   committed `c9749da` locally (not pushed). Fresh static Darwin/arm64 and Linux/amd64
@@ -102,7 +106,7 @@ Capacity/retention changes belong in a measured, validated vertical slice.
   restart/freshness/exact restore acceptance, final dashboard switch and old-key
   retirement. Original-source and old remote archive deletion have **not occurred**.
 
-## Current work
+## Work recorded at that checkpoint
 
 - Fresh checkpoint acceptance failed one of eleven journeys. Investigation reproduced
   the unchanged native-enrichment journey failing 7/20 times: the test observed the

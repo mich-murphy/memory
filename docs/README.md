@@ -5,8 +5,9 @@
 1. **[Session capture contract](session-capture-contract.md)** — agreed replacement
    architecture, failure semantics, writer/reader/analytics acceptance, and controlled
    rebuild of this Mac and BC-01. Start here for new implementation work.
-2. **[Implementation handoff](session-capture-handoff.md)** — exact current state,
-   phased implementation details, validation/cutover gates, and next-session commands.
+2. **[Delivery handoff](session-capture-handoff.md)** — sole current status/next-action
+   brief: completed source integration and qualification, last-recorded installed state,
+   unaccepted live operation, and the separately gated Mac → BC-01 → combined sequence.
 3. [Design review and sources](research/session-capture-contract-review.md) — rationale,
    alternatives, industry precedents, and analysis of the legacy consumer mismatch.
 4. [Repository guidance](../AGENTS.md) — contribution guardrails and scope.
@@ -19,9 +20,11 @@ interfaces. Their filenames and the `capture-v1` prefix do not imply v1 wire sup
 Unselected collector and analytics defaults remain legacy. For current deployment,
 qualification and next action, use the handoff's
 [current-session checkpoint](session-capture-handoff.md#current-session-checkpoint).
-The [2026-10-24 offline evidence](session-capture-offline-evidence.md) and
-[current-state alignment audit](current-state-audit.md) are dated records, not current
-operating acceptance or rollout instructions.
+The [source-bound qualification evidence](session-capture-offline-evidence.md) includes
+October 30's actual canonical aggregate pass and successful PR/merged-main CI, followed
+by the earlier `74c00f4` staged-prerequisite and October 24 records. It does not establish live
+operating acceptance. The [current-state alignment audit](current-state-audit.md) is
+also a dated record, not a current-checkout certification or rollout instruction.
 
 ## References for the implementation that exists today
 
@@ -40,6 +43,10 @@ mechanisms do not override the replacement contract:
 
 ## Current development review evidence
 
+- [Architecture, test quality and readiness review](architecture-review-20261030.md) —
+  current-source findings, focused repairs, mutation proofs and bounded mechanism
+  measurements. Its evidence section distinguishes completed checks from pending work;
+  it does not authorize installed activation or establish operating acceptance.
 - [Adversarial review](adversarial-review-20261029.md) — baseline findings and rationale.
 - [Resolution evidence](adversarial-resolution-evidence-20261029.md) — per-item repairs,
   independent reviews and passing combined development gates. This is not installed,
@@ -49,6 +56,10 @@ mechanisms do not override the replacement contract:
 
 Keep dated results as evidence; do not apply old release/reset plans to the replacement.
 
+- [October 30 handoff archive](session-capture-handoff-archive-20261030.md) — verbatim
+  pre-reconciliation ledger, including earlier experimental installs/containment and
+  pre-merge tasks. Its “current” checkpoints and worker assignments are historical;
+  use the sole current handoff above, not archived rollout commands.
 - [Historical implementation ledger](session-capture-progress-history.md) — preserved
   intermediate plans, failures and repaired findings; not current continuation tasks.
 - [Production-readiness record](production-readiness.md).

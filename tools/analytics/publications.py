@@ -323,6 +323,7 @@ def import_export(export_dir, db_path, *, reset=False):
                     for table in ('events', 'issues', 'sources', 'sessions'):
                         db.execute(f'DELETE FROM {table} WHERE session_key=?', [session])
                     counts = dict(sources=0, events=0, issues=0)
+                    codex_traces = []
                     batch_columns = dict(**{k: 'VARCHAR' for k in coords}, source_id='VARCHAR', epoch_id='VARCHAR')
                     batches = {table: _ProjectionBatch(db, table, dict(columns, **batch_columns), temp)
                                for table, columns in (('events', events.EVENT_COLUMNS), ('issues', events.ISSUE_COLUMNS))}
@@ -360,6 +361,8 @@ def import_export(export_dir, db_path, *, reset=False):
                                 length=body['size'], kind='artifact_not_normalized', record_type=None))]
                         else:
                             parsed = events.iter_events(owned, identity['agent'], trace)
+                            if identity['agent'] == 'codex':
+                                codex_traces.append(trace)
                         for event, issue in parsed:
                             if event:
                                 if source['role'] == 'subagent' and event['role'] == 'user':
@@ -389,6 +392,7 @@ def import_export(export_dir, db_path, *, reset=False):
                         counts['sources'] += 1
                     for batch in batches.values():
                         batch.flush()
+                    events.pair_codex_mirrors(db, codex_traces)
                     now = time.time_ns()
                     _insert(db, 'sessions', dict(coords, sequence=manifest['sequence'], manifest_sha256=fingerprint,
                         observed_at_ns=manifest['observed_at_ns'], captured_at_ns=manifest['captured_at_ns'],

@@ -24,7 +24,7 @@ import (
 )
 
 // MaxObjectSize bounds single-PutObject source payloads (no multipart uploads).
-const MaxObjectSize int64 = 1 << 30
+const MaxObjectSize int64 = publication.MaxEncodedObjectBytes
 
 // ErrDestinationPaused identifies destination authentication/authorization failures.
 var ErrDestinationPaused = publication.ErrDestinationPaused

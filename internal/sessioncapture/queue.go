@@ -48,7 +48,10 @@ import (
 )
 
 var (
-	ErrQuota           = errors.New("sessioncapture: spool quota exceeded")
+	ErrQuota = errors.New("sessioncapture: spool quota exceeded")
+	// ErrEncodedSize distinguishes encoded-envelope exhaustion from aggregate
+	// spool exhaustion while preserving runtime quota classification.
+	ErrEncodedSize     = fmt.Errorf("sessioncapture: encoded publication size exceeded: %w", ErrQuota)
 	ErrIntegrity       = errors.New("sessioncapture: payload integrity failure")
 	ErrSessionExcluded = errors.New("sessioncapture: session excluded")
 	ErrPolicy          = errors.New("sessioncapture: policy denied")
