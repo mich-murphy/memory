@@ -2,6 +2,7 @@ package sessioncapture
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -411,5 +412,33 @@ func TestRebasedEvidenceKeepsLocalEvidenceAtIndexZero(t *testing.T) {
 	got := rebasedEvidence(merged, []int{0, -1}, es)
 	if got[0].Request.Path != "/local/a" || got[1].Request.Path != "/p/b" || got[1].Request.SourceID != "b" || got[1].EpochID != "e2" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+// The metadata bound is inclusive: a merged manifest of exactly MaxMetadata bytes fits,
+// one byte more is a typed quota error.
+func TestRebaseManifestMetadataBoundaryIsInclusive(t *testing.T) {
+	remote := publication.Manifest{Sequence: 4, Sources: []publication.Source{rebaseSource("a", "e1", 1, "r")}}
+	build := func(pad int) (publication.Manifest, error) {
+		s := rebaseSource("b", "e2", 1, "l")
+		s.Associations = []string{strings.Repeat("x", pad)}
+		got, _, _, err := rebaseManifest(remote, publication.Manifest{Sequence: 1, Sources: []publication.Source{s}})
+		return got, err
+	}
+	got, err := build(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got.PublicationID = ""
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pad := 10 + publication.MaxMetadata - len(b)
+	if _, err := build(pad); err != nil {
+		t.Fatalf("exactly MaxMetadata must fit: %v", err)
+	}
+	if _, err := build(pad + 1); !errors.Is(err, ErrQuota) {
+		t.Fatalf("MaxMetadata+1 must be ErrQuota: %v", err)
 	}
 }

@@ -54,6 +54,10 @@ retries and clears when capacity returns. Only deterministic classes consume
 `conflict` (a guarded-write or immutable-object conflict not resolved by lost-ACK
 reconciliation or rebase) is a visible, replayable class.
 
+Admission refuses (typed `ErrKeyLength`, wrapping `ErrQuota`) an identity whose longest
+derived key (`BaseKey` + `/manifests/<64 hex>.json`) exceeds 1024 bytes, whatever the
+backend kind, so a local archive stays portable to R2.
+
 Rebase (GAP-06). A rebuilt or lagging spool converges instead of conflicting forever.
 Delivery rebases when the remote current's sequence is >= the local job's, or when the
 guarded write conflicts. It reads and fully verifies the remote current, merges the local
