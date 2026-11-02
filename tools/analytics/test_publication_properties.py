@@ -416,6 +416,56 @@ class A8Strictness(Base):
                 res, _ = self.probe(lambda m: m['manifest'].update(sequence=v), name)
                 self.assertEqual(res.startswith('rejected'), expect_reject, f'{name} -> {res} (Go validOrder requires 1..MaxInt64)')
 
+    def test_A8_metadata_exact_go_bound(self):
+        """Exactly MaxMetadata (8 MiB) is accepted; one byte more is rejected."""
+        for extra, want in ((0, 'accepted'), (1, 'rejected:invalid_metadata')):
+            with self.subTest(extra=extra):
+                d = self.path('x')
+                meta = write_export(d, identity('p'), 1, 'p1', [dict(source='main', epoch='e', role='main', raw=gen_body(random.Random(1), ['u']))])
+                meta['manifest']['coverage']['missing'] = ['']
+                size = len(json.dumps(meta))
+                meta['manifest']['coverage']['missing'] = ['x' * (8 * 1024 * 1024 - size + extra)]
+                save(d, meta)
+                self.assertEqual(len(json.dumps(meta)), 8 * 1024 * 1024 + extra)
+                try:
+                    publications.import_export(d, self.path('db'))
+                    got = 'accepted'
+                except publications.ImportFailure as e:
+                    got = 'rejected:' + str(e)
+                self.assertEqual(got, want)
+
+    def test_A8_missing_digest_is_distinct_typed_code(self):
+        res, db = self.probe(lambda m: m.pop('manifest_sha256'), 'digest_missing')
+        self.assertEqual(res, 'rejected:reader_digest_missing')
+        self.assertFalse(db.exists())
+
+    def test_A8_source_count_bound(self):
+        for n, want in ((1024, 'accepted'), (1025, 'rejected:invalid_metadata')):
+            with self.subTest(sources=n):
+                entries = [dict(source=f's{i}', epoch='e', role='subagent', raw=b'') for i in range(n)]
+                d = self.path('x')
+                write_export(d, identity('p'), 1, 'p1', entries)
+                try:
+                    publications.import_export(d, self.path('db'))
+                    got = 'accepted'
+                except publications.ImportFailure as e:
+                    got = 'rejected:' + str(e)
+                self.assertEqual(got, want)
+
+    def test_A8_digest_size_and_encoding_bounds(self):
+        cases = {
+            'digest_uppercase': lambda m: m.update(manifest_sha256='A' * 64),
+            'digest_short': lambda m: m.update(manifest_sha256='a' * 63),
+            'size_maxint64': lambda m: m['manifest']['sources'][0]['object'].update(size=2**63 - 1),
+            'encoded_size_maxint64': lambda m: m['manifest']['sources'][0]['object'].update(encoded_size=2**63 - 1),
+            'encoding_gzip': lambda m: m['manifest']['sources'][0]['object'].update(encoding='gzip'),
+        }
+        for name, f in cases.items():
+            with self.subTest(name):
+                res, db = self.probe(f, name)
+                self.assertEqual(res, 'rejected:invalid_metadata')
+                self.assertFalse(db.exists())
+
     def test_A8_metadata_size_probes(self):
         for name, mib, expect_reject in (('metadata_7MiB_control', 7, False), ('metadata_9MiB_over_go_8MiB', 9, True), ('metadata_17MiB_over_py_16MiB', 17, True)):
             with self.subTest(name):

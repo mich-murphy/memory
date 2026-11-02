@@ -74,7 +74,7 @@ precision; nanosecond timestamps are not floating-point seconds).
   its identity, sequence, and publication ID must exactly match the manifest.
 - Export: `contract` (`session-reader/v2`), `manifest_sha256`, `manifest`, `bodies`.
   `manifest_sha256` is `current.json`'s digest of the exact stored manifest bytes the export
-  pins; consumers store it rather than re-serialising the manifest. Consumers validate with
+  pins; the consumer requires a reader that emits it (a reader without it fails as `reader_digest_missing`, so deploy capture and analytics together); consumers store it rather than re-serialising the manifest. Consumers validate with
   the same bounds as the Go reader: metadata ≤ 8 MiB, `sequence` and `revision` in (0, MaxInt64],
   ≤ 1024 sources, and unknown fields rejected at every level (Go uses `DisallowUnknownFields`).
 - Body: `source_id`, `epoch_id`, `path`, `sha256`, `size`. Body paths are relative

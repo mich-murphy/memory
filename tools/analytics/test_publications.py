@@ -493,6 +493,37 @@ class PublicationsTests(unittest.TestCase):
         self.assertEqual(len(report['sessions']), 2)
         self.assertEqual(len(report['failures']), 1)
 
+    def stored_digest(self, value=None):
+        if value is not None:
+            with duckdb.connect(str(self.db)) as db:
+                db.execute('UPDATE sessions SET manifest_sha256=?', [value])
+        return self.query('SELECT manifest_sha256 FROM sessions')
+
+    def test_legacy_local_fingerprint_reimports_and_adopts_remote_digest(self):
+        self.fixture()
+        publications.import_export(self.export, self.db)
+        self.assertEqual(self.stored_digest(), [('ab' * 32,)])
+        legacy = hashlib.sha256(json.dumps(self.manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        self.stored_digest(legacy)
+        self.assertEqual(publications.import_export(self.export, self.db)['status'], 'unchanged')
+        self.assertEqual(self.stored_digest(), [('ab' * 32,)])
+
+    def test_different_stored_digest_still_conflicts(self):
+        self.fixture()
+        publications.import_export(self.export, self.db)
+        self.stored_digest('cd' * 32)
+        with self.assertRaisesRegex(publications.ImportFailure, '^publication_conflict$'):
+            publications.import_export(self.export, self.db)
+        self.assertEqual(self.stored_digest(), [('cd' * 32,)])
+
+    def test_reader_without_manifest_digest_is_typed(self):
+        data = self.fixture()
+        del data['manifest_sha256']
+        self.save(data)
+        with self.assertRaisesRegex(publications.ImportFailure, '^reader_digest_missing$'):
+            publications.import_export(self.export, self.db)
+        self.assertFalse(self.db.exists())
+
     def test_failure_watermark_survives_older_retries(self):
         for broken in ('missing', 'corrupt'):
             with self.subTest(broken=broken):

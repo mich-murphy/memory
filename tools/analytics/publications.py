@@ -89,6 +89,8 @@ def _load(root):
         _require(data.get('contract') == 'session-reader/v2', 'unsupported_contract')
         _known(data, _TOP)
         # The reader's digest of the exact stored manifest; never a local re-serialization.
+        # A reader from before this field existed is a deployment mismatch, not bad metadata.
+        _require('manifest_sha256' in data, 'reader_digest_missing')
         _require(_digest(data['manifest_sha256']))
         manifest = data['manifest']
         _require(isinstance(manifest, dict) and manifest.get('contract') == 'session-publication/v2',
@@ -315,6 +317,8 @@ def import_export(export_dir, db_path, *, reset=False):
     identity = manifest['identity']
     archive = identity['archive_id']
     session = _key(identity[k] for k in ('archive_id', 'machine_id', 'agent', 'session_id'))
+    # Projections imported before the reader exported its digest stored this local hash.
+    legacy = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     coords = dict(session_key=session, **identity, publication_id=manifest['publication_id'])
     if path.exists():
         # Refuse old projections before a writable open (including --reset).
@@ -349,9 +353,10 @@ def import_export(export_dir, db_path, *, reset=False):
         try:
             if old:
                 _require(manifest['sequence'] >= old[1], 'stale_publication')
-                _require(manifest['sequence'] != old[1] or
-                         (manifest['publication_id'], fingerprint) == (old[0], old[2]), 'publication_conflict')
-                _require(manifest['publication_id'] != old[0] or fingerprint == old[2], 'publication_conflict')
+                same = old[2] in (fingerprint, legacy)
+                _require(manifest['sequence'] != old[1] or (manifest['publication_id'] == old[0] and same),
+                         'publication_conflict')
+                _require(manifest['publication_id'] != old[0] or same, 'publication_conflict')
             with tempfile.TemporaryDirectory(prefix='.import-', dir=storage) as temp:
                 staged = {}
                 for n, (pair, body) in enumerate(bodies.items()):
@@ -363,6 +368,7 @@ def import_export(export_dir, db_path, *, reset=False):
                     # idempotent retry must not leave a corrupt local cache green.
                     for pair, target in staged.items():
                         os.replace(target, storage / bodies[pair]['sha256'])
+                    db.execute('UPDATE sessions SET manifest_sha256=? WHERE session_key=?', [fingerprint, session])
                     _clear_failure(db, session, manifest)
                     return {'status': 'unchanged', 'publication_id': old[0]}
                 db.execute('BEGIN')
