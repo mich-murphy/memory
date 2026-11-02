@@ -878,3 +878,21 @@ func TestManifestOfSlowObjectsPublishesInOneStep(t *testing.T) {
 		t.Fatalf("state=%s attempts=%d last=%s uploads=%d", head.State, head.Attempts, head.LastError, b.uploads)
 	}
 }
+
+// With the default jitter (nil) the delay is drawn from [d/2, d]. 64 draws of a
+// 32s base span about 16e9 ns values, so the chance that all draws coincide
+// (jitter not applied) is below 1e-600 in practice; no sleeping is involved.
+func TestDefaultRetryJitterIsAppliedWithinBounds(t *testing.T) {
+	const base = 32 * time.Second
+	seen := map[time.Duration]bool{}
+	for range 64 {
+		got := retryDelay(6, nil)
+		if got < base/2 || got > base {
+			t.Fatalf("retryDelay(6, nil)=%v outside [%v,%v]", got, base/2, base)
+		}
+		seen[got] = true
+	}
+	if len(seen) < 2 {
+		t.Fatalf("jitter not applied: %d distinct values in 64 draws", len(seen))
+	}
+}
