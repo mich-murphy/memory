@@ -8,7 +8,10 @@ BENCHOUT      ?= bench.txt
 ANALYTICS_PYTHON ?= $(if $(wildcard .analytics-venv/bin/python),.analytics-venv/bin/python,python3)
 FUZZ_TARGETS  := internal/adapters:FuzzSessionInfo internal/hook:FuzzReadInput \
                  internal/jsonx:FuzzParseObjectRoundTrip internal/raw:FuzzCompressRoundTrip \
-                 internal/scrub:FuzzFile internal/scrub:FuzzText internal/capturepolicy:FuzzBaseName internal/shellwords:FuzzJoinSplit internal/gitinfo:FuzzStripUserinfo
+                 internal/scrub:FuzzFile internal/scrub:FuzzText internal/capturepolicy:FuzzBaseName internal/shellwords:FuzzJoinSplit internal/gitinfo:FuzzStripUserinfo \
+                 internal/scrub:FuzzEquivalentSecretCopies internal/publication:FuzzParseCurrent \
+                 internal/publication:FuzzDecodeValidateManifest internal/sessioncapture:FuzzQuotaWriter \
+                 internal/capturehooks:FuzzEditJSON
 
 .PHONY: check fmt fmt-check lint lint-version tidy-check fix-check deadcode vuln test cover crap fuzz mutation bench bench-smoke actionlint build hooks gopls clean capture-acceptance
 

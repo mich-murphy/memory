@@ -31,12 +31,12 @@ func burstRequests(t *testing.T, base Request, n int) ([]Request, []string) {
 }
 
 // runtimeIdle reports that no source is open and every job is published.
-func runtimeIdle(q *Queue) (bool, error) {
+func runtimeIdle(ctx context.Context, q *Queue) (bool, error) {
 	var open, jobs, unpublished int
-	if err := q.db.QueryRow(`SELECT COUNT(*) FROM runtime_sources WHERE NOT(state='captured' AND captured_version=version)`).Scan(&open); err != nil {
+	if err := q.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_sources WHERE NOT(state='captured' AND captured_version=version)`).Scan(&open); err != nil {
 		return false, err
 	}
-	if err := q.db.QueryRow(`SELECT COUNT(*),COALESCE(SUM(state!='published'),0) FROM jobs`).Scan(&jobs, &unpublished); err != nil {
+	if err := q.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(state!='published'),0) FROM jobs`).Scan(&jobs, &unpublished); err != nil {
 		return false, err
 	}
 	return open == 0 && jobs > 0 && unpublished == 0, nil
@@ -53,13 +53,13 @@ func driveUntilIdle(t *testing.T, q *Queue, backend publication.Backend, during 
 	during()
 	deadline := time.Now().Add(60 * time.Second)
 	for {
-		idle, err := runtimeIdle(q)
+		idle, err := runtimeIdle(t.Context(), q)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if idle {
 			time.Sleep(300 * time.Millisecond) // must stay idle
-			if idle, err = runtimeIdle(q); err != nil {
+			if idle, err = runtimeIdle(t.Context(), q); err != nil {
 				t.Fatal(err)
 			} else if idle {
 				break
@@ -133,7 +133,7 @@ func TestHintBurstCoalescesAndKeepsLatestBytes(t *testing.T) {
 		}
 	})
 	var rows, maxAttempts int
-	if err := q.db.QueryRow(`SELECT COUNT(*),COALESCE(MAX(attempts),0) FROM runtime_sources`).Scan(&rows, &maxAttempts); err != nil {
+	if err := q.db.QueryRowContext(t.Context(), `SELECT COUNT(*),COALESCE(MAX(attempts),0) FROM runtime_sources`).Scan(&rows, &maxAttempts); err != nil {
 		t.Fatal(err)
 	}
 	if rows != sources || maxAttempts != 0 {
@@ -196,7 +196,7 @@ func TestHintInboxIsBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 	var rows int
-	if err := q.db.QueryRow(`SELECT COUNT(*) FROM runtime_sources`).Scan(&rows); err != nil {
+	if err := q.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runtime_sources`).Scan(&rows); err != nil {
 		t.Fatal(err)
 	}
 	left, err := os.ReadDir(filepath.Join(dir, "hints"))
