@@ -146,6 +146,7 @@ func TestRuntimeDiscoveryHintRestartAndNonceSweepFence(t *testing.T) {
 }
 
 func TestRuntimeDiscoveryHintFailureNeverAcknowledges(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"callback", "database"} {
 		t.Run(mode, func(t *testing.T) {
 			dir, o, req := setup(t)
@@ -240,6 +241,7 @@ func TestRuntimeDiscoveryHintUnsafeStorageAndEncodedBound(t *testing.T) {
 }
 
 func TestRuntimeHintOwnershipAfterRawAdmission(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"classified", "legacy", "forged", "database", "ambiguous"} {
 		t.Run(mode, func(t *testing.T) {
 			dir, o, _ := setup(t)

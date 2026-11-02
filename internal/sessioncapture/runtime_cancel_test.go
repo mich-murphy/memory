@@ -188,6 +188,7 @@ func TestShutdownCancellationKeepsCaptureClaimRetryable(t *testing.T) {
 }
 
 func TestReplayDoesNotReviveResolvedDelivery(t *testing.T) {
+	t.Parallel()
 	for _, resolved := range []string{"superseded", "published"} {
 		t.Run(resolved, func(t *testing.T) {
 			dir, o, req := setup(t)
@@ -221,6 +222,7 @@ func TestReplayDoesNotReviveResolvedDelivery(t *testing.T) {
 }
 
 func TestReplayCaptureGuard(t *testing.T) {
+	t.Parallel()
 	for _, current := range []string{"quarantined", "captured", "pending"} {
 		t.Run(current, func(t *testing.T) {
 			dir, o, req := setup(t)

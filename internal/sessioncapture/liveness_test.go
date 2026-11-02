@@ -89,6 +89,7 @@ func livenessTick(q *Queue, b publication.Backend, clock *time.Time, id publicat
 }
 
 func TestTransientDeliveryFailureNeverQuarantines(t *testing.T) {
+	t.Parallel()
 	t.Run("one failure then heal", func(t *testing.T) {
 		q, b, clock, r := newLivenessQueue(t)
 		capture(t, q, r)
@@ -454,6 +455,7 @@ func captureTurns(t *testing.T, q *Queue, o RuntimeOptions) {
 }
 
 func TestSourceLimitIsTypedAndNotQuarantinedAsTransient(t *testing.T) {
+	t.Parallel()
 	const limit = 32
 	dir, o, r := setup(t)
 	o.MaxSpoolBytes = 64 << 20
@@ -584,6 +586,7 @@ func optionalWork(t *testing.T, lane string, failure *error) (*Queue, string, st
 }
 
 func TestOptionalWorkFailureClassesFollowQuarantineBudget(t *testing.T) {
+	t.Parallel()
 	for _, lane := range []string{"enrichment", "repair"} {
 		t.Run(lane+"/transient retries past MaxAttempts and completes", func(t *testing.T) {
 			failure := errors.New("connection reset")
@@ -849,6 +852,7 @@ func TestTransferAllowanceSumsSelectedObjects(t *testing.T) {
 }
 
 func TestManifestOfSlowObjectsPublishesInOneStep(t *testing.T) {
+	t.Parallel()
 	dir, o, r := setup(t)
 	q := open(t, dir, o)
 	for i, name := range []string{"a", "b", "c"} {

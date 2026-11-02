@@ -113,6 +113,7 @@ func TestAssetListTamperIsIntegrity(t *testing.T) {
 }
 
 func TestLegacyRowsCompactAtInit(t *testing.T) {
+	t.Parallel()
 	dir, o, _ := setup(t)
 	q := open(t, dir, o)
 	assets := assetFixture(60)

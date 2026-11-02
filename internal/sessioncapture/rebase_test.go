@@ -47,6 +47,7 @@ func jobState(t *testing.T, q *Queue, id publication.Identity, seq uint64) strin
 // are behind the remote current must converge by rebasing above the remote, keeping
 // every remote epoch.
 func TestRebuiltSpoolRebasesAboveRemoteCurrent(t *testing.T) {
+	t.Parallel()
 	for _, variant := range []string{"append_same_source", "foreign_writer_different_bytes"} {
 		t.Run(variant, func(t *testing.T) {
 			dir, o, r := setup(t)
@@ -163,6 +164,7 @@ func sealedRemote(n int) []publication.Source {
 }
 
 func TestRebaseManifestOverSourceLimitIsTypedQuota(t *testing.T) {
+	t.Parallel()
 	remote := publication.Manifest{Sequence: 4, Sources: sealedRemote(publication.MaxSources)}
 	local := publication.Manifest{Sequence: 1, Sources: []publication.Source{rebaseSource("new", "e", 1, "n")}}
 	_, _, _, err := rebaseManifest(remote, local)
@@ -236,6 +238,7 @@ func remoteOf(t *testing.T, b publication.Backend, r Request) publication.Manife
 }
 
 func TestRebaseRecheckPolicyOfRemoteOnlySourceFailsClosed(t *testing.T) {
+	t.Parallel()
 	dir, o, r := setup(t)
 	b := newBackend(t)
 	qa := open(t, dir, o)
@@ -267,6 +270,7 @@ func TestRebaseRecheckPolicyOfRemoteOnlySourceFailsClosed(t *testing.T) {
 }
 
 func TestRebaseSteadyStateEachCaptureIsOneStep(t *testing.T) {
+	t.Parallel()
 	b, _, o, r := remoteAhead(t, 3)
 	first := remoteOf(t, b, r).Sources[0]
 	qb := open(t, filepath.Join(t.TempDir(), "queue"), o)
@@ -295,6 +299,7 @@ func TestRebaseSteadyStateEachCaptureIsOneStep(t *testing.T) {
 }
 
 func TestRebaseCoveredPublishesWithoutWrites(t *testing.T) {
+	t.Parallel()
 	dir, o, r := setup(t)
 	b := newBackend(t)
 	qa := open(t, dir, o)
@@ -317,6 +322,7 @@ func TestRebaseCoveredPublishesWithoutWrites(t *testing.T) {
 }
 
 func TestRebaseConvergesWhenCurrentMovesBeforeSwap(t *testing.T) {
+	t.Parallel()
 	b, qa, o, r := remoteAhead(t, 2)
 	cb := &countBackend{Backend: b}
 	cb.beforeSwap = func() {
@@ -344,6 +350,7 @@ func TestRebaseConvergesWhenCurrentMovesBeforeSwap(t *testing.T) {
 }
 
 func TestRebaseLostAckIsCoveredOnRetry(t *testing.T) {
+	t.Parallel()
 	b, _, o, r := remoteAhead(t, 2)
 	failed := false
 	o.Fault = func(point string) error {
@@ -373,6 +380,7 @@ func TestRebaseLostAckIsCoveredOnRetry(t *testing.T) {
 // A lost acknowledgement inside the guarded write is resolved by Publish's read-back:
 // one step, one CAS, published.
 func TestRebaseLostAckAtCurrentAfterResolvesInOneStep(t *testing.T) {
+	t.Parallel()
 	b, _, o, r := remoteAhead(t, 2)
 	o.Fault = func(point string) error {
 		if point == "current-after" {
@@ -392,6 +400,7 @@ func TestRebaseLostAckAtCurrentAfterResolvesInOneStep(t *testing.T) {
 }
 
 func TestRebaseManifestExactlyMaxSourcesFits(t *testing.T) {
+	t.Parallel()
 	remote := publication.Manifest{Sequence: 4, Sources: sealedRemote(publication.MaxSources - 1)}
 	local := publication.Manifest{Sequence: 1, Sources: []publication.Source{rebaseSource("new", "e", 1, "n")}}
 	got, _, covered, err := rebaseManifest(remote, local)

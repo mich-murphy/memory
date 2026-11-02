@@ -44,6 +44,7 @@ func growSession(t *testing.T, n int, hook func(k int)) []int64 {
 // Policy checks per publication must be linear in session size K for a
 // one-source delta: a constant number of full passes, not K passes.
 func TestDeliveryPolicyChecksAreLinearInSessionSize(t *testing.T) {
+	t.Parallel()
 	const n = 30
 	counts := growSession(t, n, nil)
 	for _, k := range []int{10, 30} {
@@ -62,6 +63,7 @@ func TestDeliveryPolicyChecksAreLinearInSessionSize(t *testing.T) {
 // A policy exclusion appearing between captures, at upload-before for an
 // uploaded object, or on a trusted source before the root commit blocks publication.
 func TestDeliveryExclusionBlocksWithTrustedObjects(t *testing.T) {
+	t.Parallel()
 	for _, stage := range []string{"between", "upload-before", "manifest-before"} {
 		t.Run(stage, func(t *testing.T) {
 			dir, o, r := setup(t)
@@ -183,6 +185,7 @@ func (f *firstPub) current(t *testing.T) bool {
 // (K sequential captures, each writing a K-sized manifest) is itself O(K^2),
 // so K stays small: the 40K bound already fails the old O(D*K) code at K=10.
 func TestFirstPublicationPolicyChecksAreLinear(t *testing.T) {
+	t.Parallel()
 	for _, k := range []int{12, 40} {
 		f := newFirstPublication(t, k, nil, nil)
 		if e := f.q.Deliver(t.Context(), f.b, f.id); e != nil {

@@ -151,6 +151,7 @@ func TestRawAcceptanceNeverChecksOptionalPolicyAndFullWorkAdmission(t *testing.T
 }
 
 func TestEnrichmentPolicyRevocationBoundariesAndRecoveryLatest(t *testing.T) {
+	t.Parallel()
 	for _, boundary := range []string{"upload-before", "manifest-upload-before", "current-before"} {
 		t.Run(boundary, func(t *testing.T) {
 			dir, o, r := setup(t)

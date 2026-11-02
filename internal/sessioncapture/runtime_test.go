@@ -190,6 +190,7 @@ func TestRuntimeDiscoveryPartialAndInboxConcurrent(t *testing.T) {
 }
 
 func TestRuntimeFairPageAndSessionClaims(t *testing.T) {
+	t.Parallel()
 	dir, o, req := setup(t)
 	q := open(t, dir, o)
 	for n := range 70 {
@@ -469,6 +470,7 @@ func TestRuntimeInboxPoisonDoesNotBlockAcceptedHint(t *testing.T) {
 }
 
 func TestRuntimeMetadataLimitStillAllowsCoalescing(t *testing.T) {
+	t.Parallel()
 	dir, o, req := setup(t)
 	q := open(t, dir, o)
 	if err := q.Hint(t.Context(), req); err != nil {

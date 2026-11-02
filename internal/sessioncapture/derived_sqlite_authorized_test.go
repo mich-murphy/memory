@@ -33,6 +33,7 @@ func sqliteQueueDB(t *testing.T, path string, wal bool, marker string) *sql.DB {
 }
 
 func TestDerivedSQLiteAuthorizedCallbackSwap(t *testing.T) {
+	t.Parallel()
 	for _, wal := range []bool{false, true} {
 		for _, leaf := range []bool{false, true} {
 			for _, early := range []bool{false, true} {
@@ -227,6 +228,7 @@ func TestDerivedSQLiteAuthorizedRetainsWALPolicyAndRestores(t *testing.T) {
 }
 
 func TestDerivedSQLiteAuthorizedExactLeafScope(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"absent", "undeclared", "declared"} {
 		t.Run(mode, func(t *testing.T) {
 			dir, o, r := setup(t)

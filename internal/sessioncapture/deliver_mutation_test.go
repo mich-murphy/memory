@@ -110,6 +110,7 @@ func TestCheckDependenciesRejectsEvidenceCountMismatch(t *testing.T) {
 }
 
 func TestCheckDependenciesHonoursOptionalUnavailableLatch(t *testing.T) {
+	t.Parallel()
 	for state, blocked := range map[string]bool{"quarantined": true, "pending": true, "repaired": false, "verified_attachment_pending": false, "delivering": false} {
 		t.Run(state, func(t *testing.T) {
 			f := newDeliveryMutationFixture(t, nil)

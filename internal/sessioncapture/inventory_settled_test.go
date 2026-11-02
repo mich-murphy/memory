@@ -132,6 +132,7 @@ func TestInventoryDefaultSettledBoundIsTheCeiling(t *testing.T) {
 }
 
 func TestInventoryUnchangedSweepsWithinBoundDoNothing(t *testing.T) {
+	t.Parallel()
 	dir, o, r := setup(t)
 	o.MaxInventoryRecords = 8
 	q := open(t, dir, o)
@@ -150,6 +151,7 @@ func TestInventoryUnchangedSweepsWithinBoundDoNothing(t *testing.T) {
 // Beyond the bound, eviction rotates: every other sweep the two evicted sources
 // re-hint and recapture to the unchanged manifest (no new job); evictions are counted.
 func TestInventoryOverBoundThrashIsBoundedAndVisible(t *testing.T) {
+	t.Parallel()
 	dir, o, r := setup(t)
 	o.MaxInventoryRecords = 8
 	q := open(t, dir, o)
@@ -222,6 +224,7 @@ func TestInventoryEvictsAbsentFirstThenLeastRecentlyObserved(t *testing.T) {
 }
 
 func TestInventoryEvictionSkipsClaimedRows(t *testing.T) {
+	t.Parallel()
 	q, _ := evictFixture(t)
 	if _, err := q.db.ExecContext(t.Context(), `UPDATE runtime_sources SET claim=1 WHERE source='src0'`); err != nil {
 		t.Fatal(err)
@@ -256,6 +259,7 @@ func TestInventoryEvictionSkipsActiveQuarantineRows(t *testing.T) {
 const testCeiling = 4096
 
 func TestInventoryEvictionAtCeilingCost(t *testing.T) {
+	t.Parallel()
 	dir, o, _ := setup(t)
 	o.MaxInventoryRecords = MaxInventoryRecords
 	q := open(t, dir, o)
@@ -286,6 +290,7 @@ func TestInventoryEvictionAtCeilingCost(t *testing.T) {
 }
 
 func TestInventoryAdmissionAtCeilingWithSettledRows(t *testing.T) {
+	t.Parallel()
 	dir, o, r := setup(t)
 	o.MaxInventoryRecords = MaxInventoryRecords
 	q := open(t, dir, o)

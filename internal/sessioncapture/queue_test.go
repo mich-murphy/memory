@@ -99,6 +99,7 @@ func TestEpochsAndRetainedPublication(t *testing.T) {
 }
 
 func TestRestartAndLostAck(t *testing.T) {
+	t.Parallel()
 	for _, boundary := range []string{"payload-before-sync", "payload-synced", "job-before-commit", "job-committed", "upload-before", "upload-after", "manifest-before", "manifest-upload-before", "manifest-upload-after", "current-before", "current-after", "current-published", "ack-before-commit", "ack-committed"} {
 		t.Run(boundary, func(t *testing.T) {
 			dir, o, r := setup(t)
@@ -204,6 +205,7 @@ func TestRestartAndLostAck(t *testing.T) {
 }
 
 func TestQuotaPolicyAndIntegrityIsolation(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"missing", "corrupt", "optout"} {
 		t.Run(mode, func(t *testing.T) {
 			dir, o, r := setup(t)
@@ -490,6 +492,7 @@ func TestPolicyChangeDuringManifestUploadPreventsRootCAS(t *testing.T) {
 }
 
 func TestNegativeCaptureTimestampsDoNotAdvanceJobs(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"observed", "now", "default-observed"} {
 		t.Run(mode, func(t *testing.T) {
 			dir, o, r := setup(t)

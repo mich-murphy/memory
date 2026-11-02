@@ -11,6 +11,7 @@ import (
 )
 
 func TestInventoryQuotaCrossesDefaultBarrier(t *testing.T) {
+	t.Parallel()
 	dir, o, req := setup(t)
 	o.MaxInventoryRecords = MaxRuntimeSources + 1
 	q := open(t, dir, o)
@@ -46,6 +47,7 @@ func TestInventoryQuotaCrossesDefaultBarrier(t *testing.T) {
 }
 
 func TestInventoryQuotaRestartRetainsBackpressureAndWork(t *testing.T) {
+	t.Parallel()
 	dir, o, req := setup(t)
 	o.MaxInventoryRecords = 2
 	q, err := Open(t.Context(), dir, o)

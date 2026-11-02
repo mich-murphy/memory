@@ -33,6 +33,7 @@ func TestEvidencePairRejectsSwappedEpochs(t *testing.T) {
 }
 
 func TestDeliveryFailureCannotResurrectTerminalJob(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"published", "superseded"} {
 		for _, cause := range []error{ErrIntegrity, ErrDestination} {
 			t.Run(state+cause.Error(), func(t *testing.T) {

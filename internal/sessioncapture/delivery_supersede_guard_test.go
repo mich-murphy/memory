@@ -6,6 +6,7 @@ import (
 )
 
 func TestDeliveryFailureAfterSupersedeCannotReviveJob(t *testing.T) {
+	t.Parallel()
 	for _, due := range []bool{false, true} {
 		t.Run(map[bool]string{false: "immediate", true: "due"}[due], func(t *testing.T) {
 			dir, o, r := setup(t)

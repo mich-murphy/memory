@@ -33,6 +33,7 @@ func discoveryBatchRequests(t *testing.T, base Request, n int) []Request {
 // fsync (synchronous=FULL) per source, so a large cold or changed sweep completes
 // inside its operation budget. A settled sweep writes nothing.
 func TestDiscoveryAdmissionCommitsInChunksAndSettledSweepWritesNothing(t *testing.T) {
+	t.Parallel()
 	dir, o, base := setup(t)
 	o.MaxInventoryRecords = 1024
 	commits := 0
@@ -147,6 +148,7 @@ func TestHintBatchLiveCapAdmitsExactlyTheFreeSlots(t *testing.T) {
 }
 
 func TestHintBatchCrashLosesOnlyUncommittedChunks(t *testing.T) {
+	t.Parallel()
 	dir, o, base := setup(t)
 	o.MaxInventoryRecords = 1024
 	commits := 0

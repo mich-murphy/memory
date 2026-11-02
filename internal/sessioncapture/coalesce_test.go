@@ -100,6 +100,7 @@ func publishedManifest(t *testing.T, b publication.Backend, id publication.Ident
 }
 
 func TestDeferredAppendsDeliverAsOneObjectAndOneSwap(t *testing.T) {
+	t.Parallel()
 	const k = 50
 	dir, o, r := setup(t)
 	o.MaxSpoolBytes = 1 << 26
@@ -168,6 +169,7 @@ func TestRewriteEpochsSurviveCoalescing(t *testing.T) {
 // At current-before the stale CAS has passed its guard and does land remotely;
 // the local job must stay superseded and job 2 must then replace it.
 func TestAppendDuringDeliveryNeverLetsStaleWorkWin(t *testing.T) {
+	t.Parallel()
 	for _, stage := range []string{"upload-before", "manifest-before", "current-before"} {
 		t.Run(stage, func(t *testing.T) {
 			dir, o, r := setup(t)
@@ -361,6 +363,7 @@ func TestRetireJobsHandlesEachJobAndOnlyPlainStates(t *testing.T) {
 // appends were deferred), a delivery without pending work costs nothing, and the totals
 // never exceed the number of captures.
 func TestDeliveryWriteCountsMatchOracleUnderRandomInterleavings(t *testing.T) {
+	t.Parallel()
 	for seed := range uint64(12) {
 		t.Run("", func(t *testing.T) {
 			rnd := rand.New(rand.NewPCG(seed, 7))

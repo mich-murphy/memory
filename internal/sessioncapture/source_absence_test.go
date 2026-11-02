@@ -146,6 +146,7 @@ func TestSourceGoneRunAllowsHealthySession(t *testing.T) {
 }
 
 func TestMissingPolicyAndSpoolRemainFatal(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"policy", "spool"} {
 		t.Run(kind, func(t *testing.T) {
 			dir, o, r := setup(t)
@@ -200,6 +201,7 @@ func TestSourceDisappearsAfterAuthorization(t *testing.T) {
 }
 
 func TestExcludedCallbackPreservesSanitizedFatalClassification(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		cause error

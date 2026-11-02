@@ -147,6 +147,7 @@ func TestOwnershipClaimValidationAndPolicy(t *testing.T) {
 }
 
 func TestOwnershipCapacityCoalescesAndRootIsolation(t *testing.T) {
+	t.Parallel()
 	dir, o, _ := setup(t)
 	q := open(t, dir, o)
 	root := t.TempDir()

@@ -54,6 +54,7 @@ func TestQuotaAuditInstallCancellationReleasesTemporary(t *testing.T) {
 }
 
 func TestQuotaAuditConcurrentScansAndTemporaryMoves(t *testing.T) {
+	t.Parallel()
 	dir, o, r := setup(t)
 	q := open(t, dir, o)
 	// Repeated identical captures exercise both rename and duplicate removal.

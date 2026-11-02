@@ -1183,6 +1183,7 @@ func shrinkModelHistory(ctx context.Context, h modelHistory, id, base string) mo
 }
 
 func TestModelHistories(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 	start := time.Now()
 	var stats modelStats
@@ -1234,6 +1235,7 @@ func TestModelHistories(t *testing.T) {
 // TestModelGeneratorShape keeps the generator honest about the measured workload
 // and deterministic for seed replay.
 func TestModelGeneratorShape(t *testing.T) {
+	t.Parallel()
 	if diff := cmp.Diff(generateModelHistory(7), generateModelHistory(7)); diff != "" {
 		t.Fatalf("same seed generated different histories:\n%s", diff)
 	}

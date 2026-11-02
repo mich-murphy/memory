@@ -11,6 +11,7 @@ import (
 // A bounded discovery cursor has already passed these requests when its callback
 // returns. An expired callback budget must not silently discard their admission.
 func TestRuntimeDiscoveryExpiredCallbackAdmitsReturnedRequestsWithoutFalseCompletion(t *testing.T) {
+	t.Parallel()
 	dir, o, req := setup(t)
 	q := open(t, dir, o)
 	if err := q.InitRuntime(t.Context()); err != nil {

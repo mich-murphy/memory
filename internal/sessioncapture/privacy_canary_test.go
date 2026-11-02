@@ -140,6 +140,7 @@ func (e *canaryEnv) notPublished(sess string) {
 }
 
 func TestPrivacyCanary(t *testing.T) {
+	t.Parallel()
 	cfgJSON := `{"env":{"TOKEN":"` + canaryJSON() + `"}}`
 
 	t.Run("scrubbed-config", func(t *testing.T) {

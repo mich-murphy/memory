@@ -171,6 +171,7 @@ func (c *enrichmentBoundaryContext) Done() <-chan struct{} {
 }
 
 func TestEnrichmentShutdownKeepsSavedResult(t *testing.T) {
+	t.Parallel()
 	for _, boundary := range []string{"policy", "loadEnrichmentResult", "storeEnrichmentResult", "attachEnrichment"} {
 		t.Run(boundary, func(t *testing.T) {
 			dir, o, r := setup(t)
@@ -321,6 +322,7 @@ func TestEnrichmentSourceAbsenceRemainsIsolated(t *testing.T) {
 }
 
 func TestShutdownRefundDoesNotChangeAnotherClaim(t *testing.T) {
+	t.Parallel()
 	for _, lane := range []string{"enrichment", "repair"} {
 		for _, transition := range []string{"quarantined", "working", "delivering"} {
 			if lane == "enrichment" && transition == "delivering" {
