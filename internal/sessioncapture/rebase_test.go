@@ -78,13 +78,16 @@ func TestRebuiltSpoolRebasesAboveRemoteCurrent(t *testing.T) {
 			if err := qb.Deliver(t.Context(), b, r.Identity); err != nil {
 				t.Fatalf("rebuilt spool deliver: %v", err)
 			}
-			for seq := uint64(1); seq <= 2; seq++ {
-				if s := jobState(t, qb, r.Identity, seq); s != "published" {
-					t.Fatalf("job %d state=%s", seq, s)
-				}
+			// Job 1 is proven subsumed by job 2 (GAP-03), so only job 2 is delivered;
+			// it rebases one sequence above the remote current (3).
+			if s := jobState(t, qb, r.Identity, 1); s != "superseded" {
+				t.Fatalf("job 1 state=%s, want superseded", s)
+			}
+			if s := jobState(t, qb, r.Identity, 2); s != "published" {
+				t.Fatalf("job 2 state=%s, want published", s)
 			}
 			got, err := publication.Read(t.Context(), b, r.Identity)
-			if err != nil || got.Sequence != 5 || len(got.Sources) != 2 {
+			if err != nil || got.Sequence != 4 || len(got.Sources) != 2 {
 				t.Fatalf("final seq=%d sources=%d err=%v", got.Sequence, len(got.Sources), err)
 			}
 			retained, active := got.Sources[0], got.Sources[1]

@@ -143,9 +143,36 @@ func TestTransientDeliveryFailureNeverQuarantines(t *testing.T) {
 		for range 4 {
 			livenessTick(q, b, clock, r.Identity)
 		}
+		// The stuck job is proven subsumed by the newer capture, so it is
+		// superseded rather than delivered; the newer job must not be blocked.
+		if s := jobStatus(t, q, r.Identity, 1); s.State != "superseded" {
+			t.Fatalf("job 1 state=%s, want superseded", s.State)
+		}
+		if s := jobStatus(t, q, r.Identity, 2); s.State != "published" {
+			t.Fatalf("job 2 state=%s, want published", s.State)
+		}
+	})
+	t.Run("newer job is not blocked by a retrying job that cannot be superseded", func(t *testing.T) {
+		q, b, clock, r := newLivenessQueue(t)
+		capture(t, q, r)
+		b.fail = func(string) bool { return true }
+		for range 12 {
+			livenessTick(q, b, clock, r.Identity)
+		}
+		// An enrichment gap makes job 1 ineligible for supersession, so the
+		// original in-order-retry guarantee is exercised.
+		if _, err := q.db.ExecContext(t.Context(), `UPDATE jobs SET enrichment_gap='quota' WHERE session=? AND sequence=1`, r.Identity.BaseKey()); err != nil {
+			t.Fatal(err)
+		}
+		appendFile(t, r.Path, []byte("more\n"))
+		capture(t, q, r)
+		b.fail = nil
+		for range 4 {
+			livenessTick(q, b, clock, r.Identity)
+		}
 		for seq := uint64(1); seq <= 2; seq++ {
 			if s := jobStatus(t, q, r.Identity, seq); s.State != "published" {
-				t.Fatalf("job %d state=%s", seq, s.State)
+				t.Fatalf("job %d state=%s, want published", seq, s.State)
 			}
 		}
 	})

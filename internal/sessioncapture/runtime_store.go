@@ -47,7 +47,7 @@ func (q *Queue) InitRuntime(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS runtime_destination (id INTEGER PRIMARY KEY CHECK(id=1),paused INTEGER NOT NULL DEFAULT 0,reason TEXT NOT NULL DEFAULT '',paused_at INTEGER NOT NULL DEFAULT 0,discovery_error TEXT NOT NULL DEFAULT '',discovered_at INTEGER NOT NULL DEFAULT 0)`,
 		`INSERT OR IGNORE INTO runtime_destination(id) VALUES(1)`,
 		`CREATE TABLE IF NOT EXISTS runtime_quarantine (id INTEGER PRIMARY KEY,kind TEXT NOT NULL,source_id INTEGER NOT NULL DEFAULT 0,session TEXT NOT NULL,sequence INTEGER NOT NULL DEFAULT 0,request BLOB,reason TEXT NOT NULL,attempts INTEGER NOT NULL,created_at INTEGER NOT NULL,contract TEXT NOT NULL,software_version TEXT NOT NULL DEFAULT 'unknown/devel',active INTEGER NOT NULL DEFAULT 1)`,
-		`CREATE INDEX IF NOT EXISTS runtime_pending_jobs ON jobs(session,sequence) WHERE state NOT IN ('published','superseded')`,
+		pendingJobsIndexSQL,
 		`CREATE INDEX IF NOT EXISTS runtime_due_jobs ON jobs(next_retry,session,sequence) WHERE state NOT IN ('published','superseded','quarantined')`,
 		`CREATE TRIGGER IF NOT EXISTS runtime_job_session AFTER INSERT ON jobs BEGIN INSERT OR IGNORE INTO runtime_sessions(session) VALUES(NEW.session); END`,
 		// Bootstrap only the pending index, not published archive history. All future

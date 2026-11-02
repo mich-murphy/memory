@@ -372,6 +372,9 @@ func (q *Queue) acceptView(ctx context.Context, m publication.Manifest, es []evi
 			e = q.admitCapturedEnrichment(ctx, tx, m, spec)
 		}
 	}
+	if e == nil && changedSource != "" {
+		e = supersedeSubsumed(ctx, tx, m)
+	}
 	if e == nil && supersede {
 		_, e = tx.ExecContext(ctx, `UPDATE jobs SET state='superseded' WHERE session=? AND sequence<? AND state NOT IN ('published','superseded')`, m.Identity.BaseKey(), m.Sequence)
 	}

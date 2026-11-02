@@ -85,9 +85,15 @@ func TestEpochsAndRetainedPublication(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	// Only the final job is delivered; earlier undelivered appends and rewrites
+	// are proven subsumed by it and superseded (GAP-03).
 	for _, s := range st {
-		if s.State != "published" {
-			t.Fatal(s)
+		want := "superseded"
+		if s.Sequence == d.Sequence {
+			want = "published"
+		}
+		if s.State != want {
+			t.Fatalf("sequence %d state %s, want %s", s.Sequence, s.State, want)
 		}
 	}
 }

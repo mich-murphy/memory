@@ -425,9 +425,13 @@ func (q *Queue) Status(ctx context.Context) ([]Status, error) {
 	return out, rows.Err()
 }
 
+// pendingJobsIndexSQL indexes undelivered jobs only. Acceptance (supersession) and
+// delivery both query exactly this predicate, so published history is never scanned.
+const pendingJobsIndexSQL = `CREATE INDEX IF NOT EXISTS runtime_pending_jobs ON jobs(session,sequence) WHERE state NOT IN ('published','superseded')`
+
 func initializeDB(ctx context.Context, db *sql.DB, dir, archiveID string) error {
 	var err error
-	for _, s := range []string{"PRAGMA journal_mode=WAL", "PRAGMA synchronous=FULL", `CREATE TABLE IF NOT EXISTS binding (archive TEXT NOT NULL)`, `CREATE TABLE IF NOT EXISTS jobs (session TEXT NOT NULL, sequence INTEGER NOT NULL, manifest BLOB NOT NULL, evidence BLOB NOT NULL, state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', next_retry INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(session,sequence))`} {
+	for _, s := range []string{"PRAGMA journal_mode=WAL", "PRAGMA synchronous=FULL", `CREATE TABLE IF NOT EXISTS binding (archive TEXT NOT NULL)`, `CREATE TABLE IF NOT EXISTS jobs (session TEXT NOT NULL, sequence INTEGER NOT NULL, manifest BLOB NOT NULL, evidence BLOB NOT NULL, state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', next_retry INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(session,sequence))`, pendingJobsIndexSQL} {
 		if _, err = db.ExecContext(ctx, s); err != nil {
 			return err
 		}
