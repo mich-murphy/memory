@@ -324,3 +324,34 @@ func TestSelectionSupersessionSupersedesEveryUndeliveredJob(t *testing.T) {
 		t.Fatalf("job 2 state %s, want pending", got)
 	}
 }
+
+// One acceptance retires every subsumed undelivered job, and only pending or retry
+// jobs are coalesced: a quarantined job is left alone.
+func TestRetireJobsHandlesEachJobAndOnlyPlainStates(t *testing.T) {
+	for _, tc := range []struct {
+		state string
+		want  map[string]int
+	}{
+		{"retry", map[string]int{"superseded": 2, "pending": 1}},
+		{"quarantined", map[string]int{"quarantined": 1, "superseded": 1, "pending": 1}},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			dir, o, r := setup(t)
+			q := open(t, dir, o)
+			capture(t, q, r)
+			appendBytes(t, r.Path, []byte("two\n"))
+			capture(t, q, r)
+			if _, err := q.db.ExecContext(t.Context(), `UPDATE jobs SET state=? WHERE sequence=1`, tc.state); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := q.db.ExecContext(t.Context(), `UPDATE jobs SET state='pending' WHERE sequence=2`); err != nil {
+				t.Fatal(err)
+			}
+			appendBytes(t, r.Path, []byte("three\n"))
+			capture(t, q, r)
+			if got := jobStates(t, q); !cmp.Equal(got, tc.want) {
+				t.Fatalf("job states: %s", cmp.Diff(tc.want, got))
+			}
+		})
+	}
+}

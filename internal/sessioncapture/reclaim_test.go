@@ -243,3 +243,114 @@ func TestReplayedRepairHoldsItsPayloadAgain(t *testing.T) {
 		t.Fatal("repaired row kept its holder")
 	}
 }
+
+func candidateCount(t *testing.T, q *Queue, where string) int {
+	t.Helper()
+	var n int
+	if err := q.db.QueryRowContext(t.Context(), `SELECT count(*) FROM payload_reclaim WHERE `+where).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// A file two sessions share (identical content) must survive one session retiring it.
+func TestSharedPayloadSurvivesOneSessionRetiringIt(t *testing.T) {
+	dir, o, a := setup(t)
+	q := open(t, dir, o)
+	b := a
+	b.Identity.SessionID = "other"
+	b.Path = filepath.Join(filepath.Dir(a.Path), "other.jsonl")
+	write(t, b.Path, "first\n")
+	ma := capture(t, q, a)
+	mb := capture(t, q, b)
+	shared := ma.Sources[0].Object.EncodedSHA256
+	if shared != mb.Sources[0].Object.EncodedSHA256 {
+		t.Fatal("fixture: sessions do not share an encoded payload")
+	}
+	appendBytes(t, a.Path, []byte("more\n"))
+	capture(t, q, a)
+	if _, err := os.Stat(filepath.Join(q.dir, "payloads", shared+".zst")); err != nil {
+		t.Fatalf("shared payload removed while session B still references it: %v", err)
+	}
+	if err := q.Deliver(t.Context(), newBackend(t), b.Identity); err != nil {
+		t.Fatalf("session B delivery after A retired the shared file: %v", err)
+	}
+}
+
+// A candidate that a retained root still references is kept and its row dropped.
+func TestRootedCandidateIsKept(t *testing.T) {
+	dir, o, r := setup(t)
+	q := open(t, dir, o)
+	m := capture(t, q, r)
+	sha := m.Sources[0].Object.EncodedSHA256
+	if _, err := q.db.ExecContext(t.Context(), `INSERT INTO payload_reclaim(sha,session) VALUES(?,?)`, sha, r.Identity.BaseKey()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.reclaimPending(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(q.dir, "payloads", sha+".zst")); err != nil {
+		t.Fatalf("rooted payload removed: %v", err)
+	}
+	if n := candidateCount(t, q, "1=1"); n != 0 {
+		t.Fatalf("%d candidate rows left", n)
+	}
+}
+
+func TestAddReclaimCandidatesRecordsEveryObject(t *testing.T) {
+	dir, o, _ := setup(t)
+	q := open(t, dir, o)
+	tx, err := q.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	objs := []publication.Object{{EncodedSHA256: "aa"}, {EncodedSHA256: "bb"}, {EncodedSHA256: "cc"}}
+	if err := addReclaimCandidates(t.Context(), tx, "s", objs); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if n := candidateCount(t, q, "1=1"); n != 3 {
+		t.Fatalf("%d candidates, want 3", n)
+	}
+}
+
+// Every failing candidate keeps its own error; one failure never hides the next.
+func TestEveryFailedCandidateRecordsItsError(t *testing.T) {
+	dir, o, r := setup(t)
+	failing := false
+	o.Fault = func(s string) error {
+		if failing && s == "reclaim-before-unlink" {
+			return errors.New("injected unlink failure")
+		}
+		return nil
+	}
+	q := open(t, dir, o)
+	capture(t, q, r)
+	failing = true
+	for range 2 {
+		appendBytes(t, r.Path, []byte("more\n"))
+		capture(t, q, r)
+	}
+	if n := candidateCount(t, q, "last_error!=''"); n != 2 {
+		t.Fatalf("%d candidates carry an error, want 2", n)
+	}
+}
+
+// The holder index of rows accepted before payload_refs existed is rebuilt at Open.
+func TestLegacyJobsAreIndexedAtInit(t *testing.T) {
+	dir, o, r := setup(t)
+	q := open(t, dir, o)
+	m := capture(t, q, r)
+	if _, err := q.db.ExecContext(t.Context(), `DROP TABLE payload_refs`); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.initReclaim(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := q.db.QueryRowContext(t.Context(), `SELECT count(*) FROM payload_refs WHERE sha=? AND session=?`, m.Sources[0].Object.EncodedSHA256, r.Identity.BaseKey()).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("backfilled refs %d, err %v", n, err)
+	}
+}
