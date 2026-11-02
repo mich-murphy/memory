@@ -326,3 +326,26 @@ func TestUploadThroughputSetting(t *testing.T) {
 		t.Fatal("local backend accepted an R2 throughput setting")
 	}
 }
+
+func TestSpecTransferBudgetMatchesR2Backend(t *testing.T) {
+	for _, kib := range []int{0, 64, 4096} {
+		s := spec()
+		s.MinThroughputKiB = kib
+		b, err := Open(t.Context(), s, deps(roundTrip(func(*http.Request) (*http.Response, error) { return nil, errors.New("offline") })))
+		if err != nil {
+			t.Fatal(err)
+		}
+		tb, ok := b.(publication.TransferBudgeter)
+		if !ok {
+			t.Fatal("R2 backend does not report transfer budgets")
+		}
+		for _, size := range []int64{0, 50 << 20, publicationr2.MaxObjectSize} {
+			if got, want := s.TransferBudget(size), tb.TransferBudget(size); got != want || want <= 0 {
+				t.Fatalf("kib=%d size=%d spec=%s backend=%s", kib, size, got, want)
+			}
+		}
+	}
+	if got := (Spec{Kind: "local", LocalDir: "/safe"}).TransferBudget(1 << 30); got != 0 {
+		t.Fatalf("local budget %s", got)
+	}
+}

@@ -163,3 +163,40 @@ func TestSlowButProgressingObjectBodyIsNotStalled(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTransferBudgetIsTwiceTotal(t *testing.T) {
+	b := budgetBackend(t, http.NotFoundHandler(), time.Second, DefaultBodyBudget())
+	for _, tc := range []struct {
+		size int64
+		want time.Duration
+	}{
+		{0, 2 * time.Minute},
+		{100 << 20, 260 * time.Second},
+		{MaxObjectSize, 30 * time.Minute},
+	} {
+		if got := b.TransferBudget(tc.size); got != tc.want || got != 2*b.body.Total(tc.size) {
+			t.Fatalf("TransferBudget(%d)=%s want %s", tc.size, got, tc.want)
+		}
+	}
+}
+
+// After the request body is fully sent only the destination's response remains, so
+// the idle guard must be disarmed: a slow response within Total is not a stall.
+func TestIdleGuardDisarmedWhileAwaitingResponse(t *testing.T) {
+	p := newProtocol()
+	slow := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			body, _ := io.ReadAll(r.Body)
+			time.Sleep(700 * time.Millisecond)
+			r.Body = io.NopCloser(bytes.NewReader(body))
+		}
+		p.ServeHTTP(w, r)
+	})
+	budget := BodyBudget{Base: time.Minute, MinThroughput: 1 << 20, Floor: time.Minute, Cap: time.Minute, Idle: 250 * time.Millisecond}
+	b := budgetBackend(t, slow, time.Minute, budget)
+	data := []byte("payload awaiting a slow response")
+	obj, _ := payloadKeys(data)
+	if err := b.PutFile(t.Context(), obj, writePayload(t, data)); err != nil {
+		t.Fatalf("slow response treated as stall: %v", err)
+	}
+}
