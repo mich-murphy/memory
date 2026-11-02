@@ -287,6 +287,6 @@ func TestDiscoveryTransformedSourcesHaveNoFingerprint(t *testing.T) {
 		}
 	}
 	if !seen {
-		t.Skip("no transformed request emitted in this fixture")
+		t.Fatalf("no transformed request emitted for a SQLite source; requests=%d", len(r.Requests))
 	}
 }
