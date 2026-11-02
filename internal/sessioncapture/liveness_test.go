@@ -2,6 +2,7 @@ package sessioncapture
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -647,5 +648,193 @@ func TestRunnableSourceIndexMatchesClaimQuery(t *testing.T) {
 	}
 	if got := plan(q); !strings.Contains(got, "USING INDEX runtime_runnable_sources_v2") {
 		t.Fatalf("claim plan %q", got)
+	}
+}
+
+// throttledBackend delays object uploads to bps bytes per second.
+type throttledBackend struct {
+	publication.Backend
+	bps int
+}
+
+// TransferBudget stands in for the R2 backend's size-aware per-object allowance.
+func (b throttledBackend) TransferBudget(int64) time.Duration { return 10 * time.Second }
+
+func (b throttledBackend) Sync(ctx context.Context, key string) error {
+	if d, ok := b.Backend.(publication.DurabilityFence); ok {
+		return d.Sync(ctx, key)
+	}
+	return nil
+}
+
+func (b throttledBackend) PutFile(ctx context.Context, key, path string) error {
+	if strings.Contains(key, "/objects/") {
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = f.Close() }()
+		buf := make([]byte, 4096)
+		for {
+			n, err := f.Read(buf)
+			if n > 0 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(time.Duration(n) * time.Second / time.Duration(b.bps)):
+				}
+			}
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return b.Backend.PutFile(ctx, key, path)
+}
+
+func runThrottledDelivery(t *testing.T, opTimeout time.Duration) Status {
+	t.Helper()
+	dir, o, r := setup(t)
+	o.MaxSpoolBytes = 1 << 26
+	o.Now = time.Now
+	q := open(t, dir, o)
+	write(t, r.Path, string(incompressible(100_000)))
+	b := throttledBackend{Backend: newBackend(t), bps: 100_000} // About 1s per upload attempt.
+	if err := q.InitRuntime(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Hint(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- q.Run(ctx, b, RuntimeOptions{OperationTimeout: opTimeout, PollInterval: 50 * time.Millisecond, Workers: 1, Jitter: func(time.Duration) time.Duration { return time.Second }})
+	}()
+	var s Status
+	for ctx.Err() == nil {
+		if all, _ := q.Status(ctx); len(all) == 1 {
+			s = all[0]
+			if s.State == "published" || s.State == "quarantined" {
+				break
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	return s
+}
+
+func TestObjectLongerThanOperationBudgetPublishes(t *testing.T) {
+	// Each upload takes about a second against a 200ms operation budget; the
+	// backend's TransferBudget extends the attempt, and the backend owns the bound.
+	s := runThrottledDelivery(t, 200*time.Millisecond)
+	if s.State != "published" || s.Attempts != 1 {
+		t.Fatalf("state=%s attempts=%d last_error=%s", s.State, s.Attempts, s.LastError)
+	}
+}
+
+func incompressible(n int) []byte {
+	out := make([]byte, 0, n+sha256.Size)
+	block := sha256.Sum256([]byte("l1-incompressible"))
+	for len(out) < n {
+		out = append(out, block[:]...)
+		block = sha256.Sum256(block[:])
+	}
+	return out[:n]
+}
+
+// slowObjectBackend takes each upload 600ms and reports a 1s allowance per object.
+type slowObjectBackend struct {
+	publication.Backend
+	uploads int
+}
+
+func (b *slowObjectBackend) TransferBudget(int64) time.Duration { return time.Second }
+
+func (b *slowObjectBackend) PutFile(ctx context.Context, key, path string) error {
+	if strings.Contains(key, "/objects/") {
+		b.uploads++
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(600 * time.Millisecond):
+		}
+	}
+	return b.Backend.PutFile(ctx, key, path)
+}
+
+func TestTransferAllowanceSumsSelectedObjects(t *testing.T) {
+	b := &slowObjectBackend{}
+	srcs := []publication.Source{
+		{Object: publication.Object{EncodedSize: 1}},
+		{Object: publication.Object{EncodedSize: 2}},
+		{Withheld: &publication.WithheldSource{}},
+	}
+	if got := transferAllowance(b, srcs...); got != 2*time.Second {
+		t.Fatalf("allowance %s", got)
+	}
+	if got := transferAllowance(newBackend(t), srcs...); got != 0 {
+		t.Fatalf("backend without budget: %s", got)
+	}
+}
+
+func TestManifestOfSlowObjectsPublishesInOneStep(t *testing.T) {
+	dir, o, r := setup(t)
+	q := open(t, dir, o)
+	for i, name := range []string{"a", "b", "c"} {
+		req := r
+		req.SourceID = "source-" + name
+		req.Path = filepath.Join(filepath.Dir(r.Path), name+".jsonl")
+		write(t, req.Path, fmt.Sprintf("object %d\n", i))
+		capture(t, q, req)
+	}
+	if err := q.InitRuntime(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	// Only the newest job (three sources) stays pending, so one step moves all three.
+	if _, err := q.db.ExecContext(t.Context(), `UPDATE jobs SET state='superseded' WHERE sequence<(SELECT MAX(sequence) FROM jobs)`); err != nil {
+		t.Fatal(err)
+	}
+	var raw []byte
+	if err := q.db.QueryRowContext(t.Context(), `SELECT manifest FROM jobs WHERE state='pending'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var head3 publication.Manifest
+	if err := json.Unmarshal(raw, &head3); err != nil {
+		t.Fatal(err)
+	}
+	selected := 0
+	for i := range head3.Sources {
+		if publication.IsSelected(head3.Sources[i]) {
+			selected++
+		}
+	}
+	if selected != 3 {
+		t.Fatalf("head manifest selects %d objects, want 3", selected)
+	}
+	b := &slowObjectBackend{Backend: newBackend(t)}
+	// 3 x 600ms of upload exceeds one object's 1s allowance and a flat 1.2s bound.
+	opts := runtimeDefaults(RuntimeOptions{OperationTimeout: 200 * time.Millisecond})
+	if did, err := q.deliverDueWork(t.Context(), b, r.Identity, opts); err != nil || !did {
+		t.Fatalf("did=%v err=%v", did, err)
+	}
+	all, err := q.Status(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var head Status
+	for i := range all {
+		if all[i].Sequence > head.Sequence {
+			head = all[i]
+		}
+	}
+	if head.State != "published" || head.Attempts != 1 || b.uploads != 3 {
+		t.Fatalf("state=%s attempts=%d last=%s uploads=%d", head.State, head.Attempts, head.LastError, b.uploads)
 	}
 }

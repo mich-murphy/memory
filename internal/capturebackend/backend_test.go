@@ -86,7 +86,7 @@ func TestCredentialErrorsAndDefaults(t *testing.T) {
 	}
 	c := defaultHTTPClient()
 	tr := c.Transport.(*http.Transport)
-	if c.Timeout <= 0 || tr.DialContext == nil || tr.MaxConnsPerHost <= 0 || tr.ResponseHeaderTimeout <= 0 || tr.TLSHandshakeTimeout <= 0 || tr.Proxy != nil {
+	if c.Timeout != 0 || tr.DialContext == nil || tr.MaxConnsPerHost <= 0 || tr.ResponseHeaderTimeout <= 0 || tr.TLSHandshakeTimeout <= 0 || tr.Proxy != nil {
 		t.Fatal("unbounded transport")
 	}
 	if !errors.Is(c.CheckRedirect(nil, nil), http.ErrUseLastResponse) {
@@ -308,4 +308,21 @@ func TestFactoryQueueReaderExactBytesLostAck(t *testing.T) {
 	if err = q.Deliver(t.Context(), b, identity()); err != nil {
 		t.Fatal(err)
 	} // already acknowledged, no work
+}
+
+func TestUploadThroughputSetting(t *testing.T) {
+	for _, tc := range []struct {
+		kib int
+		ok  bool
+	}{{0, true}, {1, true}, {maxMinThroughputKiB, true}, {-1, false}, {maxMinThroughputKiB + 1, false}} {
+		s := spec()
+		s.MinThroughputKiB = tc.kib
+		if err := s.Validate(); (err == nil) != tc.ok {
+			t.Fatalf("min_throughput_kib=%d: %v", tc.kib, err)
+		}
+	}
+	local := Spec{Kind: "local", LocalDir: "/safe", MinThroughputKiB: 5}
+	if local.Validate() == nil {
+		t.Fatal("local backend accepted an R2 throughput setting")
+	}
 }

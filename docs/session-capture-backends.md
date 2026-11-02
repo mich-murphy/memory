@@ -33,6 +33,10 @@ instance-metadata discovery, legacy collector config lookup or implicit activati
 Only the two explicitly named environment references are resolved. No configuration
 inspection, hint, hook, status, replay, save or service plan needs those values.
 
+The optional `min_throughput_kib` (default 1024) sets the slowest sustained object
+transfer the size-aware body deadline assumes; see the object transfer budgets in the
+phase 3 document. It is valid only for R2.
+
 The SDK uses explicit static credentials, region `auto`, path-style addressing, a
 bounded HTTP transport, no redirects and no SDK retries. The durable coordinator owns
 retry/backoff and destination pause. Tests inject a nonnetwork HTTP client beneath the

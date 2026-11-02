@@ -179,7 +179,7 @@ func (q *Queue) optionalRepairNext(ctx context.Context, b publication.Backend, o
 		// No-op once a terminal state was saved; frees 'working' after a failed save.
 		defer q.releaseOptionalRepair(ctx, id, attempts+1)
 		defer func() { resultErr = q.refundOptionalRepairShutdown(ctx, id, attempts, resultErr, o) }()
-		err = q.repairOptionalObject(ctx, b, s, e)
+		err = q.repairWithAllowance(ctx, b, s, e, o)
 	}
 	save, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.OperationTimeout)
 	defer cancel()
@@ -219,6 +219,17 @@ func (q *Queue) refundOptionalRepairShutdown(ctx context.Context, id string, att
 	defer cancel()
 	_, err := q.db.ExecContext(save, `UPDATE optional_repairs SET state=CASE WHEN state='working' THEN 'retry' ELSE state END,attempts=?,last_error='shutdown',next_retry=0 WHERE id=? AND attempts=? AND state IN ('working','verified_attachment_pending')`, attempts, id, attempts+1)
 	return errors.Join(cause, err)
+}
+
+// repairWithAllowance extends the caller's context by the backend's transfer
+// allowance for the object; backends without one keep the caller's context.
+func (q *Queue) repairWithAllowance(ctx context.Context, b publication.Backend, s publication.Source, e evidence, o RuntimeOptions) error {
+	if allowance := transferAllowance(b, s); allowance > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, o.OperationTimeout+allowance)
+		defer cancel()
+	}
+	return q.repairOptionalObject(ctx, b, s, e)
 }
 
 func (q *Queue) repairOptionalObject(ctx context.Context, b publication.Backend, s publication.Source, e evidence) error {

@@ -79,6 +79,9 @@ type RuntimeOptions struct {
 	// Jitter returns the desired delay; its result is clamped to [1s,5min].
 	Jitter   func(time.Duration) time.Duration
 	Classify func(error) FailureClass
+
+	// budgeted is set by Run when the backend reports per-object transfer budgets.
+	budgeted bool
 }
 
 type runtimeLocal struct {
@@ -190,6 +193,7 @@ func (q *Queue) Run(ctx context.Context, b publication.Backend, options RuntimeO
 	r.mu.Unlock()
 	defer func() { r.mu.Lock(); r.running = false; r.mu.Unlock() }()
 	o := runtimeDefaults(options)
+	_, o.budgeted = b.(publication.TransferBudgeter)
 	r.softwareVersion.Store(o.SoftwareVersion)
 	r.enrichmentOptions.Store(&o)
 	if err := q.startDiscoverySweep(ctx); err != nil {
@@ -258,7 +262,7 @@ func (q *Queue) runtimeWorkerNamed(ctx context.Context, name string, o RuntimeOp
 	timer := time.NewTicker(min(o.PollInterval, 100*time.Millisecond))
 	defer timer.Stop()
 	for ctx.Err() == nil {
-		op, cancel := context.WithTimeout(ctx, o.OperationTimeout)
+		op, cancel := stepContext(ctx, name, o)
 		did, err := work(op)
 		opExpired := errors.Is(op.Err(), context.DeadlineExceeded)
 		cancel()
@@ -278,6 +282,36 @@ func (q *Queue) runtimeWorkerNamed(ctx context.Context, name string, o RuntimeOp
 		}
 	}
 	return nil
+}
+
+// stepContext bounds one worker turn by OperationTimeout. Workers that move object
+// bodies are not bounded here: their attempt context is OperationTimeout plus the
+// backend's per-object allowance for the manifest being moved (transferAllowance),
+// which is only known once the head job is loaded.
+func stepContext(ctx context.Context, name string, o RuntimeOptions) (context.Context, context.CancelFunc) {
+	switch name {
+	case "delivery", "optional-delivery", "optional-repair":
+		if o.budgeted {
+			return context.WithCancel(ctx)
+		}
+	}
+	return context.WithTimeout(ctx, o.OperationTimeout)
+}
+
+// transferAllowance sums the backend's worst-case PutFile duration over the
+// selected objects of the given sources; zero when the backend reports none.
+func transferAllowance(b publication.Backend, sources ...publication.Source) time.Duration {
+	tb, ok := b.(publication.TransferBudgeter)
+	if !ok {
+		return 0
+	}
+	var d time.Duration
+	for i := range sources {
+		if publication.IsSelected(sources[i]) {
+			d += tb.TransferBudget(sources[i].Object.EncodedSize)
+		}
+	}
+	return d
 }
 
 func (q *Queue) discoverLoop(ctx context.Context, o RuntimeOptions) error {

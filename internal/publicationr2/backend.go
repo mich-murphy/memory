@@ -33,17 +33,24 @@ var ErrDestinationPaused = publication.ErrDestinationPaused
 type Backend struct {
 	client  *s3.Client
 	bucket  string
-	timeout time.Duration
+	timeout time.Duration // Flat deadline for metadata, references and conditional writes.
+	body    BodyBudget    // Size-aware budget for object bodies.
 }
 
 var _ publication.Backend = (*Backend)(nil)
 
 // New requires an explicit client, bucket, and positive operation budget.
-func New(client *s3.Client, bucket string, timeout time.Duration) (*Backend, error) {
+func New(client *s3.Client, bucket string, timeout time.Duration, opts ...Option) (*Backend, error) {
 	if client == nil || timeout <= 0 || bucket == "" || strings.TrimSpace(bucket) != bucket || strings.ContainsAny(bucket, "/\\\x00\r\n") {
 		return nil, errors.New("invalid publication destination options")
 	}
-	return &Backend{client: client, bucket: bucket, timeout: timeout}, nil
+	b := &Backend{client: client, bucket: bucket, timeout: timeout, body: DefaultBodyBudget()}
+	for _, opt := range opts {
+		if err := opt(b); err != nil {
+			return nil, err
+		}
+	}
+	return b, nil
 }
 
 type keyKind int
@@ -104,8 +111,8 @@ func safeError(ctx context.Context, err error) error {
 	if err == nil {
 		return nil
 	}
-	if ctx.Err() != nil {
-		return ctx.Err()
+	if e := ctxErr(ctx); e != nil {
+		return e
 	}
 	if response, ok := errors.AsType[*smithyhttp.ResponseError](err); ok {
 		switch response.HTTPStatusCode() {
@@ -134,10 +141,10 @@ func (b *Backend) Open(ctx context.Context, key string) (io.ReadCloser, error) {
 	if kind == invalidKey {
 		return nil, errors.New("invalid publication key")
 	}
-	ctx, cancel := context.WithTimeout(ctx, b.timeout)
+	ctx, tr := b.newTransfer(ctx)
 	out, err := b.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(b.bucket), Key: aws.String(key)})
 	if err != nil {
-		defer cancel()
+		defer tr.stop()
 		return nil, safeError(ctx, err)
 	}
 	limit := int64(publication.MaxMetadata)
@@ -145,18 +152,25 @@ func (b *Backend) Open(ctx context.Context, key string) (io.ReadCloser, error) {
 		limit = MaxObjectSize
 	}
 	if out.Body == nil || out.ContentLength == nil || *out.ContentLength < 0 || *out.ContentLength > limit {
-		cancel()
+		tr.stop()
 		if out.Body != nil {
 			_ = out.Body.Close() // Invalid response; no writable data to flush.
 		}
 		return nil, errors.New("invalid publication response length")
 	}
-	return &stream{ctx: ctx, cancel: cancel, body: out.Body, remaining: *out.ContentLength}, nil
+	s := &stream{ctx: ctx, tr: tr, body: out.Body, remaining: *out.ContentLength}
+	if kind == objectKey {
+		// Object bodies get a size-aware deadline and an idle limit on each network wait.
+		tr.budget(b.body.Total(*out.ContentLength))
+		s.guard = tr.guard(b.body.Idle, false)
+	}
+	return s, nil
 }
 
 type stream struct {
 	ctx       context.Context
-	cancel    context.CancelFunc
+	tr        *transfer
+	guard     *idleGuard // Armed only while waiting on the network; nil for metadata.
 	body      io.ReadCloser
 	remaining int64
 	once      sync.Once
@@ -164,10 +178,12 @@ type stream struct {
 }
 
 func (s *stream) Read(p []byte) (int, error) {
-	if err := s.ctx.Err(); err != nil {
+	if err := ctxErr(s.ctx); err != nil {
 		return 0, err
 	}
+	s.guard.arm()
 	n, err := s.body.Read(p)
+	s.guard.disarm()
 	s.remaining -= int64(n)
 	if s.remaining < 0 {
 		return n, errors.New("publication response length mismatch")
@@ -182,7 +198,7 @@ func (s *stream) Read(p []byte) (int, error) {
 }
 
 func (s *stream) Close() error {
-	s.once.Do(func() { s.cancel(); s.closeErr = s.body.Close() })
+	s.once.Do(func() { s.tr.stop(); s.closeErr = s.body.Close() })
 	if s.closeErr != nil {
 		return errors.New("publication stream close failed")
 	}
@@ -196,8 +212,8 @@ func (b *Backend) PutFile(ctx context.Context, key, path string) (err error) {
 	if kind != manifestKey && kind != objectKey {
 		return errors.New("invalid publication payload key")
 	}
-	ctx, cancel := context.WithTimeout(ctx, b.timeout)
-	defer cancel()
+	ctx, tr := b.newTransfer(ctx)
+	defer tr.stop()
 	// Nonblocking open lets us reject FIFOs/devices without waiting for a peer.
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
@@ -219,6 +235,9 @@ func (b *Backend) PutFile(ctx context.Context, key, path string) (err error) {
 	if !info.Mode().IsRegular() || info.Size() < 0 || info.Size() > limit {
 		return errors.New("invalid publication payload size or type")
 	}
+	if kind == objectKey {
+		tr.budget(b.body.Total(info.Size()))
+	}
 	// Verify before any network call; spool ownership must prevent concurrent
 	// mutation throughout verification and SDK signing/upload passes.
 	digest := strings.TrimSuffix(key[strings.LastIndex(key, "/")+1:], ".zst")
@@ -226,9 +245,14 @@ func (b *Backend) PutFile(ctx context.Context, key, path string) (err error) {
 	if err := verifyDigest(ctx, io.NewSectionReader(f, 0, info.Size()), info.Size(), digest); err != nil {
 		return err
 	}
+	var payload io.Reader = io.NewSectionReader(f, 0, info.Size())
+	if kind == objectKey {
+		section := io.NewSectionReader(f, 0, info.Size())
+		payload = progressSeeker{progressReader{section, tr.guard(b.body.Idle, true)}, section}
+	}
 	_, err = b.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(b.bucket), Key: aws.String(key),
-		Body: io.NewSectionReader(f, 0, info.Size()), ContentLength: aws.Int64(info.Size()),
+		Body: payload, ContentLength: aws.Int64(info.Size()),
 		IfNoneMatch: aws.String("*"),
 	}, func(o *s3.Options) { o.RetryMaxAttempts = 1 })
 	if err == nil {
@@ -240,7 +264,12 @@ func (b *Backend) PutFile(ctx context.Context, key, path string) (err error) {
 	}
 	// A collision or lost acknowledgement is success only after verifying exact
 	// existing bytes. Never delete corruption or retry with an unguarded PUT.
-	return b.reconcileImmutable(ctx, key, info.Size(), digest, writeErr)
+	var g *idleGuard
+	if kind == objectKey {
+		tr.budget(b.body.Total(info.Size())) // The read-back verification gets its own full budget.
+		g = tr.guard(b.body.Idle, true)
+	}
+	return b.reconcileImmutable(ctx, key, info.Size(), digest, writeErr, g)
 }
 
 // verifyDigest bounds memory and reads one overflow byte to detect excess data.
@@ -250,7 +279,7 @@ func verifyDigest(ctx context.Context, r io.Reader, size int64, digest string) e
 	buf := make([]byte, 32*1024)
 	var count int64
 	for {
-		if err := ctx.Err(); err != nil {
+		if err := ctxErr(ctx); err != nil {
 			return err
 		}
 		n, err := r.Read(buf)
@@ -266,10 +295,10 @@ func verifyDigest(ctx context.Context, r io.Reader, size int64, digest string) e
 	if count != size || hex.EncodeToString(h.Sum(nil)) != digest {
 		return publication.ErrConflict
 	}
-	return ctx.Err()
+	return ctxErr(ctx)
 }
 
-func (b *Backend) reconcileImmutable(ctx context.Context, key string, size int64, digest string, writeErr error) error {
+func (b *Backend) reconcileImmutable(ctx context.Context, key string, size int64, digest string, writeErr error, g *idleGuard) error {
 	out, err := b.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(b.bucket), Key: aws.String(key)})
 	if err != nil {
 		readErr := safeError(ctx, err)
@@ -285,7 +314,7 @@ func (b *Backend) reconcileImmutable(ctx context.Context, key string, size int64
 	if out.ContentLength == nil || *out.ContentLength != size {
 		verifyErr = publication.ErrConflict
 	} else {
-		verifyErr = verifyDigest(ctx, out.Body, size, digest)
+		verifyErr = verifyDigest(ctx, progressReader{out.Body, g}, size, digest)
 	}
 	closeErr := out.Body.Close()
 	if closeErr != nil {

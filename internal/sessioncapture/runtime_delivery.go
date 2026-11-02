@@ -82,7 +82,15 @@ func (q *Queue) deliverDueLaneWork(ctx context.Context, b publication.Backend, i
 	}
 	// Malformed metadata still follows the existing attempt/result quarantine
 	// path; a lane change alone is not a failed or successful delivery attempt.
-	attemptErr := q.attempt(ctx, b, i, seq, body, ev)
+	// The attempt may upload every selected object of the head manifest, so its
+	// bound is OperationTimeout plus the backend's per-object allowances.
+	// Backends without a budget keep the caller's step context unchanged.
+	attemptCtx, cancelAttempt := ctx, context.CancelFunc(func() {})
+	if allowance := transferAllowance(b, head.Sources...); allowance > 0 {
+		attemptCtx, cancelAttempt = context.WithTimeout(ctx, o.OperationTimeout+allowance)
+	}
+	attemptErr := q.attempt(attemptCtx, b, i, seq, body, ev)
+	cancelAttempt()
 	return true, q.deliveryResult(ctx, i, seq, attempts, attemptErr, o, false)
 }
 

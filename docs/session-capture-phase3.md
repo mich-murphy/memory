@@ -81,7 +81,7 @@ acceptance**:
 | --- | --- |
 | Discovery timer | 30 seconds |
 | Capture / delivery workers | 4 / 4 |
-| Cooperative operation context | 60 seconds |
+| Cooperative operation context | 60 seconds for capture, discovery and enrichment; delivery and repair steps add `TransferTimeout` (15 minutes) so the backend, not the step context, bounds object transfers |
 | Retry backoff | Jittered, clamped to 1 second–5 minutes |
 | Failed attempts before quarantine | 8, counted only for deterministic classes (policy, integrity, permanent quota, conflict, rejected); transient, timeout, throttling and spool-full failures retry indefinitely |
 | Encoded spool | 1 GiB by service example; no eviction |
@@ -357,3 +357,27 @@ These are development gates, not installed 32768-record, native/resource/coverag
 acceptance. Builds and controlled upgrades were the next action at that checkpoint;
 subsequent installations and failures are recorded in the handoff, not renewed rollout
 instructions here.
+
+## Object transfer budgets (GAP-02)
+
+Metadata, reference and conditional-write operations keep the flat 30 second backend
+deadline. Object bodies (upload, read-back verification after a lost acknowledgement, and
+streamed reads) use a size-aware budget: `30s + size / min_throughput`, clamped to
+60 seconds-15 minutes, plus an idle limit: a transfer making no body progress for 30
+seconds is abandoned. Timeouts and stalls wrap `context.DeadlineExceeded`, so they are
+retryable `timeout` failures that never spend the quarantine budget. The shared HTTP
+client has no whole-request timeout; dial, TLS and response-header limits remain.
+`min_throughput_kib` (R2 backend, default 1024) sets the assumed slowest sustained rate.
+The default is conservative and **not measured against live R2**; encoded objects are
+p50 about 2 KB, p99 about 1.1 MB, maximum 215 MB (Mac) and 35 MB (BC-01), so a 215 MB
+object receives about 235 seconds. Confirm the default with live transfer data.
+
+Step bound (GAP-02): a delivery or repair attempt is bounded by
+`OperationTimeout + Σ TransferBudget(size)` over the selected objects of the head manifest,
+where `TransferBudget(size) = 2 × Total(size)`. The factor of 2 covers the upload plus the
+read-back verification after a lost acknowledgement or conflict. Worst case therefore scales
+with the manifest's object bytes; the backend still enforces each object's own budget.
+Backends that report no budget (Local) keep the flat `OperationTimeout`. The defaults
+(1 MiB/s, 30 s base, 60 s–15 min, 30 s idle) are conservative and unmeasured.
+Follow-up: a conflict-path retry (412 on a re-upload) costs a full download of the object;
+per-object local upload markers are deliberately not implemented here.

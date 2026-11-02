@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/mich-murphy/memory/internal/capturebackend"
 	"github.com/mich-murphy/memory/internal/capturedaemon"
@@ -61,6 +62,12 @@ func destinationError(err error) error {
 		return errors.Join(sessioncapture.ErrDestination, err)
 	}
 	return err
+}
+
+// TransferBudget forwards the destination's size-aware allowance from the
+// specification, which is known before the lazy backend is bound.
+func (b *captureDestinationBackend) TransferBudget(size int64) time.Duration {
+	return b.spec.TransferBudget(size)
 }
 
 func (b *captureDestinationBackend) open(ctx context.Context) (publication.Backend, error) {
