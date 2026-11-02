@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -385,5 +386,62 @@ func TestListNamespaceLimitsAndAdvancement(t *testing.T) {
 		if _, _, err = serve(listXML(false, tc.list...)).ListSessionNamespaces(t.Context(), identity, tc.after, 2); err == nil || err.Error() != "nonadvancing namespace listing" {
 			t.Fatalf("%s: %v", name, err)
 		}
+	}
+}
+
+func TestNewRequiresPositiveTimeout(t *testing.T) {
+	client := clientFor(t, http.NotFoundHandler())
+	for _, timeout := range []time.Duration{-time.Second, 0} {
+		if _, err := New(client, "offline-bucket", timeout); err == nil || err.Error() != "invalid publication destination options" {
+			t.Fatalf("timeout %s: %v", timeout, err)
+		}
+	}
+	if _, err := New(client, "offline-bucket", time.Nanosecond); err != nil {
+		t.Fatalf("smallest positive timeout: %v", err)
+	}
+}
+
+type closeFailBody struct{ io.Reader }
+
+func (closeFailBody) Close() error { return errors.New("synthetic close failure") }
+
+// A read-back that verifies but whose body cannot be closed is not a success.
+func TestReconcileReportsReadBackCloseFailure(t *testing.T) {
+	data := []byte("object whose read-back verifies but fails to close")
+	object, _ := keysFor(data)
+	b := syntheticBackend(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodPut {
+			h := http.Header{}
+			h.Set("Content-Type", "application/xml")
+			return &http.Response{StatusCode: http.StatusInternalServerError, Header: h, Body: io.NopCloser(strings.NewReader("<Error><Code>InternalError</Code></Error>"))}, nil
+		}
+		return declaredResponse(int64(len(data)), closeFailBody{bytes.NewReader(data)})(r)
+	})
+	if err := b.PutFile(t.Context(), object, writePayload(t, data)); err == nil || err.Error() != "publication stream close failed" {
+		t.Fatalf("PutFile: %v", err)
+	}
+}
+
+func TestListSendsStartAfterOnlyWithCursor(t *testing.T) {
+	id := identity
+	id.SessionID = "a"
+	cursor := id.BaseKey() + "/"
+	for _, after := range []string{"", cursor} {
+		var query atomic.Value
+		b := backendFor(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			query.Store(r.URL.Query())
+			_, _ = io.WriteString(w, listXML(false))
+		}), time.Second)
+		if _, _, err := b.ListSessionNamespaces(t.Context(), identity, after, 1); err != nil {
+			t.Fatal(err)
+		}
+		q := query.Load().(url.Values)
+		if q.Has("start-after") != (after != "") || q.Get("start-after") != after {
+			t.Fatalf("after %q: start-after=%q present=%v", after, q.Get("start-after"), q.Has("start-after"))
+		}
+	}
+	b := backendFor(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, listXML(false)) }), time.Second)
+	if _, _, err := b.ListSessionNamespaces(t.Context(), identity, "capture-v1/outside/", 1); err == nil {
+		t.Fatal("cursor outside the scope accepted")
 	}
 }
