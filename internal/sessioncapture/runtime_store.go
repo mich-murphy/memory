@@ -132,6 +132,9 @@ func (q *Queue) prepareHint(req Request) (hintRow, error) {
 			return hintRow{}, errors.New("sessioncapture: invalid hint identity")
 		}
 	}
+	if err := checkKeyLength(req.Identity); err != nil {
+		return hintRow{}, err
+	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return hintRow{}, err
