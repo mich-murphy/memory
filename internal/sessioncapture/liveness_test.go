@@ -821,7 +821,10 @@ func TestManifestOfSlowObjectsPublishesInOneStep(t *testing.T) {
 	b := &slowObjectBackend{Backend: newBackend(t)}
 	// 3 x 600ms of upload exceeds one object's 1s allowance and a flat 1.2s bound.
 	opts := runtimeDefaults(RuntimeOptions{OperationTimeout: 200 * time.Millisecond})
-	if did, err := q.deliverDueWork(t.Context(), b, r.Identity, opts); err != nil || !did {
+	opts.budgeted = true // as Run sets it for a backend that reports budgets
+	step, cancelStep := stepContext(t.Context(), "delivery", opts)
+	defer cancelStep()
+	if did, err := q.deliverDueWork(step, b, r.Identity, opts); err != nil || !did {
 		t.Fatalf("did=%v err=%v", did, err)
 	}
 	all, err := q.Status(t.Context())
