@@ -28,31 +28,33 @@ type Root struct {
 	Path  string `json:"path"`
 }
 type Config struct {
-	Version             string               `json:"version"`
-	ArchiveID           string               `json:"archive_id"`
-	MachineID           string               `json:"machine_id"`
-	Store               string               `json:"store,omitempty"`
-	Backend             *capturebackend.Spec `json:"backend,omitempty"`
-	Spool               string               `json:"spool"`
-	PolicyDir           string               `json:"policy_dir"`
-	Home                string               `json:"home"`
-	DefaultRoots        bool                 `json:"default_roots"`
-	Enrichment          bool                 `json:"enrichment,omitempty"`
-	EnrichmentRoots     []string             `json:"enrichment_roots,omitempty"`
-	Roots               []Root               `json:"roots"`
-	RootAliases         []RootAlias          `json:"root_aliases,omitempty"`
-	LeafAliases         []LeafAlias          `json:"leaf_aliases,omitempty"`
-	CaptureWorkers      int                  `json:"capture_workers"`
-	DeliveryWorkers     int                  `json:"delivery_workers"`
-	PollSeconds         int                  `json:"poll_seconds"`
-	QuietSeconds        int                  `json:"quiet_seconds,omitempty"`
-	MaxDelaySeconds     int                  `json:"max_delay_seconds,omitempty"`
-	OperationSeconds    int                  `json:"operation_seconds"`
-	MaxAttempts         int                  `json:"max_attempts"`
-	MaxInventoryRecords int                  `json:"max_inventory_records,omitempty"`
-	MaxSpoolBytes       int64                `json:"max_spool_bytes"`
-	MinFreeBytes        int64                `json:"min_free_bytes"`
-	EntriesPerRoot      int                  `json:"entries_per_root"`
+	Version         string               `json:"version"`
+	ArchiveID       string               `json:"archive_id"`
+	MachineID       string               `json:"machine_id"`
+	Store           string               `json:"store,omitempty"`
+	Backend         *capturebackend.Spec `json:"backend,omitempty"`
+	Spool           string               `json:"spool"`
+	PolicyDir       string               `json:"policy_dir"`
+	Home            string               `json:"home"`
+	DefaultRoots    bool                 `json:"default_roots"`
+	Enrichment      bool                 `json:"enrichment,omitempty"`
+	EnrichmentRoots []string             `json:"enrichment_roots,omitempty"`
+	Roots           []Root               `json:"roots"`
+	RootAliases     []RootAlias          `json:"root_aliases,omitempty"`
+	LeafAliases     []LeafAlias          `json:"leaf_aliases,omitempty"`
+	CaptureWorkers  int                  `json:"capture_workers"`
+	DeliveryWorkers int                  `json:"delivery_workers"`
+	PollSeconds     int                  `json:"poll_seconds"`
+	// QuietSeconds and MaxDelaySeconds set the capture debounce; omitted means the
+	// documented defaults (30 s, 300 s), 0 disables it.
+	QuietSeconds        *int  `json:"quiet_seconds,omitempty"`
+	MaxDelaySeconds     *int  `json:"max_delay_seconds,omitempty"`
+	OperationSeconds    int   `json:"operation_seconds"`
+	MaxAttempts         int   `json:"max_attempts"`
+	MaxInventoryRecords int   `json:"max_inventory_records,omitempty"`
+	MaxSpoolBytes       int64 `json:"max_spool_bytes"`
+	MinFreeBytes        int64 `json:"min_free_bytes"`
+	EntriesPerRoot      int   `json:"entries_per_root"`
 	sourcePath          string
 }
 
@@ -201,8 +203,8 @@ func (c Config) validateBudgets() error {
 		{int64(c.CaptureWorkers), 1, 32},
 		{int64(c.DeliveryWorkers), 1, 32},
 		{int64(c.PollSeconds), 1, 3600},
-		{int64(c.QuietSeconds), 0, int64(sessioncapture.MaxQuietPeriod / time.Second)},
-		{int64(c.MaxDelaySeconds), 0, int64(sessioncapture.MaxCaptureDelay / time.Second)},
+		{int64(c.cadence().quietSeconds), 0, int64(sessioncapture.MaxQuietPeriod / time.Second)},
+		{int64(c.cadence().maxDelaySeconds), 0, int64(sessioncapture.MaxCaptureDelay / time.Second)},
 		{int64(c.OperationSeconds), 1, 3600},
 		{int64(c.MaxAttempts), 1, 100},
 		{c.MaxSpoolBytes, 1, 1 << 50},
@@ -366,4 +368,23 @@ func Save(path string, c Config) error {
 		return err
 	}
 	return WritePrivate(path, append(body, '\n'))
+}
+
+type cadence struct{ quietSeconds, maxDelaySeconds int }
+
+// Cadence resolves the capture debounce, applying the defaults for omitted fields.
+func (c Config) Cadence() (quiet, maxDelay time.Duration) {
+	r := c.cadence()
+	return time.Duration(r.quietSeconds) * time.Second, time.Duration(r.maxDelaySeconds) * time.Second
+}
+
+func (c Config) cadence() cadence {
+	r := cadence{int(sessioncapture.DefaultQuietPeriod / time.Second), int(sessioncapture.DefaultMaxDelay / time.Second)}
+	if c.QuietSeconds != nil {
+		r.quietSeconds = *c.QuietSeconds
+	}
+	if c.MaxDelaySeconds != nil {
+		r.maxDelaySeconds = *c.MaxDelaySeconds
+	}
+	return r
 }

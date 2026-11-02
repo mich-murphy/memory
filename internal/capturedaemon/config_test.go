@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func sandbox(t *testing.T) string {
@@ -222,5 +223,21 @@ func TestConfigInventoryQuotaOptionalRoundtrip(t *testing.T) {
 		if err := c.Validate(); err == nil {
 			t.Fatalf("accepted quota %d", limit)
 		}
+	}
+}
+
+func TestCadenceDefaultsAndOverrides(t *testing.T) {
+	var c Config
+	if q, m := c.Cadence(); q != 30*time.Second || m != 300*time.Second {
+		t.Fatalf("defaults %s/%s", q, m)
+	}
+	zero, ten := 0, 10
+	c.QuietSeconds, c.MaxDelaySeconds = &zero, &zero
+	if q, m := c.Cadence(); q != 0 || m != 0 {
+		t.Fatalf("disabled %s/%s", q, m)
+	}
+	c.QuietSeconds, c.MaxDelaySeconds = &ten, nil
+	if q, m := c.Cadence(); q != 10*time.Second || m != 300*time.Second {
+		t.Fatalf("partial %s/%s", q, m)
 	}
 }

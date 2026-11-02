@@ -423,3 +423,14 @@ Backends that report no budget (Local) keep the flat `OperationTimeout`. The def
 (1 MiB/s, 30 s base, 60 s–15 min, 30 s idle) are conservative and unmeasured.
 Follow-up: a conflict-path retry (412 on a re-upload) costs a full download of the object;
 per-object local upload markers are deliberately not implemented here.
+
+## Capture cadence (GAP-03, implemented)
+
+The capture daemon debounces each source: a changed source is captured once it has
+been quiet for `quiet_seconds` (default 30), and no later than `max_delay_seconds`
+(default 300) after its first unconsumed observation. Set both to 0 to capture
+immediately. `RuntimeOptions.QuietPeriod/MaxDelay` default to zero (immediate), so
+library callers are unchanged. The defaults come from a simulated replay of the
+anonymised workload timelines (`reports/g3-cadence.md`, a validation-pilot report),
+which is simulated evidence, not live measurement. `RuntimeStatus.DebouncedSources`
+and `DebounceLagNS` show sources still waiting.

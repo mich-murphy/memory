@@ -185,7 +185,8 @@ func runCaptureWritable(ctx context.Context, cmd string, c capturedaemon.Config,
 	case "run":
 		discover, closeDiscovery := r.discovery(f.config)
 		defer func() { err = errors.Join(err, closeDiscovery()) }()
-		opts := sessioncapture.RuntimeOptions{DiscoverBatch: discover, PollInterval: time.Duration(c.PollSeconds) * time.Second, OperationTimeout: time.Duration(c.OperationSeconds) * time.Second, CaptureWorkers: c.CaptureWorkers, DeliveryWorkers: c.DeliveryWorkers, MaxAttempts: c.MaxAttempts, QuietPeriod: time.Duration(c.QuietSeconds) * time.Second, MaxDelay: time.Duration(c.MaxDelaySeconds) * time.Second}
+		quiet, maxDelay := c.Cadence()
+		opts := sessioncapture.RuntimeOptions{DiscoverBatch: discover, PollInterval: time.Duration(c.PollSeconds) * time.Second, OperationTimeout: time.Duration(c.OperationSeconds) * time.Second, CaptureWorkers: c.CaptureWorkers, DeliveryWorkers: c.DeliveryWorkers, MaxAttempts: c.MaxAttempts, QuietPeriod: quiet, MaxDelay: maxDelay}
 		if c.Enrichment {
 			opts.Enrich, opts.CheckEnrichmentAsset = r.enrichment(), r.enrichmentAssetPolicy()
 		}

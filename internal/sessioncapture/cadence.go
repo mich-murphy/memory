@@ -13,6 +13,15 @@ const (
 	MaxCaptureDelay = 24 * time.Hour
 )
 
+// Daemon defaults chosen by reports/g3-cadence.md (replay sweep over D's timelines):
+// Q=30s cuts p99 captures per session by 72% and PUTs by 82% against immediate
+// capture; M=300s bounds worst-case freshness lag to about five minutes.
+// RuntimeOptions zero values still mean immediate capture.
+const (
+	DefaultQuietPeriod = 30 * time.Second
+	DefaultMaxDelay    = 300 * time.Second
+)
+
 // ErrCadence reports an invalid QuietPeriod/MaxDelay combination.
 var ErrCadence = errors.New("sessioncapture: invalid capture cadence")
 

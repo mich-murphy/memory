@@ -19,7 +19,7 @@ func runtimeFixture(t *testing.T) (capturedaemon.Config, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := capturedaemon.Config{Version: capturedaemon.ConfigVersion, ArchiveID: "runtime-test", MachineID: "test-machine", Store: filepath.Join(root, "store"), Spool: filepath.Join(root, "spool"), PolicyDir: filepath.Join(root, "policy"), Home: filepath.Join(root, "home"), DefaultRoots: true, CaptureWorkers: 1, DeliveryWorkers: 1, PollSeconds: 1, OperationSeconds: 1, MaxAttempts: 2, MaxSpoolBytes: 1 << 20, EntriesPerRoot: 16}
+	c := capturedaemon.Config{Version: capturedaemon.ConfigVersion, ArchiveID: "runtime-test", MachineID: "test-machine", Store: filepath.Join(root, "store"), Spool: filepath.Join(root, "spool"), PolicyDir: filepath.Join(root, "policy"), Home: filepath.Join(root, "home"), DefaultRoots: true, CaptureWorkers: 1, DeliveryWorkers: 1, PollSeconds: 1, OperationSeconds: 1, MaxAttempts: 2, MaxSpoolBytes: 1 << 20, EntriesPerRoot: 16, QuietSeconds: new(0), MaxDelaySeconds: new(0)}
 	if err = os.MkdirAll(filepath.Join(c.PolicyDir, "exclusions"), 0o700); err != nil {
 		t.Fatal(err)
 	}
