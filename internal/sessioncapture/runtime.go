@@ -35,7 +35,31 @@ const (
 	FailureQuota       FailureClass = "quota"
 	FailureTimeout     FailureClass = "timeout"
 	FailureAbsent      FailureClass = "absent"
+	// FailureConflict is a guarded-write or immutable-object conflict. It is a
+	// distinct, visible class: it is neither retried unseen forever nor treated as
+	// a network blip, so it spends the quarantine budget and stays replayable.
+	// Convergence with an existing remote belongs to GAP-06.
+	FailureConflict FailureClass = "conflict"
+	// FailureRejected is a destination rejection (HTTP 4xx) that repeating the same
+	// request cannot fix.
+	FailureRejected FailureClass = "rejected"
+	// FailureSpoolFull is capacity backpressure that clears when space returns.
+	FailureSpoolFull FailureClass = "spool-full"
 )
+
+// spendsQuarantineBudget reports whether repeated failures of this class count
+// toward MaxAttempts. Only deterministic classes do. Transient, timeout and
+// throttling failures retry indefinitely with capped, jittered backoff
+// (contract section 3); destination failures pause instead of quarantining.
+func (c FailureClass) spendsQuarantineBudget() bool {
+	switch c {
+	case FailurePolicy, FailureIntegrity, FailureQuota, FailureConflict, FailureRejected:
+		return true
+	case FailureTransient, FailureDestination, FailureTimeout, FailureAbsent, FailureSpoolFull:
+		return false
+	}
+	return false
+}
 
 type RuntimeOptions struct {
 	Enrich               EnrichFunc
@@ -106,14 +130,20 @@ func classify(err error, custom func(error) FailureClass) FailureClass {
 		return FailurePolicy
 	case errors.Is(err, ErrIntegrity):
 		return FailureIntegrity
+	case errors.Is(err, ErrSpoolFull):
+		return FailureSpoolFull
 	case errors.Is(err, ErrQuota):
 		return FailureQuota
+	case errors.Is(err, publication.ErrConflict):
+		return FailureConflict
+	case errors.Is(err, publication.ErrRejected):
+		return FailureRejected
 	case errors.Is(err, context.DeadlineExceeded):
 		return FailureTimeout
 	}
 	if custom != nil {
 		switch c := custom(err); c {
-		case FailureTransient, FailureDestination, FailurePolicy, FailureIntegrity, FailureQuota, FailureTimeout, FailureAbsent:
+		case FailureTransient, FailureDestination, FailurePolicy, FailureIntegrity, FailureQuota, FailureTimeout, FailureAbsent, FailureConflict, FailureRejected, FailureSpoolFull:
 			return c
 		}
 	}

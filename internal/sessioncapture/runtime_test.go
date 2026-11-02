@@ -32,7 +32,7 @@ func TestRuntimeRetryPauseQuarantineReplay(t *testing.T) {
 	if err := q.InitRuntime(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	broken := runtimeBrokenBackend{Backend: newBackend(t), err: errors.New("safe transient")}
+	broken := runtimeBrokenBackend{Backend: newBackend(t), err: fmt.Errorf("safe deterministic: %w", ErrIntegrity)}
 	options := runtimeDefaults(RuntimeOptions{MaxAttempts: 2, Jitter: func(d time.Duration) time.Duration { return d }})
 	if err := q.deliverDue(t.Context(), broken, req.Identity, options); err != nil {
 		t.Fatal(err)

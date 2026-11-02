@@ -141,7 +141,7 @@ func (q *Queue) persistDeliveryFailure(ctx context.Context, i publication.Identi
 	state := "retry"
 	if immediate && (code == FailurePolicy || code == FailureIntegrity) {
 		state = string(code) // Explicit replay retains the legacy visible blocked state.
-	} else if !immediate && attempts >= o.MaxAttempts {
+	} else if !immediate && code.spendsQuarantineBudget() && attempts >= o.MaxAttempts {
 		state = "quarantined"
 	}
 	tx, err := q.db.BeginTx(ctx, nil)

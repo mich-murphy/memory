@@ -51,7 +51,12 @@ var (
 	ErrQuota = errors.New("sessioncapture: spool quota exceeded")
 	// ErrEncodedSize distinguishes encoded-envelope exhaustion from aggregate
 	// spool exhaustion while preserving runtime quota classification.
-	ErrEncodedSize     = fmt.Errorf("sessioncapture: encoded publication size exceeded: %w", ErrQuota)
+	ErrEncodedSize = fmt.Errorf("sessioncapture: encoded publication size exceeded: %w", ErrQuota)
+	// ErrSpoolFull is capacity backpressure (spool bytes or free-space reserve). It
+	// wraps ErrQuota for existing callers but clears when capacity returns, so it
+	// retries with capped backoff and never spends the quarantine budget; permanent
+	// limits (oversized source, request bounds) remain plain ErrQuota.
+	ErrSpoolFull       = fmt.Errorf("%w: spool full", ErrQuota)
 	ErrIntegrity       = errors.New("sessioncapture: payload integrity failure")
 	ErrSessionExcluded = errors.New("sessioncapture: session excluded")
 	ErrPolicy          = errors.New("sessioncapture: policy denied")
@@ -96,6 +101,9 @@ type Status struct {
 	Attempts             int
 	LastError            string
 	NextRetryNS          int64
+	// CapturedAtNS is when the job's bytes were accepted; now minus this value is
+	// the job's pending age.
+	CapturedAtNS int64
 }
 type evidence struct {
 	EpochID         string              `json:",omitempty"` // Private durable source-epoch join; older rows have no binding.
@@ -402,6 +410,7 @@ func (q *Queue) Status(ctx context.Context) ([]Status, error) {
 		s.Identity = m.Identity
 		s.Sequence = m.Sequence
 		s.PublicationID = m.PublicationID
+		s.CapturedAtNS = m.CapturedAtNS
 		out = append(out, s)
 	}
 	return out, rows.Err()

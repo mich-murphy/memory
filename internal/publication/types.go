@@ -27,6 +27,9 @@ var (
 	ErrDestinationPaused = errors.New("publication destination paused")
 	ErrConflict          = errors.New("publication conflict")
 	ErrNotFound          = errors.New("publication object not found")
+	// ErrRejected marks a destination rejection (HTTP 4xx other than not-found,
+	// conflict, authentication, timeout or throttling) that retrying cannot fix.
+	ErrRejected = errors.New("publication request rejected by destination")
 	// ErrInvalidMetadata marks a document that was read in full but is oversized,
 	// malformed or unsupported. It never marks a transport or read failure.
 	ErrInvalidMetadata = errors.New("publication metadata invalid")

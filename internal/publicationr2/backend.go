@@ -115,6 +115,13 @@ func safeError(ctx context.Context, err error) error {
 			return publication.ErrConflict
 		case http.StatusUnauthorized, http.StatusForbidden:
 			return ErrDestinationPaused
+		case http.StatusRequestTimeout, http.StatusTooManyRequests:
+			// Throttling and server-side timeouts are temporary: leave them to the
+			// runtime's unbounded, jittered retry.
+		default:
+			if code := response.HTTPStatusCode(); code >= 400 && code < 500 {
+				return publication.ErrRejected
+			}
 		}
 	}
 	return errors.New("publication destination operation failed")

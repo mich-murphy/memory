@@ -597,3 +597,25 @@ func TestImmutableLostAcknowledgement(t *testing.T) {
 		})
 	}
 }
+
+func TestStatusClassesForRetryAndRejection(t *testing.T) {
+	for _, tc := range []struct {
+		status   int
+		code     string
+		rejected bool
+	}{
+		{400, "InvalidRequest", true},
+		{413, "EntityTooLarge", true},
+		{408, "RequestTimeout", false},
+		{429, "SlowDown", false},
+		{503, "SlowDown", false},
+	} {
+		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
+			b := backendFor(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { protocolError(w, tc.status, tc.code) }), time.Second)
+			err := b.CompareAndSwap(t.Context(), identity.CurrentKey(), "", []byte("test"))
+			if err == nil || errors.Is(err, publication.ErrRejected) != tc.rejected || errors.Is(err, ErrDestinationPaused) || errors.Is(err, publication.ErrConflict) || errors.Is(err, publication.ErrNotFound) {
+				t.Fatalf("status %d: rejected=%v err=%v", tc.status, errors.Is(err, publication.ErrRejected), err)
+			}
+		})
+	}
+}

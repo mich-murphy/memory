@@ -43,6 +43,21 @@ resumed after restart without another hook or their original source. Explicit
 Quarantine retains source/session coordinates, attempts, safe classifications,
 contract and diagnostic software version. Replaying does not erase historical entries.
 
+Failure dispositions (contract section 3): temporary transport, throttling (HTTP 408/429/5xx)
+and timeout failures keep the job `retry` with capped (5 minute) jittered backoff and
+no attempt limit; a newer job never overtakes the pending head, and the head publishes
+once the backend heals without `replay`. Destination authentication pauses delivery.
+Spool or free-space exhaustion (`ErrSpoolFull`, class `spool-full`) is backpressure that
+retries and clears when capacity returns. Only deterministic classes consume
+`max_attempts` and then quarantine: `policy-blocked`, `integrity-error`, `quota`
+(oversized source, request bounds), `rejected` (other HTTP 4xx) and `conflict`.
+`conflict` (a guarded-write or immutable-object conflict not resolved by lost-ACK
+reconciliation) is an interim visible, replayable class; convergence is GAP-06.
+Lag is observable: per-job `Status` carries `Attempts`, `LastError` class, `NextRetryNS`
+and `CapturedAtNS`; `RuntimeStatus` adds `RetryingPublications`, `MaxPendingAttempts`,
+`OldestPendingPublicationAtNS` and `SpoolFullWork`. Optional-repair and enrichment work
+still use the legacy attempt rule (open item).
+
 The intended cancellation boundary is graceful shutdown only when every error-tree
 leaf is caller cancellation; database, integrity and durability causes must remain
 visible. The handoff tracks qualification of this boundary; intent is not proof that every
@@ -59,7 +74,7 @@ acceptance**:
 | Capture / delivery workers | 4 / 4 |
 | Cooperative operation context | 60 seconds |
 | Retry backoff | Jittered, clamped to 1 second–5 minutes |
-| Failed attempts before quarantine | 8 |
+| Failed attempts before quarantine | 8, counted only for deterministic classes (policy, integrity, permanent quota, conflict, rejected); transient, timeout, throttling and spool-full failures retry indefinitely |
 | Encoded spool | 1 GiB by service example; no eviction |
 | Decoded source body | 1 GiB |
 | Encoded source object | 1 GiB, independently enforced before local acceptance and by R2 transport |

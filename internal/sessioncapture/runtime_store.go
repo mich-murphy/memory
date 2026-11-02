@@ -246,13 +246,7 @@ func (q *Queue) captureNext(ctx context.Context, o RuntimeOptions) (did bool, re
 	if captureErr == nil {
 		// CaptureIfChanged may return an old manifest: observation freshness must
 		// not fabricate a newer byte-ownership watermark for unchanged content.
-		var capturedAt int64
-		for j := range m.Sources {
-			source := &m.Sources[j]
-			if source.SourceID == w.req.SourceID {
-				capturedAt = max(capturedAt, source.CapturedAtNS)
-			}
-		}
+		capturedAt := sourceCapturedAt(m, w.req.SourceID)
 		_, err = q.db.ExecContext(save, `UPDATE runtime_sources SET claim=0,captured_version=MAX(captured_version,?),captured_at=?,sequence=?,publication=?,attempts=0,last_error='',next_retry=0,state=CASE WHEN observed_state='absent' THEN 'absent' WHEN version=? THEN 'captured' ELSE 'pending' END WHERE id=? AND claim=?`, w.version, capturedAt, m.Sequence, m.PublicationID, w.version, w.id, w.version)
 		return true, err
 	}
@@ -267,7 +261,7 @@ func (q *Queue) captureNext(ctx context.Context, o RuntimeOptions) (did bool, re
 	}
 	attempts := w.attempts + 1
 	state := "retry"
-	if attempts >= o.MaxAttempts {
+	if code.spendsQuarantineBudget() && attempts >= o.MaxAttempts {
 		state = "quarantined"
 	}
 	if code == FailureAbsent {
@@ -292,6 +286,17 @@ func (q *Queue) captureNext(ctx context.Context, o RuntimeOptions) (did bool, re
 		return true, err
 	}
 	return true, tx.Commit()
+}
+
+// sourceCapturedAt returns the latest capture time of one source in a manifest.
+func sourceCapturedAt(m publication.Manifest, sourceID string) int64 {
+	var capturedAt int64
+	for j := range m.Sources {
+		if m.Sources[j].SourceID == sourceID {
+			capturedAt = max(capturedAt, m.Sources[j].CapturedAtNS)
+		}
+	}
+	return capturedAt
 }
 
 func (q *Queue) destinationPaused(ctx context.Context) (bool, error) {

@@ -49,7 +49,7 @@ func (q *Queue) reserve(n int64) error {
 		return ErrIntegrity
 	}
 	if q.used > q.opts.MaxSpoolBytes || n > q.opts.MaxSpoolBytes-q.used {
-		return ErrQuota
+		return ErrSpoolFull
 	}
 	if q.opts.MinFreeBytes > 0 {
 		free, err := availableBytes(q.dir)
@@ -59,7 +59,7 @@ func (q *Queue) reserve(n int64) error {
 		// Existing writes are reflected in statfs, but outstanding reservations may
 		// not be. Subtract them conservatively until their writes finish.
 		if free < q.opts.MinFreeBytes || n > free-q.opts.MinFreeBytes-q.writing {
-			return ErrQuota
+			return ErrSpoolFull
 		}
 		if err := q.checkWorkingReserveLocked(free, n); err != nil {
 			return err

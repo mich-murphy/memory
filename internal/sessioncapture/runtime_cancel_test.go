@@ -3,6 +3,7 @@ package sessioncapture
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -106,7 +107,8 @@ func TestOperationDeadlineStillSpendsAttempt(t *testing.T) {
 	if state != "retry" || attempts != 1 || reason != string(FailureTimeout) {
 		t.Fatalf("%s %d %s", state, attempts, reason)
 	}
-	// The 8th deadline failure quarantines.
+	// Deadline failures never consume the quarantine budget (contract section 3):
+	// even past MaxAttempts the job keeps retrying.
 	if _, err := q.db.ExecContext(t.Context(), `UPDATE jobs SET attempts=7,next_retry=0,state='retry'`); err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +119,7 @@ func TestOperationDeadlineStillSpendsAttempt(t *testing.T) {
 	}
 	entries, err := q.Quarantine(t.Context(), 0, 8)
 	state, attempts, _ = jobRow(t, q)
-	if err != nil || len(entries) != 1 || entries[0].Reason != string(FailureTimeout) || state != "quarantined" || attempts != 8 {
+	if err != nil || len(entries) != 0 || state != "retry" || attempts != 8 {
 		t.Fatalf("%+v %v %s %d", entries, err, state, attempts)
 	}
 }
@@ -224,7 +226,7 @@ func TestReplayCaptureGuard(t *testing.T) {
 			dir, o, req := setup(t)
 			o.Fault = func(point string) error {
 				if point == "payload-before-sync" {
-					return errors.New("injected")
+					return fmt.Errorf("injected: %w", ErrIntegrity)
 				}
 				return nil
 			}

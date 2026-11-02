@@ -36,7 +36,17 @@ type RuntimeStatus struct {
 	DiscoveryError                                                  string
 	DiscoveredAtNS                                                  int64
 	Sources, PendingSources, Quarantined, PendingPublications       int64
-	OldestObservedAtNS                                              int64
+	// RetryingPublications counts unpublished jobs that failed at least once and
+	// are not quarantined; they retry indefinitely when the cause is transient.
+	// OldestPendingPublicationAtNS is the capture time of the oldest unpublished
+	// job (0 when none), so lag is now minus that value. MaxPendingAttempts is the
+	// highest attempt count among unpublished jobs.
+	RetryingPublications, MaxPendingAttempts int64
+	// SpoolFullWork counts capture sources and publications currently waiting on
+	// spool or free-space capacity (backpressure, not quarantine).
+	SpoolFullWork                int64
+	OldestPendingPublicationAtNS int64
+	OldestObservedAtNS           int64
 	// Discovery and enrichment remain partial; a successful timer is not proof of
 	// complete source inventory. Published timestamps remain independent of capture.
 	Coverage string
@@ -117,7 +127,11 @@ func (q *Queue) RuntimeStatus(ctx context.Context) (RuntimeStatus, error) {
 	if err := q.discoveryStatus(ctx, &s); err != nil {
 		return s, err
 	}
-	err = q.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM jobs WHERE state NOT IN ('published','superseded')`).Scan(&s.PendingPublications)
+	err = q.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(state='retry'),0),COALESCE(MAX(attempts),0),COALESCE(MIN(json_extract(CAST(manifest AS TEXT),'$.captured_at_ns')),0) FROM jobs WHERE state NOT IN ('published','superseded')`).Scan(&s.PendingPublications, &s.RetryingPublications, &s.MaxPendingAttempts, &s.OldestPendingPublicationAtNS)
+	if err != nil {
+		return s, err
+	}
+	err = q.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM runtime_sources WHERE state='retry' AND last_error='spool-full')+(SELECT COUNT(*) FROM jobs WHERE state='retry' AND last_error='spool-full')`).Scan(&s.SpoolFullWork)
 	return s, err
 }
 
