@@ -273,7 +273,12 @@ func TestRebaseSteadyStateEachCaptureIsOneStep(t *testing.T) {
 		}
 		costs = append(costs, fmt.Sprintf("current=%d opens=%d puts=%d swaps=%d", cb.current, cb.opens, cb.puts, cb.swaps))
 	}
-	t.Logf("per-delivery backend calls: %v", costs)
+	// Bounded, measured cost: every delivery repeats Current+Read+merge because local
+	// sequencing stays below the remote. This must not grow silently.
+	want := []string{"current=5 opens=6 puts=1 swaps=1", "current=5 opens=8 puts=2 swaps=1", "current=5 opens=8 puts=2 swaps=1"}
+	if fmt.Sprint(costs) != fmt.Sprint(want) {
+		t.Fatalf("per-delivery backend calls %v, want %v", costs, want)
+	}
 }
 
 func TestRebaseCoveredPublishesWithoutWrites(t *testing.T) {
@@ -370,5 +375,41 @@ func TestRebaseLostAckAtCurrentAfterResolvesInOneStep(t *testing.T) {
 	}
 	if cb.swaps != 1 || jobState(t, qb, r.Identity, 1) != "published" || remoteOf(t, b, r).Sequence != 3 {
 		t.Fatalf("swaps=%d", cb.swaps)
+	}
+}
+
+func TestRebaseManifestExactlyMaxSourcesFits(t *testing.T) {
+	remote := publication.Manifest{Sequence: 4}
+	for i := range publication.MaxSources - 1 {
+		remote.Sources = append(remote.Sources, rebaseSource(fmt.Sprintf("s%d", i), "e", 1, fmt.Sprintf("h%d", i)))
+	}
+	local := publication.Manifest{Sequence: 1, Sources: []publication.Source{rebaseSource("new", "e", 1, "n")}}
+	got, _, covered, err := rebaseManifest(remote, local)
+	if err != nil || covered || len(got.Sources) != publication.MaxSources {
+		t.Fatalf("sources=%d covered=%v err=%v", len(got.Sources), covered, err)
+	}
+}
+
+func TestRebaseCoverageMergesDiscoveryAndEnrichmentIndependently(t *testing.T) {
+	for _, tc := range []struct{ remote, local, want [2]string }{
+		{[2]string{"complete", "complete"}, [2]string{"complete", "complete"}, [2]string{"complete", "complete"}},
+		{[2]string{"partial", "complete"}, [2]string{"complete", "complete"}, [2]string{"partial", "complete"}},
+		{[2]string{"complete", "partial"}, [2]string{"complete", "complete"}, [2]string{"complete", "partial"}},
+	} {
+		remote := publication.Manifest{Sequence: 4, Coverage: publication.Coverage{Discovery: tc.remote[0], Enrichment: tc.remote[1]}, Sources: []publication.Source{rebaseSource("a", "e1", 1, "r")}}
+		local := publication.Manifest{Sequence: 1, Coverage: publication.Coverage{Discovery: tc.local[0], Enrichment: tc.local[1]}, Sources: []publication.Source{rebaseSource("b", "e2", 1, "l")}}
+		got, _, _, err := rebaseManifest(remote, local)
+		if err != nil || [2]string{got.Coverage.Discovery, got.Coverage.Enrichment} != tc.want {
+			t.Fatalf("%v: coverage %+v err=%v", tc, got.Coverage, err)
+		}
+	}
+}
+
+func TestRebasedEvidenceKeepsLocalEvidenceAtIndexZero(t *testing.T) {
+	merged := publication.Manifest{Identity: publication.Identity{SessionID: "s"}, Sources: []publication.Source{rebaseSource("a", "e1", 1, "l"), rebaseSource("b", "e2", 1, "r")}}
+	es := []evidence{{EpochID: "e1", Request: Request{Path: "/local/a"}}}
+	got := rebasedEvidence(merged, []int{0, -1}, es)
+	if got[0].Request.Path != "/local/a" || got[1].Request.Path != "/p/b" || got[1].Request.SourceID != "b" || got[1].EpochID != "e2" {
+		t.Fatalf("%+v", got)
 	}
 }

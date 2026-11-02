@@ -52,7 +52,26 @@ retries and clears when capacity returns. Only deterministic classes consume
 `max_attempts` and then quarantine: `policy-blocked`, `integrity-error`, `quota`
 (oversized source, request bounds), `rejected` (other HTTP 4xx) and `conflict`.
 `conflict` (a guarded-write or immutable-object conflict not resolved by lost-ACK
-reconciliation) is an interim visible, replayable class; convergence is GAP-06.
+reconciliation or rebase) is a visible, replayable class.
+
+Rebase (GAP-06). A rebuilt or lagging spool converges instead of conflicting forever.
+Delivery rebases when the remote current's sequence is >= the local job's, or when the
+guarded write conflicts. It reads and fully verifies the remote current, merges the local
+view into it at remote sequence + 1, and publishes with the token from the first
+`Current`. Every remote epoch is retained; a remote active epoch replaced by a new local
+epoch of the same source is sealed. If the remote already holds everything local
+contributes, the job is marked published with no upload and no CAS. Nothing is ever
+overwritten. Still `conflict`: the same source epoch and revision with a different
+commitment, or a `Withheld` mismatch (a foreign writer whose history is not a prefix).
+A merge beyond `MaxSources` or metadata limits is a typed `ErrQuota`. Remote-only
+sources have no local bytes, resolved identities or physical-path equivalents; they get
+only the session-identity and publication-path exclusion checks (`recheckScopes`), failing
+closed with `ErrPolicy`/`ErrSessionExcluded` before any upload or CAS. A logical/physical
+path difference therefore means only the claimed-session and publication-path
+exclusions apply to them. Measured steady-state cost per delivery after a rebase
+(asserted in `TestRebaseSteadyStateEachCaptureIsOneStep`): Current 5, Open 6/8/8, PutFile
+1/2/2, CAS 1 for three successive captures. Later captures repeat Current+Read+merge
+because local sequencing stays below the remote; removing that is a bounded follow-up.
 Lag is observable: per-job `Status` carries `Attempts`, `LastError` class, `NextRetryNS`
 and `CapturedAtNS`; `RuntimeStatus` adds `RetryingPublications`, `MaxPendingAttempts`,
 `OldestPendingPublicationAtNS` and `SpoolFullWork`. Enrichment and optional-repair
