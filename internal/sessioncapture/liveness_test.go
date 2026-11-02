@@ -647,7 +647,7 @@ func (b healingBackend) PutFile(ctx context.Context, key, path string) error {
 
 func TestRunnableSourceIndexMatchesClaimQuery(t *testing.T) {
 	plan := func(q *Queue) string {
-		rows, err := q.db.QueryContext(t.Context(), `EXPLAIN QUERY PLAN `+claimSourceSQL, 0, 0)
+		rows, err := q.db.QueryContext(t.Context(), `EXPLAIN QUERY PLAN `+claimSourceSQL, 0, 0, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

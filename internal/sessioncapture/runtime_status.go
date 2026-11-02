@@ -54,6 +54,9 @@ type RuntimeStatus struct {
 	ReclaimPending, ReclaimFailed int64
 	OldestPendingPublicationAtNS  int64
 	OldestObservedAtNS            int64
+	// DebouncedSources counts changed sources waiting for their quiet period (Q) or
+	// maximum delay (M); DebounceLagNS is the age of the oldest such observation.
+	DebouncedSources, DebounceLagNS int64
 	// Discovery and enrichment remain partial; a successful timer is not proof of
 	// complete source inventory. Published timestamps remain independent of capture.
 	Coverage string
@@ -132,6 +135,13 @@ func (q *Queue) RuntimeStatus(ctx context.Context) (RuntimeStatus, error) {
 	err = q.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(version>captured_version),0),COALESCE(MIN(CASE WHEN version>captured_version THEN observed_at END),0) FROM runtime_sources`).Scan(&s.Sources, &s.PendingSources, &s.OldestObservedAtNS)
 	if err != nil {
 		return s, err
+	}
+	now := q.opts.Now().UnixNano()
+	if err := q.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(MIN(dirty_since),0) FROM runtime_sources WHERE version>captured_version AND debounce_until>? AND dirty_since>0`, now).Scan(&s.DebouncedSources, &s.DebounceLagNS); err != nil {
+		return s, err
+	}
+	if s.DebounceLagNS > 0 {
+		s.DebounceLagNS = max(now-s.DebounceLagNS, 0)
 	}
 	err = q.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_sources WHERE state='source-limit'`).Scan(&s.SourceLimitSources)
 	if err != nil {

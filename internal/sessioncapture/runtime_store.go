@@ -16,7 +16,7 @@ import (
 const runnableSourcePredicate = `claim=0 AND state NOT IN ('absent','captured','quarantined','source-limit')`
 
 // claimSourceSQL pages runnable sources by id; it must use runtime_runnable_sources_v2.
-const claimSourceSQL = `SELECT id,request,version,attempts,claim,state,next_retry,observed_state FROM runtime_sources AS s WHERE id>? AND ` + runnableSourcePredicate + ` AND next_retry<=? AND NOT EXISTS(SELECT 1 FROM runtime_sources AS busy WHERE busy.session=s.session AND busy.claim!=0) ORDER BY id LIMIT 64`
+const claimSourceSQL = `SELECT id,request,version,attempts,claim,state,next_retry,observed_state FROM runtime_sources AS s WHERE id>? AND ` + runnableSourcePredicate + ` AND next_retry<=? AND debounce_until<=? AND NOT EXISTS(SELECT 1 FROM runtime_sources AS busy WHERE busy.session=s.session AND busy.claim!=0) ORDER BY id LIMIT 64`
 
 // InitRuntime installs durable runtime state lazily. The Queue process flock
 // guarantees that claims left by a previous process can be reset safely. Calls
@@ -69,6 +69,11 @@ func (q *Queue) InitRuntime(ctx context.Context) error {
 			return err
 		}
 	}
+	for _, c := range [][2]string{{"dirty_since", "INTEGER NOT NULL DEFAULT 0"}, {"debounce_until", "INTEGER NOT NULL DEFAULT 0"}} {
+		if err := q.addColumnIfMissing(ctx, "runtime_sources", c[0], c[1]); err != nil {
+			return err
+		}
+	}
 	if err := q.initRuntimeSoftwareVersion(ctx); err != nil {
 		return err
 	}
@@ -103,8 +108,8 @@ type hintRow struct {
 const hintChunk = 256
 
 const (
-	upsertHintHead = `INSERT INTO runtime_sources(session,source,request,observed_at,fingerprint) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_sources WHERE session=? AND source=?) OR `
-	upsertHintTail = ` ON CONFLICT(session,source) DO UPDATE SET request=excluded.request,version=version+1,observed_at=excluded.observed_at,fingerprint=excluded.fingerprint,observed_state='present',state=CASE WHEN state IN ('captured','absent','source-limit') THEN 'pending' ELSE state END WHERE excluded.fingerprint='' OR runtime_sources.fingerprint!=excluded.fingerprint OR runtime_sources.observed_state!='present'`
+	upsertHintHead = `INSERT INTO runtime_sources(session,source,request,observed_at,fingerprint,dirty_since,debounce_until) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_sources WHERE session=? AND source=?) OR `
+	upsertHintTail = ` ON CONFLICT(session,source) DO UPDATE SET request=excluded.request,version=version+1,observed_at=excluded.observed_at,fingerprint=excluded.fingerprint,dirty_since=CASE WHEN dirty_since>0 THEN dirty_since ELSE excluded.dirty_since END,debounce_until=MIN(excluded.debounce_until,(CASE WHEN dirty_since>0 THEN dirty_since ELSE excluded.dirty_since END)+?),observed_state='present',state=CASE WHEN state IN ('captured','absent','source-limit') THEN 'pending' ELSE state END WHERE excluded.fingerprint='' OR runtime_sources.fingerprint!=excluded.fingerprint OR runtime_sources.observed_state!='present'`
 	// hintLiveRoom is evaluated per new row by a single Hint; a batch counts once.
 	hintLiveRoom  = `(SELECT COUNT(*) FROM runtime_sources WHERE state NOT IN ('captured','absent'))<?`
 	liveSlotsSQL  = `SELECT COUNT(*) FROM runtime_sources WHERE state NOT IN ('captured','absent')`
@@ -163,7 +168,9 @@ func (q *Queue) upsertHint(ctx context.Context, x hintExecer, h hintRow, slots *
 			return false, ErrQuota
 		}
 	}
-	result, err := x.ExecContext(ctx, upsertHintHead+room+upsertHintTail, key, h.req.SourceID, h.body, h.req.ObservedAtNS, h.fingerprint, key, h.req.SourceID, arg)
+	now := q.opts.Now().UnixNano()
+	quiet, maxDelay := q.cadence()
+	result, err := x.ExecContext(ctx, upsertHintHead+room+upsertHintTail, key, h.req.SourceID, h.body, h.req.ObservedAtNS, h.fingerprint, now, now+int64(quiet), key, h.req.SourceID, arg, int64(maxDelay))
 	if err != nil {
 		return false, err
 	}
@@ -368,7 +375,8 @@ func (q *Queue) claimSource(ctx context.Context) (sourceWork, error) {
 	var w sourceWork
 	// Read at most one fixed page per turn; the cursor advances past unavailable
 	// sources as well as successful work. No archive job history is inspected.
-	rows, err := q.db.QueryContext(ctx, claimSourceSQL, r.sourceCursor, q.opts.Now().UnixNano())
+	now := q.opts.Now().UnixNano()
+	rows, err := q.db.QueryContext(ctx, claimSourceSQL, r.sourceCursor, now, now)
 	if err != nil {
 		return w, err
 	}
@@ -428,7 +436,7 @@ func (q *Queue) captureNext(ctx context.Context, o RuntimeOptions) (did bool, re
 		// CaptureIfChanged may return an old manifest: observation freshness must
 		// not fabricate a newer byte-ownership watermark for unchanged content.
 		capturedAt := sourceCapturedAt(m, w.req.SourceID)
-		_, err = q.db.ExecContext(save, `UPDATE runtime_sources SET claim=0,captured_version=MAX(captured_version,?),captured_at=?,sequence=?,publication=?,attempts=0,last_error='',next_retry=0,state=CASE WHEN observed_state='absent' THEN 'absent' WHEN version=? THEN 'captured' ELSE 'pending' END WHERE id=? AND claim=?`, w.version, capturedAt, m.Sequence, m.PublicationID, w.version, w.id, w.version)
+		_, err = q.db.ExecContext(save, `UPDATE runtime_sources SET claim=0,captured_version=MAX(captured_version,?),captured_at=?,sequence=?,publication=?,attempts=0,last_error='',next_retry=0,state=CASE WHEN observed_state='absent' THEN 'absent' WHEN version=? THEN 'captured' ELSE 'pending' END,dirty_since=CASE WHEN version=? THEN 0 ELSE ? END WHERE id=? AND claim=?`, w.version, capturedAt, m.Sequence, m.PublicationID, w.version, w.version, q.opts.Now().UnixNano(), w.id, w.version)
 		return true, err
 	}
 	if shutdownCancellation(ctx, captureErr) {

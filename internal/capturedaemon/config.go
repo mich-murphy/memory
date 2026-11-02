@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/mich-murphy/memory/internal/capturebackend"
@@ -44,6 +45,8 @@ type Config struct {
 	CaptureWorkers      int                  `json:"capture_workers"`
 	DeliveryWorkers     int                  `json:"delivery_workers"`
 	PollSeconds         int                  `json:"poll_seconds"`
+	QuietSeconds        int                  `json:"quiet_seconds,omitempty"`
+	MaxDelaySeconds     int                  `json:"max_delay_seconds,omitempty"`
 	OperationSeconds    int                  `json:"operation_seconds"`
 	MaxAttempts         int                  `json:"max_attempts"`
 	MaxInventoryRecords int                  `json:"max_inventory_records,omitempty"`
@@ -198,6 +201,8 @@ func (c Config) validateBudgets() error {
 		{int64(c.CaptureWorkers), 1, 32},
 		{int64(c.DeliveryWorkers), 1, 32},
 		{int64(c.PollSeconds), 1, 3600},
+		{int64(c.QuietSeconds), 0, int64(sessioncapture.MaxQuietPeriod / time.Second)},
+		{int64(c.MaxDelaySeconds), 0, int64(sessioncapture.MaxCaptureDelay / time.Second)},
 		{int64(c.OperationSeconds), 1, 3600},
 		{int64(c.MaxAttempts), 1, 100},
 		{c.MaxSpoolBytes, 1, 1 << 50},

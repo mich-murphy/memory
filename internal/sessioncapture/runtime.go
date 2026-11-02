@@ -77,6 +77,10 @@ type RuntimeOptions struct {
 	Workers, CaptureWorkers, DeliveryWorkers int
 	OperationTimeout                         time.Duration
 	MaxAttempts                              int
+	// QuietPeriod (Q) delays capturing a source until it has been unchanged this long;
+	// MaxDelay (M) caps the delay from the first unconsumed observation. Zero Q
+	// captures immediately. See validateCadence for bounds.
+	QuietPeriod, MaxDelay time.Duration
 	// Jitter returns the desired delay; its result is clamped to [1s,5min].
 	Jitter   func(time.Duration) time.Duration
 	Classify func(error) FailureClass
@@ -194,9 +198,16 @@ func (q *Queue) Run(ctx context.Context, b publication.Backend, options RuntimeO
 	r.mu.Unlock()
 	defer func() { r.mu.Lock(); r.running = false; r.mu.Unlock() }()
 	o := runtimeDefaults(options)
+	if err := validateCadence(o); err != nil {
+		return err
+	}
 	_, o.budgeted = b.(publication.TransferBudgeter)
 	r.softwareVersion.Store(o.SoftwareVersion)
 	r.enrichmentOptions.Store(&o)
+	// A restart flushes debounced sources: their observations are durable.
+	if _, err := q.db.ExecContext(ctx, `UPDATE runtime_sources SET debounce_until=0 WHERE debounce_until>0`); err != nil {
+		return runtimeStopError(ctx, err)
+	}
 	if err := q.startDiscoverySweep(ctx); err != nil {
 		return runtimeStopError(ctx, err)
 	}
