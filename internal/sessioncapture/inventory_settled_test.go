@@ -55,7 +55,7 @@ func TestInventoryAdmissionIgnoresSettledHistory(t *testing.T) {
 		t.Fatalf("rows total=%d live=%d settled=%d", total, live, settled)
 	}
 	st, err := q.RuntimeStatus(t.Context())
-	if err != nil || st.SourceCap != 8 || st.LiveSources != 1 || st.SettledSources != 8 {
+	if err != nil || st.SourceCap != 8 || st.SettledCap != MaxInventoryRecords || st.LiveSources != 1 || st.SettledSources != 8 {
 		t.Fatalf("occupancy %+v %v", st, err)
 	}
 }

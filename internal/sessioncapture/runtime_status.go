@@ -58,8 +58,8 @@ type RuntimeStatus struct {
 	StepErrors, LastStepErrorAtNS int64
 	LastStepError                 string
 	// Source-inventory occupancy: SourceCap bounds live work (LiveSources: pending,
-	// retry, claimed, quarantined) and, separately, retained settled rows.
-	SourceCap, LiveSources, SettledSources int64
+	// retry, claimed, quarantined); SettledCap bounds retained settled rows.
+	SourceCap, LiveSources, SettledSources, SettledCap int64
 	// InventoryEvictions counts settled rows dropped from the source index at the
 	// retention bound; a rising count means rediscovery re-hints them (thrash).
 	InventoryEvictions int64
@@ -154,6 +154,7 @@ func (q *Queue) RuntimeStatus(ctx context.Context) (RuntimeStatus, error) {
 
 func (q *Queue) inventoryStatus(ctx context.Context, s *RuntimeStatus) error {
 	s.SourceCap = int64(q.opts.MaxInventoryRecords)
+	s.SettledCap = int64(q.settledBound())
 	return q.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(state NOT IN ('captured','absent')),0),COALESCE(SUM(state IN ('captured','absent')),0),(SELECT inventory_evictions FROM runtime_destination WHERE id=1) FROM runtime_sources`).Scan(&s.LiveSources, &s.SettledSources, &s.InventoryEvictions)
 }
 

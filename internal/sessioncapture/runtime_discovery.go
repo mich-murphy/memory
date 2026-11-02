@@ -223,10 +223,9 @@ func (q *Queue) discoverOnce(ctx context.Context, o RuntimeOptions) error {
 	if len(batch.Requests) > limit {
 		err = errors.Join(err, ErrQuota)
 	}
-	for j := range min(len(batch.Requests), limit) {
-		// Try every healthy request even if another request or root was rejected.
-		err = errors.Join(err, q.Hint(save, batch.Requests[j]))
-	}
+	// Try every healthy request even if another request or root was rejected, in
+	// chunked transactions so the batch costs a few durable commits.
+	err = errors.Join(err, q.HintBatch(save, batch.Requests[:min(len(batch.Requests), limit)]))
 	// Once per batch, not per capture: bounds the settled index without a per-row cost.
 	_, evictErr := q.evictSettledSources(save)
 	err = errors.Join(err, evictErr)

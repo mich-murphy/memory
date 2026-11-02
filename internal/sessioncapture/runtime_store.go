@@ -76,18 +76,113 @@ func (q *Queue) InitRuntime(ctx context.Context) error {
 	return nil
 }
 
-// MaxRuntimeSources is the default bound on live source work (pending, retry,
-// claimed or quarantined) and, separately, on retained settled rows (captured or
-// absent, kept only so unchanged fingerprints skip re-hinting; bound MaxInventoryRecords). At live capacity
-// new identities receive visible ErrQuota backpressure; existing identities still
-// coalesce. Settled history never refuses a new session: beyond the bound the
-// oldest settled row (absent first) is dropped from this index only (jobs and payloads
-// stay), and its source re-hints once if rediscovered. No complete-inventory guarantee.
+// MaxRuntimeSources is the default live-work cap (max_inventory_records): source rows
+// that are pending, retry, claimed or quarantined. At that cap new identities receive
+// visible ErrQuota backpressure; existing identities still coalesce. Settled rows
+// (captured or absent, kept only so unchanged fingerprints skip re-hinting) are bounded
+// separately by the fixed MaxInventoryRecords ceiling (65,536; ~3.8 KB/row, worst case
+// ~250 MB; measured inventories are 19k on the Mac and 29k on BC-01). Settled history
+// never refuses a new session: beyond that ceiling the oldest settled row (absent first)
+// leaves this index only (jobs and payloads stay), and its source re-hints once if
+// rediscovered. No complete-inventory guarantee.
 const MaxRuntimeSources = 4096
 
 // MaxInventoryRecords is the hard ceiling for an explicitly configured inventory.
 // It does not raise per-batch discovery or paginated status limits.
 const MaxInventoryRecords = 65536
+
+// hintRow is a validated, normalized hint ready for the admission upsert.
+type hintRow struct {
+	req         Request
+	body        []byte
+	fingerprint string
+}
+
+// hintChunk bounds one admission transaction: a discovery batch costs a handful of
+// durable commits (synchronous=FULL fsyncs), not one per source.
+const hintChunk = 256
+
+const (
+	upsertHintHead = `INSERT INTO runtime_sources(session,source,request,observed_at,fingerprint) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_sources WHERE session=? AND source=?) OR `
+	upsertHintTail = ` ON CONFLICT(session,source) DO UPDATE SET request=excluded.request,version=version+1,observed_at=excluded.observed_at,fingerprint=excluded.fingerprint,observed_state='present',state=CASE WHEN state IN ('captured','absent','source-limit') THEN 'pending' ELSE state END WHERE excluded.fingerprint='' OR runtime_sources.fingerprint!=excluded.fingerprint OR runtime_sources.observed_state!='present'`
+	// hintLiveRoom is evaluated per new row by a single Hint; a batch counts once.
+	hintLiveRoom  = `(SELECT COUNT(*) FROM runtime_sources WHERE state NOT IN ('captured','absent'))<?`
+	liveSlotsSQL  = `SELECT COUNT(*) FROM runtime_sources WHERE state NOT IN ('captured','absent')`
+	hintSlotsLeft = `?>0`
+)
+
+type hintExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func (q *Queue) prepareHint(req Request) (hintRow, error) {
+	if err := validateHint(req); err != nil {
+		return hintRow{}, err
+	}
+	req, err := q.prepareRequest(req)
+	if err != nil {
+		return hintRow{}, err
+	}
+	if err := q.valid(req); err != nil {
+		return hintRow{}, err
+	}
+	for _, s := range []string{req.Identity.ArchiveID, req.Identity.MachineID, req.Identity.Agent, req.Identity.SessionID, req.SourceID, req.Path} {
+		if strings.ContainsRune(s, 0) {
+			return hintRow{}, errors.New("sessioncapture: invalid hint identity")
+		}
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return hintRow{}, err
+	}
+	if len(body) > publication.MaxMetadata {
+		return hintRow{}, ErrQuota
+	}
+	fingerprint, err := hintFingerprint(req)
+	return hintRow{req: req, body: body, fingerprint: fingerprint}, err
+}
+
+// upsertHint admits one prepared hint and reports whether a row was written. A
+// matching non-empty fingerprint on a present source is a no-op (no version bump,
+// state reset or row write). With slots == nil the live cap is checked per statement;
+// a batch passes its remaining live slots (counted once) and they are consumed here.
+func (q *Queue) upsertHint(ctx context.Context, x hintExecer, h hintRow, slots *int) (bool, error) {
+	key := h.req.Identity.BaseKey()
+	room, arg, created := hintLiveRoom, q.opts.MaxInventoryRecords, false
+	if slots != nil {
+		var exists int
+		if err := x.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_sources WHERE session=? AND source=?`, key, h.req.SourceID).Scan(&exists); err != nil {
+			return false, err
+		}
+		room, arg, created = hintSlotsLeft, *slots, exists == 0
+		if created && arg <= 0 {
+			return false, ErrQuota
+		}
+	}
+	result, err := x.ExecContext(ctx, upsertHintHead+room+upsertHintTail, key, h.req.SourceID, h.body, h.req.ObservedAtNS, h.fingerprint, key, h.req.SourceID, arg)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if created {
+		*slots--
+	}
+	if n == 0 {
+		// Either an unchanged existing row (fine) or the live cap refused a new one.
+		var exists int
+		if err := x.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_sources WHERE session=? AND source=?`, key, h.req.SourceID).Scan(&exists); err != nil {
+			return false, err
+		}
+		if exists == 0 {
+			return false, ErrQuota
+		}
+	}
+	return n > 0, nil
+}
 
 // Hint owns only bounded pathname metadata, not source bytes. Repeated hints
 // coalesce by source identity; they never clear backoff or quarantine. A worker
@@ -96,56 +191,83 @@ func (q *Queue) Hint(ctx context.Context, req Request) error {
 	if err := q.InitRuntime(ctx); err != nil {
 		return err
 	}
-	if err := validateHint(req); err != nil {
-		return err
-	}
-	req, err := q.prepareRequest(req)
+	h, err := q.prepareHint(req)
 	if err != nil {
 		return err
 	}
-	if err := q.valid(req); err != nil {
+	if _, err := q.upsertHint(ctx, q.db, h, nil); err != nil {
 		return err
-	}
-	for _, s := range []string{req.Identity.ArchiveID, req.Identity.MachineID, req.Identity.Agent, req.Identity.SessionID, req.SourceID, req.Path} {
-		if strings.ContainsRune(s, 0) {
-			return errors.New("sessioncapture: invalid hint identity")
-		}
-	}
-	body, err := json.Marshal(req)
-	if err != nil {
-		return err
-	}
-	if len(body) > publication.MaxMetadata {
-		return ErrQuota
-	}
-	fingerprint, err := hintFingerprint(req)
-	if err != nil {
-		return err
-	}
-	// A matching non-empty fingerprint on a present source makes the upsert a no-op
-	// (no version bump, state reset or row write; RowsAffected is 0).
-	result, err := q.db.ExecContext(ctx, `INSERT INTO runtime_sources(session,source,request,observed_at,fingerprint) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_sources WHERE session=? AND source=?) OR (SELECT COUNT(*) FROM runtime_sources WHERE state NOT IN ('captured','absent'))<? ON CONFLICT(session,source) DO UPDATE SET request=excluded.request,version=version+1,observed_at=excluded.observed_at,fingerprint=excluded.fingerprint,observed_state='present',state=CASE WHEN state IN ('captured','absent','source-limit') THEN 'pending' ELSE state END WHERE excluded.fingerprint='' OR runtime_sources.fingerprint!=excluded.fingerprint OR runtime_sources.observed_state!='present'`, req.Identity.BaseKey(), req.SourceID, body, req.ObservedAtNS, fingerprint, req.Identity.BaseKey(), req.SourceID, q.opts.MaxInventoryRecords)
-	if err != nil {
-		return err
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		// Either an unchanged existing row (fine) or the inventory cap refused a new one.
-		var exists int
-		if err := q.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_sources WHERE session=? AND source=?`, req.Identity.BaseKey(), req.SourceID).Scan(&exists); err != nil {
-			return err
-		}
-		if exists == 0 {
-			return ErrQuota
-		}
 	}
 	// Ownership enrichment follows raw metadata admission, never under a source
 	// lock or the admission statement. Its bounded ambiguity/capacity must not
 	// block safe raw capture; unknown store/integrity failures remain visible.
-	return q.recordHintOwnership(ctx, req)
+	return q.recordHintOwnership(ctx, h.req)
+}
+
+// HintBatch admits many hints with the semantics of Hint on each, in transactions of
+// at most hintChunk rows. Every healthy request is tried even if another is refused;
+// refusals are joined. A chunk that writes nothing (settled sweep) commits nothing.
+func (q *Queue) HintBatch(ctx context.Context, reqs []Request) error {
+	if err := q.InitRuntime(ctx); err != nil {
+		return err
+	}
+	var errs []error
+	for start := 0; start < len(reqs); start += hintChunk {
+		admitted, err := q.admitChunk(ctx, reqs[start:min(start+hintChunk, len(reqs))])
+		errs = append(errs, err)
+		if ctx.Err() != nil {
+			break
+		}
+		for i := range admitted {
+			errs = append(errs, q.recordHintOwnership(ctx, admitted[i].req))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// admitChunk upserts one chunk in a single transaction and returns the rows that
+// were admitted (new, changed or unchanged-existing) for ownership recording.
+func (q *Queue) admitChunk(ctx context.Context, reqs []Request) ([]hintRow, error) {
+	tx, err := q.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var slots int
+	if err := tx.QueryRowContext(ctx, liveSlotsSQL).Scan(&slots); err != nil {
+		return nil, err
+	}
+	slots = q.opts.MaxInventoryRecords - slots
+	var errs []error
+	var admitted []hintRow
+	wrote := false
+	for i := range reqs {
+		h, err := q.prepareHint(reqs[i])
+		if err != nil {
+			errs = append(errs, err) // this request is invalid or oversized; others proceed
+			continue
+		}
+		w, err := q.upsertHint(ctx, tx, h, &slots)
+		if errors.Is(err, ErrQuota) {
+			errs = append(errs, err)
+			continue
+		}
+		if err != nil {
+			return nil, errors.Join(append(errs, err)...)
+		}
+		wrote = wrote || w
+		admitted = append(admitted, h)
+	}
+	if !wrote {
+		return admitted, errors.Join(errs...)
+	}
+	if err := q.fault("runtime-hint-commit"); err != nil {
+		return nil, errors.Join(append(errs, err)...)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, errors.Join(append(errs, err)...)
+	}
+	return admitted, errors.Join(errs...)
 }
 
 // hintFingerprint binds the discovery stat digest to the normalized request
