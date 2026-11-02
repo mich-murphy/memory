@@ -1149,6 +1149,9 @@ func (r *modelRun) drain() (string, string) {
 	if id, d := r.checkInvariants(); id != "" {
 		return id, d
 	}
+	if id, d := r.checkSpoolAndCounts(); id != "" {
+		return id, d
+	}
 	r.stats.RepeatedCAS += r.be.repeats
 	for s := range r.src {
 		epochs := 0
@@ -1294,4 +1297,73 @@ func TestModelGeneratorShape(t *testing.T) {
 			t.Errorf("operation %s is never generated", k)
 		}
 	}
+}
+
+// checkSpoolAndCounts is the reclamation oracle after the final drain. Safety: every
+// object a retained root references is still in the spool. Leaks: with no injected
+// fault (which may leave crash orphans that are deliberately retained) the spool
+// equals the roots exactly. Counts: CAS writes never exceed accepted jobs plus
+// lost-ack republishes, so coalescing cannot cost more writes than captures.
+func (r *modelRun) checkSpoolAndCounts() (string, string) {
+	rows, err := r.q.db.QueryContext(r.ctx, `SELECT manifest FROM jobs AS j WHERE state NOT IN ('published','superseded') OR sequence=(SELECT max(sequence) FROM jobs WHERE session=j.session) OR sequence=(SELECT max(sequence) FROM jobs WHERE session=j.session AND state='published')`)
+	if err != nil {
+		return "HARNESS", err.Error()
+	}
+	roots := map[string]bool{}
+	for rows.Next() {
+		var body []byte
+		var m publication.Manifest
+		if err := rows.Scan(&body); err != nil {
+			_ = rows.Close()
+			return "HARNESS", err.Error()
+		}
+		if err := json.Unmarshal(body, &m); err != nil {
+			_ = rows.Close()
+			return "HARNESS", err.Error()
+		}
+		for i := range m.Sources {
+			if sha := m.Sources[i].Object.EncodedSHA256; sha != "" {
+				roots[sha+".zst"] = true
+			}
+		}
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return "HARNESS", err.Error()
+	}
+	entries, err := os.ReadDir(filepath.Join(r.q.dir, "payloads"))
+	if err != nil {
+		return "HARNESS", err.Error()
+	}
+	have := map[string]bool{}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".zst") {
+			have[e.Name()] = true
+		}
+	}
+	for n := range roots {
+		if !have[n] {
+			return "RECLAIM", "retained root payload missing from spool: " + n
+		}
+	}
+	r.mu.Lock()
+	faults := r.total
+	r.mu.Unlock()
+	if faults == 0 && r.be.lostCount() == 0 {
+		for n := range have {
+			if !roots[n] {
+				return "RECLAIM", "spool payload leaked (no root references it): " + n
+			}
+		}
+	}
+	var jobs int
+	if err := r.q.db.QueryRowContext(r.ctx, `SELECT count(*) FROM jobs`).Scan(&jobs); err != nil {
+		return "HARNESS", err.Error()
+	}
+	r.be.mu.Lock()
+	cas, repeats := len(r.be.cas), r.be.repeats
+	r.be.mu.Unlock()
+	if cas > jobs+repeats {
+		return "COUNTS", fmt.Sprintf("%d CAS writes for %d jobs and %d republishes", cas, jobs, repeats)
+	}
+	return "", ""
 }
