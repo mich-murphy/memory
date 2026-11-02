@@ -38,7 +38,8 @@ const (
 	// FailureConflict is a guarded-write or immutable-object conflict. It is a
 	// distinct, visible class: it is neither retried unseen forever nor treated as
 	// a network blip, so it spends the quarantine budget and stays replayable.
-	// Convergence with an existing remote belongs to GAP-06.
+	// A rebuilt spool behind the remote converges by rebasing (rebase.go); what
+	// remains here is divergence that cannot be reconciled.
 	FailureConflict FailureClass = "conflict"
 	// FailureRejected is a destination rejection (HTTP 4xx) that repeating the same
 	// request cannot fix.

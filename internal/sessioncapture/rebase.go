@@ -21,7 +21,10 @@ import (
 // Divergence that cannot be reconciled is publication.ErrConflict: the same source
 // epoch at the same revision with different bytes can only come from a writer whose
 // history is not a prefix of ours. A merge that cannot fit the manifest limits is
-// ErrQuota (typed, visible, deterministic). Nothing is ever overwritten.
+// ErrQuota (typed, visible, deterministic). It is deliberately not ErrSourceLimit:
+// that class parks a capture source without spending the quarantine budget, whereas
+// a delivery job whose merge can never fit must reach visible quarantine instead of
+// retrying indefinitely. Nothing is ever overwritten.
 func rebaseManifest(remote, local publication.Manifest) (merged publication.Manifest, origin []int, covered bool, err error) {
 	type key [2]string
 	at := map[key]int{}
