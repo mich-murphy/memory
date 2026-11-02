@@ -39,7 +39,7 @@ class PublicationsTests(unittest.TestCase):
                 observed_at_ns=3, captured_at_ns=4, associations=[], object=dict(key='immutable/object',
                 encoding='zstd', sha256=digest, encoded_sha256=digest, size=len(raw), encoded_size=len(raw))))
             bodies.append(dict(source_id=source, epoch_id=epoch, path=name, sha256=digest, size=len(raw)))
-        data = dict(contract='session-reader/v2', manifest=self.manifest, bodies=bodies)
+        data = dict(contract='session-reader/v2', manifest_sha256='ab' * 32, manifest=self.manifest, bodies=bodies)
         self.save(data)
         return data
 
@@ -496,11 +496,11 @@ class PublicationsTests(unittest.TestCase):
     def test_failure_watermark_survives_older_retries(self):
         for broken in ('missing', 'corrupt'):
             with self.subTest(broken=broken):
-                self.manifest.update(sequence=1, publication_id='p1')
+                self.manifest.update(sequence=2, publication_id='p1')
                 self.fixture()
                 publications.import_export(self.export, self.db, reset=True)
                 success = self.query('SELECT * FROM sessions')
-                self.manifest.update(sequence=2, publication_id='p2')
+                self.manifest.update(sequence=3, publication_id='p2')
                 self.fixture()
                 body = self.export / 'body-0.jsonl'
                 if broken == 'missing':
@@ -510,7 +510,7 @@ class PublicationsTests(unittest.TestCase):
                 with self.assertRaises(publications.ImportFailure):
                     publications.import_export(self.export, self.db)
                 failure = self.query('SELECT * EXCLUDE(attempts) FROM failures')
-                self.manifest.update(sequence=1, publication_id='p1')
+                self.manifest.update(sequence=2, publication_id='p1')
                 self.fixture()
                 self.assertEqual(publications.import_export(self.export, self.db)['status'], 'unchanged')
                 self.assertEqual(self.query('SELECT * FROM sessions'), success)
@@ -518,13 +518,13 @@ class PublicationsTests(unittest.TestCase):
                 self.assertEqual(self.query('SELECT attempts FROM failures'), [(1,)])
                 self.assertTrue(publications.report(self.db, now_ns=1700000000000000010)['sessions'][0]['stale'])
                 # A stale failed P0 attempt counts, but cannot replace P2's target/reason/time.
-                self.manifest.update(sequence=0, publication_id='p0')
+                self.manifest.update(sequence=1, publication_id='p0')
                 self.fixture()
                 with self.assertRaisesRegex(publications.ImportFailure, '^stale_publication$'):
                     publications.import_export(self.export, self.db)
                 self.assertEqual(self.query('SELECT * EXCLUDE(attempts) FROM failures'), failure)
-                self.assertEqual(self.query('SELECT publication_id,sequence,attempts FROM failures'), [('p2', 2, 2)])
-                self.manifest.update(sequence=2, publication_id='p2')
+                self.assertEqual(self.query('SELECT publication_id,sequence,attempts FROM failures'), [('p2', 3, 2)])
+                self.manifest.update(sequence=3, publication_id='p2')
                 self.fixture()
                 publications.import_export(self.export, self.db)
                 self.assertEqual(self.query('SELECT count(*) FROM failures'), [(0,)])

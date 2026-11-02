@@ -205,7 +205,9 @@ func MarshalValidManifest(m Manifest) ([]byte, error) {
 	}
 	// A durable publication must fit the consumer envelope too: selected source
 	// and epoch identities are repeated in the export's exact body table.
-	if _, _, err = exportMetadata(m); err != nil {
+	// The digest is a fixed-width placeholder here: its real value is unknowable
+	// before publication but its encoded size is not.
+	if _, _, err = exportMetadata(m, strings.Repeat("0", sha256.Size*2)); err != nil {
 		return nil, err
 	}
 	return data, nil
@@ -296,19 +298,20 @@ func resolve(ctx context.Context, b Backend, i Identity, c Current) (Manifest, e
 	return m, nil
 }
 
-func pinned(ctx context.Context, b Backend, i Identity) (Manifest, error) {
+func pinned(ctx context.Context, b Backend, i Identity) (Manifest, string, error) {
 	if err := checkArchive(ctx, b, i); err != nil {
-		return Manifest{}, err
+		return Manifest{}, "", err
 	}
 	data, _, err := b.Current(ctx, i.CurrentKey())
 	if err != nil {
-		return Manifest{}, err
+		return Manifest{}, "", err
 	}
 	c, err := parseCurrent(data, i)
 	if err != nil {
-		return Manifest{}, err
+		return Manifest{}, "", err
 	}
-	return resolve(ctx, b, i, c)
+	m, err := resolve(ctx, b, i, c)
+	return m, c.ManifestSHA256, err
 }
 
 // streamObject verifies both representations, reading at most declared sizes+1.
@@ -368,7 +371,7 @@ func verifyExcept(ctx context.Context, b Backend, m Manifest, trusted map[Object
 
 // Read resolves one current root and verifies its complete dependency closure.
 func Read(ctx context.Context, b Backend, i Identity) (Manifest, error) {
-	m, err := pinned(ctx, b, i)
+	m, _, err := pinned(ctx, b, i)
 	if err != nil {
 		return m, err
 	}

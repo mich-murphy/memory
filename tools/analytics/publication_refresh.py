@@ -463,7 +463,7 @@ def _target(status, endpoint, head, key, database, root, timeout, max_bytes):
         with tempfile.TemporaryDirectory(dir=root) as temp:
             output = Path(temp) / 'export'
             export(endpoint, head['identity'], output, root, timeout, max_bytes)
-            manifest, _, _ = publications._load(output)
+            manifest, _, _, _ = publications._load(output)
             require(manifest['identity'] == head['identity'], 'reader_identity')
             require(manifest['sequence'] >= head['sequence'], 'reader_regression')
             require(manifest['sequence'] != head['sequence'] or

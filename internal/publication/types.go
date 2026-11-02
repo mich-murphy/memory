@@ -131,9 +131,12 @@ type Current struct {
 	Sequence       uint64   `json:"sequence"`
 }
 type Export struct {
-	Contract string   `json:"contract"`
-	Manifest Manifest `json:"manifest"`
-	Bodies   []Body   `json:"bodies"`
+	Contract string `json:"contract"`
+	// ManifestSHA256 is current.json's digest of the exact stored manifest bytes
+	// that this export pins, so consumers can tie rows back to remote current.
+	ManifestSHA256 string   `json:"manifest_sha256"`
+	Manifest       Manifest `json:"manifest"`
+	Bodies         []Body   `json:"bodies"`
 }
 type Body struct {
 	SourceID string `json:"source_id"`

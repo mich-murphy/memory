@@ -35,8 +35,39 @@ def _require(condition, code='invalid_metadata'):
         raise ImportFailure(code)
 
 
+# Go's publication.MaxMetadata / MaxSources / validOrder, mirrored exactly.
+MAX_METADATA = 8 << 20
+MAX_SOURCES = 1024
+_TOP = {'contract', 'manifest_sha256', 'manifest', 'bodies'}
+_MANIFEST = {'contract', 'identity', 'publication_id', 'sequence', 'observed_at_ns',
+             'captured_at_ns', 'published_at_ns', 'coverage', 'sources'}
+_IDENTITY = {'archive_id', 'machine_id', 'agent', 'session_id'}
+_COVERAGE = {'discovery', 'enrichment', 'missing'}
+_SOURCE = {'source_id', 'epoch_id', 'role', 'path', 'state', 'revision', 'observed_at_ns',
+           'captured_at_ns', 'object', 'optional', 'withheld', 'associations'}
+_OBJECT = {'key', 'encoding', 'sha256', 'encoded_sha256', 'size', 'encoded_size'}
+_BODY = {'source_id', 'epoch_id', 'path', 'sha256', 'size'}
+
+
 def _integer(value):
     return type(value) is int and 0 <= value <= 2**63 - 1
+
+
+def _order(value):
+    """Go validOrder: sequence and revision lie in (0, MaxInt64]."""
+    return _integer(value) and value > 0
+
+
+def _known(value, keys):
+    """Go decodes with DisallowUnknownFields, so an unexpected key is invalid."""
+    _require(isinstance(value, dict) and set(value) <= keys)
+
+
+def _text(*values):
+    """Go validStrings: bounded, valid UTF-8, no NUL."""
+    for value in values:
+        _require(isinstance(value, str) and len(value) <= MAX_METADATA and '\x00' not in value)
+        value.encode('utf-8')
 
 
 def _digest(value):
@@ -51,20 +82,30 @@ def _source_hash(source_id):
 def _load(root):
     try:
         with (root / 'metadata.json').open('rb') as stream:
-            raw = stream.read(16 * 1024 * 1024 + 1)
-        _require(len(raw) <= 16 * 1024 * 1024)
+            raw = stream.read(MAX_METADATA + 1)
+        _require(len(raw) <= MAX_METADATA)
         data = json.loads(raw)
         _require(isinstance(data, dict))
         _require(data.get('contract') == 'session-reader/v2', 'unsupported_contract')
+        _known(data, _TOP)
+        # The reader's digest of the exact stored manifest; never a local re-serialization.
+        _require(_digest(data['manifest_sha256']))
         manifest = data['manifest']
-        _require(manifest.get('contract') == 'session-publication/v2', 'unsupported_contract')
+        _require(isinstance(manifest, dict) and manifest.get('contract') == 'session-publication/v2',
+                 'unsupported_contract')
+        _known(manifest, _MANIFEST)
         identity = manifest['identity']
-        for key in ('archive_id', 'machine_id', 'agent', 'session_id'):
+        _known(identity, _IDENTITY)
+        for key in _IDENTITY:
             _require(isinstance(identity[key], str) and bool(identity[key]))
+            _text(identity[key])
         _require(isinstance(manifest['publication_id'], str) and bool(manifest['publication_id']))
-        for key in ('sequence', 'observed_at_ns', 'captured_at_ns', 'published_at_ns'):
+        _text(manifest['publication_id'])
+        _require(_order(manifest['sequence']))
+        for key in ('observed_at_ns', 'captured_at_ns', 'published_at_ns'):
             _require(_integer(manifest[key]))
         coverage = manifest['coverage']
+        _known(coverage, _COVERAGE)
         # Go's v2 wire model permits nil slices as JSON null. Normalize only
         # declared array fields, not missing fields or unsupported contracts.
         if coverage['missing'] is None:
@@ -75,13 +116,17 @@ def _load(root):
             data['bodies'] = []
         _require(isinstance(coverage['discovery'], str) and isinstance(coverage['enrichment'], str)
                  and isinstance(coverage['missing'], list))
+        _text(coverage['discovery'], coverage['enrichment'], *coverage['missing'])
         _require(isinstance(manifest['sources'], list) and isinstance(data['bodies'], list))
+        _require(len(manifest['sources']) <= MAX_SOURCES)
         pairs = {}
         selected = {}
         for source in manifest['sources']:
+            _require(isinstance(source, dict))
             for key in ('epoch_id', 'role', 'state'):
                 _require(isinstance(source[key], str) and bool(source[key]))
-            for key in ('revision', 'observed_at_ns', 'captured_at_ns'):
+            _require(_order(source['revision']))
+            for key in ('observed_at_ns', 'captured_at_ns'):
                 _require(_integer(source[key]))
             if source['associations'] is None:
                 source['associations'] = []
@@ -96,7 +141,6 @@ def _load(root):
                          'optional', 'withheld'}, 'withheld_metadata_redaction')
                 _require(isinstance(withheld, dict) and
                          set(withheld) == {'source_id_hash', 'snapshot_commitment', 'reason'})
-                _require(source['revision'] > 0)
                 _require(optional and source['role'] == 'artifact' and
                          source['source_id'] == '' and source['path'] == '' and
                          not source['associations'] and 'object' not in source,
@@ -108,25 +152,29 @@ def _load(root):
                          'source-withheld' in coverage['missing'], 'withheld_coverage')
                 source_hash = withheld['source_id_hash']
             else:
+                _known(source, _SOURCE)
                 for key in ('source_id', 'path'):
                     _require(isinstance(source[key], str) and bool(source[key]))
                 obj = source['object']
+                _known(obj, _OBJECT)
                 for key in ('sha256', 'encoded_sha256'):
                     _require(_digest(obj[key]))
+                # Go validateObjectDescriptor: sizes are non-negative and below MaxInt64.
                 for key in ('size', 'encoded_size'):
-                    _require(_integer(obj[key]))
-                _require(isinstance(obj['key'], str) and isinstance(obj['encoding'], str))
+                    _require(_integer(obj[key]) and obj[key] < 2**63 - 1)
+                _require(isinstance(obj['key'], str) and bool(obj['key']) and obj['encoding'] == 'zstd')
+                _text(obj['key'])
                 source_hash = _source_hash(source['source_id'])
             pair = (source_hash, source['epoch_id'])
-            for key in ('source_id', 'epoch_id', 'role', 'path', 'state'):
-                _require(isinstance(source[key], str) and '\x00' not in source[key])
-                source[key].encode('utf-8')
+            _text(*(source[key] for key in ('source_id', 'epoch_id', 'role', 'path', 'state')),
+                  *source['associations'])
             _require(pair not in pairs, 'duplicate_source')
             pairs[pair] = source
             if withheld is None:
                 selected[pair] = source
         bodies = {}
         for body in data['bodies']:
+            _known(body, _BODY)
             pair = (_source_hash(body['source_id']), body['epoch_id'])
             _require(pair not in bodies and pair in selected, 'body_coverage')
             _require(body['sha256'] == pairs[pair]['object']['sha256'] and
@@ -136,7 +184,7 @@ def _load(root):
                      and '\\' not in str(path), 'unsafe_body_path')
             bodies[pair] = body
         _require(selected.keys() == bodies.keys(), 'body_coverage')
-        return manifest, pairs, bodies
+        return manifest, pairs, bodies, data['manifest_sha256']
     except ImportFailure:
         raise
     except (OSError, ValueError, KeyError, TypeError, AttributeError, UnicodeError):
@@ -263,12 +311,11 @@ def import_export(export_dir, db_path, *, reset=False):
     """
     duckdb, events = _dependencies()
     root, path = Path(export_dir).resolve(), Path(db_path)
-    manifest, sources, bodies = _load(root)
+    manifest, sources, bodies, fingerprint = _load(root)
     identity = manifest['identity']
     archive = identity['archive_id']
     session = _key(identity[k] for k in ('archive_id', 'machine_id', 'agent', 'session_id'))
     coords = dict(session_key=session, **identity, publication_id=manifest['publication_id'])
-    fingerprint = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     if path.exists():
         # Refuse old projections before a writable open (including --reset).
         with duckdb.connect(str(path), read_only=True) as existing:

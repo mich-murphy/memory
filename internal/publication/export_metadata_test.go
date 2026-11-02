@@ -32,7 +32,7 @@ func envelopeFixture(t *testing.T, size int) (*Local, Manifest, Export, []byte) 
 		m.Sources = append(m.Sources, next)
 	}
 	oracle := func() Export {
-		return Export{Contract: ReaderContract, Manifest: m, Bodies: []Body{
+		return Export{Contract: ReaderContract, ManifestSHA256: strings.Repeat("0", 64), Manifest: m, Bodies: []Body{
 			{SourceID: m.Sources[0].SourceID, EpochID: m.Sources[0].EpochID, Path: "bodies/0000.bin", SHA256: s.Object.SHA256, Size: s.Object.Size},
 			{SourceID: m.Sources[2].SourceID, EpochID: m.Sources[2].EpochID, Path: "bodies/0002.bin", SHA256: s.Object.SHA256, Size: s.Object.Size},
 		}}
@@ -48,6 +48,9 @@ func envelopeFixture(t *testing.T, size int) (*Local, Manifest, Export, []byte) 
 	// Provenance appears only once, permitting exact odd/even byte boundaries.
 	m.Sources[0].Path += strings.Repeat("p", size-len(mustJSON(t, oracle())))
 	want := oracle()
+	// Fixed-width placeholder above sized the envelope; the real digest is the
+	// checksum of the exact manifest bytes that Publish stores.
+	want.ManifestSHA256 = token(mustJSON(t, m))
 	if got := len(mustJSON(t, want)); got != size {
 		t.Fatalf("oracle size %d, want %d", got, size)
 	}
@@ -148,7 +151,7 @@ func TestExportMetadataPreflightNoIO(t *testing.T) {
 	// Bypass writer acceptance to exercise export's own defensive preflight.
 	counter := &exportReadCounter{Backend: b}
 	dest := filepath.Join(t.TempDir(), "export")
-	if _, err := exportPinned(t.Context(), counter, m, dest); err == nil {
+	if _, err := exportPinned(t.Context(), counter, m, strings.Repeat("0", 64), dest); err == nil {
 		t.Error("oversized export accepted")
 	}
 	if counter.bodies != 0 {
