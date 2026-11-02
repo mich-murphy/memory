@@ -311,6 +311,14 @@ analytics tests passed; the intermediate seven-journey result above is chronolog
 not a list of currently pending repairs. SDK peers use injected in-memory HTTPS transports,
 not actual conditional-R2 endpoints.
 
+Transformed sources (SQLite backup, scrubbed config, zstd) carry a discovery fingerprint
+that binds the source stat, the transform kind, `transformPolicyVersion`, and for SQLite
+backups the `-wal`, `-shm` and `-journal` stat identities (an absent sidecar is itself an
+identity). Any input change re-hints; an unchanged sweep is a write-free no-op. Unknown
+inputs yield an empty fingerprint (re-hint every sweep). Policy and exclusions are not
+fingerprint inputs: they are rechecked at capture and delivery. Bump
+`transformPolicyVersion` when scrubber rules, backup procedure or decode limits change.
+
 Full merged-source operating-resource/freshness and both machines' preserved policy/
 inventory/installed-path acceptance remain required. Earlier Mac scratch-native gates,
 isolated actual R2 tests and selected installed source-to-report journeys did pass;
