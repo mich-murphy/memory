@@ -48,3 +48,7 @@ func transformFingerprint(version, transform, path string, info os.FileInfo) str
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(sum[:])
 }
+
+// scrubRulesGolden is scrub.RulesDigest() at the time transformPolicyVersion was last
+// bumped. TestScrubRulesMatchTransformPolicyVersion fails when they diverge.
+const scrubRulesGolden = "e613d5dfa7202909d87d576a64b843a2385a55af725e351aae454819e2877669"
