@@ -503,17 +503,17 @@ func TestSourceLimitIsTypedAndNotQuarantinedAsTransient(t *testing.T) {
 	if err != nil || rs.SourceLimitSources != 1 || rs.Quarantined != 0 {
 		t.Fatalf("%+v %v", rs, err)
 	}
-	// The previous successful publication stays accepted and unchanged. Read
-	// that one job directly; jobStatus would parse every job.
-	var raw []byte
-	if err := q.db.QueryRowContext(t.Context(), `SELECT manifest FROM jobs WHERE session=? AND sequence=?`, r.Identity.BaseKey(), last.Sequence).Scan(&raw); err != nil {
+	// The previous successful publication stays accepted and unchanged.
+	// Read only the last accepted job's manifest rather than parsing every job.
+	var body []byte
+	if err := q.db.QueryRowContext(t.Context(), `SELECT manifest FROM jobs WHERE session=? AND sequence=?`, r.Identity.BaseKey(), last.Sequence).Scan(&body); err != nil {
 		t.Fatal(err)
 	}
 	var stored publication.Manifest
-	if err := json.Unmarshal(raw, &stored); err != nil {
+	if err := json.Unmarshal(body, &stored); err != nil {
 		t.Fatal(err)
 	}
-	if stored.PublicationID != last.PublicationID || len(stored.Sources) != limit {
+	if stored.Identity != r.Identity || stored.Sequence != last.Sequence || stored.PublicationID != last.PublicationID || len(stored.Sources) != limit {
 		t.Fatalf("last publication changed: %s with %d sources", stored.PublicationID, len(stored.Sources))
 	}
 }
