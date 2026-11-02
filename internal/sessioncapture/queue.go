@@ -138,6 +138,9 @@ type Queue struct {
 	derivedOnce sync.Once
 	derived     *derivedReservations
 
+	// freeBytes overrides the statfs free-space probe; nil means the real one.
+	freeBytes func(path string) (int64, error)
+
 	// discoveryLimit is a test-only override of MaxDiscoveryRecords; 0 means the const.
 	discoveryLimit int
 }
@@ -203,14 +206,9 @@ func Open(ctx context.Context, dir string, opts Options) (*Queue, error) {
 	if err := q.initEnrichment(ctx); err != nil {
 		return fail(err)
 	}
-	used, err := q.usage()
-	if err != nil {
+	if err := q.reclaimAndAccount(); err != nil {
 		return fail(err)
 	}
-	if used > opts.MaxSpoolBytes {
-		return fail(ErrQuota)
-	}
-	q.used = used
 	if err := syncQueueTree(dir); err != nil {
 		return fail(err)
 	}
