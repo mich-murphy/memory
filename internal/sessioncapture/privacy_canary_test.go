@@ -40,12 +40,13 @@ func canaryVariants() [][]byte {
 }
 
 type canaryEnv struct {
-	t      *testing.T
-	root   string
-	be     *modelBackend
-	q      *Queue
-	mu     sync.Mutex
-	deny   map[string]bool
+	t    *testing.T
+	root string
+	be   *modelBackend
+	q    *Queue
+	mu   sync.Mutex
+
+	deny    map[string]bool
 	onStage map[string]func()
 }
 
@@ -55,7 +56,10 @@ func newCanaryEnv(t *testing.T) *canaryEnv {
 	if err := publication.WriteArchive(t.Context(), e.be.inner, publication.Archive{Contract: publication.Contract, ArchiveID: "archive"}); err != nil {
 		t.Fatal(err)
 	}
-	o := Options{ArchiveID: "archive", MaxSpoolBytes: 1 << 20, Now: func() time.Time { return time.Unix(100, 0) },
+	o := Options{
+		ArchiveID:     "archive",
+		MaxSpoolBytes: 1 << 20,
+		Now:           func() time.Time { return time.Unix(100, 0) },
 		CheckPolicy: func(_ context.Context, r Request) error {
 			e.mu.Lock()
 			defer e.mu.Unlock()
@@ -73,7 +77,8 @@ func newCanaryEnv(t *testing.T) *canaryEnv {
 				f()
 			}
 			return nil
-		}}
+		},
+	}
 	q, err := Open(t.Context(), filepath.Join(e.root, "queue"), o)
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +101,7 @@ func (e *canaryEnv) put(name, content string) {
 	}
 }
 
-func jsonInner(s string) string { j, _ := json.Marshal(s); return string(j[1 : len(j)-1]) }
+func canaryJSON() string { j, _ := json.Marshal(canaryRaw); return string(j[1 : len(j)-1]) }
 
 // positive sibling: must capture, publish and export exactly.
 func (e *canaryEnv) positive() {
@@ -135,7 +140,7 @@ func (e *canaryEnv) notPublished(sess string) {
 }
 
 func TestPrivacyCanary(t *testing.T) {
-	cfgJSON := `{"env":{"TOKEN":"` + jsonInner(canaryRaw) + `"}}`
+	cfgJSON := `{"env":{"TOKEN":"` + canaryJSON() + `"}}`
 
 	t.Run("scrubbed-config", func(t *testing.T) {
 		e := newCanaryEnv(t)
@@ -185,7 +190,7 @@ func TestPrivacyCanary(t *testing.T) {
 		e := newCanaryEnv(t)
 		e.setDeny("excl")
 		name := "excl-" + canaryRaw + ".jsonl"
-		e.put(name, `{"secret":"`+jsonInner(canaryRaw)+"\"}\n"+canaryRaw+"\n")
+		e.put(name, `{"secret":"`+canaryJSON()+"\"}\n"+canaryRaw+"\n")
 		r := e.req("excl", name, "")
 		if _, err := e.q.Capture(t.Context(), r); !errors.Is(err, ErrPolicy) {
 			t.Fatalf("excluded identity captured: %v", err)
@@ -198,7 +203,7 @@ func TestPrivacyCanary(t *testing.T) {
 	late := func(t *testing.T, mode string) {
 		e := newCanaryEnv(t)
 		name := "late-" + canaryRaw + ".jsonl"
-		e.put(name, `{"secret":"`+jsonInner(canaryRaw)+"\"}\n"+canaryRaw+"\n")
+		e.put(name, `{"secret":"`+canaryJSON()+"\"}\n"+canaryRaw+"\n")
 		r := e.req("late", name, "")
 		if _, err := e.q.Capture(t.Context(), r); err != nil {
 			t.Fatalf("pre-optout capture: %v", err)
@@ -223,7 +228,7 @@ func TestPrivacyCanary(t *testing.T) {
 
 	t.Run("scanner-control-unblocked-transcript", func(t *testing.T) {
 		e := newCanaryEnv(t)
-		e.put("ctl.jsonl", `{"m":"`+jsonInner(canaryRaw)+"\"}\n"+canaryRaw+"\n")
+		e.put("ctl.jsonl", `{"m":"`+canaryJSON()+"\"}\n"+canaryRaw+"\n")
 		r := e.req("ctl", "ctl.jsonl", "")
 		if _, err := e.q.Capture(t.Context(), r); err != nil {
 			t.Fatal(err)

@@ -511,10 +511,17 @@ func (s *modelSource) apply(b []byte, ifChanged bool) {
 // ---------- runner ----------
 
 type modelStats struct {
-	Histories, Ops, CaptureOK, CaptureFaultAccepted, CaptureFaultRejected int
-	DeliverOK, DeliverFailed, Restarts, FaultsFired, LostAcks, NewEpochs   int
-	RepeatedCAS, AlreadyApplied, BackoffGated, DueDelivered                int
-	PolicyRefused, MultiEpochSessions                                      int
+	Histories, Ops int
+
+	CaptureOK, CaptureFaultAccepted, CaptureFaultRejected int
+
+	DeliverOK, DeliverFailed, Restarts, FaultsFired int
+
+	LostAcks, NewEpochs, RepeatedCAS, AlreadyApplied int
+
+	BackoffGated, DueDelivered, PolicyRefused int
+
+	MultiEpochSessions int
 }
 
 type modelRun struct {
@@ -819,7 +826,8 @@ func (r *modelRun) pendingHead(s int) (Status, bool, error) {
 	}
 	var head Status
 	found := false
-	for _, j := range st {
+	for i := range st {
+		j := st[i]
 		if j.Identity != r.ident(s) || j.State == "published" || j.State == "superseded" {
 			continue
 		}
@@ -986,8 +994,8 @@ func (r *modelRun) checkRemote(id string) (string, string) {
 			return id, fmt.Sprintf("session %d export: %v", s, err)
 		}
 		var selected []publication.Source
-		for _, x := range exp.Manifest.Sources {
-			if publication.IsSelected(x) {
+		for i := range exp.Manifest.Sources {
+			if x := exp.Manifest.Sources[i]; publication.IsSelected(x) {
 				selected = append(selected, x)
 			}
 		}
@@ -1006,15 +1014,16 @@ func (r *modelRun) compareSession(s int, selected []publication.Source, exp publ
 	seen := map[string]bool{}
 	for i, sr := range r.src[s] {
 		var got []publication.Source
-		for _, x := range selected {
-			if x.SourceID == fmt.Sprintf("src%d", i) {
+		for k := range selected {
+			if x := selected[k]; x.SourceID == fmt.Sprintf("src%d", i) {
 				got = append(got, x)
 			}
 		}
 		if len(got) != len(sr.epochs) {
 			return fmt.Sprintf("session %d src%d epochs %d, model %d", s, i, len(got), len(sr.epochs))
 		}
-		for k, x := range got {
+		for k := range got {
+			x := &got[k]
 			want := sr.epochs[k]
 			state := "sealed"
 			if k == len(got)-1 {
@@ -1259,7 +1268,7 @@ func TestModelGeneratorShape(t *testing.T) {
 				big++
 			}
 			if op.Size >= 8192 && bytes.Contains(modelBytes(op.Seed, op.Size, false), bytes.Repeat([]byte("a"), 1)) {
-				for _, line := range bytes.Split(modelBytes(op.Seed, op.Size, false), []byte("\n")) {
+				for line := range bytes.SplitSeq(modelBytes(op.Seed, op.Size, false), []byte("\n")) {
 					if len(line) >= 4096 {
 						bigLines++
 						break

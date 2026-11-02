@@ -226,7 +226,8 @@ func crashCase(t *testing.T, stage string, n int) {
 		t.Fatalf("%s: status: %v", label, err)
 	}
 	var maxSeq uint64
-	for _, s := range st {
+	for i := range st {
+		s := &st[i]
 		if s.PublicationID == "" {
 			t.Fatalf("%s: torn job row %+v", label, s)
 		}
@@ -270,7 +271,8 @@ func crashCase(t *testing.T, stage string, n int) {
 	if st, err = q.Status(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range st {
+	for i := range st {
+		s := &st[i]
 		if s.State != "published" {
 			t.Fatalf("%s: job %d state %s after drain", label, s.Sequence, s.State)
 		}
