@@ -102,3 +102,13 @@ func TestZeroQuietPeriodCapturesImmediately(t *testing.T) {
 		t.Fatalf("claim %+v %v, want immediate", w, err)
 	}
 }
+
+// The daemon defaults are documented values (reports/g3-cadence.md), pinned here.
+func TestDefaultCadenceValues(t *testing.T) {
+	if DefaultQuietPeriod != 30*time.Second || DefaultMaxDelay != 300*time.Second {
+		t.Fatalf("defaults %s/%s, want 30s/300s", DefaultQuietPeriod, DefaultMaxDelay)
+	}
+	if err := validateCadence(RuntimeOptions{QuietPeriod: DefaultQuietPeriod, MaxDelay: DefaultMaxDelay}); err != nil {
+		t.Fatal(err)
+	}
+}
