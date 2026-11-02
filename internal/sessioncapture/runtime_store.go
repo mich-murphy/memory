@@ -10,6 +10,14 @@ import (
 	"github.com/mich-murphy/memory/internal/publication"
 )
 
+// runnableSourcePredicate is shared by the claimSource query and the partial index
+// runtime_runnable_sources_v2; SQLite only uses the index when the text matches, so
+// adding a settled state here changes both together.
+const runnableSourcePredicate = `claim=0 AND state NOT IN ('absent','captured','quarantined','source-limit')`
+
+// claimSourceSQL pages runnable sources by id; it must use runtime_runnable_sources_v2.
+const claimSourceSQL = `SELECT id,request,version,attempts,claim,state,next_retry,observed_state FROM runtime_sources AS s WHERE id>? AND ` + runnableSourcePredicate + ` AND next_retry<=? AND NOT EXISTS(SELECT 1 FROM runtime_sources AS busy WHERE busy.session=s.session AND busy.claim!=0) ORDER BY id LIMIT 64`
+
 // InitRuntime installs durable runtime state lazily. The Queue process flock
 // guarantees that claims left by a previous process can be reset safely. Calls
 // after the first initialization never reset live workers' claims.
@@ -29,7 +37,10 @@ func (q *Queue) InitRuntime(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS runtime_discovery_scopes (id INTEGER PRIMARY KEY,agent TEXT NOT NULL,root TEXT NOT NULL,state TEXT NOT NULL,examined INTEGER NOT NULL,enrichment TEXT NOT NULL,seen_generation INTEGER NOT NULL,active INTEGER NOT NULL DEFAULT 1,UNIQUE(agent,root))`,
 		`CREATE TABLE IF NOT EXISTS runtime_sources (id INTEGER PRIMARY KEY,session TEXT NOT NULL,source TEXT NOT NULL,request BLOB NOT NULL,version INTEGER NOT NULL DEFAULT 1,captured_version INTEGER NOT NULL DEFAULT 0,observed_at INTEGER NOT NULL,captured_at INTEGER NOT NULL DEFAULT 0,sequence INTEGER NOT NULL DEFAULT 0,publication TEXT NOT NULL DEFAULT '',state TEXT NOT NULL DEFAULT 'pending',observed_state TEXT NOT NULL DEFAULT 'present',attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT NOT NULL DEFAULT '',next_retry INTEGER NOT NULL DEFAULT 0,claim INTEGER NOT NULL DEFAULT 0,UNIQUE(session,source))`,
 		`CREATE INDEX IF NOT EXISTS runtime_source_claims ON runtime_sources(session,claim)`,
-		`CREATE INDEX IF NOT EXISTS runtime_runnable_sources ON runtime_sources(id) WHERE claim=0 AND state NOT IN ('absent','captured','quarantined')`,
+		// v2 carries the source-limit state. The old index is dropped because CREATE INDEX
+		// IF NOT EXISTS would keep a stale predicate that claimSourceSQL cannot use.
+		`DROP INDEX IF EXISTS runtime_runnable_sources`,
+		`CREATE INDEX IF NOT EXISTS runtime_runnable_sources_v2 ON runtime_sources(id) WHERE ` + runnableSourcePredicate,
 		`CREATE TABLE IF NOT EXISTS runtime_sessions (id INTEGER PRIMARY KEY,session TEXT UNIQUE NOT NULL,claim INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE IF NOT EXISTS runtime_destination (id INTEGER PRIMARY KEY CHECK(id=1),paused INTEGER NOT NULL DEFAULT 0,reason TEXT NOT NULL DEFAULT '',paused_at INTEGER NOT NULL DEFAULT 0,discovery_error TEXT NOT NULL DEFAULT '',discovered_at INTEGER NOT NULL DEFAULT 0)`,
 		`INSERT OR IGNORE INTO runtime_destination(id) VALUES(1)`,
@@ -187,7 +198,7 @@ func (q *Queue) claimSource(ctx context.Context) (sourceWork, error) {
 	var w sourceWork
 	// Read at most one fixed page per turn; the cursor advances past unavailable
 	// sources as well as successful work. No archive job history is inspected.
-	rows, err := q.db.QueryContext(ctx, `SELECT id,request,version,attempts,claim,state,next_retry,observed_state FROM runtime_sources AS s WHERE id>? AND claim=0 AND state NOT IN ('absent','captured','quarantined','source-limit') AND next_retry<=? AND NOT EXISTS(SELECT 1 FROM runtime_sources AS busy WHERE busy.session=s.session AND busy.claim!=0) ORDER BY id LIMIT 64`, r.sourceCursor, q.opts.Now().UnixNano())
+	rows, err := q.db.QueryContext(ctx, claimSourceSQL, r.sourceCursor, q.opts.Now().UnixNano())
 	if err != nil {
 		return w, err
 	}

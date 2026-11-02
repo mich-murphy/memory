@@ -579,3 +579,73 @@ func (b healingBackend) PutFile(ctx context.Context, key, path string) error {
 	}
 	return b.Backend.PutFile(ctx, key, path)
 }
+
+func TestRunnableSourceIndexMatchesClaimQuery(t *testing.T) {
+	plan := func(q *Queue) string {
+		rows, err := q.db.QueryContext(t.Context(), `EXPLAIN QUERY PLAN `+claimSourceSQL, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		var out []string
+		for rows.Next() {
+			var id, parent, unused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, detail)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(out, "\n")
+	}
+	indexes := func(q *Queue) string {
+		rows, err := q.db.QueryContext(t.Context(), `SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'runtime_runnable_sources%' ORDER BY name`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		var names []string
+		for rows.Next() {
+			var n string
+			if err := rows.Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			names = append(names, n)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(names, ",")
+	}
+	dir, o, _ := setup(t)
+	q := open(t, dir, o)
+	// A queue created by an older build carries the stale three-state index.
+	if err := q.InitRuntime(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := indexes(q); got != "runtime_runnable_sources_v2" {
+		t.Fatalf("fresh indexes %q", got)
+	}
+	if _, err := q.db.ExecContext(t.Context(), `DROP INDEX runtime_runnable_sources_v2`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.db.ExecContext(t.Context(), `CREATE INDEX runtime_runnable_sources ON runtime_sources(id) WHERE claim=0 AND state NOT IN ('absent','captured','quarantined')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Close(); err != nil {
+		t.Fatal(err)
+	}
+	q = open(t, dir, o)
+	if err := q.InitRuntime(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := indexes(q); got != "runtime_runnable_sources_v2" {
+		t.Fatalf("reopened indexes %q", got)
+	}
+	if got := plan(q); !strings.Contains(got, "USING INDEX runtime_runnable_sources_v2") {
+		t.Fatalf("claim plan %q", got)
+	}
+}
