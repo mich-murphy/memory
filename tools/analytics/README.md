@@ -414,7 +414,7 @@ projection writers separately. Each sweep starts enumeration at the beginning; a
 persistent lexical watermark would miss sessions created earlier in sort order.
 Enumeration is paged at 256 heads, capped at 1024 pages per endpoint per sweep.
 Process timeout defaults to 300 seconds; `--timeout` and `--max-bytes` configure
-bounded individual exports (default 256 MiB, maximum 1 GiB). Local output bytes and
+bounded individual exports (default 1 GiB, maximum 1 GiB; raised from 256 MiB because the largest measured session is 615 MB; the limit is cumulative across retained epochs and a refusal is reported as `export_too_large` in `target_error_codes`). Local output bytes and
 entry counts are monitored during subprocesses, with process-group cancellation;
 this polling bound is not a filesystem quota or a hard instantaneous disk ceiling.
 Remote reader byte limits bound staging before SCP. At most one export is staged

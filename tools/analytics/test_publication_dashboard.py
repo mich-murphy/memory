@@ -52,7 +52,7 @@ class PublicationDashboardTests(unittest.TestCase):
             observed_at_ns=1700000000000000001, captured_at_ns=1700000000000000002,
             published_at_ns=0, coverage=dict(discovery='unknown', enrichment='partial', missing=['source-withheld']),
             sources=sources)
-        (export / 'metadata.json').write_text(json.dumps(dict(contract='session-reader/v2', manifest=manifest, bodies=bodies)))
+        (export / 'metadata.json').write_text(json.dumps(dict(contract='session-reader/v2', manifest_sha256='ab' * 32, manifest=manifest, bodies=bodies)))
         publications.import_export(export, self.database)
         shutil.rmtree(export)  # Serving cannot fall back to transient exports or originals.
         self.adapter = PublicationDashboard(self.database)

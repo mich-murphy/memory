@@ -93,13 +93,22 @@ func runCapture(ctx context.Context, args []string, o IO) (int, error) {
 		if c.store == "" || c.output == "" || !captureIdentityComplete(c.identity()) {
 			return exitUsage, errors.New("export requires --store, --output, --machine, --agent, --session")
 		}
-		_, err := publication.ExportSessionBounded(ctx, backend, c.identity(), c.output, c.maxBytes)
-		return exitOK, err
+		return exportSession(ctx, backend, c)
 	case "capture", "deliver", "status":
 		return runCaptureWork(ctx, args[0], c, o)
 	default:
 		return exitUsage, errors.New("unknown capture-v1 command")
 	}
+}
+
+// exportSession runs the pinned export under the total byte limit. A budget refusal
+// is permanent for that limit, so it has its own exit status, not the generic one.
+func exportSession(ctx context.Context, backend publication.Backend, c captureFlags) (int, error) {
+	_, err := publication.ExportSessionBounded(ctx, backend, c.identity(), c.output, c.maxBytes)
+	if errors.Is(err, publication.ErrExportBudget) {
+		return exitExportBudget, err
+	}
+	return exitOK, err
 }
 
 func runCaptureWork(ctx context.Context, cmd string, c captureFlags, o IO) (code int, err error) {
