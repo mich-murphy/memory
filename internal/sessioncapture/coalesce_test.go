@@ -168,7 +168,7 @@ func TestRewriteEpochsSurviveCoalescing(t *testing.T) {
 // At current-before the stale CAS has passed its guard and does land remotely;
 // the local job must stay superseded and job 2 must then replace it.
 func TestAppendDuringDeliveryNeverLetsStaleWorkWin(t *testing.T) {
-	for _, stage := range []string{"manifest-before", "current-before"} {
+	for _, stage := range []string{"upload-before", "manifest-before", "current-before"} {
 		t.Run(stage, func(t *testing.T) {
 			dir, o, r := setup(t)
 			var q *Queue
@@ -228,6 +228,10 @@ func TestAppendDuringDeliveryNeverLetsStaleWorkWin(t *testing.T) {
 			}
 			if m := publishedManifest(t, b, r.Identity); m.Sources[0].Object.Size != int64(len(want)) {
 				t.Fatalf("published size %d, want %d", m.Sources[0].Object.Size, len(want))
+			}
+			// The stale job's payload was reclaimed when it was superseded; only job 2's remains.
+			if n := payloadFileCount(t, q); n != 1 {
+				t.Fatalf("%d payload files after stale attempt, want 1", n)
 			}
 		})
 	}
@@ -292,5 +296,31 @@ func TestSubsumes(t *testing.T) {
 				t.Fatalf("subsumes = %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+// Selection supersession (optional detach, terminal repair quota) must retire every
+// undelivered job, subsumable or not. A skipped job is redelivered forever because
+// each supersession accepts a new job (livelock).
+func TestSelectionSupersessionSupersedesEveryUndeliveredJob(t *testing.T) {
+	dir, o, r := setup(t)
+	q := open(t, dir, o)
+	capture(t, q, r)
+	if _, err := q.db.ExecContext(t.Context(), `UPDATE jobs SET enrichment_gap='quota' WHERE sequence=1`); err != nil {
+		t.Fatal(err)
+	}
+	m, es, err := q.latest(t.Context(), r.Identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Sequence++
+	if _, err := q.acceptView(t.Context(), m, es, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := jobStatus(t, q, r.Identity, 1).State; got != "superseded" {
+		t.Fatalf("job 1 state %s, want superseded", got)
+	}
+	if got := jobStatus(t, q, r.Identity, 2).State; got != "pending" {
+		t.Fatalf("job 2 state %s, want pending", got)
 	}
 }

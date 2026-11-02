@@ -3,8 +3,16 @@
 // are fsynced before a short acceptance transaction. A process lock fences other
 // openers. No metadata transaction spans source I/O or network operations.
 //
-// All payloads, sealed epochs, intermediate accepted publications and crash orphans
-// are retained: there is deliberately no GC. MaxSpoolBytes bounds compressed payload
+// Remote storage has no GC (contract section 4). Locally, payloads are reclaimed
+// only when no retained root references them (see reclaim.go): a proven-subsumed
+// undelivered append is superseded at acceptance and its objects reclaimed, and the
+// objects of an older published job that the next acknowledged job no longer
+// references are reclaimed after that acknowledgement. Retained, never reclaimed:
+// anything an undelivered, latest or latest-published job references, sealed epochs
+// while referenced, enrichment results, unfinished repairs, optional artifacts and
+// objects kept by selection supersession (unique local bytes, bounded by
+// MaxSpoolBytes, visible in usage), and crash orphans no job references.
+// MaxSpoolBytes bounds compressed payload
 // bytes (including orphans), not SQLite metadata or filesystem overhead. Operators
 // must budget those separately. Source snapshots are double-hashed with stat checks;
 // this detects ordinary mutation, not producer atomicity or hostile filesystem races.
@@ -212,7 +220,10 @@ func Open(ctx context.Context, dir string, opts Options) (*Queue, error) {
 	if err := q.initEnrichment(ctx); err != nil {
 		return fail(err)
 	}
-	if err := q.reclaimAndAccount(); err != nil {
+	if err := q.initReclaim(ctx); err != nil {
+		return fail(err)
+	}
+	if err := q.reclaimAndAccount(ctx); err != nil {
 		return fail(err)
 	}
 	if err := syncQueueTree(dir); err != nil {

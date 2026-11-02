@@ -1,6 +1,7 @@
 package sessioncapture
 
 import (
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,7 +12,10 @@ import (
 
 // used includes durable payloads, crash orphans, temporary bytes and reservations
 // not yet written. Only unwritten reservations or successfully removed duplicates
-// may be released. No accepted/orphan payload is garbage collected.
+// may be released, plus payloads that reclaim.go proves unreferenced by every
+// retained root (metadata decision committed first, then unlink; Open finishes
+// interrupted unlinks before accounting). Crash orphans and unique optional or
+// selection-superseded bytes are not reclaimed; a full spool still stops capture.
 type quotaWriter struct {
 	q        *Queue
 	w        io.Writer
@@ -127,7 +131,7 @@ func sweepTemporaries(dir string) (bool, error) {
 // reclaimAndAccount runs at Open under the process lock. A crash before payload
 // install leaves writer temporaries; they are reclaimed before accounting so
 // their bytes are not charged forever. Existing payloads must fit the quota.
-func (q *Queue) reclaimAndAccount() error {
+func (q *Queue) reclaimAndAccount(ctx context.Context) error {
 	swept, err := sweepTemporaries(q.dir)
 	if err != nil {
 		return err
@@ -136,6 +140,11 @@ func (q *Queue) reclaimAndAccount() error {
 		if err := syncDir(filepath.Join(q.dir, "payloads")); err != nil {
 			return err
 		}
+	}
+	// Finish unlinks whose metadata decision committed before a crash. The usage
+	// scan below then charges only what is physically present.
+	if _, err := q.reclaimPending(ctx); err != nil {
+		return err
 	}
 	used, err := q.usage()
 	if err != nil {

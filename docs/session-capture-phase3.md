@@ -25,8 +25,13 @@ checks without a separately reviewed accounting/integrity design.
 
 SQLite WAL with `synchronous=FULL` remains authoritative for accepted work. Private
 encoded payloads are synced before acceptance; crash orphans, sealed epochs and
-intermediate accepted publications remain retained. No automatic GC or eviction is
-implemented. Failed capture never advances an accepted publication. Source absence
+older accepted publications are reclaimed locally only when no retained root
+references them: undelivered proven-subsumed appends are superseded at acceptance
+(k deferred appends deliver as one object PUT and one CAS) and their payloads removed;
+an older published job's payloads are removed after a newer acknowledgement. Optional
+artifacts, objects kept by selection supersession and crash orphans stay retained
+(unique bytes, bounded by the spool limit). `RuntimeStatus.ReclaimPending/Failed`
+show unfinished unlinks. Remote GC and eviction are not implemented. Failed capture never advances an accepted publication. Source absence
 is a local fact, not remote deletion.
 
 `CaptureIfChanged` double-hashes a stable observation and compares provenance; it

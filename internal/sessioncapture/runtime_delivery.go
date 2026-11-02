@@ -113,6 +113,7 @@ func (q *Queue) deliveryResult(ctx context.Context, i publication.Identity, seq 
 	if cause == nil {
 		cause = q.acknowledge(save, i, seq)
 		if cause == nil {
+			q.reclaimBestEffort(save)
 			return nil
 		}
 		// A post-commit fault reports an ambiguous ACK, never a new failed job.

@@ -29,13 +29,15 @@ const (
 )
 
 var (
-	crashCaptureStages = map[string]bool{"payload-before-sync": true, "payload-synced": true, "job-before-commit": true, "job-committed": true}
-	crashPreCommit     = map[string]bool{"payload-before-sync": true, "payload-synced": true, "job-before-commit": true}
+	crashCaptureStages = map[string]bool{"payload-before-sync": true, "payload-synced": true, "payload-accept-before": true, "job-before-commit": true, "job-committed": true}
+	crashPreCommit     = map[string]bool{"payload-before-sync": true, "payload-synced": true, "payload-accept-before": true, "job-before-commit": true}
+	// crashReclaimStages only fire when del2 retires the first published payload.
+	crashReclaimStages = map[string]bool{"reclaim-before-unlink": true, "reclaim-after-unlink": true}
 	crashStages        = []string{
-		"payload-before-sync", "payload-synced", "job-before-commit", "job-committed",
+		"payload-before-sync", "payload-synced", "payload-accept-before", "job-before-commit", "job-committed",
 		"upload-before", "upload-after", "manifest-before", "manifest-upload-before",
 		"manifest-upload-after", "current-before", "current-after", "current-published",
-		"ack-before-commit", "ack-committed",
+		"ack-before-commit", "ack-committed", "reclaim-before-unlink", "reclaim-after-unlink",
 	}
 )
 
@@ -221,6 +223,13 @@ func crashCase(t *testing.T, stage string, n int) {
 	}
 	t.Cleanup(func() { _ = q.Close() })
 	assertSpoolReclaimed(t, q, label+" (reopen)")
+	if crashReclaimStages[stage] {
+		// The ack committed before the crash, whichever side of the unlink it hit:
+		// reopen must leave only the second payload.
+		if n := payloadFileCount(t, q); n != 1 {
+			t.Fatalf("%s: %d payload files after reopen, want 1", label, n)
+		}
+	}
 	st, err := q.Status(t.Context())
 	if err != nil {
 		t.Fatalf("%s: status: %v", label, err)
@@ -283,7 +292,11 @@ func crashCase(t *testing.T, stage string, n int) {
 func TestCrashProcess(t *testing.T) {
 	t.Run("control-no-crash", func(t *testing.T) { crashCase(t, "none", 2) })
 	for _, stage := range crashStages {
-		for _, n := range []int{1, 2} {
+		ns := []int{1, 2}
+		if crashReclaimStages[stage] {
+			ns = []int{2}
+		}
+		for _, n := range ns {
 			t.Run(fmt.Sprintf("%s/seq%d", stage, n), func(t *testing.T) { crashCase(t, stage, n) })
 		}
 	}

@@ -47,9 +47,13 @@ type RuntimeStatus struct {
 	SpoolFullWork int64
 	// SourceLimitSources counts sources parked at the manifest source limit; a new
 	// observation retries them, since an append to an existing epoch can still fit.
-	SourceLimitSources           int64
-	OldestPendingPublicationAtNS int64
-	OldestObservedAtNS           int64
+	SourceLimitSources int64
+	// ReclaimPending counts payload files awaiting local reclamation (a committed
+	// metadata decision whose unlink has not completed); ReclaimFailed is the subset
+	// whose last attempt failed and will be retried.
+	ReclaimPending, ReclaimFailed int64
+	OldestPendingPublicationAtNS  int64
+	OldestObservedAtNS            int64
 	// Discovery and enrichment remain partial; a successful timer is not proof of
 	// complete source inventory. Published timestamps remain independent of capture.
 	Coverage string
@@ -145,6 +149,10 @@ func (q *Queue) RuntimeStatus(ctx context.Context) (RuntimeStatus, error) {
 		return s, err
 	}
 	err = q.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM runtime_sources WHERE state='retry' AND last_error='spool-full')+(SELECT COUNT(*) FROM jobs WHERE state='retry' AND last_error='spool-full')`).Scan(&s.SpoolFullWork)
+	if err != nil {
+		return s, err
+	}
+	err = q.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(last_error!=''),0) FROM payload_reclaim`).Scan(&s.ReclaimPending, &s.ReclaimFailed)
 	if err != nil {
 		return s, err
 	}
