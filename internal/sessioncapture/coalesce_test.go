@@ -355,3 +355,47 @@ func TestRetireJobsHandlesEachJobAndOnlyPlainStates(t *testing.T) {
 		})
 	}
 }
+
+// Property: for any interleaving of appends, captures and deliveries, a delivery with
+// pending work costs exactly one object PUT, one manifest PUT and one CAS (however many
+// appends were deferred), a delivery without pending work costs nothing, and the totals
+// never exceed the number of captures.
+func TestDeliveryWriteCountsMatchOracleUnderRandomInterleavings(t *testing.T) {
+	for seed := range uint64(12) {
+		t.Run("", func(t *testing.T) {
+			rnd := rand.New(rand.NewPCG(seed, 7))
+			dir, o, r := setup(t)
+			o.MaxSpoolBytes = 1 << 26
+			q := open(t, dir, o)
+			m := &meterBackend{Backend: newBackend(t)}
+			captures, deliveries := 1, 0
+			capture(t, q, r)
+			for step := range 30 {
+				if rnd.IntN(3) > 0 {
+					appendBytes(t, r.Path, randomBytes(byte(step), 64+rnd.IntN(512)))
+					capture(t, q, r)
+					captures++
+					continue
+				}
+				pending := jobStates(t, q)["pending"] > 0
+				before := *m
+				if err := q.Deliver(t.Context(), m, r.Identity); err != nil {
+					t.Fatal(err)
+				}
+				dObj, dMeta, dSwap := m.objPuts-before.objPuts, m.metaPuts-before.metaPuts, m.swaps-before.swaps
+				want := 0
+				if pending {
+					want = 1
+					deliveries++
+				}
+				if dObj != want || dMeta != want || dSwap != want {
+					t.Fatalf("seed %d step %d pending=%v: objects=%d manifests=%d cas=%d, want %d each", seed, step, pending, dObj, dMeta, dSwap, want)
+				}
+			}
+			if m.swaps != deliveries || m.swaps > captures {
+				t.Fatalf("totals: cas=%d deliveries=%d captures=%d", m.swaps, deliveries, captures)
+			}
+			assertSpoolEqualsRoots(t, q)
+		})
+	}
+}
