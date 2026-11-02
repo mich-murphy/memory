@@ -399,3 +399,43 @@ func TestDeliveryWriteCountsMatchOracleUnderRandomInterleavings(t *testing.T) {
 		})
 	}
 }
+
+// An unparsable plain job is never coalesced: it stays pending for delivery to
+// report the integrity failure, while a parsable plain job is still superseded.
+func TestRetireJobsKeepsUnparsablePlainJob(t *testing.T) {
+	dir, o, r := setup(t)
+	q := open(t, dir, o)
+	capture(t, q, r)
+	appendBytes(t, r.Path, []byte("two\n"))
+	capture(t, q, r)
+	if _, err := q.db.ExecContext(t.Context(), `UPDATE jobs SET manifest=?, state='pending' WHERE sequence=1`, []byte("not-json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.db.ExecContext(t.Context(), `UPDATE jobs SET state='pending' WHERE sequence=2`); err != nil {
+		t.Fatal(err)
+	}
+	appendBytes(t, r.Path, []byte("three\n"))
+	capture(t, q, r)
+	// Status would reject the corrupt manifest, so count states directly.
+	rows, err := q.db.QueryContext(t.Context(), `SELECT state,COUNT(*) FROM jobs GROUP BY state`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }() // Read-only query; rows.Err checked below.
+	got := map[string]int{}
+	for rows.Next() {
+		var state string
+		var n int
+		if err := rows.Scan(&state, &n); err != nil {
+			t.Fatal(err)
+		}
+		got[state] = n
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{"pending": 2, "superseded": 1}
+	if !cmp.Equal(got, want) {
+		t.Fatalf("job states: %s", cmp.Diff(want, got))
+	}
+}

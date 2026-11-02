@@ -26,7 +26,7 @@ import (
 // Objects that only the superseded job held become reclamation candidates in the
 // same transaction (the durable metadata decision); the unlink happens later.
 func retireJobs(ctx context.Context, tx *sql.Tx, next publication.Manifest, subsumedOnly bool) error {
-	jobs, err := undeliveredJobs(ctx, tx, next)
+	jobs, err := undeliveredJobs(ctx, tx, next, subsumedOnly)
 	if err != nil {
 		return err
 	}
@@ -54,15 +54,20 @@ func retireJobs(ctx context.Context, tx *sql.Tx, next publication.Manifest, subs
 type undeliveredJob struct {
 	sequence uint64
 	manifest publication.Manifest
-	// readable is false for an unparsable manifest. Such a job is never coalesced
+	// readable is false for an unparsable manifest, and for a manifest that was
+	// not loaded (not coalescing, or not plain). Such a job is never coalesced
 	// (delivery reports the integrity failure) and contributes no candidates.
 	readable bool
 	// plain means pending/retry with no enrichment or optional-repair gap.
 	plain bool
 }
 
-func undeliveredJobs(ctx context.Context, tx *sql.Tx, next publication.Manifest) (jobs []undeliveredJob, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT sequence,manifest,state,enrichment_gap,optional_repair_gap FROM jobs WHERE session=? AND sequence<? AND state NOT IN ('published','superseded')`, next.Identity.BaseKey(), next.Sequence)
+// undeliveredJobs lists the undelivered jobs before next. The manifest is
+// fetched and parsed only where it can matter: a coalescing pass (subsumedOnly)
+// over a plain job. Selection supersession retires every job without reading
+// it, and a non-plain job is never coalesced, so neither needs a parse.
+func undeliveredJobs(ctx context.Context, tx *sql.Tx, next publication.Manifest, subsumedOnly bool) (jobs []undeliveredJob, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT sequence,CASE WHEN ? AND state IN ('pending','retry') AND enrichment_gap='' AND optional_repair_gap='' THEN manifest END,state,enrichment_gap,optional_repair_gap FROM jobs WHERE session=? AND sequence<? AND state NOT IN ('published','superseded')`, subsumedOnly, next.Identity.BaseKey(), next.Sequence)
 	if err != nil {
 		return nil, err
 	}
@@ -74,8 +79,10 @@ func undeliveredJobs(ctx context.Context, tx *sql.Tx, next publication.Manifest)
 		if err := rows.Scan(&j.sequence, &body, &state, &enrichmentGap, &repairGap); err != nil {
 			return nil, err
 		}
-		j.readable = json.Unmarshal(body, &j.manifest) == nil
 		j.plain = (state == "pending" || state == "retry") && enrichmentGap == "" && repairGap == ""
+		if body != nil {
+			j.readable = json.Unmarshal(body, &j.manifest) == nil
+		}
 		jobs = append(jobs, j)
 	}
 	return jobs, rows.Err()
