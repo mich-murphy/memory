@@ -97,7 +97,13 @@ func TestOptionalWorkersShutdownBudget(t *testing.T) {
 					t.Fatal(err)
 				}
 				if kind != "shutdown" {
-					if state != "quarantined" || attempts != 8 || next == 0 {
+					// Deterministic failures spend the budget and quarantine; deadline,
+					// cancellation and durability failures stay retryable (contract section 3).
+					want := "retry"
+					if kind == "joined-integrity" {
+						want = "quarantined"
+					}
+					if state != want || attempts != 8 || next == 0 {
 						t.Fatalf("genuine failure refunded: %s %d %d", state, attempts, next)
 					}
 					return

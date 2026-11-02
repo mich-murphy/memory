@@ -515,6 +515,9 @@ func encodeAcceptedView(m publication.Manifest, es []evidence) (publication.Mani
 		return m, nil, nil, err
 	}
 	m.PublicationID = digest(b)
+	if len(m.Sources) > publication.MaxSources {
+		return m, nil, nil, ErrSourceLimit
+	}
 	if err := publication.ValidateManifest(m); err != nil {
 		return m, nil, nil, err
 	}
@@ -529,7 +532,7 @@ func encodeAcceptedView(m publication.Manifest, es []evidence) (publication.Mani
 	if err != nil {
 		return m, nil, nil, err
 	}
-	if len(b) > publication.MaxMetadata || len(m.Sources) > publication.MaxSources {
+	if len(b) > publication.MaxMetadata {
 		return m, nil, nil, ErrQuota
 	}
 	return m, b, ev, nil

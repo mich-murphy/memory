@@ -45,6 +45,10 @@ const (
 	FailureRejected FailureClass = "rejected"
 	// FailureSpoolFull is capacity backpressure that clears when space returns.
 	FailureSpoolFull FailureClass = "spool-full"
+	// FailureSourceLimit marks a session at publication.MaxSources. Retrying cannot
+	// help, so the source parks in the visible terminal state "source-limit"
+	// without a quarantine entry or further attempts.
+	FailureSourceLimit FailureClass = "source-limit"
 )
 
 // spendsQuarantineBudget reports whether repeated failures of this class count
@@ -55,7 +59,7 @@ func (c FailureClass) spendsQuarantineBudget() bool {
 	switch c {
 	case FailurePolicy, FailureIntegrity, FailureQuota, FailureConflict, FailureRejected:
 		return true
-	case FailureTransient, FailureDestination, FailureTimeout, FailureAbsent, FailureSpoolFull:
+	case FailureTransient, FailureDestination, FailureTimeout, FailureAbsent, FailureSpoolFull, FailureSourceLimit:
 		return false
 	}
 	return false
@@ -130,6 +134,8 @@ func classify(err error, custom func(error) FailureClass) FailureClass {
 		return FailurePolicy
 	case errors.Is(err, ErrIntegrity):
 		return FailureIntegrity
+	case errors.Is(err, ErrSourceLimit):
+		return FailureSourceLimit
 	case errors.Is(err, ErrSpoolFull):
 		return FailureSpoolFull
 	case errors.Is(err, ErrQuota):
@@ -143,7 +149,7 @@ func classify(err error, custom func(error) FailureClass) FailureClass {
 	}
 	if custom != nil {
 		switch c := custom(err); c {
-		case FailureTransient, FailureDestination, FailurePolicy, FailureIntegrity, FailureQuota, FailureTimeout, FailureAbsent, FailureConflict, FailureRejected, FailureSpoolFull:
+		case FailureTransient, FailureDestination, FailurePolicy, FailureIntegrity, FailureQuota, FailureTimeout, FailureAbsent, FailureConflict, FailureRejected, FailureSpoolFull, FailureSourceLimit:
 			return c
 		}
 	}

@@ -55,8 +55,17 @@ retries and clears when capacity returns. Only deterministic classes consume
 reconciliation) is an interim visible, replayable class; convergence is GAP-06.
 Lag is observable: per-job `Status` carries `Attempts`, `LastError` class, `NextRetryNS`
 and `CapturedAtNS`; `RuntimeStatus` adds `RetryingPublications`, `MaxPendingAttempts`,
-`OldestPendingPublicationAtNS` and `SpoolFullWork`. Optional-repair and enrichment work
-still use the legacy attempt rule (open item).
+`OldestPendingPublicationAtNS` and `SpoolFullWork`. Enrichment and optional-repair
+work follow the same rule.
+
+Source limit (GAP-05): a session manifest holds at most `publication.MaxSources` (1024)
+source epochs. Reaching it returns the typed `ErrSourceLimit` (not `ErrQuota`), class
+`source-limit`: the source parks in the visible terminal state `source-limit` (no
+quarantine entry, no retry loop; `RuntimeStatus.SourceLimitSources` counts them), earlier
+epochs are never dropped and the previous successful publication stays readable. A new
+observation of the source retries it. Rollover or compaction is deliberately out of
+scope: measured sessions reach at most 379 sources (Mac) and 198 (BC-01), so 1024 stays a
+documented hard limit with visible status.
 
 The intended cancellation boundary is graceful shutdown only when every error-tree
 leaf is caller cancellation; database, integrity and durability causes must remain

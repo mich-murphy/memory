@@ -44,7 +44,10 @@ type RuntimeStatus struct {
 	RetryingPublications, MaxPendingAttempts int64
 	// SpoolFullWork counts capture sources and publications currently waiting on
 	// spool or free-space capacity (backpressure, not quarantine).
-	SpoolFullWork                int64
+	SpoolFullWork int64
+	// SourceLimitSources counts sources parked at the manifest source limit; a new
+	// observation retries them, since an append to an existing epoch can still fit.
+	SourceLimitSources           int64
 	OldestPendingPublicationAtNS int64
 	OldestObservedAtNS           int64
 	// Discovery and enrichment remain partial; a successful timer is not proof of
@@ -117,6 +120,10 @@ func (q *Queue) RuntimeStatus(ctx context.Context) (RuntimeStatus, error) {
 		return s, err
 	}
 	err = q.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(version>captured_version),0),COALESCE(MIN(CASE WHEN version>captured_version THEN observed_at END),0) FROM runtime_sources`).Scan(&s.Sources, &s.PendingSources, &s.OldestObservedAtNS)
+	if err != nil {
+		return s, err
+	}
+	err = q.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_sources WHERE state='source-limit'`).Scan(&s.SourceLimitSources)
 	if err != nil {
 		return s, err
 	}

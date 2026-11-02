@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -422,4 +423,159 @@ func captureTurns(t *testing.T, q *Queue, o RuntimeOptions) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func TestSourceLimitIsTypedAndNotQuarantinedAsTransient(t *testing.T) {
+	dir, o, r := setup(t)
+	o.MaxSpoolBytes = 64 << 20
+	clock := time.Unix(1000, 0)
+	o.Now = func() time.Time { return clock }
+	q := open(t, dir, o)
+	var last publication.Manifest
+	var capErr error
+	for i := 1; i <= 1030; i++ {
+		write(t, r.Path, fmt.Sprintf("%08d\n", i))
+		m, err := q.Capture(t.Context(), r)
+		if err != nil {
+			capErr = err
+			break
+		}
+		last = m
+	}
+	if len(last.Sources) != publication.MaxSources {
+		t.Fatalf("last accepted manifest holds %d sources", len(last.Sources))
+	}
+	if !errors.Is(capErr, ErrSourceLimit) {
+		t.Fatalf("capture error %v is not ErrSourceLimit", capErr)
+	}
+	if err := q.Hint(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	opts := runtimeDefaults(RuntimeOptions{})
+	for range 12 {
+		captureTurns(t, q, opts)
+		clock = clock.Add(10 * time.Minute)
+	}
+	var state, lastErr string
+	var qn int
+	if err := q.db.QueryRowContext(t.Context(), `SELECT state,last_error FROM runtime_sources LIMIT 1`).Scan(&state, &lastErr); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runtime_quarantine WHERE kind='capture'`).Scan(&qn); err != nil {
+		t.Fatal(err)
+	}
+	if state != "source-limit" || lastErr != string(FailureSourceLimit) || qn != 0 {
+		t.Fatalf("state=%s last_error=%s quarantine rows=%d", state, lastErr, qn)
+	}
+	rs, err := q.RuntimeStatus(t.Context())
+	if err != nil || rs.SourceLimitSources != 1 || rs.Quarantined != 0 {
+		t.Fatalf("%+v %v", rs, err)
+	}
+	// The previous successful publication stays accepted and unchanged.
+	if jobs := jobStatus(t, q, r.Identity, last.Sequence); jobs.PublicationID != last.PublicationID {
+		t.Fatalf("last publication changed: %+v", jobs)
+	}
+}
+
+// optionalWork seeds one enrichment or optional-repair row at attempts=7 and
+// returns the table, row id and a runner for one worker turn.
+func optionalWork(t *testing.T, lane string, failure *error) (*Queue, string, string, func() error) {
+	t.Helper()
+	dir, o, r := setup(t)
+	q := open(t, dir, o)
+	if err := q.InitRuntime(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	m := capture(t, q, r)
+	_, es, err := q.latest(t.Context(), r.Identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := runtimeDefaults(RuntimeOptions{MaxAttempts: 8, Enrich: func(context.Context, EnrichmentSpec) (EnrichmentArtifact, error) {
+		if *failure != nil {
+			return EnrichmentArtifact{}, *failure
+		}
+		return EnrichmentArtifact{Body: io.NopCloser(strings.NewReader("ok")), Complete: true}, nil
+	}})
+	if lane == "enrichment" {
+		spec := EnrichmentSpec{Kind: "snapshot", Identity: r.Identity, Source: SourceCoordinate{SourceID: r.SourceID, Path: r.Path}}
+		body, err := json.Marshal(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.db.ExecContext(t.Context(), `INSERT INTO enrichment_work(id,session,spec,contract,attempts) VALUES('w',?,?,?,7)`, r.Identity.BaseKey(), body, EnrichmentContract); err != nil {
+			t.Fatal(err)
+		}
+		return q, "enrichment_work", "w", func() error { _, err := q.enrichmentNext(t.Context(), opts); return err }
+	}
+	if err := q.persistOptionalRepair(t.Context(), r.Identity, m.Sources[0], es[0], "upload"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.db.ExecContext(t.Context(), `UPDATE optional_repairs SET attempts=7`); err != nil {
+		t.Fatal(err)
+	}
+	b := healingBackend{Backend: newBackend(t), failure: failure}
+	return q, "optional_repairs", repairID(r.Identity, m.Sources[0]), func() error { _, err := q.optionalRepairNext(t.Context(), b, opts); return err }
+}
+
+func TestOptionalWorkFailureClassesFollowQuarantineBudget(t *testing.T) {
+	for _, lane := range []string{"enrichment", "repair"} {
+		t.Run(lane+"/transient retries past MaxAttempts and completes", func(t *testing.T) {
+			failure := errors.New("connection reset")
+			q, table, id, step := optionalWork(t, lane, &failure)
+			if err := step(); err != nil {
+				t.Fatal(err)
+			}
+			var state, last string
+			var attempts int
+			scan := func() {
+				if err := q.db.QueryRowContext(t.Context(), `SELECT state,attempts,last_error FROM `+table+` WHERE id=?`, id).Scan(&state, &attempts, &last); err != nil {
+					t.Fatal(err)
+				}
+			}
+			scan()
+			if state != "retry" || attempts != 8 || last != "transient" {
+				t.Fatalf("after outage: %s %d %s", state, attempts, last)
+			}
+			failure = nil
+			if _, err := q.db.ExecContext(t.Context(), `UPDATE `+table+` SET next_retry=0`); err != nil {
+				t.Fatal(err)
+			}
+			if err := step(); err != nil {
+				t.Fatal(err)
+			}
+			scan()
+			if state != "attached" && state != "repaired" {
+				t.Fatalf("after heal: %s", state)
+			}
+		})
+		t.Run(lane+"/integrity quarantines with its class", func(t *testing.T) {
+			failure := fmt.Errorf("bad: %w", ErrIntegrity)
+			q, table, id, step := optionalWork(t, lane, &failure)
+			if err := step(); err != nil {
+				t.Fatal(err)
+			}
+			var state, last string
+			var attempts int
+			if err := q.db.QueryRowContext(t.Context(), `SELECT state,attempts,last_error FROM `+table+` WHERE id=?`, id).Scan(&state, &attempts, &last); err != nil {
+				t.Fatal(err)
+			}
+			if state != "quarantined" || attempts != 8 || last != "integrity-error" {
+				t.Fatalf("%s %d %s", state, attempts, last)
+			}
+		})
+	}
+}
+
+// healingBackend fails uploads with *failure while it is set, then stores normally.
+type healingBackend struct {
+	publication.Backend
+	failure *error
+}
+
+func (b healingBackend) PutFile(ctx context.Context, key, path string) error {
+	if *b.failure != nil {
+		return *b.failure
+	}
+	return b.Backend.PutFile(ctx, key, path)
 }

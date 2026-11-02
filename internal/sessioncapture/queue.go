@@ -56,7 +56,12 @@ var (
 	// wraps ErrQuota for existing callers but clears when capacity returns, so it
 	// retries with capped backoff and never spends the quarantine budget; permanent
 	// limits (oversized source, request bounds) remain plain ErrQuota.
-	ErrSpoolFull       = fmt.Errorf("%w: spool full", ErrQuota)
+	ErrSpoolFull = fmt.Errorf("%w: spool full", ErrQuota)
+	// ErrSourceLimit reports that accepting another source epoch would exceed
+	// publication.MaxSources. It is deterministic and deliberately does not wrap
+	// ErrQuota: earlier epochs are never dropped (contract section 1) and the
+	// previous successful publication stays readable.
+	ErrSourceLimit     = fmt.Errorf("sessioncapture: session reached the %d source limit", publication.MaxSources)
 	ErrIntegrity       = errors.New("sessioncapture: payload integrity failure")
 	ErrSessionExcluded = errors.New("sessioncapture: session excluded")
 	ErrPolicy          = errors.New("sessioncapture: policy denied")

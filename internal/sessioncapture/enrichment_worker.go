@@ -104,10 +104,11 @@ func (q *Queue) finishEnrichment(ctx context.Context, id string, attempts int, c
 		return cause
 	}
 	state := "retry"
-	if attempts >= o.MaxAttempts {
+	class := classify(cause, o.Classify)
+	if class.spendsQuarantineBudget() && attempts >= o.MaxAttempts {
 		state = "quarantined"
 	}
-	code := string(classify(cause, o.Classify))
+	code := string(class)
 	save, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.OperationTimeout)
 	defer cancel()
 	_, err := q.db.ExecContext(save, `UPDATE enrichment_work SET state=?,last_error=?,next_retry=? WHERE id=?`, state, code, q.opts.Now().Add(retryDelay(attempts, o.Jitter)).UnixNano(), id)

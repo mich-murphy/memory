@@ -253,10 +253,11 @@ func (q *Queue) saveOptionalRepairFailure(ctx context.Context, id string, attemp
 		return err
 	}
 	state := "retry"
-	if attempts >= o.MaxAttempts {
+	class := classify(cause, o.Classify)
+	if class.spendsQuarantineBudget() && attempts >= o.MaxAttempts {
 		state = "quarantined"
 	}
-	code := string(classify(cause, o.Classify))
+	code := string(class)
 	_, err := q.db.ExecContext(ctx, `UPDATE optional_repairs SET state=?,last_error=?,next_retry=? WHERE id=?`, state, code, q.opts.Now().Add(retryDelay(attempts, o.Jitter)).UnixNano(), id)
 	return err
 }

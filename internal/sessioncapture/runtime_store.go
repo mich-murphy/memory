@@ -107,7 +107,7 @@ func (q *Queue) Hint(ctx context.Context, req Request) error {
 	}
 	// A matching non-empty fingerprint on a present source makes the upsert a no-op
 	// (no version bump, state reset or row write; RowsAffected is 0).
-	result, err := q.db.ExecContext(ctx, `INSERT INTO runtime_sources(session,source,request,observed_at,fingerprint) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_sources WHERE session=? AND source=?) OR (SELECT COUNT(*) FROM runtime_sources)<? ON CONFLICT(session,source) DO UPDATE SET request=excluded.request,version=version+1,observed_at=excluded.observed_at,fingerprint=excluded.fingerprint,observed_state='present',state=CASE WHEN state='captured' OR state='absent' THEN 'pending' ELSE state END WHERE excluded.fingerprint='' OR runtime_sources.fingerprint!=excluded.fingerprint OR runtime_sources.observed_state!='present'`, req.Identity.BaseKey(), req.SourceID, body, req.ObservedAtNS, fingerprint, req.Identity.BaseKey(), req.SourceID, q.opts.MaxInventoryRecords)
+	result, err := q.db.ExecContext(ctx, `INSERT INTO runtime_sources(session,source,request,observed_at,fingerprint) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_sources WHERE session=? AND source=?) OR (SELECT COUNT(*) FROM runtime_sources)<? ON CONFLICT(session,source) DO UPDATE SET request=excluded.request,version=version+1,observed_at=excluded.observed_at,fingerprint=excluded.fingerprint,observed_state='present',state=CASE WHEN state IN ('captured','absent','source-limit') THEN 'pending' ELSE state END WHERE excluded.fingerprint='' OR runtime_sources.fingerprint!=excluded.fingerprint OR runtime_sources.observed_state!='present'`, req.Identity.BaseKey(), req.SourceID, body, req.ObservedAtNS, fingerprint, req.Identity.BaseKey(), req.SourceID, q.opts.MaxInventoryRecords)
 	if err != nil {
 		return err
 	}
@@ -187,7 +187,7 @@ func (q *Queue) claimSource(ctx context.Context) (sourceWork, error) {
 	var w sourceWork
 	// Read at most one fixed page per turn; the cursor advances past unavailable
 	// sources as well as successful work. No archive job history is inspected.
-	rows, err := q.db.QueryContext(ctx, `SELECT id,request,version,attempts,claim,state,next_retry,observed_state FROM runtime_sources AS s WHERE id>? AND claim=0 AND state NOT IN ('absent','captured','quarantined') AND next_retry<=? AND NOT EXISTS(SELECT 1 FROM runtime_sources AS busy WHERE busy.session=s.session AND busy.claim!=0) ORDER BY id LIMIT 64`, r.sourceCursor, q.opts.Now().UnixNano())
+	rows, err := q.db.QueryContext(ctx, `SELECT id,request,version,attempts,claim,state,next_retry,observed_state FROM runtime_sources AS s WHERE id>? AND claim=0 AND state NOT IN ('absent','captured','quarantined','source-limit') AND next_retry<=? AND NOT EXISTS(SELECT 1 FROM runtime_sources AS busy WHERE busy.session=s.session AND busy.claim!=0) ORDER BY id LIMIT 64`, r.sourceCursor, q.opts.Now().UnixNano())
 	if err != nil {
 		return w, err
 	}
@@ -204,7 +204,7 @@ func (q *Queue) claimSource(ctx context.Context) (sourceWork, error) {
 		}
 		visited = true
 		r.sourceCursor = id
-		if claim != 0 || state == "absent" || state == "captured" || state == "quarantined" || next > q.opts.Now().UnixNano() {
+		if claim != 0 || state == "absent" || state == "captured" || state == "quarantined" || state == "source-limit" || next > q.opts.Now().UnixNano() {
 			continue
 		}
 		w = sourceWork{id: id, version: version, attempts: attempts}
@@ -266,6 +266,9 @@ func (q *Queue) captureNext(ctx context.Context, o RuntimeOptions) (did bool, re
 	}
 	if code == FailureAbsent {
 		state = "absent"
+	}
+	if code == FailureSourceLimit {
+		state = "source-limit"
 	}
 	tx, err := q.db.BeginTx(save, nil)
 	if err != nil {
