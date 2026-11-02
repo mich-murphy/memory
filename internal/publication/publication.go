@@ -160,45 +160,55 @@ func checkArchive(ctx context.Context, b Backend, i Identity) error {
 
 // ValidateManifest checks the complete wire shape without accessing backend dependencies.
 func ValidateManifest(m Manifest) error {
+	_, err := MarshalValidManifest(m)
+	return err
+}
+
+// MarshalValidManifest runs every ValidateManifest check and returns the exact
+// json.Marshal(m) bytes it measured against MaxMetadata, so a caller that stores
+// them marshals the manifest once.
+func MarshalValidManifest(m Manifest) ([]byte, error) {
 	if m.Contract != Contract {
-		return errors.New("unsupported manifest contract")
+		return nil, errors.New("unsupported manifest contract")
 	}
 	if !validIdentity(m.Identity) || m.PublicationID == "" || !validStrings(m.PublicationID) || !validOrder(m.Sequence) {
-		return errors.New("invalid manifest identity or sequence")
+		return nil, errors.New("invalid manifest identity or sequence")
 	}
 	if m.ObservedAtNS < 0 || m.CapturedAtNS < 0 || m.PublishedAtNS < 0 {
-		return errors.New("negative manifest timestamp")
+		return nil, errors.New("negative manifest timestamp")
 	}
 	if len(m.Sources) > MaxSources {
-		return errors.New("source limit exceeded")
+		return nil, errors.New("source limit exceeded")
 	}
 	if m.Coverage.Discovery == "" || m.Coverage.Enrichment == "" ||
 		!validStrings(m.Coverage.Discovery, m.Coverage.Enrichment) || !validStrings(m.Coverage.Missing...) {
-		return errors.New("coverage required")
+		return nil, errors.New("coverage required")
 	}
 	seen := map[[2]string]bool{}
 	for n := range m.Sources {
 		s := &m.Sources[n]
 		k := [2]string{SourceKeyHash(*s), s.EpochID}
 		if seen[k] {
-			return errors.New("invalid or duplicate source epoch")
+			return nil, errors.New("invalid or duplicate source epoch")
 		}
 		if err := validateSource(*s, m.Identity); err != nil {
-			return err
+			return nil, err
 		}
 		if !IsSelected(*s) && (m.Coverage.Enrichment != "partial" || !slices.Contains(m.Coverage.Missing, MissingSourceWithheld)) {
-			return errors.New("withheld source requires partial enrichment and missing marker")
+			return nil, errors.New("withheld source requires partial enrichment and missing marker")
 		}
 		seen[k] = true
 	}
 	data, err := json.Marshal(m)
 	if err != nil || len(data) > MaxMetadata {
-		return errors.New("metadata exceeds limit")
+		return nil, errors.New("metadata exceeds limit")
 	}
 	// A durable publication must fit the consumer envelope too: selected source
 	// and epoch identities are repeated in the export's exact body table.
-	_, _, err = exportMetadata(m)
-	return err
+	if _, _, err = exportMetadata(m); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 // validateSource checks one source's provenance and selected object. Uniqueness
