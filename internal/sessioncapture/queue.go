@@ -143,6 +143,8 @@ type Queue struct {
 
 	// discoveryLimit is a test-only override of MaxDiscoveryRecords; 0 means the const.
 	discoveryLimit int
+	// settledLimit is a test-only override of the settled-row bound; 0 means MaxInventoryRecords.
+	settledLimit int
 
 	// sourceLimit is a test-only per-Queue override of publication.MaxSources;
 	// 0 means the const. Set it only through setSourceLimit.

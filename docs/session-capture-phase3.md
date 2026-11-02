@@ -94,7 +94,7 @@ acceptance**:
 | Discovery directory entries | At most 4096 per call, fairly divided among configured roots |
 | Discovery directory descriptors | At most 256; depth/descriptor gaps are explicit |
 | Configured roots | At most 128 |
-| Retained source work records | Default 4096; optional `max_inventory_records` up to 65536, with same-source coalescing at capacity |
+| Retained source work records | Default 4096; optional `max_inventory_records` up to 65536. The cap bounds **live** work (pending, retry, claimed, quarantined) with same-source coalescing at capacity; settled (captured/absent) rows are retained separately up to the same bound, oldest dropped from the index only |
 | Retained discovery issues / scopes | Default 4096 each; same optional inventory quota, including resolved history |
 | Path-hint inbox | 1024 hints, each at most 64 KiB |
 | Status page | 1–256 records; independent list cursors |
@@ -326,7 +326,13 @@ cutover or reviewed retired-key deletion.
 Omitted or zero retains the old **4096** default; positive values are bounded at
 **65536**. This is a per-table retained metadata limit for runtime sources,
 discovery issues and discovery scopes, not a byte quota, per-sweep entry budget,
-or complete-inventory guarantee. The 4096 per-discovery-batch bound and 256-row
+or complete-inventory guarantee. Admission counts only live source rows
+(`state` not `captured`/`absent`): settled history never refuses a new session. Settled
+rows are kept so an unchanged fingerprint skips re-hinting, bounded by the same value;
+beyond it the oldest settled row leaves the source index (jobs, payloads and published
+data are untouched, and a rediscovered source re-hints once and recaptures to an unchanged
+manifest). A cap full of live work still refuses with `ErrQuota`. Runtime status exposes
+`SourceCap`, `LiveSources` and `SettledSources`. The 4096 per-discovery-batch bound and 256-row
 status detail page ceiling are unchanged. Status aggregates count all admitted
 rows, independently of page size or the current configured quota.
 

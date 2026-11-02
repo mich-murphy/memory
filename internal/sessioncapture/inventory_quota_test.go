@@ -74,6 +74,13 @@ func TestInventoryQuotaRestartRetainsBackpressureAndWork(t *testing.T) {
 	if err != nil || len(before) != 1 {
 		t.Fatalf("accepted work: %+v %v", before, err)
 	}
+	// Settled rows no longer count toward the live cap; re-observe source-0 so
+	// two live rows fill it and the next new identity meets backpressure.
+	first := req
+	first.SourceID = "source-0"
+	if err := q.Hint(t.Context(), first); err != nil {
+		t.Fatal(err)
+	}
 	req.SourceID = "healthy-new"
 	if err := WriteHint(t.Context(), dir, req); err != nil {
 		t.Fatal(err)

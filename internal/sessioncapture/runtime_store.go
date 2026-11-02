@@ -41,6 +41,8 @@ func (q *Queue) InitRuntime(ctx context.Context) error {
 		// IF NOT EXISTS would keep a stale predicate that claimSourceSQL cannot use.
 		`DROP INDEX IF EXISTS runtime_runnable_sources`,
 		`CREATE INDEX IF NOT EXISTS runtime_runnable_sources_v2 ON runtime_sources(id) WHERE ` + runnableSourcePredicate,
+		`CREATE INDEX IF NOT EXISTS runtime_live_sources ON runtime_sources(id) WHERE state NOT IN ('captured','absent')`,
+		`CREATE INDEX IF NOT EXISTS runtime_settled_sources ON runtime_sources(id) WHERE state IN ('captured','absent')`,
 		`CREATE TABLE IF NOT EXISTS runtime_sessions (id INTEGER PRIMARY KEY,session TEXT UNIQUE NOT NULL,claim INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE IF NOT EXISTS runtime_destination (id INTEGER PRIMARY KEY CHECK(id=1),paused INTEGER NOT NULL DEFAULT 0,reason TEXT NOT NULL DEFAULT '',paused_at INTEGER NOT NULL DEFAULT 0,discovery_error TEXT NOT NULL DEFAULT '',discovered_at INTEGER NOT NULL DEFAULT 0)`,
 		`INSERT OR IGNORE INTO runtime_destination(id) VALUES(1)`,
@@ -62,7 +64,7 @@ func (q *Queue) InitRuntime(ctx context.Context) error {
 			return err
 		}
 	}
-	for _, c := range [][2]string{{"step_errors", "INTEGER NOT NULL DEFAULT 0"}, {"last_step_error", "TEXT NOT NULL DEFAULT ''"}, {"last_step_error_at", "INTEGER NOT NULL DEFAULT 0"}} {
+	for _, c := range [][2]string{{"step_errors", "INTEGER NOT NULL DEFAULT 0"}, {"last_step_error", "TEXT NOT NULL DEFAULT ''"}, {"last_step_error_at", "INTEGER NOT NULL DEFAULT 0"}, {"inventory_evictions", "INTEGER NOT NULL DEFAULT 0"}} {
 		if err := q.addColumnIfMissing(ctx, "runtime_destination", c[0], c[1]); err != nil {
 			return err
 		}
@@ -74,9 +76,13 @@ func (q *Queue) InitRuntime(ctx context.Context) error {
 	return nil
 }
 
-// MaxRuntimeSources is the default retained source metadata bound, including absent sources.
-// At capacity new identities receive backpressure; existing identities still
-// coalesce. There is no automatic GC, nor a complete-inventory guarantee.
+// MaxRuntimeSources is the default bound on live source work (pending, retry,
+// claimed or quarantined) and, separately, on retained settled rows (captured or
+// absent, kept only so unchanged fingerprints skip re-hinting; bound MaxInventoryRecords). At live capacity
+// new identities receive visible ErrQuota backpressure; existing identities still
+// coalesce. Settled history never refuses a new session: beyond the bound the
+// oldest settled row (absent first) is dropped from this index only (jobs and payloads
+// stay), and its source re-hints once if rediscovered. No complete-inventory guarantee.
 const MaxRuntimeSources = 4096
 
 // MaxInventoryRecords is the hard ceiling for an explicitly configured inventory.
@@ -118,7 +124,7 @@ func (q *Queue) Hint(ctx context.Context, req Request) error {
 	}
 	// A matching non-empty fingerprint on a present source makes the upsert a no-op
 	// (no version bump, state reset or row write; RowsAffected is 0).
-	result, err := q.db.ExecContext(ctx, `INSERT INTO runtime_sources(session,source,request,observed_at,fingerprint) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_sources WHERE session=? AND source=?) OR (SELECT COUNT(*) FROM runtime_sources)<? ON CONFLICT(session,source) DO UPDATE SET request=excluded.request,version=version+1,observed_at=excluded.observed_at,fingerprint=excluded.fingerprint,observed_state='present',state=CASE WHEN state IN ('captured','absent','source-limit') THEN 'pending' ELSE state END WHERE excluded.fingerprint='' OR runtime_sources.fingerprint!=excluded.fingerprint OR runtime_sources.observed_state!='present'`, req.Identity.BaseKey(), req.SourceID, body, req.ObservedAtNS, fingerprint, req.Identity.BaseKey(), req.SourceID, q.opts.MaxInventoryRecords)
+	result, err := q.db.ExecContext(ctx, `INSERT INTO runtime_sources(session,source,request,observed_at,fingerprint) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_sources WHERE session=? AND source=?) OR (SELECT COUNT(*) FROM runtime_sources WHERE state NOT IN ('captured','absent'))<? ON CONFLICT(session,source) DO UPDATE SET request=excluded.request,version=version+1,observed_at=excluded.observed_at,fingerprint=excluded.fingerprint,observed_state='present',state=CASE WHEN state IN ('captured','absent','source-limit') THEN 'pending' ELSE state END WHERE excluded.fingerprint='' OR runtime_sources.fingerprint!=excluded.fingerprint OR runtime_sources.observed_state!='present'`, req.Identity.BaseKey(), req.SourceID, body, req.ObservedAtNS, fingerprint, req.Identity.BaseKey(), req.SourceID, q.opts.MaxInventoryRecords)
 	if err != nil {
 		return err
 	}
@@ -183,6 +189,45 @@ func (q *Queue) HintAbsent(ctx context.Context, req Request) error {
 	}
 	_, err := q.db.ExecContext(ctx, `UPDATE runtime_sources SET observed_state='absent',state=CASE WHEN state='quarantined' THEN state ELSE 'absent' END WHERE session=? AND source=?`, req.Identity.BaseKey(), req.SourceID)
 	return err
+}
+
+// settledBound is the retained settled-row bound: the hard inventory ceiling, so
+// the measured inventories (29k rows, ~3.8 KB/row including indexes) fit without
+// eviction. Tests may lower it.
+func (q *Queue) settledBound() int {
+	if q.settledLimit > 0 {
+		return q.settledLimit
+	}
+	return MaxInventoryRecords
+}
+
+// evictSettledSources keeps at most settledBound settled rows by dropping, from the
+// source index only, absent rows first and then the least recently observed. Claimed
+// rows and rows referenced by an active quarantine entry are never dropped. Accepted
+// jobs and payloads are untouched. It returns the number evicted and counts them in
+// status so repeated re-hinting caused by a too-small bound is visible.
+func (q *Queue) evictSettledSources(ctx context.Context) (int64, error) {
+	var excess int64
+	if err := q.db.QueryRowContext(ctx, `SELECT COUNT(*)-? FROM runtime_sources WHERE state IN ('captured','absent')`, q.settledBound()).Scan(&excess); err != nil || excess <= 0 {
+		return 0, err
+	}
+	tx, err := q.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `DELETE FROM runtime_sources WHERE id IN (SELECT id FROM runtime_sources AS s WHERE state IN ('captured','absent') AND claim=0 AND NOT EXISTS(SELECT 1 FROM runtime_quarantine AS k WHERE k.source_id=s.id AND k.active=1) ORDER BY state='absent' DESC,observed_at,id LIMIT ?)`, excess)
+	if err != nil {
+		return 0, err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE runtime_destination SET inventory_evictions=inventory_evictions+? WHERE id=1`, n); err != nil {
+		return 0, err
+	}
+	return n, tx.Commit()
 }
 
 type sourceWork struct {

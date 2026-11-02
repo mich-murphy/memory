@@ -227,6 +227,9 @@ func (q *Queue) discoverOnce(ctx context.Context, o RuntimeOptions) error {
 		// Try every healthy request even if another request or root was rejected.
 		err = errors.Join(err, q.Hint(save, batch.Requests[j]))
 	}
+	// Once per batch, not per capture: bounds the settled index without a per-row cost.
+	_, evictErr := q.evictSettledSources(save)
+	err = errors.Join(err, evictErr)
 	if saveErr := q.saveDiscoveryBatch(save, batch, err); saveErr != nil {
 		// A budget exhausted by admission (or by the metadata transaction)
 		// cannot silently lose the failure for this generation. Retry the
