@@ -210,3 +210,36 @@ func TestOptionalArtifactSurvivesDrainOfLaterRawAppends(t *testing.T) {
 	}
 	assertSpoolEqualsRoots(t, q, m.Sources[1].Object)
 }
+
+// Replaying a repaired optional repair makes its object needed again, so the
+// holder released at "repaired" must be re-established.
+func TestReplayedRepairHoldsItsPayloadAgain(t *testing.T) {
+	dir, o, _ := setup(t)
+	q := open(t, dir, o)
+	ctx := t.Context()
+	if _, err := q.db.ExecContext(ctx, `INSERT INTO optional_repairs(id,session,source_hash,epoch,commitment,source,evidence,identity,state,stage,contract,software) VALUES('r1','s','h','e','c',?,x'',x'','repaired','st','c','sw')`, []byte(`{"object":{"encoded_sha256":"abc"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	held := func() bool {
+		var n int
+		if err := q.db.QueryRowContext(ctx, `SELECT count(*) FROM payload_refs WHERE sha='abc' AND session='repair:r1'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n > 0
+	}
+	if held() {
+		t.Fatal("repaired row must not hold its payload")
+	}
+	if err := q.ReplayOptionalRepair(ctx, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if !held() {
+		t.Fatal("replayed repair lost its payload holder")
+	}
+	if _, err := q.db.ExecContext(ctx, `UPDATE optional_repairs SET state='repaired' WHERE id='r1'`); err != nil {
+		t.Fatal(err)
+	}
+	if held() {
+		t.Fatal("repaired row kept its holder")
+	}
+}
