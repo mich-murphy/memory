@@ -1305,29 +1305,8 @@ func TestModelGeneratorShape(t *testing.T) {
 // equals the roots exactly. Counts: CAS writes never exceed accepted jobs plus
 // lost-ack republishes, so coalescing cannot cost more writes than captures.
 func (r *modelRun) checkSpoolAndCounts() (string, string) {
-	rows, err := r.q.db.QueryContext(r.ctx, `SELECT manifest FROM jobs AS j WHERE state NOT IN ('published','superseded') OR sequence=(SELECT max(sequence) FROM jobs WHERE session=j.session) OR sequence=(SELECT max(sequence) FROM jobs WHERE session=j.session AND state='published')`)
+	roots, err := r.rootFiles()
 	if err != nil {
-		return "HARNESS", err.Error()
-	}
-	roots := map[string]bool{}
-	for rows.Next() {
-		var body []byte
-		var m publication.Manifest
-		if err := rows.Scan(&body); err != nil {
-			_ = rows.Close()
-			return "HARNESS", err.Error()
-		}
-		if err := json.Unmarshal(body, &m); err != nil {
-			_ = rows.Close()
-			return "HARNESS", err.Error()
-		}
-		for i := range m.Sources {
-			if sha := m.Sources[i].Object.EncodedSHA256; sha != "" {
-				roots[sha+".zst"] = true
-			}
-		}
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return "HARNESS", err.Error()
 	}
 	entries, err := os.ReadDir(filepath.Join(r.q.dir, "payloads"))
@@ -1366,4 +1345,30 @@ func (r *modelRun) checkSpoolAndCounts() (string, string) {
 		return "COUNTS", fmt.Sprintf("%d CAS writes for %d jobs and %d republishes", cas, jobs, repeats)
 	}
 	return "", ""
+}
+
+// rootFiles lists the payload files referenced by the retained roots.
+func (r *modelRun) rootFiles() (roots map[string]bool, err error) {
+	rows, err := r.q.db.QueryContext(r.ctx, `SELECT manifest FROM jobs AS j WHERE state NOT IN ('published','superseded') OR sequence=(SELECT max(sequence) FROM jobs WHERE session=j.session) OR sequence=(SELECT max(sequence) FROM jobs WHERE session=j.session AND state='published')`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, rows.Close()) }()
+	roots = map[string]bool{}
+	for rows.Next() {
+		var body []byte
+		var m publication.Manifest
+		if err := rows.Scan(&body); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(body, &m); err != nil {
+			return nil, err
+		}
+		for i := range m.Sources {
+			if sha := m.Sources[i].Object.EncodedSHA256; sha != "" {
+				roots[sha+".zst"] = true
+			}
+		}
+	}
+	return roots, rows.Err()
 }
