@@ -4,26 +4,22 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 )
 
-// recognisedNames lists every filename rulesFor maps to a rule table. A name added to
-// rulesFor but not here is caught by TestRecognisedNamesCoverRulesFor.
-var recognisedNames = []string{
-	"claude.json", ".claude.json", "settings.json", "settings.local.json", "managed-settings.json",
-	".mcp.json", "mcp.json", "managed-mcp.json", "models.json", "config.toml", "managed_config.toml",
-}
-
-// RulesDigest digests the rule tables (filename, format, patterns, keep kinds) that decide
-// how config bytes are scrubbed. Capture binds a version to transformed-source
-// fingerprints; a guard test compares this digest with a golden so that changing the
-// rules forces that version to be bumped.
+// RulesDigest digests ruleTable (filename, format, patterns, keep kinds), the table
+// rulesFor reads. Capture binds a version to transformed-source fingerprints and a guard
+// test compares this digest with a golden, so changing the rules forces a version bump.
+// Not covered: scrubDoc/IsSecretName and other scrubbing logic outside the table; a
+// change there still needs a manual bump of the version.
 func RulesDigest() string {
 	h := sha256.New()
-	for _, name := range recognisedNames {
-		rs, f := rulesFor(name)
-		_, _ = fmt.Fprintf(h, "%s|%d|%d\n", name, f, len(rs))
-		for _, r := range rs {
+	for _, name := range slices.Sorted(maps.Keys(ruleTable)) {
+		e := ruleTable[name]
+		_, _ = fmt.Fprintf(h, "%s|%d|%d\n", name, e.format, len(e.rules))
+		for _, r := range e.rules {
 			_, _ = fmt.Fprintf(h, "%s|%d\n", strings.Join(r.pattern, "."), r.keep)
 		}
 	}

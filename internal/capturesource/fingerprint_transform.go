@@ -11,6 +11,10 @@ import (
 // transformPolicyVersion is bound into every transformed-source fingerprint. Bump it
 // whenever scrubber rules, the SQLite backup procedure or the zstd decode limits
 // change, so previously fingerprinted sources are re-hinted and re-prepared once.
+//
+// The scrub digest guard covers only the rule table. scrubDoc/IsSecretName and other
+// scrubbing logic outside it, the SQLite backup procedure and zstd limits are not
+// covered and still need a manual bump.
 const transformPolicyVersion = "transform-v1"
 
 // sqliteSidecars are the files a SQLite backup reads besides the database itself.
@@ -51,4 +55,4 @@ func transformFingerprint(version, transform, path string, info os.FileInfo) str
 
 // scrubRulesGolden is scrub.RulesDigest() at the time transformPolicyVersion was last
 // bumped. TestScrubRulesMatchTransformPolicyVersion fails when they diverge.
-const scrubRulesGolden = "e613d5dfa7202909d87d576a64b843a2385a55af725e351aae454819e2877669"
+const scrubRulesGolden = "95003ab929dd2b7225959f4bbd268e01320b347a4931ed8fded129333776b606"
