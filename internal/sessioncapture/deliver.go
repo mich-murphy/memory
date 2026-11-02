@@ -166,7 +166,8 @@ func (q *Queue) deliverOne(ctx context.Context, b publication.Backend, m publica
 			return err
 		}
 		if c.Sequence >= m.Sequence {
-			return publication.ErrConflict
+			// A rebuilt or lagging spool: publish above the verified remote current.
+			return q.deliverRebased(ctx, b, m, es, publication.ErrConflict)
 		}
 	}
 	// Objects already in the remote current's verified manifest need no upload or
@@ -182,6 +183,10 @@ func (q *Queue) deliverOne(ctx context.Context, b publication.Backend, m publica
 		return e
 	}
 	_, e = publication.Publish(ctx, faultBackend{Backend: b, q: q, evidence: selectedEvidence(m, es), scopeEvidence: es, manifest: m}, m, token)
+	if errors.Is(e, publication.ErrConflict) {
+		// The remote moved or holds epochs this spool lacks: rebase above it.
+		return q.deliverRebased(ctx, b, m, es, e)
+	}
 	if e != nil {
 		return e
 	}
