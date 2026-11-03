@@ -1,0 +1,83 @@
+minimum_prek_version: "0.5.0"
+repos:
+  - repo: builtin
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+        exclude: (^|/)testdata/
+        priority: 0
+        stages: [pre-commit]
+      - id: end-of-file-fixer
+        exclude: (^|/)testdata/
+        priority: 0
+        stages: [pre-commit]
+      - id: check-merge-conflict
+        exclude: (^|/)testdata/
+        priority: 0
+        stages: [pre-commit]
+      - id: check-added-large-files
+        exclude: (^|/)testdata/
+        priority: 0
+        stages: [pre-commit]
+      - id: check-yaml
+        exclude: (^|/)testdata/
+        priority: 0
+        stages: [pre-commit]
+  - repo: local
+    hooks:
+      - id: format
+        name: format
+        entry: "make fmt-check"
+        language: system
+        types: [go]
+        pass_filenames: false
+        priority: 10
+        stages: [pre-commit]
+      - id: lint
+        name: lint
+        entry: "make lint"
+        language: system
+        types: [go]
+        pass_filenames: false
+        priority: 10
+        stages: [pre-commit]
+      - id: tidy
+        name: tidy
+        entry: "make tidy-check"
+        language: system
+        files: '(^|/)go\.(mod|sum)$'
+        pass_filenames: false
+        priority: 10
+        stages: [pre-push]
+      - id: deadcode
+        name: deadcode
+        entry: "make deadcode"
+        language: system
+        types: [go]
+        pass_filenames: false
+        priority: 10
+        stages: [pre-push]
+      - id: vuln
+        name: vuln
+        entry: "make vuln"
+        language: system
+        types: [go]
+        pass_filenames: false
+        priority: 10
+        stages: [pre-push]
+      - id: actionlint
+        name: actionlint
+        entry: "make actionlint"
+        language: system
+        files: '^\.github/workflows/'
+        pass_filenames: false
+        priority: 10
+        stages: [pre-commit]
+      - id: test
+        name: test
+        entry: "make test-hook"
+        language: system
+        types: [go]
+        pass_filenames: false
+        priority: 10
+        stages: [pre-push]
