@@ -44,7 +44,8 @@ class LaunchJourneyTests(unittest.TestCase):
                     spool=str(root / 'spool'), policy_dir=str(policy), home=str(home),
                     default_roots=True, roots=[], capture_workers=1, delivery_workers=1,
                     poll_seconds=1, operation_seconds=2, max_attempts=3,
-                    max_spool_bytes=1 << 24, min_free_bytes=0, entries_per_root=64)))
+                    max_spool_bytes=1 << 24, min_free_bytes=0, entries_per_root=64,
+                    quiet_seconds=0, max_delay_seconds=0)))
                 if alternate:
                     document = json.loads(config.read_text())
                     backend = document.pop('backend')
