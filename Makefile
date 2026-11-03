@@ -102,7 +102,11 @@ gopls:
 	go install -modfile=tools/gopls/go.mod golang.org/x/tools/gopls
 
 hooks:
-	$(TOOL) lefthook install
+	prek install --hook-type pre-commit --hook-type pre-push
 
 clean:
 	rm -rf $(COVER_DIR) cover.out bench.txt mutation.json bin dist
+
+# Cacheable on purpose: no -count=1, no -shuffle, no -args. CI keeps the uncached runs (make cover, make test).
+test-hook:
+	CGO_ENABLED=1 go test -race ./...
