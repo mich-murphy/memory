@@ -488,7 +488,8 @@ class WriterBacked(Base):
         self.cfg.write_text(json.dumps(dict(version='capture-runtime/v1', archive_id='a7', machine_id='M', store=str(r / 'store'),
             spool=str(r / 'spool'), policy_dir=str(r / 'policy'), home=str(r / 'home'), default_roots=False, roots=[],
             min_free_bytes=0, capture_workers=2, delivery_workers=2, poll_seconds=1, operation_seconds=30, max_attempts=2,
-            max_spool_bytes=1 << 24, entries_per_root=256)))
+            max_spool_bytes=1 << 24, entries_per_root=256,
+            quiet_seconds=0, max_delay_seconds=0)))
         self.cfg.chmod(0o600)
         self.writer('init', '--store', str(r / 'store'), '--archive', 'a7')
         common = ['--archive', 'a7', '--machine', 'M', '--agent', 'claude', '--session', 'root/big', '--spool', str(r / 'spool'), '--policy-dir', str(r / 'policy')]
