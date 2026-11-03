@@ -29,7 +29,7 @@ repos:
         name: format
         entry: "make fmt-check"
         language: system
-        types: [go]
+        files: '\.go$|(^|/)\.golangci\.(yml|yaml|toml|json)$|(^|/)\.golangci-lint-version$'
         pass_filenames: false
         priority: 10
         stages: [pre-commit]
@@ -37,7 +37,7 @@ repos:
         name: lint
         entry: "make lint"
         language: system
-        types: [go]
+        files: '\.go$|(^|/)\.golangci\.(yml|yaml|toml|json)$|(^|/)\.golangci-lint-version$'
         pass_filenames: false
         priority: 10
         stages: [pre-commit]
@@ -45,7 +45,15 @@ repos:
         name: tidy
         entry: "make tidy-check"
         language: system
-        files: '(^|/)go\.(mod|sum)$'
+        files: '\.go$|(^|/)go\.(mod|sum)$'
+        pass_filenames: false
+        priority: 10
+        stages: [pre-push]
+      - id: coverage
+        name: coverage
+        entry: "make test-hook"
+        language: system
+        files: '\.go$|(^|/)go\.(mod|sum)$'
         pass_filenames: false
         priority: 10
         stages: [pre-push]
@@ -53,7 +61,7 @@ repos:
         name: deadcode
         entry: "make deadcode"
         language: system
-        types: [go]
+        files: '\.go$|(^|/)go\.(mod|sum)$'
         pass_filenames: false
         priority: 10
         stages: [pre-push]
@@ -61,7 +69,7 @@ repos:
         name: vuln
         entry: "make vuln"
         language: system
-        types: [go]
+        files: '\.go$|(^|/)go\.(mod|sum)$'
         pass_filenames: false
         priority: 10
         stages: [pre-push]
@@ -73,11 +81,3 @@ repos:
         pass_filenames: false
         priority: 10
         stages: [pre-commit]
-      - id: test
-        name: test
-        entry: "make test-hook"
-        language: system
-        types: [go]
-        pass_filenames: false
-        priority: 10
-        stages: [pre-push]
