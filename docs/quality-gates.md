@@ -28,7 +28,8 @@ The research behind these choices (tool versions, the configs of 13 well-regarde
 | `make mutation` | Mutation testing with gremlins; `MUTATE_DIFF=origin/main` mutates only the lines changed since that ref. Not part of `make check` |
 | `make bench` | Every benchmark `BENCHCOUNT` times (default 10) into `bench.txt`, for benchstat ([benchmarks.md](benchmarks.md)) |
 | `make bench-smoke` | Every benchmark once, as CI does, so a broken one fails |
-| `make hooks` | Installs the git hooks in `lefthook.yml` |
+| `make hooks` | Installs the pre-commit and pre-push git hooks with `prek install`, from `.pre-commit-config.yaml` |
+| `make test-hook` | `go test -race ./...` with no `-count=1`, `-shuffle` or `-args`, so the test cache applies. This is what the pre-push `test` hook runs |
 | `make gopls` | Installs the pinned gopls, for the Claude Code `gopls-lsp` plugin |
 
 Tools other than golangci-lint are pinned in their own module, `tools/go.mod`, and run with `go tool -modfile=tools/go.mod <name>`, so they never touch the collector's `go.mod` and Dependabot updates them (it only reads files named `go.mod`). gopls has a module of its own, `tools/gopls/go.mod`, because it needs a different `golang.org/x/tools` from deadcode's. golangci-lint is installed as a binary, as its maintainers recommend, at the version in `.golangci-lint-version`: CI installs that version, and `make lint` fails when the local one differs.
@@ -95,9 +96,13 @@ gofumpt (stricter gofmt) and goimports, with this module's imports grouped last.
 - Dependabot updates Go modules and Actions weekly, grouped, after a 7-day cooldown.
 - Required checks on `main` need branch protection, which GitHub offers free on public repos.
 
-## Git hooks (`lefthook.yml`)
+## Git hooks (`.pre-commit-config.yaml`)
 
-Pre-commit formats staged Go files, runs `make lint` and `make tidy-check`, and lints changed workflows; pre-push runs the tests. The installed hooks call lefthook through `go tool -modfile=tools/go.mod`, and fail rather than let a commit through when they can't find it.
+[prek](https://prek.j178.dev) runs the hooks; `make hooks` installs them. Pre-commit runs hygiene checks, `make fmt-check` (check only, so run `make fmt` to fix), `make lint` and `make actionlint`. Pre-push runs `make tidy-check` when `go.mod` or `go.sum` change, `make deadcode`, `make vuln` and `make test-hook`. The hooks need `golangci-lint` at the version in `.golangci-lint-version` and Go 1.27.3 on PATH.
+
+`make test-hook` is cacheable on purpose, so it omits the `-shuffle` and the capture-acceptance journeys that `make test` carries. CI keeps those, and the coverage floor and CRAP gate (`make crap`). `verify.yaml` waives the `coverage` obligation for that reason.
+
+If a checkout still has lefthook shims in `.git/hooks`, run `prek install -f --hook-type pre-commit --hook-type pre-push` once.
 
 ## For agents
 
