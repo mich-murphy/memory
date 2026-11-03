@@ -1,0 +1,2 @@
+waivers:
+  - {obligation: coverage, reason: "The coverage floor (make cover, go-test-coverage) runs in CI via make crap; the pre-push test hook is the cacheable race run."}
