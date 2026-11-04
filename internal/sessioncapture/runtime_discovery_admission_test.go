@@ -125,6 +125,9 @@ func TestRuntimeDiscoveryExpiredSaveCannotResolvePriorIssue(t *testing.T) {
 	if err != nil || len(sources) != 0 {
 		t.Fatalf("expired admission unexpectedly accepted source: %+v %v", sources, err)
 	}
+	// Only the first pass is meant to expire. This clean pass must complete, so it
+	// gets an ample budget that scheduler or fsync stalls cannot exhaust.
+	options.OperationTimeout = time.Second
 	options.DiscoverBatch = func(context.Context) (DiscoveryBatch, error) { return DiscoveryBatch{Complete: true}, nil }
 	if err := q.discoverOnce(t.Context(), options); err != nil {
 		t.Fatal(err)

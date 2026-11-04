@@ -200,3 +200,41 @@ func TestHintBatchRecordsOwnershipAfterAdmission(t *testing.T) {
 		t.Fatalf("ownership %q %q %v", session, gotLegacy, err)
 	}
 }
+
+// DiscoveryComplete describes the current sweep: a later, still-bounded sweep reports
+// false while CompletedSweep keeps the last finished sweep and no error is recorded.
+func TestDiscoveryCompleteResetsWhileNextSweepIsBounded(t *testing.T) {
+	t.Parallel()
+	dir, o, base := setup(t)
+	q := open(t, dir, o)
+	if err := q.InitRuntime(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	reqs := discoveryBatchRequests(t, base, 3)
+	complete := true
+	batch := func(context.Context) (DiscoveryBatch, error) {
+		return DiscoveryBatch{Requests: reqs, Complete: complete}, nil
+	}
+	opts := runtimeDefaults(RuntimeOptions{DiscoverBatch: batch})
+	if err := q.discoverOnce(t.Context(), opts); err != nil {
+		t.Fatal(err)
+	}
+	complete = false
+	if err := q.discoverOnce(t.Context(), opts); err != nil {
+		t.Fatal(err)
+	}
+	st, err := q.RuntimeStatus(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.CurrentSweep != 2 || st.CompletedSweep != 1 || st.DiscoveryComplete || st.DiscoveryError != "" {
+		t.Fatalf("mid-sweep status: current=%d completed=%d complete=%v err=%q, want 2,1,false,\"\"", st.CurrentSweep, st.CompletedSweep, st.DiscoveryComplete, st.DiscoveryError)
+	}
+	complete = true
+	if err := q.discoverOnce(t.Context(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if st, err = q.RuntimeStatus(t.Context()); err != nil || st.CurrentSweep != 2 || st.CompletedSweep != 2 || !st.DiscoveryComplete {
+		t.Fatalf("after finishing: %+v %v", st, err)
+	}
+}

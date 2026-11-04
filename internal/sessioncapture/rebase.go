@@ -84,17 +84,32 @@ func rebaseManifest(remote, local publication.Manifest) (merged publication.Mani
 }
 
 // sealSuperseded seals each remote active epoch that another active epoch of the same
-// source has replaced, as an ordinary capture would.
+// source has replaced, as an ordinary capture would. Remote sources are visited in
+// order and a source sealed earlier no longer counts as a replacement for later ones,
+// so two active remote epochs of one source keep the later one active. Active epochs
+// are counted per source key and per epoch once, so the pass is linear.
 func sealSuperseded(out []publication.Source, remoteCount int) {
+	type epoch struct{ hash, id string }
+	perSource := map[string]int{}
+	perEpoch := map[epoch]int{}
+	hashes := make([]string, len(out))
+	for i := range out {
+		if out[i].State != "active" {
+			continue
+		}
+		hashes[i] = publication.SourceKeyHash(out[i])
+		perSource[hashes[i]]++
+		perEpoch[epoch{hashes[i], out[i].EpochID}]++
+	}
 	for i := range remoteCount {
 		if out[i].State != "active" {
 			continue
 		}
-		for j := range out {
-			if j != i && out[j].State == "active" && publication.SourceKeyHash(out[j]) == publication.SourceKeyHash(out[i]) && out[j].EpochID != out[i].EpochID {
-				out[i].State = "sealed"
-				break
-			}
+		e := epoch{hashes[i], out[i].EpochID}
+		if perSource[e.hash] > perEpoch[e] {
+			out[i].State = "sealed"
+			perSource[e.hash]--
+			perEpoch[e]--
 		}
 	}
 }

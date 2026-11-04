@@ -494,18 +494,12 @@ func publicationEligible(ctx context.Context, b Backend, m Manifest, c Current, 
 // ambiguous acknowledgement; a newer selected publication is never overwritten.
 func Publish(ctx context.Context, b Backend, m Manifest, expectedToken string) (Current, error) {
 	var zero Current
-	if err := ValidateManifest(m); err != nil {
+	data, err := MarshalValidManifest(m)
+	if err != nil {
 		return zero, err
 	}
 	if err := checkArchive(ctx, b, m.Identity); err != nil {
 		return zero, err
-	}
-	data, err := json.Marshal(m)
-	if err != nil {
-		return zero, err
-	}
-	if len(data) > MaxMetadata {
-		return zero, errors.New("metadata exceeds limit")
 	}
 	digest := token(data)
 	c := Current{Contract: Contract, Identity: m.Identity, PublicationID: m.PublicationID, Sequence: m.Sequence, ManifestSHA256: digest, ManifestKey: m.Identity.BaseKey() + "/manifests/" + digest + ".json"}

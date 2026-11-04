@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/mich-murphy/memory/internal/adapters"
 	"github.com/mich-murphy/memory/internal/capturebackend"
@@ -18,6 +19,20 @@ import (
 // Discovery admits only metadata for a recognized configuration. The queue still
 // requires the explicit scrubbed-config transform before reading protected bytes.
 func (r runtimeComposition) policy(discovery bool) func(context.Context, sessioncapture.Request) error {
+	return r.policyWith(discovery, r.loadRegistry, r.newFilesystemSet)
+}
+
+// snapshotPolicy is policy(discovery) with the exclusion registry and the
+// filesystem policy set built at most once, on first use. A discovery call owns one
+// snapshot so a 4096-entry walk costs one registry load, not one per entry. It is
+// only a pre-filter: every admitted request is rechecked live by policy(false) at
+// capture, so an exclusion saved after the snapshot still prevents capture and the
+// next call takes a fresh snapshot.
+func (r runtimeComposition) snapshotPolicy(discovery bool) func(context.Context, sessioncapture.Request) error {
+	return r.policyWith(discovery, sync.OnceValues(r.loadRegistry), sync.OnceValues(r.newFilesystemSet))
+}
+
+func (r runtimeComposition) policyWith(discovery bool, registry func() (exclusion.Registry, error), filesystem func() (*capturepolicy.Policy, error)) func(context.Context, sessioncapture.Request) error {
 	c := r.config
 	return func(ctx context.Context, req sessioncapture.Request) error {
 		if err := ctx.Err(); err != nil {
@@ -37,27 +52,36 @@ func (r runtimeComposition) policy(discovery bool) func(context.Context, session
 		if err := runtimeUnresolvedNativePolicy(c, req.Identity.Agent); err != nil {
 			return errors.Join(sessioncapture.ErrSessionExcluded, err)
 		}
-		if err := r.exclusions(ctx, req, discovery); err != nil {
+		if err := r.exclusions(ctx, req, discovery, registry); err != nil {
 			return err
 		}
-		return runtimeFilesystemPolicy(c, req.Path, discovery || req.Transform == "scrubbed-config")
+		return runtimeFilesystemPolicyWith(req.Path, discovery || req.Transform == "scrubbed-config", capturepolicy.Resolve, filesystem)
 	}
 }
 
-func (r runtimeComposition) exclusions(ctx context.Context, req sessioncapture.Request, discovery bool) error {
+// loadRegistry validates the policy directories and reads the exclusion registry.
+func (r runtimeComposition) loadRegistry() (exclusion.Registry, error) {
 	c := r.config
 	for _, dir := range []string{c.PolicyDir, filepath.Join(c.PolicyDir, "exclusions")} {
 		if err := capturedaemon.SafePath(dir); err != nil {
-			return sessioncapture.ErrPolicyUnavailable
+			return nil, sessioncapture.ErrPolicyUnavailable
 		}
 		st, err := os.Stat(dir)
 		if err != nil || !st.IsDir() {
-			return sessioncapture.ErrPolicyUnavailable
+			return nil, sessioncapture.ErrPolicyUnavailable
 		}
 	}
-	registry, err := exclusion.Load(c.PolicyDir)
+	registry, err := r.loadExclusions(c.PolicyDir)
 	if err != nil {
-		return sessioncapture.ErrPolicyUnavailable
+		return nil, sessioncapture.ErrPolicyUnavailable
+	}
+	return registry, nil
+}
+
+func (r runtimeComposition) exclusions(ctx context.Context, req sessioncapture.Request, discovery bool, load func() (exclusion.Registry, error)) error {
+	registry, err := load()
+	if err != nil {
+		return err
 	}
 	claimedExcluded, err := r.claimedSessionExcluded(req, registry)
 	if err != nil {
@@ -165,6 +189,20 @@ func runtimeFilesystemPolicy(c capturedaemon.Config, path string, scrubbed bool)
 	return runtimeFilesystemPolicyWith(path, scrubbed, capturepolicy.Resolve, func() (*capturepolicy.Policy, error) {
 		return newRuntimeFilesystemSet(c)
 	})
+}
+
+func (r runtimeComposition) newFilesystemSet() (*capturepolicy.Policy, error) {
+	if r.filesystemSet != nil {
+		return r.filesystemSet(r.config)
+	}
+	return newRuntimeFilesystemSet(r.config)
+}
+
+func (r runtimeComposition) loadExclusions(dir string) (exclusion.Registry, error) {
+	if r.registryLoader != nil {
+		return r.registryLoader(dir)
+	}
+	return exclusion.Load(dir)
 }
 
 func newRuntimeFilesystemSet(c capturedaemon.Config) (*capturepolicy.Policy, error) {
