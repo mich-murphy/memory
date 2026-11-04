@@ -173,7 +173,7 @@ func (r runtimeComposition) privacyOwner(ctx context.Context, req sessioncapture
 	rel, _ := filepath.Rel(root, req.Path)
 	first, _, _ := strings.Cut(filepath.ToSlash(rel), "/")
 	if req.Identity.Agent == "claude" && runtimeExternalScope(first) {
-		return runtimeExternalPrivacyOwner(ctx, c, req, root, rel, discovery)
+		return r.externalPrivacyOwner(ctx, req, root, rel, discovery)
 	}
 	a := adapters.All(c.Home)[req.Identity.Agent]
 	if a == nil {
