@@ -26,13 +26,24 @@ func repairID(i publication.Identity, s publication.Source) string {
 	return digest([]byte(i.BaseKey() + "\x00" + publication.SourceKeyHash(s) + "\x00" + s.EpochID + "\x00" + publication.ObjectCommitment(s.Object)))
 }
 
-func (q *Queue) unavailableLatch(ctx context.Context, i publication.Identity, s publication.Source) (bool, error) {
+func (q *Queue) optionalRepairState(ctx context.Context, i publication.Identity, s publication.Source) (string, error) {
 	var state string
 	err := q.db.QueryRowContext(ctx, `SELECT state FROM optional_repairs WHERE id=?`, repairID(i, s)).Scan(&state)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return "", nil
 	}
-	return state != "repaired" && state != "verified_attachment_pending" && state != "delivering", err
+	return state, err
+}
+
+// latchBlocks reports whether a row state keeps an epoch withheld. No row, a
+// remotely verified row and an in-flight delivery do not.
+func latchBlocks(state string) bool {
+	return state != "" && state != "repaired" && state != "verified_attachment_pending" && state != "delivering"
+}
+
+func (q *Queue) unavailableLatch(ctx context.Context, i publication.Identity, s publication.Source) (bool, error) {
+	state, err := q.optionalRepairState(ctx, i, s)
+	return latchBlocks(state), err
 }
 
 // Network outcomes are saved with a fresh bounded local context. A timed-out

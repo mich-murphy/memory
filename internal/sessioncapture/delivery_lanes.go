@@ -61,17 +61,23 @@ func (q *Queue) beginOptionalDelivery(ctx context.Context, m publication.Manifes
 		return noop, err
 	}
 	defer unlock()
+	// Rows whose object a repair already verified remotely keep that fact: if this
+	// delivery is superseded they return to it instead of re-latching as retry.
+	prior := map[string]string{}
 	for n := range m.Sources {
 		s := m.Sources[n]
 		if !s.Optional || !publication.IsSelected(s) {
 			continue
 		}
-		blocked, err := q.unavailableLatch(ctx, m.Identity, s)
+		state, err := q.optionalRepairState(ctx, m.Identity, s)
 		if err != nil {
 			return noop, err
 		}
-		if blocked {
+		if latchBlocks(state) {
 			continue
+		}
+		if state == "repaired" || state == "verified_attachment_pending" {
+			prior[repairID(m.Identity, s)] = state
 		}
 		if err := q.persistOptionalRepairState(ctx, m.Identity, s, es[n], "delivery", "delivering"); err != nil {
 			return noop, err
@@ -80,8 +86,13 @@ func (q *Queue) beginOptionalDelivery(ctx context.Context, m publication.Manifes
 	return func() error {
 		save, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
+		var restoreErr error
+		for id, state := range prior {
+			_, err := q.db.ExecContext(save, `UPDATE optional_repairs SET state=?,last_error='',next_retry=0 WHERE id=? AND state='delivering' AND EXISTS(SELECT 1 FROM jobs WHERE session=? AND sequence=? AND state='superseded')`, state, id, m.Identity.BaseKey(), m.Sequence)
+			restoreErr = errors.Join(restoreErr, err)
+		}
 		_, err := q.db.ExecContext(save, `UPDATE optional_repairs SET state=CASE WHEN EXISTS(SELECT 1 FROM jobs WHERE session=? AND sequence=? AND state='superseded') THEN 'retry' ELSE 'repaired' END,next_retry=0 WHERE session=? AND state='delivering'`, m.Identity.BaseKey(), m.Sequence, m.Identity.BaseKey())
-		return err
+		return errors.Join(restoreErr, err)
 	}, nil
 }
 
