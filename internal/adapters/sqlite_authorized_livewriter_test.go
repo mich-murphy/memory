@@ -540,3 +540,25 @@ func TestSQLiteLiveWriterSameSizeSameMtimeRewriteIsTyped(t *testing.T) {
 		t.Fatalf("in-place rewrite with restored mtime: %v", err)
 	}
 }
+
+// A rollback journal appearing mid-backup is an unsupported recovery requirement,
+// not a source movement: it must keep ErrSQLiteRollbackJournal and never be typed
+// as ErrSQLiteSourceChanged.
+func TestSQLiteJournalAppearingMidBackupIsNotSourceChanged(t *testing.T) {
+	src := cleanClosedWALDB(t)
+	dest := filepath.Join(filepath.Dir(src), "prepared.db")
+	must(t, os.WriteFile(dest, nil, 0o600))
+	created := false
+	reserve := func() error {
+		if !created {
+			created = true
+			must(t, os.WriteFile(src+"-journal", nil, 0o600))
+		}
+		return nil
+	}
+	err := BackupSQLiteAuthorized(t.Context(), src, dest, 1<<30, reserve,
+		SQLiteAuthorizedOptions{Authorize: func(context.Context, SQLiteAuthorization) error { return nil }})
+	if !errors.Is(err, ErrSQLiteRollbackJournal) || errors.Is(err, ErrSQLiteSourceChanged) {
+		t.Fatalf("journal appearing mid-backup: %v", err)
+	}
+}

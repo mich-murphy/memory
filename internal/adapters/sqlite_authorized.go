@@ -229,9 +229,6 @@ func checkSQLitePair(ctx context.Context, pair [2]sqliteObserved, rehash bool) e
 }
 
 func checkSQLiteSources(ctx context.Context, pair [2]sqliteObserved, rehash bool) error {
-	if err := rejectSQLiteJournal(ctx, pair[0].meta.ResolvedPath); err != nil {
-		return err
-	}
 	r, err := capturepolicy.Resolve(pair[0].meta.OriginalPath)
 	if err != nil {
 		return err
