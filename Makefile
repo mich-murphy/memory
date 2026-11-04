@@ -79,7 +79,8 @@ cover:
 	isolated=$$(go list $(COVER_ISOLATED)); \
 	rest="$(COVER_REST)"; \
 	if [ -z "$$rest" ]; then \
-		rest=$$(go list ./... | grep -vxF "$$isolated"); \
+		all=$$(go list ./...); \
+		rest=$$(printf '%s\n' "$$all" | grep -vxF "$$isolated"); \
 	fi; \
 	rc=0; \
 	CGO_ENABLED=1 E2E_GOCOVERDIR=$(COVER_DIR)/e2e go test -count=1 -race -shuffle=on \
