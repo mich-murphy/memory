@@ -30,16 +30,61 @@ func burstRequests(t *testing.T, base Request, n int) ([]Request, []string) {
 	return rs, paths
 }
 
-// runtimeIdle reports that no source is open and every job is published.
+// runtimeIdle reports that no source is open and every session has settled: at
+// least one job exists, none is still undelivered, and each session's newest job
+// is published. A job superseded by a later capture is terminal, not pending.
 func runtimeIdle(ctx context.Context, q *Queue) (bool, error) {
-	var open, jobs, unpublished int
+	var open, jobs, undelivered, newestUnpublished int
 	if err := q.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_sources WHERE NOT(state='captured' AND captured_version=version)`).Scan(&open); err != nil {
 		return false, err
 	}
-	if err := q.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(state!='published'),0) FROM jobs`).Scan(&jobs, &unpublished); err != nil {
+	if err := q.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(state NOT IN ('published','superseded')),0) FROM jobs`).Scan(&jobs, &undelivered); err != nil {
 		return false, err
 	}
-	return open == 0 && jobs > 0 && unpublished == 0, nil
+	if err := q.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM jobs AS j WHERE j.sequence=(SELECT MAX(sequence) FROM jobs WHERE session=j.session) AND j.state!='published'`).Scan(&newestUnpublished); err != nil {
+		return false, err
+	}
+	return open == 0 && jobs > 0 && undelivered == 0 && newestUnpublished == 0, nil
+}
+
+// TestRuntimeIdleTreatsSupersededAsSettled pins that a coalesced (superseded)
+// earlier job does not keep a delivered runtime from reading as idle.
+func TestRuntimeIdleTreatsSupersededAsSettled(t *testing.T) {
+	dir, o, base := setup(t)
+	q := open(t, dir, o)
+	if err := q.InitRuntime(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	backend := newBackend(t)
+	capture(t, q, base)
+	f, err := os.OpenFile(base.Path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString("second\n")
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture(t, q, base)
+	var first, second string
+	if err := q.db.QueryRowContext(t.Context(), `SELECT (SELECT state FROM jobs ORDER BY sequence LIMIT 1),(SELECT state FROM jobs ORDER BY sequence DESC LIMIT 1)`).Scan(&first, &second); err != nil {
+		t.Fatal(err)
+	}
+	if first != "superseded" || second != "pending" {
+		t.Fatalf("precondition: job states %q,%q want superseded,pending", first, second)
+	}
+	if idle, err := runtimeIdle(t.Context(), q); err != nil || idle {
+		t.Fatalf("idle before delivery = %v (%v), want false", idle, err)
+	}
+	if err := q.Deliver(t.Context(), backend, base.Identity); err != nil {
+		t.Fatal(err)
+	}
+	if idle, err := runtimeIdle(t.Context(), q); err != nil || !idle {
+		t.Fatalf("idle after delivery = %v (%v), want true", idle, err)
+	}
 }
 
 // driveUntilIdle runs the autonomous runtime while during produces hints, then
