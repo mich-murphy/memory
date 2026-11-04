@@ -19,7 +19,8 @@ import (
 // Discovery admits only metadata for a recognized configuration. The queue still
 // requires the explicit scrubbed-config transform before reading protected bytes.
 func (r runtimeComposition) policy(discovery bool) func(context.Context, sessioncapture.Request) error {
-	return r.policyWith(discovery, r.loadRegistry, r.newFilesystemSet)
+	c := r.config
+	return r.policyWith(discovery, r.loadRegistry, r.newFilesystemSet, func(agent string) error { return runtimeUnresolvedNativePolicy(c, agent) })
 }
 
 // snapshotPolicy is policy(discovery) with the exclusion registry and the
@@ -29,10 +30,35 @@ func (r runtimeComposition) policy(discovery bool) func(context.Context, session
 // capture, so an exclusion saved after the snapshot still prevents capture and the
 // next call takes a fresh snapshot.
 func (r runtimeComposition) snapshotPolicy(discovery bool) func(context.Context, sessioncapture.Request) error {
-	return r.policyWith(discovery, sync.OnceValues(r.loadRegistry), sync.OnceValues(r.newFilesystemSet))
+	c := r.config
+	memoSet := sync.OnceValues(func() (*capturepolicy.Policy, error) {
+		p, err := r.newFilesystemSet()
+		if err != nil {
+			return nil, err
+		}
+		return p.Memoized(), nil
+	})
+	return r.policyWith(discovery, sync.OnceValues(r.loadRegistry), memoSet, perAgent(func(agent string) error { return runtimeUnresolvedNativePolicy(c, agent) }))
 }
 
-func (r runtimeComposition) policyWith(discovery bool, registry func() (exclusion.Registry, error), filesystem func() (*capturepolicy.Policy, error)) func(context.Context, sessioncapture.Request) error {
+// perAgent evaluates check once per agent for the lifetime of the returned func.
+// Only a snapshot owner (one discovery call) may hold it; see snapshotPolicy.
+func perAgent(check func(string) error) func(string) error {
+	var mu sync.Mutex
+	results := map[string]error{}
+	return func(agent string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		err, ok := results[agent]
+		if !ok {
+			err = check(agent)
+			results[agent] = err
+		}
+		return err
+	}
+}
+
+func (r runtimeComposition) policyWith(discovery bool, registry func() (exclusion.Registry, error), filesystem func() (*capturepolicy.Policy, error), native func(string) error) func(context.Context, sessioncapture.Request) error {
 	c := r.config
 	return func(ctx context.Context, req sessioncapture.Request) error {
 		if err := ctx.Err(); err != nil {
@@ -49,7 +75,7 @@ func (r runtimeComposition) policyWith(discovery bool, registry func() (exclusio
 		if os.Getenv("AGENT_SESSIONS_DISABLE") != "" {
 			return errors.New("capture disabled by effective environment policy")
 		}
-		if err := runtimeUnresolvedNativePolicy(c, req.Identity.Agent); err != nil {
+		if err := native(req.Identity.Agent); err != nil {
 			return errors.Join(sessioncapture.ErrSessionExcluded, err)
 		}
 		if err := r.exclusions(ctx, req, discovery, registry); err != nil {
