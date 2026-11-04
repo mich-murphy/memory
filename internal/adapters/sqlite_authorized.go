@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -32,6 +33,13 @@ type SQLiteAuthorization struct {
 // source journal is opened or recovered by this readonly capture path.
 var ErrSQLiteRollbackJournal = errors.New("sqlite authorized: rollback journal unsupported")
 
+// ErrSQLiteSourceChanged marks every failure that proves the source pair moved
+// while it was being captured: a member vanished, appeared, was replaced,
+// resized, or its bytes differed between observations. It is the expected
+// outcome of an ordinary concurrent write, is retryable, and says nothing about
+// the source being corrupt or unauthorized.
+var ErrSQLiteSourceChanged = errors.New("sqlite authorized: source changed during backup")
+
 type SQLiteAuthorizedOptions struct {
 	Authorize func(context.Context, SQLiteAuthorization) error
 	// ObserveInput retains bounded private provenance. It runs after all authorization
@@ -49,6 +57,12 @@ type sqliteObserved struct {
 }
 
 // BackupSQLiteAuthorized accepts only a verified stable observation of DB+WAL.
+// It takes no lock on the source and never writes to it, so a live writer is
+// never blocked. Under a concurrent writer (inserts, WAL growth, checkpoints,
+// WAL creation or deletion) each call either returns an error matching
+// ErrSQLiteSourceChanged, or the output is the committed state of the pinned
+// DB+WAL pair that was stable across the whole call. Other failures leave the
+// source unchanged and are not attributed to a concurrent writer.
 // It is not an atomic snapshot of an uncooperative mutable producer: changes
 // between observations that are restored byte-for-byte cannot be detected.
 // dest must be a queue-owned private empty output, never a source pathname.
@@ -80,20 +94,59 @@ func BackupSQLiteAuthorized(ctx context.Context, src, dest string, limit int64, 
 		return err
 	}
 	defer closeSQLitePair(&pair)
-	pins, err := pinSQLitePair(ctx, &pair, limit)
+	if err := captureSQLitePair(ctx, &pair, dest, limit, reserve); err != nil {
+		return attributeSQLiteChange(ctx, pair, err)
+	}
+	return nil
+}
+
+func captureSQLitePair(ctx context.Context, pair *[2]sqliteObserved, dest string, limit int64, reserve func() error) error {
+	pins, err := pinSQLitePair(ctx, pair, limit)
 	if err != nil {
 		return err
 	}
-	if err := checkSQLitePair(ctx, pair, false); err != nil {
+	if err := checkSQLitePair(ctx, *pair, false); err != nil {
 		return err
 	}
 	if err := backupSQLitePinned(ctx, pins, dest, limit, reserve); err != nil {
 		return err
 	}
-	if err := checkSQLitePair(ctx, pair, true); err != nil {
+	if err := checkSQLitePair(ctx, *pair, true); err != nil {
 		return err
 	}
-	return checkSQLitePair(ctx, pair, false)
+	return checkSQLitePair(ctx, *pair, false)
+}
+
+func isSQLiteChangeSignal(err error) bool {
+	return errors.Is(err, ErrSQLiteSourceChanged) || errors.Is(err, fs.ErrNotExist) || errors.Is(err, safefile.ErrReplaced) ||
+		errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+func markSQLiteChange(err error) error {
+	if err == nil || errors.Is(err, ErrSQLiteSourceChanged) || !isSQLiteChangeSignal(err) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", ErrSQLiteSourceChanged, err)
+}
+
+// attributeSQLiteChange types a failure caused by a concurrent writer. A pinned
+// descriptor that was truncated or rewritten surfaces from SQLite as an I/O or
+// malformed-image error, so a non-signal failure is rechecked against the source:
+// only a proven change is attributed, anything else keeps its own class.
+func attributeSQLiteChange(ctx context.Context, pair [2]sqliteObserved, err error) error {
+	if ctx.Err() != nil {
+		return err
+	}
+	if isSQLiteChangeSignal(err) {
+		return markSQLiteChange(err)
+	}
+	if pair[0].file == nil || (pair[1].meta.Present && pair[1].file == nil) {
+		return err
+	}
+	if rc := checkSQLitePair(ctx, pair, true); errors.Is(rc, ErrSQLiteSourceChanged) {
+		return fmt.Errorf("%w; backup stage: %w", rc, err)
+	}
+	return err
 }
 
 func observeSQLitePair(src string, expected fs.FileInfo) ([2]sqliteObserved, error) {
@@ -128,7 +181,7 @@ func observeSQLitePair(src string, expected fs.FileInfo) ([2]sqliteObserved, err
 	if we == nil {
 		st, err = os.Lstat(wal)
 		if err != nil {
-			return pair, err
+			return pair, markSQLiteChange(err)
 		}
 		if !st.Mode().IsRegular() {
 			return pair, errors.New("sqlite authorized: nonregular WAL")
@@ -136,7 +189,7 @@ func observeSQLitePair(src string, expected fs.FileInfo) ([2]sqliteObserved, err
 		pair[1].meta.Info = st
 	} else {
 		if _, e := os.Lstat(wal); !errors.Is(e, fs.ErrNotExist) {
-			return pair, errors.New("sqlite authorized: unresolved WAL entry")
+			return pair, fmt.Errorf("%w: unresolved WAL entry", ErrSQLiteSourceChanged)
 		}
 		// Only absence of the immediate canonical sidecar is accepted; no missing ancestor.
 		pair[1].parent, err = os.Stat(filepath.Dir(wal))
@@ -169,6 +222,13 @@ func hashSQLiteFile(ctx context.Context, f *os.File, size int64) ([32]byte, erro
 }
 
 func checkSQLitePair(ctx context.Context, pair [2]sqliteObserved, rehash bool) error {
+	if err := rejectSQLiteJournal(ctx, pair[0].meta.ResolvedPath); err != nil {
+		return err
+	}
+	return markSQLiteChange(checkSQLiteSources(ctx, pair, rehash))
+}
+
+func checkSQLiteSources(ctx context.Context, pair [2]sqliteObserved, rehash bool) error {
 	if err := rejectSQLiteJournal(ctx, pair[0].meta.ResolvedPath); err != nil {
 		return err
 	}
@@ -344,14 +404,14 @@ func checkSQLiteAbsence(ctx context.Context, p *sqliteObserved) error {
 	st, e := dir.Stat()
 	var stat unix.Stat_t
 	if e == nil && !os.SameFile(st, p.parent) {
-		e = errors.New("sqlite authorized: sidecar parent changed")
+		e = fmt.Errorf("%w: sidecar parent", ErrSQLiteSourceChanged)
 	}
 	if e == nil {
 		e = unix.Fstatat(int(dir.Fd()), filepath.Base(p.meta.ResolvedPath), &stat, unix.AT_SYMLINK_NOFOLLOW)
 		if errors.Is(e, unix.ENOENT) {
 			e = nil
 		} else if e == nil {
-			e = errors.New("sqlite authorized: WAL appeared")
+			e = fmt.Errorf("%w: WAL appeared", ErrSQLiteSourceChanged)
 		}
 	}
 	_ = dir.Close()
@@ -380,7 +440,7 @@ func checkSQLiteMember(ctx context.Context, p *sqliteObserved, rehash bool) erro
 		return err
 	}
 	if st.Size() != p.meta.Info.Size() || pinned.Size() != st.Size() || !st.ModTime().Equal(p.meta.Info.ModTime()) || !pinned.ModTime().Equal(st.ModTime()) {
-		return errors.New("sqlite authorized: source changed")
+		return fmt.Errorf("%w: size or mtime", ErrSQLiteSourceChanged)
 	}
 	if rehash {
 		digest, err := hashSQLiteFile(ctx, p.file, st.Size())
@@ -388,7 +448,7 @@ func checkSQLiteMember(ctx context.Context, p *sqliteObserved, rehash bool) erro
 			return err
 		}
 		if digest != p.hash {
-			return errors.New("sqlite authorized: source bytes changed")
+			return fmt.Errorf("%w: bytes", ErrSQLiteSourceChanged)
 		}
 	}
 	return nil

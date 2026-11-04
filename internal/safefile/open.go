@@ -12,6 +12,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// ErrReplaced reports that the opened file is not the observed regular file.
+var ErrReplaced = errors.New("safefile: replaced or nonregular input")
+
 // OpenResolved opens an already resolved absolute path. Every component is opened
 // relative to its pinned parent with O_NOFOLLOW. expected must be observed before
 // authorization; replacement, nonregular files and cancellation fail before reads.
@@ -23,7 +26,7 @@ func OpenResolved(ctx context.Context, path string, expected fs.FileInfo) (*os.F
 	}
 	st, err := f.Stat()
 	if err == nil && (!st.Mode().IsRegular() || expected == nil || !os.SameFile(st, expected)) {
-		err = errors.New("safefile: replaced or nonregular input")
+		err = ErrReplaced
 	}
 	if err != nil {
 		_ = f.Close()
