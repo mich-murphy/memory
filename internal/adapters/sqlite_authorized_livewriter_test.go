@@ -512,3 +512,31 @@ func TestSQLiteLiveWriterProcess(t *testing.T) {
 }
 
 func isChangedSource(err error) bool { return errors.Is(err, ErrSQLiteSourceChanged) }
+
+// A rewrite that keeps size and mtime is caught only by the final rehash: a writer
+// bumps the header change counter in place during the backup and restores mtime.
+func TestSQLiteLiveWriterSameSizeSameMtimeRewriteIsTyped(t *testing.T) {
+	src := cleanClosedWALDB(t)
+	dest := filepath.Join(filepath.Dir(src), "prepared.db")
+	must(t, os.WriteFile(dest, nil, 0o600))
+	st, err := os.Stat(src)
+	must(t, err)
+	rewritten := false
+	reserve := func() error {
+		if rewritten {
+			return nil
+		}
+		rewritten = true
+		f, err := os.OpenFile(src, os.O_RDWR, 0)
+		must(t, err)
+		_, err = f.WriteAt([]byte{0xde, 0xad, 0xbe, 0xef}, 24) // file change counter
+		must(t, errors.Join(err, f.Close()))
+		must(t, os.Chtimes(src, st.ModTime(), st.ModTime()))
+		return nil
+	}
+	err = BackupSQLiteAuthorized(t.Context(), src, dest, 1<<30, reserve,
+		SQLiteAuthorizedOptions{Authorize: func(context.Context, SQLiteAuthorization) error { return nil }})
+	if !errors.Is(err, ErrSQLiteSourceChanged) || !strings.Contains(err.Error(), "bytes") {
+		t.Fatalf("in-place rewrite with restored mtime: %v", err)
+	}
+}
