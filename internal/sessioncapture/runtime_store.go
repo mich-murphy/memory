@@ -307,7 +307,10 @@ func (q *Queue) recordHintOwnership(ctx context.Context, req Request) error {
 		return nil
 	}
 	err := q.RecordOwnership(ctx, req)
-	if errors.Is(err, ErrOwnershipAmbiguous) || errors.Is(err, ErrOwnershipCapacity) {
+	// A source deleted after raw admission is an expected source outcome: the later
+	// capture classifies it absent. Only pure absence is tolerated; mixed or local
+	// store failures stay fatal.
+	if errors.Is(err, ErrOwnershipAmbiguous) || errors.Is(err, ErrOwnershipCapacity) || onlySourceAbsence(err) {
 		return nil
 	}
 	return err
