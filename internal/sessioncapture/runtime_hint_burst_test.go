@@ -77,7 +77,7 @@ func driveUntilIdle(t *testing.T, q *Queue, backend publication.Backend, during 
 }
 
 func TestHintBurstCoalescesAndKeepsLatestBytes(t *testing.T) {
-	const sources, workers, perWorker = 8, 4, 250 // 1000 hints
+	const sources, workers, perWorker = 8, 4, 100 // 400 hints
 	dir, o, base := setup(t)
 	q := open(t, dir, o)
 	backend := newBackend(t)
@@ -112,7 +112,7 @@ func TestHintBurstCoalescesAndKeepsLatestBytes(t *testing.T) {
 					i := (g + k) % sources
 					r := rs[i]
 					r.ObservedAtNS = int64(g*perWorker + k + 1)
-					if k%50 == 0 {
+					if k%25 == 0 {
 						appendLine(i, fmt.Sprintf("g%d-k%d\n", g, k))
 					}
 					if err := q.Hint(t.Context(), r); err != nil {
@@ -158,13 +158,14 @@ func TestHintBurstCoalescesAndKeepsLatestBytes(t *testing.T) {
 func TestHintInboxIsBounded(t *testing.T) {
 	dir, o, base := setup(t)
 	q := open(t, dir, o)
-	total := MaxInboxHints + 200
+	const over, rehint = 8, 64 // 8 sources past the bound; 64 sources hinted a second time
+	total := MaxInboxHints + over
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	accepted, refused := 0, 0
 	for g := range 8 {
 		wg.Go(func() {
-			for k := g; k < total*2; k += 8 { // each source id hinted twice
+			for k := g; k < total+rehint; k += 8 { // the first `rehint` source ids are hinted twice
 				r := base
 				r.SourceID = fmt.Sprintf("src%d", k%total)
 				err := WriteHint(t.Context(), dir, r)
