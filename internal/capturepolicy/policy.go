@@ -41,7 +41,11 @@ func isConfig(path, configPath string) bool {
 		BaseName(path) == BaseName(configPath) && fsutil.SameLocation(filepath.Dir(path), filepath.Dir(configPath))
 }
 
-func isWithin(path, dir string) bool {
+func isWithin(path, dir string) bool { return isWithinStat(path, dir, os.Stat) }
+
+// isWithinStat is isWithin with an injectable metadata lookup, so one evaluation
+// owner can share the stat of a directory and its ancestors between checks.
+func isWithinStat(path, dir string, stat func(string) (os.FileInfo, error)) bool {
 	if dir == "" {
 		return false
 	}
@@ -53,12 +57,12 @@ func isWithin(path, dir string) bool {
 	// ancestors by filesystem identity, including intermediate paths supplied by Resolve.
 	// Do not lowercase whole paths: distinct directories on case-sensitive volumes
 	// must remain distinct. Metadata checks do not read transcript contents.
-	root, err := os.Stat(dir)
+	root, err := stat(dir)
 	if err != nil {
 		return false // An unavailable location cannot establish an additional alias.
 	}
 	for current := filepath.Clean(path); ; current = filepath.Dir(current) {
-		info, statErr := os.Stat(current)
+		info, statErr := stat(current)
 		if statErr == nil && os.SameFile(info, root) {
 			return true
 		}

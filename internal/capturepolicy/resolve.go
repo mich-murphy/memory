@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 )
 
@@ -108,6 +109,49 @@ func remainingPath(prefix string, suffix []string) string {
 type Policy struct {
 	configs []string
 	states  []string
+	stat    func(string) (os.FileInfo, error) // nil means os.Stat
+}
+
+// Memoized returns a copy of p that looks up each path's metadata at most once.
+// The copy is a snapshot: it never observes later changes, so an owner must drop it
+// at the end of its call (one discovery call) and take a fresh one next time. Never
+// hold it across calls or use it for the live recheck before capture or delivery.
+func (p *Policy) Memoized() *Policy { return p.memoizedOver(os.Stat) }
+
+func (p *Policy) memoizedOver(base func(string) (os.FileInfo, error)) *Policy {
+	m := &statMemo{base: base, results: map[string]statResult{}}
+	c := *p
+	c.stat = m.stat
+	return &c
+}
+
+type statResult struct {
+	info os.FileInfo
+	err  error
+}
+
+type statMemo struct {
+	base    func(string) (os.FileInfo, error)
+	mu      sync.Mutex
+	results map[string]statResult
+}
+
+func (m *statMemo) stat(path string) (os.FileInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.results[path]
+	if !ok {
+		r.info, r.err = m.base(path)
+		m.results[path] = r
+	}
+	return r.info, r.err
+}
+
+func (p *Policy) statFunc() func(string) (os.FileInfo, error) {
+	if p.stat == nil {
+		return os.Stat
+	}
+	return p.stat
 }
 
 // New resolves collector locations once. Missing locations still retain the logical and
@@ -179,6 +223,7 @@ func (p *Policy) ExcludesClaudeConfig(identities []string) bool {
 }
 
 func (p *Policy) excludes(identities []string, claudeConfig bool) bool {
+	stat := p.statFunc()
 	for _, identity := range identities {
 		primary := claudeConfig && filepath.Base(identity) == ".claude.json"
 		if IsNoise(identity) || IsCredential(identity) && !primary {
@@ -190,7 +235,7 @@ func (p *Policy) excludes(identities []string, claudeConfig bool) bool {
 			}
 		}
 		for _, stateDir := range p.states {
-			if isWithin(identity, stateDir) {
+			if isWithinStat(identity, stateDir, stat) {
 				return true
 			}
 		}

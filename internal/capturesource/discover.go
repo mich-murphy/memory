@@ -153,7 +153,7 @@ func Discover(ctx context.Context, opts Options) (Result, error) {
 		return out, errors.New("capturesource: closed or mismatched cursor")
 	}
 	out.Cursor = c
-	policy, err := capturepolicy.New(opts.ConfigPath, opts.StateDir)
+	policy, err := callPolicy(opts)
 	if err != nil || opts.Policy == nil {
 		for _, r := range roots {
 			out.Issues = append(out.Issues, Issue{r, r.Path, "policy_unavailable"})
@@ -213,6 +213,16 @@ func rootsFor(opts Options) ([]Root, error) {
 		return nil, errors.New("capturesource: too many roots")
 	}
 	return out, nil
+}
+
+// callPolicy builds the filesystem policy one Discover call owns. Its stat memo
+// lives only for that call; the next call rebuilds it and so sees any change.
+func callPolicy(opts Options) (*capturepolicy.Policy, error) {
+	policy, err := capturepolicy.New(opts.ConfigPath, opts.StateDir)
+	if err != nil {
+		return nil, err
+	}
+	return policy.Memoized(), nil
 }
 
 func allowed(ctx context.Context, opts Options, policy *capturepolicy.Policy, r Root, path string) bool {
