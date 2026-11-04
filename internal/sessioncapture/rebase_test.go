@@ -147,11 +147,20 @@ func TestRebaseManifestForeignDivergenceStaysConflict(t *testing.T) {
 	}
 }
 
-func TestRebaseManifestOverSourceLimitIsTypedQuota(t *testing.T) {
-	remote := publication.Manifest{Sequence: 4}
-	for i := range publication.MaxSources {
-		remote.Sources = append(remote.Sources, rebaseSource(fmt.Sprintf("s%d", i), "e", 1, fmt.Sprintf("h%d", i)))
+// sealedRemote is n sealed remote sources. Sealed epochs cannot be superseded, so
+// sealSuperseded skips them instead of hashing every active pair (O(n^2) sha256
+// at the 1024 bound); the size limit itself is checked on the unchanged path.
+func sealedRemote(n int) []publication.Source {
+	out := make([]publication.Source, n)
+	for i := range out {
+		out[i] = rebaseSource(fmt.Sprintf("s%d", i), "e", 1, fmt.Sprintf("h%d", i))
+		out[i].State = "sealed"
 	}
+	return out
+}
+
+func TestRebaseManifestOverSourceLimitIsTypedQuota(t *testing.T) {
+	remote := publication.Manifest{Sequence: 4, Sources: sealedRemote(publication.MaxSources)}
 	local := publication.Manifest{Sequence: 1, Sources: []publication.Source{rebaseSource("new", "e", 1, "n")}}
 	_, _, _, err := rebaseManifest(remote, local)
 	if !errors.Is(err, ErrQuota) || classify(err, nil) != FailureQuota {
@@ -380,10 +389,7 @@ func TestRebaseLostAckAtCurrentAfterResolvesInOneStep(t *testing.T) {
 }
 
 func TestRebaseManifestExactlyMaxSourcesFits(t *testing.T) {
-	remote := publication.Manifest{Sequence: 4}
-	for i := range publication.MaxSources - 1 {
-		remote.Sources = append(remote.Sources, rebaseSource(fmt.Sprintf("s%d", i), "e", 1, fmt.Sprintf("h%d", i)))
-	}
+	remote := publication.Manifest{Sequence: 4, Sources: sealedRemote(publication.MaxSources - 1)}
 	local := publication.Manifest{Sequence: 1, Sources: []publication.Source{rebaseSource("new", "e", 1, "n")}}
 	got, _, covered, err := rebaseManifest(remote, local)
 	if err != nil || covered || len(got.Sources) != publication.MaxSources {
