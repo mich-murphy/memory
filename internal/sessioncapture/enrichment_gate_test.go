@@ -65,7 +65,16 @@ func TestNativeInboxQuotaBlockedFilesBackOffUntilCapacityChanges(t *testing.T) {
 	identity := publication.Identity{ArchiveID: "archive", MachineID: "machine", Agent: "claude", SessionID: "session"}
 	var names []string
 	for _, id := range []string{"launch-a", "launch-b", "launch-c"} {
-		record := NativeEvidence{Contract: EnrichmentContract, ID: id, Identity: identity, Request: Request{Identity: identity, SourceID: "source", Role: "main", Path: filepath.Join(t.TempDir(), "absent")}, ObservedAtNS: 1, Context: NativeContext{Event: "start", ContextOrigin: "native"}}
+		// Resolve symlinks (macOS /var -> /private/var) so the request path has exactly one identity.
+		base, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		absent := filepath.Join(base, "absent")
+		if resolved, err := filepath.EvalSymlinks(base); err != nil || resolved != base {
+			t.Fatalf("temp dir %q is not symlink-free (%q, %v); callbacksPerAttempt assumes one identity", base, resolved, err)
+		}
+		record := NativeEvidence{Contract: EnrichmentContract, ID: id, Identity: identity, Request: Request{Identity: identity, SourceID: "source", Role: "main", Path: absent}, ObservedAtNS: 1, Context: NativeContext{Event: "start", ContextOrigin: "native"}}
 		if err := WriteNativeEvidence(t.Context(), dir, record); err != nil {
 			t.Fatal(err)
 		}
