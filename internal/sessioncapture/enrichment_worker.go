@@ -15,6 +15,9 @@ import (
 	"github.com/mich-murphy/memory/internal/publication"
 )
 
+// enrichmentClaimSQL must use enrichment_work_runnable.
+const enrichmentClaimSQL = `SELECT id,spec,attempts,result FROM enrichment_work WHERE state IN ('pending','retry','ready') AND next_retry<=? ORDER BY attempts,next_retry,rowid LIMIT 1`
+
 func (q *Queue) enrichmentNext(ctx context.Context, o RuntimeOptions) (did bool, resultErr error) {
 	if err := q.gatedEnrichmentAdmission(ctx); err != nil {
 		return false, err
@@ -22,7 +25,7 @@ func (q *Queue) enrichmentNext(ctx context.Context, o RuntimeOptions) (did bool,
 	var id string
 	var body, saved []byte
 	var attempts int
-	err := q.db.QueryRowContext(ctx, `SELECT id,spec,attempts,result FROM enrichment_work WHERE state IN ('pending','retry','ready') AND next_retry<=? ORDER BY attempts,next_retry,rowid LIMIT 1`, q.opts.Now().UnixNano()).Scan(&id, &body, &attempts, &saved)
+	err := q.db.QueryRowContext(ctx, enrichmentClaimSQL, q.opts.Now().UnixNano()).Scan(&id, &body, &attempts, &saved)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

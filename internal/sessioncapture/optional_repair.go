@@ -10,9 +10,13 @@ import (
 	"github.com/mich-murphy/memory/internal/publication"
 )
 
+// optionalRepairClaimSQL must use optional_repairs_runnable.
+const optionalRepairClaimSQL = `SELECT id,source,evidence,identity,attempts,state FROM optional_repairs WHERE state IN ('pending','retry','verified_attachment_pending') AND next_retry<=? ORDER BY attempts,next_retry,rowid LIMIT 1`
+
 func (q *Queue) initOptionalRepair(ctx context.Context) error {
 	for _, statement := range []string{
 		`CREATE TABLE IF NOT EXISTS optional_repairs(id TEXT PRIMARY KEY,session TEXT NOT NULL,source_hash TEXT NOT NULL,epoch TEXT NOT NULL,commitment TEXT NOT NULL,source BLOB NOT NULL,evidence BLOB NOT NULL,identity BLOB NOT NULL,state TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,next_retry INTEGER NOT NULL DEFAULT 0,last_error TEXT NOT NULL DEFAULT '',stage TEXT NOT NULL,contract TEXT NOT NULL,software TEXT NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS optional_repairs_runnable ON optional_repairs(attempts,next_retry) WHERE state IN ('pending','retry','verified_attachment_pending')`,
 		`UPDATE optional_repairs SET state='retry' WHERE state IN ('working','delivering')`,
 	} {
 		if _, err := q.db.ExecContext(ctx, statement); err != nil {
@@ -161,7 +165,7 @@ func (q *Queue) optionalRepairNext(ctx context.Context, b publication.Backend, o
 	var source, ev, identity []byte
 	var attempts int
 	var state string
-	err = q.db.QueryRowContext(ctx, `SELECT id,source,evidence,identity,attempts,state FROM optional_repairs WHERE state IN ('pending','retry','verified_attachment_pending') AND next_retry<=? ORDER BY attempts,next_retry,rowid LIMIT 1`, q.opts.Now().UnixNano()).Scan(&id, &source, &ev, &identity, &attempts, &state)
+	err = q.db.QueryRowContext(ctx, optionalRepairClaimSQL, q.opts.Now().UnixNano()).Scan(&id, &source, &ev, &identity, &attempts, &state)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

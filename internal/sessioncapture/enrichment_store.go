@@ -42,6 +42,7 @@ func (q *Queue) initEnrichment(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS enrichment_work (id TEXT PRIMARY KEY, session TEXT NOT NULL, spec BLOB NOT NULL, state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, next_retry INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', contract TEXT NOT NULL, software TEXT NOT NULL DEFAULT 'unknown/devel', result BLOB, attached_sequence INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE IF NOT EXISTS enrichment_results(id TEXT PRIMARY KEY,body BLOB NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS enrichment_asset_lists(id TEXT PRIMARY KEY,body BLOB NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS enrichment_work_runnable ON enrichment_work(attempts,next_retry) WHERE state IN ('pending','retry','ready')`,
 		`UPDATE enrichment_work SET state='pending' WHERE state='working'`,
 	} {
 		if _, err := q.db.ExecContext(ctx, statement); err != nil {
