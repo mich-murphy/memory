@@ -22,7 +22,7 @@ The research behind these choices (tool versions, the configs of 13 well-regarde
 | `make lint` | golangci-lint with `.golangci.yml` |
 | `make test` | Actual writer/reader/analytics compatibility gate, then `go test -race -shuffle=on ./...` |
 | `make capture-acceptance` | Build the actual candidate; run writer/reader/import/event index/report and refresh process journeys, plus synthetic candidate-R2 and delivery-launcher tests (offline by default; pinned analytics environment required). The live launcher is separately opt-in, not acceptance from an offline pass. |
-| `make cover` | Tests with the race detector, plus end-to-end runs of the built binary, merged into one profile and checked against `.testcoverage.yml` |
+| `make cover` | Tests with the race detector, plus end-to-end runs of the built binary, merged into one profile and checked against `.testcoverage.yml`; `internal/syncer` runs in its own `go test` invocation so the two heaviest race-instrumented packages don't contend for cores, with the flags and the merged profile unchanged |
 | `make crap` | `make cover`, then the CRAP gate on that profile |
 | `make fuzz` | Each explicitly listed `FUZZ_TARGETS` entry for `FUZZTIME` (default 30s) |
 | `make mutation` | Mutation testing with gremlins; `MUTATE_DIFF=origin/main` mutates only the lines changed since that ref. Not part of `make check` |

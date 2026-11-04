@@ -1,6 +1,10 @@
 GOLANGCI_LINT ?= golangci-lint
 TOOL          := go tool -modfile=tools/go.mod
 COVER_DIR     := $(CURDIR)/.cover
+# Packages that run in their own go test invocation under make cover, so the two heaviest
+# race-instrumented packages do not contend for cores. COVER_REST overrides the other set.
+COVER_ISOLATED ?= ./internal/syncer
+COVER_REST     ?=
 FUZZTIME      ?= 30s
 # Bound minimization: with one worker the default 60s freezes all execs while one input is minimized.
 FUZZMINIMIZETIME ?= 5s
@@ -71,8 +75,18 @@ capture-acceptance:
 
 cover:
 	rm -rf $(COVER_DIR) && mkdir -p $(COVER_DIR)/unit $(COVER_DIR)/e2e
+	set -e; \
+	isolated=$$(go list $(COVER_ISOLATED)); \
+	rest="$(COVER_REST)"; \
+	if [ -z "$$rest" ]; then \
+		rest=$$(go list ./... | grep -vxF "$$isolated"); \
+	fi; \
+	rc=0; \
 	CGO_ENABLED=1 E2E_GOCOVERDIR=$(COVER_DIR)/e2e go test -count=1 -race -shuffle=on \
-		-covermode=atomic -coverpkg=./... ./... -args -test.gocoverdir=$(COVER_DIR)/unit
+		-covermode=atomic -coverpkg=./... $$rest -args -test.gocoverdir=$(COVER_DIR)/unit || rc=1; \
+	CGO_ENABLED=1 E2E_GOCOVERDIR=$(COVER_DIR)/e2e go test -count=1 -race -shuffle=on \
+		-covermode=atomic -coverpkg=./... $$isolated -args -test.gocoverdir=$(COVER_DIR)/unit || rc=1; \
+	[ $$rc -eq 0 ]
 	go tool covdata textfmt -i=$(COVER_DIR)/unit,$(COVER_DIR)/e2e -o cover.out
 	$(TOOL) go-test-coverage --config=.testcoverage.yml
 
