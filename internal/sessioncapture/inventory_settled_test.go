@@ -251,20 +251,25 @@ func TestInventoryEvictionSkipsActiveQuarantineRows(t *testing.T) {
 	}
 }
 
+// testCeiling is the lowered per-Queue settled bound used by the at-ceiling tests;
+// TestInventoryDefaultSettledBoundIsTheCeiling pins the production default.
+const testCeiling = 4096
+
 func TestInventoryEvictionAtCeilingCost(t *testing.T) {
 	dir, o, _ := setup(t)
 	o.MaxInventoryRecords = MaxInventoryRecords
 	q := open(t, dir, o)
+	q.settledLimit = testCeiling
 	if err := q.InitRuntime(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	_, err := q.db.ExecContext(t.Context(), `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?) INSERT INTO runtime_sources(session,source,request,observed_at,state,captured_version) SELECT 'old',CAST(x AS TEXT),'{}',x,'captured',1 FROM n`, MaxInventoryRecords+1)
+	_, err := q.db.ExecContext(t.Context(), `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?) INSERT INTO runtime_sources(session,source,request,observed_at,state,captured_version) SELECT 'old',CAST(x AS TEXT),'{}',x,'captured',1 FROM n`, testCeiling+1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()
 	n, err := q.evictSettledSources(t.Context())
-	t.Logf("evicting 1 of %d settled rows: %v", MaxInventoryRecords+1, time.Since(start))
+	t.Logf("evicting 1 of %d settled rows: %v", testCeiling+1, time.Since(start))
 	if err != nil || n != 1 {
 		t.Fatalf("evicted %d %v", n, err)
 	}
@@ -274,7 +279,7 @@ func TestInventoryEvictionAtCeilingCost(t *testing.T) {
 	}
 	start = time.Now()
 	n, err = q.evictSettledSources(t.Context())
-	t.Logf("no-op check at %d settled rows: %v", MaxInventoryRecords, time.Since(start))
+	t.Logf("no-op check at %d settled rows: %v", testCeiling, time.Since(start))
 	if err != nil || n != 0 {
 		t.Fatalf("second eviction %d %v", n, err)
 	}
@@ -284,19 +289,20 @@ func TestInventoryAdmissionAtCeilingWithSettledRows(t *testing.T) {
 	dir, o, r := setup(t)
 	o.MaxInventoryRecords = MaxInventoryRecords
 	q := open(t, dir, o)
+	q.settledLimit = testCeiling
 	if err := q.InitRuntime(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	_, err := q.db.ExecContext(t.Context(), `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?) INSERT INTO runtime_sources(session,source,request,observed_at,state,captured_version) SELECT 'old',CAST(x AS TEXT),'{}',x,'captured',1 FROM n`, MaxInventoryRecords)
+	_, err := q.db.ExecContext(t.Context(), `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?) INSERT INTO runtime_sources(session,source,request,observed_at,state,captured_version) SELECT 'old',CAST(x AS TEXT),'{}',x,'captured',1 FROM n`, testCeiling)
 	if err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()
 	if err := q.Hint(t.Context(), r); err != nil {
-		t.Fatalf("admission with %d settled rows: %v", MaxInventoryRecords, err)
+		t.Fatalf("admission with %d settled rows: %v", testCeiling, err)
 	}
-	t.Logf("admission with %d settled rows: %v", MaxInventoryRecords, time.Since(start))
-	if total, live, settled := rowCounts(t, q); total != MaxInventoryRecords+1 || live != 1 || settled != MaxInventoryRecords {
+	t.Logf("admission with %d settled rows: %v", testCeiling, time.Since(start))
+	if total, live, settled := rowCounts(t, q); total != testCeiling+1 || live != 1 || settled != testCeiling {
 		t.Fatalf("rows total=%d live=%d settled=%d", total, live, settled)
 	}
 }
