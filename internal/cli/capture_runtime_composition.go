@@ -3,6 +3,8 @@ package cli
 import (
 	"github.com/mich-murphy/memory/internal/capturecoordinates"
 	"github.com/mich-murphy/memory/internal/capturedaemon"
+	"github.com/mich-murphy/memory/internal/capturepolicy"
+	"github.com/mich-murphy/memory/internal/exclusion"
 )
 
 // runtimeComposition owns one immutable declaration snapshot for this invocation.
@@ -10,6 +12,9 @@ import (
 type runtimeComposition struct {
 	config    capturedaemon.Config
 	inventory *capturecoordinates.Inventory
+	// Optional counting seams for tests; nil selects the production loaders.
+	registryLoader func(string) (exclusion.Registry, error)
+	filesystemSet  func(capturedaemon.Config) (*capturepolicy.Policy, error)
 }
 
 func newRuntimeComposition(c capturedaemon.Config) (runtimeComposition, error) {

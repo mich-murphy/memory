@@ -20,6 +20,12 @@ type SourceStatus struct {
 	NextRetryNS                      int64
 	Claimed                          bool
 }
+
+// RuntimeStatus is a last-observed snapshot. DiscoveryComplete describes the CURRENT
+// sweep only: true once it finished with no error. Starting the next sweep
+// (prepareDiscoverySweep) resets it, so false with CompletedSweep>0 and no
+// DiscoveryError is the normal state while a later sweep is in progress; use
+// CompletedSweep/CompletedAtNS for the last finished sweep.
 type RuntimeStatus struct {
 	// These are last-observed metadata counts, not capture/publication freshness.
 	PendingDiscoveryHints, RejectedDiscoveryHints                   int64
