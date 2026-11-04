@@ -132,31 +132,57 @@ func (q *Queue) drainNativeEvidence(ctx context.Context) error {
 	start := runtime.nativeCursor % len(entries)
 	runtime.nativeCursor = (start + 32) % len(entries)
 	runtime.mu.Unlock()
+	names := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		names[e.Name()] = true
+	}
+	q.quota.keepOnly(names)
 	for n := range min(len(entries), 32) {
-		entry := entries[(start+n)%len(entries)]
-		path := filepath.Join(dir, entry.Name())
-		body, err := readNativeFile(path)
-		if err != nil {
-			continue
-		}
-		var record NativeEvidence
-		if json.Unmarshal(body, &record) != nil {
-			continue
-		}
-		if err := q.AcceptNativeEvidence(ctx, record); err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			continue
-		}
-		if err := os.Remove(path); err != nil {
-			return err
-		}
-		if err := syncDir(dir); err != nil {
+		if err := q.drainNativeEntry(ctx, dir, entries[(start+n)%len(entries)].Name()); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// drainNativeEntry adopts one inbox file and removes it only after durable
+// adoption. A quota rejection keeps the file and backs the entry off, so an
+// exhausted capacity is not re-probed (policy callback, Lstat, COUNT scans)
+// every tick. Other per-file failures keep their prior behaviour: skip.
+func (q *Queue) drainNativeEntry(ctx context.Context, dir, name string) error {
+	if q.quota.blocked(name, q.opts.Now()) {
+		return nil
+	}
+	path := filepath.Join(dir, name)
+	record, ok := readNativeRecord(path)
+	if !ok {
+		return nil
+	}
+	if err := q.AcceptNativeEvidence(ctx, record); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if errors.Is(err, ErrQuota) {
+			q.quota.fail(name, q.opts.Now())
+		}
+		return nil
+	}
+	q.quota.clear(name)
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	return syncDir(dir)
+}
+
+// readNativeRecord reports ok=false for an unreadable or undecodable file,
+// which the drain leaves in place exactly as before.
+func readNativeRecord(path string) (NativeEvidence, bool) {
+	var record NativeEvidence
+	body, err := readNativeFile(path)
+	if err != nil {
+		return record, false
+	}
+	return record, json.Unmarshal(body, &record) == nil
 }
 
 func (q *Queue) nativeInboxLoop(ctx context.Context) error {

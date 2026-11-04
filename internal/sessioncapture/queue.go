@@ -157,6 +157,12 @@ type Queue struct {
 	// sourceLimit is a test-only per-Queue override of publication.MaxSources;
 	// 0 means the const. Set it only through setSourceLimit.
 	sourceLimit int
+
+	// enrichmentCap is a test-only per-Queue override of MaxEnrichmentWork;
+	// 0 means the const. Set it only through setEnrichmentLimit.
+	enrichmentCap int
+
+	quota quotaGate
 }
 
 func Open(ctx context.Context, dir string, opts Options) (*Queue, error) {
