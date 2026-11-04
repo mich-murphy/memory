@@ -166,7 +166,8 @@ func (q *Queue) deliverOne(ctx context.Context, b publication.Backend, m publica
 			return err
 		}
 		if c.Sequence >= m.Sequence {
-			return publication.ErrConflict
+			// A rebuilt or lagging spool: publish above the verified remote current.
+			return q.deliverRebased(ctx, b, m, es, publication.ErrConflict)
 		}
 	}
 	// Objects already in the remote current's verified manifest need no upload or
@@ -182,6 +183,10 @@ func (q *Queue) deliverOne(ctx context.Context, b publication.Backend, m publica
 		return e
 	}
 	_, e = publication.Publish(ctx, faultBackend{Backend: b, q: q, evidence: selectedEvidence(m, es), scopeEvidence: es, manifest: m}, m, token)
+	if errors.Is(e, publication.ErrConflict) {
+		// The remote moved or holds epochs this spool lacks: rebase above it.
+		return q.deliverRebased(ctx, b, m, es, e)
+	}
 	if e != nil {
 		return e
 	}
@@ -382,6 +387,9 @@ func (q *Queue) attempt(ctx context.Context, b publication.Backend, i publicatio
 
 func (q *Queue) attemptManifest(ctx context.Context, b publication.Backend, i publication.Identity, seq uint64, m publication.Manifest, es []evidence) error {
 	if checkErr := q.verifyDependencies(ctx, m, es); checkErr != nil {
+		if stale := q.staleAttempt(ctx, i, seq, checkErr); errors.Is(stale, errSelectionSuperseded) {
+			return stale
+		}
 		if handled, handleErr := q.isolateOptionalFailure(ctx, i, m, es, checkErr); handled || handleErr != nil {
 			return handleErr
 		}
@@ -401,14 +409,8 @@ func (q *Queue) attemptManifest(ctx context.Context, b publication.Backend, i pu
 		return err
 	}
 	err = errors.Join(q.deliverOne(ctx, b, m, es), finish())
-	if err == nil || errors.Is(err, publication.ErrConflict) {
-		var state string
-		if stateErr := q.db.QueryRowContext(ctx, `SELECT state FROM jobs WHERE session=? AND sequence=?`, i.BaseKey(), seq).Scan(&state); stateErr != nil {
-			return stateErr
-		}
-		if state == "superseded" {
-			return errSelectionSuperseded
-		}
+	if stale := q.staleAttempt(ctx, i, seq, err); stale != nil {
+		return stale
 	}
 	if handled, handleErr := q.isolateOptionalFailure(ctx, i, m, es, err); handled || handleErr != nil {
 		return handleErr
@@ -420,8 +422,49 @@ func (q *Queue) acknowledge(ctx context.Context, i publication.Identity, seq uin
 	if err := q.fault("ack-before-commit"); err != nil {
 		return err
 	}
-	if _, err := q.db.ExecContext(ctx, "UPDATE jobs SET state='published',last_error='',next_retry=0 WHERE session=? AND sequence=? AND state!='superseded'", i.BaseKey(), seq); err != nil {
+	tx, err := q.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, "UPDATE jobs SET state='published',last_error='',next_retry=0 WHERE session=? AND sequence=? AND state!='superseded'", i.BaseKey(), seq)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		// Same transaction as the acknowledgement: the metadata decision precedes any unlink.
+		if err := retirePublished(ctx, tx, i.BaseKey(), seq); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 	return q.fault("ack-committed")
+}
+
+// staleAttempt returns errSelectionSuperseded when the attempted job succeeded, conflicted or failed its payload
+// check after being superseded meanwhile (its payloads may then have been reclaimed, so a failure says nothing
+// about the session; the newer job carries the content), nil when it is still live,
+// or the metadata error. Only a payload-integrity or missing-file failure is a candidate staleness verdict.
+func (q *Queue) staleAttempt(ctx context.Context, i publication.Identity, seq uint64, cause error) error {
+	// A success or conflict of a superseded job is stale by definition. Otherwise
+	// only a payload-integrity or missing-file failure can be caused by
+	// reclamation; any other failure (for example a remote error) is reported as is.
+	reclaimable := errors.Is(cause, ErrIntegrity) || errors.Is(cause, os.ErrNotExist)
+	if cause != nil && !errors.Is(cause, publication.ErrConflict) && (!reclaimable || (ctx.Err() != nil && errors.Is(cause, ctx.Err()))) {
+		return nil
+	}
+	var state string
+	if err := q.db.QueryRowContext(ctx, `SELECT state FROM jobs WHERE session=? AND sequence=?`, i.BaseKey(), seq).Scan(&state); err != nil {
+		return err
+	}
+	if state == "superseded" {
+		return errSelectionSuperseded
+	}
+	return nil
 }

@@ -156,6 +156,7 @@ func TestRuntimeDiscoveryInvalidMetadataCannotResolveOrBlockHealthyRequests(t *t
 }
 
 func TestRuntimeDiscoveryLimitsCoalesceWithoutGC(t *testing.T) {
+	t.Parallel()
 	dir, o, req := setup(t)
 	q := open(t, dir, o)
 	if err := q.InitRuntime(t.Context()); err != nil {
@@ -308,6 +309,7 @@ func TestRuntimeDiscoveryMalformedInboxStatusIsBoundedAndReadOnly(t *testing.T) 
 }
 
 func TestRuntimeDiscoveryMetadataValidationAndBatchBound(t *testing.T) {
+	t.Parallel()
 	for _, sample := range []string{"", "not safe", "newline\n", "π", "too-long-" + string(make([]byte, 65))} {
 		if discoveryToken(sample, false) {
 			t.Fatalf("unsafe code %q", sample)

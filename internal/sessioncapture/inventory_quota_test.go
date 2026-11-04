@@ -11,6 +11,7 @@ import (
 )
 
 func TestInventoryQuotaCrossesDefaultBarrier(t *testing.T) {
+	t.Parallel()
 	dir, o, req := setup(t)
 	o.MaxInventoryRecords = MaxRuntimeSources + 1
 	q := open(t, dir, o)
@@ -46,6 +47,7 @@ func TestInventoryQuotaCrossesDefaultBarrier(t *testing.T) {
 }
 
 func TestInventoryQuotaRestartRetainsBackpressureAndWork(t *testing.T) {
+	t.Parallel()
 	dir, o, req := setup(t)
 	o.MaxInventoryRecords = 2
 	q, err := Open(t.Context(), dir, o)
@@ -73,6 +75,13 @@ func TestInventoryQuotaRestartRetainsBackpressureAndWork(t *testing.T) {
 	before, err := q.Status(t.Context())
 	if err != nil || len(before) != 1 {
 		t.Fatalf("accepted work: %+v %v", before, err)
+	}
+	// Settled rows no longer count toward the live cap; re-observe source-0 so
+	// two live rows fill it and the next new identity meets backpressure.
+	first := req
+	first.SourceID = "source-0"
+	if err := q.Hint(t.Context(), first); err != nil {
+		t.Fatal(err)
 	}
 	req.SourceID = "healthy-new"
 	if err := WriteHint(t.Context(), dir, req); err != nil {

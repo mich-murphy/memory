@@ -109,6 +109,7 @@ class PublicationDashboard:
             result.update(mode='configured', endpoint_errors=errors, expected_targets=counts['expected_targets'],
                           discovery_errors=counts['discovery_errors'],
                           unimported=counts['unimported'], target_errors=counts['target_errors'],
+                          target_error_codes=counts['target_error_codes'],
                           last_completed_sweep_ns=completed, stale=stale,
                           expected_endpoints=len(expected), omitted_endpoints=omitted,
                           incomplete_endpoints=sum(row[2] is None for row in endpoints),

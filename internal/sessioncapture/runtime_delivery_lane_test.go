@@ -16,6 +16,7 @@ import (
 // really publishes it, and Capture makes selected optional N+1 the pending head.
 // The old raw selection must not spend an attempt or perform optional network I/O.
 func TestRuntimeDeliveryLaneTransitions(t *testing.T) {
+	t.Parallel()
 	for _, window := range []struct {
 		name, boundary string
 		worker         bool
@@ -181,6 +182,7 @@ func assertDeliveryLaneExport(t *testing.T, backend publication.Backend, want pu
 }
 
 func TestRuntimeDeliveryLaneFaults(t *testing.T) {
+	t.Parallel()
 	for _, boundary := range []string{"delivery-worker-lane-selected", "delivery-lane-selected"} {
 		t.Run(boundary, func(t *testing.T) {
 			dir, options, raw := setup(t)

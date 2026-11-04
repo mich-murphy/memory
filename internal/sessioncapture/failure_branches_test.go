@@ -13,6 +13,7 @@ import (
 )
 
 func TestOpenRejectsUnsafeQueuePathsAndRecovers(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"parent-file", "wide-queue", "wide-payloads", "symlink-queue", "symlink-payloads", "symlink-database", "wide-database", "unopenable-lock-path", "corrupt-database", "cancelled-init"} {
 		t.Run(mode, func(t *testing.T) {
 			dir, opts, _ := setup(t)
@@ -168,6 +169,7 @@ func TestOpenArchiveMismatchPreservesAcceptedQueue(t *testing.T) {
 }
 
 func TestCaptureSourceFailuresPreserveProgressAndRetry(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"directory", "oversize-sparse", "spool-directory", "missing-spool", "missing-original", "cancelled"} {
 		t.Run(mode, func(t *testing.T) {
 			dir, opts, req := setup(t)

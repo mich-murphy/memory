@@ -39,7 +39,7 @@ class PublicationsTests(unittest.TestCase):
                 observed_at_ns=3, captured_at_ns=4, associations=[], object=dict(key='immutable/object',
                 encoding='zstd', sha256=digest, encoded_sha256=digest, size=len(raw), encoded_size=len(raw))))
             bodies.append(dict(source_id=source, epoch_id=epoch, path=name, sha256=digest, size=len(raw)))
-        data = dict(contract='session-reader/v2', manifest=self.manifest, bodies=bodies)
+        data = dict(contract='session-reader/v2', manifest_sha256='ab' * 32, manifest=self.manifest, bodies=bodies)
         self.save(data)
         return data
 
@@ -493,14 +493,45 @@ class PublicationsTests(unittest.TestCase):
         self.assertEqual(len(report['sessions']), 2)
         self.assertEqual(len(report['failures']), 1)
 
+    def stored_digest(self, value=None):
+        if value is not None:
+            with duckdb.connect(str(self.db)) as db:
+                db.execute('UPDATE sessions SET manifest_sha256=?', [value])
+        return self.query('SELECT manifest_sha256 FROM sessions')
+
+    def test_legacy_local_fingerprint_reimports_and_adopts_remote_digest(self):
+        self.fixture()
+        publications.import_export(self.export, self.db)
+        self.assertEqual(self.stored_digest(), [('ab' * 32,)])
+        legacy = hashlib.sha256(json.dumps(self.manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        self.stored_digest(legacy)
+        self.assertEqual(publications.import_export(self.export, self.db)['status'], 'unchanged')
+        self.assertEqual(self.stored_digest(), [('ab' * 32,)])
+
+    def test_different_stored_digest_still_conflicts(self):
+        self.fixture()
+        publications.import_export(self.export, self.db)
+        self.stored_digest('cd' * 32)
+        with self.assertRaisesRegex(publications.ImportFailure, '^publication_conflict$'):
+            publications.import_export(self.export, self.db)
+        self.assertEqual(self.stored_digest(), [('cd' * 32,)])
+
+    def test_reader_without_manifest_digest_is_typed(self):
+        data = self.fixture()
+        del data['manifest_sha256']
+        self.save(data)
+        with self.assertRaisesRegex(publications.ImportFailure, '^reader_digest_missing$'):
+            publications.import_export(self.export, self.db)
+        self.assertFalse(self.db.exists())
+
     def test_failure_watermark_survives_older_retries(self):
         for broken in ('missing', 'corrupt'):
             with self.subTest(broken=broken):
-                self.manifest.update(sequence=1, publication_id='p1')
+                self.manifest.update(sequence=2, publication_id='p1')
                 self.fixture()
                 publications.import_export(self.export, self.db, reset=True)
                 success = self.query('SELECT * FROM sessions')
-                self.manifest.update(sequence=2, publication_id='p2')
+                self.manifest.update(sequence=3, publication_id='p2')
                 self.fixture()
                 body = self.export / 'body-0.jsonl'
                 if broken == 'missing':
@@ -510,7 +541,7 @@ class PublicationsTests(unittest.TestCase):
                 with self.assertRaises(publications.ImportFailure):
                     publications.import_export(self.export, self.db)
                 failure = self.query('SELECT * EXCLUDE(attempts) FROM failures')
-                self.manifest.update(sequence=1, publication_id='p1')
+                self.manifest.update(sequence=2, publication_id='p1')
                 self.fixture()
                 self.assertEqual(publications.import_export(self.export, self.db)['status'], 'unchanged')
                 self.assertEqual(self.query('SELECT * FROM sessions'), success)
@@ -518,13 +549,13 @@ class PublicationsTests(unittest.TestCase):
                 self.assertEqual(self.query('SELECT attempts FROM failures'), [(1,)])
                 self.assertTrue(publications.report(self.db, now_ns=1700000000000000010)['sessions'][0]['stale'])
                 # A stale failed P0 attempt counts, but cannot replace P2's target/reason/time.
-                self.manifest.update(sequence=0, publication_id='p0')
+                self.manifest.update(sequence=1, publication_id='p0')
                 self.fixture()
                 with self.assertRaisesRegex(publications.ImportFailure, '^stale_publication$'):
                     publications.import_export(self.export, self.db)
                 self.assertEqual(self.query('SELECT * EXCLUDE(attempts) FROM failures'), failure)
-                self.assertEqual(self.query('SELECT publication_id,sequence,attempts FROM failures'), [('p2', 2, 2)])
-                self.manifest.update(sequence=2, publication_id='p2')
+                self.assertEqual(self.query('SELECT publication_id,sequence,attempts FROM failures'), [('p2', 3, 2)])
+                self.manifest.update(sequence=3, publication_id='p2')
                 self.fixture()
                 publications.import_export(self.export, self.db)
                 self.assertEqual(self.query('SELECT count(*) FROM failures'), [(0,)])

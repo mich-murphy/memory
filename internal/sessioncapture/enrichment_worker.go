@@ -104,10 +104,11 @@ func (q *Queue) finishEnrichment(ctx context.Context, id string, attempts int, c
 		return cause
 	}
 	state := "retry"
-	if attempts >= o.MaxAttempts {
+	class := classify(cause, o.Classify)
+	if class.spendsQuarantineBudget() && attempts >= o.MaxAttempts {
 		state = "quarantined"
 	}
-	code := string(classify(cause, o.Classify))
+	code := string(class)
 	save, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.OperationTimeout)
 	defer cancel()
 	_, err := q.db.ExecContext(save, `UPDATE enrichment_work SET state=?,last_error=?,next_retry=? WHERE id=?`, state, code, q.opts.Now().Add(retryDelay(attempts, o.Jitter)).UnixNano(), id)
@@ -262,7 +263,7 @@ func (q *Queue) attachEnrichment(ctx context.Context, s EnrichmentSpec, r enrich
 	}
 	request := Request{Identity: s.Identity, SourceID: sourceID, Role: "artifact", Path: provenance.Path, LogicalPath: provenance.LogicalPath, Identities: slices.Clone(provenance.Identities), Optional: true, ObservedAtNS: r.ObservedAtNS}
 	src := publication.Source{SourceID: sourceID, EpochID: digest([]byte(sourceID + ":" + r.Object.SHA256 + ":" + digestSpec(s))), Role: "artifact", Path: publicationSourcePath(request), Optional: true, State: "active", Revision: 1, ObservedAtNS: r.ObservedAtNS, CapturedAtNS: r.CapturedAtNS, Object: r.Object, Associations: []string{"enrichment:" + s.Kind, "basis:" + s.BasisPublication}}
-	if len(m.Sources) >= publication.MaxSources-128 {
+	if limit := q.effectiveSourceLimit(); len(m.Sources) >= limit-limit/sourceHeadroomDivisor {
 		return 0, ErrQuota
 	}
 	if idx >= 0 {

@@ -47,16 +47,19 @@ func TestCaptureExportByteLimitsDirectAndConfigured(t *testing.T) {
 		for _, limit := range []int64{size - 1, size} {
 			dest := filepath.Join(t.TempDir(), "export")
 			args := append([]string{"export", "--agent", id.Agent, "--session", id.SessionID, "--output", dest, "--max-bytes", strconv.FormatInt(limit, 10)}, backendArgs...)
-			_, err := runCapture(t.Context(), args, io)
+			code, err := runCapture(t.Context(), args, io)
 			if limit < size {
+				if code != exitExportBudget {
+					t.Fatalf("budget refusal exit %d, want %d", code, exitExportBudget)
+				}
 				if !errors.Is(err, publication.ErrExportBudget) {
 					t.Fatal("budget error lost", err)
 				}
 				if _, err := os.Stat(dest); !os.IsNotExist(err) {
 					t.Fatal("budget failure created output")
 				}
-			} else if err != nil {
-				t.Fatal(err)
+			} else if err != nil || code != exitOK {
+				t.Fatal(code, err)
 			}
 		}
 	}

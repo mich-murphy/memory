@@ -333,7 +333,39 @@ func (q *Queue) acceptSnapshot(ctx context.Context, r Request, identities []stri
 	} else {
 		m.Coverage = publication.Coverage{Discovery: "partial", Enrichment: "partial", Missing: []string{"discovery-not-enumerated", "enrichment-not-implemented"}}
 	}
-	return q.acceptView(ctx, m, es, r.SourceID, false)
+	accepted, err := q.acceptOwned(ctx, m, es, r.SourceID, obj)
+	if err != nil {
+		return publication.Manifest{}, err
+	}
+	// The acceptance (and any supersession) is already durable; reclaiming what it
+	// released happens after the install mutex is dropped.
+	q.reclaimBestEffort(ctx)
+	return accepted, nil
+}
+
+// acceptOwned commits a view while holding the install mutex of the object just
+// captured. A capture that deduplicated onto an existing file would otherwise race
+// a reclaim of that file: reclaim takes the same mutex, so either the file is still
+// present at commit (and the new job then roots it) or the capture retries.
+func (q *Queue) acceptOwned(ctx context.Context, m publication.Manifest, es []evidence, changedSource string, obj publication.Object) (publication.Manifest, error) {
+	if err := q.fault("payload-accept-before"); err != nil {
+		return publication.Manifest{}, err
+	}
+	unlock, err := lockContext(ctx, keyedMutex(&q.installs, obj.EncodedSHA256))
+	if err != nil {
+		return publication.Manifest{}, err
+	}
+	defer unlock()
+	if _, err := os.Lstat(q.payload(obj)); err != nil {
+		return publication.Manifest{}, errors.Join(errPayloadReclaimed, err)
+	}
+	// Only the object just captured is new to this session; every other object of
+	// the view was recorded when it was captured. A reference left by a capture
+	// that then fails is harmless: payloadKept drops an unrooted own-session ref.
+	if err := recordPayloadRef(ctx, q.db, obj, m.Identity.BaseKey()); err != nil {
+		return publication.Manifest{}, err
+	}
+	return q.acceptView(ctx, m, es, changedSource, false)
 }
 
 func (q *Queue) accept(ctx context.Context, m publication.Manifest, es []evidence) (publication.Manifest, error) {
@@ -354,7 +386,7 @@ func (q *Queue) acceptView(ctx context.Context, m publication.Manifest, es []evi
 	if err != nil {
 		return zero, err
 	}
-	m, b, ev, e := encodeAcceptedView(m, es)
+	m, b, ev, e := encodeAcceptedView(m, es, q.effectiveSourceLimit())
 	if e != nil {
 		return zero, e
 	}
@@ -372,8 +404,8 @@ func (q *Queue) acceptView(ctx context.Context, m publication.Manifest, es []evi
 			e = q.admitCapturedEnrichment(ctx, tx, m, spec)
 		}
 	}
-	if e == nil && supersede {
-		_, e = tx.ExecContext(ctx, `UPDATE jobs SET state='superseded' WHERE session=? AND sequence<? AND state NOT IN ('published','superseded')`, m.Identity.BaseKey(), m.Sequence)
+	if e == nil && (supersede || changedSource != "") {
+		e = retireJobs(ctx, tx, m, !supersede)
 	}
 	if e == nil {
 		e = tx.Commit()
@@ -508,28 +540,28 @@ func (q *Queue) unchanged(ctx context.Context, r Request, source authorizedSourc
 
 // encodeAcceptedView establishes the stable ID and validates the exact bytes
 // before the acceptance transaction can mutate the durable queue.
-func encodeAcceptedView(m publication.Manifest, es []evidence) (publication.Manifest, []byte, []byte, error) {
+func encodeAcceptedView(m publication.Manifest, es []evidence, sourceLimit int) (publication.Manifest, []byte, []byte, error) {
 	m.PublicationID = ""
 	b, err := json.Marshal(m)
 	if err != nil {
 		return m, nil, nil, err
 	}
 	m.PublicationID = digest(b)
-	if err := publication.ValidateManifest(m); err != nil {
+	if len(m.Sources) > sourceLimit {
+		return m, nil, nil, ErrSourceLimit
+	}
+	b, err = publication.MarshalValidManifest(m)
+	if err != nil {
 		return m, nil, nil, err
 	}
 	if err := validateEvidencePair(m, es, false); err != nil {
-		return m, nil, nil, err
-	}
-	b, err = json.Marshal(m)
-	if err != nil {
 		return m, nil, nil, err
 	}
 	ev, err := json.Marshal(es)
 	if err != nil {
 		return m, nil, nil, err
 	}
-	if len(b) > publication.MaxMetadata || len(m.Sources) > publication.MaxSources {
+	if len(b) > publication.MaxMetadata {
 		return m, nil, nil, ErrQuota
 	}
 	return m, b, ev, nil

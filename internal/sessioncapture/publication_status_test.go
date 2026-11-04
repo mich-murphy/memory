@@ -27,6 +27,7 @@ func insertPublicationJob(t *testing.T, q *Queue, m publication.Manifest, state 
 }
 
 func TestPublicationHeadsSweepAndLatestSuccess(t *testing.T) {
+	t.Parallel()
 	dir, o, req := setup(t)
 	q := open(t, dir, o)
 	// Actual accepted and published manual work establishes a valid manifest. SQL
@@ -89,6 +90,7 @@ func TestPublicationHeadsSweepAndLatestSuccess(t *testing.T) {
 }
 
 func TestPublicationHeadsReadOnlyBindingAndValidation(t *testing.T) {
+	t.Parallel()
 	dir, o, req := setup(t)
 	q := open(t, dir, o)
 	m := capture(t, q, req)

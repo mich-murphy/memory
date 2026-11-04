@@ -43,6 +43,10 @@ mechanisms do not override the replacement contract:
 
 ## Current development review evidence
 
+- [Production gap register — November 2](production-gap-register-20261102.md) —
+  offline experiments against `2deac62`: confirmed liveness/efficiency/cap gaps,
+  verified-sound areas, proven weak oracles and ready-to-adopt tests. It is not
+  operating acceptance and changes no code.
 - [Architecture, test quality and readiness review](architecture-review-20261030.md) —
   current-source findings, focused repairs, mutation proofs and bounded mechanism
   measurements. Its evidence section distinguishes completed checks from pending work;

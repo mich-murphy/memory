@@ -37,6 +37,9 @@ const (
 	exitFailed = 1
 	exitUsage  = 2
 	exitLocked = 3
+	// exitExportBudget is a permanent, typed export refusal: a retained object or the
+	// session total exceeds the requested byte limits. Retrying cannot succeed.
+	exitExportBudget = 4
 )
 
 // errUsage is returned once the flag package has already printed what was wrong.

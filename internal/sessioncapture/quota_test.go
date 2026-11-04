@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -59,6 +60,17 @@ func TestQuotaRetainsFailedCleanupAndRestartOrphan(t *testing.T) {
 		t.Fatalf("failed cleanup undercharged physical=%d accounted=%d", used, q.used)
 	}
 	if err := q.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// GAP-10: writer temporaries are swept at Open, so this test keeps its
+	// original intent (an unreclaimed, accounted orphan payload) by installing
+	// the leftover bytes under a durable payload name, which is never collected.
+	payloads := filepath.Join(dir, "payloads")
+	left, err := os.ReadDir(payloads)
+	if err != nil || len(left) != 1 {
+		t.Fatalf("expected one leftover temporary: %v %d", err, len(left))
+	}
+	if err := os.Rename(filepath.Join(payloads, left[0].Name()), filepath.Join(payloads, strings.Repeat("a", 64)+".zst")); err != nil {
 		t.Fatal(err)
 	}
 	o.Fault = nil

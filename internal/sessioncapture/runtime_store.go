@@ -10,6 +10,14 @@ import (
 	"github.com/mich-murphy/memory/internal/publication"
 )
 
+// runnableSourcePredicate is shared by the claimSource query and the partial index
+// runtime_runnable_sources_v2; SQLite only uses the index when the text matches, so
+// adding a settled state here changes both together.
+const runnableSourcePredicate = `claim=0 AND state NOT IN ('absent','captured','quarantined','source-limit')`
+
+// claimSourceSQL pages runnable sources by id; it must use runtime_runnable_sources_v2.
+const claimSourceSQL = `SELECT id,request,version,attempts,claim,state,next_retry,observed_state FROM runtime_sources AS s WHERE id>? AND ` + runnableSourcePredicate + ` AND next_retry<=? AND debounce_until<=? AND NOT EXISTS(SELECT 1 FROM runtime_sources AS busy WHERE busy.session=s.session AND busy.claim!=0) ORDER BY id LIMIT 64`
+
 // InitRuntime installs durable runtime state lazily. The Queue process flock
 // guarantees that claims left by a previous process can be reset safely. Calls
 // after the first initialization never reset live workers' claims.
@@ -29,12 +37,17 @@ func (q *Queue) InitRuntime(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS runtime_discovery_scopes (id INTEGER PRIMARY KEY,agent TEXT NOT NULL,root TEXT NOT NULL,state TEXT NOT NULL,examined INTEGER NOT NULL,enrichment TEXT NOT NULL,seen_generation INTEGER NOT NULL,active INTEGER NOT NULL DEFAULT 1,UNIQUE(agent,root))`,
 		`CREATE TABLE IF NOT EXISTS runtime_sources (id INTEGER PRIMARY KEY,session TEXT NOT NULL,source TEXT NOT NULL,request BLOB NOT NULL,version INTEGER NOT NULL DEFAULT 1,captured_version INTEGER NOT NULL DEFAULT 0,observed_at INTEGER NOT NULL,captured_at INTEGER NOT NULL DEFAULT 0,sequence INTEGER NOT NULL DEFAULT 0,publication TEXT NOT NULL DEFAULT '',state TEXT NOT NULL DEFAULT 'pending',observed_state TEXT NOT NULL DEFAULT 'present',attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT NOT NULL DEFAULT '',next_retry INTEGER NOT NULL DEFAULT 0,claim INTEGER NOT NULL DEFAULT 0,UNIQUE(session,source))`,
 		`CREATE INDEX IF NOT EXISTS runtime_source_claims ON runtime_sources(session,claim)`,
-		`CREATE INDEX IF NOT EXISTS runtime_runnable_sources ON runtime_sources(id) WHERE claim=0 AND state NOT IN ('absent','captured','quarantined')`,
+		// v2 carries the source-limit state. The old index is dropped because CREATE INDEX
+		// IF NOT EXISTS would keep a stale predicate that claimSourceSQL cannot use.
+		`DROP INDEX IF EXISTS runtime_runnable_sources`,
+		`CREATE INDEX IF NOT EXISTS runtime_runnable_sources_v2 ON runtime_sources(id) WHERE ` + runnableSourcePredicate,
+		`CREATE INDEX IF NOT EXISTS runtime_live_sources ON runtime_sources(id) WHERE state NOT IN ('captured','absent')`,
+		`CREATE INDEX IF NOT EXISTS runtime_settled_sources ON runtime_sources(id) WHERE state IN ('captured','absent')`,
 		`CREATE TABLE IF NOT EXISTS runtime_sessions (id INTEGER PRIMARY KEY,session TEXT UNIQUE NOT NULL,claim INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE IF NOT EXISTS runtime_destination (id INTEGER PRIMARY KEY CHECK(id=1),paused INTEGER NOT NULL DEFAULT 0,reason TEXT NOT NULL DEFAULT '',paused_at INTEGER NOT NULL DEFAULT 0,discovery_error TEXT NOT NULL DEFAULT '',discovered_at INTEGER NOT NULL DEFAULT 0)`,
 		`INSERT OR IGNORE INTO runtime_destination(id) VALUES(1)`,
 		`CREATE TABLE IF NOT EXISTS runtime_quarantine (id INTEGER PRIMARY KEY,kind TEXT NOT NULL,source_id INTEGER NOT NULL DEFAULT 0,session TEXT NOT NULL,sequence INTEGER NOT NULL DEFAULT 0,request BLOB,reason TEXT NOT NULL,attempts INTEGER NOT NULL,created_at INTEGER NOT NULL,contract TEXT NOT NULL,software_version TEXT NOT NULL DEFAULT 'unknown/devel',active INTEGER NOT NULL DEFAULT 1)`,
-		`CREATE INDEX IF NOT EXISTS runtime_pending_jobs ON jobs(session,sequence) WHERE state NOT IN ('published','superseded')`,
+		pendingJobsIndexSQL,
 		`CREATE INDEX IF NOT EXISTS runtime_due_jobs ON jobs(next_retry,session,sequence) WHERE state NOT IN ('published','superseded','quarantined')`,
 		`CREATE TRIGGER IF NOT EXISTS runtime_job_session AFTER INSERT ON jobs BEGIN INSERT OR IGNORE INTO runtime_sessions(session) VALUES(NEW.session); END`,
 		// Bootstrap only the pending index, not published archive history. All future
@@ -51,8 +64,13 @@ func (q *Queue) InitRuntime(ctx context.Context) error {
 			return err
 		}
 	}
-	for _, c := range [][2]string{{"step_errors", "INTEGER NOT NULL DEFAULT 0"}, {"last_step_error", "TEXT NOT NULL DEFAULT ''"}, {"last_step_error_at", "INTEGER NOT NULL DEFAULT 0"}} {
+	for _, c := range [][2]string{{"step_errors", "INTEGER NOT NULL DEFAULT 0"}, {"last_step_error", "TEXT NOT NULL DEFAULT ''"}, {"last_step_error_at", "INTEGER NOT NULL DEFAULT 0"}, {"inventory_evictions", "INTEGER NOT NULL DEFAULT 0"}} {
 		if err := q.addColumnIfMissing(ctx, "runtime_destination", c[0], c[1]); err != nil {
+			return err
+		}
+	}
+	for _, c := range [][2]string{{"dirty_since", "INTEGER NOT NULL DEFAULT 0"}, {"debounce_until", "INTEGER NOT NULL DEFAULT 0"}} {
+		if err := q.addColumnIfMissing(ctx, "runtime_sources", c[0], c[1]); err != nil {
 			return err
 		}
 	}
@@ -63,14 +81,118 @@ func (q *Queue) InitRuntime(ctx context.Context) error {
 	return nil
 }
 
-// MaxRuntimeSources is the default retained source metadata bound, including absent sources.
-// At capacity new identities receive backpressure; existing identities still
-// coalesce. There is no automatic GC, nor a complete-inventory guarantee.
+// MaxRuntimeSources is the default live-work cap (max_inventory_records): source rows
+// that are pending, retry, claimed or quarantined. At that cap new identities receive
+// visible ErrQuota backpressure; existing identities still coalesce. Settled rows
+// (captured or absent, kept only so unchanged fingerprints skip re-hinting) are bounded
+// separately by the fixed MaxInventoryRecords ceiling (65,536; ~3.8 KB/row, worst case
+// ~250 MB; measured inventories are 19k on the Mac and 29k on BC-01). Settled history
+// never refuses a new session: beyond that ceiling the oldest settled row (absent first)
+// leaves this index only (jobs and payloads stay), and its source re-hints once if
+// rediscovered. No complete-inventory guarantee.
 const MaxRuntimeSources = 4096
 
 // MaxInventoryRecords is the hard ceiling for an explicitly configured inventory.
 // It does not raise per-batch discovery or paginated status limits.
 const MaxInventoryRecords = 65536
+
+// hintRow is a validated, normalized hint ready for the admission upsert.
+type hintRow struct {
+	req         Request
+	body        []byte
+	fingerprint string
+}
+
+// hintChunk bounds one admission transaction: a discovery batch costs a handful of
+// durable commits (synchronous=FULL fsyncs), not one per source.
+const hintChunk = 256
+
+const (
+	upsertHintHead = `INSERT INTO runtime_sources(session,source,request,observed_at,fingerprint,dirty_since,debounce_until) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_sources WHERE session=? AND source=?) OR `
+	upsertHintTail = ` ON CONFLICT(session,source) DO UPDATE SET request=excluded.request,version=version+1,observed_at=excluded.observed_at,fingerprint=excluded.fingerprint,dirty_since=CASE WHEN dirty_since>0 THEN dirty_since ELSE excluded.dirty_since END,debounce_until=MIN(excluded.debounce_until,(CASE WHEN dirty_since>0 THEN dirty_since ELSE excluded.dirty_since END)+?),observed_state='present',state=CASE WHEN state IN ('captured','absent','source-limit') THEN 'pending' ELSE state END WHERE excluded.fingerprint='' OR runtime_sources.fingerprint!=excluded.fingerprint OR runtime_sources.observed_state!='present'`
+	// hintLiveRoom is evaluated per new row by a single Hint; a batch counts once.
+	hintLiveRoom  = `(SELECT COUNT(*) FROM runtime_sources WHERE state NOT IN ('captured','absent'))<?`
+	liveSlotsSQL  = `SELECT COUNT(*) FROM runtime_sources WHERE state NOT IN ('captured','absent')`
+	hintSlotsLeft = `?>0`
+)
+
+type hintExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func (q *Queue) prepareHint(req Request) (hintRow, error) {
+	if err := validateHint(req); err != nil {
+		return hintRow{}, err
+	}
+	req, err := q.prepareRequest(req)
+	if err != nil {
+		return hintRow{}, err
+	}
+	if err := q.valid(req); err != nil {
+		return hintRow{}, err
+	}
+	for _, s := range []string{req.Identity.ArchiveID, req.Identity.MachineID, req.Identity.Agent, req.Identity.SessionID, req.SourceID, req.Path} {
+		if strings.ContainsRune(s, 0) {
+			return hintRow{}, errors.New("sessioncapture: invalid hint identity")
+		}
+	}
+	if err := checkKeyLength(req.Identity); err != nil {
+		return hintRow{}, err
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return hintRow{}, err
+	}
+	if len(body) > publication.MaxMetadata {
+		return hintRow{}, ErrQuota
+	}
+	fingerprint, err := hintFingerprint(req)
+	return hintRow{req: req, body: body, fingerprint: fingerprint}, err
+}
+
+// upsertHint admits one prepared hint and reports whether a row was written. A
+// matching non-empty fingerprint on a present source is a no-op (no version bump,
+// state reset or row write). With slots == nil the live cap is checked per statement;
+// a batch passes its remaining live slots (counted once) and they are consumed here.
+func (q *Queue) upsertHint(ctx context.Context, x hintExecer, h hintRow, slots *int) (bool, error) {
+	key := h.req.Identity.BaseKey()
+	room, arg, created := hintLiveRoom, q.opts.MaxInventoryRecords, false
+	if slots != nil {
+		var exists int
+		if err := x.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_sources WHERE session=? AND source=?`, key, h.req.SourceID).Scan(&exists); err != nil {
+			return false, err
+		}
+		room, arg, created = hintSlotsLeft, *slots, exists == 0
+		if created && arg <= 0 {
+			return false, ErrQuota
+		}
+	}
+	now := q.opts.Now().UnixNano()
+	quiet, maxDelay := q.cadence()
+	result, err := x.ExecContext(ctx, upsertHintHead+room+upsertHintTail, key, h.req.SourceID, h.body, h.req.ObservedAtNS, h.fingerprint, now, now+int64(quiet), key, h.req.SourceID, arg, int64(maxDelay))
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if created {
+		*slots--
+	}
+	if n == 0 {
+		// Either an unchanged existing row (fine) or the live cap refused a new one.
+		var exists int
+		if err := x.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_sources WHERE session=? AND source=?`, key, h.req.SourceID).Scan(&exists); err != nil {
+			return false, err
+		}
+		if exists == 0 {
+			return false, ErrQuota
+		}
+	}
+	return n > 0, nil
+}
 
 // Hint owns only bounded pathname metadata, not source bytes. Repeated hints
 // coalesce by source identity; they never clear backoff or quarantine. A worker
@@ -79,56 +201,83 @@ func (q *Queue) Hint(ctx context.Context, req Request) error {
 	if err := q.InitRuntime(ctx); err != nil {
 		return err
 	}
-	if err := validateHint(req); err != nil {
-		return err
-	}
-	req, err := q.prepareRequest(req)
+	h, err := q.prepareHint(req)
 	if err != nil {
 		return err
 	}
-	if err := q.valid(req); err != nil {
+	if _, err := q.upsertHint(ctx, q.db, h, nil); err != nil {
 		return err
-	}
-	for _, s := range []string{req.Identity.ArchiveID, req.Identity.MachineID, req.Identity.Agent, req.Identity.SessionID, req.SourceID, req.Path} {
-		if strings.ContainsRune(s, 0) {
-			return errors.New("sessioncapture: invalid hint identity")
-		}
-	}
-	body, err := json.Marshal(req)
-	if err != nil {
-		return err
-	}
-	if len(body) > publication.MaxMetadata {
-		return ErrQuota
-	}
-	fingerprint, err := hintFingerprint(req)
-	if err != nil {
-		return err
-	}
-	// A matching non-empty fingerprint on a present source makes the upsert a no-op
-	// (no version bump, state reset or row write; RowsAffected is 0).
-	result, err := q.db.ExecContext(ctx, `INSERT INTO runtime_sources(session,source,request,observed_at,fingerprint) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM runtime_sources WHERE session=? AND source=?) OR (SELECT COUNT(*) FROM runtime_sources)<? ON CONFLICT(session,source) DO UPDATE SET request=excluded.request,version=version+1,observed_at=excluded.observed_at,fingerprint=excluded.fingerprint,observed_state='present',state=CASE WHEN state='captured' OR state='absent' THEN 'pending' ELSE state END WHERE excluded.fingerprint='' OR runtime_sources.fingerprint!=excluded.fingerprint OR runtime_sources.observed_state!='present'`, req.Identity.BaseKey(), req.SourceID, body, req.ObservedAtNS, fingerprint, req.Identity.BaseKey(), req.SourceID, q.opts.MaxInventoryRecords)
-	if err != nil {
-		return err
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		// Either an unchanged existing row (fine) or the inventory cap refused a new one.
-		var exists int
-		if err := q.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_sources WHERE session=? AND source=?`, req.Identity.BaseKey(), req.SourceID).Scan(&exists); err != nil {
-			return err
-		}
-		if exists == 0 {
-			return ErrQuota
-		}
 	}
 	// Ownership enrichment follows raw metadata admission, never under a source
 	// lock or the admission statement. Its bounded ambiguity/capacity must not
 	// block safe raw capture; unknown store/integrity failures remain visible.
-	return q.recordHintOwnership(ctx, req)
+	return q.recordHintOwnership(ctx, h.req)
+}
+
+// HintBatch admits many hints with the semantics of Hint on each, in transactions of
+// at most hintChunk rows. Every healthy request is tried even if another is refused;
+// refusals are joined. A chunk that writes nothing (settled sweep) commits nothing.
+func (q *Queue) HintBatch(ctx context.Context, reqs []Request) error {
+	if err := q.InitRuntime(ctx); err != nil {
+		return err
+	}
+	var errs []error
+	for start := 0; start < len(reqs); start += hintChunk {
+		admitted, err := q.admitChunk(ctx, reqs[start:min(start+hintChunk, len(reqs))])
+		errs = append(errs, err)
+		if ctx.Err() != nil {
+			break
+		}
+		for i := range admitted {
+			errs = append(errs, q.recordHintOwnership(ctx, admitted[i].req))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// admitChunk upserts one chunk in a single transaction and returns the rows that
+// were admitted (new, changed or unchanged-existing) for ownership recording.
+func (q *Queue) admitChunk(ctx context.Context, reqs []Request) ([]hintRow, error) {
+	tx, err := q.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var slots int
+	if err := tx.QueryRowContext(ctx, liveSlotsSQL).Scan(&slots); err != nil {
+		return nil, err
+	}
+	slots = q.opts.MaxInventoryRecords - slots
+	var errs []error
+	var admitted []hintRow
+	wrote := false
+	for i := range reqs {
+		h, err := q.prepareHint(reqs[i])
+		if err != nil {
+			errs = append(errs, err) // this request is invalid or oversized; others proceed
+			continue
+		}
+		w, err := q.upsertHint(ctx, tx, h, &slots)
+		if errors.Is(err, ErrQuota) {
+			errs = append(errs, err)
+			continue
+		}
+		if err != nil {
+			return nil, errors.Join(append(errs, err)...)
+		}
+		wrote = wrote || w
+		admitted = append(admitted, h)
+	}
+	if !wrote {
+		return admitted, errors.Join(errs...)
+	}
+	if err := q.fault("runtime-hint-commit"); err != nil {
+		return nil, errors.Join(append(errs, err)...)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, errors.Join(append(errs, err)...)
+	}
+	return admitted, errors.Join(errs...)
 }
 
 // hintFingerprint binds the discovery stat digest to the normalized request
@@ -174,6 +323,45 @@ func (q *Queue) HintAbsent(ctx context.Context, req Request) error {
 	return err
 }
 
+// settledBound is the retained settled-row bound: the hard inventory ceiling, so
+// the measured inventories (29k rows, ~3.8 KB/row including indexes) fit without
+// eviction. Tests may lower it.
+func (q *Queue) settledBound() int {
+	if q.settledLimit > 0 {
+		return q.settledLimit
+	}
+	return MaxInventoryRecords
+}
+
+// evictSettledSources keeps at most settledBound settled rows by dropping, from the
+// source index only, absent rows first and then the least recently observed. Claimed
+// rows and rows referenced by an active quarantine entry are never dropped. Accepted
+// jobs and payloads are untouched. It returns the number evicted and counts them in
+// status so repeated re-hinting caused by a too-small bound is visible.
+func (q *Queue) evictSettledSources(ctx context.Context) (int64, error) {
+	var excess int64
+	if err := q.db.QueryRowContext(ctx, `SELECT COUNT(*)-? FROM runtime_sources WHERE state IN ('captured','absent')`, q.settledBound()).Scan(&excess); err != nil || excess <= 0 {
+		return 0, err
+	}
+	tx, err := q.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `DELETE FROM runtime_sources WHERE id IN (SELECT id FROM runtime_sources AS s WHERE state IN ('captured','absent') AND claim=0 AND NOT EXISTS(SELECT 1 FROM runtime_quarantine AS k WHERE k.source_id=s.id AND k.active=1) ORDER BY state='absent' DESC,observed_at,id LIMIT ?)`, excess)
+	if err != nil {
+		return 0, err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE runtime_destination SET inventory_evictions=inventory_evictions+? WHERE id=1`, n); err != nil {
+		return 0, err
+	}
+	return n, tx.Commit()
+}
+
 type sourceWork struct {
 	id, version int64
 	req         Request
@@ -187,7 +375,8 @@ func (q *Queue) claimSource(ctx context.Context) (sourceWork, error) {
 	var w sourceWork
 	// Read at most one fixed page per turn; the cursor advances past unavailable
 	// sources as well as successful work. No archive job history is inspected.
-	rows, err := q.db.QueryContext(ctx, `SELECT id,request,version,attempts,claim,state,next_retry,observed_state FROM runtime_sources AS s WHERE id>? AND claim=0 AND state NOT IN ('absent','captured','quarantined') AND next_retry<=? AND NOT EXISTS(SELECT 1 FROM runtime_sources AS busy WHERE busy.session=s.session AND busy.claim!=0) ORDER BY id LIMIT 64`, r.sourceCursor, q.opts.Now().UnixNano())
+	now := q.opts.Now().UnixNano()
+	rows, err := q.db.QueryContext(ctx, claimSourceSQL, r.sourceCursor, now, now)
 	if err != nil {
 		return w, err
 	}
@@ -204,7 +393,7 @@ func (q *Queue) claimSource(ctx context.Context) (sourceWork, error) {
 		}
 		visited = true
 		r.sourceCursor = id
-		if claim != 0 || state == "absent" || state == "captured" || state == "quarantined" || next > q.opts.Now().UnixNano() {
+		if claim != 0 || state == "absent" || state == "captured" || state == "quarantined" || state == "source-limit" || next > q.opts.Now().UnixNano() {
 			continue
 		}
 		w = sourceWork{id: id, version: version, attempts: attempts}
@@ -246,14 +435,8 @@ func (q *Queue) captureNext(ctx context.Context, o RuntimeOptions) (did bool, re
 	if captureErr == nil {
 		// CaptureIfChanged may return an old manifest: observation freshness must
 		// not fabricate a newer byte-ownership watermark for unchanged content.
-		var capturedAt int64
-		for j := range m.Sources {
-			source := &m.Sources[j]
-			if source.SourceID == w.req.SourceID {
-				capturedAt = max(capturedAt, source.CapturedAtNS)
-			}
-		}
-		_, err = q.db.ExecContext(save, `UPDATE runtime_sources SET claim=0,captured_version=MAX(captured_version,?),captured_at=?,sequence=?,publication=?,attempts=0,last_error='',next_retry=0,state=CASE WHEN observed_state='absent' THEN 'absent' WHEN version=? THEN 'captured' ELSE 'pending' END WHERE id=? AND claim=?`, w.version, capturedAt, m.Sequence, m.PublicationID, w.version, w.id, w.version)
+		capturedAt := sourceCapturedAt(m, w.req.SourceID)
+		_, err = q.db.ExecContext(save, `UPDATE runtime_sources SET claim=0,captured_version=MAX(captured_version,?),captured_at=?,sequence=?,publication=?,attempts=0,last_error='',next_retry=0,state=CASE WHEN observed_state='absent' THEN 'absent' WHEN version=? THEN 'captured' ELSE 'pending' END,dirty_since=CASE WHEN version=? THEN 0 ELSE ? END WHERE id=? AND claim=?`, w.version, capturedAt, m.Sequence, m.PublicationID, w.version, w.version, q.opts.Now().UnixNano(), w.id, w.version)
 		return true, err
 	}
 	if shutdownCancellation(ctx, captureErr) {
@@ -267,11 +450,14 @@ func (q *Queue) captureNext(ctx context.Context, o RuntimeOptions) (did bool, re
 	}
 	attempts := w.attempts + 1
 	state := "retry"
-	if attempts >= o.MaxAttempts {
+	if code.spendsQuarantineBudget() && attempts >= o.MaxAttempts {
 		state = "quarantined"
 	}
 	if code == FailureAbsent {
 		state = "absent"
+	}
+	if code == FailureSourceLimit {
+		state = "source-limit"
 	}
 	tx, err := q.db.BeginTx(save, nil)
 	if err != nil {
@@ -292,6 +478,17 @@ func (q *Queue) captureNext(ctx context.Context, o RuntimeOptions) (did bool, re
 		return true, err
 	}
 	return true, tx.Commit()
+}
+
+// sourceCapturedAt returns the latest capture time of one source in a manifest.
+func sourceCapturedAt(m publication.Manifest, sourceID string) int64 {
+	var capturedAt int64
+	for j := range m.Sources {
+		if m.Sources[j].SourceID == sourceID {
+			capturedAt = max(capturedAt, m.Sources[j].CapturedAtNS)
+		}
+	}
+	return capturedAt
 }
 
 func (q *Queue) destinationPaused(ctx context.Context) (bool, error) {

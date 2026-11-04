@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -28,17 +29,39 @@ func TestConcurrentReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	results := make(chan error, 2)
-	for _, body := range []string{"next-a", "next-b"} {
-		go func() { results <- b.CompareAndSwap(t.Context(), key, token, []byte(body)) }()
+	const writers = 16
+	type result struct {
+		body string
+		err  error
 	}
-	first, second := <-results, <-results
-	if (first != nil || !errors.Is(second, publication.ErrConflict)) && (second != nil || !errors.Is(first, publication.ErrConflict)) {
-		t.Fatalf("replacement results: %v %v", first, second)
+	start, results := make(chan struct{}), make(chan result, writers)
+	for i := range writers {
+		body := fmt.Sprintf("next-%02d", i)
+		go func() {
+			<-start
+			results <- result{body, b.CompareAndSwap(t.Context(), key, token, []byte(body))}
+		}()
+	}
+	close(start)
+	var winners []string
+	conflicts := 0
+	for range writers {
+		r := <-results
+		switch {
+		case r.err == nil:
+			winners = append(winners, r.body)
+		case errors.Is(r.err, publication.ErrConflict):
+			conflicts++
+		default:
+			t.Errorf("unexpected error %v", r.err)
+		}
+	}
+	if len(winners) != 1 || conflicts != writers-1 {
+		t.Fatalf("winners=%v conflicts=%d, want exactly one winner and %d conflicts", winners, conflicts, writers-1)
 	}
 	body, _, err := b.Current(t.Context(), key)
-	if err != nil || string(body) != "next-a" && string(body) != "next-b" {
-		t.Fatalf("current replacement: %q %v", body, err)
+	if err != nil || string(body) != winners[0] {
+		t.Fatalf("current body %q (err %v), want the acknowledged winner %q", body, err, winners[0])
 	}
 }
 

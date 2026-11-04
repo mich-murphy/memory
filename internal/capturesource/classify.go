@@ -125,11 +125,12 @@ func classifyInfo(ctx context.Context, opts Options, policy *capturepolicy.Polic
 		return sessioncapture.Request{}, "policy_denied"
 	}
 	req := emitRequest(opts, root, sf, path, observed, transform)
-	// Only a plain file whose bytes are fully described by its own stat may be
-	// skipped as unchanged. Transformed/prepared sources (SQLite backup with WAL
-	// inputs, scrubbed config, decoded compression) never get a fingerprint.
+	// Plain files are described by their own stat; transformed sources also bind
+	// every extra input the transform reads (see transformFingerprint).
 	if transform == "" {
 		req.Fingerprint = statFingerprint(info)
+	} else {
+		req.Fingerprint = transformFingerprint(transformPolicyVersion, transform, path, info)
 	}
 	return req, ""
 }

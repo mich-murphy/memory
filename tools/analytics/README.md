@@ -414,12 +414,12 @@ projection writers separately. Each sweep starts enumeration at the beginning; a
 persistent lexical watermark would miss sessions created earlier in sort order.
 Enumeration is paged at 256 heads, capped at 1024 pages per endpoint per sweep.
 Process timeout defaults to 300 seconds; `--timeout` and `--max-bytes` configure
-bounded individual exports (default 256 MiB, maximum 1 GiB). Local output bytes and
+bounded individual exports (default 1 GiB, maximum 1 GiB; raised from 256 MiB because the largest measured session is 615 MB; the limit is cumulative across retained epochs and a refusal is reported as `export_too_large` in `target_error_codes`). Local output bytes and
 entry counts are monitored during subprocesses, with process-group cancellation;
 this polling bound is not a filesystem quota or a hard instantaneous disk ceiling.
 Remote reader byte limits bound staging before SCP. At most one export is staged
 at a time. Unsupported contracts, partial enumeration, reader failures and projection
-errors remain failures; B still proceeds when A fails. Unchanged targets skip the reader only when the actual projection is at the same
+errors remain failures; B still proceeds when A fails. The importer requires a reader that emits `manifest_sha256` (otherwise `reader_digest_missing`), so deploy the capture binary and analytics together; projections imported earlier with a locally computed digest re-import cleanly and adopt the reader's digest. Unchanged targets skip the reader only when the actual projection is at the same
 or a newer valid coordinate and every selected owned body passes private regular-file,
 no-symlink, size and streaming SHA-256 checks. Missing/recreated projections or missing/
 changed bodies force reader repair. Unchanged validation does not advance freshness.

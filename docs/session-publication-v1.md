@@ -72,7 +72,11 @@ precision; nanosecond timestamps are not floating-point seconds).
 - Current: `contract`, `identity`, `publication_id`, `manifest_key`,
   `manifest_sha256`, `sequence`. Its manifest reference is content addressed and
   its identity, sequence, and publication ID must exactly match the manifest.
-- Export: `contract` (`session-reader/v2`), `manifest`, `bodies`.
+- Export: `contract` (`session-reader/v2`), `manifest_sha256`, `manifest`, `bodies`.
+  `manifest_sha256` is `current.json`'s digest of the exact stored manifest bytes the export
+  pins; the consumer requires a reader that emits it (a reader without it fails as `reader_digest_missing`, so deploy capture and analytics together); consumers store it rather than re-serialising the manifest. Consumers validate with
+  the same bounds as the Go reader: metadata ≤ 8 MiB, `sequence` and `revision` in (0, MaxInt64],
+  ≤ 1024 sources, and unknown fields rejected at every level (Go uses `DisallowUnknownFields`).
 - Body: `source_id`, `epoch_id`, `path`, `sha256`, `size`. Body paths are relative
   `bodies/0000.bin` etc., not original source paths.
 
@@ -207,6 +211,18 @@ declared sizes plus one byte read/output for overflow detection. There is no fix
 total body-size quota or disk-space reservation; streaming bounds memory, not disk
 usage or elapsed time. A declared size near int64 overflow is rejected. Producers
 must use compatible zstd windows. Export errors must not be treated as valid bodies.
+
+### Export byte limit
+
+`--max-bytes` (Go default 1 GiB, maximum 1 TiB) bounds the **cumulative** decoded size of
+all selected retained epochs, not the latest epoch alone. A refusal exits with status 4
+(`ErrExportBudget`), which the Python refresh reports as the typed code `export_too_large`
+in `targets.error`, `target_error_codes` and the dashboard. The session stays an unimported
+target (never a green refresh) and imports once the limit is raised to at least its
+cumulative size. The refresh default was raised from 256 MiB to 1 GiB because the largest
+measured real session is one 615,165,952-byte object. The flag keeps its meaning, so the
+installed value 805306368 still clears that session. Deferred option: partial import of the
+latest epoch with a coverage gap, to be built if any real session approaches 1 GiB.
 
 ## Local safety and durability scope
 

@@ -82,7 +82,7 @@ func TestOptionalRepairFailureRetainedAndDestinationNotWithheld(t *testing.T) {
 		t.Fatalf("repair failure %v %v", did, err)
 	}
 	var state string
-	if err := q.db.QueryRowContext(t.Context(), `SELECT state FROM optional_repairs`).Scan(&state); err != nil || state != "quarantined" {
+	if err := q.db.QueryRowContext(t.Context(), `SELECT state FROM optional_repairs`).Scan(&state); err != nil || state != "retry" {
 		t.Fatal("repair failure not retained", err)
 	}
 	if _, err := q.db.ExecContext(t.Context(), `UPDATE optional_repairs SET state='pending',next_retry=0`); err != nil {

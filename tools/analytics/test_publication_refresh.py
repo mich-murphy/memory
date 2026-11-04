@@ -59,7 +59,7 @@ class RefreshTests(unittest.TestCase):
         (output / 'unit-coordinate.json').write_text(json.dumps(manifest))
 
     def loader(self, output):
-        return json.loads((output / 'unit-coordinate.json').read_text()), {}, {}
+        return json.loads((output / 'unit-coordinate.json').read_text()), {}, {}, 'ab' * 32
 
     def importer(self, output, database):
         self.imports.append(self.loader(output)[0])
@@ -259,6 +259,32 @@ class RefreshTests(unittest.TestCase):
         self.assertEqual(self.status.execute('SELECT imported_sequence FROM targets WHERE endpoint=? ORDER BY identity', ('Mac',)).fetchone(), (1,))
         self.failed.clear()
         self.assertEqual(self.sweep()['unimported'], 0)
+
+    def test_export_too_large_is_named_gap_and_isolated(self):
+        self.sweep()
+        self.heads['Mac'][0] = self.head('Mac', 'a', 2)
+        original = self.exporter
+
+        def exporter(endpoint, identity, output, *args):
+            if (identity['machine_id'], identity['session_id']) == ('Mac', 'a'):
+                raise refresh.RefreshFailure('export_too_large')
+            return original(endpoint, identity, output, *args)
+        self.exporter = exporter
+        result = self.sweep()
+        self.assertEqual((result['unimported'], result['target_errors']), (1, 1))
+        self.assertEqual(result['target_error_codes'], {'export_too_large': 1})
+        self.assertEqual(self.status.execute("SELECT imported_sequence FROM targets WHERE error='export_too_large'").fetchone(), (1,))
+        self.assertEqual(self.status.execute('SELECT count(*) FROM targets WHERE error IS NULL AND imported_sequence IS NOT NULL').fetchone(), (3,))
+        self.exporter = original
+        result = self.sweep()
+        self.assertEqual((result['unimported'], result['target_errors'], result['target_error_codes']), (0, 0, {}))
+
+    def test_exit_status_mapping_and_monitor_slack(self):
+        import sys
+        with self.assertRaisesRegex(refresh.RefreshFailure, '^export_too_large$'):
+            refresh.run([sys.executable, '-c', 'raise SystemExit(4)'], self.root)
+        with self.assertRaisesRegex(refresh.RefreshFailure, '^process_failed$'):
+            refresh.run([sys.executable, '-c', 'raise SystemExit(1)'], self.root)
 
     def test_advance_race_imports_actual_coordinate_identity_conflict_and_regression(self):
         self.advance = True
@@ -535,7 +561,7 @@ class DiscoveryFailureConsumerTests(unittest.TestCase):
                 state='present', revision=1, observed_at_ns=1, captured_at_ns=2, associations=[],
                 object=dict(key='immutable/object', encoding='zstd', sha256=digest,
                     encoded_sha256=digest, size=len(raw), encoded_size=len(raw)))])
-        (output / 'metadata.json').write_text(json.dumps(dict(contract='session-reader/v2',
+        (output / 'metadata.json').write_text(json.dumps(dict(contract='session-reader/v2', manifest_sha256='ab' * 32,
             manifest=manifest, bodies=[dict(source_id='main', epoch_id='epoch', path='body.jsonl',
                                           sha256=digest, size=len(raw))])))
 

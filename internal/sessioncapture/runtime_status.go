@@ -36,7 +36,27 @@ type RuntimeStatus struct {
 	DiscoveryError                                                  string
 	DiscoveredAtNS                                                  int64
 	Sources, PendingSources, Quarantined, PendingPublications       int64
-	OldestObservedAtNS                                              int64
+	// RetryingPublications counts unpublished jobs that failed at least once and
+	// are not quarantined; they retry indefinitely when the cause is transient.
+	// OldestPendingPublicationAtNS is the capture time of the oldest unpublished
+	// job (0 when none), so lag is now minus that value. MaxPendingAttempts is the
+	// highest attempt count among unpublished jobs.
+	RetryingPublications, MaxPendingAttempts int64
+	// SpoolFullWork counts capture sources and publications currently waiting on
+	// spool or free-space capacity (backpressure, not quarantine).
+	SpoolFullWork int64
+	// SourceLimitSources counts sources parked at the manifest source limit; a new
+	// observation retries them, since an append to an existing epoch can still fit.
+	SourceLimitSources int64
+	// ReclaimPending counts payload files awaiting local reclamation (a committed
+	// metadata decision whose unlink has not completed); ReclaimFailed is the subset
+	// whose last attempt failed and will be retried.
+	ReclaimPending, ReclaimFailed int64
+	OldestPendingPublicationAtNS  int64
+	OldestObservedAtNS            int64
+	// DebouncedSources counts changed sources waiting for their quiet period (Q) or
+	// maximum delay (M); DebounceLagNS is the age of the oldest such observation.
+	DebouncedSources, DebounceLagNS int64
 	// Discovery and enrichment remain partial; a successful timer is not proof of
 	// complete source inventory. Published timestamps remain independent of capture.
 	Coverage string
@@ -44,6 +64,12 @@ type RuntimeStatus struct {
 	// count with a stale CompletedAtNS indicates a persistent stall.
 	StepErrors, LastStepErrorAtNS int64
 	LastStepError                 string
+	// Source-inventory occupancy: SourceCap bounds live work (LiveSources: pending,
+	// retry, claimed, quarantined); SettledCap bounds retained settled rows.
+	SourceCap, LiveSources, SettledSources, SettledCap int64
+	// InventoryEvictions counts settled rows dropped from the source index at the
+	// retention bound; a rising count means rediscovery re-hints them (thrash).
+	InventoryEvictions int64
 }
 type QuarantineEntry struct {
 	ID              int64
@@ -110,6 +136,17 @@ func (q *Queue) RuntimeStatus(ctx context.Context) (RuntimeStatus, error) {
 	if err != nil {
 		return s, err
 	}
+	now := q.opts.Now().UnixNano()
+	if err := q.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(MIN(dirty_since),0) FROM runtime_sources WHERE version>captured_version AND debounce_until>? AND dirty_since>0`, now).Scan(&s.DebouncedSources, &s.DebounceLagNS); err != nil {
+		return s, err
+	}
+	if s.DebounceLagNS > 0 {
+		s.DebounceLagNS = max(now-s.DebounceLagNS, 0)
+	}
+	err = q.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_sources WHERE state='source-limit'`).Scan(&s.SourceLimitSources)
+	if err != nil {
+		return s, err
+	}
 	err = q.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_quarantine WHERE active=1`).Scan(&s.Quarantined)
 	if err != nil {
 		return s, err
@@ -117,8 +154,26 @@ func (q *Queue) RuntimeStatus(ctx context.Context) (RuntimeStatus, error) {
 	if err := q.discoveryStatus(ctx, &s); err != nil {
 		return s, err
 	}
-	err = q.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM jobs WHERE state NOT IN ('published','superseded')`).Scan(&s.PendingPublications)
+	err = q.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(state='retry'),0),COALESCE(MAX(attempts),0),COALESCE(MIN(json_extract(CAST(manifest AS TEXT),'$.captured_at_ns')),0) FROM jobs WHERE state NOT IN ('published','superseded')`).Scan(&s.PendingPublications, &s.RetryingPublications, &s.MaxPendingAttempts, &s.OldestPendingPublicationAtNS)
+	if err != nil {
+		return s, err
+	}
+	err = q.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM runtime_sources WHERE state='retry' AND last_error='spool-full')+(SELECT COUNT(*) FROM jobs WHERE state='retry' AND last_error='spool-full')`).Scan(&s.SpoolFullWork)
+	if err != nil {
+		return s, err
+	}
+	err = q.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(last_error!=''),0) FROM payload_reclaim`).Scan(&s.ReclaimPending, &s.ReclaimFailed)
+	if err != nil {
+		return s, err
+	}
+	err = q.inventoryStatus(ctx, &s)
 	return s, err
+}
+
+func (q *Queue) inventoryStatus(ctx context.Context, s *RuntimeStatus) error {
+	s.SourceCap = int64(q.opts.MaxInventoryRecords)
+	s.SettledCap = int64(q.settledBound())
+	return q.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(state NOT IN ('captured','absent')),0),COALESCE(SUM(state IN ('captured','absent')),0),(SELECT inventory_evictions FROM runtime_destination WHERE id=1) FROM runtime_sources`).Scan(&s.LiveSources, &s.SettledSources, &s.InventoryEvictions)
 }
 
 func (q *Queue) Quarantine(ctx context.Context, afterID int64, limit int) ([]QuarantineEntry, error) {

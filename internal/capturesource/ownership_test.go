@@ -136,3 +136,33 @@ func TestExternalPendingAmbiguousDerivedAndPolicy(t *testing.T) {
 	_, err = Classify(t.Context(), o, "claude", path)
 	requireExternalCode(t, err, "policy_denied")
 }
+
+func TestOwnedExternalTransformFingerprintTracksSidecars(t *testing.T) {
+	o := options(t)
+	o.OnlyRoots = true
+	o.Derived = true
+	root := Root{"claude", filepath.Join(o.Home, ".claude")}
+	o.Roots = []Root{root}
+	main := fixture(t, filepath.Join(root.Path, "projects", "slug", externalTestUUID+".jsonl"), "raw")
+	m, err := Classify(t.Context(), o, "claude", main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.LookupOwner = func(context.Context, Root, string) (string, string, error) {
+		return m.Identity.SessionID, "slug/" + externalTestUUID, nil
+	}
+	db := fixture(t, filepath.Join(root.Path, "tasks", externalTestUUID, "state.sqlite"), "SQLite format 3\x00")
+	first, err := Classify(t.Context(), o, "claude", db)
+	if err != nil || first.Transform != "sqlite-backup" || first.Fingerprint == "" {
+		t.Fatalf("%+v %v", first, err)
+	}
+	again, err := Classify(t.Context(), o, "claude", db)
+	if err != nil || again.Fingerprint != first.Fingerprint {
+		t.Fatalf("unchanged must keep fingerprint: %v", err)
+	}
+	appendFile(t, db+"-wal", "w")
+	changed, err := Classify(t.Context(), o, "claude", db)
+	if err != nil || changed.Fingerprint == "" || changed.Fingerprint == first.Fingerprint {
+		t.Fatalf("wal change not reflected: %v", err)
+	}
+}

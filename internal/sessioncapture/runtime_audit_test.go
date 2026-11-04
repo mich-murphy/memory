@@ -10,6 +10,7 @@ import (
 )
 
 func TestRuntimeAuditStartupCancellation(t *testing.T) {
+	t.Parallel()
 	for _, boundary := range []string{"pre-canceled", "runtime-init-statement", "runtime-sweep-before"} {
 		for _, joined := range []bool{false, true} {
 			if boundary == "pre-canceled" && joined {

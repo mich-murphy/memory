@@ -24,7 +24,7 @@ func TestEvidencePairSwappedAndWithheldCommitment(t *testing.T) {
 		t.Fatalf("sources: %d", len(es))
 	}
 	es[0], es[1] = es[1], es[0]
-	if _, _, _, err = encodeAcceptedView(original, es); !errors.Is(err, ErrIntegrity) {
+	if _, _, _, err = encodeAcceptedView(original, es, publication.MaxSources); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("swapped encode: %v", err)
 	}
 	if err = validateEvidencePair(m, es, false); !errors.Is(err, ErrIntegrity) {

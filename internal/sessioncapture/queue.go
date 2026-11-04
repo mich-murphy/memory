@@ -3,8 +3,16 @@
 // are fsynced before a short acceptance transaction. A process lock fences other
 // openers. No metadata transaction spans source I/O or network operations.
 //
-// All payloads, sealed epochs, intermediate accepted publications and crash orphans
-// are retained: there is deliberately no GC. MaxSpoolBytes bounds compressed payload
+// Remote storage has no GC (contract section 4). Locally, payloads are reclaimed
+// only when no retained root references them (see reclaim.go): a proven-subsumed
+// undelivered append is superseded at acceptance and its objects reclaimed, and the
+// objects of an older published job that the next acknowledged job no longer
+// references are reclaimed after that acknowledgement. Retained, never reclaimed:
+// anything an undelivered, latest or latest-published job references, sealed epochs
+// while referenced, enrichment results, unfinished repairs, optional artifacts and
+// objects kept by selection supersession (unique local bytes, bounded by
+// MaxSpoolBytes, visible in usage), and crash orphans no job references.
+// MaxSpoolBytes bounds compressed payload
 // bytes (including orphans), not SQLite metadata or filesystem overhead. Operators
 // must budget those separately. Source snapshots are double-hashed with stat checks;
 // this detects ordinary mutation, not producer atomicity or hostile filesystem races.
@@ -51,7 +59,17 @@ var (
 	ErrQuota = errors.New("sessioncapture: spool quota exceeded")
 	// ErrEncodedSize distinguishes encoded-envelope exhaustion from aggregate
 	// spool exhaustion while preserving runtime quota classification.
-	ErrEncodedSize     = fmt.Errorf("sessioncapture: encoded publication size exceeded: %w", ErrQuota)
+	ErrEncodedSize = fmt.Errorf("sessioncapture: encoded publication size exceeded: %w", ErrQuota)
+	// ErrSpoolFull is capacity backpressure (spool bytes or free-space reserve). It
+	// wraps ErrQuota for existing callers but clears when capacity returns, so it
+	// retries with capped backoff and never spends the quarantine budget; permanent
+	// limits (oversized source, request bounds) remain plain ErrQuota.
+	ErrSpoolFull = fmt.Errorf("%w: spool full", ErrQuota)
+	// ErrSourceLimit reports that accepting another source epoch would exceed
+	// publication.MaxSources. It is deterministic and deliberately does not wrap
+	// ErrQuota: earlier epochs are never dropped (contract section 1) and the
+	// previous successful publication stays readable.
+	ErrSourceLimit     = fmt.Errorf("sessioncapture: session reached the %d source limit", publication.MaxSources)
 	ErrIntegrity       = errors.New("sessioncapture: payload integrity failure")
 	ErrSessionExcluded = errors.New("sessioncapture: session excluded")
 	ErrPolicy          = errors.New("sessioncapture: policy denied")
@@ -96,6 +114,9 @@ type Status struct {
 	Attempts             int
 	LastError            string
 	NextRetryNS          int64
+	// CapturedAtNS is when the job's bytes were accepted; now minus this value is
+	// the job's pending age.
+	CapturedAtNS int64
 }
 type evidence struct {
 	EpochID         string              `json:",omitempty"` // Private durable source-epoch join; older rows have no binding.
@@ -125,8 +146,17 @@ type Queue struct {
 	derivedOnce sync.Once
 	derived     *derivedReservations
 
+	// freeBytes overrides the statfs free-space probe; nil means the real one.
+	freeBytes func(path string) (int64, error)
+
 	// discoveryLimit is a test-only override of MaxDiscoveryRecords; 0 means the const.
 	discoveryLimit int
+	// settledLimit is a test-only override of the settled-row bound; 0 means MaxInventoryRecords.
+	settledLimit int
+
+	// sourceLimit is a test-only per-Queue override of publication.MaxSources;
+	// 0 means the const. Set it only through setSourceLimit.
+	sourceLimit int
 }
 
 func Open(ctx context.Context, dir string, opts Options) (*Queue, error) {
@@ -190,14 +220,12 @@ func Open(ctx context.Context, dir string, opts Options) (*Queue, error) {
 	if err := q.initEnrichment(ctx); err != nil {
 		return fail(err)
 	}
-	used, err := q.usage()
-	if err != nil {
+	if err := q.initReclaim(ctx); err != nil {
 		return fail(err)
 	}
-	if used > opts.MaxSpoolBytes {
-		return fail(ErrQuota)
+	if err := q.reclaimAndAccount(ctx); err != nil {
+		return fail(err)
 	}
-	q.used = used
 	if err := syncQueueTree(dir); err != nil {
 		return fail(err)
 	}
@@ -402,14 +430,19 @@ func (q *Queue) Status(ctx context.Context) ([]Status, error) {
 		s.Identity = m.Identity
 		s.Sequence = m.Sequence
 		s.PublicationID = m.PublicationID
+		s.CapturedAtNS = m.CapturedAtNS
 		out = append(out, s)
 	}
 	return out, rows.Err()
 }
 
+// pendingJobsIndexSQL indexes undelivered jobs only. Acceptance (supersession) and
+// delivery both query exactly this predicate, so published history is never scanned.
+const pendingJobsIndexSQL = `CREATE INDEX IF NOT EXISTS runtime_pending_jobs ON jobs(session,sequence) WHERE state NOT IN ('published','superseded')`
+
 func initializeDB(ctx context.Context, db *sql.DB, dir, archiveID string) error {
 	var err error
-	for _, s := range []string{"PRAGMA journal_mode=WAL", "PRAGMA synchronous=FULL", `CREATE TABLE IF NOT EXISTS binding (archive TEXT NOT NULL)`, `CREATE TABLE IF NOT EXISTS jobs (session TEXT NOT NULL, sequence INTEGER NOT NULL, manifest BLOB NOT NULL, evidence BLOB NOT NULL, state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', next_retry INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(session,sequence))`} {
+	for _, s := range []string{"PRAGMA journal_mode=WAL", "PRAGMA synchronous=FULL", `CREATE TABLE IF NOT EXISTS binding (archive TEXT NOT NULL)`, `CREATE TABLE IF NOT EXISTS jobs (session TEXT NOT NULL, sequence INTEGER NOT NULL, manifest BLOB NOT NULL, evidence BLOB NOT NULL, state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', next_retry INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(session,sequence))`, pendingJobsIndexSQL} {
 		if _, err = db.ExecContext(ctx, s); err != nil {
 			return err
 		}
@@ -486,6 +519,33 @@ func (q *Queue) checkCallback(ctx context.Context, r Request) error {
 		return errors.Join(fmt.Errorf("%w: callback denied", ErrPolicy), &policyStorageFailure{})
 	}
 	return fmt.Errorf("%w: callback denied", ErrPolicy)
+}
+
+// errSourceLimitBounds rejects a source-limit override that could exceed the
+// publication bound or silently disable the check.
+var errSourceLimitBounds = errors.New("sessioncapture: source limit out of bounds")
+
+// setSourceLimit lowers the per-session source limit for this Queue; zero
+// restores publication.MaxSources. It exists so tests can reach the limit
+// through the real Capture path without 1024 captures.
+func (q *Queue) setSourceLimit(limit int) error {
+	if limit < 0 || limit > publication.MaxSources {
+		return errSourceLimitBounds
+	}
+	q.sourceLimit = limit
+	return nil
+}
+
+// sourceHeadroomDivisor reserves 1/8 of the source limit (128 of 1024) for
+// captures that enrichment must not consume.
+const sourceHeadroomDivisor = 8
+
+// effectiveSourceLimit is publication.MaxSources unless a test lowered it.
+func (q *Queue) effectiveSourceLimit() int {
+	if q.sourceLimit > 0 {
+		return q.sourceLimit
+	}
+	return publication.MaxSources
 }
 
 // inventoryRecordLimit normalizes the optional operating quota before any disk I/O.

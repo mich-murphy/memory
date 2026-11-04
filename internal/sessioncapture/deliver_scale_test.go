@@ -73,6 +73,7 @@ func (c *opCountBackend) Open(ctx context.Context, key string) (io.ReadCloser, e
 // Per-publication remote object work must track the delta (one new source),
 // not the session's accumulated object set.
 func TestDeliveryCostIsProportionalToDelta(t *testing.T) {
+	t.Parallel()
 	dir, o, r := setup(t)
 	q := open(t, dir, o)
 	cb := &opCountBackend{Backend: newBackend(t)}

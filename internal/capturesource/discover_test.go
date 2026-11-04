@@ -270,23 +270,3 @@ func TestDiscoveryFingerprintTracksStatNotSweepTime(t *testing.T) {
 		t.Fatal("append must change fingerprint")
 	}
 }
-
-func TestDiscoveryTransformedSourcesHaveNoFingerprint(t *testing.T) {
-	o := options(t)
-	o.Derived = true
-	root := filepath.Join(o.Home, ".codex")
-	fixture(t, filepath.Join(root, "state.sqlite"), "SQLite format 3\x00")
-	r := discover(t, o)
-	var seen bool
-	for _, q := range r.Requests {
-		if q.Transform != "" {
-			seen = true
-			if q.Fingerprint != "" {
-				t.Fatalf("transform %q must not carry a fingerprint", q.Transform)
-			}
-		}
-	}
-	if !seen {
-		t.Skip("no transformed request emitted in this fixture")
-	}
-}

@@ -16,6 +16,7 @@ import (
 // restores it at the old payload boundary. Path-following double reads/stat would
 // accept outside bytes and later delivery would see only the restored safe path.
 func TestAuthorizedSourceRejectsCallbackSwap(t *testing.T) {
+	t.Parallel()
 	for _, transform := range []string{"", "zstd", "scrubbed-config"} {
 		for _, leaf := range []bool{false, true} {
 			for _, unchanged := range []bool{false, true} {

@@ -179,7 +179,7 @@ func (q *Queue) optionalRepairNext(ctx context.Context, b publication.Backend, o
 		// No-op once a terminal state was saved; frees 'working' after a failed save.
 		defer q.releaseOptionalRepair(ctx, id, attempts+1)
 		defer func() { resultErr = q.refundOptionalRepairShutdown(ctx, id, attempts, resultErr, o) }()
-		err = q.repairOptionalObject(ctx, b, s, e)
+		err = q.repairWithAllowance(ctx, b, s, e, o)
 	}
 	save, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.OperationTimeout)
 	defer cancel()
@@ -221,6 +221,17 @@ func (q *Queue) refundOptionalRepairShutdown(ctx context.Context, id string, att
 	return errors.Join(cause, err)
 }
 
+// repairWithAllowance extends the caller's context by the backend's transfer
+// allowance for the object; backends without one keep the caller's context.
+func (q *Queue) repairWithAllowance(ctx context.Context, b publication.Backend, s publication.Source, e evidence, o RuntimeOptions) error {
+	if allowance := transferAllowance(b, s); allowance > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, o.OperationTimeout+allowance)
+		defer cancel()
+	}
+	return q.repairOptionalObject(ctx, b, s, e)
+}
+
 func (q *Queue) repairOptionalObject(ctx context.Context, b publication.Backend, s publication.Source, e evidence) error {
 	if _, err := q.check(ctx, e, true); err != nil {
 		return err
@@ -253,10 +264,11 @@ func (q *Queue) saveOptionalRepairFailure(ctx context.Context, id string, attemp
 		return err
 	}
 	state := "retry"
-	if attempts >= o.MaxAttempts {
+	class := classify(cause, o.Classify)
+	if class.spendsQuarantineBudget() && attempts >= o.MaxAttempts {
 		state = "quarantined"
 	}
-	code := string(classify(cause, o.Classify))
+	code := string(class)
 	_, err := q.db.ExecContext(ctx, `UPDATE optional_repairs SET state=?,last_error=?,next_retry=? WHERE id=?`, state, code, q.opts.Now().Add(retryDelay(attempts, o.Jitter)).UnixNano(), id)
 	return err
 }

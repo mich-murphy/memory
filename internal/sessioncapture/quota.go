@@ -1,15 +1,21 @@
 package sessioncapture
 
 import (
+	"context"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/mich-murphy/memory/internal/publication"
 )
 
 // used includes durable payloads, crash orphans, temporary bytes and reservations
 // not yet written. Only unwritten reservations or successfully removed duplicates
-// may be released. No accepted/orphan payload is garbage collected.
+// may be released, plus payloads that reclaim.go proves unreferenced by every
+// retained root (metadata decision committed first, then unlink; Open finishes
+// interrupted unlinks before accounting). Crash orphans and unique optional or
+// selection-superseded bytes are not reclaimed; a full spool still stops capture.
 type quotaWriter struct {
 	q        *Queue
 	w        io.Writer
@@ -49,17 +55,17 @@ func (q *Queue) reserve(n int64) error {
 		return ErrIntegrity
 	}
 	if q.used > q.opts.MaxSpoolBytes || n > q.opts.MaxSpoolBytes-q.used {
-		return ErrQuota
+		return ErrSpoolFull
 	}
 	if q.opts.MinFreeBytes > 0 {
-		free, err := availableBytes(q.dir)
+		free, err := q.availableBytes()
 		if err != nil {
 			return err
 		}
 		// Existing writes are reflected in statfs, but outstanding reservations may
 		// not be. Subtract them conservatively until their writes finish.
 		if free < q.opts.MinFreeBytes || n > free-q.opts.MinFreeBytes-q.writing {
-			return ErrQuota
+			return ErrSpoolFull
 		}
 		if err := q.checkWorkingReserveLocked(free, n); err != nil {
 			return err
@@ -85,4 +91,68 @@ func (q *Queue) cleanupTemporary(path string, w *quotaWriter) {
 		q.used -= w.bytes
 		q.mu.Unlock()
 	}
+}
+
+// availableBytes reports free space for the queue directory. The unexported
+// freeBytes field is an internal seam so boundary arithmetic can be tested
+// exactly; production leaves it nil and reads statfs.
+func (q *Queue) availableBytes() (int64, error) {
+	if q.freeBytes != nil {
+		return q.freeBytes(q.dir)
+	}
+	return availableBytes(q.dir)
+}
+
+// sweepTemporaries removes writer temporaries (capture-* without the .zst
+// suffix) left in payloads/ by a process that exited before installing or
+// cleaning them. It runs at Open under the process lock, so no live writer owns
+// them. Durable payloads (*.zst) and everything outside payloads/ are untouched.
+// It reports whether any entry was removed so the caller can fence the directory.
+func sweepTemporaries(dir string) (bool, error) {
+	payloads := filepath.Join(dir, "payloads")
+	entries, err := os.ReadDir(payloads)
+	if err != nil {
+		return false, err
+	}
+	removed := false
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "capture-") || strings.HasSuffix(name, ".zst") || !e.Type().IsRegular() {
+			continue
+		}
+		if err := os.Remove(filepath.Join(payloads, name)); err != nil && !os.IsNotExist(err) {
+			return removed, err
+		}
+		removed = true
+	}
+	return removed, nil
+}
+
+// reclaimAndAccount runs at Open under the process lock. A crash before payload
+// install leaves writer temporaries; they are reclaimed before accounting so
+// their bytes are not charged forever. Existing payloads must fit the quota.
+func (q *Queue) reclaimAndAccount(ctx context.Context) error {
+	swept, err := sweepTemporaries(q.dir)
+	if err != nil {
+		return err
+	}
+	if swept {
+		if err := syncDir(filepath.Join(q.dir, "payloads")); err != nil {
+			return err
+		}
+	}
+	// Finish unlinks whose metadata decision committed before a crash. The usage
+	// scan below then charges only what is physically present.
+	if _, err := q.reclaimPending(ctx); err != nil {
+		return err
+	}
+	used, err := q.usage()
+	if err != nil {
+		return err
+	}
+	if used > q.opts.MaxSpoolBytes {
+		return ErrQuota
+	}
+	q.used = used
+	return nil
 }

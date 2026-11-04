@@ -8,6 +8,7 @@ import (
 
 // Sparse inventories must not spend 100ms worker turns walking retained pages.
 func TestSparseDueSelectionSingleClaim(t *testing.T) {
+	t.Parallel()
 	for _, source := range []bool{false, true} {
 		t.Run(map[bool]string{false: "session", true: "source"}[source], func(t *testing.T) {
 			dir, o, r := setup(t)

@@ -24,6 +24,13 @@ import publications
 import projection_access
 
 
+# Default export bound: the largest measured real session is one 615 MB object, so
+# 256 MiB made it permanently unimportable. Matches Go's DefaultExportMaxBytes.
+DEFAULT_MAX_BYTES = 1024 ** 3
+# agent-sessions exit status for a permanent export budget refusal (internal/cli exitExportBudget).
+EXIT_EXPORT_BUDGET = 4
+
+
 class RefreshFailure(ValueError):
     pass
 
@@ -87,7 +94,7 @@ def disk_bytes(root, cap):
     return total
 
 
-def run(command, root, *, timeout=300, max_bytes=256 * 1024 * 1024, output_limit=2 * 1024 * 1024):
+def run(command, root, *, timeout=300, max_bytes=DEFAULT_MAX_BYTES, output_limit=2 * 1024 * 1024):
     """One bounded process group; stderr is discarded, never exposed as diagnostics."""
     with tempfile.TemporaryFile() as output:
         try:
@@ -100,10 +107,13 @@ def run(command, root, *, timeout=300, max_bytes=256 * 1024 * 1024, output_limit
             while True:
                 require(time.monotonic() < deadline, 'process_timeout')
                 require(os.fstat(output.fileno()).st_size <= output_limit, 'process_output_limit')
-                disk_bytes(root, max_bytes)
+                disk_bytes(root, max_bytes + publications.MAX_METADATA)
                 if process.poll() is not None:
                     break
                 time.sleep(.025)
+            # A budget refusal is permanent for this limit: keep it distinct from a
+            # transient failure so operators see why the session is not imported.
+            require(process.returncode != EXIT_EXPORT_BUDGET, 'export_too_large')
             require(process.returncode == 0, 'process_failed')
             output.seek(0)
             return output.read(output_limit + 1)
@@ -241,8 +251,12 @@ def summary(db):
             ON x.name=t.endpoint AND x.active=1 AND x.fingerprint=t.fingerprint
         UNION SELECT f.endpoint,f.identity FROM head_failures f
             JOIN expected_endpoints x ON x.name=f.endpoint AND x.fingerprint=f.fingerprint WHERE x.active=1)''').fetchone()[0]
+    codes = db.execute('''SELECT t.error,count(*) FROM targets t JOIN expected_endpoints x
+        ON x.name=t.endpoint AND x.active=1 AND x.fingerprint=t.fingerprint
+        WHERE t.error IS NOT NULL GROUP BY t.error ORDER BY t.error''').fetchall()
     return dict(expected_targets=expected_targets, unimported=targets[1] or 0,
-                target_errors=targets[2] or 0, discovery_errors=discovery_errors)
+                target_errors=targets[2] or 0, discovery_errors=discovery_errors,
+                target_error_codes=dict(codes))
 
 
 def report(db):
@@ -258,7 +272,7 @@ def report(db):
                     LEFT JOIN endpoints e USING(name) WHERE active=1 ORDER BY name''')]}
 
 
-def sweep(endpoints, database, status, *, timeout=300, max_bytes=256 * 1024 * 1024,
+def sweep(endpoints, database, status, *, timeout=300, max_bytes=DEFAULT_MAX_BYTES,
           max_pages=1024):
     bind_endpoints(status, endpoints)
     for endpoint in endpoints:
@@ -463,7 +477,7 @@ def _target(status, endpoint, head, key, database, root, timeout, max_bytes):
         with tempfile.TemporaryDirectory(dir=root) as temp:
             output = Path(temp) / 'export'
             export(endpoint, head['identity'], output, root, timeout, max_bytes)
-            manifest, _, _ = publications._load(output)
+            manifest, _, _, _ = publications._load(output)
             require(manifest['identity'] == head['identity'], 'reader_identity')
             require(manifest['sequence'] >= head['sequence'], 'reader_regression')
             require(manifest['sequence'] != head['sequence'] or
@@ -495,7 +509,7 @@ def main():
     parser.add_argument('--once', action='store_true')
     parser.add_argument('--interval', type=float, default=60)
     parser.add_argument('--timeout', type=float, default=300)
-    parser.add_argument('--max-bytes', type=int, default=256 * 1024 * 1024)
+    parser.add_argument('--max-bytes', type=int, default=DEFAULT_MAX_BYTES)
     args = parser.parse_args()
     try:
         require(1 <= args.interval <= 86400 and 1 <= args.timeout <= 3600 and

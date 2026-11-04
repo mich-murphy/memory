@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/url"
 	"path/filepath"
+	"time"
 )
 
 // RuntimeView is a bounded, read-only snapshot. Sources, Quarantine,
@@ -59,7 +60,7 @@ func ReadRuntime(ctx context.Context, spool, archive string, afterID int64, limi
 	if bound != archive {
 		return view, errors.New("sessioncapture: archive binding mismatch")
 	}
-	q := &Queue{db: db, opts: Options{ArchiveID: archive}}
+	q := &Queue{db: db, opts: Options{ArchiveID: archive, Now: time.Now}}
 	q.runtimeLocal().initialized = true // This read-only facade must never run InitRuntime DDL.
 	if view.Runtime, err = q.RuntimeStatus(ctx); err != nil {
 		return view, err

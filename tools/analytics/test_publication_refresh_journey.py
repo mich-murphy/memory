@@ -35,7 +35,8 @@ class PublicationRefreshJourney(unittest.TestCase):
                           store=str(root / 'store'), spool=str(root / 'spool'), policy_dir=str(root / 'policy'),
                           home=str(root / 'home'), default_roots=False, roots=[], min_free_bytes=0,
                           capture_workers=2, delivery_workers=2, poll_seconds=1, operation_seconds=30,
-                          max_attempts=2, max_spool_bytes=1 << 24, entries_per_root=256)
+                          max_attempts=2, max_spool_bytes=1 << 24, entries_per_root=256,
+                          quiet_seconds=0, max_delay_seconds=0)
             path = root / 'runtime.json'
             path.write_text(json.dumps(config))
             path.chmod(0o600)

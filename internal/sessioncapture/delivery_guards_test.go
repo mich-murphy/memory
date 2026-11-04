@@ -3,6 +3,8 @@ package sessioncapture
 import (
 	"errors"
 	"testing"
+
+	"github.com/mich-murphy/memory/internal/publication"
 )
 
 func TestEvidencePairRejectsSwappedEpochs(t *testing.T) {
@@ -25,12 +27,13 @@ func TestEvidencePairRejectsSwappedEpochs(t *testing.T) {
 	if err := validateEvidencePair(m, es, false); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("swapped epochs: %v", err)
 	}
-	if _, _, _, err := encodeAcceptedView(m, es); !errors.Is(err, ErrIntegrity) {
+	if _, _, _, err := encodeAcceptedView(m, es, publication.MaxSources); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("swapped encode: %v", err)
 	}
 }
 
 func TestDeliveryFailureCannotResurrectTerminalJob(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"published", "superseded"} {
 		for _, cause := range []error{ErrIntegrity, ErrDestination} {
 			t.Run(state+cause.Error(), func(t *testing.T) {

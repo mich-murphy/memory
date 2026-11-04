@@ -2,13 +2,21 @@ GOLANGCI_LINT ?= golangci-lint
 TOOL          := go tool -modfile=tools/go.mod
 COVER_DIR     := $(CURDIR)/.cover
 FUZZTIME      ?= 30s
+# Bound minimization: with one worker the default 60s freezes all execs while one input is minimized.
+FUZZMINIMIZETIME ?= 5s
+# gremlins derives per-mutant timeouts from a coverage pass (0.65s for internal/sessioncapture), so the
+# old coefficient of 3 timed out nearly every mutant there; 100 gave valid results.
+MUTATE_TIMEOUT_COEFFICIENT ?= 100
 BENCH         ?= .
 BENCHCOUNT    ?= 10
 BENCHOUT      ?= bench.txt
 ANALYTICS_PYTHON ?= $(if $(wildcard .analytics-venv/bin/python),.analytics-venv/bin/python,python3)
 FUZZ_TARGETS  := internal/adapters:FuzzSessionInfo internal/hook:FuzzReadInput \
                  internal/jsonx:FuzzParseObjectRoundTrip internal/raw:FuzzCompressRoundTrip \
-                 internal/scrub:FuzzFile internal/scrub:FuzzText internal/capturepolicy:FuzzBaseName internal/shellwords:FuzzJoinSplit internal/gitinfo:FuzzStripUserinfo
+                 internal/scrub:FuzzFile internal/scrub:FuzzText internal/capturepolicy:FuzzBaseName internal/shellwords:FuzzJoinSplit internal/gitinfo:FuzzStripUserinfo \
+                 internal/scrub:FuzzEquivalentSecretCopies internal/publication:FuzzParseCurrent \
+                 internal/publication:FuzzDecodeValidateManifest internal/sessioncapture:FuzzQuotaWriter \
+                 internal/capturehooks:FuzzEditJSON
 
 .PHONY: check fmt fmt-check lint lint-version tidy-check fix-check deadcode vuln test cover crap fuzz mutation bench bench-smoke actionlint build hooks gopls clean capture-acceptance
 
@@ -84,7 +92,7 @@ crap: cover
 # MUTATE_DIFF=origin/main mutates only the lines changed since that ref.
 MUTATE_DIFF ?=
 mutation:
-	$(TOOL) gremlins unleash --exclude-files='internal/testenv/' --timeout-coefficient=3 \
+	$(TOOL) gremlins unleash --exclude-files='internal/testenv/' --timeout-coefficient=$(MUTATE_TIMEOUT_COEFFICIENT) \
 		--invert-assignments --invert-bitwise --invert-bwassign --invert-logical --invert-loopctrl \
 		--remove-self-assignments --output=mutation.json $(if $(MUTATE_DIFF),--diff=$(MUTATE_DIFF))
 
@@ -92,7 +100,7 @@ fuzz:
 	@for t in $(FUZZ_TARGETS); do \
 		pkg=$${t%%:*}; name=$${t##*:}; \
 		echo "fuzzing $$name for $(FUZZTIME)"; \
-		go test -run='^$$' -fuzz="^$$name$$" -fuzztime=$(FUZZTIME) ./$$pkg || exit 1; \
+		go test -run='^$$' -fuzz="^$$name$$" -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./$$pkg || exit 1; \
 	done
 
 build:

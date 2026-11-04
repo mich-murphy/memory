@@ -25,8 +25,13 @@ checks without a separately reviewed accounting/integrity design.
 
 SQLite WAL with `synchronous=FULL` remains authoritative for accepted work. Private
 encoded payloads are synced before acceptance; crash orphans, sealed epochs and
-intermediate accepted publications remain retained. No automatic GC or eviction is
-implemented. Failed capture never advances an accepted publication. Source absence
+older accepted publications are reclaimed locally only when no retained root
+references them: undelivered proven-subsumed appends are superseded at acceptance
+(k deferred appends deliver as one object PUT and one CAS) and their payloads removed;
+an older published job's payloads are removed after a newer acknowledgement. Optional
+artifacts, objects kept by selection supersession and crash orphans stay retained
+(unique bytes, bounded by the spool limit). `RuntimeStatus.ReclaimPending/Failed`
+show unfinished unlinks. Remote GC and eviction are not implemented. Failed capture never advances an accepted publication. Source absence
 is a local fact, not remote deletion.
 
 `CaptureIfChanged` double-hashes a stable observation and compares provenance; it
@@ -43,6 +48,53 @@ resumed after restart without another hook or their original source. Explicit
 Quarantine retains source/session coordinates, attempts, safe classifications,
 contract and diagnostic software version. Replaying does not erase historical entries.
 
+Failure dispositions (contract section 3): temporary transport, throttling (HTTP 408/429/5xx)
+and timeout failures keep the job `retry` with capped (5 minute) jittered backoff and
+no attempt limit; a newer job never overtakes the pending head, and the head publishes
+once the backend heals without `replay`. Destination authentication pauses delivery.
+Spool or free-space exhaustion (`ErrSpoolFull`, class `spool-full`) is backpressure that
+retries and clears when capacity returns. Only deterministic classes consume
+`max_attempts` and then quarantine: `policy-blocked`, `integrity-error`, `quota`
+(oversized source, request bounds), `rejected` (other HTTP 4xx) and `conflict`.
+`conflict` (a guarded-write or immutable-object conflict not resolved by lost-ACK
+reconciliation or rebase) is a visible, replayable class.
+
+Admission refuses (typed `ErrKeyLength`, wrapping `ErrQuota`) an identity whose longest
+derived key (`BaseKey` + `/manifests/<64 hex>.json`) exceeds 1024 bytes, whatever the
+backend kind, so a local archive stays portable to R2.
+
+Rebase (GAP-06). A rebuilt or lagging spool converges instead of conflicting forever.
+Delivery rebases when the remote current's sequence is >= the local job's, or when the
+guarded write conflicts. It reads and fully verifies the remote current, merges the local
+view into it at remote sequence + 1, and publishes with the token from the first
+`Current`. Every remote epoch is retained; a remote active epoch replaced by a new local
+epoch of the same source is sealed. If the remote already holds everything local
+contributes, the job is marked published with no upload and no CAS. Nothing is ever
+overwritten. Still `conflict`: the same source epoch and revision with a different
+commitment, or a `Withheld` mismatch (a foreign writer whose history is not a prefix).
+A merge beyond `MaxSources` or metadata limits is a typed `ErrQuota`. Remote-only
+sources have no local bytes, resolved identities or physical-path equivalents; they get
+only the session-identity and publication-path exclusion checks (`recheckScopes`), failing
+closed with `ErrPolicy`/`ErrSessionExcluded` before any upload or CAS. A logical/physical
+path difference therefore means only the claimed-session and publication-path
+exclusions apply to them. Measured steady-state cost per delivery after a rebase
+(asserted in `TestRebaseSteadyStateEachCaptureIsOneStep`): Current 5, Open 6/8/8, PutFile
+1/2/2, CAS 1 for three successive captures. Later captures repeat Current+Read+merge
+because local sequencing stays below the remote; removing that is a bounded follow-up.
+Lag is observable: per-job `Status` carries `Attempts`, `LastError` class, `NextRetryNS`
+and `CapturedAtNS`; `RuntimeStatus` adds `RetryingPublications`, `MaxPendingAttempts`,
+`OldestPendingPublicationAtNS` and `SpoolFullWork`. Enrichment and optional-repair
+work follow the same rule.
+
+Source limit (GAP-05): a session manifest holds at most `publication.MaxSources` (1024)
+source epochs. Reaching it returns the typed `ErrSourceLimit` (not `ErrQuota`), class
+`source-limit`: the source parks in the visible terminal state `source-limit` (no
+quarantine entry, no retry loop; `RuntimeStatus.SourceLimitSources` counts them), earlier
+epochs are never dropped and the previous successful publication stays readable. A new
+observation of the source retries it. Rollover or compaction is deliberately out of
+scope: measured sessions reach at most 379 sources (Mac) and 198 (BC-01), so 1024 stays a
+documented hard limit with visible status.
+
 The intended cancellation boundary is graceful shutdown only when every error-tree
 leaf is caller cancellation; database, integrity and durability causes must remain
 visible. The handoff tracks qualification of this boundary; intent is not proof that every
@@ -57,9 +109,9 @@ acceptance**:
 | --- | --- |
 | Discovery timer | 30 seconds |
 | Capture / delivery workers | 4 / 4 |
-| Cooperative operation context | 60 seconds |
+| Cooperative operation context | 60 seconds for capture, discovery and enrichment; delivery and repair steps add `TransferTimeout` (15 minutes) so the backend, not the step context, bounds object transfers |
 | Retry backoff | Jittered, clamped to 1 second–5 minutes |
-| Failed attempts before quarantine | 8 |
+| Failed attempts before quarantine | 8, counted only for deterministic classes (policy, integrity, permanent quota, conflict, rejected); transient, timeout, throttling and spool-full failures retry indefinitely |
 | Encoded spool | 1 GiB by service example; no eviction |
 | Decoded source body | 1 GiB |
 | Encoded source object | 1 GiB, independently enforced before local acceptance and by R2 transport |
@@ -70,7 +122,7 @@ acceptance**:
 | Discovery directory entries | At most 4096 per call, fairly divided among configured roots |
 | Discovery directory descriptors | At most 256; depth/descriptor gaps are explicit |
 | Configured roots | At most 128 |
-| Retained source work records | Default 4096; optional `max_inventory_records` up to 65536, with same-source coalescing at capacity |
+| Retained source work records | Default 4096; optional `max_inventory_records` up to 65536. The cap bounds **live** work (pending, retry, claimed, quarantined) with same-source coalescing at capacity; settled (captured/absent) rows are retained separately up to the fixed 65536 ceiling (~3.8 KB/row, worst case ~250 MB; measured inventories 19k Mac, 29k BC-01), absent then least recently observed dropped from the index only |
 | Retained discovery issues / scopes | Default 4096 each; same optional inventory quota, including resolved history |
 | Path-hint inbox | 1024 hints, each at most 64 KiB |
 | Status page | 1–256 records; independent list cursors |
@@ -287,6 +339,14 @@ analytics tests passed; the intermediate seven-journey result above is chronolog
 not a list of currently pending repairs. SDK peers use injected in-memory HTTPS transports,
 not actual conditional-R2 endpoints.
 
+Transformed sources (SQLite backup, scrubbed config, zstd) carry a discovery fingerprint
+that binds the source stat, the transform kind, `transformPolicyVersion`, and for SQLite
+backups the `-wal`, `-shm` and `-journal` stat identities (an absent sidecar is itself an
+identity). Any input change re-hints; an unchanged sweep is a write-free no-op. Unknown
+inputs yield an empty fingerprint (re-hint every sweep). Policy and exclusions are not
+fingerprint inputs: they are rechecked at capture and delivery. Bump
+`transformPolicyVersion` when scrubber rules, backup procedure or decode limits change.
+
 Full merged-source operating-resource/freshness and both machines' preserved policy/
 inventory/installed-path acceptance remain required. Earlier Mac scratch-native gates,
 isolated actual R2 tests and selected installed source-to-report journeys did pass;
@@ -302,7 +362,13 @@ cutover or reviewed retired-key deletion.
 Omitted or zero retains the old **4096** default; positive values are bounded at
 **65536**. This is a per-table retained metadata limit for runtime sources,
 discovery issues and discovery scopes, not a byte quota, per-sweep entry budget,
-or complete-inventory guarantee. The 4096 per-discovery-batch bound and 256-row
+or complete-inventory guarantee. Admission counts only live source rows
+(`state` not `captured`/`absent`): settled history never refuses a new session. Settled
+rows are kept so an unchanged fingerprint skips re-hinting, bounded by the fixed 65536 ceiling (`SettledCap`), independent of `max_inventory_records`;
+beyond it the oldest settled row leaves the source index (jobs, payloads and published
+data are untouched, and a rediscovered source re-hints once and recaptures to an unchanged
+manifest). A cap full of live work still refuses with `ErrQuota`. Runtime status exposes
+`SourceCap`, `LiveSources` and `SettledSources`. The 4096 per-discovery-batch bound and 256-row
 status detail page ceiling are unchanged. Status aggregates count all admitted
 rows, independently of page size or the current configured quota.
 
@@ -333,3 +399,38 @@ These are development gates, not installed 32768-record, native/resource/coverag
 acceptance. Builds and controlled upgrades were the next action at that checkpoint;
 subsequent installations and failures are recorded in the handoff, not renewed rollout
 instructions here.
+
+## Object transfer budgets (GAP-02)
+
+Metadata, reference and conditional-write operations keep the flat 30 second backend
+deadline. Object bodies (upload, read-back verification after a lost acknowledgement, and
+streamed reads) use a size-aware budget: `30s + size / min_throughput`, clamped to
+60 seconds-15 minutes, plus an idle limit: a transfer making no body progress for 30
+seconds is abandoned. Timeouts and stalls wrap `context.DeadlineExceeded`, so they are
+retryable `timeout` failures that never spend the quarantine budget. The shared HTTP
+client has no whole-request timeout; dial, TLS and response-header limits remain.
+`min_throughput_kib` (R2 backend, default 1024) sets the assumed slowest sustained rate.
+The default is conservative and **not measured against live R2**; encoded objects are
+p50 about 2 KB, p99 about 1.1 MB, maximum 215 MB (Mac) and 35 MB (BC-01), so a 215 MB
+object receives about 235 seconds. Confirm the default with live transfer data.
+
+Step bound (GAP-02): a delivery or repair attempt is bounded by
+`OperationTimeout + Σ TransferBudget(size)` over the selected objects of the head manifest,
+where `TransferBudget(size) = 2 × Total(size)`. The factor of 2 covers the upload plus the
+read-back verification after a lost acknowledgement or conflict. Worst case therefore scales
+with the manifest's object bytes; the backend still enforces each object's own budget.
+Backends that report no budget (Local) keep the flat `OperationTimeout`. The defaults
+(1 MiB/s, 30 s base, 60 s–15 min, 30 s idle) are conservative and unmeasured.
+Follow-up: a conflict-path retry (412 on a re-upload) costs a full download of the object;
+per-object local upload markers are deliberately not implemented here.
+
+## Capture cadence (GAP-03, implemented)
+
+The capture daemon debounces each source: a changed source is captured once it has
+been quiet for `quiet_seconds` (default 30), and no later than `max_delay_seconds`
+(default 300) after its first unconsumed observation. Set both to 0 to capture
+immediately. `RuntimeOptions.QuietPeriod/MaxDelay` default to zero (immediate), so
+library callers are unchanged. The defaults come from a simulated replay of the
+anonymised workload timelines (`reports/g3-cadence.md`, a validation-pilot report),
+which is simulated evidence, not live measurement. `RuntimeStatus.DebouncedSources`
+and `DebounceLagNS` show sources still waiting.

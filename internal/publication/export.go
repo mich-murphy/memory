@@ -30,14 +30,14 @@ func ExportSessionBounded(ctx context.Context, b Backend, i Identity, dest strin
 	if maxBytes <= 0 || maxBytes > MaxExportBytes {
 		return out, ErrExportBudget
 	}
-	m, err := pinned(ctx, b, i)
+	m, digest, err := pinned(ctx, b, i)
 	if err != nil {
 		return out, err
 	}
 	if err := checkExportBudget(m, maxBytes); err != nil {
 		return out, err
 	}
-	return exportPinned(ctx, b, m, dest)
+	return exportPinned(ctx, b, m, digest, dest)
 }
 
 func checkExportBudget(m Manifest, maxBytes int64) error {
@@ -57,9 +57,10 @@ func checkExportBudget(m Manifest, maxBytes int64) error {
 }
 
 // exportMetadata is the shared prospective consumer envelope. Body coordinates
-// depend only on the pinned manifest, never on body I/O or destination state.
-func exportMetadata(m Manifest) (Export, []byte, error) {
-	out := Export{Contract: ReaderContract, Manifest: m, Bodies: make([]Body, 0, len(m.Sources))}
+// depend only on the pinned manifest and its digest, never on body I/O or
+// destination state.
+func exportMetadata(m Manifest, digest string) (Export, []byte, error) {
+	out := Export{Contract: ReaderContract, ManifestSHA256: digest, Manifest: m, Bodies: make([]Body, 0, len(m.Sources))}
 	for n := range m.Sources {
 		s := &m.Sources[n]
 		if IsSelected(*s) {
@@ -76,8 +77,8 @@ func exportMetadata(m Manifest) (Export, []byte, error) {
 	return out, data, nil
 }
 
-func exportPinned(ctx context.Context, b Backend, m Manifest, dest string) (Export, error) {
-	out, data, err := exportMetadata(m)
+func exportPinned(ctx context.Context, b Backend, m Manifest, digest, dest string) (Export, error) {
+	out, data, err := exportMetadata(m, digest)
 	if err != nil {
 		return out, err
 	}

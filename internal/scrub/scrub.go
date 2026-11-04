@@ -84,20 +84,32 @@ var (
 	jsonArgRules = slices.Concat(settingsRules, mcpFileRules)
 )
 
+type ruleSet struct {
+	rules  []rule
+	format format
+}
+
+// ruleTable is the single source of truth for which filenames are protected and how.
+// rulesFor and RulesDigest both read it, so a new entry is covered by the digest guard.
+var ruleTable = map[string]ruleSet{
+	"claude.json":           {claudeJSONRules, formatJSON},
+	".claude.json":          {claudeJSONRules, formatJSON},
+	"settings.json":         {settingsRules, formatJSON},
+	"settings.local.json":   {settingsRules, formatJSON},
+	"managed-settings.json": {settingsRules, formatJSON},
+	".mcp.json":             {mcpFileRules, formatJSON},
+	"mcp.json":              {mcpFileRules, formatJSON},
+	"managed-mcp.json":      {mcpFileRules, formatJSON},
+	"models.json":           {piModelsRules, formatJSON},
+	"config.toml":           {codexTOMLRules, formatTOML},
+	"managed_config.toml":   {codexTOMLRules, formatTOML},
+}
+
 // rulesFor selects the union of supported schemas for this filename, not the collecting agent.
 // Shared settings filenames retain their supported dialect rules; unknown filenames are not DLP.
 func rulesFor(name string) ([]rule, format) {
-	switch capturepolicy.BaseName(name) {
-	case "claude.json", ".claude.json":
-		return claudeJSONRules, formatJSON
-	case "settings.json", "settings.local.json", "managed-settings.json":
-		return settingsRules, formatJSON
-	case ".mcp.json", "mcp.json", "managed-mcp.json":
-		return mcpFileRules, formatJSON
-	case "models.json":
-		return piModelsRules, formatJSON
-	case "config.toml", "managed_config.toml":
-		return codexTOMLRules, formatTOML
+	if e, ok := ruleTable[capturepolicy.BaseName(name)]; ok {
+		return e.rules, e.format
 	}
 	return nil, formatJSON
 }

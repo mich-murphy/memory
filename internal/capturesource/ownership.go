@@ -90,6 +90,8 @@ func classifyExternal(ctx context.Context, opts Options, policy *capturepolicy.P
 	q := emitRequest(opts, root, sf, path, observed, transform)
 	if transform == "" {
 		q.Fingerprint = statFingerprint(info)
+	} else {
+		q.Fingerprint = transformFingerprint(transformPolicyVersion, transform, path, info)
 	}
 	q.Identity.SessionID = session
 	q.Associations = append(q.Associations, "owner-uuid:"+uuid)

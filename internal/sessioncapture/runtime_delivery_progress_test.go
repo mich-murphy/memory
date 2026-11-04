@@ -61,6 +61,7 @@ func (b *progressMemoryBackend) CompareAndSwap(_ context.Context, key, token str
 // A real wrong-lane turn seeds the adverse scan position. Subsequent worker
 // turns must drain accepted work without resetting either cursor or sleeping.
 func TestRuntimeDeliveryProgressLaneCursors(t *testing.T) {
+	t.Parallel()
 	for _, optional := range []bool{false, true} {
 		for _, correctFirst := range []bool{true, false} {
 			t.Run(fmt.Sprintf("optional=%v/correctFirst=%v", optional, correctFirst), func(t *testing.T) {
@@ -161,6 +162,7 @@ func TestRuntimeDeliveryProgressLaneCursors(t *testing.T) {
 }
 
 func TestRuntimeDeliveryProgressIdleScheduling(t *testing.T) {
+	t.Parallel()
 	for _, optional := range []bool{false, true} {
 		for _, idle := range []string{"busy", "paused"} {
 			t.Run(fmt.Sprintf("optional=%v/%s", optional, idle), func(t *testing.T) {
@@ -275,6 +277,7 @@ func TestRuntimeDeliveryProgressIdleScheduling(t *testing.T) {
 // Simulate state changes after scheduler selection without timing-dependent SQL
 // races: the delivery helper must recheck all these conditions and report idle.
 func TestRuntimeDeliveryProgressRechecks(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"paused", "noRows", "quarantined", "notDue", "success", "retry", "fatal"} {
 		t.Run(state, func(t *testing.T) {
 			dir, o, req := setup(t)

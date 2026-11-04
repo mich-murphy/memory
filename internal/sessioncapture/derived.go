@@ -55,13 +55,13 @@ func (q *Queue) checkWorkingReserveLocked(free, n int64) error {
 	}
 	remaining := q.opts.MaxSpoolBytes - q.used - n
 	if remaining < 0 {
-		return ErrQuota
+		return ErrSpoolFull
 	}
 	working := state.active * MaxSourceBytes
 	// Subtractions avoid overflow for operator-supplied byte budgets.
 	for _, amount := range []int64{q.opts.MinFreeBytes, q.writing, n, working, remaining} {
 		if amount < 0 || amount > free {
-			return ErrQuota
+			return ErrSpoolFull
 		}
 		free -= amount
 	}

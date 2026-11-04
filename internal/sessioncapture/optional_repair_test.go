@@ -177,6 +177,7 @@ func TestOptionalNetworkStallDoesNotLockRawAcceptanceOrClaims(t *testing.T) {
 }
 
 func TestOptionalRemoteFailureWithholdsLatestAndRepairsAfterRestart(t *testing.T) {
+	t.Parallel()
 	for _, stage := range []string{"upload", "verify", "object-fence"} {
 		t.Run(stage, func(t *testing.T) {
 			dir, o, r := setup(t)

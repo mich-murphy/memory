@@ -338,7 +338,8 @@ class CoordinatorJourney(unittest.TestCase):
             store=str(self.root / 'store'), spool=str(self.root / 'spool'), policy_dir=str(self.policy),
             home=str(self.home), default_roots=True, roots=[], capture_workers=2, delivery_workers=2,
             poll_seconds=1, operation_seconds=30, max_attempts=2, max_spool_bytes=1 << 24,
-            min_free_bytes=0, entries_per_root=256)
+            min_free_bytes=0, entries_per_root=256,
+            quiet_seconds=0, max_delay_seconds=0)  # Prompt capture is under test, not cadence.
         self.config.write_text(json.dumps(config))
         self.config.chmod(0o600)
         self.process = None
@@ -584,6 +585,27 @@ class CoordinatorJourney(unittest.TestCase):
         self.assertTrue(report['event_counts'])
         self.assertTrue(any(r['kind'] == 'artifact_not_normalized' for r in report['issue_counts']))
         self.assertEqual(report['sessions'][0]['normalization'], 'partial')
+
+    def test_configured_cadence_debounces_hinted_source_in_actual_binary(self):
+        import time
+        quiet = 2
+        config = json.loads(self.config.read_text())
+        config.update(quiet_seconds=quiet, max_delay_seconds=4)
+        self.config.write_text(json.dumps(config))
+        path = self.home / '.claude' / 'projects' / 'cadence' / 'cadence.jsonl'
+        path.parent.mkdir(parents=True, mode=0o700)
+        path.write_text('{"type":"user","uuid":"c","message":{"role":"user","content":"Synthetic cadence"}}\n')
+        def captured():
+            return next((row for row in (self.view() or {}).get('Sources', [])
+                         if row['Request']['Path'] == str(path) and row['CapturedVersion'] > 0), None)
+        # The clock starts before the hint, so the durable debounce (hint + quiet) cannot end earlier.
+        began = time.monotonic()
+        self.run_writer('hook', '--config', str(self.config), '--agent', 'claude', '--path', str(path))
+        self.start()
+        while time.monotonic() - began < quiet:
+            self.assertIsNone(captured(), 'source captured before the configured quiet period elapsed')
+            time.sleep(0.05)
+        self.until(captured)
 
     def test_periodic_capture_quarantine_and_restart_without_another_hook(self):
         directory = self.home / '.claude' / 'projects' / 'synthetic'

@@ -35,7 +35,36 @@ const (
 	FailureQuota       FailureClass = "quota"
 	FailureTimeout     FailureClass = "timeout"
 	FailureAbsent      FailureClass = "absent"
+	// FailureConflict is a guarded-write or immutable-object conflict. It is a
+	// distinct, visible class: it is neither retried unseen forever nor treated as
+	// a network blip, so it spends the quarantine budget and stays replayable.
+	// A rebuilt spool behind the remote converges by rebasing (rebase.go); what
+	// remains here is divergence that cannot be reconciled.
+	FailureConflict FailureClass = "conflict"
+	// FailureRejected is a destination rejection (HTTP 4xx) that repeating the same
+	// request cannot fix.
+	FailureRejected FailureClass = "rejected"
+	// FailureSpoolFull is capacity backpressure that clears when space returns.
+	FailureSpoolFull FailureClass = "spool-full"
+	// FailureSourceLimit marks a session at publication.MaxSources. Retrying cannot
+	// help, so the source parks in the visible terminal state "source-limit"
+	// without a quarantine entry or further attempts.
+	FailureSourceLimit FailureClass = "source-limit"
 )
+
+// spendsQuarantineBudget reports whether repeated failures of this class count
+// toward MaxAttempts. Only deterministic classes do. Transient, timeout and
+// throttling failures retry indefinitely with capped, jittered backoff
+// (contract section 3); destination failures pause instead of quarantining.
+func (c FailureClass) spendsQuarantineBudget() bool {
+	switch c {
+	case FailurePolicy, FailureIntegrity, FailureQuota, FailureConflict, FailureRejected:
+		return true
+	case FailureTransient, FailureDestination, FailureTimeout, FailureAbsent, FailureSpoolFull, FailureSourceLimit:
+		return false
+	}
+	return false
+}
 
 type RuntimeOptions struct {
 	Enrich               EnrichFunc
@@ -48,9 +77,16 @@ type RuntimeOptions struct {
 	Workers, CaptureWorkers, DeliveryWorkers int
 	OperationTimeout                         time.Duration
 	MaxAttempts                              int
+	// QuietPeriod (Q) delays capturing a source until it has been unchanged this long;
+	// MaxDelay (M) caps the delay from the first unconsumed observation. Zero Q
+	// captures immediately. See validateCadence for bounds.
+	QuietPeriod, MaxDelay time.Duration
 	// Jitter returns the desired delay; its result is clamped to [1s,5min].
 	Jitter   func(time.Duration) time.Duration
 	Classify func(error) FailureClass
+
+	// budgeted is set by Run when the backend reports per-object transfer budgets.
+	budgeted bool
 }
 
 type runtimeLocal struct {
@@ -106,14 +142,22 @@ func classify(err error, custom func(error) FailureClass) FailureClass {
 		return FailurePolicy
 	case errors.Is(err, ErrIntegrity):
 		return FailureIntegrity
+	case errors.Is(err, ErrSourceLimit):
+		return FailureSourceLimit
+	case errors.Is(err, ErrSpoolFull):
+		return FailureSpoolFull
 	case errors.Is(err, ErrQuota):
 		return FailureQuota
+	case errors.Is(err, publication.ErrConflict):
+		return FailureConflict
+	case errors.Is(err, publication.ErrRejected):
+		return FailureRejected
 	case errors.Is(err, context.DeadlineExceeded):
 		return FailureTimeout
 	}
 	if custom != nil {
 		switch c := custom(err); c {
-		case FailureTransient, FailureDestination, FailurePolicy, FailureIntegrity, FailureQuota, FailureTimeout, FailureAbsent:
+		case FailureTransient, FailureDestination, FailurePolicy, FailureIntegrity, FailureQuota, FailureTimeout, FailureAbsent, FailureConflict, FailureRejected, FailureSpoolFull, FailureSourceLimit:
 			return c
 		}
 	}
@@ -154,8 +198,16 @@ func (q *Queue) Run(ctx context.Context, b publication.Backend, options RuntimeO
 	r.mu.Unlock()
 	defer func() { r.mu.Lock(); r.running = false; r.mu.Unlock() }()
 	o := runtimeDefaults(options)
+	if err := validateCadence(o); err != nil {
+		return err
+	}
+	_, o.budgeted = b.(publication.TransferBudgeter)
 	r.softwareVersion.Store(o.SoftwareVersion)
 	r.enrichmentOptions.Store(&o)
+	// A restart flushes debounced sources: their observations are durable.
+	if _, err := q.db.ExecContext(ctx, `UPDATE runtime_sources SET debounce_until=0 WHERE debounce_until>0`); err != nil {
+		return runtimeStopError(ctx, err)
+	}
 	if err := q.startDiscoverySweep(ctx); err != nil {
 		return runtimeStopError(ctx, err)
 	}
@@ -222,7 +274,7 @@ func (q *Queue) runtimeWorkerNamed(ctx context.Context, name string, o RuntimeOp
 	timer := time.NewTicker(min(o.PollInterval, 100*time.Millisecond))
 	defer timer.Stop()
 	for ctx.Err() == nil {
-		op, cancel := context.WithTimeout(ctx, o.OperationTimeout)
+		op, cancel := stepContext(ctx, name, o)
 		did, err := work(op)
 		opExpired := errors.Is(op.Err(), context.DeadlineExceeded)
 		cancel()
@@ -242,6 +294,36 @@ func (q *Queue) runtimeWorkerNamed(ctx context.Context, name string, o RuntimeOp
 		}
 	}
 	return nil
+}
+
+// stepContext bounds one worker turn by OperationTimeout. Workers that move object
+// bodies are not bounded here: their attempt context is OperationTimeout plus the
+// backend's per-object allowance for the manifest being moved (transferAllowance),
+// which is only known once the head job is loaded.
+func stepContext(ctx context.Context, name string, o RuntimeOptions) (context.Context, context.CancelFunc) {
+	switch name {
+	case "delivery", "optional-delivery", "optional-repair":
+		if o.budgeted {
+			return context.WithCancel(ctx)
+		}
+	}
+	return context.WithTimeout(ctx, o.OperationTimeout)
+}
+
+// transferAllowance sums the backend's worst-case PutFile duration over the
+// selected objects of the given sources; zero when the backend reports none.
+func transferAllowance(b publication.Backend, sources ...publication.Source) time.Duration {
+	tb, ok := b.(publication.TransferBudgeter)
+	if !ok {
+		return 0
+	}
+	var d time.Duration
+	for i := range sources {
+		if publication.IsSelected(sources[i]) {
+			d += tb.TransferBudget(sources[i].Object.EncodedSize)
+		}
+	}
+	return d
 }
 
 func (q *Queue) discoverLoop(ctx context.Context, o RuntimeOptions) error {
