@@ -15,6 +15,27 @@ import (
 
 const MaxEnrichmentWork = 4096
 
+var errEnrichmentLimitBounds = errors.New("sessioncapture: enrichment limit out of bounds")
+
+// setEnrichmentLimit lowers the enrichment_work capacity of this Queue; 0
+// restores MaxEnrichmentWork. It exists so tests can reach the capacity
+// through the real admission paths without 4096 rows.
+func (q *Queue) setEnrichmentLimit(limit int) error {
+	if limit < 0 || limit > MaxEnrichmentWork {
+		return errEnrichmentLimitBounds
+	}
+	q.enrichmentCap = limit
+	q.capacityChanged()
+	return nil
+}
+
+func (q *Queue) effectiveEnrichmentLimit() int {
+	if q.enrichmentCap > 0 {
+		return q.enrichmentCap
+	}
+	return MaxEnrichmentWork
+}
+
 func (q *Queue) initEnrichment(ctx context.Context) error {
 	for _, statement := range []string{
 		`CREATE TABLE IF NOT EXISTS native_evidence (id TEXT PRIMARY KEY, body BLOB NOT NULL, adopted_at INTEGER NOT NULL)`,
@@ -104,7 +125,7 @@ func validateSpec(s EnrichmentSpec) ([]byte, error) {
 	return json.Marshal(s)
 }
 
-func enqueueEnrichmentTx(ctx context.Context, tx *sql.Tx, spec EnrichmentSpec) error {
+func enqueueEnrichmentTx(ctx context.Context, tx *sql.Tx, spec EnrichmentSpec, limit int) error {
 	body, err := validateSpec(spec)
 	if err != nil {
 		return err
@@ -116,7 +137,7 @@ func enqueueEnrichmentTx(ctx context.Context, tx *sql.Tx, spec EnrichmentSpec) e
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO enrichment_work(id,session,spec,contract) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM enrichment_work WHERE id=?) OR (SELECT COUNT(*) FROM enrichment_work)<?`, id, spec.Identity.BaseKey(), body, EnrichmentContract, id, MaxEnrichmentWork)
+	result, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO enrichment_work(id,session,spec,contract) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM enrichment_work WHERE id=?) OR (SELECT COUNT(*) FROM enrichment_work)<?`, id, spec.Identity.BaseKey(), body, EnrichmentContract, id, limit)
 	if err != nil {
 		return err
 	}
@@ -143,7 +164,7 @@ func (q *Queue) EnqueueEnrichment(ctx context.Context, spec EnrichmentSpec) (res
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := enqueueEnrichmentTx(ctx, tx, spec); err != nil {
+	if err := enqueueEnrichmentTx(ctx, tx, spec, q.effectiveEnrichmentLimit()); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -190,7 +211,7 @@ func (q *Queue) AcceptNativeEvidence(ctx context.Context, r NativeEvidence) (res
 		// Native snapshots have a launch basis, not a fictitious accepted source epoch.
 		root, adapter := requestCoordinates(r.Request)
 		spec := EnrichmentSpec{Kind: kind, Identity: r.Identity, LaunchID: r.ID, Root: root, CWD: r.Context.CWD, AdapterSessionKey: adapter, SelectionVersion: "native-" + kind + "/v1"}
-		if err := enqueueEnrichmentTx(ctx, tx, spec); err != nil {
+		if err := enqueueEnrichmentTx(ctx, tx, spec, q.effectiveEnrichmentLimit()); err != nil {
 			return err
 		}
 	}

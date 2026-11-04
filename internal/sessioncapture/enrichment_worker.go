@@ -16,7 +16,7 @@ import (
 )
 
 func (q *Queue) enrichmentNext(ctx context.Context, o RuntimeOptions) (did bool, resultErr error) {
-	if err := q.retryEnrichmentAdmission(ctx); err != nil {
+	if err := q.gatedEnrichmentAdmission(ctx); err != nil {
 		return false, err
 	}
 	var id string

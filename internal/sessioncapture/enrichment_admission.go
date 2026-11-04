@@ -59,7 +59,7 @@ func (q *Queue) admitCapturedEnrichment(ctx context.Context, tx *sql.Tx, m publi
 	if _, err := tx.ExecContext(ctx, `SAVEPOINT enrichment_admission`); err != nil {
 		return err
 	}
-	admissionErr := metadataError(enqueueEnrichmentTx(ctx, tx, spec))
+	admissionErr := metadataError(enqueueEnrichmentTx(ctx, tx, spec, q.effectiveEnrichmentLimit()))
 	if admissionErr != nil {
 		if !errors.Is(admissionErr, ErrQuota) {
 			return admissionErr
@@ -81,46 +81,75 @@ func (q *Queue) admitCapturedEnrichment(ctx context.Context, tx *sql.Tx, m publi
 // A rejected source-enrichment intent lives with its accepted raw job. It is not
 // accepted enrichment work and can be adopted independently after capacity repair.
 func (q *Queue) retryEnrichmentAdmission(ctx context.Context) error {
+	_, err := q.attemptEnrichmentAdmission(ctx)
+	return err
+}
+
+// gatedEnrichmentAdmission is the idle-tick entry: while capacity stays
+// exhausted the oldest gapped job is re-probed only after a bounded backoff.
+func (q *Queue) gatedEnrichmentAdmission(ctx context.Context) error {
+	if q.quota.blocked(admissionGateKey, q.opts.Now()) {
+		return nil
+	}
+	quota, err := q.attemptEnrichmentAdmission(ctx)
+	if quota {
+		q.quota.fail(admissionGateKey, q.opts.Now())
+	} else if err == nil {
+		q.quota.clear(admissionGateKey)
+	}
+	return err
+}
+
+// attemptEnrichmentAdmission reports quota=true when capacity rejected the intent.
+func (q *Queue) attemptEnrichmentAdmission(ctx context.Context) (quota bool, resultErr error) {
+	if err := q.fault("enrichment-admission-attempt"); err != nil {
+		return false, err
+	}
 	var session string
 	var sequence uint64
 	var body []byte
 	err := q.db.QueryRowContext(ctx, `SELECT session,sequence,enrichment_intent FROM jobs WHERE enrichment_gap!='' ORDER BY sequence,session LIMIT 1`).Scan(&session, &sequence, &body)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	index, err := strconv.Atoi(string(body))
 	if err != nil {
-		return ErrIntegrity
+		return false, ErrIntegrity
 	}
 	var manifestBody, evidenceBody []byte
 	if err := q.db.QueryRowContext(ctx, `SELECT manifest,evidence FROM jobs WHERE session=? AND sequence=?`, session, sequence).Scan(&manifestBody, &evidenceBody); err != nil {
-		return err
+		return false, err
 	}
 	var m publication.Manifest
 	var es []evidence
 	if json.Unmarshal(manifestBody, &m) != nil || json.Unmarshal(evidenceBody, &es) != nil || index < 0 || index >= len(m.Sources) || len(es) != len(m.Sources) {
-		return ErrIntegrity
+		return false, ErrIntegrity
 	}
 	spec, ok := capturedSpec(m, es, m.Sources[index].SourceID)
 	if !ok {
-		return ErrIntegrity
+		return false, ErrIntegrity
 	}
 	tx, err := q.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := metadataError(enqueueEnrichmentTx(ctx, tx, spec)); err != nil {
-		if errors.Is(err, ErrQuota) {
-			return nil
-		}
-		return err
+	if err := metadataError(enqueueEnrichmentTx(ctx, tx, spec, q.effectiveEnrichmentLimit())); err != nil {
+		return errors.Is(err, ErrQuota), quotaOnly(err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE jobs SET enrichment_gap='',enrichment_intent=NULL WHERE session=? AND sequence=?`, session, sequence); err != nil {
-		return err
+		return false, err
 	}
-	return tx.Commit()
+	return false, tx.Commit()
+}
+
+// quotaOnly hides ErrQuota: a capacity rejection is reported through the bool.
+func quotaOnly(err error) error {
+	if errors.Is(err, ErrQuota) {
+		return nil
+	}
+	return err
 }
