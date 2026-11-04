@@ -427,14 +427,18 @@ func captureTurns(t *testing.T, q *Queue, o RuntimeOptions) {
 }
 
 func TestSourceLimitIsTypedAndNotQuarantinedAsTransient(t *testing.T) {
+	const limit = 32
 	dir, o, r := setup(t)
 	o.MaxSpoolBytes = 64 << 20
 	clock := time.Unix(1000, 0)
 	o.Now = func() time.Time { return clock }
 	q := open(t, dir, o)
+	if err := q.setSourceLimit(limit); err != nil {
+		t.Fatal(err)
+	}
 	var last publication.Manifest
 	var capErr error
-	for i := 1; i <= 1030; i++ {
+	for i := 1; i <= limit+6; i++ {
 		write(t, r.Path, fmt.Sprintf("%08d\n", i))
 		m, err := q.Capture(t.Context(), r)
 		if err != nil {
@@ -443,7 +447,7 @@ func TestSourceLimitIsTypedAndNotQuarantinedAsTransient(t *testing.T) {
 		}
 		last = m
 	}
-	if len(last.Sources) != publication.MaxSources {
+	if len(last.Sources) != limit {
 		t.Fatalf("last accepted manifest holds %d sources", len(last.Sources))
 	}
 	if !errors.Is(capErr, ErrSourceLimit) {
@@ -472,9 +476,42 @@ func TestSourceLimitIsTypedAndNotQuarantinedAsTransient(t *testing.T) {
 	if err != nil || rs.SourceLimitSources != 1 || rs.Quarantined != 0 {
 		t.Fatalf("%+v %v", rs, err)
 	}
-	// The previous successful publication stays accepted and unchanged.
-	if jobs := jobStatus(t, q, r.Identity, last.Sequence); jobs.PublicationID != last.PublicationID {
-		t.Fatalf("last publication changed: %+v", jobs)
+	// The previous successful publication stays accepted and unchanged. Read
+	// that one job directly; jobStatus would parse every job.
+	var raw []byte
+	if err := q.db.QueryRowContext(t.Context(), `SELECT manifest FROM jobs WHERE session=? AND sequence=?`, r.Identity.BaseKey(), last.Sequence).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var stored publication.Manifest
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.PublicationID != last.PublicationID || len(stored.Sources) != limit {
+		t.Fatalf("last publication changed: %s with %d sources", stored.PublicationID, len(stored.Sources))
+	}
+}
+
+func TestSourceLimitDefaultAndBounds(t *testing.T) {
+	dir, o, _ := setup(t)
+	q := open(t, dir, o)
+	if got := q.effectiveSourceLimit(); got != publication.MaxSources {
+		t.Fatalf("default limit %d, want %d", got, publication.MaxSources)
+	}
+	for _, bad := range []int{-1, publication.MaxSources + 1} {
+		if err := q.setSourceLimit(bad); !errors.Is(err, errSourceLimitBounds) {
+			t.Fatalf("setSourceLimit(%d) = %v", bad, err)
+		}
+		if got := q.effectiveSourceLimit(); got != publication.MaxSources {
+			t.Fatalf("rejected %d changed limit to %d", bad, got)
+		}
+	}
+	for _, ok := range []int{1, publication.MaxSources} {
+		if err := q.setSourceLimit(ok); err != nil || q.effectiveSourceLimit() != ok {
+			t.Fatalf("setSourceLimit(%d) = %v, effective %d", ok, err, q.effectiveSourceLimit())
+		}
+	}
+	if err := q.setSourceLimit(0); err != nil || q.effectiveSourceLimit() != publication.MaxSources {
+		t.Fatalf("zero must restore the default: %v %d", err, q.effectiveSourceLimit())
 	}
 }
 

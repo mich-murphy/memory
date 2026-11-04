@@ -143,6 +143,10 @@ type Queue struct {
 
 	// discoveryLimit is a test-only override of MaxDiscoveryRecords; 0 means the const.
 	discoveryLimit int
+
+	// sourceLimit is a test-only per-Queue override of publication.MaxSources;
+	// 0 means the const. Set it only through setSourceLimit.
+	sourceLimit int
 }
 
 func Open(ctx context.Context, dir string, opts Options) (*Queue, error) {
@@ -498,6 +502,33 @@ func (q *Queue) checkCallback(ctx context.Context, r Request) error {
 		return errors.Join(fmt.Errorf("%w: callback denied", ErrPolicy), &policyStorageFailure{})
 	}
 	return fmt.Errorf("%w: callback denied", ErrPolicy)
+}
+
+// errSourceLimitBounds rejects a source-limit override that could exceed the
+// publication bound or silently disable the check.
+var errSourceLimitBounds = errors.New("sessioncapture: source limit out of bounds")
+
+// setSourceLimit lowers the per-session source limit for this Queue; zero
+// restores publication.MaxSources. It exists so tests can reach the limit
+// through the real Capture path without 1024 captures.
+func (q *Queue) setSourceLimit(limit int) error {
+	if limit < 0 || limit > publication.MaxSources {
+		return errSourceLimitBounds
+	}
+	q.sourceLimit = limit
+	return nil
+}
+
+// sourceHeadroomDivisor reserves 1/8 of the source limit (128 of 1024) for
+// captures that enrichment must not consume.
+const sourceHeadroomDivisor = 8
+
+// effectiveSourceLimit is publication.MaxSources unless a test lowered it.
+func (q *Queue) effectiveSourceLimit() int {
+	if q.sourceLimit > 0 {
+		return q.sourceLimit
+	}
+	return publication.MaxSources
 }
 
 // inventoryRecordLimit normalizes the optional operating quota before any disk I/O.

@@ -354,7 +354,7 @@ func (q *Queue) acceptView(ctx context.Context, m publication.Manifest, es []evi
 	if err != nil {
 		return zero, err
 	}
-	m, b, ev, e := encodeAcceptedView(m, es)
+	m, b, ev, e := encodeAcceptedView(m, es, q.effectiveSourceLimit())
 	if e != nil {
 		return zero, e
 	}
@@ -508,14 +508,14 @@ func (q *Queue) unchanged(ctx context.Context, r Request, source authorizedSourc
 
 // encodeAcceptedView establishes the stable ID and validates the exact bytes
 // before the acceptance transaction can mutate the durable queue.
-func encodeAcceptedView(m publication.Manifest, es []evidence) (publication.Manifest, []byte, []byte, error) {
+func encodeAcceptedView(m publication.Manifest, es []evidence, sourceLimit int) (publication.Manifest, []byte, []byte, error) {
 	m.PublicationID = ""
 	b, err := json.Marshal(m)
 	if err != nil {
 		return m, nil, nil, err
 	}
 	m.PublicationID = digest(b)
-	if len(m.Sources) > publication.MaxSources {
+	if len(m.Sources) > sourceLimit {
 		return m, nil, nil, ErrSourceLimit
 	}
 	if err := publication.ValidateManifest(m); err != nil {

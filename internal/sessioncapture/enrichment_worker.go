@@ -263,7 +263,7 @@ func (q *Queue) attachEnrichment(ctx context.Context, s EnrichmentSpec, r enrich
 	}
 	request := Request{Identity: s.Identity, SourceID: sourceID, Role: "artifact", Path: provenance.Path, LogicalPath: provenance.LogicalPath, Identities: slices.Clone(provenance.Identities), Optional: true, ObservedAtNS: r.ObservedAtNS}
 	src := publication.Source{SourceID: sourceID, EpochID: digest([]byte(sourceID + ":" + r.Object.SHA256 + ":" + digestSpec(s))), Role: "artifact", Path: publicationSourcePath(request), Optional: true, State: "active", Revision: 1, ObservedAtNS: r.ObservedAtNS, CapturedAtNS: r.CapturedAtNS, Object: r.Object, Associations: []string{"enrichment:" + s.Kind, "basis:" + s.BasisPublication}}
-	if len(m.Sources) >= publication.MaxSources-128 {
+	if limit := q.effectiveSourceLimit(); len(m.Sources) >= limit-limit/sourceHeadroomDivisor {
 		return 0, ErrQuota
 	}
 	if idx >= 0 {
