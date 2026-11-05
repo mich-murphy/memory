@@ -114,7 +114,54 @@ const (
 	hintLiveRoom  = `(SELECT COUNT(*) FROM runtime_sources WHERE state NOT IN ('captured','absent'))<?`
 	liveSlotsSQL  = `SELECT COUNT(*) FROM runtime_sources WHERE state NOT IN ('captured','absent')`
 	hintSlotsLeft = `?>0`
+	// Constant statement variants: no per-call concatenation, and a stable text a
+	// transaction-scoped prepared statement can be keyed on.
+	upsertHintLiveSQL  = upsertHintHead + hintLiveRoom + upsertHintTail
+	upsertHintSlotsSQL = upsertHintHead + hintSlotsLeft + upsertHintTail
+	existsHintSQL      = `SELECT COUNT(*) FROM runtime_sources WHERE session=? AND source=?`
 )
+
+// txStmts caches statements prepared on one transaction. Statements are closed with
+// the transaction (close is deferred before the rollback), so none outlives it.
+// A failed prepare falls back to the unprepared call, which reports the same error.
+type txStmts struct {
+	tx    *sql.Tx
+	stmts map[string]*sql.Stmt
+}
+
+func newTxStmts(tx *sql.Tx) *txStmts { return &txStmts{tx: tx, stmts: map[string]*sql.Stmt{}} }
+
+func (c *txStmts) stmt(ctx context.Context, query string) *sql.Stmt {
+	if s, ok := c.stmts[query]; ok {
+		return s
+	}
+	s, err := c.tx.PrepareContext(ctx, query)
+	if err != nil {
+		return nil
+	}
+	c.stmts[query] = s
+	return s
+}
+
+func (c *txStmts) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if s := c.stmt(ctx, query); s != nil { //nolint:sqlclosecheck // cached; closed by the deferred txStmts.close in admitChunk
+		return s.ExecContext(ctx, args...)
+	}
+	return c.tx.ExecContext(ctx, query, args...)
+}
+
+func (c *txStmts) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	if s := c.stmt(ctx, query); s != nil { //nolint:sqlclosecheck // cached; closed by the deferred txStmts.close in admitChunk
+		return s.QueryRowContext(ctx, args...)
+	}
+	return c.tx.QueryRowContext(ctx, query, args...)
+}
+
+func (c *txStmts) close() {
+	for _, s := range c.stmts {
+		_ = s.Close() // the transaction's end also closes it; nothing to act on
+	}
+}
 
 type hintExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
@@ -157,20 +204,20 @@ func (q *Queue) prepareHint(req Request) (hintRow, error) {
 // a batch passes its remaining live slots (counted once) and they are consumed here.
 func (q *Queue) upsertHint(ctx context.Context, x hintExecer, h hintRow, slots *int) (bool, error) {
 	key := h.req.Identity.BaseKey()
-	room, arg, created := hintLiveRoom, q.opts.MaxInventoryRecords, false
+	query, arg, created := upsertHintLiveSQL, q.opts.MaxInventoryRecords, false
 	if slots != nil {
 		var exists int
-		if err := x.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_sources WHERE session=? AND source=?`, key, h.req.SourceID).Scan(&exists); err != nil {
+		if err := x.QueryRowContext(ctx, existsHintSQL, key, h.req.SourceID).Scan(&exists); err != nil {
 			return false, err
 		}
-		room, arg, created = hintSlotsLeft, *slots, exists == 0
+		query, arg, created = upsertHintSlotsSQL, *slots, exists == 0
 		if created && arg <= 0 {
 			return false, ErrQuota
 		}
 	}
 	now := q.opts.Now().UnixNano()
 	quiet, maxDelay := q.cadence()
-	result, err := x.ExecContext(ctx, upsertHintHead+room+upsertHintTail, key, h.req.SourceID, h.body, h.req.ObservedAtNS, h.fingerprint, now, now+int64(quiet), key, h.req.SourceID, arg, int64(maxDelay))
+	result, err := x.ExecContext(ctx, query, key, h.req.SourceID, h.body, h.req.ObservedAtNS, h.fingerprint, now, now+int64(quiet), key, h.req.SourceID, arg, int64(maxDelay))
 	if err != nil {
 		return false, err
 	}
@@ -184,7 +231,7 @@ func (q *Queue) upsertHint(ctx context.Context, x hintExecer, h hintRow, slots *
 	if n == 0 {
 		// Either an unchanged existing row (fine) or the live cap refused a new one.
 		var exists int
-		if err := x.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_sources WHERE session=? AND source=?`, key, h.req.SourceID).Scan(&exists); err != nil {
+		if err := x.QueryRowContext(ctx, existsHintSQL, key, h.req.SourceID).Scan(&exists); err != nil {
 			return false, err
 		}
 		if exists == 0 {
@@ -243,6 +290,8 @@ func (q *Queue) admitChunk(ctx context.Context, reqs []Request) ([]hintRow, erro
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	stmts := newTxStmts(tx)
+	defer stmts.close()
 	var slots int
 	if err := tx.QueryRowContext(ctx, liveSlotsSQL).Scan(&slots); err != nil {
 		return nil, err
@@ -257,7 +306,7 @@ func (q *Queue) admitChunk(ctx context.Context, reqs []Request) ([]hintRow, erro
 			errs = append(errs, err) // this request is invalid or oversized; others proceed
 			continue
 		}
-		w, err := q.upsertHint(ctx, tx, h, &slots)
+		w, err := q.upsertHint(ctx, stmts, h, &slots)
 		if errors.Is(err, ErrQuota) {
 			errs = append(errs, err)
 			continue
