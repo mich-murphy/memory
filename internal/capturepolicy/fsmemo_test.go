@@ -164,3 +164,21 @@ func TestFSMemoFreshMemoSeesReplacedDirectory(t *testing.T) {
 		t.Fatalf("live: %q %v", live.Path, err)
 	}
 }
+
+// The seen-identity check ends a symlink cycle at its first repeat, not at the 255-link cap.
+func TestResolveWithCycleStopsAtFirstRepeat(t *testing.T) {
+	d := resolveFixture(t)
+	for _, name := range []string{"c1", "self"} {
+		count := newCountFS()
+		if _, err := ResolveWith(filepath.Join(d, name), count); err == nil || !strings.Contains(err.Error(), "cyclic") {
+			t.Fatalf("%s: error %v, want cyclic", name, err)
+		}
+		total := 0
+		for _, n := range count.readlink {
+			total += n
+		}
+		if total < 1 || total > 2 {
+			t.Errorf("%s: Readlink calls = %d, want 1..2 (stop at first repeat)", name, total)
+		}
+	}
+}
