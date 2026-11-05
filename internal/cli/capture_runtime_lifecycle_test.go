@@ -78,7 +78,13 @@ func TestRuntimeEnrichmentEnabledRunPublishesAndStatusDoesNotTakeLease(t *testin
 			t.Error("coordinator did not join")
 		}
 	}()
-	deadline := time.Now().Add(5 * time.Second)
+	// The attachment budget covers serialized startup, not the 2s operation budget
+	// alone. Under CPU and fsync contention (synchronous=FULL DDL) Open took up to
+	// ~2.1s and InitRuntime up to ~2.4s, then discovery, capture, a second discovery
+	// pass and the enrichment attempt added ~1s more: ~5.5s observed worst case with
+	// 6 concurrent race+coverage copies. 30s is over 5x that and still far below the
+	// 60s production operation default, so a real liveness defect still fails.
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		rows, err := sessioncapture.ReadEnrichmentWorkStatus(t.Context(), c.Spool, c.ArchiveID, "", 64)
 		attached := false
