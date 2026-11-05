@@ -44,6 +44,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -378,7 +379,13 @@ func (q *Queue) checkObserved(ctx context.Context, e evidence, delivery bool) (a
 	return observed, nil
 }
 
+// syncDirHook observes every directory fsync (tests only; nil in production).
+var syncDirHook atomic.Pointer[func(string)]
+
 func syncDir(p string) error {
+	if hook := syncDirHook.Load(); hook != nil {
+		(*hook)(p)
+	}
 	f, e := os.Open(p)
 	if e != nil {
 		return e

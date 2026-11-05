@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -118,31 +120,33 @@ func lockInbox(ctx context.Context, spool string) (string, *flock.Flock, error) 
 	return lockNamedInbox(ctx, spool, "hints")
 }
 
+// inboxSynced records inbox directories whose ancestor tree this process has
+// already fenced successfully, keyed by absolute path. inboxTreeSyncHook observes
+// every actual tree sync (tests only; nil in production).
+var (
+	inboxSynced       sync.Map
+	inboxTreeSyncHook atomic.Pointer[func(string)]
+)
+
+// inboxCreated reports whether path is absent, i.e. the next MkdirAll creates it.
+func inboxCreated(path string) (bool, error) {
+	_, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	return false, err
+}
+
+// lockNamedInbox returns the locked inbox. The directory tree is fenced
+// (syncQueueTree) so a writer's later syncDir(inbox) also covers the inbox and lock
+// entries: on the first lock of a directory in this process, and whenever this call
+// created the spool, the inbox or the lock file. Later ticks over an existing,
+// already fenced inbox skip it; removal fsyncs by callers are unaffected.
 func lockNamedInbox(ctx context.Context, spool, name string) (string, *flock.Flock, error) {
-	if err := os.MkdirAll(spool, 0o700); err != nil {
-		return "", nil, err
-	}
-	if err := privateInboxPath(spool, true); err != nil {
-		return "", nil, err
-	}
 	dir := filepath.Join(spool, name)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", nil, err
-	}
-	if err := privateInboxPath(dir, true); err != nil {
-		return "", nil, err
-	}
 	lockPath := filepath.Join(spool, name+".lock")
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
-	if err == nil {
-		err = f.Close()
-	} else if errors.Is(err, os.ErrExist) {
-		err = nil
-	}
+	created, err := prepareInbox(spool, dir, lockPath)
 	if err != nil {
-		return "", nil, err
-	}
-	if err := privateInboxPath(lockPath, false); err != nil {
 		return "", nil, err
 	}
 	lock := flock.New(lockPath)
@@ -153,11 +157,78 @@ func lockNamedInbox(ctx context.Context, spool, name string) (string, *flock.Flo
 	if !ok {
 		return "", nil, ctx.Err()
 	}
-	if err = syncQueueTree(dir); err != nil {
+	if err = fenceInbox(dir, lockPath, created); err != nil {
 		_ = lock.Unlock()
 		return "", nil, err
 	}
 	return dir, lock, nil
+}
+
+// prepareInbox creates and validates the spool, inbox directory and lock file and
+// reports whether any of them was absent beforehand (so this call created it).
+func prepareInbox(spool, dir, lockPath string) (bool, error) {
+	created := false
+	for _, p := range []string{spool, dir, lockPath} {
+		c, err := inboxCreated(p)
+		if err != nil {
+			return false, err
+		}
+		created = created || c
+	}
+	for _, d := range []string{spool, dir} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			return false, err
+		}
+		if err := privateInboxPath(d, true); err != nil {
+			return false, err
+		}
+	}
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	if err == nil {
+		err = f.Close()
+	} else if errors.Is(err, os.ErrExist) {
+		err = nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return created, privateInboxPath(lockPath, false)
+}
+
+// fencedInbox is the identity of an inbox directory and lock file already fenced.
+type fencedInbox struct{ dir, lock os.FileInfo }
+
+// fenceInbox syncs the tree unless this process already fenced this very directory
+// and lock file (same inodes) and nothing was created by the current call. A
+// directory replaced or recreated by another process has a new identity and is
+// fenced again.
+func fenceInbox(dir, lockPath string, created bool) error {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	di, err := os.Lstat(abs)
+	if err != nil {
+		return err
+	}
+	li, err := os.Lstat(lockPath)
+	if err != nil {
+		return err
+	}
+	if v, ok := inboxSynced.Load(abs); ok && !created {
+		if f, isF := v.(fencedInbox); isF && os.SameFile(f.dir, di) && os.SameFile(f.lock, li) {
+			return nil
+		}
+	}
+	if hook := inboxTreeSyncHook.Load(); hook != nil {
+		(*hook)(abs)
+	}
+	if err := syncQueueTree(abs); err != nil {
+		inboxSynced.Delete(abs)
+		return err
+	}
+	inboxSynced.Store(abs, fencedInbox{dir: di, lock: li})
+	return nil
 }
 
 func (q *Queue) drainHints(ctx context.Context) error {
