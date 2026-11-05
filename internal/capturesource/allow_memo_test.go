@@ -14,6 +14,16 @@ const policyCallsPerEvaluation = 2
 // and a second call re-evaluates them (the memo never crosses calls).
 func TestDiscoverEvaluatesSharedOwnerCoordinatesOncePerCall(t *testing.T) {
 	o := options(t)
+	// Resolve the temp home (macOS /var -> /private/var) so the resolved identities
+	// of every fixture path equal the path and each evaluation is counted exactly.
+	home, err := filepath.EvalSymlinks(o.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, err := filepath.EvalSymlinks(home); err != nil || again != home {
+		t.Fatalf("home %q is not symlink-free (resolves to %q, err %v)", home, again, err)
+	}
+	o.Home = home
 	root := Root{"claude", filepath.Join(o.Home, ".claude")}
 	o.Roots, o.OnlyRoots, o.Derived = []Root{root}, true, true
 	main := fixture(t, filepath.Join(root.Path, "projects", "slug", externalTestUUID+".jsonl"), "raw")
