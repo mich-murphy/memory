@@ -15,6 +15,9 @@ type runtimeComposition struct {
 	// Optional counting seams for tests; nil selects the production loaders.
 	registryLoader func(string) (exclusion.Registry, error)
 	filesystemSet  func(capturedaemon.Config) (*capturepolicy.Policy, error)
+	// ownerLookup replaces the live queue ownership reader: a per-call memo in a
+	// discovery snapshot, a counting reader in tests. Nil selects the live reader.
+	ownerLookup ownerLookupFunc
 }
 
 func newRuntimeComposition(c capturedaemon.Config) (runtimeComposition, error) {

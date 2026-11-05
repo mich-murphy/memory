@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/mich-murphy/memory/internal/adapters"
-	"github.com/mich-murphy/memory/internal/capturedaemon"
 	"github.com/mich-murphy/memory/internal/capturesource"
 	"github.com/mich-murphy/memory/internal/sessioncapture"
 )
@@ -21,7 +20,8 @@ func runtimeExternalScope(top string) bool {
 	}
 }
 
-func runtimeExternalPrivacyOwner(ctx context.Context, c capturedaemon.Config, req sessioncapture.Request, root, rel string, discovery bool) (*adapters.SessionFile, error) {
+func (r runtimeComposition) externalPrivacyOwner(ctx context.Context, req sessioncapture.Request, root, rel string, discovery bool) (*adapters.SessionFile, error) {
+	c := r.config
 	// Directory traversal was handled before this call. An unresolved leaf may be
 	// inspected as metadata only: the source classifier must independently resolve
 	// its owner before emitting work, and final capture/delivery always require it.
@@ -39,7 +39,7 @@ func runtimeExternalPrivacyOwner(ctx context.Context, c capturedaemon.Config, re
 	if uuid == "" {
 		return unavailable()
 	}
-	session, legacy, err := sessioncapture.ReadOwnership(ctx, c.Spool, c.ArchiveID, req.Identity.Agent, root, uuid)
+	session, legacy, err := r.owners()(ctx, req.Identity.Agent, root, uuid)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, err

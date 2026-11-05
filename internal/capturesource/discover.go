@@ -50,6 +50,7 @@ type Options struct {
 	EntriesPerRoot, MaxDepth int
 	Cursor                   *Cursor
 	fdDepth                  int
+	allow                    *allowMemo
 	roots                    []Root
 	Now                      func() time.Time
 }
@@ -127,6 +128,8 @@ func Discover(ctx context.Context, opts Options) (Result, error) {
 	if err := defaults(&opts); err != nil {
 		return out, err
 	}
+	// One decision memo per call; it is never stored in the caller's Options.
+	opts.allow = newAllowMemo()
 	if opts.Coordinates != nil {
 		return discoverCoordinates(ctx, opts)
 	}
@@ -225,7 +228,16 @@ func callPolicy(opts Options) (*capturepolicy.Policy, error) {
 	return policy.Memoized(), nil
 }
 
+// allowed memoizes per Discover call (opts.allow is set only there); one-shot
+// callers such as Classify evaluate live.
 func allowed(ctx context.Context, opts Options, policy *capturepolicy.Policy, r Root, path string) bool {
+	if opts.allow == nil {
+		return evaluateAllowed(ctx, opts, policy, r, path)
+	}
+	return opts.allow.decide(ctx, allowKey{r, path}, func() bool { return evaluateAllowed(ctx, opts, policy, r, path) })
+}
+
+func evaluateAllowed(ctx context.Context, opts Options, policy *capturepolicy.Policy, r Root, path string) bool {
 	if opts.Policy(ctx, Scope{Root: r, Path: path, Identities: []string{path}}) != nil {
 		return false
 	}

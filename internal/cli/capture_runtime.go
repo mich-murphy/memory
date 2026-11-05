@@ -215,9 +215,8 @@ func (r runtimeComposition) discovery(configPath string) (func(context.Context) 
 	opts := r.sourceOptions(configPath)
 	return func(ctx context.Context) (sessioncapture.DiscoveryBatch, error) {
 			opts.Cursor = cursor
-			// One policy snapshot per call; capture rechecks policy live.
-			opts.Policy = r.scopePolicy(r.snapshotPolicy(true))
-			result, err := capturesource.Discover(ctx, opts)
+			// One policy and ownership snapshot per call; capture rechecks live.
+			result, err := capturesource.Discover(ctx, r.callOptions(opts))
 			cursor = result.Cursor
 			batch := sessioncapture.DiscoveryBatch{Requests: result.Requests, Complete: true}
 			for _, coverage := range result.Coverage {
