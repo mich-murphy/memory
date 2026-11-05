@@ -81,8 +81,23 @@ func (r runtimeComposition) policyWith(discovery bool, registry func() (exclusio
 		if err := r.exclusions(ctx, req, discovery, registry); err != nil {
 			return err
 		}
-		return runtimeFilesystemPolicyWith(req.Path, discovery || req.Transform == "scrubbed-config", capturepolicy.Resolve, filesystem)
+		return runtimeFilesystemPolicyWith(req.Path, discovery || req.Transform == "scrubbed-config", r.resolve(), filesystem)
 	}
+}
+
+// resolve and lstat are live unless this composition is a discovery call's snapshot.
+func (r runtimeComposition) resolve() func(string) (capturepolicy.Resolution, error) {
+	if r.fsMemo != nil {
+		return r.fsMemo.Resolve
+	}
+	return capturepolicy.Resolve
+}
+
+func (r runtimeComposition) lstat(path string) (os.FileInfo, error) {
+	if r.fsMemo != nil {
+		return r.fsMemo.Lstat(path)
+	}
+	return os.Lstat(path)
 }
 
 // loadRegistry validates the policy directories and reads the exclusion registry.
@@ -155,7 +170,7 @@ func (r runtimeComposition) privacyOwner(ctx context.Context, req sessioncapture
 	if root == "" {
 		return nil, errors.New("source outside configured inventory")
 	}
-	st, err := os.Lstat(req.Path)
+	st, err := r.lstat(req.Path)
 	if err == nil && st.IsDir() && req.Role == "" {
 		return nil, nil
 	}

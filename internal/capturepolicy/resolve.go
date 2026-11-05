@@ -24,7 +24,11 @@ type Resolution struct {
 // Resolve walks path components without cleaning away .. before following symlinks. Each
 // symlink replacement records its full path with the remaining suffix, not just the final leaf.
 // Missing, unreadable, cyclic and excessively long chains return an error: callers must not read.
-func Resolve(path string) (Resolution, error) {
+func Resolve(path string) (Resolution, error) { return ResolveWith(path, liveFS{}) }
+
+// ResolveWith is Resolve over an injected filesystem view (see FSMemo). The walk, the
+// symlink-cycle detection and every recorded identity are the same for any view.
+func ResolveWith(path string, fsys Filesystem) (Resolution, error) {
 	if !filepath.IsAbs(path) {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -51,7 +55,7 @@ func Resolve(path string) (Resolution, error) {
 		}
 		candidate := filepath.Join(dest, part)
 		result.record(remainingPath(candidate, pending))
-		st, err := os.Lstat(candidate)
+		st, err := fsys.Lstat(candidate)
 		if err != nil {
 			return result, fmt.Errorf("capturepolicy: resolve: %w", err)
 		}
@@ -69,7 +73,7 @@ func Resolve(path string) (Resolution, error) {
 		}
 		seen[identity] = true
 		links++
-		target, err := os.Readlink(candidate)
+		target, err := fsys.Readlink(candidate)
 		if err != nil {
 			return result, fmt.Errorf("capturepolicy: read symlink: %w", err)
 		}
