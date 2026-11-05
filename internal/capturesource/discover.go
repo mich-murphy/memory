@@ -49,10 +49,15 @@ type Options struct {
 	// MaxDepth bounds open directory handles per root.
 	EntriesPerRoot, MaxDepth int
 	Cursor                   *Cursor
-	fdDepth                  int
-	allow                    *allowMemo
-	roots                    []Root
-	Now                      func() time.Time
+	// Filesystem is the metadata view of one Discover call: every Lstat and Readlink of
+	// the policy resolution and the walk is shared through it. A caller that supplies one
+	// (the runtime, which shares it with its policy) must give each call a fresh one.
+	// Nil makes Discover create its own; one-shot callers evaluate live.
+	Filesystem *capturepolicy.FSMemo
+	fdDepth    int
+	allow      *allowMemo
+	roots      []Root
+	Now        func() time.Time
 }
 
 // Issue intentionally contains no OS error messages or source contents. Path is
@@ -130,6 +135,7 @@ func Discover(ctx context.Context, opts Options) (Result, error) {
 	}
 	// One decision memo per call; it is never stored in the caller's Options.
 	opts.allow = newAllowMemo()
+	ensureFilesystem(&opts)
 	if opts.Coordinates != nil {
 		return discoverCoordinates(ctx, opts)
 	}
@@ -187,6 +193,13 @@ func Discover(ctx context.Context, opts Options) (Result, error) {
 	return out, nil
 }
 
+// ensureFilesystem gives the call its own metadata memo unless the caller supplied one.
+func ensureFilesystem(opts *Options) {
+	if opts.Filesystem == nil {
+		opts.Filesystem = capturepolicy.NewFSMemo()
+	}
+}
+
 func rootsFor(opts Options) ([]Root, error) {
 	roots := append([]Root(nil), opts.Roots...)
 	if !opts.OnlyRoots {
@@ -241,7 +254,11 @@ func evaluateAllowed(ctx context.Context, opts Options, policy *capturepolicy.Po
 	if opts.Policy(ctx, Scope{Root: r, Path: path, Identities: []string{path}}) != nil {
 		return false
 	}
-	resolution, err := capturepolicy.Resolve(path)
+	resolve := capturepolicy.Resolve
+	if opts.Filesystem != nil {
+		resolve = opts.Filesystem.Resolve
+	}
+	resolution, err := resolve(path)
 	excluded := policy.Excludes(resolution.Identities)
 	if opts.Derived && filepath.Base(path) == ".claude.json" && scrub.Recognizes(path) {
 		excluded = policy.ExcludesClaudeConfig(resolution.Identities)
@@ -320,7 +337,7 @@ func visit(ctx context.Context, opts Options, policy *capturepolicy.Policy, w *w
 		w.stack = append(w.stack, frame{path, f})
 		return
 	}
-	info, err := e.Info()
+	info, err := entryInfo(opts, e, path)
 	if err != nil {
 		gap(w, path, "source_unreadable", out)
 		return
@@ -335,6 +352,14 @@ func visit(ctx context.Context, opts Options, policy *capturepolicy.Policy, w *w
 		return
 	}
 	out.Requests = append(out.Requests, q)
+}
+
+// entryInfo is the entry's Lstat, shared with the policy resolution of the same call.
+func entryInfo(opts Options, e os.DirEntry, path string) (os.FileInfo, error) {
+	if opts.Filesystem == nil {
+		return e.Info()
+	}
+	return opts.Filesystem.Lstat(path)
 }
 
 func gap(w *walk, path, code string, out *Result) {

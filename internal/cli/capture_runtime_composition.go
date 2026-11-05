@@ -18,6 +18,10 @@ type runtimeComposition struct {
 	// ownerLookup replaces the live queue ownership reader: a per-call memo in a
 	// discovery snapshot, a counting reader in tests. Nil selects the live reader.
 	ownerLookup ownerLookupFunc
+	// fsMemo is the metadata view of one discovery call, set only on the per-call
+	// copy made by callOptions; nil means live. fsBase is a test seam under it.
+	fsMemo *capturepolicy.FSMemo
+	fsBase capturepolicy.Filesystem
 }
 
 func newRuntimeComposition(c capturedaemon.Config) (runtimeComposition, error) {

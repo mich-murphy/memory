@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/mich-murphy/memory/internal/capturepolicy"
 	"github.com/mich-murphy/memory/internal/capturesource"
 	"github.com/mich-murphy/memory/internal/sessioncapture"
 )
@@ -58,12 +59,15 @@ func (r runtimeComposition) owners() ownerLookupFunc {
 	}
 }
 
-// callOptions returns opts for exactly one Discover call: one policy snapshot and
-// one ownership memo shared by the discovery LookupOwner and the privacy owner
+// callOptions returns opts for exactly one Discover call: one policy snapshot, one
+// filesystem metadata memo (shared by Discover, the snapshot resolve and the owner
+// leaf Lstat) and one ownership memo shared by the discovery LookupOwner and the privacy owner
 // reached through the policy. Capture-time checks keep the live reader.
 func (r runtimeComposition) callOptions(opts capturesource.Options) capturesource.Options {
 	call := r
 	call.ownerLookup = newOwnershipMemo(r.owners()).lookup
+	call.fsMemo = capturepolicy.NewFSMemoOver(r.fsBase)
+	opts.Filesystem = call.fsMemo
 	owners := call.owners()
 	opts.LookupOwner = func(ctx context.Context, root capturesource.Root, uuid string) (string, string, error) {
 		return owners(ctx, root.Agent, root.Path, uuid)
