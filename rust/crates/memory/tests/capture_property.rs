@@ -378,16 +378,16 @@ fn read_chain(store: &FakeStore, owner: &Owner) -> R<Option<Chain>> {
 fn reassemble(store: &FakeStore, record: &EpochRecord) -> R<Vec<u8>> {
     let mut out: Vec<u8> = Vec::new();
     for piece in &record.pieces {
-        let stored = need(store.peek(&piece.object), "piece object missing")?;
+        let stored = need(store.peek(piece.object()), "piece object missing")?;
         ensure(
-            sha(stored) == piece.encoded_sha256 && len64(stored) == piece.encoded_len,
+            sha(stored) == piece.encoded_sha256() && len64(stored) == piece.encoded_len(),
             "descriptor differs from stored encoding",
         )?;
         ensure(
-            sha(stored) == piece.sha256 && len64(stored) == piece.len,
+            sha(stored) == piece.sha256() && len64(stored) == piece.len(),
             "piece bytes differ from descriptor",
         )?;
-        ensure(len64(&out) == piece.offset.get(), "piece offset gap")?;
+        ensure(len64(&out) == piece.offset().get(), "piece offset gap")?;
         out.extend_from_slice(stored);
     }
     ensure(

@@ -127,7 +127,7 @@ fn stamp(n: u32, rules: Option<u64>) -> EpochStamp {
     }
 }
 fn piece(c: u64, off: u64, len: u64) -> Piece {
-    Piece::new(Offset::new(off), len, h(c), 1 + c % 50, h(c + 1_000_000))
+    raw_piece(Offset::new(off), len, h(c), 1 + c % 50, h(c + 1_000_000))
 }
 fn kind_of(append: bool) -> SourceKind {
     if append {
@@ -1236,7 +1236,7 @@ fn r2_race(seed: u64) -> R {
     let len = 1 + seed % 1000;
     let mut manifests = Vec::new();
     for (owner, enc) in [(session_owner()?, a), (shared_owner()?, b)] {
-        let own = Piece::new(
+        let own = raw_piece(
             Offset::new(0),
             len,
             raw,
@@ -1245,11 +1245,16 @@ fn r2_race(seed: u64) -> R {
         );
         let adopted = own.clone().adopt_stored(&winner);
         assert_eq!(
-            (adopted.offset, adopted.len, adopted.sha256, &adopted.object),
-            (own.offset, own.len, own.sha256, &own.object)
+            (
+                adopted.offset(),
+                adopted.len(),
+                adopted.sha256(),
+                &adopted.object()
+            ),
+            (own.offset(), own.len(), own.sha256(), &own.object())
         );
         assert_eq!(
-            (adopted.encoded_len, adopted.encoded_sha256),
+            (adopted.encoded_len(), adopted.encoded_sha256()),
             (winner.encoded_len, winner.encoded_sha256)
         );
         let write = swrite("t", true, stamp(1, None), len, raw, vec![adopted])?;
@@ -1349,7 +1354,7 @@ fn state_view(state: &OwnerState) -> View {
                     let pieces = r
                         .pieces
                         .iter()
-                        .map(|p| (p.offset.get(), p.len, p.sha256))
+                        .map(|p| (p.offset().get(), p.len(), p.sha256()))
                         .collect();
                     (r.epoch.clone(), r.size, r.sha256, pieces)
                 })
@@ -1414,8 +1419,11 @@ fn gen_change(
         let (pieces, end) = fresh(rng, ctr, last.size);
         last.size = end;
         last.whole = whole;
-        last.pieces
-            .extend(pieces.iter().map(|p| (p.offset.get(), p.len, p.sha256)));
+        last.pieces.extend(
+            pieces
+                .iter()
+                .map(|p| (p.offset().get(), p.len(), p.sha256())),
+        );
         let epoch = last.stamp.clone();
         return Ok(Change::Extend(swrite(
             &name, true, epoch, end, whole, pieces,
@@ -1434,7 +1442,7 @@ fn gen_change(
         whole,
         pieces: pieces
             .iter()
-            .map(|p| (p.offset.get(), p.len, p.sha256))
+            .map(|p| (p.offset().get(), p.len(), p.sha256()))
             .collect(),
     };
     match model.get_mut(&name) {
@@ -1552,17 +1560,17 @@ fn history_shapes(
         match &built.manifest {
             Manifest::Delta(d) => {
                 assert_ne!(seq % 64, 0);
-                assert_eq!(Some(d.previous), prev_hash);
-                assert_eq!(hashes.get(cp_seq).copied(), Some(d.checkpoint));
+                assert_eq!(Some(d.previous()), prev_hash);
+                assert_eq!(hashes.get(cp_seq).copied(), Some(d.checkpoint()));
                 assert_eq!(projection.kind, ProjectedKind::Delta);
                 assert_eq!(
                     (projection.previous, projection.checkpoint),
-                    (prev_hash, Some(d.checkpoint))
+                    (prev_hash, Some(d.checkpoint()))
                 );
             }
             Manifest::Checkpoint(c) => {
                 assert_eq!(seq % 64, 0);
-                assert_eq!(c.previous, prev_hash);
+                assert_eq!(c.previous(), prev_hash);
                 assert_eq!(projection.kind, ProjectedKind::Checkpoint);
                 assert_eq!(
                     (projection.previous, projection.checkpoint),
@@ -1570,14 +1578,14 @@ fn history_shapes(
                 );
                 stats.push(Stat {
                     pieces: c
-                        .sources
+                        .sources()
                         .iter()
                         .flat_map(|x| &x.epochs)
                         .map(|e| e.pieces.len())
                         .sum(),
                 });
                 // Snapshot-class sources keep only the latest epoch in checkpoints.
-                for src in &c.sources {
+                for src in c.sources() {
                     if src.class == SourceClass::Snapshot {
                         assert_eq!(src.epochs.len(), 1);
                     }
@@ -1727,4 +1735,25 @@ fn property6_coverage_guard_negative_controls_bite() {
     let small = Shapes::new();
     assert!(history_shapes(1, 2, 1, &small).is_ok());
     assert!(require_all_shapes(&small.counts(true)).is_err());
+}
+
+#[expect(
+    clippy::panic,
+    reason = "test fixture: a literal piece that fails to parse is a broken test, not a runtime path"
+)]
+fn raw_piece(
+    offset: Offset,
+    len: u64,
+    sha: Sha256,
+    encoded_len: u64,
+    encoded_sha: Sha256,
+) -> Piece {
+    let h = String::from(sha);
+    let v = serde_json::json!({"offset": offset.get(), "len": len, "sha256": h,
+        "object": format!("objects/{h}.zst"), "encoding": "zstd-3",
+        "encoded_len": encoded_len, "encoded_sha256": String::from(encoded_sha)});
+    match serde_json::from_value(v) {
+        Ok(p) => p,
+        Err(_) => panic!("piece"),
+    }
 }

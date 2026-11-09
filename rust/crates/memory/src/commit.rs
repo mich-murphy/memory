@@ -201,8 +201,8 @@ pub fn disposition_paced(
 /// [`Failure::Invalid`] with [`ManifestError::BadLink`] on a mismatch.
 pub fn check_fence(manifest: &Manifest, named: Option<Sha256>) -> Result<(), Failure> {
     let previous = match manifest {
-        Manifest::Delta(d) => Some(d.previous),
-        Manifest::Checkpoint(c) => c.previous,
+        Manifest::Delta(d) => Some(d.previous()),
+        Manifest::Checkpoint(c) => c.previous(),
     };
     if previous == named {
         Ok(())
@@ -242,7 +242,7 @@ fn adopt_winner(changes: &mut [Change], winners: &BTreeMap<String, StoredEncodin
     for change in changes {
         if let Change::Extend(w) | Change::Epoch(w) | Change::Replace(w) = change {
             for piece in &mut w.pieces {
-                if let Some(winner) = winners.get(&piece.object) {
+                if let Some(winner) = winners.get(piece.object()) {
                     *piece = piece.clone().adopt_stored(winner);
                 }
             }

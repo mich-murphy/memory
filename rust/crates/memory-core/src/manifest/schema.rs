@@ -1,128 +1,14 @@
-//! Pure `memory.manifest/1` and `memory.current/1` (DESIGN.md sections 5, 6.3-6.5, 7.4).
-//!
-//! No I/O. Published digests and offsets are over the TRANSFORMED bytes (R1). A piece
-//! descriptor must describe the encoding actually stored under its object key (R2, see
-//! [`Piece::adopt_stored`] and [`Manifest::verify_encodings`]). Checkpoints are not bounded
-//! in size by 64 pieces (R3); only the number of manifest GETs is bounded. Envelope dispatch
-//! comes first (R5): a newer or unknown schema is a typed error, never a generic parse
-//! failure, and [`recover_projection`] reads position fields only.
-//!
-//! Types deserialize with `deny_unknown_fields`; call [`parse_manifest`] (duplicate keys,
-//! schema dispatch, structural validation) rather than raw `serde_json` on untrusted bytes.
-use crate::domain::{
-    CommitOutcome, EpochPosition, Offset, Owner, OwnerParkReason, RulesDigest, Sha256, SourceClass,
-    SourceId, SourceKind,
-};
-use crate::privacy::SanitizedLaunch;
+use super::state::SourceEntry;
+use super::{CHECKPOINT_INTERVAL, ManifestError};
+use crate::domain::{Offset, Owner, RulesDigest, Sha256, SourceClass, SourceId, SourceKind};
+use crate::privacy::{AuthorizedBody, SanitizedLaunch};
 use schemars::JsonSchema;
 use serde::de::{self, DeserializeOwned, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256 as Hasher};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-/// Every manifest whose `seq` is a multiple of this is a checkpoint.
-pub const CHECKPOINT_INTERVAL: u64 = 64;
 const DUPLICATE: &str = "duplicate key";
-
-/// Closed failure reasons. Never carries input text (parser messages can echo secrets).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum ManifestError {
-    /// Not valid JSON of the expected shape.
-    #[error("malformed document")]
-    Malformed,
-    /// A JSON object repeats a key.
-    #[error("duplicate key")]
-    DuplicateKey,
-    /// Schema string of this family that is not understood and not newer.
-    #[error("unknown schema")]
-    UnknownSchema,
-    /// Schema string of a newer version of this family.
-    #[error("newer schema")]
-    NewerSchema,
-    /// `seq` inconsistent with the manifest kind or the chain.
-    #[error("bad seq")]
-    BadSeq,
-    /// `previous` or `checkpoint` link inconsistent.
-    #[error("bad link")]
-    BadLink,
-    /// Timestamp is not `YYYY-MM-DDTHH:MM:SSZ`.
-    #[error("bad timestamp")]
-    BadTimestamp,
-    /// Token text empty, too long or not printable ASCII.
-    #[error("bad text")]
-    BadText,
-    /// Source path empty, absolute, traversing or too long.
-    #[error("bad path")]
-    BadPath,
-    /// Launch record count, digest or uniqueness violation.
-    #[error("bad launch")]
-    BadLaunch,
-    /// Piece with zero length or zero encoded length, or an empty extend.
-    #[error("bad piece")]
-    BadPiece,
-    /// Object key is not `objects/<piece sha256>.zst`.
-    #[error("bad object key")]
-    BadObjectKey,
-    /// Piece ranges leave a gap.
-    #[error("piece gap")]
-    Gap,
-    /// Piece ranges overlap.
-    #[error("piece overlap")]
-    Overlap,
-    /// Offset arithmetic overflow.
-    #[error("offset overflow")]
-    Overflow,
-    /// Operation does not match the source class.
-    #[error("op/class mismatch")]
-    OpClassMismatch,
-    /// `size` is not the end of the last piece.
-    #[error("size mismatch")]
-    SizeMismatch,
-    /// Duplicate (or, in checkpoints, unsorted) source ids.
-    #[error("duplicate source")]
-    DuplicateSource,
-    /// Epoch numbering or stamp inconsistent.
-    #[error("bad epoch")]
-    BadEpoch,
-    /// Change references a source with no state.
-    #[error("missing source")]
-    MissingSource,
-    /// Change not legal for a deleted (or already deleted) source.
-    #[error("source deleted")]
-    SourceDeleted,
-    /// Kind, path or class of an existing source changed.
-    #[error("source identity changed")]
-    SourceChanged,
-    /// A reader chain longer than 64 manifests.
-    #[error("too many manifest steps")]
-    TooManySteps,
-    /// Manifests of one chain name different owners.
-    #[error("owner mismatch")]
-    OwnerMismatch,
-    /// Chain does not start with a checkpoint followed only by deltas.
-    #[error("broken chain")]
-    BrokenChain,
-    /// Piece object not present in the store model.
-    #[error("missing object")]
-    MissingObject,
-    /// Descriptor differs from the encoding stored under its key (R2).
-    #[error("encoding mismatch")]
-    EncodingMismatch,
-    /// Serialization failed.
-    #[error("encode failure")]
-    Encode,
-}
-
-impl ManifestError {
-    /// Owner park reason for an error that must park rather than retry.
-    pub fn park_reason(&self) -> Option<OwnerParkReason> {
-        matches!(self, Self::NewerSchema).then_some(OwnerParkReason::NewerRemoteSchema)
-    }
-    /// Commit outcome for a verification GET whose manifest cannot be understood.
-    pub fn commit_outcome(&self) -> Option<CommitOutcome> {
-        matches!(self, Self::NewerSchema).then_some(CommitOutcome::NewerSchema)
-    }
-}
 
 /// SHA-256 of serialized manifest bytes: the manifest's identity and request id.
 pub fn manifest_hash(bytes: &[u8]) -> Sha256 {
@@ -193,7 +79,7 @@ pub fn check_no_duplicate_keys(bytes: &[u8]) -> Result<(), ManifestError> {
     de.end().map_err(|_| ManifestError::Malformed)
 }
 
-fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, ManifestError> {
+pub(super) fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, ManifestError> {
     serde_json::from_slice(bytes).map_err(|_| ManifestError::Malformed)
 }
 
@@ -232,7 +118,7 @@ struct Envelope {
     schema: String,
 }
 
-fn preflight(bytes: &[u8], family: &str) -> Result<(), ManifestError> {
+pub(super) fn preflight(bytes: &[u8], family: &str) -> Result<(), ManifestError> {
     check_no_duplicate_keys(bytes)?;
     let envelope: Envelope = decode(bytes)?;
     match classify_schema(family, &envelope.schema) {
@@ -344,7 +230,7 @@ pub struct Writer {
     pub commit: String,
 }
 impl Writer {
-    fn validate(&self) -> Result<(), ManifestError> {
+    pub(super) fn validate(&self) -> Result<(), ManifestError> {
         token(&self.name, 64)?;
         token(&self.version, 64)?;
         token(&self.commit, 64)
@@ -374,7 +260,7 @@ pub struct EpochStamp {
     pub rules: Option<RulesDigest>,
 }
 impl EpochStamp {
-    fn validate(&self) -> Result<(), ManifestError> {
+    pub(super) fn validate(&self) -> Result<(), ManifestError> {
         token(&self.writer.version, 64)?;
         token(&self.writer.commit, 64)
     }
@@ -408,38 +294,87 @@ pub fn object_key(raw: &Sha256) -> String {
 #[serde(deny_unknown_fields)]
 pub struct Piece {
     /// Start offset in the transformed stream.
-    pub offset: Offset,
+    offset: Offset,
     /// Length in bytes.
-    pub len: u64,
+    len: u64,
     /// SHA-256 of the raw (transformed, unencoded) piece bytes.
-    pub sha256: Sha256,
+    sha256: Sha256,
     /// Object key, `objects/<sha256>.zst`.
-    pub object: String,
+    object: String,
     /// Encoding of the stored object.
-    pub encoding: Encoding,
+    encoding: Encoding,
     /// Stored length.
-    pub encoded_len: u64,
+    encoded_len: u64,
     /// SHA-256 of the stored bytes.
-    pub encoded_sha256: Sha256,
+    encoded_sha256: Sha256,
 }
+/// Piece fields are private. Local construction is [`Piece::from_authorized`] only, which hashes
+/// the bytes of an authorized body itself; the other path is deserialising a remote manifest.
+/// ```compile_fail
+/// let _ = memory_core::manifest::Piece::new;
+/// ```
 impl Piece {
-    /// Describe a piece with the canonical object key and encoding.
-    pub fn new(
-        offset: Offset,
-        len: u64,
-        sha256: Sha256,
-        encoded_len: u64,
-        encoded_sha256: Sha256,
-    ) -> Self {
-        Self {
-            offset,
+    /// Describe `body[start..end]` of an authorized body. The digests and length are computed
+    /// here from the authorized bytes; the caller supplies no digest. Encoding is the identity
+    /// until zstd lands, so the encoded fields equal the raw ones (see [`Piece::adopt_stored`]).
+    ///
+    /// # Errors
+    /// [`ManifestError::BadPiece`] for an empty or out-of-range slice,
+    /// [`ManifestError::Overflow`] if an offset does not fit in `u64`.
+    pub fn from_authorized(
+        body: &AuthorizedBody,
+        start: usize,
+        end: usize,
+    ) -> Result<Self, ManifestError> {
+        let chunk = body
+            .bytes()
+            .get(start..end)
+            .filter(|c| !c.is_empty())
+            .ok_or(ManifestError::BadPiece)?;
+        let sha256 = manifest_hash(chunk);
+        let len = u64::try_from(chunk.len()).map_err(|_| ManifestError::Overflow)?;
+        let offset = u64::try_from(start).map_err(|_| ManifestError::Overflow)?;
+        Ok(Self {
+            offset: Offset::new(offset),
             len,
             sha256,
             object: object_key(&sha256),
             encoding: Encoding::Zstd3,
-            encoded_len,
-            encoded_sha256,
-        }
+            encoded_len: len,
+            encoded_sha256: sha256,
+        })
+    }
+    /// Start offset in the transformed stream.
+    pub fn offset(&self) -> Offset {
+        self.offset
+    }
+    /// Length in bytes.
+    pub fn len(&self) -> u64 {
+        self.len
+    }
+    /// Pieces are never empty once validated.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+    /// SHA-256 of the raw piece bytes.
+    pub fn sha256(&self) -> Sha256 {
+        self.sha256
+    }
+    /// Object key.
+    pub fn object(&self) -> &str {
+        &self.object
+    }
+    /// Encoding of the stored object.
+    pub fn encoding(&self) -> Encoding {
+        self.encoding
+    }
+    /// Stored length.
+    pub fn encoded_len(&self) -> u64 {
+        self.encoded_len
+    }
+    /// SHA-256 of the stored bytes.
+    pub fn encoded_sha256(&self) -> Sha256 {
+        self.encoded_sha256
     }
     /// Replace the encoding fields by the encoding that won the `If-None-Match` race (R2).
     #[must_use]
@@ -448,7 +383,7 @@ impl Piece {
         self.encoded_sha256 = stored.encoded_sha256;
         self
     }
-    fn validate(&self) -> Result<Offset, ManifestError> {
+    pub(super) fn validate(&self) -> Result<Offset, ManifestError> {
         if self.len == 0 || self.encoded_len == 0 {
             return Err(ManifestError::BadPiece);
         }
@@ -523,7 +458,7 @@ impl LaunchRecord {
     pub fn env(&self) -> &BTreeMap<String, String> {
         &self.env
     }
-    fn validate(&self) -> Result<(), ManifestError> {
+    pub(super) fn validate(&self) -> Result<(), ManifestError> {
         if self.argv.len() > 32
             || self.env.len() > 8
             || launch_digest(&self.argv, &self.env)? != self.digest
@@ -598,7 +533,7 @@ impl SourceWrite {
         }
         Ok(())
     }
-    fn record(&self) -> EpochRecord {
+    pub(super) fn record(&self) -> EpochRecord {
         EpochRecord {
             epoch: self.epoch.clone(),
             size: self.size,
@@ -606,7 +541,7 @@ impl SourceWrite {
             pieces: self.pieces.clone(),
         }
     }
-    fn entry(&self) -> SourceEntry {
+    pub(super) fn entry(&self) -> SourceEntry {
         SourceEntry {
             kind: self.kind.clone(),
             path: self.path.clone(),
@@ -645,7 +580,7 @@ impl Change {
             Self::Deleted { id, .. } => id,
         }
     }
-    fn validate(&self) -> Result<(), ManifestError> {
+    pub(super) fn validate(&self) -> Result<(), ManifestError> {
         match self {
             Self::Extend(w) => w.check(Op::Extend),
             Self::Epoch(w) => w.check(Op::Epoch),
@@ -669,7 +604,7 @@ pub struct EpochRecord {
     pub pieces: Vec<Piece>,
 }
 impl EpochRecord {
-    fn validate(&self) -> Result<(), ManifestError> {
+    pub(super) fn validate(&self) -> Result<(), ManifestError> {
         self.epoch.validate()?;
         if check_run(&self.pieces, true)? != self.size {
             return Err(ManifestError::SizeMismatch);
@@ -697,7 +632,7 @@ pub struct CheckpointSource {
     pub deleted_at: Option<Timestamp>,
 }
 impl CheckpointSource {
-    fn validate(&self) -> Result<(), ManifestError> {
+    pub(super) fn validate(&self) -> Result<(), ManifestError> {
         check_path(&self.path)?;
         if self.epochs.is_empty() || (self.class == SourceClass::Snapshot && self.epochs.len() != 1)
         {
@@ -733,26 +668,82 @@ pub enum ManifestSchema {
 #[serde(deny_unknown_fields)]
 pub struct Delta {
     /// Schema tag.
-    pub schema: ManifestSchema,
+    schema: ManifestSchema,
     /// Chain owner.
-    pub owner: Owner,
+    owner: Owner,
     /// Sequence number, never a multiple of 64.
-    pub seq: u64,
+    seq: u64,
     /// Hash of manifest `seq - 1`.
-    pub previous: Sha256,
+    previous: Sha256,
     /// Hash of the latest checkpoint manifest (`seq - seq % 64`).
-    pub checkpoint: Sha256,
+    checkpoint: Sha256,
     /// Capture time.
-    pub captured_at: Timestamp,
+    captured_at: Timestamp,
     /// Writer stamp.
-    pub writer: Writer,
+    writer: Writer,
     /// Launch evidence.
-    pub launch: Vec<LaunchRecord>,
+    launch: Vec<LaunchRecord>,
     /// Changes, at most one per source.
-    pub changes: Vec<Change>,
+    changes: Vec<Change>,
 }
 impl Delta {
-    fn validate(&self) -> Result<(), ManifestError> {
+    /// Assemble a delta; validated by the builder and by parsing, never by the caller.
+    #[expect(clippy::too_many_arguments)]
+    pub(super) fn new(
+        owner: Owner,
+        seq: u64,
+        previous: Sha256,
+        checkpoint: Sha256,
+        captured_at: Timestamp,
+        writer: Writer,
+        launch: Vec<LaunchRecord>,
+        changes: Vec<Change>,
+    ) -> Self {
+        Self {
+            schema: ManifestSchema::V1,
+            owner,
+            seq,
+            previous,
+            checkpoint,
+            captured_at,
+            writer,
+            launch,
+            changes,
+        }
+    }
+    /// Chain owner.
+    pub fn owner(&self) -> &Owner {
+        &self.owner
+    }
+    /// Sequence number.
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+    /// Hash of manifest `seq - 1`.
+    pub fn previous(&self) -> Sha256 {
+        self.previous
+    }
+    /// Hash of the latest checkpoint.
+    pub fn checkpoint(&self) -> Sha256 {
+        self.checkpoint
+    }
+    /// Capture time.
+    pub fn captured_at(&self) -> &Timestamp {
+        &self.captured_at
+    }
+    /// Writer stamp.
+    pub fn writer(&self) -> &Writer {
+        &self.writer
+    }
+    /// Launch evidence.
+    pub fn launch(&self) -> &[LaunchRecord] {
+        &self.launch
+    }
+    /// Changes.
+    pub fn changes(&self) -> &[Change] {
+        &self.changes
+    }
+    pub(super) fn validate(&self) -> Result<(), ManifestError> {
         if self.seq.is_multiple_of(CHECKPOINT_INTERVAL) {
             return Err(ManifestError::BadSeq);
         }
@@ -773,24 +764,73 @@ impl Delta {
 #[serde(deny_unknown_fields)]
 pub struct Checkpoint {
     /// Schema tag.
-    pub schema: ManifestSchema,
+    schema: ManifestSchema,
     /// Chain owner.
-    pub owner: Owner,
+    owner: Owner,
     /// Sequence number, a multiple of 64.
-    pub seq: u64,
+    seq: u64,
     /// Hash of manifest `seq - 1`; absent only at seq 0.
-    pub previous: Option<Sha256>,
+    previous: Option<Sha256>,
     /// Capture time.
-    pub captured_at: Timestamp,
+    captured_at: Timestamp,
     /// Writer stamp.
-    pub writer: Writer,
+    writer: Writer,
     /// Launch evidence.
-    pub launch: Vec<LaunchRecord>,
+    launch: Vec<LaunchRecord>,
     /// Sources sorted by id, unique.
-    pub sources: Vec<CheckpointSource>,
+    sources: Vec<CheckpointSource>,
 }
 impl Checkpoint {
-    fn validate(&self) -> Result<(), ManifestError> {
+    /// Assemble a checkpoint; validated by the builder and by parsing, never by the caller.
+    pub(super) fn new(
+        owner: Owner,
+        seq: u64,
+        previous: Option<Sha256>,
+        captured_at: Timestamp,
+        writer: Writer,
+        launch: Vec<LaunchRecord>,
+        sources: Vec<CheckpointSource>,
+    ) -> Self {
+        Self {
+            schema: ManifestSchema::V1,
+            owner,
+            seq,
+            previous,
+            captured_at,
+            writer,
+            launch,
+            sources,
+        }
+    }
+    /// Chain owner.
+    pub fn owner(&self) -> &Owner {
+        &self.owner
+    }
+    /// Sequence number.
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+    /// Hash of manifest `seq - 1`; absent only at seq 0.
+    pub fn previous(&self) -> Option<Sha256> {
+        self.previous
+    }
+    /// Capture time.
+    pub fn captured_at(&self) -> &Timestamp {
+        &self.captured_at
+    }
+    /// Writer stamp.
+    pub fn writer(&self) -> &Writer {
+        &self.writer
+    }
+    /// Launch evidence.
+    pub fn launch(&self) -> &[LaunchRecord] {
+        &self.launch
+    }
+    /// Sources sorted by id.
+    pub fn sources(&self) -> &[CheckpointSource] {
+        &self.sources
+    }
+    pub(super) fn validate(&self) -> Result<(), ManifestError> {
         if !self.seq.is_multiple_of(CHECKPOINT_INTERVAL) {
             return Err(ManifestError::BadSeq);
         }
@@ -949,541 +989,4 @@ impl Current {
 pub fn parse_current(bytes: &[u8]) -> Result<Current, ManifestError> {
     preflight(bytes, "memory.current/")?;
     decode(bytes)
-}
-
-// ---------------------------------------------------------------- owner state
-
-/// Retained state of one source.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceEntry {
-    /// Source kind.
-    pub kind: SourceKind,
-    /// Root-relative path.
-    pub path: String,
-    /// Source class.
-    pub class: SourceClass,
-    /// Append: every epoch. Snapshot: the latest only.
-    pub epochs: Vec<EpochRecord>,
-    /// Deletion time, cleared when a new epoch starts.
-    pub deleted_at: Option<Timestamp>,
-}
-impl SourceEntry {
-    fn same_identity(&self, w: &SourceWrite) -> Result<(), ManifestError> {
-        if self.kind == w.kind && self.path == w.path && self.class == w.class {
-            Ok(())
-        } else {
-            Err(ManifestError::SourceChanged)
-        }
-    }
-}
-
-/// Retained state of an owner: the fold of a checkpoint and the deltas after it.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct OwnerState {
-    /// Sources by id.
-    pub sources: BTreeMap<SourceId, SourceEntry>,
-}
-impl OwnerState {
-    /// State listed by a checkpoint.
-    pub fn from_checkpoint(checkpoint: &Checkpoint) -> Self {
-        Self {
-            sources: checkpoint
-                .sources
-                .iter()
-                .map(|s| {
-                    (
-                        s.id.clone(),
-                        SourceEntry {
-                            kind: s.kind.clone(),
-                            path: s.path.clone(),
-                            class: s.class.clone(),
-                            epochs: s.epochs.clone(),
-                            deleted_at: s.deleted_at.clone(),
-                        },
-                    )
-                })
-                .collect(),
-        }
-    }
-    /// Checkpoint listing of this state, sorted by id.
-    pub fn to_checkpoint_sources(&self) -> Vec<CheckpointSource> {
-        self.sources
-            .iter()
-            .map(|(id, e)| CheckpointSource {
-                id: id.clone(),
-                kind: e.kind.clone(),
-                path: e.path.clone(),
-                class: e.class.clone(),
-                epochs: e.epochs.clone(),
-                deleted_at: e.deleted_at.clone(),
-            })
-            .collect()
-    }
-    /// Apply one manifest's changes atomically (state unchanged on error).
-    ///
-    /// # Errors
-    /// Any structural or state-transition violation.
-    pub fn apply_changes(&mut self, changes: &[Change]) -> Result<(), ManifestError> {
-        let mut seen = HashSet::new();
-        for change in changes {
-            change.validate()?;
-            if !seen.insert(change.id()) {
-                return Err(ManifestError::DuplicateSource);
-            }
-        }
-        let mut next = self.clone();
-        for change in changes {
-            next.apply_one(change)?;
-        }
-        *self = next;
-        Ok(())
-    }
-    fn apply_one(&mut self, change: &Change) -> Result<(), ManifestError> {
-        match change {
-            Change::Extend(w) => {
-                let entry = self
-                    .sources
-                    .get_mut(&w.id)
-                    .ok_or(ManifestError::MissingSource)?;
-                entry.same_identity(w)?;
-                if entry.deleted_at.is_some() {
-                    return Err(ManifestError::SourceDeleted);
-                }
-                let last = entry.epochs.last_mut().ok_or(ManifestError::BadEpoch)?;
-                if last.epoch != w.epoch {
-                    return Err(ManifestError::BadEpoch);
-                }
-                let first = w.pieces.first().ok_or(ManifestError::BadPiece)?;
-                match first.offset.get().cmp(&last.size) {
-                    std::cmp::Ordering::Less => return Err(ManifestError::Overlap),
-                    std::cmp::Ordering::Greater => return Err(ManifestError::Gap),
-                    std::cmp::Ordering::Equal => {}
-                }
-                last.size = w.size;
-                last.sha256 = w.sha256;
-                last.pieces.extend(w.pieces.iter().cloned());
-                Ok(())
-            }
-            Change::Epoch(w) | Change::Replace(w) => {
-                let replace = matches!(change, Change::Replace(_));
-                match self.sources.get_mut(&w.id) {
-                    None => {
-                        self.sources.insert(w.id.clone(), w.entry());
-                    }
-                    Some(entry) => {
-                        entry.same_identity(w)?;
-                        let next = entry
-                            .epochs
-                            .last()
-                            .and_then(|l| l.epoch.n.checked_add(1))
-                            .ok_or(ManifestError::BadEpoch)?;
-                        if w.epoch.n != next {
-                            return Err(ManifestError::BadEpoch);
-                        }
-                        if replace {
-                            entry.epochs.clear();
-                        }
-                        entry.epochs.push(w.record());
-                        entry.deleted_at = None;
-                    }
-                }
-                Ok(())
-            }
-            Change::Deleted {
-                id,
-                kind,
-                deleted_at,
-            } => {
-                let entry = self
-                    .sources
-                    .get_mut(id)
-                    .ok_or(ManifestError::MissingSource)?;
-                if entry.kind != *kind {
-                    return Err(ManifestError::SourceChanged);
-                }
-                if entry.deleted_at.is_some() {
-                    return Err(ManifestError::SourceDeleted);
-                }
-                entry.deleted_at = Some(deleted_at.clone());
-                Ok(())
-            }
-        }
-    }
-}
-
-// ---------------------------------------------------------------- builder
-
-/// Position of the latest committed manifest of a chain.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Position {
-    /// Sequence number.
-    pub seq: u64,
-    /// Hash of this manifest.
-    pub manifest: Sha256,
-    /// Hash of the latest checkpoint at or before it.
-    pub checkpoint: Sha256,
-}
-
-/// Fields of a manifest that do not depend on the chain position.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Header {
-    /// Chain owner.
-    pub owner: Owner,
-    /// Capture time.
-    pub captured_at: Timestamp,
-    /// Writer stamp.
-    pub writer: Writer,
-    /// Pending launch records.
-    pub launch: Vec<LaunchRecord>,
-}
-
-/// Result of [`build`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Built {
-    /// Canonical bytes to PUT as `manifests/<hash>.json`.
-    pub bytes: Vec<u8>,
-    /// SHA-256 of `bytes`.
-    pub hash: Sha256,
-    /// The manifest.
-    pub manifest: Manifest,
-    /// Owner state after this manifest.
-    pub state: OwnerState,
-    /// Position after this manifest.
-    pub position: Position,
-}
-
-/// Build the next manifest after `previous` (or the first, a checkpoint at seq 0).
-///
-/// `seq` is the previous seq plus one; a checkpoint when `seq % 64 == 0`, listing all
-/// retained epochs of the state after the changes.
-///
-/// # Errors
-/// Invalid changes, an invalid transition, or seq overflow.
-pub fn build(
-    previous: Option<(&Position, &OwnerState)>,
-    header: Header,
-    changes: Vec<Change>,
-) -> Result<Built, ManifestError> {
-    let (seq, mut state, link) = match previous {
-        None => (0, OwnerState::default(), None),
-        Some((p, s)) => (
-            p.seq.checked_add(1).ok_or(ManifestError::Overflow)?,
-            s.clone(),
-            Some((p.manifest, p.checkpoint)),
-        ),
-    };
-    state.apply_changes(&changes)?;
-    let Header {
-        owner,
-        captured_at,
-        writer,
-        launch,
-    } = header;
-    let is_checkpoint = seq.is_multiple_of(CHECKPOINT_INTERVAL);
-    let manifest = if is_checkpoint {
-        Manifest::Checkpoint(Checkpoint {
-            schema: ManifestSchema::V1,
-            owner,
-            seq,
-            previous: link.map(|(m, _)| m),
-            captured_at,
-            writer,
-            launch,
-            sources: state.to_checkpoint_sources(),
-        })
-    } else {
-        let (previous, checkpoint) = link.ok_or(ManifestError::BadLink)?;
-        Manifest::Delta(Delta {
-            schema: ManifestSchema::V1,
-            owner,
-            seq,
-            previous,
-            checkpoint,
-            captured_at,
-            writer,
-            launch,
-            changes,
-        })
-    };
-    manifest.validate()?;
-    let bytes = manifest.to_bytes()?;
-    let hash = manifest_hash(&bytes);
-    let checkpoint = match (is_checkpoint, link) {
-        (false, Some((_, cp))) => cp,
-        _ => hash,
-    };
-    Ok(Built {
-        bytes,
-        hash,
-        manifest,
-        state,
-        position: Position {
-            seq,
-            manifest: hash,
-            checkpoint,
-        },
-    })
-}
-
-// ---------------------------------------------------------------- fold
-
-/// Result of folding a reader chain.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Folded {
-    /// Chain owner.
-    pub owner: Owner,
-    /// Folded state.
-    pub state: OwnerState,
-    /// Position of the last manifest folded.
-    pub position: Position,
-}
-
-/// Fold a checkpoint followed by consecutive deltas (oldest first, at most 64 manifests).
-///
-/// # Errors
-/// Parse errors, link/seq/owner inconsistencies, [`ManifestError::TooManySteps`], or an
-/// invalid state transition.
-pub fn fold(chain: &[&[u8]]) -> Result<Folded, ManifestError> {
-    if chain.len() as u64 > CHECKPOINT_INTERVAL {
-        return Err(ManifestError::TooManySteps);
-    }
-    let mut raw = chain.iter();
-    let first = raw.next().ok_or(ManifestError::BrokenChain)?;
-    let Manifest::Checkpoint(checkpoint) = parse_manifest(first)? else {
-        return Err(ManifestError::BrokenChain);
-    };
-    let checkpoint_hash = manifest_hash(first);
-    let mut state = OwnerState::from_checkpoint(&checkpoint);
-    let mut position = Position {
-        seq: checkpoint.seq,
-        manifest: checkpoint_hash,
-        checkpoint: checkpoint_hash,
-    };
-    for bytes in raw {
-        let Manifest::Delta(delta) = parse_manifest(bytes)? else {
-            return Err(ManifestError::BrokenChain);
-        };
-        if delta.owner != checkpoint.owner {
-            return Err(ManifestError::OwnerMismatch);
-        }
-        if position.seq.checked_add(1) != Some(delta.seq) {
-            return Err(ManifestError::BadSeq);
-        }
-        if delta.previous != position.manifest || delta.checkpoint != checkpoint_hash {
-            return Err(ManifestError::BadLink);
-        }
-        state.apply_changes(&delta.changes)?;
-        position.seq = delta.seq;
-        position.manifest = manifest_hash(bytes);
-    }
-    Ok(Folded {
-        owner: checkpoint.owner,
-        state,
-        position,
-    })
-}
-
-// ---------------------------------------------------------------- recovery projection
-
-type Ignored = serde::de::IgnoredAny;
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum RawOp {
-    Extend,
-    Epoch,
-    Replace,
-    Deleted,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawEpoch {
-    n: u32,
-    #[serde(default)]
-    rules: Option<RulesDigest>,
-    #[expect(dead_code, reason = "allowed envelope field, not projected")]
-    writer: Ignored,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-#[expect(dead_code, reason = "allowed envelope fields, not projected")]
-struct RawChange {
-    id: SourceId,
-    op: RawOp,
-    kind: Option<Ignored>,
-    path: Option<Ignored>,
-    class: Option<Ignored>,
-    pieces: Option<Ignored>,
-    deleted_at: Option<Ignored>,
-    epoch: Option<RawEpoch>,
-    size: Option<u64>,
-    sha256: Option<Sha256>,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-#[expect(dead_code, reason = "allowed envelope field, not projected")]
-struct RawRecord {
-    epoch: RawEpoch,
-    size: u64,
-    sha256: Sha256,
-    pieces: Ignored,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-#[expect(dead_code, reason = "allowed envelope fields, not projected")]
-struct RawSource {
-    id: SourceId,
-    kind: Ignored,
-    path: Ignored,
-    class: Ignored,
-    epochs: Vec<RawRecord>,
-    deleted_at: Option<String>,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-#[expect(dead_code, reason = "allowed envelope fields, not projected")]
-struct RawDelta {
-    schema: Ignored,
-    owner: Ignored,
-    seq: u64,
-    previous: Option<Sha256>,
-    checkpoint: Option<Sha256>,
-    captured_at: Ignored,
-    writer: Ignored,
-    launch: Ignored,
-    changes: Vec<RawChange>,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-#[expect(dead_code, reason = "allowed envelope fields, not projected")]
-struct RawCheckpoint {
-    schema: Ignored,
-    owner: Ignored,
-    seq: u64,
-    previous: Option<Sha256>,
-    captured_at: Ignored,
-    writer: Ignored,
-    launch: Ignored,
-    sources: Vec<RawSource>,
-}
-/// Strict per-kind envelope: a delta may carry `changes` and never `sources`; a checkpoint
-/// the reverse. Presence of the wrong field is an error whatever its length.
-#[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum RawProjection {
-    Delta(RawDelta),
-    Checkpoint(RawCheckpoint),
-}
-
-/// Kind of a projected manifest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProjectedKind {
-    /// Delta.
-    Delta,
-    /// Checkpoint.
-    Checkpoint,
-}
-/// Latest epoch position of one source, or `None` if the source was deleted.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectedSource {
-    /// Source id.
-    pub id: SourceId,
-    /// Latest epoch position.
-    pub latest: Option<EpochPosition>,
-}
-/// Position fields of a remote manifest, as the writer's recovery path may read them.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Projection {
-    /// Delta or checkpoint.
-    pub kind: ProjectedKind,
-    /// Sequence number.
-    pub seq: u64,
-    /// Previous manifest hash.
-    pub previous: Option<Sha256>,
-    /// Latest checkpoint hash (deltas only).
-    pub checkpoint: Option<Sha256>,
-    /// Changed sources (delta) or all sources (checkpoint).
-    pub sources: Vec<ProjectedSource>,
-}
-
-fn position(epoch: &RawEpoch, size: u64, whole: Sha256) -> EpochPosition {
-    EpochPosition {
-        epoch: epoch.n,
-        captured_to: Offset::new(size),
-        whole,
-        rules: epoch.rules,
-    }
-}
-
-/// Recovery projection (R5): strict envelope (duplicate keys, schema dispatch, kind/seq
-/// rule) and only the position fields; every other field, at any depth, is ignored. Strict
-/// validation of everything else belongs to [`parse_manifest`].
-///
-/// # Errors
-/// [`ManifestError::NewerSchema`] / [`ManifestError::UnknownSchema`] before the body is
-/// read; otherwise [`ManifestError::Malformed`], [`ManifestError::BadSeq`] or
-/// [`ManifestError::BadLink`].
-pub fn recover_projection(bytes: &[u8]) -> Result<Projection, ManifestError> {
-    preflight(bytes, "memory.manifest/")?;
-    match decode::<RawProjection>(bytes)? {
-        RawProjection::Checkpoint(c) => {
-            if !c.seq.is_multiple_of(CHECKPOINT_INTERVAL) {
-                return Err(ManifestError::BadSeq);
-            }
-            if (c.seq == 0) != c.previous.is_none() {
-                return Err(ManifestError::BadLink);
-            }
-            let sources = c
-                .sources
-                .iter()
-                .map(|s| {
-                    let latest = match (&s.deleted_at, s.epochs.last()) {
-                        (None, Some(r)) => Some(position(&r.epoch, r.size, r.sha256)),
-                        (Some(_), Some(_)) => None,
-                        (_, None) => return Err(ManifestError::Malformed),
-                    };
-                    Ok(ProjectedSource {
-                        id: s.id.clone(),
-                        latest,
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(Projection {
-                kind: ProjectedKind::Checkpoint,
-                seq: c.seq,
-                previous: c.previous,
-                checkpoint: None,
-                sources,
-            })
-        }
-        RawProjection::Delta(d) => {
-            if d.seq.is_multiple_of(CHECKPOINT_INTERVAL) {
-                return Err(ManifestError::BadSeq);
-            }
-            if d.previous.is_none() || d.checkpoint.is_none() {
-                return Err(ManifestError::BadLink);
-            }
-            let sources = d
-                .changes
-                .iter()
-                .map(|c| {
-                    let latest = match (c.op, &c.epoch, c.size, c.sha256) {
-                        (RawOp::Deleted, _, _, _) => None,
-                        (_, Some(e), Some(size), Some(whole)) => Some(position(e, size, whole)),
-                        _ => return Err(ManifestError::Malformed),
-                    };
-                    Ok(ProjectedSource {
-                        id: c.id.clone(),
-                        latest,
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(Projection {
-                kind: ProjectedKind::Delta,
-                seq: d.seq,
-                previous: d.previous,
-                checkpoint: d.checkpoint,
-                sources,
-            })
-        }
-    }
 }

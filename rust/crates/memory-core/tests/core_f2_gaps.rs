@@ -672,7 +672,7 @@ fn stamp(n: u32, rules: Option<u64>) -> EpochStamp {
     }
 }
 fn piece(c: u64, off: u64, len: u64) -> Piece {
-    Piece::new(Offset::new(off), len, h(c), 1 + c % 50, h(c + 1_000_000))
+    raw_piece(Offset::new(off), len, h(c), 1 + c % 50, h(c + 1_000_000))
 }
 fn write(
     name: &str,
@@ -739,7 +739,7 @@ fn view(records: &[EpochRecord]) -> Vec<Epoch> {
             pieces: e
                 .pieces
                 .iter()
-                .map(|p| (p.offset.get(), p.len, p.sha256))
+                .map(|p| (p.offset().get(), p.len(), p.sha256()))
                 .collect(),
         })
         .collect()
@@ -831,12 +831,12 @@ fn row12_three_hundred_epoch_rewrite_history_retains_appends_and_latest_snapshot
             Manifest::Checkpoint(c) => {
                 assert_eq!(seq % 64, 0);
                 assert_eq!(
-                    view(&of(&c.sources, "t")?.epochs),
+                    view(&of(c.sources(), "t")?.epochs),
                     model_t,
                     "checkpoint t at seq {seq}"
                 );
-                assert_eq!(of(&c.sources, "c")?.epochs.len(), 1);
-                assert_eq!(view(&of(&c.sources, "c")?.epochs), vec![model_c.clone()]);
+                assert_eq!(of(c.sources(), "c")?.epochs.len(), 1);
+                assert_eq!(view(&of(c.sources(), "c")?.epochs), vec![model_c.clone()]);
                 checkpoint_bytes.push((seq, built.bytes.len()));
                 if seq > 0 {
                     let s = usize::try_from(seq)?;
@@ -894,4 +894,25 @@ fn row12_three_hundred_epoch_rewrite_history_retains_appends_and_latest_snapshot
         "delta size must not grow with history"
     );
     Ok(())
+}
+
+#[expect(
+    clippy::panic,
+    reason = "test fixture: a literal piece that fails to parse is a broken test, not a runtime path"
+)]
+fn raw_piece(
+    offset: Offset,
+    len: u64,
+    sha: Sha256,
+    encoded_len: u64,
+    encoded_sha: Sha256,
+) -> Piece {
+    let h = String::from(sha);
+    let v = serde_json::json!({"offset": offset.get(), "len": len, "sha256": h,
+        "object": format!("objects/{h}.zst"), "encoding": "zstd-3",
+        "encoded_len": encoded_len, "encoded_sha256": String::from(encoded_sha)});
+    match serde_json::from_value(v) {
+        Ok(p) => p,
+        Err(_) => panic!("piece"),
+    }
 }

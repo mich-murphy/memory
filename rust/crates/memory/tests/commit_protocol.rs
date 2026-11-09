@@ -347,7 +347,7 @@ fn pieces_from(bytes: &[u8], from: usize, variant: u8, uploads: &mut Vec<Upload>
     for chunk in tail.chunks(PIECE) {
         let raw = sha(chunk);
         let stored = encode(chunk, variant);
-        out.push(Piece::new(
+        out.push(raw_piece(
             Offset::new(u64::try_from(offset).map_err(e)?),
             len64(chunk),
             raw,
@@ -502,17 +502,17 @@ fn read_chain(store: &FakeStore, owner: &Owner) -> R<Option<Chain>> {
 fn reassemble(store: &FakeStore, record: &EpochRecord) -> R<Vec<u8>> {
     let mut out: Vec<u8> = Vec::new();
     for piece in &record.pieces {
-        let stored = need(store.peek(&piece.object), "piece object missing")?;
+        let stored = need(store.peek(piece.object()), "piece object missing")?;
         ensure(
-            sha(stored) == piece.encoded_sha256 && len64(stored) == piece.encoded_len,
+            sha(stored) == piece.encoded_sha256() && len64(stored) == piece.encoded_len(),
             "descriptor differs from stored encoding",
         )?;
         let raw = need(decode(stored), "undecodable piece")?;
         ensure(
-            sha(&raw) == piece.sha256 && len64(&raw) == piece.len,
+            sha(&raw) == piece.sha256() && len64(&raw) == piece.len(),
             "piece bytes differ from descriptor",
         )?;
-        ensure(len64(&out) == piece.offset.get(), "piece offset gap")?;
+        ensure(len64(&out) == piece.offset().get(), "piece offset gap")?;
         out.extend(raw);
     }
     ensure(
@@ -1601,10 +1601,13 @@ fn later_write_is_fenced_by_the_etag_and_chains_previous() -> R {
         .filter(|k| k.starts_with("manifests/"))
         .count();
     assert_eq!(first, 2);
-    assert_eq!(delta.seq, 1);
+    assert_eq!(delta.seq(), 1);
     // Invariant 6: previous is the manifest named under the fenced ETag.
     let chain = need(read_chain(&rig.store, &rig.owner)?, "chain")?;
-    assert_eq!(chain.hashes.first().map(|(_, h)| *h), Some(delta.previous));
+    assert_eq!(
+        chain.hashes.first().map(|(_, h)| *h),
+        Some(delta.previous())
+    );
     rig.assert_safe()
 }
 
@@ -2023,14 +2026,14 @@ fn r2_a_412_dedup_adopts_the_encoding_that_actually_won() -> R {
     };
     let piece = need(
         checkpoint
-            .sources
+            .sources()
             .first()
             .and_then(|s| s.epochs.first())
             .and_then(|r| r.pieces.first()),
         "piece",
     )?;
-    assert_eq!(piece.encoded_sha256, sha(&winner));
-    assert_eq!(piece.encoded_len, len64(&winner));
+    assert_eq!(piece.encoded_sha256(), sha(&winner));
+    assert_eq!(piece.encoded_len(), len64(&winner));
     // The stored object was not overwritten.
     assert_eq!(
         rig.store.peek(&object_key(&sha(&raw))),
@@ -2100,7 +2103,7 @@ fn invariant_6_fence_check() -> R {
     let Manifest::Delta(delta) = &manifest else {
         return Err("delta".to_owned());
     };
-    assert_eq!(check_fence(&manifest, Some(delta.previous)), Ok(()));
+    assert_eq!(check_fence(&manifest, Some(delta.previous())), Ok(()));
     assert_eq!(
         check_fence(&manifest, Some(sha(b"other"))),
         Err(Failure::Invalid(ManifestError::BadLink))
@@ -2110,12 +2113,12 @@ fn invariant_6_fence_check() -> R {
         Err(Failure::Invalid(ManifestError::BadLink))
     );
     let first = parse_manifest(need(
-        rig.store.peek(&manifest_key(&delta.previous)),
+        rig.store.peek(&manifest_key(&delta.previous())),
         "first",
     )?)
     .map_err(e)?;
     assert_eq!(check_fence(&first, None), Ok(()));
-    assert!(check_fence(&first, Some(delta.previous)).is_err());
+    assert!(check_fence(&first, Some(delta.previous())).is_err());
     Ok(())
 }
 
@@ -2405,4 +2408,25 @@ fn base_unchanged_exhaustion_is_transient_not_throttled() {
         ),
         "{d:?}"
     );
+}
+
+#[expect(
+    clippy::panic,
+    reason = "test fixture: a literal piece that fails to parse is a broken test, not a runtime path"
+)]
+fn raw_piece(
+    offset: Offset,
+    len: u64,
+    sha: Sha256,
+    encoded_len: u64,
+    encoded_sha: Sha256,
+) -> Piece {
+    let h = String::from(sha);
+    let v = serde_json::json!({"offset": offset.get(), "len": len, "sha256": h,
+        "object": format!("objects/{h}.zst"), "encoding": "zstd-3",
+        "encoded_len": encoded_len, "encoded_sha256": String::from(encoded_sha)});
+    match serde_json::from_value(v) {
+        Ok(p) => p,
+        Err(_) => panic!("piece"),
+    }
 }

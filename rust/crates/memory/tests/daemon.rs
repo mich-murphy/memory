@@ -568,16 +568,16 @@ fn read_chain(store: &FStore, owner: &Owner) -> R<Option<Chain>> {
 fn reassemble(store: &FStore, record: &EpochRecord) -> R<Vec<u8>> {
     let mut out: Vec<u8> = Vec::new();
     for piece in &record.pieces {
-        let stored = need(store.peek(&piece.object), "piece object missing")?;
+        let stored = need(store.peek(piece.object()), "piece object missing")?;
         ensure(
-            sha(stored) == piece.encoded_sha256 && len64(stored) == piece.encoded_len,
+            sha(stored) == piece.encoded_sha256() && len64(stored) == piece.encoded_len(),
             "descriptor differs from stored encoding",
         )?;
         ensure(
-            sha(stored) == piece.sha256 && len64(stored) == piece.len,
+            sha(stored) == piece.sha256() && len64(stored) == piece.len(),
             "piece bytes differ from descriptor",
         )?;
-        ensure(len64(&out) == piece.offset.get(), "piece offset gap")?;
+        ensure(len64(&out) == piece.offset().get(), "piece offset gap")?;
         out.extend_from_slice(stored);
     }
     ensure(
@@ -614,8 +614,8 @@ fn observe(store: &FStore, owner: &Owner, history: &[Vec<u8>]) -> R<Option<Obser
     let mut launches = 0;
     for bytes in &chain.manifests {
         launches += match parse_manifest(bytes).map_err(e)? {
-            Manifest::Delta(d) => d.launch.len(),
-            Manifest::Checkpoint(c) => c.launch.len(),
+            Manifest::Delta(d) => d.launch().len(),
+            Manifest::Checkpoint(c) => c.launch().len(),
         };
     }
     Ok(Some(Observed {

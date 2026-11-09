@@ -30,7 +30,7 @@ use memory_core::domain::{
 };
 use memory_core::manifest::{
     Change, EpochStamp, EpochWriter, Header, LaunchRecord, ManifestError, OwnerState, Piece,
-    SourceWrite, manifest_hash, object_key,
+    SourceWrite, manifest_hash,
 };
 use memory_core::planner::{
     AppendBasis, AuditEvidence, Observation, PlanInput, Planning, Strategy, WindowEvidence, plan,
@@ -431,18 +431,11 @@ impl Job<'_> {
         while at < stream_len {
             let end = at.saturating_add(step).min(stream_len);
             let piece = Published::piece(&body, at, end).ok_or(SourceOutcome::Raced)?;
-            let chunk = piece.as_ref();
-            let sha = manifest_hash(chunk);
-            let len = u64::try_from(chunk.len()).map_err(|_| SourceOutcome::Raced)?;
-            pieces.push(Piece::new(
-                Offset::new(u64::try_from(at).map_err(|_| SourceOutcome::Raced)?),
-                len,
-                sha,
-                len,
-                sha,
-            ));
+            let described =
+                Piece::from_authorized(&body, at, end).map_err(|_| SourceOutcome::Raced)?;
+            pieces.push(described.clone());
             acc.uploads.push(Upload {
-                key: object_key(&sha),
+                key: described.object().to_owned(),
                 body: piece,
             });
             at = end;

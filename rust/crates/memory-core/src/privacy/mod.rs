@@ -332,11 +332,14 @@ pub fn authorize(
         return Authorization::Deny(Reason::ContextChanged);
     }
     match admit(context, source.facts) {
-        Admission::Allow(admitted) => Authorization::Allow(AuthorizedBody {
-            digest: Sha256::digest(&redacted.bytes).into(),
-            bytes: redacted.bytes,
-            owner: admitted.facts.owner.unwrap_or_default(),
-        }),
+        Admission::Allow(admitted) => match admitted.facts.owner {
+            Some(owner) => Authorization::Allow(AuthorizedBody {
+                digest: Sha256::digest(&redacted.bytes).into(),
+                bytes: redacted.bytes,
+                owner,
+            }),
+            None => Authorization::Deny(Reason::UnknownOwner),
+        },
         Admission::Deny(reason) => Authorization::Deny(reason),
         Admission::Unknown(reason) => Authorization::Unknown(reason),
     }
