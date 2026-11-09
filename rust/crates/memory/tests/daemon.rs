@@ -62,6 +62,23 @@ impl Drop for Tmp {
 #[derive(Default)]
 struct MemFs {
     files: BTreeMap<u64, Vec<u8>>,
+    /// Modification times set by `set`; a source never set through it keeps 1_000.
+    mtimes: BTreeMap<u64, i64>,
+    tick: i64,
+}
+impl MemFs {
+    /// Replace a source's bytes; a real change moves the mtime, as a real write does.
+    fn set(&mut self, source: u64, bytes: &[u8]) {
+        if self.files.get(&source).map(Vec::as_slice) != Some(bytes) {
+            self.tick += 1;
+            self.mtimes.insert(source, 1_000 + self.tick);
+        }
+        self.files.insert(source, bytes.to_vec());
+    }
+    fn remove(&mut self, source: u64) {
+        self.files.remove(&source);
+        self.mtimes.remove(&source);
+    }
 }
 impl FileSystem for MemFs {
     type Error = ();
@@ -73,7 +90,7 @@ impl FileSystem for MemFs {
                 birth: Birth::Unavailable,
             },
             size: u64::try_from(b.len()).unwrap_or(0),
-            mtime_ns: 1_000,
+            mtime_ns: self.mtimes.get(&source).copied().unwrap_or(1_000),
         }))
     }
     fn stat_len(&mut self, source: u64) -> Result<u64, ()> {
@@ -411,6 +428,20 @@ struct Rule {
     key: Option<String>,
     effect: Effect,
 }
+/// Where a simulated process death cuts a commit short.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CrashAt {
+    /// Pieces landed; the manifest PUT does not.
+    Manifest,
+    /// Pieces and manifest landed; the `current.json` PUT does not.
+    Current,
+}
+/// A `current.json` write from an earlier attempt, delayed in the network (A6).
+struct Late {
+    body: Vec<u8>,
+    /// Version of `current.json` the write was fenced on (`None`: first write).
+    fence: Option<u64>,
+}
 
 /// Fake store with S3/R2 conditional-write semantics and scripted faults on `current.json`.
 #[derive(Default)]
@@ -422,6 +453,16 @@ struct FStore {
     rules: Vec<Rule>,
     put_log: Vec<String>,
     lost_fired: u64,
+    /// While set, `current.json` PUTs that pass their fence are held, not landed (5xx reply).
+    stall: bool,
+    /// The first held write; it lands, fenced, just before the next `current.json` PUT.
+    late: Option<Late>,
+    late_landed: u64,
+    crash_at: Option<CrashAt>,
+    /// After a crash fired every request fails until the test replaces the process.
+    crashed: Option<CrashAt>,
+    /// After a held write the store is unreachable until the round ends.
+    blackout: bool,
 }
 impl FStore {
     fn tag(v: u64) -> Result<ETag, StoreError> {
@@ -447,8 +488,20 @@ impl FStore {
             .position(|r| r.key.as_deref().is_none_or(|k| k == key))?;
         Some(self.rules.remove(at).effect)
     }
+    /// The held write from an earlier attempt arrives; it lands only if its fence still holds.
+    fn land_late(&mut self, key: &str) {
+        if let Some(late) = self.late.take() {
+            let now = self.objects.get(key).map(|(_, v)| *v);
+            if now == late.fence {
+                self.write(key, late.body);
+                self.late_landed += 1;
+            }
+        }
+    }
     fn gate(&self) -> Result<(), StoreError> {
-        if self.revoked {
+        if self.crashed.is_some() || self.blackout {
+            Err(StoreError::Offline)
+        } else if self.revoked {
             Err(StoreError::Auth)
         } else if self.offline {
             Err(StoreError::Offline)
@@ -470,7 +523,21 @@ impl FStore {
             }
             self.write(key, f.current.clone());
         }
+        let is_current = key.ends_with("current.json");
+        if let Some(at) = self.crash_at {
+            let hit = match at {
+                CrashAt::Manifest => key.starts_with("manifests/"),
+                CrashAt::Current => is_current,
+            };
+            if hit {
+                self.crashed = Some(at);
+                self.crash_at = None;
+            }
+        }
         self.gate()?;
+        if is_current {
+            self.land_late(key);
+        }
         let existing = self.objects.get(key).map(|(_, v)| *v);
         match (fence, existing) {
             (None, Some(_)) => return Err(StoreError::PreconditionFailed),
@@ -479,6 +546,15 @@ impl FStore {
                 return Err(StoreError::PreconditionFailed);
             }
             _ => {}
+        }
+        if self.stall && is_current && self.late.is_none() {
+            self.late = Some(Late {
+                body: body.as_ref().to_vec(),
+                fence: existing,
+            });
+            self.blackout = true;
+            self.stall = false;
+            return Err(StoreError::Offline);
         }
         self.write(key, body.as_ref().to_vec());
         let tag = Self::tag(self.version)?;
@@ -591,6 +667,7 @@ struct Observed {
     epochs: usize,
     seq: u64,
     launches: usize,
+    deleted: bool,
 }
 /// Safety: the chain is consistent, every object matches its descriptor, and every committed
 /// epoch is a prefix of bytes the (single) source once held.
@@ -600,8 +677,10 @@ fn observe(store: &FStore, owner: &Owner, history: &[Vec<u8>]) -> R<Option<Obser
     };
     let mut latest = None;
     let mut epochs = 0;
+    let mut deleted = false;
     for entry in chain.folded.state.sources.values() {
         epochs += entry.epochs.len();
+        deleted |= entry.deleted_at.is_some();
         for record in &entry.epochs {
             let bytes = reassemble(store, record)?;
             ensure(
@@ -623,6 +702,7 @@ fn observe(store: &FStore, owner: &Owner, history: &[Vec<u8>]) -> R<Option<Obser
         epochs,
         seq: chain.current.seq,
         launches,
+        deleted,
     }))
 }
 fn ts() -> R<Timestamp> {
@@ -989,26 +1069,50 @@ fn damaged_index_and_status_are_treated_as_missing() -> R {
 
 // ---------------------------------------------------------------- coverage guard
 
+const SHAPE_NAMES: [&str; 12] = [
+    "restart",
+    "lost-reply",
+    "delete-index",
+    "rewrite",
+    "rewrite-mid-file",
+    "truncate",
+    "remove-source",
+    "revoke",
+    "crash",
+    "late-write",
+    "multi-epoch",
+    "big-file",
+];
+const REQUIRED_NEW: [&str; 6] = [
+    "rewrite",
+    "truncate",
+    "remove-source",
+    "revoke",
+    "crash",
+    "late-write",
+];
 struct Shapes {
-    restart: AtomicU64,
-    lost_reply: AtomicU64,
-    delete_index: AtomicU64,
+    n: [AtomicU64; 12],
 }
 impl Shapes {
     const fn new() -> Self {
         Self {
-            restart: AtomicU64::new(0),
-            lost_reply: AtomicU64::new(0),
-            delete_index: AtomicU64::new(0),
+            n: [const { AtomicU64::new(0) }; 12],
+        }
+    }
+    fn hit(&self, name: &str) {
+        if let Some(i) = SHAPE_NAMES.iter().position(|x| *x == name)
+            && let Some(c) = self.n.get(i)
+        {
+            bump(c);
         }
     }
     fn counts(&self) -> Vec<(&'static str, u64)> {
-        let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
-        vec![
-            ("restart", load(&self.restart)),
-            ("lost-reply", load(&self.lost_reply)),
-            ("delete-index", load(&self.delete_index)),
-        ]
+        SHAPE_NAMES
+            .iter()
+            .zip(self.n.iter())
+            .map(|(k, c)| (*k, c.load(Ordering::Relaxed)))
+            .collect()
     }
 }
 fn bump(counter: &AtomicU64) {
@@ -1034,19 +1138,29 @@ fn guard_has_negative_controls() {
     let zero = Shapes::new();
     assert!(require_all(&zero.counts()).is_err());
     assert!(require_all(&[]).is_err());
-    for missing in 0..3 {
-        let mut counts = vec![1_u64; 3];
-        if let Some(c) = counts.get_mut(missing) {
-            *c = 0;
-        }
-        let named: Vec<_> = zero
-            .counts()
-            .into_iter()
-            .zip(counts)
-            .map(|((name, _), n)| (name, n))
-            .collect();
-        assert!(require_all(&named).is_err(), "missing shape {missing}");
+    // The guard names every new shape the phase requires.
+    for need in REQUIRED_NEW {
+        assert!(SHAPE_NAMES.contains(&need), "guard lost shape {need}");
     }
+    // Each shape missing on its own (including each new shape) fails the guard.
+    for missing in 0..SHAPE_NAMES.len() {
+        let named: Vec<_> = SHAPE_NAMES
+            .iter()
+            .enumerate()
+            .map(|(i, name)| (*name, u64::from(i != missing)))
+            .collect();
+        let err = require_all(&named);
+        assert!(err.is_err(), "missing shape {missing}");
+        assert!(
+            err.err()
+                .is_some_and(|m| m.contains(SHAPE_NAMES.get(missing).copied().unwrap_or(""))),
+            "guard names the missing shape {missing}"
+        );
+    }
+    // A shape that is only hit on the other side's statics does not count.
+    zero.hit("crash");
+    assert!(zero.counts().iter().any(|(k, n)| *k == "crash" && *n == 1));
+    assert!(require_all(&zero.counts()).is_err());
     let full: Vec<_> = zero.counts().into_iter().map(|(n, _)| (n, 1)).collect();
     assert!(require_all(&full).is_ok());
 }
@@ -1056,6 +1170,14 @@ fn guard_has_negative_controls() {
 #[derive(Clone, Debug)]
 enum Step {
     Append { seed: u8, n: u8 },
+    Bulk { seed: u8, kib: u8 },
+    Rewrite { zone: u8, delta: u16 },
+    Truncate { frac: u8 },
+    RemoveSource,
+    RevokeToken,
+    RestoreToken,
+    Crash { manifest: bool },
+    LateWrite { seed: u8, n: u8 },
     Round,
     DeleteIndex,
     Restart,
@@ -1065,17 +1187,97 @@ enum Step {
     Settle,
 }
 
+const HEAD: usize = 4096;
+const TAIL: usize = 65536;
+
+/// The independent model: the bytes the source holds now and every version it ever held.
 #[derive(Clone, Debug, Default)]
 struct Reference {
     file: Vec<u8>,
+    exists: bool,
     history: Vec<Vec<u8>>,
+    /// The last step changed the source for real (not a no-op on an empty or absent file).
+    effect: bool,
+    /// The last step was a rewrite outside both windows.
+    mid: bool,
+    /// A same-size rewrite between the head and tail windows is live and no truncate or
+    /// removal since could have forced a replay. Only an audit finds it (DESIGN 7.2), and
+    /// reconcile rounds run none, so 1b liveness is not required while this holds.
+    hidden: bool,
+    /// While `hidden`, what the daemon can have committed: the pre-rewrite bytes plus every
+    /// later append. Such a splice was held by no version of the source, so it joins the
+    /// history; this is the documented limit of window checks, not a relaxation of 1a.
+    shadow: Vec<u8>,
 }
 impl Reference {
+    fn grow(&mut self, add: impl Iterator<Item = u8>) {
+        let add: Vec<u8> = add.collect();
+        self.exists = true;
+        self.file.extend_from_slice(&add);
+        self.history.push(self.file.clone());
+        if self.hidden {
+            self.shadow.extend_from_slice(&add);
+            self.history.push(self.shadow.clone());
+        }
+    }
     fn apply(&mut self, step: &Step) {
-        if let Step::Append { seed, n } = step {
-            let add: Vec<u8> = (0..(*n).max(1)).map(|k| seed.wrapping_add(k) % 3).collect();
-            self.file.extend(add);
-            self.history.push(self.file.clone());
+        self.effect = false;
+        self.mid = false;
+        match step {
+            Step::Append { seed, n } | Step::LateWrite { seed, n } => {
+                self.grow((0..(*n).max(1)).map(|k| seed.wrapping_add(k) % 3));
+            }
+            Step::Bulk { seed, kib } => {
+                let len = usize::from((*kib).max(1)) * 1024;
+                self.grow((0..len).map(|k| seed.wrapping_add(u8::try_from(k % 251).unwrap_or(0))));
+            }
+            Step::Rewrite { zone, delta } => {
+                let len = self.file.len();
+                let d = usize::from(*delta);
+                let pos = if !self.exists || len == 0 {
+                    None
+                } else {
+                    Some(match zone % 3 {
+                        0 => d % len.min(HEAD),
+                        1 => len - 1 - d % len.min(TAIL),
+                        _ if len > HEAD + TAIL => HEAD + d * 7 % (len - HEAD - TAIL),
+                        _ => d % len,
+                    })
+                };
+                let before = self.file.clone();
+                if let Some(b) = pos.and_then(|p| self.file.get_mut(p)) {
+                    *b = b.wrapping_add(1);
+                    self.effect = true;
+                    self.mid = zone % 3 == 2 && len > HEAD + TAIL;
+                    if self.mid {
+                        if !self.hidden {
+                            self.shadow = before;
+                        }
+                        self.hidden = true;
+                    } else {
+                        // A head or tail window mismatch forces a replay of the whole file.
+                        self.hidden = false;
+                    }
+                    self.history.push(self.file.clone());
+                }
+            }
+            Step::Truncate { frac } => {
+                let len = self.file.len();
+                let k = len * usize::from(*frac) / 255;
+                if self.exists && k < len {
+                    self.file.truncate(k);
+                    self.hidden = false;
+                    self.effect = true;
+                    self.history.push(self.file.clone());
+                }
+            }
+            Step::RemoveSource if self.exists => {
+                self.effect = true;
+                self.hidden = false;
+                self.exists = false;
+                self.file.clear();
+            }
+            _ => {}
         }
     }
 }
@@ -1091,6 +1293,8 @@ struct Sut {
     ran: bool,
     index_expected: bool,
     lost_seen: u64,
+    late_seen: u64,
+    max_epochs: usize,
 }
 impl Sut {
     fn new() -> R<Self> {
@@ -1116,12 +1320,24 @@ impl Sut {
             ran: false,
             index_expected: false,
             lost_seen: 0,
+            late_seen: 0,
+            max_epochs: 0,
         })
     }
     fn daemon(&mut self) -> R<&mut D> {
         self.d.as_mut().ok_or_else(|| "no daemon".to_owned())
     }
+    /// Process death and restart. A write still in flight from the dead process dies with its
+    /// connection, and `known_ours` is in memory only (A6), so the pending late write is dropped.
     fn restart(&mut self) -> R {
+        {
+            let store = self.daemon()?.store_mut();
+            store.late = None;
+            store.crashed = None;
+            store.crash_at = None;
+            store.blackout = false;
+            store.stall = false;
+        }
         let d = need(self.d.take(), "no daemon")?;
         self.d = Some(cycle_sync(
             d,
@@ -1134,32 +1350,111 @@ impl Sut {
         self.mono = 0;
         Ok(())
     }
-    fn round(&mut self) -> R {
+    fn round(&mut self, shapes: &Shapes) -> R {
+        self.round_tracking(shapes, true)
+    }
+    /// `track_index` is false for rounds that may land only an adopted earlier manifest (A6
+    /// `follow_up`): that commit applies no local updates, so it need not dirty the index.
+    fn round_tracking(&mut self, shapes: &Shapes, track_index: bool) -> R {
         self.mono += 61_000_000_000;
         let mono = self.mono;
         let d = self.daemon()?;
         d.clock_mut().mono = mono;
+        let (before, revoked) = (d.store_mut().version, d.store_mut().revoked);
         let report = d.reconcile_once().map_err(e)?;
+        if revoked {
+            ensure(
+                d.store_mut().version == before,
+                "a write landed while the token was revoked",
+            )?;
+            if d.status().host_paused {
+                shapes.hit("revoke");
+            }
+        }
         self.ran = true;
-        self.index_expected |= report.landed > 0;
+        self.index_expected |= track_index && report.landed > 0;
+        Ok(())
+    }
+    fn sync_file(&mut self, after: &Reference) -> R {
+        let d = self.daemon()?;
+        if after.exists {
+            d.fs_mut().set(1, &after.file);
+        } else {
+            d.fs_mut().remove(1);
+        }
         Ok(())
     }
     fn exec(&mut self, step: &Step, after: &Reference, shapes: &Shapes) -> R {
         match step {
-            Step::Append { .. } => {
-                let bytes = after.file.clone();
-                bytes_in(self.daemon()?, 1, &bytes);
+            Step::Append { .. }
+            | Step::Bulk { .. }
+            | Step::Rewrite { .. }
+            | Step::Truncate { .. }
+            | Step::RemoveSource => {
+                self.sync_file(after)?;
+                if after.effect {
+                    match step {
+                        Step::Rewrite { .. } => {
+                            shapes.hit("rewrite");
+                            if after.mid {
+                                shapes.hit("rewrite-mid-file");
+                            }
+                        }
+                        Step::Truncate { .. } => shapes.hit("truncate"),
+                        Step::RemoveSource => {
+                            let key = current_key(&self.owner);
+                            if self.daemon()?.store_mut().peek(&key).is_some() {
+                                shapes.hit("remove-source");
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if after.file.len() > HEAD + TAIL {
+                    shapes.hit("big-file");
+                }
             }
-            Step::Round => self.round()?,
+            Step::Round => self.round(shapes)?,
+            Step::RevokeToken => self.daemon()?.store_mut().revoked = true,
+            Step::RestoreToken => self.daemon()?.store_mut().revoked = false,
+            Step::Crash { manifest } => {
+                self.daemon()?.store_mut().crash_at = Some(if *manifest {
+                    CrashAt::Manifest
+                } else {
+                    CrashAt::Current
+                });
+                self.round(shapes)?;
+                let store = self.daemon()?.store_mut();
+                store.crash_at = None;
+                if store.crashed.take().is_some() {
+                    self.restart()?;
+                    shapes.hit("crash");
+                }
+            }
+            Step::LateWrite { .. } => {
+                // Attempt 1 commits what the source holds; its current.json write is held in the
+                // network and the store goes dark, so the capture fails. Then new bytes arrive,
+                // a later capture starts, and the held write lands before its PUT (A6).
+                self.daemon()?.store_mut().stall = true;
+                self.round_tracking(shapes, false)?;
+                {
+                    let store = self.daemon()?.store_mut();
+                    store.stall = false;
+                    store.blackout = false;
+                }
+                self.sync_file(after)?;
+                self.mono += 140_000_000_000;
+                self.round_tracking(shapes, false)?;
+            }
             Step::DeleteIndex => {
                 let _ = fs::remove_file(self.tmp.root().join("index.json"));
                 self.restart()?;
                 self.index_expected = false;
-                bump(&shapes.delete_index);
+                shapes.hit("delete-index");
             }
             Step::Restart => {
                 self.restart()?;
-                bump(&shapes.restart);
+                shapes.hit("restart");
             }
             Step::LostReply => self
                 .daemon()?
@@ -1170,20 +1465,31 @@ impl Sut {
             Step::Settle => {
                 let store = self.daemon()?.store_mut();
                 store.offline = false;
+                store.revoked = false;
+                store.blackout = false;
+                store.stall = false;
+                store.crash_at = None;
                 store.rules.clear();
                 for _ in 0..4 {
-                    self.round()?;
+                    self.round(shapes)?;
                 }
             }
         }
-        let fired = self.daemon()?.store_mut().lost_fired;
+        let (fired, late) = {
+            let s = self.daemon()?.store_mut();
+            (s.lost_fired, s.late_landed)
+        };
         for _ in self.lost_seen..fired {
-            bump(&shapes.lost_reply);
+            shapes.hit("lost-reply");
+        }
+        for _ in self.late_seen..late {
+            shapes.hit("late-write");
         }
         self.lost_seen = fired;
+        self.late_seen = late;
         Ok(())
     }
-    fn check(&mut self, after: &Reference, settled: bool) -> R {
+    fn check(&mut self, after: &Reference, settled: bool, shapes: &Shapes) -> R {
         if self.ran {
             match file_state(&self.tmp, StateFile::Status) {
                 Loaded::Present(s) => {
@@ -1200,13 +1506,32 @@ impl Sut {
                 Loaded::Missing(r) => return Err(format!("index unreadable: {r:?}")),
             }
         }
+        // No step here models a foreign writer, so an owner is never parked (A6).
+        ensure(
+            self.daemon()?.status().parked.is_empty(),
+            "an owner was parked (false Foreign)",
+        )?;
         let owner = self.owner.clone();
         let observed = observe(self.daemon()?.store_mut(), &owner, &after.history)?;
-        if settled && !after.file.is_empty() {
+        if let Some(o) = &observed {
+            if o.epochs > 1 || self.max_epochs > 1 {
+                shapes.hit("multi-epoch");
+            }
+            self.max_epochs = self.max_epochs.max(o.epochs);
+        }
+        if settled && after.exists && !after.file.is_empty() && !after.hidden {
             let o = need(observed, "no chain after settle")?;
             ensure(
                 o.latest.as_deref() == Some(after.file.as_slice()),
                 "latest epoch differs from the source bytes after settle",
+            )?;
+        } else if settled
+            && !after.exists
+            && let Some(o) = &observed
+        {
+            ensure(
+                o.epochs == 0 || o.deleted,
+                "removed source not recorded deleted after settle",
             )?;
         }
         Ok(())
@@ -1233,7 +1558,7 @@ impl World {
             .exec(&step, &self.reference, self.shapes)
             .and_then(|()| {
                 self.sut
-                    .check(&self.reference, matches!(step, Step::Settle))
+                    .check(&self.reference, matches!(step, Step::Settle), self.shapes)
             });
         assert!(result.is_ok(), "{step:?}: {result:?}");
     }
@@ -1246,6 +1571,52 @@ impl World {
         let seed = tc.draw(gs::integers::<u8>());
         let n = tc.draw(gs::integers::<u8>().min_value(1).max_value(9));
         self.run(Step::Append { seed, n });
+    }
+    #[rule(weight = 2.0)]
+    fn bulk(&mut self, tc: TestCase) {
+        let seed = tc.draw(gs::integers::<u8>());
+        // Half the time large enough (> HEAD + TAIL) that a rewrite can fall between windows.
+        let big = tc.draw(gs::booleans());
+        let kib = if big {
+            tc.draw(gs::integers::<u8>().min_value(69).max_value(90))
+        } else {
+            tc.draw(gs::integers::<u8>().min_value(1).max_value(8))
+        };
+        self.run(Step::Bulk { seed, kib });
+    }
+    #[rule(weight = 3.0)]
+    fn rewrite(&mut self, tc: TestCase) {
+        let zone = tc.draw(gs::integers::<u8>().min_value(0).max_value(2));
+        let delta = tc.draw(gs::integers::<u16>());
+        self.run(Step::Rewrite { zone, delta });
+    }
+    #[rule(weight = 2.0)]
+    fn truncate(&mut self, tc: TestCase) {
+        let frac = tc.draw(gs::integers::<u8>());
+        self.run(Step::Truncate { frac });
+    }
+    #[rule]
+    fn remove_source(&mut self, _: TestCase) {
+        self.run(Step::RemoveSource);
+    }
+    #[rule]
+    fn revoke_token(&mut self, _: TestCase) {
+        self.run(Step::RevokeToken);
+    }
+    #[rule]
+    fn restore_token(&mut self, _: TestCase) {
+        self.run(Step::RestoreToken);
+    }
+    #[rule(weight = 2.0)]
+    fn crash(&mut self, tc: TestCase) {
+        let manifest = tc.draw(gs::booleans());
+        self.run(Step::Crash { manifest });
+    }
+    #[rule(weight = 2.0)]
+    fn late_write(&mut self, tc: TestCase) {
+        let seed = tc.draw(gs::integers::<u8>());
+        let n = tc.draw(gs::integers::<u8>().min_value(1).max_value(9));
+        self.run(Step::LateWrite { seed, n });
     }
     #[rule(weight = 4.0)]
     fn round(&mut self, _: TestCase) {
@@ -1283,7 +1654,7 @@ fn hegel_daemon_state_machine() {
         let world = World::new(&HEGEL_SHAPES);
         assert!(world.is_ok(), "{:?}", world.as_ref().err());
         if let Ok(world) = world {
-            hegel::stateful::machine(world).steps(8).run(tc);
+            hegel::stateful::machine(world).steps(12).run(tc);
         }
     })
     .run();
@@ -1294,6 +1665,14 @@ fn hegel_daemon_state_machine() {
 fn step_strategy() -> BoxedStrategy<Step> {
     prop_oneof![
         3 => (any::<u8>(), 1..=9_u8).prop_map(|(seed, n)| Step::Append { seed, n }),
+        1 => (any::<u8>(), 1..=90_u8).prop_map(|(seed, kib)| Step::Bulk { seed, kib }),
+        3 => (0..=2_u8, any::<u16>()).prop_map(|(zone, delta)| Step::Rewrite { zone, delta }),
+        2 => any::<u8>().prop_map(|frac| Step::Truncate { frac }),
+        1 => Just(Step::RemoveSource),
+        1 => Just(Step::RevokeToken),
+        1 => Just(Step::RestoreToken),
+        2 => any::<bool>().prop_map(|manifest| Step::Crash { manifest }),
+        2 => (any::<u8>(), 1..=9_u8).prop_map(|(seed, n)| Step::LateWrite { seed, n }),
         4 => Just(Step::Round),
         1 => Just(Step::DeleteIndex),
         1 => Just(Step::Restart),
@@ -1335,7 +1714,7 @@ impl StateMachineTest for PtMachine {
         if let Ok(sut) = state.sut.as_mut() {
             let result = sut
                 .exec(&step, after, &PROPTEST_SHAPES)
-                .and_then(|()| sut.check(after, matches!(step, Step::Settle)));
+                .and_then(|()| sut.check(after, matches!(step, Step::Settle), &PROPTEST_SHAPES));
             assert!(result.is_ok(), "{step:?}: {result:?}");
         }
         state
@@ -1344,7 +1723,7 @@ impl StateMachineTest for PtMachine {
         if let Ok(sut) = state.sut.as_mut() {
             let result = sut
                 .exec(&Step::Settle, &after, &PROPTEST_SHAPES)
-                .and_then(|()| sut.check(&after, true));
+                .and_then(|()| sut.check(&after, true, &PROPTEST_SHAPES));
             assert!(result.is_ok(), "final settle: {result:?}");
         }
     }
@@ -1355,7 +1734,7 @@ fn proptest_daemon_state_machine() {
         failure_persistence: None,
         ..Config::default()
     });
-    let strategy = <RefMachine as ReferenceStateMachine>::sequential_strategy(1..9);
+    let strategy = <RefMachine as ReferenceStateMachine>::sequential_strategy(1..13);
     let result = runner.run(&strategy, |(initial, transitions, seen)| {
         PtMachine::test_sequential(Config::default(), initial, transitions, seen);
         Ok(())
