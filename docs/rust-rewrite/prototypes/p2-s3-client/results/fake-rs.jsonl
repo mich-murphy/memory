@@ -1,0 +1,24 @@
+{"detail":"status 503","landed":true,"op":"put_if_match","r":"Throttled","retries":false,"retry_after_s":null,"server_put_statuses":[200],"server_puts":1,"suite":"fault","t":"commit_then_503"}
+{"detail":"status 500","landed":true,"op":"put_if_match","r":"Server","retries":false,"retry_after_s":null,"server_put_statuses":[200],"server_puts":1,"suite":"fault","t":"commit_then_500"}
+{"detail":"Io(Custom { kind: UnexpectedEof, error: \"Peer disconnected\" })","landed":true,"op":"put_if_match","r":"Ambiguous","retries":false,"retry_after_s":null,"server_put_statuses":[200],"server_puts":1,"suite":"fault","t":"commit_then_drop"}
+{"detail":"Timeout(Global)","landed":true,"op":"put_if_match","r":"Ambiguous","retries":false,"retry_after_s":null,"server_put_statuses":[200],"server_puts":1,"suite":"fault","t":"commit_then_hang_timeout"}
+{"detail":"status 429","landed":false,"op":"put_if_match","r":"Throttled","retries":false,"retry_after_s":7,"server_put_statuses":[429],"server_puts":1,"suite":"fault","t":"429_retry_after_7_no_commit"}
+{"detail":"status 503","landed":false,"op":"put_if_match","r":"Throttled","retries":false,"retry_after_s":null,"server_put_statuses":[503],"server_puts":1,"suite":"fault","t":"503_no_commit"}
+{"detail":"status 500","landed":false,"op":"put_if_match","r":"Server","retries":false,"retry_after_s":null,"server_put_statuses":[500],"server_puts":1,"suite":"fault","t":"500_no_commit"}
+{"detail":"status 403","landed":false,"op":"put_if_match","r":"Auth","retries":false,"retry_after_s":null,"server_put_statuses":[403],"server_puts":1,"suite":"fault","t":"403"}
+{"detail":"status 401","landed":false,"op":"put_if_match","r":"Auth","retries":false,"retry_after_s":null,"server_put_statuses":[401],"server_puts":1,"suite":"fault","t":"401"}
+{"detail":"status 503","op":"put_if_absent","r":"Throttled","retries":false,"server_put_statuses":[200],"server_puts":1,"suite":"fault","t":"commit_then_503"}
+{"detail":"status 503","op":"put_if_absent","r":"Throttled","retries":false,"server_put_statuses":[503],"server_puts":1,"suite":"fault","t":"503_no_commit"}
+{"detail":"Io(Os { code: 61, kind: ConnectionRefused, message: \"Connection refused\" })","op":"get","r":"Offline","retries":false,"suite":"fault","t":"connection_refused"}
+{"detail":"status 503","landed":true,"op":"put_if_match","r":"Throttled","retries":true,"retry_after_s":null,"server_put_statuses":[200],"server_puts":1,"suite":"fault","t":"commit_then_503"}
+{"detail":"status 500","landed":true,"op":"put_if_match","r":"Server","retries":true,"retry_after_s":null,"server_put_statuses":[200],"server_puts":1,"suite":"fault","t":"commit_then_500"}
+{"detail":"Io(Custom { kind: UnexpectedEof, error: \"Peer disconnected\" })","landed":true,"op":"put_if_match","r":"Ambiguous","retries":true,"retry_after_s":null,"server_put_statuses":[200],"server_puts":1,"suite":"fault","t":"commit_then_drop"}
+{"detail":"Timeout(Global)","landed":true,"op":"put_if_match","r":"Ambiguous","retries":true,"retry_after_s":null,"server_put_statuses":[200],"server_puts":1,"suite":"fault","t":"commit_then_hang_timeout"}
+{"detail":"status 429","landed":false,"op":"put_if_match","r":"Throttled","retries":true,"retry_after_s":7,"server_put_statuses":[429],"server_puts":1,"suite":"fault","t":"429_retry_after_7_no_commit"}
+{"detail":"status 503","landed":false,"op":"put_if_match","r":"Throttled","retries":true,"retry_after_s":null,"server_put_statuses":[503],"server_puts":1,"suite":"fault","t":"503_no_commit"}
+{"detail":"status 500","landed":false,"op":"put_if_match","r":"Server","retries":true,"retry_after_s":null,"server_put_statuses":[500],"server_puts":1,"suite":"fault","t":"500_no_commit"}
+{"detail":"status 403","landed":false,"op":"put_if_match","r":"Auth","retries":true,"retry_after_s":null,"server_put_statuses":[403],"server_puts":1,"suite":"fault","t":"403"}
+{"detail":"status 401","landed":false,"op":"put_if_match","r":"Auth","retries":true,"retry_after_s":null,"server_put_statuses":[401],"server_puts":1,"suite":"fault","t":"401"}
+{"detail":"status 503","op":"put_if_absent","r":"Throttled","retries":true,"server_put_statuses":[200],"server_puts":1,"suite":"fault","t":"commit_then_503"}
+{"detail":"status 503","op":"put_if_absent","r":"Throttled","retries":true,"server_put_statuses":[503],"server_puts":1,"suite":"fault","t":"503_no_commit"}
+{"detail":"Io(Os { code: 61, kind: ConnectionRefused, message: \"Connection refused\" })","op":"get","r":"Offline","retries":true,"suite":"fault","t":"connection_refused"}

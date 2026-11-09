@@ -1,0 +1,20 @@
+[package]
+name = "p2-baseline"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+sha2 = "=0.10.9"
+md-5 = "=0.10.6"
+base64 = "=0.22.1"
+serde_json = "=1.0.145"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

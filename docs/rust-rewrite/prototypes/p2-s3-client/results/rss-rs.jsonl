@@ -1,0 +1,3 @@
+{"per_put_ms":[2456,2763,2679,2613,2802,2823,2610,2851],"results":["Ok","Ok","Ok","Ok","Ok","Ok","Ok","Ok"],"round":0,"suite":"rss","threads":8,"wall_ms":2859}
+{"per_put_ms":[1707,2742,1783,2122,2451,2640,2933,2087],"results":["Ok","Ok","Ok","Ok","Ok","Ok","Ok","Ok"],"round":1,"suite":"rss","threads":8,"wall_ms":2947}
+{"per_put_ms":[2510,2856,2148,2445,2753,2190,2051,2440],"results":["Ok","Ok","Ok","Ok","Ok","Ok","Ok","Ok"],"round":2,"suite":"rss","threads":8,"wall_ms":2865}

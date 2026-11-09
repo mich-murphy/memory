@@ -1,0 +1,11 @@
+{"r":"Ok","t":"create_new"}
+{"t":"etag_is_md5_of_body","v":true}
+{"r":"PreconditionFailed","t":"create_again"}
+{"body_eq":true,"etag_eq_put_reply":true,"r":"Ok","t":"get_after_create"}
+{"r":"Ok","t":"match_fresh"}
+{"r":"PreconditionFailed","t":"match_stale"}
+{"body_is_B":true,"etag_eq_put_reply":true,"r":"Ok","t":"get_after_stale"}
+{"r":"PreconditionFailed","t":"match_missing_key"}
+{"r":"NotFound","t":"get_missing"}
+{"elapsed_ms":1541,"etag_changed":true,"landed_body_is_ours":true,"phase":"retries_disabled","r":"Ambiguous","suite":"lost_reply_real_r2","tunnel_connections":1,"verify_get_verdict":"AlreadyOurs"}
+{"elapsed_ms":1548,"etag_changed":true,"landed_body_is_ours":true,"phase":"client_default_retries","r":"Ambiguous","suite":"lost_reply_real_r2","tunnel_connections":1,"verify_get_verdict":"AlreadyOurs"}

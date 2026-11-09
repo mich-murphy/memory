@@ -1,0 +1,7 @@
+{"suite":"p2b","case":"control_no_checksum","result":"200  | stored=Ok(true)"}
+{"suite":"p2b","case":"md5_correct","result":"200  | stored=Ok(true)"}
+{"suite":"p2b","case":"md5_wrong","result":"400 <?xml version=\"1.0\" encoding=\"UTF-8\"?><Error><Code>BadDigest</Code><Message>The MD5 checksum you specified did not match | stored=Err(\"NotFound\")"}
+{"suite":"p2b","case":"md5_malformed","result":"400 <?xml version=\"1.0\" encoding=\"UTF-8\"?><Error><Code>InvalidDigest</Code><Message>The checksum or Content-MD5 you specifie | stored=Err(\"NotFound\")"}
+{"suite":"p2b","case":"sha256_correct","result":"200  | stored=Ok(true)"}
+{"suite":"p2b","case":"sha256_wrong","result":"400 <?xml version=\"1.0\" encoding=\"UTF-8\"?><Error><Code>BadDigest</Code><Message>The SHA-256 checksum you specified did not m | stored=Err(\"NotFound\")"}
+{"suite":"p2b","case":"both_wrong_md5_right_sha","result":"400 <?xml version=\"1.0\" encoding=\"UTF-8\"?><Error><Code>InvalidRequest</Code><Message>You can only specify one non-default ch | stored=Err(\"NotFound\")"}
