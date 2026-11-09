@@ -30,7 +30,7 @@ nix develop --max-jobs 2 --cores 2 --command sh -c \
 
 The wrapper runs format, strict clippy, dependency/license/security and pure-core
 dependency bans, nextest, compile-fail doctests, Hegel, proptest, the actual production
-window-comparison mutation, schema drift, coverage and the deliberate-lint checker. It records seeds and each command's exact status under `rust/artifacts/`;
+window-comparison mutation, the three-invariant mutation check (`scripts/check-mutations.py`: a blind/latest-ETag `If-Match`, a local index advanced after a commit that did not land, and a skipped credential denylist, each applied once to production source in one private copy and required to fail an independent-oracle test; see `crates/memory/tests/mutation_daemon.rs`), schema drift, coverage and the deliberate-lint checker. It records seeds and each command's exact status under `rust/artifacts/`;
 a failed or unavailable gate makes the aggregate fail. CI uses at least 500 cases,
 local slice acceptance requires 2,000. A scaffold/property pass is not proof of
 the daemon, real R2 semantics, privacy at the actual store sink, restore/import,

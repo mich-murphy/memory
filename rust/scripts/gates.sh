@@ -28,6 +28,7 @@ run 04-doctests cargo test --workspace --doc --locked -- --test-threads=2
 run 05-hegel cargo test -p memory-core --test scaffold hegel_ --locked -- --test-threads=2 --nocapture
 run 06-proptest cargo test -p memory-core --test scaffold proptest_ --locked -- --test-threads=2 --nocapture
 run 06-window-mutation python3 scripts/check-window-mutation.py
+run 06-mutations python3 scripts/check-mutations.py
 run 07-schema cargo xtask schemas --check
 run 08-coverage cargo llvm-cov --workspace --locked --fail-under-lines "$(< coverage-floor.txt)" --json --output-path artifacts/coverage.json -- --test-threads=2
 run 09-lints bash scripts/check-lints.sh
