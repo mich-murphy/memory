@@ -212,3 +212,82 @@ pub struct Counters {
     /// Explicit simulator timer wakeups.
     pub wakeups: u64,
 }
+
+/// Wraps a seam implementation and counts calls through it into [`Counters`].
+///
+/// `FileSystem` calls count stats (`stat`, `stat_len`) and the length of every byte vector
+/// `read` returns; `Store` calls count every `put_*` attempt (including failed or lost-reply
+/// ones). `Clock` is delegated untouched (its methods take `&self`), so `wakeups` stays 0.
+/// Counters describe calls through this wrapper only, never unwrapped system calls.
+#[derive(Debug, Default, Clone)]
+pub struct Counting<T> {
+    /// The wrapped implementation.
+    pub inner: T,
+    /// Observations so far.
+    pub counters: Counters,
+}
+
+impl<T> Counting<T> {
+    /// Wrap `inner` with zeroed counters.
+    pub const fn new(inner: T) -> Self {
+        Self {
+            inner,
+            counters: Counters {
+                stats: 0,
+                bytes_read: 0,
+                puts: 0,
+                wakeups: 0,
+            },
+        }
+    }
+}
+
+impl<T: FileSystem> FileSystem for Counting<T> {
+    type Error = T::Error;
+    fn stat(&mut self, source: u64) -> Result<Option<Stat>, Self::Error> {
+        self.counters.stats = self.counters.stats.saturating_add(1);
+        self.inner.stat(source)
+    }
+    fn stat_len(&mut self, source: u64) -> Result<u64, Self::Error> {
+        self.counters.stats = self.counters.stats.saturating_add(1);
+        self.inner.stat_len(source)
+    }
+    fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, Self::Error> {
+        let bytes = self.inner.read(source, range)?;
+        let got = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        self.counters.bytes_read = self.counters.bytes_read.saturating_add(got);
+        Ok(bytes)
+    }
+}
+
+impl<T: Store> Store for Counting<T> {
+    fn put_if_absent(
+        &mut self,
+        key: &str,
+        body: Published,
+    ) -> Result<memory_core::domain::ETag, StoreError> {
+        self.counters.puts = self.counters.puts.saturating_add(1);
+        self.inner.put_if_absent(key, body)
+    }
+    fn put_if_match(
+        &mut self,
+        key: &str,
+        etag: &memory_core::domain::ETag,
+        body: Published,
+    ) -> Result<memory_core::domain::ETag, StoreError> {
+        self.counters.puts = self.counters.puts.saturating_add(1);
+        self.inner.put_if_match(key, etag, body)
+    }
+    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
+        self.inner.get(key)
+    }
+}
+
+impl<T: Clock> Clock for Counting<T> {
+    fn monotonic_ns(&self) -> u64 {
+        self.inner.monotonic_ns()
+    }
+    fn wall_ns(&self) -> i128 {
+        self.inner.wall_ns()
+    }
+}
