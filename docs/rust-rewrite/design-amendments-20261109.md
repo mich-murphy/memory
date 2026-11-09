@@ -121,3 +121,20 @@ write durable, and it is easy to get wrong).
 
 DESIGN 16 already assigns P9 (SQLite unchanged test) and P10 (Linux racy mtime); both stay slice-3
 work. The 2026-11-09 prototypes are P11 (commit retry) and P12 (durable state writes).
+
+## A9. Line-coverage floor is 80 %, not a ratchet (DESIGN 15 gate 8; quality-gates.md)
+
+Operator decision, 2026-11-09. `rust/coverage-floor.txt` is 80. DESIGN 15 gate 8 ("the current
+percentage as a floor") is replaced: the floor is a fixed backstop, not the latest measurement.
+
+- Why: the 98 % floor was the scaffold's first measurement (49/50 lines,
+  `implementation/00-scaffold.md`), carried forward to about 5,400 lines. It left 9 uncovered
+  lines of headroom and rewarded removing error branches or adding coverage-driven tests.
+  `challenge/06-strategy-engineering.md` F8.1 and `reports/04-tests.md` finding 7 recommended
+  against a "current percentage" ratchet. The Go gate is 75 % total.
+- What carries the evidence instead: independent-oracle properties with their coverage guards
+  (DESIGN 15, unchanged), production mutation checks, and the consumer gate. Tautological tests
+  (oracle re-derived from the code under test, fake asserted against itself, derive-only) are
+  removed rather than kept for line count.
+- The floor is still a hard gate and is not lowered to make a run pass. Raising it is allowed only
+  as a recorded decision, never automatically from a measurement.

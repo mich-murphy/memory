@@ -34,8 +34,12 @@ window-comparison mutation, schema drift, coverage and the deliberate-lint check
 a failed or unavailable gate makes the aggregate fail. CI uses at least 500 cases,
 local slice acceptance requires 2,000. A scaffold/property pass is not proof of
 the daemon, real R2 semantics, privacy at the actual store sink, restore/import,
-footprint, or the two seven-day native shadows. The measured coverage floor is
-**98%**, not to be lowered for added code. The latest source-bound integrated run
+footprint, or the two seven-day native shadows. The line-coverage floor is a fixed
+**80%** backstop ([amendment A9](rust-rewrite/design-amendments-20261109.md), 2026-11-09),
+not a ratchet of the latest measurement; evidence for invariants comes from the
+independent-oracle properties, their coverage guards and the production mutation checks.
+It is never lowered to make a run pass. The earlier 98% floor was the scaffold's first
+measurement. The latest source-bound integrated run
 (gate 8, 2026-11-09) passed at **98.3173%** (5,200/5,289 lines), 369/369 nextest, 2,000
 cases, seed 730210; see [its evidence](rust-rewrite/implementation/evidence/12-slice2-round10/).
 At 2,000 cases the two daemon state-machine properties took about 6 minutes because every

@@ -30,10 +30,10 @@ mutation baseline fail the wrapper, never skip successfully.
 `artifacts/`. Replay with `PROPERTY_SEED=<recorded> PROPERTY_CASES=2000`.
 The repaired coverage tool is available in the default shell and the explicit
 `nix develop .#coverage` alias. It uses pinned official Rust 1.99.0 and its matching
-LLVM tools; upstream tool tests remain enabled. `coverage-floor.txt` is the measured
-98% scaffold line baseline (49/50, no file exclusions); see the source-bound evidence
-under docs/rust-rewrite/implementation/evidence/00-scaffold. A failed gate must
-never silently lower this baseline.
+LLVM tools; upstream tool tests remain enabled. `coverage-floor.txt` is a fixed 80% line
+backstop (amendment A9, 2026-11-09), not a ratchet from the latest measurement. The earlier
+98% value was the scaffold's first measurement (49/50 lines, evidence/00-scaffold). A failed
+gate must never silently lower the floor; raising it is a recorded decision.
 
 `memory hook <agent>` appends one hint line and always exits 0. `memory daemon` runs its
 startup (lock, state directory, recovery) and then exits 78; every other command exits 78,
