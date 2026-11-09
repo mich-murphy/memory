@@ -12,6 +12,27 @@ pub const BACKOFF_MIN: Duration = Duration::from_secs(1);
 /// Largest retry delay.
 pub const BACKOFF_MAX: Duration = Duration::from_secs(15 * 60);
 
+/// Largest `Transient` retry delay (amendment A6).
+pub const TRANSIENT_MAX: Duration = Duration::from_secs(120);
+
+/// Caller-supplied pacing inputs, so this module stays pure: one uniform random draw and an
+/// optional server `Retry-After`. The shell supplies real randomness; tests fix it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Pacing {
+    /// Uniform sample over the whole `u64` range, mapped onto each jitter window.
+    pub draw: u64,
+    /// `Retry-After` of a throttling reply, when it carried one.
+    pub retry_after: Option<Duration>,
+}
+
+impl Pacing {
+    /// Draw 0, no `Retry-After`: every jittered wait is the window minimum (1 s).
+    pub const FLOOR: Self = Self {
+        draw: 0,
+        retry_after: None,
+    };
+}
+
 /// What one attempt ended with. A cancel/failure race is reported as the failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
@@ -51,17 +72,43 @@ pub const fn park_reason(fault: &Fault) -> ParkReason {
     }
 }
 
-/// Exponential backoff for the nth failed attempt (0-based), 1 s to 15 min, no jitter.
+/// Unjittered exponential backoff for the nth failed attempt (0-based), 1 s to 15 min. It is
+/// the `Local` and deterministic-fault delay and the ceiling of the `Offline` jitter window.
 pub fn backoff(retries: u32) -> Duration {
     let secs = 1_u64 << retries.min(20);
     Duration::from_secs(secs).clamp(BACKOFF_MIN, BACKOFF_MAX)
 }
 
-fn retry(class: ErrorClass, prior: &Streak) -> Disposition {
-    Disposition::Retry {
-        after: backoff(prior.retries),
-        class,
-    }
+/// Ceiling of the `Transient` window for the nth failure: `min(120 s, 2 x 2^n s)`.
+pub fn transient_ceiling(retries: u32) -> Duration {
+    let secs = 2_u64 << retries.min(20);
+    Duration::from_secs(secs).clamp(BACKOFF_MIN, TRANSIENT_MAX)
+}
+
+/// Full-jitter wait: a uniform point of `[BACKOFF_MIN, ceiling]` (inclusive) chosen by `draw`.
+pub fn jittered(ceiling: Duration, draw: u64) -> Duration {
+    let ceiling = ceiling.max(BACKOFF_MIN);
+    let span = (ceiling - BACKOFF_MIN).as_millis();
+    let offset = (u128::from(draw) * (span + 1)) >> 64;
+    let offset = u64::try_from(offset).unwrap_or(u64::MAX);
+    (BACKOFF_MIN + Duration::from_millis(offset)).min(ceiling)
+}
+
+fn retry(class: ErrorClass, prior: &Streak, pacing: Pacing) -> Disposition {
+    let after = match &class {
+        ErrorClass::Offline => jittered(backoff(prior.retries), pacing.draw),
+        ErrorClass::Transient => jittered(transient_ceiling(prior.retries), pacing.draw),
+        // Honour Retry-After, else the Offline schedule. It is clamped to [1 s, 15 min]: a
+        // zero value must not become a hot retry loop, and a hostile one cannot stall long.
+        ErrorClass::Throttled => pacing.retry_after.map_or_else(
+            || jittered(backoff(prior.retries), pacing.draw),
+            |wait| wait.clamp(BACKOFF_MIN, BACKOFF_MAX),
+        ),
+        ErrorClass::Local(_) | ErrorClass::Deterministic(_) | ErrorClass::DestinationAuth => {
+            backoff(prior.retries)
+        }
+    };
+    Disposition::Retry { after, class }
 }
 
 /// Map an attempt and the prior streak to a disposition and the next streak.
@@ -75,6 +122,17 @@ pub fn transition(
     at: Duration,
     prior: &Streak,
 ) -> (Disposition, Streak) {
+    transition_paced(outcome, cancel_requested, at, prior, Pacing::FLOOR)
+}
+
+/// As [`transition`], with the shell's random draw and any `Retry-After`.
+pub fn transition_paced(
+    outcome: &Outcome,
+    cancel_requested: bool,
+    at: Duration,
+    prior: &Streak,
+    pacing: Pacing,
+) -> (Disposition, Streak) {
     let bumped = Streak {
         retries: prior.retries.saturating_add(1),
         ..prior.clone()
@@ -84,7 +142,7 @@ pub fn transition(
         Outcome::Succeeded => (Disposition::Done, Streak::default()),
         Outcome::Aborted => cancelled,
         Outcome::TimedOut if cancel_requested => cancelled,
-        Outcome::TimedOut => (retry(ErrorClass::Offline, prior), bumped),
+        Outcome::TimedOut => (retry(ErrorClass::Offline, prior, pacing), bumped),
         Outcome::OwnerFault(reason) => (
             Disposition::ParkOwner {
                 reason: reason.clone(),
@@ -98,11 +156,14 @@ pub fn transition(
                 },
                 prior.clone(),
             ),
-            ErrorClass::Offline | ErrorClass::Throttled | ErrorClass::Local(_) => {
+            ErrorClass::Offline
+            | ErrorClass::Throttled
+            | ErrorClass::Transient
+            | ErrorClass::Local(_) => {
                 if cancel_requested {
                     cancelled
                 } else {
-                    (retry(class.clone(), prior), bumped)
+                    (retry(class.clone(), prior, pacing), bumped)
                 }
             }
             ErrorClass::Deterministic(fault) => {
@@ -122,7 +183,7 @@ pub fn transition(
                         reason: park_reason(fault),
                     }
                 } else {
-                    retry(class.clone(), prior)
+                    retry(class.clone(), prior, pacing)
                 };
                 (disposition, next)
             }

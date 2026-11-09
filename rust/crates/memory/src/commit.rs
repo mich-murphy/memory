@@ -5,7 +5,7 @@
 //! the encoding that actually won, R2), PUTs the manifest if absent, performs the guarded
 //! `current.json` PUT and classifies the step 5 verification GET.
 use crate::environment::{Store, StoreError};
-use memory_core::disposition::{Outcome, Streak, transition};
+use memory_core::disposition::{Outcome, Pacing, Streak, transition_paced};
 use memory_core::domain::{
     CommitOutcome, Disposition, ETag, ErrorClass, Fault, Owner, OwnerParkReason, Sha256,
 };
@@ -17,6 +17,10 @@ use memory_core::manifest::{
 };
 use std::collections::BTreeMap;
 use std::time::Duration;
+
+/// Manifests this daemon built for one owner since its last landed commit, by hash (amendment
+/// A6). In memory only; [`commit_known`] clears it when a commit lands.
+pub type KnownOurs = std::collections::HashMap<Sha256, Built>;
 
 /// Retries of step 3 after `BaseUnchanged` (DESIGN.md 7.4 step 5: up to 4).
 pub const REBASE_RETRIES: u32 = 4;
@@ -68,8 +72,11 @@ pub struct Landed {
     pub outcome: CommitOutcome,
     /// ETag of `current.json` after the commit.
     pub etag: ETag,
-    /// The committed manifest.
+    /// The committed manifest. After an adoption this is the earlier attempt's manifest.
     pub built: Built,
+    /// True when `current.json` named an earlier attempt's manifest (`known_ours`): this
+    /// commit's own manifest did not land, so the caller must capture again.
+    pub follow_up: bool,
 }
 
 impl Landed {
@@ -91,7 +98,12 @@ pub enum Failure {
     /// The `current.json` write could not be verified; it may have landed. The caller
     /// must refresh its base from the store before the next commit.
     LandingUnknown(ErrorClass),
-    /// `BaseUnchanged` persisted through every retry; retry the capture.
+    /// Nothing landed because the store throttled the request.
+    Throttled {
+        /// `Retry-After` of the reply, when present.
+        retry_after: Option<Duration>,
+    },
+    /// `BaseUnchanged` persisted through every retry; the capture ends `Transient`.
     BaseUnchanged,
     /// Another writer advanced the owner: park, never merge.
     Foreign {
@@ -122,7 +134,8 @@ impl Failure {
     pub fn outcome(&self) -> Outcome {
         match self {
             Self::NotLanded(class) | Self::LandingUnknown(class) => Outcome::Failed(class.clone()),
-            Self::BaseUnchanged => Outcome::Failed(ErrorClass::Throttled),
+            Self::Throttled { .. } => Outcome::Failed(ErrorClass::Throttled),
+            Self::BaseUnchanged => Outcome::Failed(ErrorClass::Transient),
             Self::Foreign { theirs, ours } => Outcome::OwnerFault(OwnerParkReason::ForeignWriter {
                 theirs: *theirs,
                 ours: *ours,
@@ -133,6 +146,13 @@ impl Failure {
             }
         }
     }
+    /// `Retry-After` carried by a throttling reply.
+    pub const fn retry_after(&self) -> Option<Duration> {
+        match self {
+            Self::Throttled { retry_after } => *retry_after,
+            _ => None,
+        }
+    }
     /// True when the caller's base may no longer match `current.json`.
     pub const fn base_may_be_stale(&self) -> bool {
         matches!(self, Self::LandingUnknown(_))
@@ -140,17 +160,37 @@ impl Failure {
 }
 
 /// Map a commit result onto a [`Disposition`] with [`transition`].
+///
+/// Jitter draw 0: every jittered wait is its minimum. See [`disposition_paced`].
 pub fn disposition(
     result: &Result<Landed, Failure>,
     cancel_requested: bool,
     at: Duration,
     prior: &Streak,
 ) -> (Disposition, Streak) {
-    let outcome = match result {
-        Ok(_) => Outcome::Succeeded,
-        Err(failure) => failure.outcome(),
+    disposition_paced(result, cancel_requested, at, prior, 0)
+}
+
+/// As [`disposition`], with the shell's uniform random `draw` for the full-jitter backoff.
+/// A `Retry-After` on the failure is passed through.
+pub fn disposition_paced(
+    result: &Result<Landed, Failure>,
+    cancel_requested: bool,
+    at: Duration,
+    prior: &Streak,
+    draw: u64,
+) -> (Disposition, Streak) {
+    let (outcome, retry_after) = match result {
+        Ok(_) => (Outcome::Succeeded, None),
+        Err(failure) => (failure.outcome(), failure.retry_after()),
     };
-    transition(&outcome, cancel_requested, at, prior)
+    transition_paced(
+        &outcome,
+        cancel_requested,
+        at,
+        prior,
+        Pacing { draw, retry_after },
+    )
 }
 
 /// Invariant 6 (DESIGN.md 7.4): the `previous` of the manifest being committed equals the
@@ -171,7 +211,12 @@ pub fn check_fence(manifest: &Manifest, named: Option<Sha256>) -> Result<(), Fai
 }
 
 fn not_landed(error: StoreError) -> Failure {
-    Failure::NotLanded(error.class())
+    match error {
+        StoreError::Throttled(_) => Failure::Throttled {
+            retry_after: error.retry_after(),
+        },
+        other => Failure::NotLanded(other.class()),
+    }
 }
 
 fn length(bytes: &[u8]) -> u64 {
@@ -221,7 +266,15 @@ fn upload_pieces<S: Store>(
 
 enum Verdict {
     Ours(ETag),
-    Base { etag: ETag, manifest: Sha256 },
+    /// `current.json` names an earlier manifest of ours that never reported landing.
+    Adopt {
+        etag: ETag,
+        built: Box<Built>,
+    },
+    Base {
+        etag: ETag,
+        manifest: Sha256,
+    },
     Absent,
 }
 
@@ -247,6 +300,7 @@ fn verify<S: Store>(
     key: &str,
     ours: Sha256,
     previous: Option<Sha256>,
+    known: &KnownOurs,
     pause: &mut dyn FnMut(u32),
 ) -> Result<Verdict, Failure> {
     let mut last = StoreError::NotFound;
@@ -262,6 +316,11 @@ fn verify<S: Store>(
                 })?;
                 return if current.manifest == ours {
                     Ok(Verdict::Ours(stored.etag))
+                } else if let Some(built) = known.get(&current.manifest) {
+                    Ok(Verdict::Adopt {
+                        etag: stored.etag,
+                        built: Box::new(built.clone()),
+                    })
                 } else if Some(current.manifest) == previous {
                     Ok(Verdict::Base {
                         etag: stored.etag,
@@ -307,6 +366,23 @@ pub fn commit<S: Store>(
     request: Commit<S::Body>,
     pause: &mut dyn FnMut(u32),
 ) -> Result<Landed, Failure> {
+    commit_known(store, base, request, &mut KnownOurs::new(), pause)
+}
+
+/// As [`commit`], with the owner's `known_ours` (amendment A6): every manifest built since the
+/// last landed commit. The new manifest is added before any request; the set is cleared when
+/// a commit lands. A verification that finds `current.json` naming a known manifest adopts it
+/// ([`Landed::follow_up`]) instead of reporting a foreign writer.
+///
+/// # Errors
+/// As [`commit`].
+pub fn commit_known<S: Store>(
+    store: &mut S,
+    base: Option<&Base>,
+    request: Commit<S::Body>,
+    known: &mut KnownOurs,
+    pause: &mut dyn FnMut(u32),
+) -> Result<Landed, Failure> {
     let Commit {
         header,
         mut changes,
@@ -318,6 +394,7 @@ pub fn commit<S: Store>(
     let built =
         build(base.map(|b| (&b.position, &b.state)), header, changes).map_err(Failure::Invalid)?;
     let ours = built.hash;
+    known.insert(ours, built.clone());
     put_document(store, &manifest_key(&ours), built.bytes.clone())?;
     let pointer = Current::new(ours, built.position.seq, updated_at)
         .to_bytes()
@@ -334,10 +411,12 @@ pub fn commit<S: Store>(
         };
         match attempt {
             Ok(etag) => {
+                known.clear();
                 return Ok(Landed {
                     outcome: CommitOutcome::Committed { etag: etag.clone() },
                     etag,
                     built,
+                    follow_up: false,
                 });
             }
             Err(StoreError::Auth) => {
@@ -346,12 +425,26 @@ pub fn commit<S: Store>(
             Err(_) => {}
         }
         let mut absent = false;
-        match verify(store, &key, ours, previous, pause)? {
+        match verify(store, &key, ours, previous, known, pause)? {
             Verdict::Ours(etag) => {
+                known.clear();
                 return Ok(Landed {
                     outcome: CommitOutcome::AlreadyOurs { etag: etag.clone() },
                     etag,
                     built,
+                    follow_up: false,
+                });
+            }
+            Verdict::Adopt {
+                etag,
+                built: earlier,
+            } => {
+                known.clear();
+                return Ok(Landed {
+                    outcome: CommitOutcome::AlreadyOurs { etag: etag.clone() },
+                    etag,
+                    built: *earlier,
+                    follow_up: true,
                 });
             }
             Verdict::Base { etag, manifest } => {

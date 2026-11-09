@@ -16,7 +16,9 @@
 use crate::capture::{
     Env, Local, Locals, MAX_PIECE_BYTES, Published, Source, Update, attach_launches, capture,
 };
-use crate::commit::{Base, Failure, Landed, commit, disposition, recover_base};
+use crate::commit::{
+    Base, Failure, KnownOurs, Landed, commit_known, disposition_paced, recover_base,
+};
 use crate::config::{Config, ConfigError};
 use crate::environment::{Clock, FileSystem, Store};
 use crate::hook::{is_day_name, utc_day};
@@ -240,6 +242,8 @@ struct OwnerRt {
     needs_recover: bool,
     streak: Streak,
     parked: Option<ParkedReason>,
+    /// Manifests built since the last landed commit (A6); memory only.
+    known_ours: KnownOurs,
 }
 
 impl OwnerRt {
@@ -249,6 +253,7 @@ impl OwnerRt {
             needs_recover: true,
             streak: Streak::default(),
             parked,
+            known_ours: KnownOurs::new(),
         }
     }
 }
@@ -297,6 +302,7 @@ pub struct Daemon<F, S, C, E> {
     dirty: bool,
     last_index: Option<Duration>,
     last_status: Option<Duration>,
+    draws: u64,
 }
 
 impl<F: FileSystem, S: Store<Body = Published>, C: Clock, E: Sources> Daemon<F, S, C, E> {
@@ -360,6 +366,7 @@ impl<F: FileSystem, S: Store<Body = Published>, C: Clock, E: Sources> Daemon<F, 
             dirty: false,
             last_index: None,
             last_status: None,
+            draws: 0,
         })
     }
 
@@ -382,6 +389,16 @@ impl<F: FileSystem, S: Store<Body = Published>, C: Clock, E: Sources> Daemon<F, 
     /// The clock seam.
     pub const fn clock_mut(&mut self) -> &mut C {
         &mut self.clock
+    }
+
+    /// Jitter draw for the pure backoff: splitmix64 over a counter seeded from the clocks.
+    fn next_draw(&mut self) -> u64 {
+        self.draws = self.draws.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let seed = self.draws ^ self.clock.monotonic_ns() ^ (self.clock.wall_ns() as u64);
+        let mut z = seed;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
     }
 
     fn apply(&mut self, updates: Vec<Update>) {
@@ -459,9 +476,10 @@ impl<F: FileSystem, S: Store<Body = Published>, C: Clock, E: Sources> Daemon<F, 
         rt: &mut OwnerRt,
         result: &Result<Landed, Failure>,
         at: Duration,
+        draw: u64,
         report: &mut RoundReport,
     ) -> bool {
-        let (disp, streak) = disposition(result, false, at, &rt.streak);
+        let (disp, streak) = disposition_paced(result, false, at, &rt.streak, draw);
         rt.streak = streak;
         if let Err(failure) = result
             && (failure.base_may_be_stale() || matches!(failure, Failure::BaseUnchanged))
@@ -516,7 +534,10 @@ impl<F: FileSystem, S: Store<Body = Published>, C: Clock, E: Sources> Daemon<F, 
                     rt.base = base;
                     rt.needs_recover = false;
                 }
-                Err(failure) => return Self::settle(rt, &Err(failure), at, report),
+                Err(failure) => {
+                    let draw = self.next_draw();
+                    return Self::settle(rt, &Err(failure), at, draw, report);
+                }
             }
         }
         let header = Header {
@@ -552,18 +573,29 @@ impl<F: FileSystem, S: Store<Body = Published>, C: Clock, E: Sources> Daemon<F, 
             .filter_map(|r| r.launch.clone())
             .collect();
         let attached = attach_launches(&mut request, &launches).is_ok();
-        let result = commit(&mut self.store, rt.base.as_ref(), request, &mut |_| {});
+        let result = commit_known(
+            &mut self.store,
+            rt.base.as_ref(),
+            request,
+            &mut rt.known_ours,
+            &mut |_| {},
+        );
         if let Ok(landed) = &result {
             // Remote is authoritative: updates apply only once the commit is durable.
+            // An adopted earlier manifest (A6 `follow_up`) did not carry this capture's
+            // bytes: keep the base, apply nothing, and the next round captures again.
             rt.base = Some(landed.base());
-            self.apply(got.updates);
-            if attached {
+            if !landed.follow_up {
+                self.apply(got.updates);
+            }
+            if attached && !landed.follow_up {
                 for record in hints.iter_mut().flat_map(|f| f.records.iter_mut()) {
                     record.done |= record.owner == *owner;
                 }
             }
         }
-        Self::settle(rt, &result, at, report)
+        let draw = self.next_draw();
+        Self::settle(rt, &result, at, draw, report)
     }
 
     fn advance_hints(&mut self, files: &[ScannedFile]) {

@@ -654,6 +654,10 @@ pub enum ErrorClass {
     Offline,
     /// Remote throttling.
     Throttled,
+    /// `BaseUnchanged` persisted through every in-commit rebase retry (DESIGN 7.4 step 5,
+    /// amendment A6). Retried with a short full-jitter backoff, counted apart from
+    /// `Throttled`, and never carries a `Retry-After`.
+    Transient,
     /// Pause host uploads, continue observations.
     DestinationAuth,
     /// Local resource failure.

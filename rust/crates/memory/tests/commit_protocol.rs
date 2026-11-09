@@ -2176,7 +2176,11 @@ fn store_errors_classify_and_display() {
             ErrorClass::DestinationAuth,
             "authorization failed",
         ),
-        (StoreError::Throttled, ErrorClass::Throttled, "throttled"),
+        (
+            StoreError::Throttled(None),
+            ErrorClass::Throttled,
+            "throttled",
+        ),
         (StoreError::Server, ErrorClass::Offline, "server error"),
         (StoreError::Offline, ErrorClass::Offline, "offline"),
         (
@@ -2348,4 +2352,98 @@ fn parse_current_roundtrips_what_the_driver_writes() -> R {
     assert_eq!(current.manifest, landed.built.hash);
     assert_eq!(current.seq, 0);
     Ok(())
+}
+
+// ------------------------------------------------------------------ A6 known_ours
+
+use memory::commit::{KnownOurs, commit_known};
+
+/// Capture A builds M1 and fails (its `current.json` PUT and every verification GET are
+/// refused). Capture B builds M2. M1's delayed write then lands just before B's PUT.
+fn late_write(known_for_b: Option<KnownOurs>) -> R<(Rig, Result<Landed, Failure>, Sha256)> {
+    let mut rig = Rig::two_commits()?;
+    let mut known = KnownOurs::new();
+    rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    rig.store.arm(
+        Op::Put(Kind::Current),
+        Effect::FailBefore(StoreError::Offline),
+    );
+    rig.store.arm_n(
+        Op::Get(Kind::Current),
+        0,
+        GET_ATTEMPTS,
+        Effect::FailBefore(StoreError::Offline),
+    );
+    let request = rig.request()?;
+    let a = commit_known(
+        &mut rig.store,
+        rig.base.as_ref(),
+        request,
+        &mut known,
+        &mut |_| {},
+    );
+    assert!(matches!(a, Err(Failure::LandingUnknown(_))), "{a:?}");
+    assert_eq!(known.len(), 1);
+    let m1 = need(known.keys().next().copied(), "m1")?;
+    let seq = need(known.get(&m1), "built")?.position.seq;
+    let foreign = Foreign {
+        manifest_key: manifest_key(&m1),
+        manifest: need(rig.store.peek(&manifest_key(&m1)), "m1 bytes")?.to_vec(),
+        current: Current::new(m1, seq, ts()?).to_bytes().map_err(e)?,
+    };
+    rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    rig.store
+        .arm(Op::Put(Kind::Current), Effect::Foreign(foreign));
+    let mut known_b = known_for_b.unwrap_or(known);
+    let request = rig.request()?;
+    let b = commit_known(
+        &mut rig.store,
+        rig.base.as_ref(),
+        request,
+        &mut known_b,
+        &mut |_| {},
+    );
+    Ok((rig, b, m1))
+}
+
+#[test]
+fn late_write_of_an_earlier_failed_capture_is_adopted_and_followed_up() -> R {
+    let (mut rig, b, m1) = late_write(None)?;
+    let landed = b.map_err(e)?;
+    assert!(matches!(landed.outcome, CommitOutcome::AlreadyOurs { .. }));
+    assert!(landed.follow_up);
+    assert_eq!(landed.built.hash, m1);
+    rig.base = Some(landed.base());
+    // Follow-up capture uploads the newer bytes on top of the adopted manifest.
+    let again = rig.landed()?;
+    assert!(matches!(again.outcome, CommitOutcome::Committed { .. }));
+    assert!(!again.follow_up);
+    rig.assert_safe()
+}
+
+#[test]
+fn late_write_of_an_unknown_manifest_is_foreign() -> R {
+    let (_, b, _) = late_write(Some(KnownOurs::new()))?;
+    assert!(matches!(b, Err(Failure::Foreign { .. })), "{b:?}");
+    Ok(())
+}
+
+#[test]
+fn base_unchanged_exhaustion_is_transient_not_throttled() {
+    let (d, _) = disposition(
+        &Err(Failure::BaseUnchanged),
+        false,
+        Duration::ZERO,
+        &Streak::default(),
+    );
+    assert!(
+        matches!(
+            d,
+            Disposition::Retry {
+                class: ErrorClass::Transient,
+                ..
+            }
+        ),
+        "{d:?}"
+    );
 }

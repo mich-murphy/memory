@@ -63,8 +63,9 @@ pub enum StoreError {
     NotFound,
     /// Connect, DNS, TLS or timeout failure.
     Offline,
-    /// HTTP 429 or 503 (DESIGN.md 11.2 `Throttled`).
-    Throttled,
+    /// HTTP 429 or 503 (DESIGN.md 11.2 `Throttled`), with the reply's `Retry-After` in whole
+    /// seconds when it carried one (the adapter parses it).
+    Throttled(Option<u32>),
     /// Any other 5xx reply. DESIGN.md 11.2 lists only 429/503 as throttled, so this
     /// retries with the `Offline` exponential backoff.
     Server,
@@ -75,6 +76,13 @@ pub enum StoreError {
 }
 
 impl StoreError {
+    /// `Retry-After` of a throttling reply.
+    pub fn retry_after(self) -> Option<std::time::Duration> {
+        match self {
+            Self::Throttled(Some(secs)) => Some(std::time::Duration::from_secs(u64::from(secs))),
+            _ => None,
+        }
+    }
     /// Error class of the failure for the disposition table (DESIGN.md 11.2).
     ///
     /// `Offline`, `Ambiguous` and a non-throttling 5xx retry as offline; 429/503 are
@@ -83,7 +91,7 @@ impl StoreError {
         use memory_core::domain::ErrorClass;
         match self {
             Self::Auth => ErrorClass::DestinationAuth,
-            Self::Throttled => ErrorClass::Throttled,
+            Self::Throttled(_) => ErrorClass::Throttled,
             Self::PreconditionFailed
             | Self::NotFound
             | Self::Offline
@@ -99,7 +107,7 @@ impl std::fmt::Display for StoreError {
             Self::PreconditionFailed => "precondition failed",
             Self::NotFound => "not found",
             Self::Offline => "offline",
-            Self::Throttled => "throttled",
+            Self::Throttled(_) => "throttled",
             Self::Server => "server error",
             Self::Auth => "authorization failed",
             Self::Ambiguous => "ambiguous reply",

@@ -287,11 +287,12 @@ fn timeout_and_offline_retry_not_cancelled() {
     );
     assert_eq!(n.retries, 1);
     assert_eq!(n.deterministic, 0);
+    // A6: full jitter; draw 0 is the window minimum (1 s) instead of the old fixed 2 s.
     let (d, _) = transition(&Outcome::Failed(ErrorClass::Throttled), false, S(1), &n);
     assert_eq!(
         d,
         Disposition::Retry {
-            after: S(2),
+            after: S(1),
             class: ErrorClass::Throttled
         }
     );
@@ -588,5 +589,122 @@ proptest! {
     #[test]
     fn proptest_cancel(c in any::<u32>(), n in any::<u8>(), f in any::<u32>(), r in any::<u32>(), at in any::<u32>(), flag in any::<bool>()) {
         prop_assert_eq!(check_cancel(c, n, f, r, at, flag), Ok(()));
+    }
+}
+
+#[test]
+fn a6_jitter_windows_hold_for_every_draw() {
+    use memory_core::disposition::{Pacing, jittered, transient_ceiling, transition_paced};
+    let draws = [0_u64, 1, u64::MAX / 3, u64::MAX / 2, u64::MAX - 1, u64::MAX];
+    for n in [0_u32, 1, 2, 5, 6, 7, 9, 10, 11, 20, 21, u32::MAX] {
+        for draw in draws {
+            let pacing = Pacing {
+                draw,
+                retry_after: None,
+            };
+            let prior = Streak {
+                retries: n,
+                ..Streak::default()
+            };
+            let wait = |class: ErrorClass| match transition_paced(
+                &Outcome::Failed(class),
+                false,
+                S(0),
+                &prior,
+                pacing,
+            )
+            .0
+            {
+                Disposition::Retry { after, .. } => after,
+                _ => Duration::ZERO,
+            };
+            let offline = wait(ErrorClass::Offline);
+            assert!(
+                offline >= S(1) && offline <= backoff(n).min(S(900)),
+                "{n} {draw} {offline:?}"
+            );
+            let transient = wait(ErrorClass::Transient);
+            assert!(
+                transient >= S(1) && transient <= S(120),
+                "{n} {draw} {transient:?}"
+            );
+            assert!(transient <= transient_ceiling(n));
+            // Throttled without Retry-After uses the Offline schedule.
+            assert_eq!(wait(ErrorClass::Throttled), offline);
+        }
+    }
+    assert_eq!(transient_ceiling(0), S(2));
+    assert_eq!(transient_ceiling(5), S(64));
+    assert_eq!(transient_ceiling(6), S(120));
+    assert_eq!(jittered(S(900), 0), S(1));
+    assert_eq!(jittered(S(900), u64::MAX), S(900));
+}
+
+#[test]
+fn a6_retry_after_is_honoured_and_transient_is_its_own_class() {
+    use memory_core::disposition::{Pacing, transition_paced};
+    let pacing = Pacing {
+        draw: 12345,
+        retry_after: Some(S(37)),
+    };
+    let (d, n) = transition_paced(
+        &Outcome::Failed(ErrorClass::Throttled),
+        false,
+        S(0),
+        &Streak::default(),
+        pacing,
+    );
+    assert_eq!(
+        d,
+        Disposition::Retry {
+            after: S(37),
+            class: ErrorClass::Throttled
+        }
+    );
+    assert_eq!(n.retries, 1);
+    // Transient ignores any Retry-After.
+    let (d, _) = transition_paced(
+        &Outcome::Failed(ErrorClass::Transient),
+        false,
+        S(0),
+        &Streak::default(),
+        pacing,
+    );
+    assert!(
+        matches!(d, Disposition::Retry { class: ErrorClass::Transient, after } if after >= S(1) && after <= S(2))
+    );
+    // Cancel swallows it like other retryable classes.
+    let (d, _) = transition(
+        &Outcome::Failed(ErrorClass::Transient),
+        true,
+        S(0),
+        &Streak::default(),
+    );
+    assert_eq!(d, Disposition::Cancelled);
+}
+
+#[test]
+fn a6_retry_after_is_clamped_to_one_second_and_fifteen_minutes() {
+    use memory_core::disposition::{Pacing, transition_paced};
+    for (given, want) in [(0, 1), (1, 1), (900, 900), (901, 900), (86_400, 900)] {
+        let pacing = Pacing {
+            draw: u64::MAX,
+            retry_after: Some(S(given)),
+        };
+        let (d, _) = transition_paced(
+            &Outcome::Failed(ErrorClass::Throttled),
+            false,
+            S(0),
+            &Streak::default(),
+            pacing,
+        );
+        assert_eq!(
+            d,
+            Disposition::Retry {
+                after: S(want),
+                class: ErrorClass::Throttled
+            },
+            "{given}"
+        );
     }
 }
