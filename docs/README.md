@@ -59,7 +59,8 @@ mechanisms do not override DESIGN.md for Rust or the retained contract goals:
   that directory retain worker-specific evidence, not independent release approvals.
 - [Latest integrated run, gate 8](rust-rewrite/implementation/evidence/12-slice2-round10/) —
   369/369 nextest, 2,000-case properties, seed 730210, 98.3173% coverage against the
-  unchanged 98% floor; current for the uncommitted source as of 2026-11-09.
+  unchanged 98% floor; current for `rust/workspace` (d8fbc4f). A7 and A6 on stack #56 came
+  later and have hosted CI plus focused 2,000-case runs, not a new integrated gate.
 - [Corrected integrated run](rust-rewrite/implementation/evidence/02-corrected/) — slice-0
   foundation result, superseded for current source by gate 8:
   66 tests, 5 compile-fail doctests, 2,000-case properties, actual source mutation,

@@ -4,11 +4,11 @@
   "sha256": {
     "README.md": {
       "before": "920de3235d3481dae536b0c6e2a5b99d54bb8ef85977809029365b9a19b2ec90",
-      "after": "7cc0eb8d81caae72afed2ab38d983d3c85d91f0e5adc705392af0210a04ab453"
+      "after": "e6846db4c09905af789afe335bd98f2d5de452d6b1963ed8dba199eded17fa8f"
     },
     "docs/README.md": {
       "before": "260fb9df627554930a467221ee505db2cfb2af2d1beac04ba6da87d71656c4dd",
-      "after": "85bc797661d7f8fef482130dd259484a8e09f256d9a907dfac1ce65a2741f633"
+      "after": "94f140a4820155f482555d1432443188d5425410665b17ca94c195a8d047c51c"
     },
     "docs/production-gap-register-20261102.md": {
       "before": "d73eeb2207d19fbb0f0f40bf66808541a98433fd3749e27ea4f8a24aa25a78cc",
@@ -36,6 +36,16 @@
       "after": {
         "README.md": "7cc0eb8d81caae72afed2ab38d983d3c85d91f0e5adc705392af0210a04ab453",
         "docs/README.md": "85bc797661d7f8fef482130dd259484a8e09f256d9a907dfac1ce65a2741f633",
+        "docs/production-gap-register-20261102.md": "783a67afd9576b0d2da811c7156784be62c81fb9554f3814c9ec1525d2935099",
+        "docs/security.md": "1aca7b9c470e3dd0d7090a8f6b50229511054e0074fd6aa40762d1578047d420"
+      }
+    },
+    {
+      "date": "2026-11-09 (after A6)",
+      "reason": "Operator-requested state reconciliation before session handover: README.md and docs/README.md now say the work is committed as draft gh stack #56, green on hosted CI, with A7, P2 and A6 after gate 8. DESIGN.md, AGENTS.md and the contract are not revised.",
+      "after": {
+        "README.md": "e6846db4c09905af789afe335bd98f2d5de452d6b1963ed8dba199eded17fa8f",
+        "docs/README.md": "94f140a4820155f482555d1432443188d5425410665b17ca94c195a8d047c51c",
         "docs/production-gap-register-20261102.md": "783a67afd9576b0d2da811c7156784be62c81fb9554f3814c9ec1525d2935099",
         "docs/security.md": "1aca7b9c470e3dd0d7090a8f6b50229511054e0074fd6aa40762d1578047d420"
       }

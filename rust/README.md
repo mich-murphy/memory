@@ -47,7 +47,10 @@ subgates, 369/369 nextest tests, 5,200/5,289 lines covered (98.3173%, floor unch
 
 The final pinned-toolchain synthetic Hegel probe passed on BC-01, Linux x86_64,
 at 2,000 cases/seed 730052. This is not the whole workspace native suite or ARM
-acceptance. Hosted CI has not run for these changes.
+acceptance. Hosted CI (`.github/workflows/rust.yml`, ubuntu x86_64/arm64 and macOS, 500
+cases) is green on every branch of draft stack #56. After gate 8 the stack added A7
+(`SyncPolicy`, crash-point property), A6 (`ErrorClass::Transient`, full-jitter backoff,
+`known_ours`) and the P2 client choice (`rusty-s3` + `ureq`, not yet wired).
 
 Tests cover pure mechanics and known-file privacy boundaries; the actual-source
 mutation proves sensitivity to a disabled window comparison. The filesystem

@@ -38,9 +38,11 @@ footprint, or the two seven-day native shadows. The measured coverage floor is
 **98%**, not to be lowered for added code. The latest source-bound integrated run
 (gate 8, 2026-11-09) passed at **98.3173%** (5,200/5,289 lines), 369/369 nextest, 2,000
 cases, seed 730210; see [its evidence](rust-rewrite/implementation/evidence/12-slice2-round10/).
-At 2,000 cases the two daemon state-machine properties take about 6 minutes because every
-simulated round does real `F_FULLFSYNC` writes; amendment A7 adopts a test-only sync policy
-for them. Ad-hoc coverage runs at low case counts fail the property coverage guards by
+At 2,000 cases the two daemon state-machine properties took about 6 minutes because every
+simulated round did real `F_FULLFSYNC` writes. Amendment A7 is implemented on
+`rust/sync-policy`: only those two properties select `SyncPolicy::None` and now take about
+14–20 s; every other test and the binary keep `Full`. Hosted CI (`.github/workflows/rust.yml`,
+500 cases, random seed) runs `scripts/gates.sh` on every branch of stack #56. Ad-hoc coverage runs at low case counts fail the property coverage guards by
 design; use 2,000 cases or `--ignore-run-fail` and say so.
 The [final-toolchain BC probe](rust-rewrite/implementation/evidence/03-bc-recheck/README.md)
 also passed, on native x86_64. Neither result proves hosted CI or full release

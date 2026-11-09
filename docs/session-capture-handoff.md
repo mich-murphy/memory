@@ -18,9 +18,12 @@ history, not current execution instructions or renewed operating authority.
 `gpt-6.1-sol` workers at medium effort, parent-owned quality and verification.
 This is the single active task brief; dated operating records below remain history.
 
-> **Resume here (2026-11-09 handover).** Read DESIGN.md, then
+> **Resume here (2026-11-09 handover, updated after A6).** Read DESIGN.md, then
 > [design-amendments-20261109.md](rust-rewrite/design-amendments-20261109.md) (wins where
-> they conflict), then the "Handover 2026-11-09" block at the end of this brief. Earlier
+> they conflict), then the "Handover 2026-11-09" block and the "Progress 2026-11-09,
+> continued session" block after its next-actions list. That progress block is the current
+> state: draft stack #56, top branch `rust/transient-known-ours`, steps 1–3 done and green on
+> hosted CI, P2 research done, its "Next action on resume" list is next. Earlier
 > blocker lists in this brief (P5 authorization, acceptance bucket/token, hook argv,
 > symlinks, state root) are resolved by that amendment and kept only as history.
 

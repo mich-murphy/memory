@@ -21,7 +21,10 @@ local gate 8 passed at 2,000 cases: 369/369 tests, 98.3173% coverage against the
 floor. This is **not a functioning Rust collector or release acceptance**: `memory daemon`
 exits 78 after startup, and there is no R2 client, zstd or reader yet.
 
-The work is local and uncommitted on `rust/scaffold`; no Rust deployment or cutover occurred.
+The work is committed as draft gh stack #56 (PRs #54, #55, #57, #58, #59, top branch
+`rust/transient-known-ours`), green on hosted CI. A7 (test-only sync policy), the P2 client
+research and A6 (`Transient` class, jittered backoff, `known_ours`) landed after gate 8. No
+Rust deployment or cutover occurred.
 On 2026-11-09, by operator instruction, the Go capture daemons (Mac and BC-01) and the Mac
 refresh job were stopped and disabled, and the old capture prefixes in the R2 bucket were
 deleted. The Go hooks are still installed and write only local spool files. Preserve existing
