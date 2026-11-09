@@ -1,0 +1,76 @@
+{
+  "docs/research": {
+    "candidate_names_only": [
+      "docs/research/agent-navigation-context-graphs/EVIDENCE_MANIFEST.json",
+      "docs/research/agent-navigation-context-graphs/archive-scope.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/blind-path-followup-input.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/blind-path-followup-review.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/blind-path-review-input.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/blind-path-review.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/blind-pilot-followup-summary.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/blind-pilot-summary.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/corpus-coverage.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/final-validation.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/first-run-validation.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/first_run/ARTIFACTS.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/first_run/manifest.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/first_run/queries.jsonl",
+      "docs/research/agent-navigation-context-graphs/benchmark/first_run/summary.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/pilot-followup-label-erratum.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/pilot-followup-prompts.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/pilot-followup-registry.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/pilot-followup-results-v2.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/pilot-followup-results.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/pilot-instruction-audit.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/pilot-prompts.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/pilot-registry.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/pilot-results.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/production-build-v1.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/production-build-v2.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/production-final-smoke-timings.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/production-initial-timings-v1.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/production-results.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/proof-secret-scan.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/r2-provenance.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/related-source-map-smoke.json",
+      "docs/research/agent-navigation-context-graphs/benchmark/tasks.json",
+      "docs/research/agent-navigation-context-graphs/prototype/.cache/8481969323338a39.sqlite3",
+      "docs/research/agent-navigation-context-graphs/prototype/.cache/benchmark.sqlite3",
+      "docs/research/agent-navigation-context-graphs/prototype/.cache/smoke.json",
+      "docs/research/agent-navigation-context-graphs/prototype/FREEZE.json",
+      "docs/research/agent-navigation-context-graphs/prototype/routing.json"
+    ],
+    "exists": true,
+    "extensions": {
+      "": 2,
+      ".gz": 1,
+      ".json": 35,
+      ".jsonl": 1,
+      ".log": 3,
+      ".md": 14,
+      ".py": 9,
+      ".sqlite3": 2,
+      ".stdout": 1,
+      ".txt": 1
+    },
+    "file_count": 69
+  },
+  "docs/rust-rewrite": {
+    "candidate_names_only": [],
+    "exists": true,
+    "extensions": {
+      ".md": 20,
+      ".py": 6,
+      ".rs": 1,
+      ".toml": 1
+    },
+    "file_count": 28
+  },
+  "research": {
+    "candidate_names_only": [],
+    "exists": false,
+    "extensions": {},
+    "file_count": 0
+  },
+  "script_sha256": "d22abc43bd32d29c62ecfa28e258db2412fea50b81b644e9f10c9e5d50c0dee4"
+}

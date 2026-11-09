@@ -2,16 +2,63 @@
 
 > **Scope (2026-10-23):** The development gates below remain applicable, but passing them is not end-to-end publication acceptance. The agreed [session-capture contract](session-capture-contract.md) also requires writer-generated fixtures through one authoritative reader shared by restore and analytics, exact source/epoch/body coverage, idempotent import and report freshness. Unsupported formats must fail explicitly rather than produce a successful-empty refresh. Existing all-generation recovery fixtures describe v3, not a legacy-compatibility requirement for the replacement.
 
-The CI workflow configures development gates on each push and pull request; local `make` targets are listed below. Mutation testing and repeated benchmarks are opt-in diagnostics, not CI gates. Workflow configuration is not evidence that hosted CI ran successfully. The rule behind the settings: **a check is a hard gate only if fixing what it flags always makes the code better.** Bug, safety and error-handling checks pass that test. Size and style metrics don't, because the cheapest way to satisfy them is often an arbitrary split or rename, so they are either off or set high enough to act as backstops.
+The CI workflow configures development gates on each push and pull request; local `make` targets are listed below. Go mutation campaigns and repeated benchmarks are opt-in diagnostics, not CI gates; the Rust actual-window-mutation check below is mandatory. Workflow configuration is not evidence that hosted CI ran successfully. The rule behind the settings: **a check is a hard gate only if fixing what it flags always makes the code better.** Bug, safety and error-handling checks pass that test. Size and style metrics don't, because the cheapest way to satisfy them is often an arbitrary split or rename, so they are either off or set high enough to act as backstops.
 
-The mandatory opt-in v2 writer → shared reader → importer → event index → report
-gate is part of development checks, not native/R2/two-machine acceptance. See
+The mandatory Go opt-in v2 writer → shared reader → importer → event index → report
+gate is part of Go development checks, not native/R2/two-machine or Rust acceptance. See
 [dated offline evidence](session-capture-offline-evidence.md) for historical results
 and the [current handoff](session-capture-handoff.md#current-session-checkpoint) for
 checkout qualification, deployment and next action. Defaults remain legacy; do not
 weaken release gates.
 
 The research behind these choices (tool versions, the configs of 13 well-regarded Go projects, and each tool's docs) is in the project's `research/collector-language/go-tooling.md`.
+
+## Rust rewrite gates (implementation in progress)
+
+The Rust workspace is under `rust/`; [DESIGN.md](../DESIGN.md) sections 14–17
+specify its additional gates. These do not replace any Go or release acceptance
+checks below. Current evidence and ownership are in the
+[active handoff](session-capture-handoff.md#rust-implementation-delivery--active-coordinator-brief)
+and [`rust-rewrite/implementation/`](rust-rewrite/implementation/).
+
+Run the Rust gate wrapper in the pinned Nix shell, with bounded native parallelism:
+
+```sh
+nix develop --max-jobs 2 --cores 2 --command sh -c \
+  'cd rust && PROPERTY_CASES=2000 bash scripts/gates.sh'
+```
+
+The wrapper runs format, strict clippy, dependency/license/security and pure-core
+dependency bans, nextest, compile-fail doctests, Hegel, proptest, the actual production
+window-comparison mutation, schema drift, coverage and the deliberate-lint checker. It records seeds and each command's exact status under `rust/artifacts/`;
+a failed or unavailable gate makes the aggregate fail. CI uses at least 500 cases,
+local slice acceptance requires 2,000. A scaffold/property pass is not proof of
+the daemon, real R2 semantics, privacy at the actual store sink, restore/import,
+footprint, or the two seven-day native shadows. The measured coverage floor is
+**98%**, not to be lowered for added code. The latest source-bound integrated run
+(gate 8, 2026-11-09) passed at **98.3173%** (5,200/5,289 lines), 369/369 nextest, 2,000
+cases, seed 730210; see [its evidence](rust-rewrite/implementation/evidence/12-slice2-round10/).
+At 2,000 cases the two daemon state-machine properties take about 6 minutes because every
+simulated round does real `F_FULLFSYNC` writes; amendment A7 adopts a test-only sync policy
+for them. Ad-hoc coverage runs at low case counts fail the property coverage guards by
+design; use 2,000 cases or `--ignore-run-fail` and say so.
+The [final-toolchain BC probe](rust-rewrite/implementation/evidence/03-bc-recheck/README.md)
+also passed, on native x86_64. Neither result proves hosted CI or full release
+acceptance; changed source requires relevant revalidation.
+
+Focused examples (also run inside the Nix shell):
+
+```sh
+cd rust
+cargo test --locked -p memory-core --test parent_privacy_review -- --test-threads=2
+cargo test --locked -p memory-core --doc
+cargo xtask schemas --check
+```
+
+The official Rust toolchain is separately pinned through `rust-overlay`; the
+existing nixpkgs/Go dependency pin is preserved. This avoids the independently
+reproduced profiling-runtime failure of the original locked nixpkgs Rust build;
+it is not permission to skip coverage or use an unpinned host compiler.
 
 ## Commands
 
