@@ -33,7 +33,8 @@ use memory_core::manifest::{
     SourceWrite, manifest_hash, object_key,
 };
 use memory_core::planner::{
-    AuditEvidence, Observation, PlanInput, Planning, Strategy, WindowEvidence, plan, window_ranges,
+    AppendBasis, AuditEvidence, Observation, PlanInput, Planning, Strategy, WindowEvidence, plan,
+    window_ranges,
 };
 use memory_core::privacy::{
     Admission, AdmittedSource, Authorization, PolicyContext, Profile, Reason, ResolvedSourceFacts,
@@ -280,7 +281,7 @@ fn step<F: FileSystem>(
     let rules = matches!(src.facts.profile, Profile::Config | Profile::TextAsset)
         .then_some(env.context.rules)
         .flatten()
-        .map(|r| RulesDigest(Sha256::from_bytes(r)));
+        .map(|r| RulesDigest::new(Sha256::from_bytes(r)));
     let stat = match fs.stat(src.handle) {
         Ok(stat) => stat,
         Err(_) => return SourceOutcome::Unavailable,
@@ -292,17 +293,12 @@ fn step<F: FileSystem>(
         } else {
             acc.updates
                 .push(Update::Missing(src.id.clone(), consecutive));
-            Observation::Missing { consecutive }
+            Observation::missing(consecutive)
         };
         let planning = plan(&PlanInput {
             withheld: None,
             observation,
-            strategy: Strategy::Append {
-                index: None,
-                remote: None,
-                adopt_digest: None,
-                windows: None,
-            },
+            strategy: Strategy::Append(AppendBasis::Fresh),
             rules,
             audit: AuditEvidence::NotDue,
         });
@@ -474,7 +470,6 @@ impl Job<'_> {
                 src.id.clone(),
                 Box::new(SourceState {
                     observed: self.observed.clone(),
-                    trust: self.observed.trust(),
                     position: EpochPosition {
                         epoch: n,
                         captured_to: Offset::new(u64::try_from(stream_len).unwrap_or(u64::MAX)),
@@ -540,12 +535,17 @@ fn append<F: FileSystem>(
         let planning = plan(&PlanInput {
             withheld: None,
             observation: Observation::Present(job.observed.clone()),
-            strategy: Strategy::Append {
-                index: index.clone(),
-                remote: remote.clone(),
-                adopt_digest: adopt,
-                windows: windows.clone(),
-            },
+            strategy: Strategy::Append(match (&index, &remote) {
+                (Some(state), _) => AppendBasis::Indexed {
+                    state: Box::new(state.clone()),
+                    windows: windows.clone(),
+                },
+                (None, Some(remote)) => AppendBasis::Unindexed {
+                    remote: remote.clone(),
+                    adopt_digest: adopt,
+                },
+                (None, None) => AppendBasis::Fresh,
+            }),
             rules: job.rules,
             audit: AuditEvidence::NotDue,
         });
@@ -592,7 +592,6 @@ fn append<F: FileSystem>(
             src.id.clone(),
             Box::new(SourceState {
                 observed: job.observed.clone(),
-                trust: job.observed.trust(),
                 position: pos,
                 head: w.head,
                 tail: w.tail,

@@ -203,8 +203,8 @@ fn unmatched_completion_does_not_consume_pending_signal_or_advance_owner_clock()
 
 #[test]
 fn changed_protected_rules_replay_remote_epoch_before_adopt_digest_is_requested() {
-    let previous_rules = RulesDigest(Sha256::from_bytes([1; 32]));
-    let current_rules = RulesDigest(Sha256::from_bytes([2; 32]));
+    let previous_rules = RulesDigest::new(Sha256::from_bytes([1; 32]));
+    let current_rules = RulesDigest::new(Sha256::from_bytes([2; 32]));
     let remote = EpochPosition {
         epoch: 7,
         captured_to: Offset::new(100),
@@ -223,12 +223,10 @@ fn changed_protected_rules_replay_remote_epoch_before_adopt_digest_is_requested(
             mtime_ns: 1,
             observed_at_ns: 9_000_000_000,
         }),
-        strategy: Strategy::Append {
-            index: None,
-            remote: Some(remote.clone()),
+        strategy: Strategy::Append(AppendBasis::Unindexed {
+            remote: remote.clone(),
             adopt_digest: None,
-            windows: None,
-        },
+        }),
         rules: Some(current_rules),
         audit: AuditEvidence::NotDue,
     };
@@ -255,4 +253,45 @@ fn changed_protected_rules_replay_remote_epoch_before_adopt_digest_is_requested(
             adopted: None
         }
     );
+}
+
+#[test]
+fn idle_slots_are_evicted_and_next_due_reports_earliest_deadline()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mk = |name: &str| -> Result<Owner, ValidationError> {
+        Ok(Owner::Shared {
+            archive: ArchiveId::try_from("archive".to_owned())?,
+            machine: MachineId::try_from(name.to_owned())?,
+            agent: Agent::Pi,
+        })
+    };
+    let (a, b) = (mk("a")?, mk("b")?);
+    let mut c = Coalescer::new(Window::try_from(WindowSeconds { quiet: 2, cap: 5 })?);
+    assert_eq!(c.next_due(), None);
+    c.signal(a.clone(), Duration::from_secs(10), Signal::Changed)?;
+    c.signal(b.clone(), Duration::from_secs(11), Signal::Changed)?;
+    assert_eq!(c.next_due(), Some(Duration::from_secs(12)));
+    // Further edges push the quiet deadline but never past the cap.
+    c.signal(a.clone(), Duration::from_secs(13), Signal::Changed)?;
+    assert_eq!(c.next_due(), Some(Duration::from_secs(13)));
+    c.signal(b.clone(), Duration::from_secs(14), Signal::SessionEnd)?;
+    assert_eq!(c.next_due(), Some(Duration::from_secs(11)));
+    assert!(c.poll(&b, Duration::from_secs(14))?);
+    // b is in flight: excluded; a is due at min(15, 15).
+    assert_eq!(c.next_due(), Some(Duration::from_secs(15)));
+    c.complete(&b, Duration::from_secs(15))?;
+    // b had no pending edge: its slot is gone, so a completion is unmatched.
+    assert_eq!(
+        c.complete(&b, Duration::from_secs(16)),
+        Err(CoalescerError::NotInFlight)
+    );
+    assert!(c.poll(&a, Duration::from_secs(15))?);
+    c.signal(a.clone(), Duration::from_secs(16), Signal::Changed)?;
+    c.complete(&a, Duration::from_secs(16))?;
+    // a keeps its follow-up edge.
+    assert_eq!(c.next_due(), Some(Duration::from_secs(18)));
+    assert!(c.poll(&a, Duration::from_secs(18))?);
+    c.complete(&a, Duration::from_secs(18))?;
+    assert_eq!(c.next_due(), None);
+    Ok(())
 }

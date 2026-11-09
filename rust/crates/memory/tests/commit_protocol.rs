@@ -1944,7 +1944,7 @@ fn revoked_token_pauses_the_host_and_lands_nothing() -> R {
     let (failure, _) = rig.failed()?;
     assert_eq!(failure, Failure::NotLanded(ErrorClass::DestinationAuth));
     let (d, _) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
-    assert!(matches!(d, Disposition::PauseHost { .. }));
+    assert!(matches!(d, Disposition::PauseHost));
     assert!(rig.store.objects.is_empty());
     Ok(())
 }
@@ -2146,7 +2146,7 @@ fn disposition_maps_every_commit_result() -> R {
         let (d, _) = disposition(&Err(failure), false, Duration::ZERO, &prior);
         let ok = match shape {
             "retry" => matches!(d, Disposition::Retry { .. }),
-            _ => matches!(d, Disposition::PauseHost { .. }),
+            _ => matches!(d, Disposition::PauseHost),
         };
         assert!(ok, "{shape}: {d:?}");
     }

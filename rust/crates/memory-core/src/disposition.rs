@@ -115,17 +115,8 @@ fn retry(class: ErrorClass, prior: &Streak, pacing: Pacing) -> Disposition {
 ///
 /// `cancel_requested` is true when shutdown was requested during the attempt. It swallows
 /// only retryable failures; success, owner faults, deterministic faults and host auth
-/// failures keep their own disposition.
-pub fn transition(
-    outcome: &Outcome,
-    cancel_requested: bool,
-    at: Duration,
-    prior: &Streak,
-) -> (Disposition, Streak) {
-    transition_paced(outcome, cancel_requested, at, prior, Pacing::FLOOR)
-}
-
-/// As [`transition`], with the shell's random draw and any `Retry-After`.
+/// failures keep their own disposition. `pacing` carries the shell's random draw and any
+/// `Retry-After`; there is deliberately no jitterless entry point.
 pub fn transition_paced(
     outcome: &Outcome,
     cancel_requested: bool,
@@ -150,12 +141,7 @@ pub fn transition_paced(
             prior.clone(),
         ),
         Outcome::Failed(class) => match class {
-            ErrorClass::DestinationAuth => (
-                Disposition::PauseHost {
-                    class: class.clone(),
-                },
-                prior.clone(),
-            ),
+            ErrorClass::DestinationAuth => (Disposition::PauseHost, prior.clone()),
             ErrorClass::Offline
             | ErrorClass::Throttled
             | ErrorClass::Transient

@@ -1,6 +1,21 @@
 //! Round-4 F2 gap closers (09-f2-counterparts.md rows 1a, 1b, 5a, 5b, 7c, 10b, 12).
 //! Pure tests with literal tables and test-written models; no filesystem access.
-use memory_core::disposition::{Outcome, Streak, transition};
+use memory_core::disposition::{Outcome, Streak};
+fn transition(
+    o: &Outcome,
+    cancel: bool,
+    at: std::time::Duration,
+    prior: &Streak,
+) -> (memory_core::domain::Disposition, Streak) {
+    memory_core::disposition::transition_paced(
+        o,
+        cancel,
+        at,
+        prior,
+        memory_core::disposition::Pacing::FLOOR,
+    )
+}
+
 use memory_core::domain::{
     Agent, ArchiveId, Birth, Disposition, ErrorClass, FileId, Fingerprint, LocalError, MachineId,
     Observed, Offset, Owner, Plan, RulesDigest, SessionId, SessionKey, Sha256, SnapshotFingerprint,
@@ -653,7 +668,7 @@ fn stamp(n: u32, rules: Option<u64>) -> EpochStamp {
             version: "0.1.0".to_owned(),
             commit: "abc123".to_owned(),
         },
-        rules: rules.map(|r| RulesDigest(h(r))),
+        rules: rules.map(|r| RulesDigest::new(h(r))),
     }
 }
 fn piece(c: u64, off: u64, len: u64) -> Piece {

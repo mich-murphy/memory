@@ -24,8 +24,8 @@ fn alias(agent: Agent, r: &str, p: &str) -> RootAlias {
         path: p.to_owned(),
     }
 }
-fn obs(agent: Agent, p: &str, identity: u128) -> Observation {
-    Observation {
+fn obs(agent: Agent, p: &str, identity: u128) -> IdentityObservation {
+    IdentityObservation {
         agent,
         path: p.to_owned(),
         identity,
@@ -34,7 +34,11 @@ fn obs(agent: Agent, p: &str, identity: u128) -> Observation {
 fn set(items: &[&str]) -> BTreeSet<String> {
     items.iter().map(|s| (*s).to_owned()).collect()
 }
-fn compile(r: &[Root], a: &[RootAlias], o: &[Observation]) -> Result<Inventory, CoordError> {
+fn compile(
+    r: &[Root],
+    a: &[RootAlias],
+    o: &[IdentityObservation],
+) -> Result<Inventory, CoordError> {
     Inventory::compile(r, a, o)
 }
 
@@ -150,7 +154,12 @@ fn unproven_siblings_are_not_authorized() -> Result<(), CoordError> {
 #[test]
 fn rejected_declarations() {
     let base = [root(PI, "/logical"), root(PI, "/other")];
-    type Row<'a> = (&'a [Root], Vec<RootAlias>, Vec<Observation>, CoordError);
+    type Row<'a> = (
+        &'a [Root],
+        Vec<RootAlias>,
+        Vec<IdentityObservation>,
+        CoordError,
+    );
     let rel = [root(PI, "relative")];
     let newline = [root(PI, "/bad\nprivate")];
     let rows: Vec<Row> = vec![
@@ -337,7 +346,7 @@ fn explicit_alias_pair_is_accepted() -> Result<(), CoordError> {
 fn unproven_physical_aliases_are_never_authorized() -> Result<(), CoordError> {
     let logical = "/var/x";
     let physical = "/private/var/x";
-    let cases: Vec<Vec<Observation>> = vec![
+    let cases: Vec<Vec<IdentityObservation>> = vec![
         vec![],
         vec![obs(PI, logical, 1)],
         vec![obs(PI, physical, 1)],
@@ -432,7 +441,12 @@ fn agent(i: u8) -> Agent {
     if i.is_multiple_of(2) { CLAUDE } else { PI }
 }
 
-type Scenario = (Vec<Root>, Vec<RootAlias>, Vec<Observation>, Vec<String>);
+type Scenario = (
+    Vec<Root>,
+    Vec<RootAlias>,
+    Vec<IdentityObservation>,
+    Vec<String>,
+);
 fn decode(bytes: &[u8]) -> Scenario {
     let (mut roots, mut aliases, mut observations, mut chain) = (vec![], vec![], vec![], vec![]);
     for c in bytes.chunks(4) {

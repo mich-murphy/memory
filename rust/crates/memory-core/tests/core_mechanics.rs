@@ -100,7 +100,6 @@ fn state(bytes: &[u8], obs: Observed) -> SourceState {
     let window = windows(bytes, bytes.len());
     SourceState {
         observed: obs,
-        trust: StatTrust::Settled,
         position: EpochPosition {
             epoch: 0,
             captured_to: Offset::new(bytes.len() as u64),
@@ -120,12 +119,10 @@ fn input(bytes: &[u8], obs: Observed, old: SourceState) -> PlanInput {
     PlanInput {
         withheld: None,
         observation: Observation::Present(obs),
-        strategy: Strategy::Append {
-            index: Some(old),
-            remote: None,
-            adopt_digest: None,
+        strategy: Strategy::Append(AppendBasis::Indexed {
+            state: Box::new(old),
             windows: Some(windows(bytes, at)),
-        },
+        }),
         rules: None,
         audit: AuditEvidence::NotDue,
     }
@@ -188,7 +185,7 @@ fn capture_oracle(seed: u16, shapes: &Shapes) {
                 Some(0)
             }
             7 => {
-                old.trust = StatTrust::Racy;
+                old.observed.observed_at_ns = old.observed.mtime_ns;
                 mtime = 1;
                 Some(9)
             } // equal size + mtime racy

@@ -565,9 +565,9 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 report.failed += 1;
                 false
             }
-            Disposition::PauseHost { class } => {
+            Disposition::PauseHost => {
                 report.failed += 1;
-                report.failures.bump(&class);
+                report.failures.bump(&ErrorClass::DestinationAuth);
                 true
             }
             Disposition::Park { reason } => {

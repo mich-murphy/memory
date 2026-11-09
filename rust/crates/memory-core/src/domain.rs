@@ -215,22 +215,23 @@ impl Sha256 {
 impl TryFrom<String> for Sha256 {
     type Error = ValidationError;
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.len() != 64
-            || !value
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        {
+        fn nibble(byte: u8) -> Option<u8> {
+            match byte {
+                b'0'..=b'9' => Some(byte - b'0'),
+                b'a'..=b'f' => Some(byte - b'a' + 10),
+                _ => None,
+            }
+        }
+        let (pairs, rest) = value.as_bytes().as_chunks::<2>();
+        if pairs.len() != 32 || !rest.is_empty() {
             return Err(ValidationError::Hash);
         }
         let mut bytes = [0_u8; 32];
-        let (pairs, _) = value.as_bytes().as_chunks::<2>();
         for (out, [high, low]) in bytes.iter_mut().zip(pairs) {
-            let high = char::from(*high).to_digit(16);
-            let low = char::from(*low).to_digit(16);
-            match (high, low) {
-                (Some(h), Some(l)) => *out = (h * 16 + l) as u8,
-                _ => return Err(ValidationError::Hash),
-            }
+            let (Some(h), Some(l)) = (nibble(*high), nibble(*low)) else {
+                return Err(ValidationError::Hash);
+            };
+            *out = (h << 4) | l;
         }
         Ok(Self(bytes))
     }
@@ -248,7 +249,17 @@ impl From<Sha256> for String {
 /// Digest of transform rules and semantic version, not writer version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
-pub struct RulesDigest(pub Sha256);
+pub struct RulesDigest(Sha256);
+impl RulesDigest {
+    /// Brand a digest as the protected-rules digest; it is not interchangeable with content hashes.
+    pub const fn new(digest: Sha256) -> Self {
+        Self(digest)
+    }
+    /// The underlying digest.
+    pub const fn digest(self) -> Sha256 {
+        self.0
+    }
+}
 
 /// Agent namespace.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -260,6 +271,17 @@ pub enum Agent {
     Codex,
     /// Pi agent.
     Pi,
+}
+
+impl Agent {
+    /// Wire spelling, identical to the serde tag (single source for keys and namespaces).
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Pi => "pi",
+        }
+    }
 }
 
 /// Stable session coordinates.
@@ -522,10 +544,8 @@ pub struct AuditState {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SourceState {
-    /// Stat pinned at last capture.
+    /// Stat pinned at last capture; its trust is derived by [`Observed::trust`], never stored.
     pub observed: Observed,
-    /// Trust of recorded stat.
-    pub trust: StatTrust,
     /// Committed byte position.
     pub position: EpochPosition,
     /// Digest of prefix head window.
@@ -711,10 +731,10 @@ pub enum Disposition {
         class: ErrorClass,
     },
     /// Stop uploads but continue watching.
-    PauseHost {
-        /// Host-scoped class.
-        class: ErrorClass,
-    },
+    ///
+    /// Only a destination authorization failure pauses the host; the shell counts it as
+    /// `ErrorClass::DestinationAuth`.
+    PauseHost,
     /// Park one source.
     Park {
         /// Source-scoped reason.

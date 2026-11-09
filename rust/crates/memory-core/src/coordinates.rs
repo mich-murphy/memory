@@ -64,7 +64,7 @@ pub struct RootAlias {
 
 /// A shell observation: the opaque identity (device/inode-like) of the directory at `path`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Observation {
+pub struct IdentityObservation {
     /// Agent the observation was made for; identities never alias across agents.
     pub agent: Agent,
     /// Clean absolute spelling that was inspected.
@@ -109,14 +109,6 @@ fn agent_rank(agent: &Agent) -> u8 {
     }
 }
 
-fn agent_name(agent: &Agent) -> &'static str {
-    match agent {
-        Agent::Claude => "claude",
-        Agent::Codex => "codex",
-        Agent::Pi => "pi",
-    }
-}
-
 fn valid_path(p: &str) -> bool {
     p.starts_with('/')
         && !p.contains(['\0', '\r', '\n'])
@@ -150,7 +142,7 @@ impl Inventory {
     pub fn compile(
         roots: &[Root],
         aliases: &[RootAlias],
-        observations: &[Observation],
+        observations: &[IdentityObservation],
     ) -> Result<Self, CoordError> {
         if roots.len() + aliases.len() + observations.len() > MAX_ROUTES {
             return Err(CoordError::TooMany);
@@ -183,7 +175,7 @@ impl Inventory {
     }
 
     /// Turn observations that prove identity with a declared root into routes.
-    fn add_proven(&mut self, observations: &[Observation]) -> Result<(), CoordError> {
+    fn add_proven(&mut self, observations: &[IdentityObservation]) -> Result<(), CoordError> {
         let mut seen: BTreeMap<(u8, String), u128> = BTreeMap::new();
         for o in observations {
             if !valid_path(&o.path) {
@@ -301,7 +293,7 @@ impl Inventory {
         let hex: String = digest.iter().take(16).map(|b| format!("{b:02x}")).collect();
         Ok(Coordinate {
             agent: agent.clone(),
-            namespace: format!("{}-{hex}", agent_name(agent)),
+            namespace: format!("{}-{hex}", agent.as_str()),
             root,
             logical_path,
             path: path.to_owned(),

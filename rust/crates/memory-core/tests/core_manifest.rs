@@ -123,7 +123,7 @@ fn stamp(n: u32, rules: Option<u64>) -> EpochStamp {
             version: "0.1.0".to_owned(),
             commit: "abc123".to_owned(),
         },
-        rules: rules.map(|r| RulesDigest(h(r))),
+        rules: rules.map(|r| RulesDigest::new(h(r))),
     }
 }
 fn piece(c: u64, off: u64, len: u64) -> Piece {
@@ -746,7 +746,7 @@ fn pos(n: u32, size: u64, whole: Sha256, rules: Option<Sha256>) -> EpochPosition
         epoch: n,
         captured_to: Offset::new(size),
         whole,
-        rules: rules.map(RulesDigest),
+        rules: rules.map(RulesDigest::new),
     }
 }
 

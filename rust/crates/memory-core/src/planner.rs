@@ -49,33 +49,54 @@ pub fn audit_eligible(captured: &Observed, before: &Observed, after: &Observed) 
         && captured.mtime_ns == before.mtime_ns
         && before.mtime_ns == after.mtime_ns
 }
-/// Source observation; absence must be counted across reconciles by the shell.
+/// Source observation; absence is counted across reconciles by the shell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Observation {
     /// Local absence has already been committed remotely; repeating it is no work.
     DeletionRecorded,
-    /// Missing now; zero and one are not deletion evidence.
-    Missing {
-        /// Consecutive missing reconciles including this one.
-        consecutive: u32,
-    },
+    /// First missing reconcile: not deletion evidence (DESIGN 7.2).
+    MissingOnce,
+    /// Missing on two consecutive reconciles: the deletion evidence (DESIGN 7.2).
+    MissingConfirmed,
     /// Present source with physical fingerprint when snapshot-class.
     Present(Observed),
+}
+impl Observation {
+    /// Classify a count of consecutive missing reconciles including this one (0 and 1 are
+    /// not deletion evidence; 2 or more is).
+    pub const fn missing(consecutive: u32) -> Self {
+        if consecutive >= 2 {
+            Self::MissingConfirmed
+        } else {
+            Self::MissingOnce
+        }
+    }
+}
+/// What an append-class source is known by; only valid combinations are representable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppendBasis {
+    /// Rebuildable local index agrees with the remote position.
+    Indexed {
+        /// Rebuildable local state.
+        state: Box<SourceState>,
+        /// Fresh old-prefix window hashes, not cached hashes repeated as evidence.
+        windows: Option<WindowEvidence>,
+    },
+    /// No index, but a committed remote epoch exists and must be adopted or replayed.
+    Unindexed {
+        /// Committed remote epoch.
+        remote: EpochPosition,
+        /// Full fresh local digest of remote `[0, N)` for adoption.
+        adopt_digest: Option<Sha256>,
+    },
+    /// Neither index nor remote epoch: nothing was ever captured.
+    Fresh,
 }
 /// Source strategy and its independent cache/evidence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Strategy {
     /// Logical append stream. Physical decompression is a shell concern.
-    Append {
-        /// Rebuildable local state.
-        index: Option<SourceState>,
-        /// Committed remote epoch when the index is absent.
-        remote: Option<EpochPosition>,
-        /// Full fresh local digest of remote `[0, N)` for adoption.
-        adopt_digest: Option<Sha256>,
-        /// Fresh old-prefix window hashes, not cached hashes repeated as evidence.
-        windows: Option<WindowEvidence>,
-    },
+    Append(AppendBasis),
     /// Full snapshot, including both DB and WAL for SQLite.
     Snapshot {
         /// Previously captured physical inputs.
@@ -143,17 +164,8 @@ pub fn plan(input: &PlanInput) -> Planning {
     }
     let observed = match &input.observation {
         Observation::DeletionRecorded => return ready(Plan::Unchanged, false, None),
-        Observation::Missing { consecutive } => {
-            return ready(
-                if *consecutive >= 2 {
-                    Plan::Deleted
-                } else {
-                    Plan::Unchanged
-                },
-                false,
-                None,
-            );
-        }
+        Observation::MissingOnce => return ready(Plan::Unchanged, false, None),
+        Observation::MissingConfirmed => return ready(Plan::Deleted, false, None),
         Observation::Present(observed) => observed,
     };
     match &input.strategy {
@@ -180,40 +192,36 @@ pub fn plan(input: &PlanInput) -> Planning {
                 None,
             )
         }
-        Strategy::Append {
-            index,
+        Strategy::Append(AppendBasis::Fresh) => replay(ReplayReason::FirstCapture),
+        Strategy::Append(AppendBasis::Unindexed {
             remote,
             adopt_digest,
-            windows,
-        } => {
-            let Some(state) = index else {
-                let Some(remote) = remote else {
-                    return replay(ReplayReason::FirstCapture);
-                };
-                if observed.size < remote.captured_to.get() {
-                    return replay(ReplayReason::Truncated);
-                }
-                if remote.rules != input.rules {
-                    return replay(ReplayReason::RulesChanged);
-                }
-                let Some(digest) = adopt_digest else {
-                    return ready(
-                        Plan::Adopt {
-                            remote: remote.clone(),
-                        },
-                        false,
-                        None,
-                    );
-                };
-                if digest != &remote.whole {
-                    return replay(ReplayReason::AdoptMismatch);
-                }
+        }) => {
+            if observed.size < remote.captured_to.get() {
+                return replay(ReplayReason::Truncated);
+            }
+            if remote.rules != input.rules {
+                return replay(ReplayReason::RulesChanged);
+            }
+            let Some(digest) = adopt_digest else {
                 return ready(
-                    extension(remote.captured_to, observed.size),
-                    true,
-                    Some(remote.clone()),
+                    Plan::Adopt {
+                        remote: remote.clone(),
+                    },
+                    false,
+                    None,
                 );
             };
+            if digest != &remote.whole {
+                return replay(ReplayReason::AdoptMismatch);
+            }
+            ready(
+                extension(remote.captured_to, observed.size),
+                true,
+                Some(remote.clone()),
+            )
+        }
+        Strategy::Append(AppendBasis::Indexed { state, windows }) => {
             if observed.id != state.observed.id {
                 return replay(ReplayReason::IdentityChanged);
             }
@@ -231,7 +239,7 @@ pub fn plan(input: &PlanInput) -> Planning {
             let equal_size = observed.size == state.position.captured_to.get();
             if equal_size
                 && observed.mtime_ns == state.observed.mtime_ns
-                && state.trust == StatTrust::Settled
+                && state.observed.trust() == StatTrust::Settled
             {
                 return ready(Plan::Unchanged, false, None);
             }

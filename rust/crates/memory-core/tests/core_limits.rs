@@ -6,6 +6,21 @@ use memory_core::limits::*;
 use proptest::prelude::*;
 use std::time::Duration;
 
+fn transition(
+    o: &Outcome,
+    cancel: bool,
+    at: Duration,
+    prior: &Streak,
+) -> (memory_core::domain::Disposition, Streak) {
+    memory_core::disposition::transition_paced(
+        o,
+        cancel,
+        at,
+        prior,
+        memory_core::disposition::Pacing::FLOOR,
+    )
+}
+
 type R = Result<(), Box<dyn std::error::Error>>;
 const S: fn(u64) -> Duration = Duration::from_secs;
 
@@ -127,7 +142,7 @@ fn key_len_saturates() {
 fn agent_wire_matches_serde() -> R {
     for a in [Agent::Claude, Agent::Codex, Agent::Pi] {
         let json = serde_json::to_string(&a)?;
-        assert_eq!(json, format!("\"{}\"", agent_wire(&a)));
+        assert_eq!(json, format!("\"{}\"", a.as_str()));
     }
     Ok(())
 }
@@ -260,12 +275,7 @@ fn cancel_swallows_only_retryable() {
         S(1),
         &prior,
     );
-    assert_eq!(
-        d,
-        Disposition::PauseHost {
-            class: ErrorClass::DestinationAuth
-        }
-    );
+    assert_eq!(d, Disposition::PauseHost);
     assert_eq!(
         transition(&Outcome::Succeeded, true, S(1), &prior).0,
         Disposition::Done
@@ -331,12 +341,7 @@ fn auth_pauses_host_without_touching_streak() {
         S(9),
         &prior,
     );
-    assert_eq!(
-        d,
-        Disposition::PauseHost {
-            class: ErrorClass::DestinationAuth
-        }
-    );
+    assert_eq!(d, Disposition::PauseHost);
     assert_eq!(n, prior);
 }
 
@@ -704,4 +709,24 @@ fn a6_retry_after_is_clamped_to_one_second_and_fifteen_minutes() {
             "{given}"
         );
     }
+}
+
+#[test]
+fn current_key_len_matches_current_key_over_generated_inputs() -> R {
+    for agent in [Agent::Claude, Agent::Codex, Agent::Pi] {
+        for n in [1_usize, 2, 17, 200] {
+            let (a, m, s) = (id(n), id(n + 1), id(n + 2));
+            let sess = owner_session(&a, &m, &s, agent.clone())?;
+            assert_eq!(
+                current_key_len(&a, &m, agent.as_str(), Some(&s)),
+                current_key(&sess).len()
+            );
+            let shared = owner_shared(&a, &m, agent.clone())?;
+            assert_eq!(
+                current_key_len(&a, &m, agent.as_str(), None),
+                current_key(&shared).len()
+            );
+        }
+    }
+    Ok(())
 }

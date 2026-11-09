@@ -29,10 +29,9 @@ fn request() -> PlanInput {
         observation: Observation::Present(obs()),
         rules: None,
         audit: AuditEvidence::NotDue,
-        strategy: Strategy::Append {
-            index: Some(SourceState {
+        strategy: Strategy::Append(AppendBasis::Indexed {
+            state: Box::new(SourceState {
                 observed: obs(),
-                trust: StatTrust::Settled,
                 position: position(),
                 head: hash(1),
                 tail: hash(2),
@@ -41,13 +40,11 @@ fn request() -> PlanInput {
                     consecutive_failures: 0,
                 },
             }),
-            remote: None,
-            adopt_digest: None,
             windows: Some(WindowEvidence {
                 head: hash(1),
                 tail: hash(2),
             }),
-        },
+        }),
     }
 }
 fn planned(request: &PlanInput) -> Option<Plan> {
@@ -63,14 +60,12 @@ fn replay(reason: ReplayReason) -> Option<Plan> {
 fn every_append_table_branch_and_independent_evidence_request() {
     let mut r = request();
     assert_eq!(planned(&r), Some(Plan::Unchanged));
-    if let Strategy::Append { index, windows, .. } = &mut r.strategy {
-        if let Some(state) = index {
-            state.trust = StatTrust::Racy;
-        }
+    if let Strategy::Append(AppendBasis::Indexed { state, windows }) = &mut r.strategy {
+        state.observed.observed_at_ns = state.observed.mtime_ns;
         *windows = None;
     }
     assert_eq!(plan(&r), Planning::NeedWindows);
-    if let Strategy::Append { windows, .. } = &mut r.strategy {
+    if let Strategy::Append(AppendBasis::Indexed { windows, .. }) = &mut r.strategy {
         *windows = Some(WindowEvidence {
             head: hash(1),
             tail: hash(2),
@@ -95,9 +90,9 @@ fn every_append_table_branch_and_independent_evidence_request() {
             to: Offset::new(101)
         })
     );
-    if let Strategy::Append {
+    if let Strategy::Append(AppendBasis::Indexed {
         windows: Some(w), ..
-    } = &mut r.strategy
+    }) = &mut r.strategy
     {
         w.tail = hash(9);
     }
@@ -110,9 +105,9 @@ fn every_append_table_branch_and_independent_evidence_request() {
         o.id.birth = Birth::Known(1);
     }
     assert_eq!(planned(&r), replay(ReplayReason::IdentityChanged));
-    r.observation = Observation::Missing { consecutive: 1 };
+    r.observation = Observation::MissingOnce;
     assert_eq!(planned(&r), Some(Plan::Unchanged));
-    r.observation = Observation::Missing { consecutive: 2 };
+    r.observation = Observation::MissingConfirmed;
     assert_eq!(planned(&r), Some(Plan::Deleted));
     r.withheld = Some(WithholdReason::Credential);
     assert_eq!(
@@ -125,22 +120,18 @@ fn every_append_table_branch_and_independent_evidence_request() {
 #[test]
 fn adoption_requires_full_digest_then_can_extend_without_new_epoch() {
     let mut r = request();
-    r.strategy = Strategy::Append {
-        index: None,
-        remote: None,
-        adopt_digest: None,
-        windows: None,
-    };
+    r.strategy = Strategy::Append(AppendBasis::Fresh);
     assert_eq!(planned(&r), replay(ReplayReason::FirstCapture));
-    if let Strategy::Append { remote, .. } = &mut r.strategy {
-        *remote = Some(position());
-    }
+    r.strategy = Strategy::Append(AppendBasis::Unindexed {
+        remote: position(),
+        adopt_digest: None,
+    });
     assert_eq!(planned(&r), Some(Plan::Adopt { remote: position() }));
-    if let Strategy::Append { adopt_digest, .. } = &mut r.strategy {
+    if let Strategy::Append(AppendBasis::Unindexed { adopt_digest, .. }) = &mut r.strategy {
         *adopt_digest = Some(hash(9));
     }
     assert_eq!(planned(&r), replay(ReplayReason::AdoptMismatch));
-    if let Strategy::Append { adopt_digest, .. } = &mut r.strategy {
+    if let Strategy::Append(AppendBasis::Unindexed { adopt_digest, .. }) = &mut r.strategy {
         *adopt_digest = Some(hash(3));
     }
     assert_eq!(
@@ -179,7 +170,7 @@ fn full_audit_is_explicit_and_pinned_and_rules_are_not_writer_version() {
     assert_eq!(plan(&r), Planning::NeedAuditRecheck);
     r.audit = AuditEvidence::StableMismatch;
     assert_eq!(planned(&r), replay(ReplayReason::AuditMismatch));
-    r.rules = Some(RulesDigest(hash(8)));
+    r.rules = Some(RulesDigest::new(hash(8)));
     assert_eq!(planned(&r), replay(ReplayReason::RulesChanged));
     let captured = obs();
     assert!(audit_eligible(&captured, &captured, &captured));
@@ -227,7 +218,7 @@ fn sqlite_db_and_wal_and_absence_are_each_part_of_snapshot_fingerprint() {
         };
     }
     assert_eq!(planned(&r), Some(Plan::Snapshot));
-    r.rules = Some(RulesDigest(hash(6)));
+    r.rules = Some(RulesDigest::new(hash(6)));
     assert_eq!(planned(&r), replay(ReplayReason::RulesChanged));
     r.rules = None;
     if let Strategy::Snapshot { previous, .. } = &mut r.strategy {
@@ -261,7 +252,7 @@ fn snapshot_audit_compares_transformed_bytes_even_when_fingerprint_is_stable() {
 #[test]
 fn committed_deletion_repeat_has_no_capture_work() {
     let mut r = request();
-    r.observation = Observation::Missing { consecutive: 2 };
+    r.observation = Observation::MissingConfirmed;
     assert_eq!(planned(&r), Some(Plan::Deleted));
     // Shell updates its cache only after the deletion manifest commits.
     r.observation = Observation::DeletionRecorded;
@@ -273,11 +264,11 @@ fn settled_same_size_changed_mtime_requires_windows_and_refreshes_stat() {
     if let Observation::Present(o) = &mut r.observation {
         o.mtime_ns += 1;
     }
-    if let Strategy::Append { windows, .. } = &mut r.strategy {
+    if let Strategy::Append(AppendBasis::Indexed { windows, .. }) = &mut r.strategy {
         *windows = None;
     }
     assert_eq!(plan(&r), Planning::NeedWindows);
-    if let Strategy::Append { windows, .. } = &mut r.strategy {
+    if let Strategy::Append(AppendBasis::Indexed { windows, .. }) = &mut r.strategy {
         *windows = Some(WindowEvidence {
             head: hash(1),
             tail: hash(2),
@@ -291,9 +282,9 @@ fn settled_same_size_changed_mtime_requires_windows_and_refreshes_stat() {
             adopted: None
         }
     );
-    if let Strategy::Append {
+    if let Strategy::Append(AppendBasis::Indexed {
         windows: Some(w), ..
-    } = &mut r.strategy
+    }) = &mut r.strategy
     {
         w.head = hash(8);
     }

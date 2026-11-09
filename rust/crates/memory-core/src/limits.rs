@@ -1,6 +1,6 @@
 //! Pure admission limits: `current.json` key length, distinct sources per owner and the
 //! size-scaled request budget (DESIGN.md sections 6.2 and 7.3). No I/O, no clock.
-use crate::domain::{Agent, Owner, SourceId, WithholdReason};
+use crate::domain::{Owner, SourceId, WithholdReason};
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -15,15 +15,6 @@ pub const BUDGET_BASE: Duration = Duration::from_secs(30);
 /// Assumed upload throughput in bytes per second (1 MiB/s).
 pub const BUDGET_BYTES_PER_SEC: u64 = 1024 * 1024;
 
-/// Wire spelling of an agent namespace, identical to its serde tag.
-pub const fn agent_wire(agent: &Agent) -> &'static str {
-    match agent {
-        Agent::Claude => "claude",
-        Agent::Codex => "codex",
-        Agent::Pi => "pi",
-    }
-}
-
 /// Exact `current.json` key for an owner.
 pub fn current_key(owner: &Owner) -> String {
     match owner {
@@ -31,7 +22,7 @@ pub fn current_key(owner: &Owner) -> String {
             "sessions/{}/{}/{}/{}/current.json",
             k.archive.as_str(),
             k.machine.as_str(),
-            agent_wire(&k.agent),
+            k.agent.as_str(),
             k.session.as_str()
         ),
         Owner::Shared {
@@ -42,7 +33,7 @@ pub fn current_key(owner: &Owner) -> String {
             "shared/{}/{}/{}/current.json",
             archive.as_str(),
             machine.as_str(),
-            agent_wire(agent)
+            agent.as_str()
         ),
     }
 }

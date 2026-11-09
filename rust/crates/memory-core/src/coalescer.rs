@@ -165,7 +165,28 @@ impl Coalescer {
         }
         advance(slot, now)?;
         slot.in_flight = false;
+        // An idle slot holds nothing; dropping it bounds memory by live owners.
+        if slot.pending.is_none() {
+            self.slots.remove(owner);
+        }
         Ok(())
+    }
+    /// Earliest monotonic deadline at which any idle owner's pending edge becomes due,
+    /// or `None` when nothing is pending. Owners with a capture in flight are excluded:
+    /// they cannot be taken until `complete`. Pure; a run loop can sleep until then.
+    pub fn next_due(&self) -> Option<Duration> {
+        self.slots
+            .values()
+            .filter(|slot| !slot.in_flight)
+            .filter_map(|slot| slot.pending.as_ref())
+            .map(|p| {
+                if p.flush {
+                    p.first
+                } else {
+                    (p.last + self.window.quiet).min(p.first + self.window.cap)
+                }
+            })
+            .min()
     }
 }
 fn advance(slot: &mut Slot, now: Duration) -> Result<(), CoalescerError> {
@@ -186,12 +207,17 @@ pub enum WakeAction {
         jitter_max: Duration,
     },
 }
-/// Detect wall elapsed minus monotonic elapsed strictly greater than 120 seconds.
+/// Wall minus monotonic gap that counts as a sleep/wake (DESIGN 10.3 safety reconcile).
+pub const WAKE_GAP: Duration = Duration::from_secs(120);
+/// Spread of queued captures after a wake (DESIGN 10.3 wake gap).
+pub const WAKE_STAGGER: Duration = Duration::from_secs(30);
+
+/// Detect wall elapsed minus monotonic elapsed strictly greater than [`WAKE_GAP`].
 /// Wall jumps may conservatively trigger a reconcile; wall time never orders captures.
 pub fn wake_action(wall_elapsed: Duration, monotonic_elapsed: Duration) -> WakeAction {
-    if wall_elapsed.saturating_sub(monotonic_elapsed) > Duration::from_secs(120) {
+    if wall_elapsed.saturating_sub(monotonic_elapsed) > WAKE_GAP {
         WakeAction::ReconcileAndStagger {
-            jitter_max: Duration::from_secs(30),
+            jitter_max: WAKE_STAGGER,
         }
     } else {
         WakeAction::None
