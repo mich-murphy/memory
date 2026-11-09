@@ -590,6 +590,12 @@ Checkout bullet below.
     cases. Fix it by raising that generator weight, never by lowering the guard.
   - The daemon Hegel guard flake that the A7 worker saw did not reproduce at 500 cases for
     seeds 1 to 20.
+  - Rust gates run 42565602976 (58c4347, docs-only change): `08-coverage` failed on macos-26
+    only. Under llvm-cov, `hegel_daemon_state_machine` with seed 938868371 reported an
+    "unconfirmed failure: failed 0 of 10 replays". Locally the same seed passed 5 of 5 at 500
+    cases, and the same Rust source passed every gate at c1ab3ec. It needs a look at what can
+    fail nondeterministically under instrumentation (timing or ordering in the daemon
+    simulation). Do not retry it away.
   - `Transient` is not counted apart from `Throttled` in status, because there are no
     per-class counters yet.
   - The daemon computes the retry delay but does not schedule on it.
