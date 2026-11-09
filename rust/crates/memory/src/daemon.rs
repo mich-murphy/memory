@@ -20,7 +20,9 @@ use crate::commit::{Base, Failure, Landed, commit, disposition, recover_base};
 use crate::config::{Config, ConfigError};
 use crate::environment::{Clock, FileSystem, Store};
 use crate::hook::{is_day_name, utc_day};
-use crate::state::{DaemonLock, Loaded, StateDir, StateError, StateFile, WRITER_VERSION};
+use crate::state::{
+    DaemonLock, Loaded, StateDir, StateError, StateFile, SyncPolicy, WRITER_VERSION,
+};
 use memory_core::disposition::Streak;
 use memory_core::domain::{
     Disposition, Owner, OwnerParkReason, ParkReason, RulesDigest, SessionKey, SnapshotFingerprint,
@@ -177,6 +179,13 @@ pub struct Parts<F, S, C, E> {
     pub context: PolicyContext,
 }
 
+/// Start options that are not part of [`Parts`]. `Default` is production: [`SyncPolicy::Full`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StartOptions {
+    /// State write flushing; only simulation tests select [`SyncPolicy::None`].
+    pub sync: SyncPolicy,
+}
+
 struct Opened {
     lock: DaemonLock,
     state: StateDir,
@@ -186,9 +195,9 @@ struct Opened {
     status: StatusBody,
 }
 
-fn open(root: &Path, config_path: &Path) -> Result<Opened, StartError> {
+fn open(root: &Path, config_path: &Path, sync: SyncPolicy) -> Result<Opened, StartError> {
     let lock = DaemonLock::acquire(root).map_err(StartError::State)?;
-    let state = StateDir::prepare(&lock).map_err(StartError::State)?;
+    let state = StateDir::prepare_with(&lock, sync).map_err(StartError::State)?;
     state.vet_hints_dir().map_err(StartError::State)?;
     let config = Config::load(config_path).map_err(StartError::Config)?;
     let parsed = match state.read(StateFile::Index) {
@@ -217,7 +226,7 @@ pub fn main_entry() -> ExitCode {
     let Some(root) = crate::state::default_root() else {
         return ExitCode::from(1);
     };
-    match open(&root, &root.join("config.toml")) {
+    match open(&root, &root.join("config.toml"), SyncPolicy::Full) {
         Err(error) => ExitCode::from(error.exit_code()),
         Ok(opened) => {
             drop(opened);
@@ -300,7 +309,20 @@ impl<F: FileSystem, S: Store<Body = Published>, C: Clock, E: Sources> Daemon<F, 
         config_path: &Path,
         parts: Parts<F, S, C, E>,
     ) -> Result<Self, StartError> {
-        let opened = open(root, config_path)?;
+        Self::start_with(root, config_path, parts, StartOptions::default())
+    }
+
+    /// As [`Daemon::start`] with explicit [`StartOptions`] (tests only).
+    ///
+    /// # Errors
+    /// As [`Daemon::start`].
+    pub fn start_with(
+        root: &Path,
+        config_path: &Path,
+        parts: Parts<F, S, C, E>,
+        options: StartOptions,
+    ) -> Result<Self, StartError> {
+        let opened = open(root, config_path, options.sync)?;
         let locals = opened
             .index
             .sources

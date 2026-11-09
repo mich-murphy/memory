@@ -4,8 +4,8 @@ use hegel::{TestCase, generators as gs};
 use memory::config::{Config, ConfigError};
 use memory::state::{
     DaemonLock, Loaded, MAX_BODY_BYTES, MAX_HEADER_BYTES, MissingReason, Schema, StateDir,
-    StateError, StateFile, decode, default_root, encode, read_durable, root_from, stage,
-    write_durable,
+    StateError, StateFile, SyncPolicy, decode, default_root, encode, read_durable, root_from,
+    stage, write_durable,
 };
 use memory_core::domain::MachineId;
 use proptest::prelude::*;
@@ -926,6 +926,106 @@ proptest! {
         delta in any::<u8>(),
     ) {
         let r = mutation(&body, index, delta);
+        prop_assert!(r.is_ok(), "{r:?}");
+    }
+}
+
+// ------------------------------------------------------- sync policy and crash points (A7)
+
+#[test]
+fn sync_policy_default_is_full() -> R {
+    assert_eq!(SyncPolicy::default(), SyncPolicy::Full);
+    let tmp = Tmp::new("policy")?;
+    let (lock, dir) = open(&tmp)?;
+    assert_eq!(dir.sync_policy(), SyncPolicy::Full);
+    drop(dir);
+    let none = StateDir::prepare_with(&lock, SyncPolicy::None).map_err(e)?;
+    assert_eq!(none.sync_policy(), SyncPolicy::None);
+    none.write(StateFile::Status, b"x").map_err(e)?;
+    let Loaded::Present(stored) = none.read(StateFile::Status) else {
+        return Err("none-policy write unreadable".into());
+    };
+    assert_eq!(stored.body, b"x");
+    Ok(())
+}
+
+fn temp_count(root: &Path) -> Result<usize, String> {
+    Ok(fs::read_dir(root)
+        .map_err(e)?
+        .flatten()
+        .filter(|x| x.file_name().to_string_lossy().contains(".tmp-"))
+        .count())
+}
+
+/// Crash point 0: before staging. 1: after `stage`, before `publish`. 2: after a torn temp
+/// file is also left behind. 3: after `publish`. The oracle is the set {old, new} plus the
+/// point-to-expectation table written here, not read from the implementation.
+fn crash_point(old: &[u8], new: &[u8], point: u8, junk: &[u8], none: bool) -> R {
+    let tmp = Tmp::new("crashprop")?;
+    let root = tmp.p().join("state");
+    let policy = if none {
+        SyncPolicy::None
+    } else {
+        SyncPolicy::Full
+    };
+    {
+        let lock = DaemonLock::acquire(&root).map_err(e)?;
+        let dir = StateDir::prepare_with(&lock, policy).map_err(e)?;
+        dir.write(StateFile::Status, old).map_err(e)?;
+        match point % 4 {
+            0 => {}
+            1 => drop(dir.stage(StateFile::Status, new).map_err(e)?),
+            2 => {
+                drop(dir.stage(StateFile::Status, new).map_err(e)?);
+                fs::write(root.join(".status.json.tmp-1-1"), junk).map_err(e)?;
+            }
+            _ => dir
+                .stage(StateFile::Status, new)
+                .map_err(e)?
+                .publish()
+                .map_err(e)?,
+        }
+    }
+    // "Reload": a fresh lock and prepare, as after a restart.
+    let lock = DaemonLock::acquire(&root).map_err(e)?;
+    let dir = StateDir::prepare_with(&lock, policy).map_err(e)?;
+    let Loaded::Present(stored) = dir.read(StateFile::Status) else {
+        return Err("file missing or corrupt after crash".into());
+    };
+    if stored.body != old && stored.body != new {
+        return Err("read a body that is neither old nor new".into());
+    }
+    let want = if point % 4 == 3 { new } else { old };
+    if stored.body != want {
+        return Err(format!("point {} read the wrong side", point % 4));
+    }
+    if temp_count(&root)? != 0 {
+        return Err("stale temp survived the next start".into());
+    }
+    Ok(())
+}
+
+#[hegel::test]
+fn hegel_crash_between_stage_and_publish_reads_old_or_new(tc: TestCase) {
+    let old: Vec<u8> = tc.draw(gs::vecs(gs::integers::<u8>()));
+    let new: Vec<u8> = tc.draw(gs::vecs(gs::integers::<u8>()));
+    let junk: Vec<u8> = tc.draw(gs::vecs(gs::integers::<u8>()));
+    let point = tc.draw(gs::integers::<u8>());
+    let none = tc.draw(gs::booleans());
+    let r = crash_point(&old, &new, point, &junk, none);
+    assert!(r.is_ok(), "{r:?}");
+}
+
+proptest! {
+    #[test]
+    fn proptest_crash_between_stage_and_publish_reads_old_or_new(
+        old in proptest::collection::vec(any::<u8>(), 0..2048),
+        new in proptest::collection::vec(any::<u8>(), 0..2048),
+        junk in proptest::collection::vec(any::<u8>(), 0..300),
+        point in any::<u8>(),
+        none in any::<bool>(),
+    ) {
+        let r = crash_point(&old, &new, point, &junk, none);
         prop_assert!(r.is_ok(), "{r:?}");
     }
 }

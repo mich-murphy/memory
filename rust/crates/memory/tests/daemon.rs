@@ -1,8 +1,8 @@
 //! Daemon skeleton tests: temp dirs, in-memory filesystem, fake store. No real adapters.
 use memory::capture::{Published, Source};
-use memory::daemon::{Daemon, Parts, StartError};
+use memory::daemon::{Daemon, Parts, StartError, StartOptions};
 use memory::environment::{Clock, FileSystem, Stat, Store, StoreError, Stored};
-use memory::state::{DaemonLock, EXIT_LOCK_HELD};
+use memory::state::{DaemonLock, EXIT_LOCK_HELD, SyncPolicy};
 use memory_core::domain::{
     Agent, ArchiveId, Birth, ETag, FileId, MachineId, Owner, SessionId, SessionKey, SourceClass,
     SourceId, SourceKind,
@@ -689,6 +689,17 @@ fn boot(
     list: &[(Owner, Source)],
     wall: i128,
 ) -> R<D> {
+    boot_sync(tmp, cfg, fs, store, list, wall, SyncPolicy::Full)
+}
+fn boot_sync(
+    tmp: &Tmp,
+    cfg: &Path,
+    fs: MemFs,
+    store: FStore,
+    list: &[(Owner, Source)],
+    wall: i128,
+    sync: SyncPolicy,
+) -> R<D> {
     let list = list.to_vec();
     let sources: FSrcs = Box::new(move || list.clone());
     let parts = Parts {
@@ -704,10 +715,18 @@ fn boot(
             collector_identities: vec![],
         },
     };
-    Daemon::start(&tmp.root(), cfg, parts).map_err(|x| x.code().to_owned())
+    Daemon::start_with(&tmp.root(), cfg, parts, StartOptions { sync })
+        .map_err(|x| x.code().to_owned())
 }
 /// Restart: move the fs and store out, end the daemon (flushed or not) and start a new one.
-fn cycle(mut d: D, tmp: &Tmp, cfg: &Path, list: &[(Owner, Source)], flush: bool) -> R<D> {
+fn cycle_sync(
+    mut d: D,
+    tmp: &Tmp,
+    cfg: &Path,
+    list: &[(Owner, Source)],
+    flush: bool,
+    sync: SyncPolicy,
+) -> R<D> {
     let fs = std::mem::take(d.fs_mut());
     let store = std::mem::take(d.store_mut());
     if flush {
@@ -715,7 +734,7 @@ fn cycle(mut d: D, tmp: &Tmp, cfg: &Path, list: &[(Owner, Source)], flush: bool)
     } else {
         drop(d);
     }
-    boot(tmp, cfg, fs, store, list, WALL)
+    boot_sync(tmp, cfg, fs, store, list, WALL, sync)
 }
 fn file_state(tmp: &Tmp, file: StateFile) -> Loaded {
     read_durable(&tmp.root().join(file.name()), file.schema())
@@ -1082,6 +1101,7 @@ impl Reference {
     }
 }
 
+/// Only the simulation properties use `Sut`, and they run with [`SyncPolicy::None`] (A7).
 struct Sut {
     tmp: Tmp,
     cfg: PathBuf,
@@ -1098,7 +1118,15 @@ impl Sut {
         let tmp = Tmp::new()?;
         let cfg = tmp.config(true)?;
         let list = vec![src_of("s1", 1)?];
-        let d = boot(&tmp, &cfg, MemFs::default(), FStore::default(), &list, WALL)?;
+        let d = boot_sync(
+            &tmp,
+            &cfg,
+            MemFs::default(),
+            FStore::default(),
+            &list,
+            WALL,
+            SyncPolicy::None,
+        )?;
         Ok(Self {
             tmp,
             cfg,
@@ -1116,7 +1144,14 @@ impl Sut {
     }
     fn restart(&mut self) -> R {
         let d = need(self.d.take(), "no daemon")?;
-        self.d = Some(cycle(d, &self.tmp, &self.cfg, &self.list, false)?);
+        self.d = Some(cycle_sync(
+            d,
+            &self.tmp,
+            &self.cfg,
+            &self.list,
+            false,
+            SyncPolicy::None,
+        )?);
         self.mono = 0;
         Ok(())
     }

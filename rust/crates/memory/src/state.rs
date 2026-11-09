@@ -407,18 +407,40 @@ pub fn read_durable(path: &Path, schema: Schema) -> Loaded {
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-fn fsync_dir(dir: &Path) -> Result<(), StateError> {
-    File::open(dir).and_then(|d| d.sync_all()).map_err(io)
+/// Whether durable writes flush (DESIGN.md 9.2, amendment A7).
+///
+/// `Full` is production: `sync_all` on the temp file (`F_FULLFSYNC` on Apple targets) and on
+/// the directory. `None` keeps temp file, write, rename and directory open and skips only
+/// those flush calls; a flush cannot change what a live process reads back, so it is for
+/// simulation tests only. The daemon binary always uses `Full`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SyncPolicy {
+    /// Flush the file and the directory.
+    #[default]
+    Full,
+    /// Skip the flush calls only.
+    None,
 }
 
-fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+fn fsync_dir(dir: &Path, sync: SyncPolicy) -> Result<(), StateError> {
+    let dir = File::open(dir).map_err(io)?;
+    match sync {
+        SyncPolicy::Full => dir.sync_all().map_err(io),
+        SyncPolicy::None => Ok(()),
+    }
+}
+
+fn write_synced(path: &Path, bytes: &[u8], sync: SyncPolicy) -> std::io::Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
         .open(path)?;
     file.write_all(bytes)?;
-    file.sync_all()
+    match sync {
+        SyncPolicy::Full => file.sync_all(),
+        SyncPolicy::None => Ok(()),
+    }
 }
 
 /// A temporary file written and fsynced but not yet published (steps 1 and 2). Dropping it
@@ -429,14 +451,25 @@ pub struct Staged {
     tmp: PathBuf,
     dest: PathBuf,
     dir: PathBuf,
+    sync: SyncPolicy,
 }
 
 /// Steps 1 and 2 of DESIGN.md 9.2: write `dir/.<name>.tmp-<pid>-<n>` (0600, `create_new`) and
-/// fsync it. `File::sync_all` is `F_FULLFSYNC` on Apple targets.
+/// fsync it. `File::sync_all` is `F_FULLFSYNC` on Apple targets. Always [`SyncPolicy::Full`].
 ///
 /// # Errors
 /// [`StateError::InvalidName`], [`StateError::TooLarge`] or [`StateError::Io`].
 pub fn stage(dir: &Path, name: &str, schema: Schema, body: &[u8]) -> Result<Staged, StateError> {
+    stage_with(dir, name, schema, body, SyncPolicy::Full)
+}
+
+fn stage_with(
+    dir: &Path,
+    name: &str,
+    schema: Schema,
+    body: &[u8],
+    sync: SyncPolicy,
+) -> Result<Staged, StateError> {
     if !plain(name) {
         return Err(StateError::InvalidName);
     }
@@ -446,7 +479,7 @@ pub fn stage(dir: &Path, name: &str, schema: Schema, body: &[u8]) -> Result<Stag
         std::process::id(),
         TEMP_COUNTER.fetch_add(1, Ordering::SeqCst)
     ));
-    if let Err(error) = write_synced(&tmp, &bytes) {
+    if let Err(error) = write_synced(&tmp, &bytes, sync) {
         let _ = fs::remove_file(&tmp);
         return Err(io(error));
     }
@@ -454,6 +487,7 @@ pub fn stage(dir: &Path, name: &str, schema: Schema, body: &[u8]) -> Result<Stag
         tmp,
         dest: dir.join(name),
         dir: dir.to_path_buf(),
+        sync,
     })
 }
 
@@ -467,7 +501,7 @@ impl Staged {
             let _ = fs::remove_file(&self.tmp);
             return Err(io(error));
         }
-        fsync_dir(&self.dir)
+        fsync_dir(&self.dir, self.sync)
     }
 
     /// Publish only if the destination does not exist (`link(2)` fails with `EEXIST`, the
@@ -480,14 +514,14 @@ impl Staged {
         let linked = fs::hard_link(&self.tmp, &self.dest);
         let _ = fs::remove_file(&self.tmp);
         match linked {
-            Ok(()) => fsync_dir(&self.dir).map(|()| true),
+            Ok(()) => fsync_dir(&self.dir, self.sync).map(|()| true),
             Err(error) if error.kind() == ErrorKind::AlreadyExists => Ok(false),
             Err(error) => Err(io(error)),
         }
     }
 }
 
-/// Write one file durably: stage, then publish.
+/// Write one file durably: stage, then publish. Always [`SyncPolicy::Full`].
 ///
 /// # Errors
 /// As [`stage`] and [`Staged::publish`].
@@ -506,6 +540,7 @@ pub fn write_durable(
 pub struct StateDir {
     root: PathBuf,
     uid: u32,
+    sync: SyncPolicy,
 }
 
 impl StateDir {
@@ -520,6 +555,14 @@ impl StateDir {
     /// # Errors
     /// Directory refusals, [`StateError::NotOwned`] or [`StateError::Io`].
     pub fn prepare(lock: &DaemonLock) -> Result<Self, StateError> {
+        Self::prepare_with(lock, SyncPolicy::Full)
+    }
+
+    /// As [`StateDir::prepare`] with an explicit [`SyncPolicy`] (tests select `None`).
+    ///
+    /// # Errors
+    /// As [`StateDir::prepare`].
+    pub fn prepare_with(lock: &DaemonLock, sync: SyncPolicy) -> Result<Self, StateError> {
         let root = lock.root().to_path_buf();
         let tmp = root.join("tmp");
         vet(&tmp, true)?;
@@ -543,10 +586,10 @@ impl StateDir {
             }
         }
         let probe = tmp.join(".uid-probe");
-        write_synced(&probe, b"").map_err(io)?;
+        write_synced(&probe, b"", sync).map_err(io)?;
         let uid = fs::metadata(&probe).map_err(io)?.uid();
         fs::remove_file(&probe).map_err(io)?;
-        let state = Self { root, uid };
+        let state = Self { root, uid, sync };
         state.vet_dir(&state.root)?;
         state.vet_dir(&tmp)?;
         Ok(state)
@@ -568,6 +611,21 @@ impl StateDir {
     #[must_use]
     pub fn hints_dir(&self) -> PathBuf {
         self.root.join("hints")
+    }
+
+    /// The sync policy of this directory's writes.
+    #[must_use]
+    pub const fn sync_policy(&self) -> SyncPolicy {
+        self.sync
+    }
+
+    /// Stage a state file (steps 1 and 2) under this directory's policy, so a caller can
+    /// stop before [`Staged::publish`], as a crash would.
+    ///
+    /// # Errors
+    /// As [`stage`].
+    pub fn stage(&self, file: StateFile, body: &[u8]) -> Result<Staged, StateError> {
+        stage_with(&self.root, file.name(), file.schema(), body, self.sync)
     }
 
     /// The daemon's effective uid as learned by [`StateDir::prepare`].
@@ -611,9 +669,9 @@ impl StateDir {
     /// Durably write a state file.
     ///
     /// # Errors
-    /// As [`write_durable`].
+    /// As [`stage`] and [`Staged::publish`].
     pub fn write(&self, file: StateFile, body: &[u8]) -> Result<(), StateError> {
-        write_durable(&self.root, file.name(), file.schema(), body)
+        self.stage(file, body)?.publish()
     }
 
     /// Read a state file; every problem is "missing" with a reason.
@@ -629,12 +687,7 @@ impl StateDir {
     /// [`StateError::MachineIdCorrupt`] or [`StateError::Io`].
     pub fn create_machine_id(&self, candidate: &MachineId) -> Result<MachineId, StateError> {
         let file = StateFile::MachineId;
-        let staged = stage(
-            &self.root,
-            file.name(),
-            file.schema(),
-            candidate.as_str().as_bytes(),
-        )?;
+        let staged = self.stage(file, candidate.as_str().as_bytes())?;
         if staged.publish_new()? {
             return Ok(candidate.clone());
         }
