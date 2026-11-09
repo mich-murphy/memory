@@ -27,7 +27,42 @@ This is the single active task brief; dated operating records below remain histo
 > blocker lists in this brief (P5 authorization, acceptance bucket/token, hook argv,
 > symlinks, state root) are resolved by that amendment and kept only as history.
 
-**Session 2026-11-08 (current).** Operator instruction: continue from this brief
+**Session 2026-11-09, review and fix round (current).** Branch `rust/coverage-floor-80` on
+stack #56 (9206235: A9, coverage floor 80 %). Baseline gate at 0f726a6, seed 730212, 2,000
+cases: all 12 subgates 0, 378/378 nextest, 98.17 %. Plan, sequential Sonnet workers (medium),
+one owner at a time because core type changes ripple into the shell and every test `Store`:
+(1) remove/tighten tautological tests (four full audits, parent-verified) and fix the
+`core_coordinates` guard weight; (2) shell: privacy sink type (no raw-bytes store body),
+`SyncPolicy::None` test-only, no empty-body state writes, retry scheduling, verify
+classification into core; (3) core type tightening and lows; (4) test evidence: daemon
+state-machine crash/truncate/revoke steps, zero-PUT property, production mutation checks
+(If-Match, advance-after-land, privacy deny), real counters. Then integrated gate. S3
+adapter, zstd and the run loop remain slice-2 delivery, not part of this round.
+
+Progress (2026-11-10): commits 9206235..e94a09b (10). 136cf0d tests; 2a18883 shell
+(`Published` private, `Store::document` removed, `SyncPolicy::None`/`start_with` behind
+`sim`, serialization errors returned, per-owner `not_before`, `verify::classify` in core);
+6c8846e core types (derived trust, `AppendBasis`, `MissingOnce/Confirmed`, unit
+`PauseHost`); a1920b3 manifest split, `Piece::from_authorized`, private Delta/Checkpoint,
+fail-closed credential regex; 295a092 `Counting` wrapper, counter tests through `Daemon`,
+zero-PUT property (Hegel); 9482e9f delta-only Extend reads with a resumable `Sha256State`
+(59 KB append to a 200 kB source: 328,632 -> 128,632 bytes read, bound 128,632);
+e2e3cd9 `scripts/check-mutations.py` (gate 06-mutations: If-Match, advance-on-fail,
+credential deny, all killed); 42e8826 daemon machine steps (rewrite, truncate, remove,
+revoke, crash, late write; 12-shape guard with per-shape negative controls); e94a09b the
+1a oracle exempts only byte positions of unaudited mid-file rewrites (DESIGN 1a scope,
+7.2), found when the first gate run at 2,000 cases failed on a model gap, not a daemon bug.
+Integrated gate at e94a09b, seed 730212, 2,000 cases: all 13 subgates 0, nextest 391/391
+(2 ignored benchmarks), 12 compile-fail doctests, coverage 5595/5766 = 97.03 % (floor 80),
+sources unchanged across the run; `verify-evidence.py` 0.
+Open: `LaunchRecord` unification (P3) not done; property 3 has no writer-version seam
+(`WRITER_VERSION` is compile-time) and no proptest twin; 1b "after one audit" untested
+(audit evidence is always `NotDue`); idle-minute wakeups not counted (`Counters.wakeups`
+stays 0); 30k reconcile 1.24 s debug, not asserted (footprint measurement); damaged
+`status.json` clears parks without a logged event (DESIGN 9.2 tension). Next: slice 2
+(S3 adapter `rusty-s3`+`ureq`, zstd, run loop) after the stack is reviewed.
+
+**Session 2026-11-08.** Operator instruction: continue from this brief
 with **Sonnet** subagents (supersedes the gpt-6.1-sol worker choice; medium thinking
 requested via tool argument). Reconciled at start: HEAD `57d8400`, branch
 `rust/scaffold`, no commits/staging; `git diff --check` 0; `verify-evidence.py` 0;
