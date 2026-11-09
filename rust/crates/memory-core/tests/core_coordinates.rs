@@ -417,9 +417,14 @@ fn unrelated_observations_are_ignored_and_chain_is_kept_verbatim() -> Result<(),
 
 // ---- properties ----
 
-const POOL: [&str; 8] = ["/a", "/a/b", "/a/b/c", "/p", "/p/b", "/q", "/A", "/Q/x"];
+// The last entry is reserved for proof twins: roots, aliases and chains never use it, so it is
+// never covered by a declared root or alias.
+const POOL: [&str; 9] = [
+    "/a", "/a/b", "/a/b/c", "/p", "/p/b", "/q", "/A", "/Q/x", "/z/x",
+];
+const PROOF_PATH: &str = "/z/x";
 fn pool(i: u8) -> &'static str {
-    POOL.get(usize::from(i) % POOL.len())
+    POOL.get(usize::from(i) % (POOL.len() - 1))
         .copied()
         .unwrap_or("/")
 }
@@ -436,7 +441,7 @@ fn decode(bytes: &[u8]) -> Scenario {
             let r: &Root = roots.get(usize::from(k) % roots.len().max(1))?;
             Some(r.clone())
         };
-        match g(0) % 5 {
+        match g(0) % 6 {
             0 => roots.push(root(agent(g(1)), pool(g(2)))),
             1 => {
                 if let Some(r) = declared(g(2)) {
@@ -450,11 +455,20 @@ fn decode(bytes: &[u8]) -> Scenario {
                 };
                 observations.push(obs(a, &p, u128::from(g(3) % 3)));
             }
-            _ => chain.push(if g(1) % 4 == 0 {
+            4 => chain.push(if g(1) % 4 == 0 {
                 "weird\n".to_owned()
             } else {
                 pool(g(2)).to_owned()
             }),
+            // Proof twin: the same agent observes identity k at a declared root and at a path no
+            // declared root or alias covers, so that path resolves by proof alone.
+            _ => {
+                if let Some(r) = declared(g(2)) {
+                    let k = u128::from(g(3) % 3);
+                    observations.push(obs(r.agent.clone(), &r.path, k));
+                    observations.push(obs(r.agent, PROOF_PATH, k));
+                }
+            }
         }
     }
     (roots, aliases, observations, chain)

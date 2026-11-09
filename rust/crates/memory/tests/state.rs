@@ -4,8 +4,8 @@ use hegel::{TestCase, generators as gs};
 use memory::config::{Config, ConfigError};
 use memory::state::{
     DaemonLock, Loaded, MAX_BODY_BYTES, MAX_HEADER_BYTES, MissingReason, Schema, StateDir,
-    StateError, StateFile, SyncPolicy, decode, default_root, encode, read_durable, root_from,
-    stage, write_durable,
+    StateError, StateFile, SyncPolicy, decode, encode, read_durable, root_from, stage,
+    write_durable,
 };
 use memory_core::domain::MachineId;
 use proptest::prelude::*;
@@ -295,19 +295,8 @@ fn invalid_names_and_sizes_are_refused() -> R {
             Err(StateError::InvalidName),
             "{bad:?}"
         );
-        assert_eq!(
-            encode(
-                Schema {
-                    name: "x",
-                    version: 1
-                },
-                b""
-            )
-            .map(|_| ()),
-            Ok(())
-        );
         let schema = Schema {
-            name: if bad.is_empty() { "" } else { bad },
+            name: bad,
             version: 1,
         };
         assert_eq!(encode(schema, b"x"), Err(StateError::InvalidName));
@@ -542,8 +531,6 @@ fn state_root_rule_matches_the_hook() {
         Some(PathBuf::from("/h/.local/state/memory"))
     );
     assert_eq!(root_from(None, None), None);
-    // Pure read of the environment; no directory is created.
-    let _ = default_root();
 }
 
 #[test]

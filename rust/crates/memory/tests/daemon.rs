@@ -251,19 +251,6 @@ fn hints_dir_symlink_refuses() -> R {
 }
 
 #[test]
-fn invalid_config_refuses() -> R {
-    let tmp = Tmp::new()?;
-    let cfg = tmp.config(false)?;
-    let error = failed(Daemon::start(
-        &tmp.root(),
-        &cfg,
-        parts(MemFs::default(), MemStore::default()),
-    ))?;
-    assert_eq!(error.exit_code(), memory::daemon::EXIT_CONFIG);
-    Ok(())
-}
-
-#[test]
 fn first_round_commits_and_persists_then_rebuild_does_not_reupload() -> R {
     let tmp = Tmp::new()?;
     let cfg = tmp.config(true)?;

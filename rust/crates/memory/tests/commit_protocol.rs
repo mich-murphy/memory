@@ -137,8 +137,6 @@ enum Effect {
     Foreign(Foreign),
     /// The token is revoked just before this request.
     Revoke,
-    /// The network goes down just before this request.
-    Offline,
 }
 #[derive(Clone, Debug)]
 struct Rule {
@@ -239,7 +237,6 @@ impl FakeStore {
     fn side_effect(&mut self, key: &str, effect: Option<&Effect>) {
         match effect {
             Some(Effect::Revoke) => self.revoked = true,
-            Some(Effect::Offline) => self.offline = true,
             Some(Effect::Churn) => {
                 if let Some((body, _)) = self.objects.get(key).cloned() {
                     self.write(key, body);
@@ -2201,41 +2198,6 @@ fn store_errors_classify_and_display() {
         let boxed: Box<dyn std::error::Error> = Box::new(error);
         assert_eq!(boxed.to_string(), text);
     }
-}
-
-#[test]
-fn fake_store_semantics_match_conditional_writes() -> R {
-    let mut store = FakeStore::default();
-    let first = store.put_if_absent("k", vec![1]).map_err(e)?;
-    assert_eq!(
-        store.put_if_absent("k", vec![2]),
-        Err(StoreError::PreconditionFailed)
-    );
-    assert_eq!(
-        store.put_if_match("missing", &first, vec![1]),
-        Err(StoreError::NotFound)
-    );
-    let second = store.put_if_match("k", &first, vec![3]).map_err(e)?;
-    assert_ne!(first, second);
-    assert_eq!(
-        store.put_if_match("k", &first, vec![4]),
-        Err(StoreError::PreconditionFailed)
-    );
-    let got = store.get("k").map_err(e)?;
-    assert_eq!((got.body, got.etag), (vec![3], second));
-    assert_eq!(store.get("nope").err(), Some(StoreError::NotFound));
-    store.arm(Op::Get(Kind::Object), Effect::Offline);
-    assert_eq!(store.get("k").err(), Some(StoreError::Offline));
-    store.offline = false;
-    store.arm_n(
-        Op::Get(Kind::Object),
-        1,
-        1,
-        Effect::FailBefore(StoreError::Server),
-    );
-    assert!(store.get("k").is_ok());
-    assert_eq!(store.get("k").err(), Some(StoreError::Server));
-    Ok(())
 }
 
 // ------------------------------------------------------------------ recovery

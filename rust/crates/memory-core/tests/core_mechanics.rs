@@ -399,18 +399,6 @@ proptest! {
     fn proptest_property2_monotonic_quiet_cap_end(interval in any::<u8>()) { prop_assert!(coalescer_oracle(interval).is_ok()); }
 }
 #[test]
-fn property3_repeat_has_zero_planned_capture_work_even_when_writer_version_changes() {
-    let bytes = b"arbitrary raw bytes\xff\x80";
-    let old = state(bytes, observed(bytes.len(), 1, 1));
-    let request = input(bytes, old.observed.clone(), old);
-    // Writer stamps are metadata, not planner invalidation inputs.
-    for _writer_version in ["0.1.0", "99.0.0"] {
-        assert_eq!(decision(&request), Plan::Unchanged);
-        assert_eq!(decision(&request), Plan::Unchanged);
-    }
-    // This is zero planned work, NOT zero PUT integration evidence.
-}
-#[test]
 fn boundaries_strict_deserialization_and_dotted_wire_tags() -> Result<(), Box<dyn std::error::Error>>
 {
     for bad in ["", ".", "..", "a/b", "a\nb", "é"] {

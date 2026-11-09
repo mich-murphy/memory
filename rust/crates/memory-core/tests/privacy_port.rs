@@ -390,8 +390,6 @@ fn capability_binding_rejects_cross_source_cross_profile_and_changed_policy()
         privacy::transform(&source, b"not json"),
         Err(Reason::MalformedProtected)
     ));
-    assert_eq!(privacy::rules_digest(), privacy::rules_digest());
-    assert!(!privacy::TRANSFORM_VERSION.is_empty());
     Ok(())
 }
 

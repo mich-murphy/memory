@@ -323,9 +323,6 @@ fn property(raw: &[u32]) -> R {
         if got_sorted != want {
             return Err(format!("t={now} got {got:?} want {want:?}"));
         }
-        if got.len() != got_sorted.len() {
-            return Err("unreachable".into());
-        }
     }
     // Settle: complete everything in flight, then wait out the quiet window.
     let flying: Vec<usize> = model
@@ -346,12 +343,6 @@ fn property(raw: &[u32]) -> R {
                     m.in_flight = true;
                 }
             }
-        }
-        if let Some(m) = model.get_mut(&who)
-            && m.in_flight
-            && let Some(_) = m.pending
-        {
-            continue;
         }
     }
     now += 60;

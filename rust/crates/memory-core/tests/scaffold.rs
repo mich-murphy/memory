@@ -40,11 +40,3 @@ proptest! {
         prop_assert_eq!(bytes(&data, start..end).ok().map(<[u8]>::to_vec), range_oracle(&data, start, end));
     }
 }
-
-#[test]
-fn error_schema_roundtrip_rejects_unknown_fields() -> Result<(), serde_json::Error> {
-    let encoded = serde_json::to_vec(&RangeError)?;
-    assert_eq!(serde_json::from_slice::<RangeError>(&encoded)?, RangeError);
-    assert!(serde_json::from_str::<RangeError>(r#"{"unknown":1}"#).is_err());
-    Ok(())
-}

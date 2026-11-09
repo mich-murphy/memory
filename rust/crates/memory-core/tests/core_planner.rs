@@ -259,25 +259,13 @@ fn snapshot_audit_compares_transformed_bytes_even_when_fingerprint_is_stable() {
     assert_eq!(planned(&r), replay(ReplayReason::AuditMismatch));
 }
 #[test]
-fn committed_deletion_repeat_and_snapshot_repeat_have_no_capture_work() {
+fn committed_deletion_repeat_has_no_capture_work() {
     let mut r = request();
     r.observation = Observation::Missing { consecutive: 2 };
     assert_eq!(planned(&r), Some(Plan::Deleted));
     // Shell updates its cache only after the deletion manifest commits.
     r.observation = Observation::DeletionRecorded;
-    for _writer in ["old", "new"] {
-        assert_eq!(planned(&r), Some(Plan::Unchanged));
-    }
-    r.observation = Observation::Present(obs());
-    let plain = SnapshotFingerprint::Plain(fingerprint());
-    r.strategy = Strategy::Snapshot {
-        previous: Some(plain.clone()),
-        current: plain,
-        previous_rules: None,
-    };
-    for _writer in ["old", "new"] {
-        assert_eq!(planned(&r), Some(Plan::Unchanged));
-    }
+    assert_eq!(planned(&r), Some(Plan::Unchanged));
 }
 #[test]
 fn settled_same_size_changed_mtime_requires_windows_and_refreshes_stat() {

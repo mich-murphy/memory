@@ -190,10 +190,7 @@ fn budget_boundaries() {
     );
     // u64::MAX does not panic and is huge but finite.
     let big = request_budget(u64::MAX);
-    assert_eq!(
-        big,
-        S(30 + u64::MAX / mib) + Duration::from_nanos((u64::MAX % mib) * 1_000_000_000 / mib)
-    );
+    assert_eq!(big, Duration::new(17_592_186_044_445, 999_999_046));
     assert!(big > S(1 << 43));
 }
 

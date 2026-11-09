@@ -120,13 +120,21 @@ fn golden_launch_line_carries_digest_and_allowlisted_values() -> R {
 }
 
 #[test]
-fn flush_events_are_session_end_only() {
-    for n in 0..9 {
-        let e = event_of(n);
-        assert_eq!(
-            e.flushes(),
-            matches!(e, HintEvent::SessionEnd | HintEvent::Interrupted)
-        );
+fn only_session_end_and_interrupted_flush() {
+    use HintEvent as E;
+    let table = [
+        (E::SessionStart, false),
+        (E::TurnEnd, false),
+        (E::TurnFailed, false),
+        (E::SubagentStop, false),
+        (E::PreCompact, false),
+        (E::TaskCompleted, false),
+        (E::TeammateIdle, false),
+        (E::SessionEnd, true),
+        (E::Interrupted, true),
+    ];
+    for (event, flushes) in table {
+        assert_eq!(event.flushes(), flushes, "{event:?}");
     }
 }
 
@@ -324,16 +332,6 @@ fn bad_paths_degrade_to_absent_and_unknown_keys_are_tolerated() -> R {
     assert_eq!(got.transcript, PathHint::Absent);
     let long = format!("/{}", "a".repeat(MAX_PATH_BYTES));
     assert_eq!(path(&long), PathHint::Absent);
-    assert_eq!(
-        HintPath::try_from(s("/ok"))
-            .map_err(|e| e.to_string())?
-            .as_str(),
-        "/ok"
-    );
-    assert_eq!(
-        String::from(HintPath::try_from(s("/ok")).map_err(|e| e.to_string())?),
-        "/ok"
-    );
     Ok(())
 }
 
@@ -359,9 +357,14 @@ fn errors_never_echo_input() {
         };
         assert!(!shown.is_empty() && !shown.contains(canary));
     }
-    assert!(!format!("{} {:?}", HintPathError, HintPathError).contains(canary));
-    assert!(
-        !BuildError::TooLarge.to_string().is_empty() && !BuildError::Encode.to_string().is_empty()
+    assert_eq!(HintPathError.to_string(), "invalid path coordinate");
+    assert_eq!(
+        BuildError::TooLarge.to_string(),
+        "hint line exceeds the size limit"
+    );
+    assert_eq!(
+        BuildError::Encode.to_string(),
+        "hint line could not be encoded"
     );
 }
 
@@ -370,8 +373,15 @@ fn errors_never_echo_input() {
 #[test]
 fn schema_is_generated_and_strict() -> R {
     let schema = schemars::schema_for!(HintRecord);
-    let rendered = serde_json::to_string(&schema).map_err(|e| e.to_string())?;
-    assert!(rendered.contains("memory.hint/1") && rendered.contains("additionalProperties"));
+    let value = serde_json::to_value(&schema).map_err(|e| e.to_string())?;
+    assert_eq!(
+        value.get("additionalProperties"),
+        Some(&serde_json::json!(false))
+    );
+    assert_eq!(
+        value.pointer("/$defs/HintSchema/oneOf/0/const"),
+        Some(&serde_json::json!("memory.hint/1"))
+    );
     Ok(())
 }
 
@@ -425,7 +435,8 @@ fn reader_pending_tail_resume_and_midfile_fragment() -> R {
     let (_, rest) = good.split_at(good.len() - 5);
     file.extend_from_slice(rest);
     let done = scan(&file, out.next_offset).map_err(|e| e.to_string())?;
-    assert_eq!(done.records.len(), usize::from(done.dropped == 0));
+    assert_eq!(done.records.len(), 1);
+    assert_eq!(done.dropped, 0);
     assert_eq!(done.pending_bytes, 0);
     assert!(scan(&file, file.len() as u64 + 1).is_err());
     assert!(
@@ -622,8 +633,6 @@ fn reductions_are_deterministic_and_ordered() -> R {
         build_line(&parsed, Some(&launch)),
         build_line(&parsed, Some(&launch))
     );
-    let accessors = LaunchRecord::from_sanitized(&launch);
-    assert_eq!(accessors.argv(), launch.argv());
     Ok(())
 }
 

@@ -1,8 +1,6 @@
 //! Capture wiring table tests (slice 2). Synthetic in-memory filesystem and fake store only.
 //! Not the real filesystem, not zstd, not R2, not the daemon loop.
-use memory::capture::{
-    Env, Local, Locals, Published, Source, SourceOutcome, attach_launches, capture,
-};
+use memory::capture::{Env, Locals, Published, Source, SourceOutcome, attach_launches, capture};
 use memory::commit::Commit;
 use memory::commit::{Base, commit};
 use memory::environment::{FileSystem, Stat, Store, StoreError, Stored};
@@ -370,20 +368,12 @@ fn withheld_source_is_never_read_or_stored() -> R {
 }
 
 #[test]
-fn only_published_bodies_reach_the_store() -> R {
-    // `Published` has no raw constructor for pieces: this is the only public path, used for
-    // the writer's own documents, and the store sees pieces only through `capture`.
+fn captured_pieces_are_stored_under_object_keys() -> R {
     let mut rig = rig()?;
     transcript(&mut rig, b"abcdefgh");
     rig.cycle()?;
     assert!(rig.store.objects.keys().any(|k| k.starts_with("objects/")));
     Ok(())
-}
-
-#[test]
-fn local_default_is_empty() {
-    let local = Local::default();
-    assert!(local.index.is_none() && local.missing == 0);
 }
 
 // ---- launch evidence, property 5 at the store sink

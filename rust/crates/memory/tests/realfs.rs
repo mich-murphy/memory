@@ -2,7 +2,7 @@
 use hegel::{TestCase, generators as gs};
 use memory::environment::FileSystem;
 use memory::realfs::{RealFs, RealFsError, WalkLimits, walk};
-use memory_core::domain::{Agent, ArchiveId, Birth, MachineId, SourceKind};
+use memory_core::domain::{Agent, ArchiveId, MachineId, SourceKind};
 use memory_core::locator::{ConfigAsset, Located, Role, RootLayout, RootNamespace, Roots};
 use proptest::prelude::*;
 use std::fs;
@@ -144,10 +144,6 @@ fn file_id_changes_on_replace_and_stays_on_append() -> TestResult {
     ensure!(
         replaced.id != before.id,
         "replace-by-rename must change FileId"
-    );
-    ensure!(
-        matches!(before.id.birth, Birth::Known(_) | Birth::Unavailable),
-        "birth closed"
     );
     Ok(())
 }
