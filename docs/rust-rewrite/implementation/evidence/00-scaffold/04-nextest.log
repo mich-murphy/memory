@@ -1,0 +1,116 @@
+   Compiling libc v0.2.191
+   Compiling zerofrom v0.1.8
+   Compiling stable_deref_trait v1.2.1
+   Compiling cfg-if v1.0.5
+   Compiling yoke v0.8.4
+   Compiling zerovec v0.11.9
+   Compiling serde_core v1.0.229
+   Compiling bitflags v2.13.2
+   Compiling tinystr v0.8.5
+   Compiling utf_types v1.0.0
+   Compiling writeable v0.6.4
+   Compiling litemap v0.8.3
+   Compiling smallvec v1.16.5
+   Compiling icu_locale_core v2.4.0
+   Compiling utf8_iter v1.1.0
+   Compiling potential_utf v0.1.6
+   Compiling zerotrie v0.2.5
+   Compiling icu_collections v2.4.0
+   Compiling icu_provider v2.4.0
+   Compiling typenum v1.20.1
+   Compiling memchr v2.8.3
+   Compiling icu_normalizer_data v2.4.0
+   Compiling hybrid-array v0.4.15
+   Compiling icu_properties_data v2.4.0
+   Compiling regex-syntax v0.8.11
+   Compiling winnow v1.0.5
+   Compiling toml_parser v1.1.5+spec-1.1.0
+   Compiling icu_properties v2.4.0
+   Compiling icu_normalizer v2.4.0
+   Compiling toml_datetime v1.1.3+spec-1.1.0
+   Compiling serde_spanned v1.1.3
+   Compiling rand_core v0.10.1
+   Compiling toml_writer v1.2.0+spec-1.1.0
+   Compiling idna_adapter v1.2.2
+   Compiling toml v1.2.1+spec-1.1.0
+   Compiling zmij v1.0.23
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling aho-corasick v1.1.5
+   Compiling const-oid v0.10.2
+   Compiling itoa v1.0.18
+   Compiling percent-encoding v2.3.2
+   Compiling form_urlencoded v1.2.2
+   Compiling regex-automata v0.4.18
+   Compiling serde_json v1.0.154
+   Compiling digest v0.11.3
+   Compiling ref-cast v1.0.27
+   Compiling serde v1.0.229
+   Compiling idna v1.1.0
+   Compiling cpufeatures v0.3.1
+   Compiling dyn-clone v1.0.20
+   Compiling thiserror v2.0.21
+   Compiling schemars v1.2.3
+   Compiling sha2 v0.11.1
+   Compiling url v2.5.8
+   Compiling getrandom v0.4.3
+   Compiling regex v1.13.1
+   Compiling errno v0.3.14
+   Compiling rustix v1.1.6
+   Compiling once_cell v1.21.4
+   Compiling memory-core v0.1.0 (<repo>/rust/artifacts/scaffold-baseline/crates/memory-core)
+   Compiling same-file v1.0.6
+   Compiling walkdir v2.5.0
+   Compiling rand v0.10.3
+   Compiling notify-types v2.2.0
+   Compiling fsevent-sys v4.1.0
+   Compiling log v0.4.35
+   Compiling fastrand v2.5.0
+   Compiling num-modular v0.6.5
+   Compiling tempfile v3.27.0
+   Compiling notify v8.2.0
+   Compiling dashu-base v0.6.1
+   Compiling wait-timeout v0.2.1
+   Compiling adler2 v2.0.1
+   Compiling scopeguard v1.2.0
+   Compiling fnv v1.0.7
+   Compiling bit-vec v0.10.1
+   Compiling quick-error v1.2.3
+   Compiling static_assertions v1.1.0
+   Compiling bit-set v0.11.1
+   Compiling dashu-int v0.6.2
+   Compiling rusty-fork v0.3.1
+   Compiling lock_api v0.4.14
+   Compiling miniz_oxide v0.8.9
+   Compiling num-traits v0.2.19
+   Compiling libm v0.2.16
+   Compiling parking_lot_core v0.9.12
+   Compiling rand_xorshift v0.5.0
+   Compiling chacha20 v0.10.2
+   Compiling unarray v0.1.4
+   Compiling core_detect v1.0.0
+   Compiling rustc-hash v2.1.3
+   Compiling hashbrown v0.17.1
+   Compiling proptest v1.12.0
+   Compiling hegeltest-c v0.50.0
+   Compiling parking_lot v0.12.5
+   Compiling memory v0.1.0 (<repo>/rust/artifacts/scaffold-baseline/crates/memory)
+   Compiling proptest-state-machine v0.8.0
+   Compiling memory-reader v0.1.0 (<repo>/rust/artifacts/scaffold-baseline/crates/memory-reader)
+   Compiling xtask v0.1.0 (<repo>/rust/artifacts/scaffold-baseline/crates/xtask)
+   Compiling hegeltest v0.52.0
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 23.56s
+────────────
+ Nextest run ID 96273337-2035-43d9-b2cf-330659dc98a4 with nextest profile: default
+    Starting 9 tests across 8 binaries
+        PASS [   0.040s] (1/9) memory::harness lost_reply_is_visible_and_duplicate_create_preserves_first_body
+        PASS [   0.042s] (2/9) memory::harness counters_detect_each_wrapped_operation
+        PASS [   0.039s] (3/9) memory-core::scaffold checked_ranges_cover_edges
+        PASS [   0.042s] (4/9) memory-core::scaffold error_schema_roundtrip_rejects_unknown_fields
+        PASS [   0.173s] (5/9) memory-core::scaffold hegel_checked_ranges_match_independent_iterator_oracle
+        PASS [   0.294s] (6/9) memory::harness scaffold_binary_refuses_capture_instead_of_success
+        PASS [   0.206s] (7/9) memory-core::scaffold proptest_checked_ranges_match_independent_iterator_oracle
+        PASS [   0.042s] (8/9) xtask::bin/xtask tests::schemas_detect_missing_drift_and_roundtrip
+        PASS [   0.311s] (9/9) xtask::cli schema_cli_dispatches_and_rejects_unknown_commands
+────────────
+     Summary [   0.647s] 9 tests run: 9 passed, 0 skipped

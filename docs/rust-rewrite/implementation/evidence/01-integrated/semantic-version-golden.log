@@ -1,0 +1,24 @@
+   Compiling memory-core v0.1.0 (/Users/mm/dev/memory/rust/crates/memory-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.32s
+     Running tests/privacy_port.rs (target/debug/deps/privacy_port-d250f811a6f887ca)
+
+running 1 test
+test rule_digest_golden_requires_explicit_semantic_review ... FAILED
+
+failures:
+
+---- rule_digest_golden_requires_explicit_semantic_review stdout ----
+
+thread 'rule_digest_golden_requires_explicit_semantic_review' (322168097) panicked at crates/memory-core/tests/privacy_port.rs:578:5:
+assertion `left == right` failed
+  left: [165, 111, 102, 164, 34, 45, 153, 245, 246, 77, 32, 158, 156, 245, 175, 12, 249, 62, 116, 64, 95, 48, 53, 187, 0, 199, 188, 223, 239, 246, 188, 50]
+ right: [168, 44, 126, 55, 138, 207, 117, 192, 179, 219, 53, 207, 29, 26, 151, 165, 139, 21, 116, 114, 16, 74, 203, 6, 144, 130, 176, 214, 207, 46, 38, 37]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    rule_digest_golden_requires_explicit_semantic_review
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p memory-core --test privacy_port`

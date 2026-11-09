@@ -1,0 +1,10 @@
+crates/xtask/src/main.rs:18: let output = format!("{}\n", serde_json::to_string_pretty(&schema)?);
+crates/xtask/src/main.rs:24: fs::create_dir_all(root.join("schemas"))?;
+crates/xtask/src/main.rs:25: fs::write(path, output)?;
+crates/xtask/src/main.rs:58: fs::remove_dir_all(&root)?;
+crates/xtask/src/main.rs:58: fs::remove_dir_all(&root)?;
+crates/xtask/src/main.rs:58: fs::remove_dir_all(&root)?;
+crates/xtask/src/main.rs:61: schemas_at(&root, false)?;
+crates/xtask/src/main.rs:62: schemas_at(&root, true)?;
+crates/xtask/src/main.rs:63: fs::write(root.join("schemas/range-error.json"), b"{}")?;
+crates/xtask/src/main.rs:65: fs::remove_dir_all(&root)?;

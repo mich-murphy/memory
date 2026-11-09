@@ -1,0 +1,919 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Manifest",
+  "description": "A manifest, `memory.manifest/1`.",
+  "oneOf": [
+    {
+      "description": "Delta.",
+      "type": "object",
+      "properties": {
+        "captured_at": {
+          "description": "Capture time.",
+          "$ref": "#/$defs/Timestamp"
+        },
+        "changes": {
+          "description": "Changes, at most one per source.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Change"
+          }
+        },
+        "checkpoint": {
+          "description": "Hash of the latest checkpoint manifest (`seq - seq % 64`).",
+          "$ref": "#/$defs/Sha256"
+        },
+        "kind": {
+          "type": "string",
+          "const": "delta"
+        },
+        "launch": {
+          "description": "Launch evidence.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LaunchRecord"
+          }
+        },
+        "owner": {
+          "description": "Chain owner.",
+          "$ref": "#/$defs/Owner"
+        },
+        "previous": {
+          "description": "Hash of manifest `seq - 1`.",
+          "$ref": "#/$defs/Sha256"
+        },
+        "schema": {
+          "description": "Schema tag.",
+          "$ref": "#/$defs/ManifestSchema"
+        },
+        "seq": {
+          "description": "Sequence number, never a multiple of 64.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "writer": {
+          "description": "Writer stamp.",
+          "$ref": "#/$defs/Writer"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "schema",
+        "owner",
+        "seq",
+        "previous",
+        "checkpoint",
+        "captured_at",
+        "writer",
+        "launch",
+        "changes"
+      ]
+    },
+    {
+      "description": "Checkpoint.",
+      "type": "object",
+      "properties": {
+        "captured_at": {
+          "description": "Capture time.",
+          "$ref": "#/$defs/Timestamp"
+        },
+        "kind": {
+          "type": "string",
+          "const": "checkpoint"
+        },
+        "launch": {
+          "description": "Launch evidence.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LaunchRecord"
+          }
+        },
+        "owner": {
+          "description": "Chain owner.",
+          "$ref": "#/$defs/Owner"
+        },
+        "previous": {
+          "description": "Hash of manifest `seq - 1`; absent only at seq 0.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schema": {
+          "description": "Schema tag.",
+          "$ref": "#/$defs/ManifestSchema"
+        },
+        "seq": {
+          "description": "Sequence number, a multiple of 64.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "sources": {
+          "description": "Sources sorted by id, unique.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CheckpointSource"
+          }
+        },
+        "writer": {
+          "description": "Writer stamp.",
+          "$ref": "#/$defs/Writer"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "schema",
+        "owner",
+        "seq",
+        "captured_at",
+        "writer",
+        "launch",
+        "sources"
+      ]
+    }
+  ],
+  "$defs": {
+    "Agent": {
+      "description": "Agent namespace.",
+      "oneOf": [
+        {
+          "description": "Claude agent.",
+          "type": "string",
+          "const": "claude"
+        },
+        {
+          "description": "Codex agent.",
+          "type": "string",
+          "const": "codex"
+        },
+        {
+          "description": "Pi agent.",
+          "type": "string",
+          "const": "pi"
+        }
+      ]
+    },
+    "ArchiveId": {
+      "type": "string",
+      "maxLength": 1024,
+      "minLength": 1,
+      "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._:-]+$"
+    },
+    "Change": {
+      "description": "One change of a delta manifest.",
+      "oneOf": [
+        {
+          "description": "Append pieces to the current epoch (append class).",
+          "type": "object",
+          "properties": {
+            "class": {
+              "description": "Source class.",
+              "$ref": "#/$defs/SourceClass"
+            },
+            "epoch": {
+              "description": "Epoch stamp.",
+              "$ref": "#/$defs/EpochStamp"
+            },
+            "id": {
+              "description": "Source id.",
+              "$ref": "#/$defs/SourceId"
+            },
+            "kind": {
+              "description": "Source kind.",
+              "$ref": "#/$defs/SourceKind"
+            },
+            "op": {
+              "type": "string",
+              "const": "extend"
+            },
+            "path": {
+              "description": "Root-relative path.",
+              "type": "string"
+            },
+            "pieces": {
+              "description": "New pieces, contiguous, ending at `size`.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Piece"
+              }
+            },
+            "sha256": {
+              "description": "SHA-256 of the whole transformed stream `[0, size)`.",
+              "$ref": "#/$defs/Sha256"
+            },
+            "size": {
+              "description": "Size of the whole transformed stream `[0, size)` after this change.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "id",
+            "kind",
+            "path",
+            "class",
+            "epoch",
+            "size",
+            "sha256",
+            "pieces"
+          ]
+        },
+        {
+          "description": "Start epoch n+1 from offset 0 (append class).",
+          "type": "object",
+          "properties": {
+            "class": {
+              "description": "Source class.",
+              "$ref": "#/$defs/SourceClass"
+            },
+            "epoch": {
+              "description": "Epoch stamp.",
+              "$ref": "#/$defs/EpochStamp"
+            },
+            "id": {
+              "description": "Source id.",
+              "$ref": "#/$defs/SourceId"
+            },
+            "kind": {
+              "description": "Source kind.",
+              "$ref": "#/$defs/SourceKind"
+            },
+            "op": {
+              "type": "string",
+              "const": "epoch"
+            },
+            "path": {
+              "description": "Root-relative path.",
+              "type": "string"
+            },
+            "pieces": {
+              "description": "New pieces, contiguous, ending at `size`.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Piece"
+              }
+            },
+            "sha256": {
+              "description": "SHA-256 of the whole transformed stream `[0, size)`.",
+              "$ref": "#/$defs/Sha256"
+            },
+            "size": {
+              "description": "Size of the whole transformed stream `[0, size)` after this change.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "id",
+            "kind",
+            "path",
+            "class",
+            "epoch",
+            "size",
+            "sha256",
+            "pieces"
+          ]
+        },
+        {
+          "description": "Snapshot epoch replacing the previous one (snapshot class).",
+          "type": "object",
+          "properties": {
+            "class": {
+              "description": "Source class.",
+              "$ref": "#/$defs/SourceClass"
+            },
+            "epoch": {
+              "description": "Epoch stamp.",
+              "$ref": "#/$defs/EpochStamp"
+            },
+            "id": {
+              "description": "Source id.",
+              "$ref": "#/$defs/SourceId"
+            },
+            "kind": {
+              "description": "Source kind.",
+              "$ref": "#/$defs/SourceKind"
+            },
+            "op": {
+              "type": "string",
+              "const": "replace"
+            },
+            "path": {
+              "description": "Root-relative path.",
+              "type": "string"
+            },
+            "pieces": {
+              "description": "New pieces, contiguous, ending at `size`.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Piece"
+              }
+            },
+            "sha256": {
+              "description": "SHA-256 of the whole transformed stream `[0, size)`.",
+              "$ref": "#/$defs/Sha256"
+            },
+            "size": {
+              "description": "Size of the whole transformed stream `[0, size)` after this change.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "id",
+            "kind",
+            "path",
+            "class",
+            "epoch",
+            "size",
+            "sha256",
+            "pieces"
+          ]
+        },
+        {
+          "description": "Record a deletion.",
+          "type": "object",
+          "properties": {
+            "deleted_at": {
+              "description": "Deletion time.",
+              "$ref": "#/$defs/Timestamp"
+            },
+            "id": {
+              "description": "Source id.",
+              "$ref": "#/$defs/SourceId"
+            },
+            "kind": {
+              "description": "Source kind.",
+              "$ref": "#/$defs/SourceKind"
+            },
+            "op": {
+              "type": "string",
+              "const": "deleted"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "id",
+            "kind",
+            "deleted_at"
+          ]
+        }
+      ]
+    },
+    "CheckpointSource": {
+      "description": "One source in a checkpoint.",
+      "type": "object",
+      "properties": {
+        "class": {
+          "description": "Source class.",
+          "$ref": "#/$defs/SourceClass"
+        },
+        "deleted_at": {
+          "description": "Deletion time if the source was deleted and not since recreated.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epochs": {
+          "description": "Every append epoch, or exactly the latest snapshot epoch.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EpochRecord"
+          }
+        },
+        "id": {
+          "description": "Source id.",
+          "$ref": "#/$defs/SourceId"
+        },
+        "kind": {
+          "description": "Source kind.",
+          "$ref": "#/$defs/SourceKind"
+        },
+        "path": {
+          "description": "Root-relative path.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "path",
+        "class",
+        "epochs"
+      ]
+    },
+    "Encoding": {
+      "description": "Stored encoding of a piece. A zstd upgrade changes encoded bytes, never the object key.",
+      "oneOf": [
+        {
+          "description": "Zstandard level 3.",
+          "type": "string",
+          "const": "zstd-3"
+        }
+      ]
+    },
+    "EpochRecord": {
+      "description": "A retained epoch with all of its pieces (checkpoint and state form).",
+      "type": "object",
+      "properties": {
+        "epoch": {
+          "description": "Epoch stamp.",
+          "$ref": "#/$defs/EpochStamp"
+        },
+        "pieces": {
+          "description": "All pieces from offset 0, contiguous, ending at `size`.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Piece"
+          }
+        },
+        "sha256": {
+          "description": "SHA-256 of the epoch's whole transformed stream.",
+          "$ref": "#/$defs/Sha256"
+        },
+        "size": {
+          "description": "Size of the epoch's whole transformed stream.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "epoch",
+        "size",
+        "sha256",
+        "pieces"
+      ]
+    },
+    "EpochStamp": {
+      "description": "Epoch number and the stamp of the writer that started it.",
+      "type": "object",
+      "properties": {
+        "n": {
+          "description": "Epoch number.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "rules": {
+          "description": "Transform rules digest, present for protected kinds.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RulesDigest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "writer": {
+          "description": "Writer that started the epoch.",
+          "$ref": "#/$defs/EpochWriter"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "n",
+        "writer"
+      ]
+    },
+    "EpochWriter": {
+      "description": "Writer stamp of one epoch.",
+      "type": "object",
+      "properties": {
+        "commit": {
+          "description": "Source revision.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Program version.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "commit"
+      ]
+    },
+    "LaunchRecord": {
+      "description": "Sanitized launch evidence attached once per distinct digest.\n\nConstructible only from [`SanitizedLaunch`]; fields are private.\n```compile_fail\nlet _ = memory_core::manifest::LaunchRecord {\n    digest: memory_core::domain::Sha256::from_bytes([0; 32]),\n    argv: vec![],\n    env: Default::default(),\n};\n```",
+      "type": "object",
+      "properties": {
+        "argv": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "digest": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "digest",
+        "argv",
+        "env"
+      ]
+    },
+    "MachineId": {
+      "type": "string",
+      "maxLength": 1024,
+      "minLength": 1,
+      "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._:-]+$"
+    },
+    "ManifestSchema": {
+      "description": "Schema tag of `memory.manifest/1`.",
+      "oneOf": [
+        {
+          "description": "Version 1.",
+          "type": "string",
+          "const": "memory.manifest/1"
+        }
+      ]
+    },
+    "Offset": {
+      "description": "Byte offset, independent of text and record boundaries.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "Owner": {
+      "description": "Manifest-chain owner; shared sources have no fictitious session.",
+      "oneOf": [
+        {
+          "description": "Session-local evidence.",
+          "type": "object",
+          "properties": {
+            "session": {
+              "$ref": "#/$defs/SessionKey"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "session"
+          ]
+        },
+        {
+          "description": "Shared agent resources.",
+          "type": "object",
+          "properties": {
+            "shared": {
+              "type": "object",
+              "properties": {
+                "agent": {
+                  "description": "Agent namespace.",
+                  "$ref": "#/$defs/Agent"
+                },
+                "archive": {
+                  "description": "Archive namespace.",
+                  "$ref": "#/$defs/ArchiveId"
+                },
+                "machine": {
+                  "description": "Host namespace.",
+                  "$ref": "#/$defs/MachineId"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "archive",
+                "machine",
+                "agent"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "shared"
+          ]
+        }
+      ]
+    },
+    "Piece": {
+      "description": "One contiguous byte range of transformed content (not line aligned).",
+      "type": "object",
+      "properties": {
+        "encoded_len": {
+          "description": "Stored length.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "encoded_sha256": {
+          "description": "SHA-256 of the stored bytes.",
+          "$ref": "#/$defs/Sha256"
+        },
+        "encoding": {
+          "description": "Encoding of the stored object.",
+          "$ref": "#/$defs/Encoding"
+        },
+        "len": {
+          "description": "Length in bytes.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "object": {
+          "description": "Object key, `objects/<sha256>.zst`.",
+          "type": "string"
+        },
+        "offset": {
+          "description": "Start offset in the transformed stream.",
+          "$ref": "#/$defs/Offset"
+        },
+        "sha256": {
+          "description": "SHA-256 of the raw (transformed, unencoded) piece bytes.",
+          "$ref": "#/$defs/Sha256"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "offset",
+        "len",
+        "sha256",
+        "object",
+        "encoding",
+        "encoded_len",
+        "encoded_sha256"
+      ]
+    },
+    "RulesDigest": {
+      "description": "Digest of transform rules and semantic version, not writer version.",
+      "$ref": "#/$defs/Sha256"
+    },
+    "SessionId": {
+      "type": "string",
+      "maxLength": 1024,
+      "minLength": 1,
+      "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._:-]+$"
+    },
+    "SessionKey": {
+      "description": "Stable session coordinates.",
+      "type": "object",
+      "properties": {
+        "agent": {
+          "description": "Agent coordinate.",
+          "$ref": "#/$defs/Agent"
+        },
+        "archive": {
+          "description": "Archive coordinate.",
+          "$ref": "#/$defs/ArchiveId"
+        },
+        "machine": {
+          "description": "Machine coordinate.",
+          "$ref": "#/$defs/MachineId"
+        },
+        "session_id": {
+          "description": "Session coordinate, spelled `session_id` in owned wire schemas.",
+          "$ref": "#/$defs/SessionId"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "archive",
+        "machine",
+        "agent",
+        "session_id"
+      ]
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "SourceClass": {
+      "description": "Capture byte-stream strategy.",
+      "oneOf": [
+        {
+          "description": "Retain every epoch.",
+          "type": "string",
+          "const": "append"
+        },
+        {
+          "description": "Latest epoch selected in checkpoints.",
+          "type": "string",
+          "const": "snapshot"
+        }
+      ]
+    },
+    "SourceId": {
+      "type": "string",
+      "maxLength": 1024,
+      "minLength": 1,
+      "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._:-]+$"
+    },
+    "SourceKind": {
+      "description": "Finite known source families; locator still must prove pattern and ownership.",
+      "oneOf": [
+        {
+          "description": "ClaudeTranscript family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "claude.transcript"
+        },
+        {
+          "description": "ClaudeSubagent family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "claude.subagent"
+        },
+        {
+          "description": "ClaudeToolResults family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "claude.tool_results"
+        },
+        {
+          "description": "ClaudeTodos family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "claude.todos"
+        },
+        {
+          "description": "ClaudeTasks family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "claude.tasks"
+        },
+        {
+          "description": "ClaudeTeams family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "claude.teams"
+        },
+        {
+          "description": "ClaudeFileHistory family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "claude.file_history"
+        },
+        {
+          "description": "ClaudeDebug family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "claude.debug"
+        },
+        {
+          "description": "ClaudeHistory family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "claude.history"
+        },
+        {
+          "description": "ClaudeConfig family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "claude.config"
+        },
+        {
+          "description": "CodexRollout family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "codex.rollout"
+        },
+        {
+          "description": "CodexCompressed family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "codex.compressed"
+        },
+        {
+          "description": "CodexStore family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "codex.store"
+        },
+        {
+          "description": "CodexHistory family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "codex.history"
+        },
+        {
+          "description": "CodexConfig family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "codex.config"
+        },
+        {
+          "description": "PiSession family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "pi.session"
+        },
+        {
+          "description": "PiSettings family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "pi.settings"
+        },
+        {
+          "description": "PiModels family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "pi.models"
+        },
+        {
+          "description": "PiSnapshot family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "pi.snapshot"
+        },
+        {
+          "description": "ClaudeSessionEnv family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "claude.session_env"
+        },
+        {
+          "description": "ClaudePlan family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "claude.plan"
+        },
+        {
+          "description": "ClaudePaste family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "claude.paste"
+        },
+        {
+          "description": "ClaudeUsage family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "claude.usage"
+        },
+        {
+          "description": "ClaudeMemory family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "claude.memory"
+        },
+        {
+          "description": "ClaudeAux family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "claude.aux"
+        },
+        {
+          "description": "CodexMemory family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "codex.memory"
+        },
+        {
+          "description": "CodexLog family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "codex.log"
+        },
+        {
+          "description": "PiConfig family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "pi.config"
+        },
+        {
+          "description": "PiLog family; not arbitrary-path admission.",
+          "type": "string",
+          "const": "pi.log"
+        },
+        {
+          "description": "PiAux family: non-transcript files inside a validated Pi session directory.",
+          "type": "string",
+          "const": "pi.aux"
+        }
+      ]
+    },
+    "Timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "Writer": {
+      "description": "Manifest writer stamp.",
+      "type": "object",
+      "properties": {
+        "commit": {
+          "description": "Source revision.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Program name.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Program version.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "commit"
+      ]
+    }
+  }
+}

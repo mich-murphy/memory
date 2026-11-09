@@ -1,0 +1,2351 @@
+//! Commit protocol acceptance (DESIGN.md 7.4, 15 property 4): table tests for every
+//! `CommitOutcome` branch and injected fault, and property 4 as a state machine in both Hegel
+//! and proptest-state-machine over an independently written reference model.
+//!
+//! Everything runs against a deterministic in-memory fake store. There is no real planner or
+//! shell yet: capture is modelled by a small stand-in planner (full-prefix hash, pieces of at
+//! most 4 raw bytes) feeding memory-core's manifest builder. This is not R2, not prototype P2
+//! and not the daemon.
+use hegel::{TestCase, generators as gs};
+use memory::commit::{
+    Base, Commit, Failure, GET_ATTEMPTS, Landed, REBASE_RETRIES, Upload, check_fence, commit,
+    disposition, manifest_key, recover_base,
+};
+use memory::environment::{Store, StoreError, Stored};
+use memory_core::disposition::Streak;
+use memory_core::domain::{
+    Agent, ArchiveId, CommitOutcome, Disposition, ETag, ErrorClass, Fault, MachineId, Offset,
+    Owner, OwnerParkReason, SessionId, SessionKey, Sha256, SourceClass, SourceId, SourceKind,
+};
+use memory_core::limits::current_key;
+use memory_core::manifest::{
+    Change, Current, EpochRecord, EpochStamp, EpochWriter, Header, Manifest, ManifestError,
+    OwnerState, Piece, ProjectedKind, SourceWrite, StoredEncoding, Timestamp, Writer, build, fold,
+    manifest_hash, object_key, parse_current, parse_manifest, recover_projection,
+};
+use proptest::prelude::*;
+use proptest::test_runner::{Config, TestRunner};
+use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
+type R<T = ()> = Result<T, String>;
+
+fn e<E: std::fmt::Debug>(err: E) -> String {
+    format!("{err:?}")
+}
+fn need<T>(value: Option<T>, what: &str) -> R<T> {
+    value.ok_or_else(|| what.to_owned())
+}
+fn ensure(condition: bool, what: &str) -> R {
+    if condition {
+        Ok(())
+    } else {
+        Err(what.to_owned())
+    }
+}
+
+const SOURCES: u8 = 2;
+const PIECE: usize = 4;
+
+fn sha(bytes: &[u8]) -> Sha256 {
+    manifest_hash(bytes)
+}
+fn len64(bytes: &[u8]) -> u64 {
+    u64::try_from(bytes.len()).unwrap_or(u64::MAX)
+}
+fn owner_named(session: &str) -> R<Owner> {
+    Ok(Owner::Session(SessionKey {
+        archive: ArchiveId::try_from("a".to_owned()).map_err(e)?,
+        machine: MachineId::try_from("m".to_owned()).map_err(e)?,
+        agent: Agent::Claude,
+        session: SessionId::try_from(session.to_owned()).map_err(e)?,
+    }))
+}
+fn owner() -> R<Owner> {
+    owner_named("s1")
+}
+fn ts() -> R<Timestamp> {
+    Timestamp::try_from("2026-11-07T10:30:00Z".to_owned()).map_err(e)
+}
+fn header(owner: &Owner, who: &str) -> R<Header> {
+    Ok(Header {
+        owner: owner.clone(),
+        captured_at: ts()?,
+        writer: Writer {
+            name: who.to_owned(),
+            version: "0.1.0".to_owned(),
+            commit: "abc".to_owned(),
+        },
+        launch: vec![],
+    })
+}
+fn src_id(i: u8) -> R<SourceId> {
+    SourceId::try_from(format!("src{i}")).map_err(e)
+}
+
+/// Test-only encoding: the variant byte is the writer's "zstd version". Odd variants store
+/// the bytes reversed, so two writers disagree on the stored encoding of the same raw piece.
+fn encode(raw: &[u8], variant: u8) -> Vec<u8> {
+    let mut out = vec![variant];
+    if variant.is_multiple_of(2) {
+        out.extend_from_slice(raw);
+    } else {
+        out.extend(raw.iter().rev());
+    }
+    out
+}
+fn decode(stored: &[u8]) -> Option<Vec<u8>> {
+    let (variant, rest) = stored.split_first()?;
+    Some(if variant.is_multiple_of(2) {
+        rest.to_vec()
+    } else {
+        rest.iter().rev().copied().collect()
+    })
+}
+
+// ------------------------------------------------------------------ fake store
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    Object,
+    Manifest,
+    Current,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Op {
+    Put(Kind),
+    Get(Kind),
+}
+/// A foreign writer's documents, applied just before the next matching request.
+#[derive(Clone, Debug)]
+struct Foreign {
+    manifest_key: String,
+    manifest: Vec<u8>,
+    current: Vec<u8>,
+}
+#[derive(Clone, Debug)]
+enum Effect {
+    /// Reply with the error without landing anything.
+    FailBefore(StoreError),
+    /// Land the write, then lose the reply (or answer 5xx), optionally going offline after.
+    LandThen { err: StoreError, then_offline: bool },
+    /// Another client rewrites `current.json` unchanged, giving it a new ETag.
+    Churn,
+    /// A foreign writer advances the owner just before this request.
+    Foreign(Foreign),
+    /// The token is revoked just before this request.
+    Revoke,
+    /// The network goes down just before this request.
+    Offline,
+}
+#[derive(Clone, Debug)]
+struct Rule {
+    op: Op,
+    skip: u32,
+    times: u32,
+    effect: Effect,
+}
+enum Fence<'a> {
+    Absent,
+    Match(&'a ETag),
+}
+
+/// Deterministic object store with S3/R2 conditional-write semantics and scripted faults.
+#[derive(Default)]
+struct FakeStore {
+    objects: BTreeMap<String, (Vec<u8>, u64)>,
+    version: u64,
+    offline: bool,
+    revoked: bool,
+    rules: Vec<Rule>,
+    log: Vec<(Op, String)>,
+}
+
+fn kind_of(key: &str) -> Kind {
+    if key.starts_with("manifests/") {
+        Kind::Manifest
+    } else if key.ends_with("current.json") {
+        Kind::Current
+    } else {
+        Kind::Object
+    }
+}
+fn etag_of(version: u64) -> Result<ETag, StoreError> {
+    ETag::try_from(format!("\"v{version}\"")).map_err(|_| StoreError::Server)
+}
+
+impl FakeStore {
+    fn arm(&mut self, op: Op, effect: Effect) {
+        self.arm_n(op, 0, 1, effect);
+    }
+    fn arm_n(&mut self, op: Op, skip: u32, times: u32, effect: Effect) {
+        self.rules.push(Rule {
+            op,
+            skip,
+            times,
+            effect,
+        });
+    }
+    fn clear_transient(&mut self) {
+        self.rules
+            .retain(|r| matches!(r.effect, Effect::Foreign(_)));
+    }
+    fn foreign_armed(&self) -> bool {
+        self.rules
+            .iter()
+            .any(|r| matches!(r.effect, Effect::Foreign(_)))
+    }
+    fn peek(&self, key: &str) -> Option<&[u8]> {
+        self.objects.get(key).map(|(body, _)| body.as_slice())
+    }
+    fn etag(&self, key: &str) -> R<ETag> {
+        let (_, version) = need(self.objects.get(key), "no such key")?;
+        etag_of(*version).map_err(e)
+    }
+    fn count(&self, op: Op) -> usize {
+        self.log.iter().filter(|(o, _)| *o == op).count()
+    }
+    fn write(&mut self, key: &str, body: Vec<u8>) {
+        self.version += 1;
+        self.objects.insert(key.to_owned(), (body, self.version));
+    }
+    fn remove(&mut self, key: &str) {
+        self.objects.remove(key);
+    }
+    fn intercept(&mut self, op: Op) -> Option<Effect> {
+        let mut hit = None;
+        for (index, rule) in self.rules.iter_mut().enumerate() {
+            if rule.op != op {
+                continue;
+            }
+            if rule.skip > 0 {
+                rule.skip -= 1;
+            } else {
+                hit = Some(index);
+            }
+            break;
+        }
+        let index = hit?;
+        let rule = self.rules.get_mut(index)?;
+        let effect = rule.effect.clone();
+        rule.times -= 1;
+        if rule.times == 0 {
+            self.rules.remove(index);
+        }
+        Some(effect)
+    }
+    fn side_effect(&mut self, key: &str, effect: Option<&Effect>) {
+        match effect {
+            Some(Effect::Revoke) => self.revoked = true,
+            Some(Effect::Offline) => self.offline = true,
+            Some(Effect::Churn) => {
+                if let Some((body, _)) = self.objects.get(key).cloned() {
+                    self.write(key, body);
+                }
+            }
+            Some(Effect::Foreign(f)) => {
+                if !self.objects.contains_key(&f.manifest_key) {
+                    self.write(&f.manifest_key, f.manifest.clone());
+                }
+                self.write(key, f.current.clone());
+            }
+            _ => {}
+        }
+    }
+    fn gate(&self) -> Result<(), StoreError> {
+        if self.revoked {
+            Err(StoreError::Auth)
+        } else if self.offline {
+            Err(StoreError::Offline)
+        } else {
+            Ok(())
+        }
+    }
+    fn put(&mut self, key: &str, body: Vec<u8>, fence: &Fence<'_>) -> Result<ETag, StoreError> {
+        let op = Op::Put(kind_of(key));
+        self.log.push((op, key.to_owned()));
+        let effect = self.intercept(op);
+        self.side_effect(key, effect.as_ref());
+        self.gate()?;
+        if let Some(Effect::FailBefore(err)) = &effect {
+            return Err(*err);
+        }
+        let existing = self.objects.get(key).map(|(_, v)| *v);
+        let allowed = match (fence, existing) {
+            (Fence::Absent, None) => true,
+            (Fence::Absent, Some(_)) => false,
+            (Fence::Match(_), None) => return Err(StoreError::NotFound),
+            (Fence::Match(tag), Some(v)) => etag_of(v)? == **tag,
+        };
+        if !allowed {
+            return Err(StoreError::PreconditionFailed);
+        }
+        self.write(key, body);
+        let tag = etag_of(self.version)?;
+        match effect {
+            Some(Effect::LandThen { err, then_offline }) => {
+                self.offline |= then_offline;
+                Err(err)
+            }
+            _ => Ok(tag),
+        }
+    }
+}
+
+impl Store for FakeStore {
+    type Body = Vec<u8>;
+    fn document(bytes: Vec<u8>) -> Vec<u8> {
+        bytes
+    }
+    fn put_if_absent(&mut self, key: &str, body: Vec<u8>) -> Result<ETag, StoreError> {
+        self.put(key, body, &Fence::Absent)
+    }
+    fn put_if_match(&mut self, key: &str, etag: &ETag, body: Vec<u8>) -> Result<ETag, StoreError> {
+        self.put(key, body, &Fence::Match(etag))
+    }
+    fn get(&mut self, key: &str) -> Result<Stored<Vec<u8>>, StoreError> {
+        let op = Op::Get(kind_of(key));
+        self.log.push((op, key.to_owned()));
+        let effect = self.intercept(op);
+        self.side_effect(key, effect.as_ref());
+        self.gate()?;
+        if let Some(Effect::FailBefore(err) | Effect::LandThen { err, .. }) = &effect {
+            return Err(*err);
+        }
+        let (body, version) = self.objects.get(key).ok_or(StoreError::NotFound)?;
+        Ok(Stored {
+            body: body.clone(),
+            etag: etag_of(*version)?,
+        })
+    }
+}
+
+// ------------------------------------------------------------------ stand-in capture
+
+type Disk = BTreeMap<u8, Vec<u8>>;
+
+struct Plan {
+    changes: Vec<Change>,
+    uploads: Vec<Upload<Vec<u8>>>,
+}
+
+fn stamp(n: u32, variant: u8) -> EpochStamp {
+    EpochStamp {
+        n,
+        writer: EpochWriter {
+            version: format!("0.1.{variant}"),
+            commit: "abc".to_owned(),
+        },
+        rules: None,
+    }
+}
+fn pieces_from(
+    bytes: &[u8],
+    from: usize,
+    variant: u8,
+    uploads: &mut Vec<Upload<Vec<u8>>>,
+) -> R<Vec<Piece>> {
+    let tail = need(bytes.get(from..), "range")?;
+    let mut out = Vec::new();
+    let mut offset = from;
+    for chunk in tail.chunks(PIECE) {
+        let raw = sha(chunk);
+        let stored = encode(chunk, variant);
+        out.push(Piece::new(
+            Offset::new(u64::try_from(offset).map_err(e)?),
+            len64(chunk),
+            raw,
+            len64(&stored),
+            sha(&stored),
+        ));
+        uploads.push(Upload {
+            key: object_key(&raw),
+            body: stored,
+        });
+        offset += chunk.len();
+    }
+    Ok(out)
+}
+fn write_of(
+    i: u8,
+    epoch: EpochStamp,
+    bytes: &[u8],
+    from: usize,
+    variant: u8,
+    uploads: &mut Vec<Upload<Vec<u8>>>,
+) -> R<SourceWrite> {
+    Ok(SourceWrite {
+        id: src_id(i)?,
+        kind: SourceKind::ClaudeTranscript,
+        path: format!("p/src{i}.jsonl"),
+        class: SourceClass::Append,
+        epoch,
+        size: len64(bytes),
+        sha256: sha(bytes),
+        pieces: pieces_from(bytes, from, variant, uploads)?,
+    })
+}
+/// Stand-in planner: a full-prefix hash decides between extending the epoch and starting
+/// epoch n+1; a vanished source is recorded once as deleted.
+fn plan(disk: &Disk, state: &OwnerState, variant: u8) -> R<Plan> {
+    let mut changes = Vec::new();
+    let mut uploads = Vec::new();
+    for i in 0..SOURCES {
+        let id = src_id(i)?;
+        match (state.sources.get(&id), disk.get(&i)) {
+            (None, None) => {}
+            (Some(entry), None) => {
+                if entry.deleted_at.is_none() {
+                    changes.push(Change::Deleted {
+                        id,
+                        kind: SourceKind::ClaudeTranscript,
+                        deleted_at: ts()?,
+                    });
+                }
+            }
+            (None, Some(bytes)) => changes.push(Change::Epoch(write_of(
+                i,
+                stamp(0, variant),
+                bytes,
+                0,
+                variant,
+                &mut uploads,
+            )?)),
+            (Some(entry), Some(bytes)) => {
+                let last = need(entry.epochs.last(), "epoch")?;
+                let n = usize::try_from(last.size).map_err(e)?;
+                let same = entry.deleted_at.is_none()
+                    && bytes.get(..n).is_some_and(|p| sha(p) == last.sha256);
+                if same {
+                    if bytes.len() > n {
+                        changes.push(Change::Extend(write_of(
+                            i,
+                            last.epoch.clone(),
+                            bytes,
+                            n,
+                            variant,
+                            &mut uploads,
+                        )?));
+                    }
+                } else {
+                    changes.push(Change::Epoch(write_of(
+                        i,
+                        stamp(last.epoch.n + 1, variant),
+                        bytes,
+                        0,
+                        variant,
+                        &mut uploads,
+                    )?));
+                }
+            }
+        }
+    }
+    Ok(Plan { changes, uploads })
+}
+
+// ------------------------------------------------------------------ independent reader
+
+struct Chain {
+    folded: memory_core::manifest::Folded,
+    current: Current,
+    hashes: Vec<(u64, Sha256)>,
+}
+
+/// Walk `current.json` back to a checkpoint straight from store contents (no fault flags,
+/// no driver code) and fold it with memory-core.
+fn read_chain(store: &FakeStore, owner: &Owner) -> R<Option<Chain>> {
+    let Some(pointer) = store.peek(&current_key(owner)) else {
+        return Ok(None);
+    };
+    let current = parse_current(pointer).map_err(e)?;
+    let mut hash = current.manifest;
+    let mut raw: Vec<(Sha256, u64, Vec<u8>)> = Vec::new();
+    loop {
+        ensure(raw.len() <= 64, "chain longer than 64")?;
+        let bytes = need(
+            store.peek(&manifest_key(&hash)),
+            "referenced manifest missing",
+        )?;
+        ensure(sha(bytes) == hash, "manifest hash mismatch")?;
+        let projection = recover_projection(bytes).map_err(e)?;
+        raw.push((hash, projection.seq, bytes.to_vec()));
+        match projection.kind {
+            ProjectedKind::Checkpoint => break,
+            ProjectedKind::Delta => hash = need(projection.previous, "delta without previous")?,
+        }
+    }
+    raw.reverse();
+    let refs: Vec<&[u8]> = raw.iter().map(|(_, _, b)| b.as_slice()).collect();
+    let folded = fold(&refs).map_err(e)?;
+    ensure(
+        folded.position.seq == current.seq,
+        "current.seq != head seq",
+    )?;
+    ensure(
+        folded.position.manifest == current.manifest,
+        "current names another manifest",
+    )?;
+    ensure(folded.owner == *owner, "owner mismatch")?;
+    for (_, _, bytes) in &raw {
+        parse_manifest(bytes)
+            .map_err(e)?
+            .verify_encodings(|key| {
+                store.peek(key).map(|b| StoredEncoding {
+                    encoded_len: len64(b),
+                    encoded_sha256: sha(b),
+                })
+            })
+            .map_err(e)?;
+    }
+    Ok(Some(Chain {
+        folded,
+        current,
+        hashes: raw.iter().map(|(h, s, _)| (*s, *h)).collect(),
+    }))
+}
+fn reassemble(store: &FakeStore, record: &EpochRecord) -> R<Vec<u8>> {
+    let mut out: Vec<u8> = Vec::new();
+    for piece in &record.pieces {
+        let stored = need(store.peek(&piece.object), "piece object missing")?;
+        ensure(
+            sha(stored) == piece.encoded_sha256 && len64(stored) == piece.encoded_len,
+            "descriptor differs from stored encoding",
+        )?;
+        let raw = need(decode(stored), "undecodable piece")?;
+        ensure(
+            sha(&raw) == piece.sha256 && len64(&raw) == piece.len,
+            "piece bytes differ from descriptor",
+        )?;
+        ensure(len64(&out) == piece.offset.get(), "piece offset gap")?;
+        out.extend(raw);
+    }
+    ensure(
+        sha(&out) == record.sha256 && len64(&out) == record.size,
+        "epoch digest differs",
+    )?;
+    Ok(out)
+}
+
+struct Observed {
+    /// Latest epoch bytes per source; `None` for a deleted source.
+    sources: BTreeMap<u8, Option<Vec<u8>>>,
+    max_epochs: usize,
+    seq: u64,
+    hash: Sha256,
+    hashes: Vec<(u64, Sha256)>,
+}
+type History = BTreeMap<u8, Vec<Vec<u8>>>;
+
+/// Safety (property 4): every referenced object exists and matches its descriptor, the chain
+/// is consistent, and every committed epoch is a prefix of bytes the source held (1a).
+fn observe(store: &FakeStore, owner: &Owner, history: &History) -> R<Option<Observed>> {
+    let Some(chain) = read_chain(store, owner)? else {
+        return Ok(None);
+    };
+    let mut sources = BTreeMap::new();
+    let mut max_epochs = 0;
+    for (id, entry) in &chain.folded.state.sources {
+        let i = need(
+            (0..SOURCES).find(|i| src_id(*i).is_ok_and(|s| s == *id)),
+            "unknown source id",
+        )?;
+        max_epochs = max_epochs.max(entry.epochs.len());
+        let versions = need(history.get(&i), "source has no history")?;
+        let mut latest = None;
+        for record in &entry.epochs {
+            let bytes = reassemble(store, record)?;
+            ensure(
+                versions.iter().any(|v| v.starts_with(&bytes)),
+                "1a violated: committed bytes were never held by the source",
+            )?;
+            latest = Some(bytes);
+        }
+        sources.insert(
+            i,
+            if entry.deleted_at.is_some() {
+                None
+            } else {
+                latest
+            },
+        );
+    }
+    Ok(Some(Observed {
+        sources,
+        max_epochs,
+        seq: chain.current.seq,
+        hash: chain.current.manifest,
+        hashes: chain.hashes,
+    }))
+}
+
+fn make_foreign(store: &FakeStore, owner: &Owner, who: &str) -> R<Foreign> {
+    let head = read_chain(store, owner)?;
+    let built = build(
+        head.as_ref().map(|c| (&c.folded.position, &c.folded.state)),
+        header(owner, who)?,
+        vec![],
+    )
+    .map_err(e)?;
+    Ok(Foreign {
+        manifest_key: manifest_key(&built.hash),
+        manifest: built.bytes,
+        current: Current::new(built.hash, built.position.seq, ts()?)
+            .to_bytes()
+            .map_err(e)?,
+    })
+}
+
+// ------------------------------------------------------------------ system under test
+
+#[derive(Debug, PartialEq)]
+enum Report {
+    Parked,
+    Failed,
+    Idle,
+    Landed(CommitOutcome),
+    Crashed { manifest: bool },
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CrashAt {
+    BeforePut,
+    AfterPiece,
+    AfterManifest,
+}
+
+/// Coverage counters of the shapes a run must have produced (DESIGN.md 15).
+struct Shapes {
+    multi_epoch: AtomicU64,
+    restart: AtomicU64,
+    crash_after_manifest: AtomicU64,
+    lost_reply: AtomicU64,
+    delete_index: AtomicU64,
+}
+impl Shapes {
+    const fn new() -> Self {
+        Self {
+            multi_epoch: AtomicU64::new(0),
+            restart: AtomicU64::new(0),
+            crash_after_manifest: AtomicU64::new(0),
+            lost_reply: AtomicU64::new(0),
+            delete_index: AtomicU64::new(0),
+        }
+    }
+    fn counts(&self) -> Vec<(&'static str, u64)> {
+        let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
+        vec![
+            ("multi-epoch", load(&self.multi_epoch)),
+            ("restart", load(&self.restart)),
+            ("crash-after-manifest", load(&self.crash_after_manifest)),
+            ("lost-reply", load(&self.lost_reply)),
+            ("delete-index", load(&self.delete_index)),
+        ]
+    }
+}
+fn bump(counter: &AtomicU64) {
+    counter.fetch_add(1, Ordering::Relaxed);
+}
+/// Fails when any required shape was never produced over the run.
+fn require_all(counts: &[(&'static str, u64)]) -> Result<(), String> {
+    let missing: Vec<_> = counts
+        .iter()
+        .filter(|(_, n)| *n == 0)
+        .map(|(k, _)| *k)
+        .collect();
+    if missing.is_empty() && !counts.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("coverage guard: run never produced {missing:?}"))
+    }
+}
+static HEGEL_SHAPES: Shapes = Shapes::new();
+static PROPTEST_SHAPES: Shapes = Shapes::new();
+static SCRATCH_SHAPES: Shapes = Shapes::new();
+
+/// The shell's view: store, index (base + recovery flag), park flag and writer version.
+struct Sut {
+    store: FakeStore,
+    owner: Owner,
+    base: Option<Base>,
+    needs_recover: bool,
+    parked: bool,
+    variant: u8,
+    head: Option<(u64, Sha256)>,
+}
+
+impl Sut {
+    fn new() -> R<Self> {
+        Ok(Self {
+            store: FakeStore::default(),
+            owner: owner()?,
+            base: None,
+            needs_recover: true,
+            parked: false,
+            variant: 0,
+            head: None,
+        })
+    }
+    fn restart(&mut self) {
+        self.variant = self.variant.wrapping_add(1);
+    }
+    fn absorb(&mut self, result: Result<Landed, Failure>) -> R<Report> {
+        match result {
+            Ok(landed) => {
+                self.base = Some(landed.base());
+                Ok(Report::Landed(landed.outcome))
+            }
+            Err(Failure::NotLanded(_)) => Ok(Report::Failed),
+            Err(Failure::LandingUnknown(_) | Failure::BaseUnchanged) => {
+                self.base = None;
+                self.needs_recover = true;
+                Ok(Report::Failed)
+            }
+            Err(Failure::Foreign { .. } | Failure::NewerSchema) => {
+                self.parked = true;
+                Ok(Report::Parked)
+            }
+            Err(other) => Err(format!("commit: {other:?}")),
+        }
+    }
+    fn reconcile(&mut self, disk: &Disk) -> R<Report> {
+        if self.parked {
+            return Ok(Report::Parked);
+        }
+        if self.needs_recover {
+            match recover_base(&mut self.store, &self.owner) {
+                Ok(base) => {
+                    self.base = base;
+                    self.needs_recover = false;
+                }
+                Err(Failure::NewerSchema) => {
+                    self.parked = true;
+                    return Ok(Report::Parked);
+                }
+                Err(Failure::NotLanded(_)) => return Ok(Report::Failed),
+                Err(other) => return Err(format!("recover: {other:?}")),
+            }
+        }
+        let empty = OwnerState::default();
+        let state = self.base.as_ref().map_or(&empty, |b| &b.state);
+        let plan = plan(disk, state, self.variant)?;
+        if plan.changes.is_empty() {
+            return Ok(Report::Idle);
+        }
+        let request = Commit {
+            header: header(&self.owner, "memory")?,
+            changes: plan.changes,
+            uploads: plan.uploads,
+        };
+        let result = commit(&mut self.store, self.base.as_ref(), request, &mut |_| {});
+        self.absorb(result)
+    }
+    /// The process dies at `at`. Index and park state survive, a temporary recovery does not.
+    fn crash(&mut self, disk: &Disk, at: CrashAt) -> R<Report> {
+        let mut manifest = false;
+        if at != CrashAt::BeforePut && !self.parked {
+            let base = if self.needs_recover {
+                recover_base(&mut self.store, &self.owner).ok()
+            } else {
+                Some(self.base.clone())
+            };
+            if let Some(base) = base {
+                let empty = OwnerState::default();
+                let state = base.as_ref().map_or(&empty, |b| &b.state);
+                let plan = plan(disk, state, self.variant)?;
+                if !plan.changes.is_empty() {
+                    for upload in plan.uploads {
+                        let _ = self.store.put_if_absent(&upload.key, upload.body);
+                    }
+                    if at == CrashAt::AfterManifest {
+                        let built = build(
+                            base.as_ref().map(|b| (&b.position, &b.state)),
+                            header(&self.owner, "memory")?,
+                            plan.changes,
+                        )
+                        .map_err(e)?;
+                        manifest = self
+                            .store
+                            .put_if_absent(&manifest_key(&built.hash), built.bytes)
+                            .is_ok();
+                    }
+                }
+            }
+        }
+        self.restart();
+        Ok(Report::Crashed { manifest })
+    }
+    fn exec(&mut self, step: &Step, after: &Reference, shapes: &Shapes) -> R {
+        let disk = &after.files;
+        match step {
+            Step::Append { .. }
+            | Step::Rewrite { .. }
+            | Step::Truncate { .. }
+            | Step::RemoveSource { .. } => {}
+            Step::Reconcile => {
+                self.reconcile(disk)?;
+            }
+            Step::CrashBeforePut => {
+                self.crash(disk, CrashAt::BeforePut)?;
+            }
+            Step::CrashAfterPiece => {
+                self.crash(disk, CrashAt::AfterPiece)?;
+            }
+            Step::CrashAfterManifest => {
+                if let Report::Crashed { manifest: true } =
+                    self.crash(disk, CrashAt::AfterManifest)?
+                {
+                    bump(&shapes.crash_after_manifest);
+                }
+            }
+            Step::CommittedReplyLost { then_offline } => {
+                self.store.arm(
+                    Op::Put(Kind::Current),
+                    Effect::LandThen {
+                        err: StoreError::Ambiguous,
+                        then_offline: *then_offline,
+                    },
+                );
+                let report = self.reconcile(disk)?;
+                self.store.clear_transient();
+                if matches!(report, Report::Landed(CommitOutcome::AlreadyOurs { .. })) {
+                    bump(&shapes.lost_reply);
+                }
+            }
+            Step::CommittedThen5xx { landed } => {
+                let effect = if *landed {
+                    Effect::LandThen {
+                        err: StoreError::Server,
+                        then_offline: false,
+                    }
+                } else {
+                    Effect::FailBefore(StoreError::Server)
+                };
+                self.store.arm(Op::Put(Kind::Current), effect);
+                self.reconcile(disk)?;
+                self.store.clear_transient();
+            }
+            Step::Restart => {
+                self.restart();
+                bump(&shapes.restart);
+            }
+            Step::DeleteIndex => {
+                if self.store.peek(&current_key(&self.owner)).is_some() {
+                    bump(&shapes.delete_index);
+                }
+                self.base = None;
+                self.needs_recover = true;
+            }
+            Step::GoOffline => self.store.offline = true,
+            Step::GoOnline => self.store.offline = false,
+            Step::RevokeToken => self.store.revoked = true,
+            Step::RestoreToken => self.store.revoked = false,
+            Step::ForeignWriter => {
+                if !self.store.foreign_armed() {
+                    let foreign = make_foreign(&self.store, &self.owner, "foreign")?;
+                    self.store
+                        .arm(Op::Put(Kind::Current), Effect::Foreign(foreign));
+                }
+            }
+            Step::Settle => {
+                self.store.offline = false;
+                self.store.revoked = false;
+                self.store.clear_transient();
+                for _ in 0..3 {
+                    self.reconcile(disk)?;
+                }
+                if !after.parked {
+                    self.liveness(disk, &after.history)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    /// Liveness: after go-online, token restore and a final reconcile, the latest epoch of
+    /// every source reassembles the file wherever it exists.
+    fn liveness(&self, disk: &Disk, history: &History) -> R {
+        let observed = observe(&self.store, &self.owner, history)?;
+        for i in 0..SOURCES {
+            let actual = observed
+                .as_ref()
+                .and_then(|o| o.sources.get(&i))
+                .and_then(|s| s.as_ref());
+            ensure(actual == disk.get(&i), "liveness: latest epoch != source")?;
+        }
+        Ok(())
+    }
+    fn check(&mut self, reference: &Reference, shapes: &Shapes) -> R {
+        let observed = observe(&self.store, &self.owner, &reference.history)?;
+        let Some(observed) = observed else {
+            return ensure(
+                reference.committed.values().all(Option::is_none),
+                "nothing committed but the model expects commits",
+            );
+        };
+        if let Some((seq, hash)) = self.head {
+            ensure(observed.seq >= seq, "current.json went backwards")?;
+            ensure(
+                observed
+                    .hashes
+                    .iter()
+                    .find(|(s, _)| *s == seq)
+                    .is_none_or(|(_, h)| *h == hash),
+                "a committed manifest was replaced",
+            )?;
+        }
+        self.head = Some((observed.seq, observed.hash));
+        if observed.max_epochs >= 2 {
+            bump(&shapes.multi_epoch);
+        }
+        for i in 0..SOURCES {
+            let expected = reference.committed.get(&i).and_then(|c| c.as_ref());
+            let actual = observed.sources.get(&i).and_then(|c| c.as_ref());
+            ensure(
+                expected == actual,
+                "store disagrees with the reference model",
+            )?;
+        }
+        Ok(())
+    }
+}
+// ------------------------------------------------------------------ reference model
+
+#[derive(Clone, Debug)]
+enum Step {
+    Append { src: u8, seed: u8, n: u8 },
+    Rewrite { src: u8, pos: u8, byte: u8 },
+    Truncate { src: u8, len: u8 },
+    RemoveSource { src: u8 },
+    Reconcile,
+    CrashBeforePut,
+    CrashAfterPiece,
+    CrashAfterManifest,
+    CommittedReplyLost { then_offline: bool },
+    CommittedThen5xx { landed: bool },
+    Restart,
+    DeleteIndex,
+    GoOffline,
+    GoOnline,
+    RevokeToken,
+    RestoreToken,
+    ForeignWriter,
+    Settle,
+}
+
+/// Independent expectation: sources, everything they ever held, and what a successful
+/// capture must have published. It never reads the driver, planner or store.
+#[derive(Clone, Debug)]
+struct Reference {
+    files: Disk,
+    history: History,
+    committed: BTreeMap<u8, Option<Vec<u8>>>,
+    online: bool,
+    authorized: bool,
+    parked: bool,
+    foreign_armed: bool,
+}
+
+impl Reference {
+    fn new() -> Self {
+        Self {
+            files: Disk::new(),
+            history: History::new(),
+            committed: BTreeMap::new(),
+            online: true,
+            authorized: true,
+            parked: false,
+            foreign_armed: false,
+        }
+    }
+    fn pending(&self) -> bool {
+        (0..SOURCES).any(|i| self.files.get(&i) != self.committed.get(&i).and_then(|c| c.as_ref()))
+    }
+    fn publish(&mut self) {
+        for i in 0..SOURCES {
+            let now = self.files.get(&i).cloned();
+            if now.is_some() || self.committed.contains_key(&i) {
+                self.committed.insert(i, now);
+            }
+        }
+    }
+    /// A capture attempt: it reaches the `current.json` PUT only with something pending,
+    /// network, token and no park. A racing foreign writer then parks the owner.
+    fn attempt(&mut self, then_offline: bool) {
+        if self.pending() && self.online && self.authorized && !self.parked {
+            if self.foreign_armed {
+                self.foreign_armed = false;
+                self.parked = true;
+            } else {
+                self.publish();
+                if then_offline {
+                    self.online = false;
+                }
+            }
+        }
+    }
+    fn record(&mut self, src: u8) {
+        if let Some(bytes) = self.files.get(&src).cloned() {
+            let versions = self.history.entry(src).or_default();
+            if versions.last() != Some(&bytes) {
+                versions.push(bytes);
+            }
+        }
+    }
+    fn apply(&mut self, step: &Step) {
+        match step {
+            Step::Append { src, seed, n } => {
+                let add: Vec<u8> = (0..(*n).max(1)).map(|k| seed.wrapping_add(k) % 3).collect();
+                self.files.entry(*src).or_default().extend(add);
+                self.record(*src);
+            }
+            Step::Rewrite { src, pos, byte } => {
+                if let Some(file) = self.files.get_mut(src)
+                    && let Some(index) = usize::from(*pos).checked_rem(file.len())
+                    && let Some(b) = file.get_mut(index)
+                {
+                    *b = b.wrapping_add(1 + byte % 2);
+                }
+                self.record(*src);
+            }
+            Step::Truncate { src, len } => {
+                if let Some(file) = self.files.get_mut(src)
+                    && let Some(k) = usize::from(*len).checked_rem(file.len())
+                {
+                    file.truncate(k + 1);
+                }
+                self.record(*src);
+            }
+            Step::RemoveSource { src } => {
+                self.files.remove(src);
+            }
+            Step::Reconcile => self.attempt(false),
+            Step::CommittedReplyLost { then_offline } => self.attempt(*then_offline),
+            Step::CommittedThen5xx { .. } => self.attempt(false),
+            Step::CrashBeforePut
+            | Step::CrashAfterPiece
+            | Step::CrashAfterManifest
+            | Step::Restart
+            | Step::DeleteIndex => {}
+            Step::GoOffline => self.online = false,
+            Step::GoOnline => self.online = true,
+            Step::RevokeToken => self.authorized = false,
+            Step::RestoreToken => self.authorized = true,
+            Step::ForeignWriter => self.foreign_armed = true,
+            Step::Settle => {
+                self.online = true;
+                self.authorized = true;
+                self.attempt(false);
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ Hegel state machine
+
+struct World {
+    reference: Reference,
+    sut: Sut,
+    shapes: &'static Shapes,
+}
+impl World {
+    fn new(shapes: &'static Shapes) -> R<Self> {
+        Ok(Self {
+            reference: Reference::new(),
+            sut: Sut::new()?,
+            shapes,
+        })
+    }
+    fn try_run(&mut self, step: &Step) -> R {
+        self.reference.apply(step);
+        self.sut.exec(step, &self.reference, self.shapes)?;
+        self.sut.check(&self.reference, self.shapes)
+    }
+    fn run(&mut self, step: Step) {
+        let result = self.try_run(&step);
+        assert!(result.is_ok(), "{step:?}: {result:?}");
+    }
+}
+fn draw_src(tc: &TestCase) -> u8 {
+    tc.draw(gs::integers::<u8>().min_value(0).max_value(SOURCES - 1))
+}
+
+#[hegel::state_machine]
+impl World {
+    #[rule(weight = 3.0)]
+    fn append(&mut self, tc: TestCase) {
+        let src = draw_src(&tc);
+        let seed = tc.draw(gs::integers::<u8>());
+        let n = tc.draw(gs::integers::<u8>().min_value(1).max_value(9));
+        self.run(Step::Append { src, seed, n });
+    }
+    #[rule(weight = 2.0)]
+    fn rewrite(&mut self, tc: TestCase) {
+        let src = draw_src(&tc);
+        let pos = tc.draw(gs::integers::<u8>().max_value(24));
+        let byte = tc.draw(gs::integers::<u8>());
+        self.run(Step::Rewrite { src, pos, byte });
+    }
+    #[rule(weight = 2.0)]
+    fn truncate(&mut self, tc: TestCase) {
+        let src = draw_src(&tc);
+        let len = tc.draw(gs::integers::<u8>().max_value(24));
+        self.run(Step::Truncate { src, len });
+    }
+    #[rule]
+    fn remove_source(&mut self, tc: TestCase) {
+        let src = draw_src(&tc);
+        self.run(Step::RemoveSource { src });
+    }
+    #[rule(weight = 4.0)]
+    fn reconcile(&mut self, _: TestCase) {
+        self.run(Step::Reconcile);
+    }
+    #[rule]
+    fn crash_before_put(&mut self, _: TestCase) {
+        self.run(Step::CrashBeforePut);
+    }
+    #[rule]
+    fn crash_after_piece(&mut self, _: TestCase) {
+        self.run(Step::CrashAfterPiece);
+    }
+    #[rule]
+    fn crash_after_manifest(&mut self, _: TestCase) {
+        self.run(Step::CrashAfterManifest);
+    }
+    #[rule(weight = 2.0)]
+    fn committed_reply_lost(&mut self, tc: TestCase) {
+        let then_offline = tc.draw(gs::booleans());
+        self.run(Step::CommittedReplyLost { then_offline });
+    }
+    #[rule]
+    fn committed_then_5xx(&mut self, tc: TestCase) {
+        let landed = tc.draw(gs::booleans());
+        self.run(Step::CommittedThen5xx { landed });
+    }
+    #[rule]
+    fn restart(&mut self, _: TestCase) {
+        self.run(Step::Restart);
+    }
+    #[rule]
+    fn delete_index(&mut self, _: TestCase) {
+        self.run(Step::DeleteIndex);
+    }
+    #[rule]
+    fn go_offline(&mut self, _: TestCase) {
+        self.run(Step::GoOffline);
+    }
+    #[rule]
+    fn go_online(&mut self, _: TestCase) {
+        self.run(Step::GoOnline);
+    }
+    #[rule]
+    fn revoke_token(&mut self, _: TestCase) {
+        self.run(Step::RevokeToken);
+    }
+    #[rule]
+    fn restore_token(&mut self, _: TestCase) {
+        self.run(Step::RestoreToken);
+    }
+    #[rule(weight = 0.5)]
+    fn foreign_writer(&mut self, _: TestCase) {
+        self.run(Step::ForeignWriter);
+    }
+    #[rule(weight = 2.0)]
+    fn settle(&mut self, _: TestCase) {
+        self.run(Step::Settle);
+    }
+    #[invariant]
+    fn store_is_safe(&mut self, _: TestCase) {
+        let result = self.sut.check(&self.reference, self.shapes);
+        assert!(result.is_ok(), "{result:?}");
+    }
+}
+
+#[test]
+fn hegel_property4_commit_state_machine() {
+    hegel::Hegel::new(|tc: TestCase| {
+        let world = World::new(&HEGEL_SHAPES);
+        assert!(world.is_ok(), "{:?}", world.as_ref().err());
+        if let Ok(world) = world {
+            hegel::stateful::machine(world).steps(40).run(tc);
+        }
+    })
+    .run();
+    let guard = require_all(&HEGEL_SHAPES.counts());
+    assert!(guard.is_ok(), "{guard:?} {:?}", HEGEL_SHAPES.counts());
+}
+
+// ------------------------------------------------------------------ proptest state machine
+
+fn step_strategy() -> BoxedStrategy<Step> {
+    let src = 0..SOURCES;
+    prop_oneof![
+        3 => (src.clone(), any::<u8>(), 1..=9_u8)
+            .prop_map(|(src, seed, n)| Step::Append { src, seed, n }),
+        2 => (src.clone(), 0..=24_u8, any::<u8>())
+            .prop_map(|(src, pos, byte)| Step::Rewrite { src, pos, byte }),
+        2 => (src.clone(), 0..=24_u8).prop_map(|(src, len)| Step::Truncate { src, len }),
+        1 => src.prop_map(|src| Step::RemoveSource { src }),
+        4 => Just(Step::Reconcile),
+        1 => Just(Step::CrashBeforePut),
+        1 => Just(Step::CrashAfterPiece),
+        1 => Just(Step::CrashAfterManifest),
+        2 => any::<bool>().prop_map(|then_offline| Step::CommittedReplyLost { then_offline }),
+        1 => any::<bool>().prop_map(|landed| Step::CommittedThen5xx { landed }),
+        1 => Just(Step::Restart),
+        1 => Just(Step::DeleteIndex),
+        1 => Just(Step::GoOffline),
+        1 => Just(Step::GoOnline),
+        1 => Just(Step::RevokeToken),
+        1 => Just(Step::RestoreToken),
+        1 => Just(Step::ForeignWriter),
+        2 => Just(Step::Settle),
+    ]
+    .boxed()
+}
+
+struct RefMachine;
+impl ReferenceStateMachine for RefMachine {
+    type State = Reference;
+    type Transition = Step;
+    fn init_state() -> BoxedStrategy<Reference> {
+        Just(Reference::new()).boxed()
+    }
+    fn transitions(_: &Reference) -> BoxedStrategy<Step> {
+        step_strategy()
+    }
+    fn apply(mut state: Reference, transition: &Step) -> Reference {
+        state.apply(transition);
+        state
+    }
+}
+
+struct PtSut {
+    sut: R<Sut>,
+}
+struct PtMachine;
+impl StateMachineTest for PtMachine {
+    type SystemUnderTest = PtSut;
+    type Reference = RefMachine;
+    fn init_test(_: &Reference) -> PtSut {
+        let sut = Sut::new();
+        assert!(sut.is_ok(), "{:?}", sut.as_ref().err());
+        PtSut { sut }
+    }
+    fn apply(mut state: PtSut, after: &Reference, step: Step) -> PtSut {
+        if let Ok(sut) = state.sut.as_mut() {
+            let result = sut
+                .exec(&step, after, &PROPTEST_SHAPES)
+                .and_then(|()| sut.check(after, &PROPTEST_SHAPES));
+            assert!(result.is_ok(), "{step:?}: {result:?}");
+        }
+        state
+    }
+    fn check_invariants(state: &PtSut, after: &Reference) {
+        if let Ok(sut) = &state.sut {
+            let result = observe(&sut.store, &sut.owner, &after.history);
+            assert!(result.is_ok(), "{:?}", result.err());
+        }
+    }
+    fn teardown(mut state: PtSut, after: Reference) {
+        let mut last = after;
+        last.apply(&Step::Settle);
+        if let Ok(sut) = state.sut.as_mut() {
+            let result = sut
+                .exec(&Step::Settle, &last, &PROPTEST_SHAPES)
+                .and_then(|()| sut.check(&last, &PROPTEST_SHAPES));
+            assert!(result.is_ok(), "final settle: {result:?}");
+        }
+    }
+}
+
+#[test]
+fn proptest_property4_commit_state_machine() {
+    let mut runner = TestRunner::new(Config {
+        failure_persistence: None,
+        ..Config::default()
+    });
+    let strategy = <RefMachine as ReferenceStateMachine>::sequential_strategy(1..40);
+    let result = runner.run(&strategy, |(initial, transitions, seen)| {
+        PtMachine::test_sequential(Config::default(), initial, transitions, seen);
+        Ok(())
+    });
+    assert!(result.is_ok(), "{result:?}");
+    let guard = require_all(&PROPTEST_SHAPES.counts());
+    assert!(guard.is_ok(), "{guard:?} {:?}", PROPTEST_SHAPES.counts());
+}
+
+// ------------------------------------------------------------------ coverage guard
+
+#[test]
+fn guard_has_negative_controls() {
+    let zero = Shapes::new();
+    assert!(require_all(&zero.counts()).is_err());
+    assert!(require_all(&[]).is_err());
+    for missing in 0..5 {
+        let mut counts = vec![1_u64; 5];
+        if let Some(c) = counts.get_mut(missing) {
+            *c = 0;
+        }
+        let named: Vec<_> = zero
+            .counts()
+            .into_iter()
+            .zip(counts)
+            .map(|((name, _), n)| (name, n))
+            .collect();
+        let err = require_all(&named);
+        assert!(err.is_err(), "missing shape {missing} must fail the guard");
+    }
+    let full: Vec<_> = zero.counts().into_iter().map(|(n, _)| (n, 1)).collect();
+    assert!(require_all(&full).is_ok());
+}
+
+/// Scripted run through the same machinery the properties use.
+fn drive(steps: &[Step]) -> R<(Reference, Sut)> {
+    let mut reference = Reference::new();
+    let mut sut = Sut::new()?;
+    for step in steps {
+        reference.apply(step);
+        sut.exec(step, &reference, &SCRATCH_SHAPES)?;
+        sut.check(&reference, &SCRATCH_SHAPES)?;
+    }
+    Ok((reference, sut))
+}
+fn app(src: u8, seed: u8, n: u8) -> Step {
+    Step::Append { src, seed, n }
+}
+
+#[test]
+fn guard_shapes_arise_from_scripted_runs() -> R {
+    let (reference, mut sut) = drive(&[
+        app(0, 0, 6),
+        Step::Reconcile,
+        Step::Rewrite {
+            src: 0,
+            pos: 0,
+            byte: 1,
+        },
+        Step::Reconcile,
+    ])?;
+    let before = SCRATCH_SHAPES.counts();
+    sut.check(&reference, &SCRATCH_SHAPES)?;
+    let after = SCRATCH_SHAPES.counts();
+    let multi = |c: &[(&str, u64)]| c.first().map_or(0, |(_, n)| *n);
+    assert!(multi(&after) > multi(&before), "two epochs must be seen");
+    Ok(())
+}
+
+#[test]
+fn directed_crash_after_manifest_then_new_writer_version_adopts_winner_encoding() -> R {
+    let (_, sut) = drive(&[
+        app(0, 0, 5),
+        Step::CrashAfterManifest,
+        Step::Reconcile,
+        Step::Settle,
+    ])?;
+    // The crashed attempt left an unreferenced manifest; the retry used another encoding
+    // version, got 412s and described the stored (winner) encoding.
+    let manifests = sut
+        .store
+        .objects
+        .keys()
+        .filter(|k| k.starts_with("manifests/"))
+        .count();
+    assert_eq!(manifests, 2);
+    Ok(())
+}
+
+#[test]
+fn directed_lost_reply_is_already_ours_and_next_commit_uses_the_verified_etag() -> R {
+    let (reference, sut) = drive(&[
+        app(0, 1, 3),
+        Step::CommittedReplyLost {
+            then_offline: false,
+        },
+        app(1, 2, 3),
+        Step::Reconcile,
+    ])?;
+    assert!(!reference.pending());
+    assert_eq!(sut.head.map(|(s, _)| s), Some(1));
+    Ok(())
+}
+
+#[test]
+fn directed_lost_reply_then_offline_recovers_after_settle() -> R {
+    let (_, sut) = drive(&[
+        app(0, 1, 3),
+        Step::CommittedReplyLost { then_offline: true },
+        Step::Reconcile,
+        Step::Settle,
+    ])?;
+    assert!(sut.base.is_some());
+    Ok(())
+}
+
+#[test]
+fn directed_delete_index_and_removed_source_recover_from_the_store() -> R {
+    let (reference, sut) = drive(&[
+        app(0, 0, 6),
+        app(1, 1, 2),
+        Step::Reconcile,
+        Step::DeleteIndex,
+        Step::RemoveSource { src: 1 },
+        Step::Reconcile,
+        Step::Restart,
+        Step::DeleteIndex,
+        Step::Settle,
+    ])?;
+    assert_eq!(reference.committed.get(&1), Some(&None));
+    assert!(sut.base.is_some());
+    Ok(())
+}
+
+#[test]
+fn directed_foreign_writer_parks_without_merging_and_settle_is_exempt() -> R {
+    let (reference, sut) = drive(&[
+        app(0, 0, 4),
+        Step::Reconcile,
+        Step::ForeignWriter,
+        app(0, 1, 4),
+        Step::Reconcile,
+        Step::Settle,
+    ])?;
+    assert!(reference.parked && sut.parked);
+    Ok(())
+}
+
+#[test]
+fn directed_offline_and_revoked_commit_nothing_until_settle() -> R {
+    let (reference, sut) = drive(&[
+        app(0, 0, 4),
+        Step::GoOffline,
+        Step::Reconcile,
+        Step::GoOnline,
+        Step::RevokeToken,
+        Step::Reconcile,
+        Step::CommittedThen5xx { landed: true },
+        Step::Settle,
+    ])?;
+    assert!(!reference.pending());
+    assert!(sut.store.peek(&current_key(&sut.owner)).is_some());
+    Ok(())
+}
+
+#[test]
+fn oracle_detects_tampered_store_contents() -> R {
+    let steps = [app(0, 0, 8), Step::Reconcile];
+    let key_of = |sut: &Sut, prefix: &str| -> R<String> {
+        need(
+            sut.store
+                .objects
+                .keys()
+                .find(|k| k.starts_with(prefix))
+                .cloned(),
+            "key",
+        )
+    };
+    // A referenced object disappears.
+    let (reference, mut sut) = drive(&steps)?;
+    let object = key_of(&sut, "objects/")?;
+    sut.store.remove(&object);
+    assert!(sut.check(&reference, &SCRATCH_SHAPES).is_err());
+    // The stored encoding no longer matches its descriptor.
+    let (reference, mut sut) = drive(&steps)?;
+    let object = key_of(&sut, "objects/")?;
+    sut.store.write(&object, encode(&[9, 9], 0));
+    assert!(sut.check(&reference, &SCRATCH_SHAPES).is_err());
+    // current.json claims another seq.
+    let (reference, mut sut) = drive(&steps)?;
+    let cur = need(sut.head, "head")?;
+    let pointer = Current::new(cur.1, cur.0 + 5, ts()?)
+        .to_bytes()
+        .map_err(e)?;
+    sut.store.write(&current_key(&sut.owner), pointer);
+    assert!(sut.check(&reference, &SCRATCH_SHAPES).is_err());
+    // The model expects different committed bytes (1a / expectation).
+    let (mut reference, mut sut) = drive(&steps)?;
+    reference.committed.insert(0, Some(vec![7, 7, 7]));
+    assert!(sut.check(&reference, &SCRATCH_SHAPES).is_err());
+    // Committed bytes the source never held violate 1a.
+    let (mut reference, mut sut) = drive(&steps)?;
+    reference.history.insert(0, vec![vec![5]]);
+    assert!(sut.check(&reference, &SCRATCH_SHAPES).is_err());
+    // current.json goes backwards.
+    let (reference, mut sut) = drive(&steps)?;
+    sut.head = Some((9, sha(b"later")));
+    assert!(sut.check(&reference, &SCRATCH_SHAPES).is_err());
+    // A committed manifest is replaced at the same seq.
+    let (reference, mut sut) = drive(&steps)?;
+    sut.head = Some((0, sha(b"other")));
+    assert!(sut.check(&reference, &SCRATCH_SHAPES).is_err());
+    // Nothing committed while the model expects commits.
+    let (reference, mut sut) = drive(&steps)?;
+    sut.store.remove(&current_key(&sut.owner));
+    assert!(sut.check(&reference, &SCRATCH_SHAPES).is_err());
+    Ok(())
+}
+
+// ------------------------------------------------------------------ table tests
+
+struct Rig {
+    store: FakeStore,
+    owner: Owner,
+    disk: Disk,
+    history: History,
+    variant: u8,
+    base: Option<Base>,
+}
+type Run = (Result<Landed, Failure>, Vec<u32>);
+
+impl Rig {
+    fn new() -> R<Self> {
+        Ok(Self {
+            store: FakeStore::default(),
+            owner: owner()?,
+            disk: Disk::new(),
+            history: History::new(),
+            variant: 0,
+            base: None,
+        })
+    }
+    fn put_file(&mut self, i: u8, bytes: &[u8]) {
+        self.disk.insert(i, bytes.to_vec());
+        self.history.entry(i).or_default().push(bytes.to_vec());
+    }
+    fn request(&self) -> R<Commit<Vec<u8>>> {
+        let empty = OwnerState::default();
+        let state = self.base.as_ref().map_or(&empty, |b| &b.state);
+        let plan = plan(&self.disk, state, self.variant)?;
+        Ok(Commit {
+            header: header(&self.owner, "memory")?,
+            changes: plan.changes,
+            uploads: plan.uploads,
+        })
+    }
+    fn go_with(&mut self, request: Commit<Vec<u8>>) -> Run {
+        let mut pauses = Vec::new();
+        let result = commit(&mut self.store, self.base.as_ref(), request, &mut |n| {
+            pauses.push(n)
+        });
+        if let Ok(landed) = &result {
+            self.base = Some(landed.base());
+        }
+        (result, pauses)
+    }
+    fn go(&mut self) -> R<Run> {
+        let request = self.request()?;
+        Ok(self.go_with(request))
+    }
+    fn landed(&mut self) -> R<Landed> {
+        self.go()?.0.map_err(e)
+    }
+    fn failed(&mut self) -> R<(Failure, Vec<u32>)> {
+        let (result, pauses) = self.go()?;
+        match result {
+            Err(f) => Ok((f, pauses)),
+            Ok(l) => Err(format!("expected failure, landed {l:?}")),
+        }
+    }
+    fn current_etag(&self) -> R<ETag> {
+        self.store.etag(&current_key(&self.owner))
+    }
+    fn current_key(&self) -> String {
+        current_key(&self.owner)
+    }
+    fn seeded(bytes: &[u8]) -> R<Self> {
+        let mut rig = Self::new()?;
+        rig.put_file(0, bytes);
+        Ok(rig)
+    }
+    fn two_commits() -> R<Self> {
+        let mut rig = Self::seeded(&[1, 2, 3, 4, 5])?;
+        rig.landed()?;
+        rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7]);
+        rig.landed()?;
+        Ok(rig)
+    }
+    fn assert_safe(&self) -> R {
+        observe(&self.store, &self.owner, &self.history).map(|_| ())
+    }
+}
+
+#[test]
+fn first_write_uses_if_none_match_and_returns_committed() -> R {
+    let mut rig = Rig::seeded(&[1, 2, 3, 4, 5])?;
+    let landed = rig.landed()?;
+    let etag = rig.current_etag()?;
+    assert_eq!(
+        landed.outcome,
+        CommitOutcome::Committed { etag: etag.clone() }
+    );
+    assert_eq!(landed.etag, etag);
+    assert_eq!(landed.built.position.seq, 0);
+    assert_eq!(rig.store.count(Op::Put(Kind::Object)), 2);
+    assert_eq!(rig.store.count(Op::Put(Kind::Manifest)), 1);
+    assert_eq!(rig.store.count(Op::Put(Kind::Current)), 1);
+    assert_eq!(rig.store.count(Op::Get(Kind::Current)), 0);
+    rig.assert_safe()
+}
+
+#[test]
+fn later_write_is_fenced_by_the_etag_and_chains_previous() -> R {
+    let rig = Rig::two_commits()?;
+    let base = need(rig.base.clone(), "base")?;
+    assert_eq!(base.position.seq, 1);
+    let Manifest::Delta(delta) = parse_manifest(need(
+        rig.store.peek(&manifest_key(&base.position.manifest)),
+        "manifest",
+    )?)
+    .map_err(e)?
+    else {
+        return Err("expected a delta".to_owned());
+    };
+    let first = rig
+        .store
+        .objects
+        .keys()
+        .filter(|k| k.starts_with("manifests/"))
+        .count();
+    assert_eq!(first, 2);
+    assert_eq!(delta.seq, 1);
+    // Invariant 6: previous is the manifest named under the fenced ETag.
+    let chain = need(read_chain(&rig.store, &rig.owner)?, "chain")?;
+    assert_eq!(chain.hashes.first().map(|(_, h)| *h), Some(delta.previous));
+    rig.assert_safe()
+}
+
+#[test]
+fn lost_reply_after_landing_is_already_ours() -> R {
+    let mut rig = Rig::seeded(&[1, 2, 3, 4, 5])?;
+    rig.store.arm(
+        Op::Put(Kind::Current),
+        Effect::LandThen {
+            err: StoreError::Ambiguous,
+            then_offline: false,
+        },
+    );
+    let landed = rig.landed()?;
+    let etag = rig.current_etag()?;
+    assert_eq!(
+        landed.outcome,
+        CommitOutcome::AlreadyOurs { etag: etag.clone() }
+    );
+    assert_eq!(rig.store.count(Op::Get(Kind::Current)), 1);
+    assert_eq!(rig.store.count(Op::Put(Kind::Current)), 1);
+    // The verified ETag fences the next commit.
+    rig.put_file(0, &[1, 2, 3, 4, 5, 9]);
+    assert!(matches!(
+        rig.landed()?.outcome,
+        CommitOutcome::Committed { .. }
+    ));
+    rig.assert_safe()
+}
+
+#[test]
+fn committed_then_5xx_is_already_ours_and_never_a_spurious_412() -> R {
+    let mut rig = Rig::two_commits()?;
+    rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    rig.store.arm(
+        Op::Put(Kind::Current),
+        Effect::LandThen {
+            err: StoreError::Server,
+            then_offline: false,
+        },
+    );
+    let landed = rig.landed()?;
+    assert!(matches!(landed.outcome, CommitOutcome::AlreadyOurs { .. }));
+    assert_eq!(rig.store.count(Op::Put(Kind::Current)), 3);
+    rig.assert_safe()
+}
+
+#[test]
+fn unlanded_5xx_reads_base_unchanged_and_retries_from_step_three() -> R {
+    let mut rig = Rig::two_commits()?;
+    rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    let before = rig.store.count(Op::Put(Kind::Current));
+    rig.store.arm(
+        Op::Put(Kind::Current),
+        Effect::FailBefore(StoreError::Server),
+    );
+    let (result, pauses) = rig.go()?;
+    assert!(matches!(
+        result.map_err(e)?.outcome,
+        CommitOutcome::Committed { .. }
+    ));
+    assert_eq!(rig.store.count(Op::Put(Kind::Current)) - before, 2);
+    assert_eq!(pauses, vec![1]);
+    rig.assert_safe()
+}
+
+#[test]
+fn etag_churn_is_base_unchanged_then_committed_with_the_fresh_etag() -> R {
+    let mut rig = Rig::two_commits()?;
+    rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    rig.store.arm(Op::Put(Kind::Current), Effect::Churn);
+    let landed = rig.landed()?;
+    assert_eq!(landed.etag, rig.current_etag()?);
+    assert_eq!(rig.store.count(Op::Get(Kind::Current)), 1);
+    rig.assert_safe()
+}
+
+#[test]
+fn base_unchanged_retries_exactly_four_times_then_retries_the_capture() -> R {
+    let mut rig = Rig::two_commits()?;
+    rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    let head = need(rig.base.clone(), "base")?.position.manifest;
+    let before = rig.store.count(Op::Put(Kind::Current));
+    rig.store
+        .arm_n(Op::Put(Kind::Current), 0, 100, Effect::Churn);
+    let (failure, pauses) = rig.failed()?;
+    assert_eq!(failure, Failure::BaseUnchanged);
+    assert_eq!(
+        rig.store.count(Op::Put(Kind::Current)) - before,
+        1 + REBASE_RETRIES as usize
+    );
+    assert_eq!(pauses.len(), REBASE_RETRIES as usize);
+    assert_eq!(failure.commit_outcome(), Some(CommitOutcome::BaseUnchanged));
+    assert!(!failure.base_may_be_stale());
+    // Nothing advanced: current.json still names the previous head.
+    let chain = need(read_chain(&rig.store, &rig.owner)?, "chain")?;
+    assert_eq!(chain.current.manifest, head);
+    let (disposition, _) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
+    assert!(matches!(disposition, Disposition::Retry { .. }));
+    Ok(())
+}
+
+#[test]
+fn foreign_writer_parks_the_owner_with_both_hashes() -> R {
+    let mut rig = Rig::two_commits()?;
+    let foreign = make_foreign(&rig.store, &rig.owner, "foreign")?;
+    let theirs = sha(&foreign.manifest);
+    rig.store
+        .arm(Op::Put(Kind::Current), Effect::Foreign(foreign));
+    rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    let (failure, _) = rig.failed()?;
+    let Failure::Foreign { theirs: got, ours } = failure.clone() else {
+        return Err(format!("expected foreign, got {failure:?}"));
+    };
+    assert_eq!(got, theirs);
+    assert_ne!(ours, theirs);
+    assert_eq!(
+        failure.commit_outcome(),
+        Some(CommitOutcome::Foreign { theirs })
+    );
+    let (d, _) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
+    assert_eq!(
+        d,
+        Disposition::ParkOwner {
+            reason: OwnerParkReason::ForeignWriter { theirs, ours }
+        }
+    );
+    // The foreign head stays; our manifest was never referenced.
+    assert_eq!(
+        need(read_chain(&rig.store, &rig.owner)?, "chain")?
+            .current
+            .manifest,
+        theirs
+    );
+    rig.assert_safe()
+}
+
+#[test]
+fn foreign_first_write_is_detected_through_if_none_match() -> R {
+    let mut rig = Rig::seeded(&[1, 2, 3, 4, 5])?;
+    let foreign = make_foreign(&rig.store, &rig.owner, "foreign")?;
+    rig.store
+        .arm(Op::Put(Kind::Current), Effect::Foreign(foreign));
+    let (failure, _) = rig.failed()?;
+    assert!(matches!(failure, Failure::Foreign { .. }));
+    Ok(())
+}
+
+#[test]
+fn foreign_manifest_with_a_missing_body_is_still_foreign() -> R {
+    let mut rig = Rig::two_commits()?;
+    let ghost = Foreign {
+        manifest_key: "manifests/unrelated.json".to_owned(),
+        manifest: vec![1],
+        current: Current::new(sha(b"ghost"), 5, ts()?)
+            .to_bytes()
+            .map_err(e)?,
+    };
+    rig.store
+        .arm(Op::Put(Kind::Current), Effect::Foreign(ghost));
+    rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    let (failure, _) = rig.failed()?;
+    assert!(matches!(failure, Failure::Foreign { .. }));
+    Ok(())
+}
+
+#[test]
+fn newer_manifest_schema_parks_instead_of_looping() -> R {
+    let mut rig = Rig::two_commits()?;
+    let body = br#"{"schema":"memory.manifest/2"}"#.to_vec();
+    let theirs = sha(&body);
+    let newer = Foreign {
+        manifest_key: manifest_key(&theirs),
+        manifest: body,
+        current: Current::new(theirs, 9, ts()?).to_bytes().map_err(e)?,
+    };
+    rig.store
+        .arm(Op::Put(Kind::Current), Effect::Foreign(newer));
+    rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    let (failure, _) = rig.failed()?;
+    assert_eq!(failure, Failure::NewerSchema);
+    assert_eq!(failure.commit_outcome(), Some(CommitOutcome::NewerSchema));
+    let (d, _) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
+    assert_eq!(
+        d,
+        Disposition::ParkOwner {
+            reason: OwnerParkReason::NewerRemoteSchema
+        }
+    );
+    Ok(())
+}
+
+#[test]
+fn newer_current_schema_parks() -> R {
+    let mut rig = Rig::two_commits()?;
+    let newer = Foreign {
+        manifest_key: "manifests/x.json".to_owned(),
+        manifest: vec![0],
+        current: br#"{"schema":"memory.current/2"}"#.to_vec(),
+    };
+    rig.store
+        .arm(Op::Put(Kind::Current), Effect::Foreign(newer));
+    rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    assert_eq!(rig.failed()?.0, Failure::NewerSchema);
+    Ok(())
+}
+
+#[test]
+fn unreadable_current_is_corrupt_and_deterministic() -> R {
+    let mut rig = Rig::two_commits()?;
+    let junk = Foreign {
+        manifest_key: "manifests/x.json".to_owned(),
+        manifest: vec![0],
+        current: b"{".to_vec(),
+    };
+    rig.store.arm(Op::Put(Kind::Current), Effect::Foreign(junk));
+    rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    let (failure, _) = rig.failed()?;
+    assert_eq!(failure, Failure::Corrupt);
+    let (d, streak) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
+    assert!(matches!(d, Disposition::Retry { .. }));
+    assert_eq!(streak.fault, Some(Fault::Schema));
+    Ok(())
+}
+
+#[test]
+fn a_404_on_the_first_write_is_not_final_and_retries_if_none_match() -> R {
+    let mut rig = Rig::seeded(&[1, 2, 3, 4, 5])?;
+    rig.store.arm(
+        Op::Put(Kind::Current),
+        Effect::FailBefore(StoreError::Server),
+    );
+    let landed = rig.landed()?;
+    assert!(matches!(landed.outcome, CommitOutcome::Committed { .. }));
+    assert_eq!(
+        rig.store.count(Op::Get(Kind::Current)),
+        GET_ATTEMPTS as usize
+    );
+    assert_eq!(rig.store.count(Op::Put(Kind::Current)), 2);
+    rig.assert_safe()
+}
+
+#[test]
+fn a_404_under_a_fence_is_landing_unknown() -> R {
+    let mut rig = Rig::two_commits()?;
+    rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    let key = rig.current_key();
+    rig.store.remove(&key);
+    let (failure, _) = rig.failed()?;
+    assert_eq!(failure, Failure::LandingUnknown(ErrorClass::Offline));
+    assert!(failure.base_may_be_stale());
+    Ok(())
+}
+
+#[test]
+fn a_persistent_404_on_the_first_write_gives_up_without_claiming_a_landing() -> R {
+    let mut rig = Rig::seeded(&[1, 2, 3, 4, 5])?;
+    rig.store.arm_n(
+        Op::Put(Kind::Current),
+        0,
+        100,
+        Effect::FailBefore(StoreError::Server),
+    );
+    let (failure, _) = rig.failed()?;
+    assert_eq!(failure, Failure::LandingUnknown(ErrorClass::Offline));
+    Ok(())
+}
+
+#[test]
+fn verification_that_cannot_read_is_landing_unknown_with_its_class() -> R {
+    let mut rig = Rig::two_commits()?;
+    rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    rig.store.arm(
+        Op::Put(Kind::Current),
+        Effect::FailBefore(StoreError::Server),
+    );
+    rig.store.arm_n(
+        Op::Get(Kind::Current),
+        0,
+        100,
+        Effect::FailBefore(StoreError::Offline),
+    );
+    let (failure, pauses) = rig.failed()?;
+    assert_eq!(failure, Failure::LandingUnknown(ErrorClass::Offline));
+    assert_eq!(pauses.len(), GET_ATTEMPTS as usize - 1);
+    let (d, _) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
+    assert!(matches!(
+        d,
+        Disposition::Retry {
+            class: ErrorClass::Offline,
+            ..
+        }
+    ));
+    Ok(())
+}
+
+#[test]
+fn auth_loss_during_verification_pauses_the_host() -> R {
+    let mut rig = Rig::two_commits()?;
+    rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    rig.store.arm(
+        Op::Put(Kind::Current),
+        Effect::FailBefore(StoreError::Server),
+    );
+    rig.store.arm(Op::Get(Kind::Current), Effect::Revoke);
+    let (failure, _) = rig.failed()?;
+    assert_eq!(
+        failure,
+        Failure::LandingUnknown(ErrorClass::DestinationAuth)
+    );
+    Ok(())
+}
+
+#[test]
+fn offline_store_lands_nothing_and_retries_as_offline() -> R {
+    let mut rig = Rig::seeded(&[1, 2, 3, 4, 5])?;
+    rig.store.offline = true;
+    let (failure, _) = rig.failed()?;
+    assert_eq!(failure, Failure::NotLanded(ErrorClass::Offline));
+    assert!(rig.store.objects.is_empty());
+    let (d, streak) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
+    assert!(matches!(
+        d,
+        Disposition::Retry {
+            class: ErrorClass::Offline,
+            ..
+        }
+    ));
+    assert_eq!(streak.retries, 1);
+    Ok(())
+}
+
+#[test]
+fn revoked_token_pauses_the_host_and_lands_nothing() -> R {
+    let mut rig = Rig::seeded(&[1, 2, 3, 4, 5])?;
+    rig.store.revoked = true;
+    let (failure, _) = rig.failed()?;
+    assert_eq!(failure, Failure::NotLanded(ErrorClass::DestinationAuth));
+    let (d, _) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
+    assert!(matches!(d, Disposition::PauseHost { .. }));
+    assert!(rig.store.objects.is_empty());
+    Ok(())
+}
+
+#[test]
+fn revocation_before_the_pointer_write_leaves_only_unreferenced_objects_then_recovers() -> R {
+    let mut rig = Rig::two_commits()?;
+    rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    let before = need(rig.base.clone(), "base")?;
+    rig.store.arm(Op::Put(Kind::Current), Effect::Revoke);
+    let (failure, _) = rig.failed()?;
+    assert_eq!(failure, Failure::NotLanded(ErrorClass::DestinationAuth));
+    assert_eq!(rig.store.count(Op::Put(Kind::Current)), 3);
+    assert_eq!(
+        need(read_chain(&rig.store, &rig.owner)?, "chain")?
+            .current
+            .manifest,
+        before.position.manifest
+    );
+    rig.store.revoked = false;
+    // Same inputs again: pieces and the manifest are 412 = success, the pointer lands.
+    let landed = rig.landed()?;
+    assert_eq!(landed.built.position.seq, 2);
+    rig.assert_safe()
+}
+
+#[test]
+fn ambiguous_piece_put_is_retried_as_412_success() -> R {
+    let mut rig = Rig::seeded(&[1, 2, 3, 4, 5])?;
+    rig.store.arm(
+        Op::Put(Kind::Object),
+        Effect::LandThen {
+            err: StoreError::Ambiguous,
+            then_offline: false,
+        },
+    );
+    let (failure, _) = rig.failed()?;
+    assert_eq!(failure, Failure::NotLanded(ErrorClass::Offline));
+    assert!(rig.store.peek(&rig.current_key()).is_none());
+    assert!(matches!(
+        rig.landed()?.outcome,
+        CommitOutcome::Committed { .. }
+    ));
+    rig.assert_safe()
+}
+
+#[test]
+fn manifest_put_failure_lands_nothing_and_a_repeat_412_is_success() -> R {
+    let mut rig = Rig::seeded(&[1, 2, 3, 4, 5])?;
+    rig.store.arm(
+        Op::Put(Kind::Manifest),
+        Effect::LandThen {
+            err: StoreError::Server,
+            then_offline: false,
+        },
+    );
+    let (failure, _) = rig.failed()?;
+    assert_eq!(failure, Failure::NotLanded(ErrorClass::Offline));
+    assert!(rig.store.peek(&rig.current_key()).is_none());
+    rig.landed()?;
+    rig.assert_safe()
+}
+
+#[test]
+fn r2_a_412_dedup_adopts_the_encoding_that_actually_won() -> R {
+    let raw = [1_u8, 2, 3, 4];
+    let mut rig = Rig::seeded(&raw)?;
+    // Another writer version stored the same raw piece with a different encoding.
+    let winner = encode(&raw, 1);
+    rig.store.write(&object_key(&sha(&raw)), winner.clone());
+    let ours = encode(&raw, 0);
+    assert_ne!(sha(&ours), sha(&winner));
+    let landed = rig.landed()?;
+    let Manifest::Checkpoint(checkpoint) = &landed.built.manifest else {
+        return Err("first manifest is a checkpoint".to_owned());
+    };
+    let piece = need(
+        checkpoint
+            .sources
+            .first()
+            .and_then(|s| s.epochs.first())
+            .and_then(|r| r.pieces.first()),
+        "piece",
+    )?;
+    assert_eq!(piece.encoded_sha256, sha(&winner));
+    assert_eq!(piece.encoded_len, len64(&winner));
+    // The stored object was not overwritten.
+    assert_eq!(
+        rig.store.peek(&object_key(&sha(&raw))),
+        Some(winner.as_slice())
+    );
+    rig.assert_safe()
+}
+
+#[test]
+fn r2_without_adoption_the_descriptor_would_not_verify() -> R {
+    let raw = [1_u8, 2, 3, 4];
+    let mut rig = Rig::seeded(&raw)?;
+    rig.store.write(&object_key(&sha(&raw)), encode(&raw, 1));
+    let request = rig.request()?;
+    let built = build(None, header(&rig.owner, "memory")?, request.changes).map_err(e)?;
+    let verdict = built.manifest.verify_encodings(|key| {
+        rig.store.peek(key).map(|b| StoredEncoding {
+            encoded_len: len64(b),
+            encoded_sha256: sha(b),
+        })
+    });
+    assert_eq!(verdict, Err(ManifestError::EncodingMismatch));
+    Ok(())
+}
+
+#[test]
+fn a_failed_readback_after_412_lands_nothing() -> R {
+    let raw = [1_u8, 2, 3, 4];
+    let mut rig = Rig::seeded(&raw)?;
+    rig.store.write(&object_key(&sha(&raw)), encode(&raw, 1));
+    rig.store.arm(
+        Op::Get(Kind::Object),
+        Effect::FailBefore(StoreError::Server),
+    );
+    let (failure, _) = rig.failed()?;
+    assert_eq!(failure, Failure::NotLanded(ErrorClass::Offline));
+    Ok(())
+}
+
+#[test]
+fn an_invalid_manifest_is_deterministic_and_never_reaches_the_store() -> R {
+    let mut rig = Rig::new()?;
+    let mut uploads = Vec::new();
+    let write = write_of(0, stamp(0, 0), &[1, 2, 3], 0, 0, &mut uploads)?;
+    let request = Commit {
+        header: header(&rig.owner, "memory")?,
+        changes: vec![Change::Extend(write)],
+        uploads: vec![],
+    };
+    let (result, _) = rig.go_with(request);
+    assert_eq!(result, Err(Failure::Invalid(ManifestError::MissingSource)));
+    assert!(rig.store.objects.is_empty());
+    let (d, _) = disposition(&result, false, Duration::ZERO, &Streak::default());
+    assert!(matches!(d, Disposition::Retry { .. }));
+    Ok(())
+}
+
+#[test]
+fn invariant_6_fence_check() -> R {
+    let rig = Rig::two_commits()?;
+    let base = need(rig.base.clone(), "base")?;
+    let manifest = parse_manifest(need(
+        rig.store.peek(&manifest_key(&base.position.manifest)),
+        "manifest",
+    )?)
+    .map_err(e)?;
+    let Manifest::Delta(delta) = &manifest else {
+        return Err("delta".to_owned());
+    };
+    assert_eq!(check_fence(&manifest, Some(delta.previous)), Ok(()));
+    assert_eq!(
+        check_fence(&manifest, Some(sha(b"other"))),
+        Err(Failure::Invalid(ManifestError::BadLink))
+    );
+    assert_eq!(
+        check_fence(&manifest, None),
+        Err(Failure::Invalid(ManifestError::BadLink))
+    );
+    let first = parse_manifest(need(
+        rig.store.peek(&manifest_key(&delta.previous)),
+        "first",
+    )?)
+    .map_err(e)?;
+    assert_eq!(check_fence(&first, None), Ok(()));
+    assert!(check_fence(&first, Some(delta.previous)).is_err());
+    Ok(())
+}
+
+#[test]
+fn disposition_maps_every_commit_result() -> R {
+    let mut rig = Rig::seeded(&[1, 2, 3])?;
+    let landed = rig.landed()?;
+    let (d, streak) = disposition(
+        &Ok(landed),
+        false,
+        Duration::ZERO,
+        &Streak {
+            retries: 3,
+            ..Streak::default()
+        },
+    );
+    assert_eq!(d, Disposition::Done);
+    assert_eq!(streak, Streak::default());
+    let prior = Streak::default();
+    for (failure, shape) in [
+        (Failure::NotLanded(ErrorClass::Throttled), "retry"),
+        (Failure::LandingUnknown(ErrorClass::Offline), "retry"),
+        (Failure::NotLanded(ErrorClass::DestinationAuth), "pause"),
+        (Failure::BaseUnchanged, "retry"),
+        (Failure::Invalid(ManifestError::BadLink), "retry"),
+        (Failure::Corrupt, "retry"),
+    ] {
+        let (d, _) = disposition(&Err(failure), false, Duration::ZERO, &prior);
+        let ok = match shape {
+            "retry" => matches!(d, Disposition::Retry { .. }),
+            _ => matches!(d, Disposition::PauseHost { .. }),
+        };
+        assert!(ok, "{shape}: {d:?}");
+    }
+    let (d, _) = disposition(
+        &Err(Failure::NotLanded(ErrorClass::Offline)),
+        true,
+        Duration::ZERO,
+        &prior,
+    );
+    assert_eq!(d, Disposition::Cancelled);
+    assert_eq!(Failure::Corrupt.commit_outcome(), None);
+    assert!(!Failure::Corrupt.base_may_be_stale());
+    Ok(())
+}
+
+#[test]
+fn store_errors_classify_and_display() {
+    let table = [
+        (
+            StoreError::Auth,
+            ErrorClass::DestinationAuth,
+            "authorization failed",
+        ),
+        (StoreError::Throttled, ErrorClass::Throttled, "throttled"),
+        (StoreError::Server, ErrorClass::Offline, "server error"),
+        (StoreError::Offline, ErrorClass::Offline, "offline"),
+        (
+            StoreError::Ambiguous,
+            ErrorClass::Offline,
+            "ambiguous reply",
+        ),
+        (StoreError::NotFound, ErrorClass::Offline, "not found"),
+        (
+            StoreError::PreconditionFailed,
+            ErrorClass::Offline,
+            "precondition failed",
+        ),
+    ];
+    for (error, class, text) in table {
+        assert_eq!(error.class(), class);
+        assert_eq!(error.to_string(), text);
+        let boxed: Box<dyn std::error::Error> = Box::new(error);
+        assert_eq!(boxed.to_string(), text);
+    }
+}
+
+#[test]
+fn fake_store_semantics_match_conditional_writes() -> R {
+    let mut store = FakeStore::default();
+    let first = store.put_if_absent("k", vec![1]).map_err(e)?;
+    assert_eq!(
+        store.put_if_absent("k", vec![2]),
+        Err(StoreError::PreconditionFailed)
+    );
+    assert_eq!(
+        store.put_if_match("missing", &first, vec![1]),
+        Err(StoreError::NotFound)
+    );
+    let second = store.put_if_match("k", &first, vec![3]).map_err(e)?;
+    assert_ne!(first, second);
+    assert_eq!(
+        store.put_if_match("k", &first, vec![4]),
+        Err(StoreError::PreconditionFailed)
+    );
+    let got = store.get("k").map_err(e)?;
+    assert_eq!((got.body, got.etag), (vec![3], second));
+    assert_eq!(store.get("nope").err(), Some(StoreError::NotFound));
+    store.arm(Op::Get(Kind::Object), Effect::Offline);
+    assert_eq!(store.get("k").err(), Some(StoreError::Offline));
+    store.offline = false;
+    store.arm_n(
+        Op::Get(Kind::Object),
+        1,
+        1,
+        Effect::FailBefore(StoreError::Server),
+    );
+    assert!(store.get("k").is_ok());
+    assert_eq!(store.get("k").err(), Some(StoreError::Server));
+    Ok(())
+}
+
+// ------------------------------------------------------------------ recovery
+
+#[test]
+fn recover_base_reproduces_the_committed_base() -> R {
+    let mut rig = Rig::two_commits()?;
+    let recovered = recover_base(&mut rig.store, &rig.owner).map_err(e)?;
+    assert_eq!(recovered, rig.base);
+    // A fresh owner has nothing to recover.
+    let other = owner_named("s2")?;
+    assert_eq!(recover_base(&mut rig.store, &other), Ok(None));
+    Ok(())
+}
+
+#[test]
+fn recover_base_failures_are_classified() -> R {
+    let rig = Rig::two_commits()?;
+    let head = need(rig.base.clone(), "base")?.position.manifest;
+    let key = manifest_key(&head);
+    let recover = |store: &mut FakeStore| recover_base(store, &rig.owner);
+
+    let mut store = clone_store(&rig.store);
+    store.offline = true;
+    assert_eq!(
+        recover(&mut store),
+        Err(Failure::NotLanded(ErrorClass::Offline))
+    );
+
+    let mut store = clone_store(&rig.store);
+    store.remove(&key);
+    assert_eq!(recover(&mut store), Err(Failure::Corrupt));
+
+    let mut store = clone_store(&rig.store);
+    store.write(&key, b"{\"changed\":true}".to_vec());
+    assert_eq!(recover(&mut store), Err(Failure::Corrupt));
+
+    let mut store = clone_store(&rig.store);
+    store.arm(
+        Op::Get(Kind::Manifest),
+        Effect::FailBefore(StoreError::Server),
+    );
+    assert_eq!(
+        recover(&mut store),
+        Err(Failure::NotLanded(ErrorClass::Offline))
+    );
+
+    let mut store = clone_store(&rig.store);
+    store.write(&rig.current_key(), b"{".to_vec());
+    assert_eq!(recover(&mut store), Err(Failure::Corrupt));
+
+    let mut store = clone_store(&rig.store);
+    store.write(
+        &rig.current_key(),
+        br#"{"schema":"memory.current/2"}"#.to_vec(),
+    );
+    assert_eq!(recover(&mut store), Err(Failure::NewerSchema));
+
+    let mut store = clone_store(&rig.store);
+    let body = br#"{"schema":"memory.manifest/2"}"#.to_vec();
+    let newer = sha(&body);
+    store.write(&manifest_key(&newer), body);
+    store.write(
+        &rig.current_key(),
+        Current::new(newer, 9, ts()?).to_bytes().map_err(e)?,
+    );
+    assert_eq!(recover(&mut store), Err(Failure::NewerSchema));
+
+    // A chain that names another owner does not fold into this owner's base.
+    let mut store = clone_store(&rig.store);
+    let alien = build(None, header(&owner_named("s2")?, "x")?, vec![]).map_err(e)?;
+    store.write(&manifest_key(&alien.hash), alien.bytes);
+    store.write(
+        &rig.current_key(),
+        Current::new(alien.hash, 0, ts()?).to_bytes().map_err(e)?,
+    );
+    assert_eq!(recover(&mut store), Err(Failure::Corrupt));
+    Ok(())
+}
+
+fn clone_store(store: &FakeStore) -> FakeStore {
+    FakeStore {
+        objects: store.objects.clone(),
+        version: store.version,
+        ..FakeStore::default()
+    }
+}
+
+#[test]
+fn seventy_commits_cross_a_checkpoint_and_still_recover() -> R {
+    let mut rig = Rig::seeded(&[1])?;
+    let mut content = vec![1_u8];
+    rig.landed()?;
+    for n in 1..=70_u64 {
+        content.push(u8::try_from(n % 3).map_err(e)?);
+        rig.put_file(0, &content.clone());
+        let landed = rig.landed()?;
+        assert_eq!(landed.built.position.seq, n);
+        assert_eq!(
+            matches!(landed.built.manifest, Manifest::Checkpoint(_)),
+            n % 64 == 0
+        );
+    }
+    let recovered = recover_base(&mut rig.store, &rig.owner).map_err(e)?;
+    assert_eq!(recovered, rig.base);
+    rig.assert_safe()
+}
+
+#[test]
+fn parse_current_roundtrips_what_the_driver_writes() -> R {
+    let mut rig = Rig::seeded(&[1, 2, 3])?;
+    let landed = rig.landed()?;
+    let current = parse_current(need(rig.store.peek(&rig.current_key()), "current")?).map_err(e)?;
+    assert_eq!(current.manifest, landed.built.hash);
+    assert_eq!(current.seq, 0);
+    Ok(())
+}

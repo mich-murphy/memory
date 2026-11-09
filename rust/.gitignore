@@ -1,0 +1,6 @@
+/target/
+/lint-check/target/
+/artifacts/
+.hegel/
+# LLVM coverage leftovers from interrupted instrumented runs.
+*.profraw

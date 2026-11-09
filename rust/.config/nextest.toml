@@ -1,0 +1,7 @@
+[profile.default]
+test-threads = 2
+failure-output = "immediate-final"
+
+[profile.ci]
+test-threads = 2
+fail-fast = false

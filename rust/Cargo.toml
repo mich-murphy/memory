@@ -1,0 +1,43 @@
+[workspace]
+resolver = "3"
+members = ["crates/memory-core", "crates/memory-reader", "crates/memory", "crates/xtask"]
+exclude = ["lint-check"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+memory-core = { version = "=0.1.0", path = "crates/memory-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+schemars = "1"
+thiserror = "2"
+toml = "1"
+sha2 = "=0.11.1"
+regex = "1"
+url = "2"
+hegel = { package = "hegeltest", version = "=0.52.0", features = ["static-engine"] }
+proptest = "1"
+proptest-state-machine = "0.8"
+# Source read before pinning: crates.io notify-8.2.0/Cargo.toml.
+notify = "=8.2.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unfulfilled_lint_expectations = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+todo = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+allow_attributes = "deny"
+missing_errors_doc = "warn"

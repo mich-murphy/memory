@@ -1,0 +1,52 @@
+warning[license-not-encountered]: license was not encountered
+  ┌─ <repo>/rust/artifacts/scaffold-baseline/deny.toml:9:32
+  │
+9 │ allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "CC0-1.0", "Zlib"]
+  │                                ━━━━━━━━━━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+  ┌─ <repo>/rust/artifacts/scaffold-baseline/deny.toml:9:48
+  │
+9 │ allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "CC0-1.0", "Zlib"]
+  │                                                ━━━━━━━━━━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+  ┌─ <repo>/rust/artifacts/scaffold-baseline/deny.toml:9:97
+  │
+9 │ allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "CC0-1.0", "Zlib"]
+  │                                                                                                 ━━━━ unmatched license allowance
+
+warning[duplicate]: found 2 duplicate entries for crate 'windows-sys'
+    ┌─ <repo>/rust/artifacts/scaffold-baseline/Cargo.lock:109:1
+    │  
+109 │ ╭ windows-sys 0.60.2 registry+https://github.com/rust-lang/crates.io-index
+110 │ │ windows-sys 0.61.2 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰────────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ windows-sys v0.60.2
+      └── notify v8.2.0
+          └── memory v0.1.0
+    ├ windows-sys v0.61.2
+      ├── errno v0.3.14
+      │   └── rustix v1.1.6
+      │       └── tempfile v3.27.0
+      │           ├── proptest v1.12.0
+      │           │   ├── (dev) memory-core v0.1.0
+      │           │   │   ├── memory-reader v0.1.0
+      │           │   │   └── xtask v0.1.0
+      │           │   └── proptest-state-machine v0.8.0
+      │           │       └── (dev) memory-core v0.1.0 (*)
+      │           └── rusty-fork v0.3.1
+      │               └── proptest v1.12.0 (*)
+      ├── mio v1.2.4
+      │   └── notify v8.2.0
+      │       └── memory v0.1.0
+      ├── rustix v1.1.6 (*)
+      ├── tempfile v3.27.0 (*)
+      └── winapi-util v0.1.11
+          ├── same-file v1.0.6
+          │   └── walkdir v2.5.0
+          │       └── notify v8.2.0 (*)
+          └── walkdir v2.5.0 (*)
+
+advisories ok, bans ok, licenses ok, sources ok

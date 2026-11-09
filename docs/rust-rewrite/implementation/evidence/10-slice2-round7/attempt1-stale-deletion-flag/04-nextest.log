@@ -1,0 +1,400 @@
+   Compiling memory v0.1.0 (/Users/mm/dev/memory/rust/crates/memory)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.64s
+────────────
+ Nextest run ID 4aa6f874-8d4f-4d75-b01d-d99b412473dd with nextest profile: default
+    Starting 291 tests across 26 binaries (2 tests skipped)
+        PASS [   0.048s] (  1/291) memory::capture append_extends_then_unchanged_uploads_nothing
+        PASS [   0.059s] (  2/291) memory::capture attach_launches_deduplicates_by_digest
+        PASS [   0.041s] (  3/291) memory::capture failure_branches_have_literal_outcomes_and_store_nothing
+        PASS [   0.048s] (  4/291) memory::capture launch_canaries_never_reach_any_stored_object
+        PASS [   0.038s] (  5/291) memory::capture local_default_is_empty
+        PASS [   0.039s] (  6/291) memory::capture need_windows_reads_head_and_tail_through_the_seam
+        PASS [   0.039s] (  7/291) memory::capture only_published_bodies_reach_the_store
+        PASS [   0.039s] (  8/291) memory::capture removed_source_is_deleted_only_after_two_observations
+        PASS [   0.039s] (  9/291) memory::capture rewrite_and_truncate_start_a_new_epoch
+        PASS [   0.039s] ( 10/291) memory::capture snapshot_change_is_replaced
+        PASS [   0.040s] ( 11/291) memory::capture snapshot_replaces_and_protected_config_never_stores_the_canary
+        PASS [   0.038s] ( 12/291) memory::capture withheld_source_is_never_read_or_stored
+        PASS [   0.040s] ( 13/291) memory::capture_property guard_has_negative_controls
+        PASS [   0.055s] ( 14/291) memory::capture_property guard_shapes_arise_from_a_scripted_run_with_the_real_capture
+        PASS [   0.049s] ( 15/291) memory::capture_property oracle_detects_tampered_store_contents
+        FAIL [  16.271s] ( 16/291) memory::capture_property proptest_property4_capture_state_machine
+  stdout ───
+
+    running 1 test
+    test proptest_property4_capture_state_machine ... FAILED
+
+    failures:
+
+    failures:
+        proptest_property4_capture_state_machine
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 16.23s
+
+  stderr ───
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1184:5:
+    Err(Fail(Reason("final settle: Err(\"liveness: removed source not recorded deleted\")"), (Reference { files: {}, history: {}, foreign_seen: false }, [Append { src: 0, seed: 0, n: 1 }, Reconcile, RemoveSource { src: 0 }, Settle, Append { src: 0, seed: 0, n: 1 }, CommittedReplyLost { then_offline: true }, RemoveSource { src: 0 }], None)))
+
+  Cancelling due to test failure: 1 test still running
+        PASS [  24.941s] ( 17/291) memory::capture_property hegel_property4_capture_state_machine
+────────────
+     Summary [  25.227s] 17/291 tests run: 16 passed, 1 failed, 2 skipped
+        FAIL [  16.271s] ( 16/291) memory::capture_property proptest_property4_capture_state_machine
+  stdout ───
+
+    running 1 test
+    test proptest_property4_capture_state_machine ... FAILED
+
+    failures:
+
+    failures:
+        proptest_property4_capture_state_machine
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 16.23s
+
+  stderr ───
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1184:5:
+    Err(Fail(Reason("final settle: Err(\"liveness: removed source not recorded deleted\")"), (Reference { files: {}, history: {}, foreign_seen: false }, [Append { src: 0, seed: 0, n: 1 }, Reconcile, RemoveSource { src: 0 }, Settle, Append { src: 0, seed: 0, n: 1 }, CommittedReplyLost { then_offline: true }, RemoveSource { src: 0 }], None)))
+
+warning: 274/291 tests were not run due to test failure (run with --no-fail-fast to run all tests, or run with --max-fail)
+error: test run failed

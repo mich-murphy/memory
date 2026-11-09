@@ -1,0 +1,69 @@
+   Compiling same-file v1.0.6
+   Compiling notify-types v2.2.0
+   Compiling walkdir v2.5.0
+   Compiling fsevent-sys v4.1.0
+   Compiling log v0.4.35
+   Compiling memory-reader v0.1.0 (/Users/mm/dev/memory/rust/crates/memory-reader)
+   Compiling memory-core v0.1.0 (/Users/mm/dev/memory/rust/crates/memory-core)
+   Compiling notify v8.2.0
+   Compiling memory v0.1.0 (/Users/mm/dev/memory/rust/crates/memory)
+   Compiling xtask v0.1.0 (/Users/mm/dev/memory/rust/crates/xtask)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.50s
+────────────
+ Nextest run ID 25267083-62d4-41fb-a7bc-baa934efc07c with nextest profile: default
+    Starting 49 tests across 13 binaries
+        PASS [   0.042s] ( 1/49) memory::harness lost_reply_is_visible_and_duplicate_create_preserves_first_body
+        PASS [   0.042s] ( 2/49) memory::harness counters_detect_each_wrapped_operation
+        PASS [   0.048s] ( 3/49) memory-core::core_mechanics boundaries_strict_deserialization_and_dotted_wire_tags
+        PASS [   0.041s] ( 4/49) memory-core::core_mechanics coalescer_config_wake_and_backwards_are_explicit
+        PASS [   0.296s] ( 5/49) memory::harness scaffold_binary_refuses_capture_instead_of_success
+        PASS [   0.435s] ( 6/49) memory-core::core_mechanics hegel_property2_monotonic_quiet_cap_end
+        PASS [   0.042s] ( 7/49) memory-core::core_mechanics immediate_session_end_and_independent_owner_monotonic_clocks
+        PASS [   0.041s] ( 8/49) memory-core::core_mechanics owner_wire_goldens_and_schema_use_session_id_and_distinct_shared_coordinates
+        PASS [   0.043s] ( 9/49) memory-core::core_mechanics property1_negative_control_disabled_window_check_must_fail
+        PASS [   0.041s] (10/49) memory-core::core_mechanics property3_repeat_has_zero_planned_capture_work_even_when_writer_version_changes
+        SLOW [> 60.000s] (─────) memory-core::core_mechanics hegel_property1_independent_capture_and_eligible_audit
+        SLOW [> 60.000s] (─────) memory-core::core_mechanics proptest_property1_independent_capture_and_eligible_audit
+        SLOW [>120.000s] (─────) memory-core::core_mechanics hegel_property1_independent_capture_and_eligible_audit
+        SLOW [>120.000s] (─────) memory-core::core_mechanics proptest_property1_independent_capture_and_eligible_audit
+        PASS [ 132.799s] (11/49) memory-core::core_mechanics hegel_property1_independent_capture_and_eligible_audit
+        PASS [   0.373s] (12/49) memory-core::core_mechanics proptest_property2_monotonic_quiet_cap_end
+        PASS [   0.041s] (13/49) memory-core::core_planner adoption_requires_full_digest_then_can_extend_without_new_epoch
+        PASS [   0.037s] (14/49) memory-core::core_planner committed_deletion_repeat_and_snapshot_repeat_have_no_capture_work
+        PASS [   0.037s] (15/49) memory-core::core_planner every_append_table_branch_and_independent_evidence_request
+        PASS [   0.037s] (16/49) memory-core::core_planner full_audit_is_explicit_and_pinned_and_rules_are_not_writer_version
+        PASS [   0.038s] (17/49) memory-core::core_planner settled_same_size_changed_mtime_requires_windows_and_refreshes_stat
+        PASS [   0.037s] (18/49) memory-core::core_planner snapshot_audit_compares_transformed_bytes_even_when_fingerprint_is_stable
+        PASS [   0.037s] (19/49) memory-core::core_planner sqlite_db_and_wal_and_absence_are_each_part_of_snapshot_fingerprint
+        PASS [   0.037s] (20/49) memory-core::core_planner window_ranges_clamp_at_zero_and_old_committed_endpoint_without_overflow
+        PASS [ 132.681s] (21/49) memory-core::core_mechanics proptest_property1_independent_capture_and_eligible_audit
+        PASS [   0.051s] (22/49) memory-core::parent_privacy_review escaped_duplicate_config_keys_fail_closed_and_launch_prompt_is_dropped
+        PASS [   0.039s] (23/49) memory-core::parent_privacy_review intermediate_credential_and_unknown_root_are_not_admitted
+        PASS [   0.040s] (24/49) memory-core::parent_privacy_review malformed_selected_url_does_not_preserve_invalid_escape_literal
+        PASS [   0.039s] (25/49) memory-core::parent_privacy_review malformed_selected_url_does_not_preserve_invalid_port_literal
+        PASS [   0.038s] (26/49) memory-core::parent_privacy_review transformed_capability_cannot_be_rebound_to_a_protected_source
+        PASS [   0.042s] (27/49) memory-core::parent_privacy_review scrubbed_toml_retains_unrelated_datetime_type
+        PASS [   0.055s] (28/49) memory-core::privacy_port capability_binding_rejects_cross_source_cross_profile_and_changed_policy
+        PASS [   0.081s] (29/49) memory-core::privacy_port all_eleven_names_all_agents_aliases_and_whole_document_digest
+        PASS [   0.052s] (30/49) memory-core::privacy_port codex_and_claude_all_rule_families_including_args_and_urls
+        PASS [   0.041s] (31/49) memory-core::privacy_port escaped_copies_nested_arrays_and_keys_are_not_lost
+        PASS [   0.072s] (32/49) memory-core::privacy_port denied_identities_backups_collector_aliases_and_unknowns
+        PASS [   0.117s] (33/49) memory-core::privacy_port native_launch_drops_prompt_secret_flags_and_nonexact_env
+        PASS [   0.045s] (34/49) memory-core::privacy_port rejects_malformed_duplicates_unicode_trailing_and_nonobjects
+        PASS [   0.038s] (35/49) memory-core::privacy_port rule_digest_golden_requires_explicit_semantic_review
+        PASS [   0.052s] (36/49) memory-core::privacy_port rules_union_only_encountered_identities_and_supported_reference_syntax
+        PASS [   0.064s] (37/49) memory-core::privacy_port text_guard_shell_fish_quotes_separators_and_negative_controls
+        PASS [   0.049s] (38/49) memory-core::privacy_port toml_datetime_types_and_url_parser_parity
+        PASS [   0.040s] (39/49) memory-core::privacy_port unrelated_json_numeric_lexemes_survive_rewrite
+        PASS [   0.040s] (40/49) memory-core::privacy_port url_rewrite_preserves_safe_spelling_not_whatwg_normalization
+        PASS [   2.363s] (41/49) memory-core::privacy_port generated_equivalent_copies_and_safe_negative_values
+        PASS [   1.929s] (42/49) memory-core::privacy_property hegel_generated_canaries_do_not_escape_pure_privacy_outputs
+        PASS [   0.042s] (43/49) memory-core::scaffold checked_ranges_cover_edges
+        PASS [   0.041s] (44/49) memory-core::scaffold error_schema_roundtrip_rejects_unknown_fields
+        PASS [   0.117s] (45/49) memory-core::privacy_property independent_inventory_exercises_every_family_and_credential_variant
+        PASS [   0.177s] (46/49) memory-core::scaffold hegel_checked_ranges_match_independent_iterator_oracle
+        PASS [   0.199s] (47/49) memory-core::scaffold proptest_checked_ranges_match_independent_iterator_oracle
+        PASS [   0.042s] (48/49) xtask::bin/xtask tests::schemas_detect_missing_drift_and_roundtrip
+        PASS [   0.388s] (49/49) xtask::cli schema_cli_dispatches_and_rejects_unknown_commands
+────────────
+     Summary [ 136.915s] 49 tests run: 49 passed (2 slow), 0 skipped

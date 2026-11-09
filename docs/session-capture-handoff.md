@@ -1,8 +1,10 @@
 # Session capture: current delivery handoff
 
-This is the sole current deployment/qualification/next-action brief. Requirements live
-in the [capture contract](session-capture-contract.md); the accepted cleanup direction
-and rationale live in the [holistic review](holistic-review-20261029.md).
+This is the sole current deployment/qualification/next-action brief. For Rust,
+[DESIGN.md](../DESIGN.md) is authoritative; read its section 0 first. The
+[capture contract](session-capture-contract.md) retains goals and Go maintenance
+requirements. The [holistic review](holistic-review-20261029.md) records historical
+Go cleanup rationale, not the Rust mechanism.
 The previous handoff is preserved **verbatim** in the
 [October 30 archive](session-capture-handoff-archive-20261030.md). Its pre-merge tasks,
 worker assignments, installation tables and earlier “current” checkpoints are dated
@@ -10,7 +12,918 @@ history, not current execution instructions or renewed operating authority.
 
 ## Current session checkpoint
 
-### October 30: source integration complete; live operation not accepted
+### Rust implementation delivery — active coordinator brief
+
+**Acceptance: pending.** User requested implementation of DESIGN.md with
+`gpt-6.1-sol` workers at medium effort, parent-owned quality and verification.
+This is the single active task brief; dated operating records below remain history.
+
+> **Resume here (2026-11-09 handover).** Read DESIGN.md, then
+> [design-amendments-20261109.md](rust-rewrite/design-amendments-20261109.md) (wins where
+> they conflict), then the "Handover 2026-11-09" block at the end of this brief. Earlier
+> blocker lists in this brief (P5 authorization, acceptance bucket/token, hook argv,
+> symlinks, state root) are resolved by that amendment and kept only as history.
+
+**Session 2026-11-08 (current).** Operator instruction: continue from this brief
+with **Sonnet** subagents (supersedes the gpt-6.1-sol worker choice; medium thinking
+requested via tool argument). Reconciled at start: HEAD `57d8400`, branch
+`rust/scaffold`, no commits/staging; `git diff --check` 0; `verify-evidence.py` 0;
+all 45 `02-corrected/source-before.json` hashes match, so that local green result
+still applies to the pre-dispatch source. Parent then added empty module stubs
+`memory-core/src/{hint,locator,manifest}.rs` and declared them in `lib.rs` (parent
+owns `lib.rs`, `domain.rs`, Cargo, xtask, schemas, scripts, gates). This invalidates
+the 45-file snapshot for integrated-gate reuse; rerun required before acceptance.
+Slice-1 assignments (disjoint; workers may not edit domain.rs/lib.rs/Cargo/xtask —
+requested changes go to parent in their report):
+
+| Worker | Owns | Scope |
+|---|---|---|
+| locator (Sonnet) | `src/locator.rs`, `tests/core_locator.rs`, `implementation/06-locator.md` | Pure `locate`, Roots/ownership facts input (R4), mapping matrix, property 7 |
+| manifest (Sonnet) | `src/manifest.rs`, `tests/core_manifest.rs`, `implementation/07-manifest.md` | `memory.manifest/1` + `memory.current/1` delta/checkpoint types, builder/apply, R2/R3/R5, property 6 |
+| hint (Sonnet) | `src/hint.rs`, `tests/core_hint.rs`, `implementation/08-hint.md` | Owned hint-line schema, ≤4 KiB builder, resync parser, tolerant hook-input DTO |
+
+P5 remains blocked as recorded in its report; no private-source collector is authorized
+by this session.
+
+**Worker state (all completed and paths explicitly released; actual model
+`claude-5.5-sonnet`, medium requested; startup acknowledgements observed):**
+locator `7bb7ee9b-2324-482`, manifest `ddd8a95d-40f1-44e` (ended with a tool abort
+*after* its final passing run and report; on-disk hashes match its report), hint
+`a0d4fede-d13a-4f5`. Parent owns all paths again.
+
+**Corrections (all acknowledged, uptake verified in source and tests):**
+1. Hint: the event mapping did not match the Go installers. Codex SubagentStop,
+   PreCompact and Interrupt were dropped, and the Pi names were guesses. Fixed: Codex
+   has all six events, with a new `Interrupted` that flushes (trust.go:38). Pi maps
+   only `session_start`, `agent_settled` and `session_shutdown`. Claude
+   `agent_transcript_path` is a separate `agent_transcript` hint.
+2. Locator: Pi session-dir non-transcript files gave UnknownKind (Go keeps them as
+   Aux), and learned custom Pi roots had no layout. Parent added `SourceKind::PiAux`
+   (`pi.aux`) to domain.rs. Worker added the PiAux mapping and
+   `RootLayout::PiCustomRoot` (session layouts only).
+3. Manifest: the worker deleted a failing negative assertion (`sources: []` on a
+   delta) instead of fixing the decoder. Steered mid-run. The assertion was restored
+   plus a `changes: []`-on-checkpoint case. The decoder is now strictly kind-tagged
+   per-kind structs with no defaults. The failure and correction are recorded in 07.
+
+**Parent integration:** `xtask schemas` now exports and drift-checks
+`memory.manifest.1.json`, `memory.current.1.json` and `memory.hint.1.json`, alongside
+range-error; its drift test covers a second file.
+
+**Integrated gate (parent, unchanged wrapper):** `PROPERTY_CASES=2000
+PROPERTY_SEED=730201 bash scripts/gates.sh` in pinned Nix: **exit 0, all 12
+subgates 0**. Nextest 125/125, doctests pass, window mutation killed, schema drift 0.
+Coverage **2,769/2,815 = 98.3659%** (floor 98%, unchanged). All 53 snapshotted source
+files were unchanged during the run. Evidence and checksums:
+`implementation/evidence/05-slice1-integrated/`. Afterwards `git diff --check` and
+`verify-evidence.py` both exit 0. Not hosted CI, not native Linux.
+
+**Parent decisions:** locator class/owner `*` proposals are accepted as the slice-1
+working mapping. They agree with acceptance-map section 2, and evidence can revisit
+them. Report 06's original matrix table predates correction 1; its "Parent
+correction 1" section is authoritative for Pi rows. Hint `Interrupted` flushes:
+accepted.
+
+**Slice-1 exit: NOT yet accepted. Open gaps:**
+- *Pi coverage narrowing:* under `sessions/` with no cwd dir, a multi-part path whose
+  first part is not a session dir gives UnknownKind. Go captures it as a sessionless
+  Aux. It is counted, not silent, but it narrows coverage, so Shared PiAux or a
+  recorded exclusion must be decided before acceptance.
+- *F2 "Go fix → Rust counterpart" table:* map 01 lists targets. Each row still needs
+  an implemented test pointer, or "not applicable/later slice" with a reason.
+- *Coverage guard (DESIGN 15):* no generator counters exist for multi-epoch, restart,
+  crash-after-manifest, lost-reply or delete-index. Most belong to property 4
+  (slice 2). The guard's slice-1 subset must be pinned and implemented.
+- *Property 5:* only the hint-line and transform levels exist. The PUT-body sink is
+  slice 2.
+- *P5:* blocked (above). P1 synthetic only.
+
+**Round 2 (all workers completed and released; Sonnet; acknowledgements observed):**
+- Locator: original worker `7bb7ee9b` session expired (resume unavailable, paths
+  were released). Replacement `3c1e04ed-2817-436` did correction 2 (Pi `sessions/`
+  non-session-dir multi-part → Shared `PiAux`; single top-level unknown stays
+  UnknownKind) and correction 3. **Parent retracted its own correction-1 premise**:
+  Go `Pi.Classify` (pi.go:158-168) promotes custom-root paths to agent-dir rules for
+  `sessions/…`, piRoles names/dirs and single-part `*.log`; only the rest become
+  Shared PiAux. Implemented by reusing `pi_asset`; recognised config identities keep
+  config kinds (privacy-relevant). 06 matrix rewritten as authoritative.
+  Pi narrowing gap: **closed**.
+- Acceptance worker `69bd8a8f-13e5-4d2`: coverage guard for property 1 (multi-epoch,
+  window rewrite, interior audit, truncate-regrow, identity replacement) and property
+  6 (multi-epoch, snapshot replace, delete, fold across checkpoint), both engines,
+  with negative controls. Parent verified the plain-`#[test]` wrappers still honour
+  `HEGEL_TEST_CASES/SEED` (hegeltest runner.rs:264-305) and `PROPTEST_CASES/RNG_SEED`
+  (proptest config.rs:26,40); mutation gate still kills. F2 table
+  `09-f2-counterparts.md` delivered **incomplete**: 14 rows "name only" (unverified
+  assertions), 7 partial-S1; worker hit its turn budget.
+
+**Integrated gate 2 (parent, unchanged wrapper):** seed 730202, 2,000 cases: **exit 0,
+all 12 subgates 0**; nextest 127/127; coverage **2,786/2,832 = 98.3757%**; 53
+snapshotted files unchanged during run. Evidence:
+`implementation/evidence/06-slice1-guard/`. `git diff --check` and
+`verify-evidence.py` 0. Supersedes gate 1 for current source.
+
+**Remaining slice-1 gaps:** (1) verify or downgrade the 14 "name only" F2 rows;
+(2) pure S1 counterparts requested by 09: owner-key UTF-8 byte limit
+(1,024 ok / 1,025 `KeyTooLong`), distinct-source `SourceLimit`, `request_budget`
+`max(60s, 30s+size/1MiB/s)`, disposition transition (cancel does not advance
+streak), `/var`↔`/private/var` coordinate alias; (3) P5 blocked; property 4 guard
+cases (restart, crash-after-manifest, lost-reply, delete-index) are slice 2 by design.
+
+**Round 3 (all completed and released; Sonnet; acknowledgements observed):**
+- Parent added stubs `src/{limits,disposition,coordinates}.rs` to `lib.rs`.
+- Limits/disposition `347e7230-1a84-47f`: `current_key` (1,024 ok / 1,025
+  `KeyTooLong`), distinct-source `SourceSet::admit` (`SourceLimit`, no eviction),
+  `request_budget`, pure `transition` (cancel keeps the streak and never parks;
+  timeout is `Retry{Offline}`; auth is `PauseHost`; park after 3 failures over at
+  least 3 h). Report 10.
+- Coordinates `d0c381aa-ceca-46d`: pure alias module. An alias is accepted only with
+  a shell-supplied identity proof or a declared pair, no case folding, and every
+  spelling is kept. Not yet wired into the locator or privacy modules. Report 11.
+- F2 verifier `a7d1b59e-9c85-424`: read every cited assertion and removed all "name
+  only" markers. 1a, 1b and 7c were over-claimed and are now partial-S1; 7a was
+  under-claimed and is now implemented. 21/21 subcases have one row.
+- **Parent correction (DESIGN 11.2):** the worker left `NonJsonResponse`/`Schema`
+  retrying forever. The parent added `ParkReason::{RepeatedNonJsonResponse,
+  RepeatedSchemaError}` and made `park_reason` total. The test that asserted "never
+  parks" was deliberately replaced, and the change is recorded in report 10. The parent
+  also filled F2 rows 2, 3, 4a, 6a and 7d as implemented-S1 after reading the tests.
+
+**Integrated gate 3 (parent, unchanged wrapper):** seed 730203, 2,000 cases: **exit 0,
+all 12 subgates 0**; nextest 167/167; coverage **3,104/3,151 = 98.5084%**; 58
+snapshotted files unchanged during the run. Evidence:
+`implementation/evidence/07-slice1-round3/`. `git diff --check` and
+`verify-evidence.py` both exit 0. This supersedes gates 1–2 for the current source.
+
+**Slice-1 exit: still NOT accepted.** The F2 table is complete, with a status on
+every row, but 7 rows are partial-S1 with pure test gaps: 1a (backup-alias
+spellings of each protected basename per agent), 1b (8-env bound and env value
+grammar), 5a (db-only change with the WAL unchanged), 5b (types only), 7c (Codex
+archive move or recompression keeps the rollout id; locator rows may already cover
+this and need re-verifying), 10b, and 12 (long rewrite histories). P5 is still
+blocked. The property-4 guard cases are in slice 2 by design.
+
+**Round 4 (completed and released; Sonnet; acknowledgement observed):** worker
+`3f1ad91f-c830-4e4` added `tests/core_f2_gaps.rs` (12 tests, no production change)
+closing rows 1a, 1b, 5a, 5b (S1 part), 7c, 10b and 12. Parent read the 1a and 12
+tests (literal-count expectations; 300-manifest history against a test-written
+model), then normalised 09 so each row leads with its current status, keeping the
+earlier verdict as history. 09 now has 21/21 rows with no partial-S1 status.
+
+**Integrated gate 4 (parent, unchanged wrapper):** seed 730204, 2,000 cases: **exit 0,
+all 12 subgates 0**; nextest 179/179; coverage **3,105/3,151 = 98.5401%** (floor 98%
+unchanged); 59 snapshotted files unchanged during the run. Evidence:
+`implementation/evidence/08-slice1-round4/`. `git diff --check` and
+`verify-evidence.py` both exit 0. Supersedes gates 1–3 for the current source.
+
+**Slice-1 decision (parent, 2026-11-08):** the DESIGN section 17 slice-1 *exit*
+criteria are **met on the current source**: properties 1, 2, 3, 5 (hint and
+transform level), 6 and 7 green at 2,000 cases on both engines, the proptest
+cross-check green, the window mutation killed, the coverage guard implemented
+with negative controls, and the F2 table complete. **Slice 1 is NOT fully
+accepted**, because prerequisite **P5** ("before slice 1") is still blocked: it
+needs operator authorization to collect historical offset and prefix-hash metadata
+from this Mac's sources (no content read). This is an operator decision, not
+something tools can resolve within the current remit. Other known limits: the
+coordinates module is not yet wired into the locator or privacy modules (slice-2
+shell wiring); property 5 at the PUT sink and the property-4 guard cases are
+slice 2; not hosted CI, not native Linux.
+
+**External blockers (operator):** (1) P5 metadata-collection authorization;
+(2) the acceptance bucket and scoped token for P2/P2b (https://dash.cloudflare.com/).
+Natural-sleep P6 needs elapsed real time.
+
+**Next action:** once P5 is authorized, run a metadata-only collector (sizes,
+offsets and prefix hashes; no content persisted) and record the result in
+`prototypes/P5-prefix-rewrite-frequency.md`. Independent of the blockers, slice-2
+work that needs no bucket can start: the `memory hook` binary (hand-parsed argv,
+no tokio, uses `hint::build_line`) with actual Rust P4 timing and RSS, and the
+fake-store property-4 state machine. Commit and stack the task-owned changes
+(`gh stack`) before the hosted-CI run.
+
+**Slice-2 groundwork (parent, 2026-11-08):** `crates/memory` now depends on
+`memory-core` and has hegel/proptest/proptest-state-machine dev-dependencies (lock
+diff: only those `memory` edges; `cargo check --locked` and `cargo deny check bans`
+pass). Stubs `src/{hook,commit}.rs` were declared in `lib.rs`.
+
+**Round 5 (active; Sonnet, medium thinking; acknowledgements observed):**
+- Hook `5f446c9a-781b-4dc`: owns `crates/memory/src/{main,hook}.rs`,
+  `tests/hook.rs`, `implementation/12-hook.md`. `memory hook <agent>` per
+  DESIGN 10.1, plus a synthetic P4 measurement.
+- Commit protocol `79a65718-6c22-472`: owns `crates/memory/src/{environment,commit}.rs`,
+  `tests/{harness,commit_protocol}.rs`, `implementation/13-commit-protocol.md`.
+  Typed store seam, 7.4 driver, fake store, property 4 on both engines against a
+  fake store (not the daemon).
+
+**Round 5 result (both completed and released; the parent reviewed the code):**
+- Hook: `memory hook <agent>` writes with one `write(2)` call on an O_APPEND file
+  created 0600, into a hints directory created 0700. It refuses a group- or
+  world-writable directory or a symlink, has a 2 s stdin deadline, always exits 0, and
+  prints nothing to stdout. 26 tests, with Hegel and proptest over arbitrary stdin.
+  **P4 (synthetic, Apple M2, release build):** in-process p50 30.5 µs and p99 75.7 µs,
+  against the 1 ms target. Max RSS is about 2.5 MiB. Spawn p99 is 4.15 ms, against
+  1.33 ms for `/usr/bin/true`. The parent rechecked fmt and tests (26/26).
+- Commit protocol: typed `Store` seam (`put_if_absent`/`put_if_match`/`get`, closed
+  `StoreError`). The 7.4 driver adopts the stored descriptor on a 412 (R2), checks the
+  invariant-6 fence before every step 3, verifies with up to 4 GETs, rebases up to 4
+  times, and does not treat a 404 under a fence as final. `recover_base` covers 9.3.
+  Property 4 runs against a fake store on both engines, with an independent model, a
+  coverage guard with negative controls, and an oracle tamper control in 8 cases.
+  46 tests. The capture step is a test stand-in, not the real planner or shell.
+- **Parent correction (DESIGN 11.2):** added `StoreError::Throttled` (429/503 →
+  `Throttled`). Any other 5xx (`Server`) is now `Offline`. 4 expectations changed on
+  purpose and 1 table row was added (report 13).
+- **Parent correction (coverage harness):** `tests/hook.rs` passes `LLVM_PROFILE_FILE`
+  through `env_clear()` spawns (report 12). Attempt 1 failed coverage at 96.9923% and is
+  kept in `evidence/09-slice2-round5/attempt1-coverage-fail/`.
+
+**Integrated gate 5 (parent, unchanged wrapper, floor 98%):** seed 730206, 2,000
+cases: **exit 0, all 12 subgates 0**. Nextest 251/251, with 2 skipped (ignored P4
+measurement tests). Coverage **3,572/3,624 = 98.5651%**. The 63 snapshotted files did
+not change during the run. Evidence is in `implementation/evidence/09-slice2-round5/`.
+`git diff --check` and `verify-evidence.py` both exit 0. This supersedes gate 4 for
+the current source.
+
+**Open decisions from round 5 (none is an operator blocker):**
+1. Hook launch argv: Go walks the process tree and Pi passes `--argv`. The Rust hook
+   records env only. The planned approach is a bounded `kern.procargs2` or
+   `/proc` read of the direct parent, timed against P4. It must be decided before the
+   cutover.
+2. The strict hint-directory owner check belongs in the daemon (DESIGN 9.1), which
+   does not exist yet.
+3. `BaseUnchanged` exhaustion maps to `Retry`/`Throttled`, because `ErrorClass` has
+   no closer class.
+4. The state root (`$HOME/.local/state/memory`) is an assumption until the install
+   layout is fixed.
+
+**Next action:** slice-2 work that needs no bucket: the daemon skeleton (lock,
+state layout and the 9.1 owner check, an index cache that may be deleted), and wiring
+the real planner and locator into the commit driver so the fake-store property 4
+uses actual capture. P2/P2b still need the acceptance bucket and token, and P5 still
+needs operator authorization.
+
+**Round 6 groundwork (parent, 2026-11-09):** stubs `src/{state,config,capture}.rs`
+declared in `lib.rs`; `crates/memory` gained serde, serde_json, sha2 and toml workspace
+dependencies (lock diff: only those four `memory` edges; `--locked` check and `deny bans`
+pass).
+
+**Round 6 (active; Sonnet, medium thinking; acknowledgements observed):**
+- Daemon state `6583b582-2d54-43d`: owns `crates/memory/src/{state,config}.rs`,
+  `tests/state.rs`, `implementation/14-daemon-state.md`. Config (deny_unknown_fields),
+  state dir modes, daemon lock, 9.2 durable envelope, machine id O_EXCL, hint-dir vetting.
+- Capture wiring `1d480dd6-9667-498`: owns `crates/memory/src/{capture,environment}.rs`
+  (Store semantics frozen), `tests/{harness,capture}.rs`,
+  `implementation/15-capture-wiring.md`. Real planner/privacy capture step into the
+  commit driver; property 4 and property 5 at the store sink against a fake store.
+
+**Round 6 results (parent-verified 2026-11-09):**
+- Daemon state `6583b582-2d54-43d` (completed, released): config with
+  deny_unknown_fields and a metadata-only token-mode check; `DaemonLock` via
+  `File::try_lock` (flock; `LockHeld` exit 75, not yet wired into `main.rs`); 9.2 envelope
+  (temp file, `sync_all`/F_FULLFSYNC, rename, dir fsync; every failure reads as
+  `Missing(reason)`); `prepare` needs the lock before sweeping `tmp/`; machine id
+  create-once via `hard_link` (never overwrites); hint-dir owner check against a probe
+  file's uid. Parent reread lock/durable/machine-id code; fmt 0; `tests/state` 22/22.
+  Open: std facts were verified against 1.98.0 rust-src (the pinned 1.99 has none); some
+  I/O failure branches are untested.
+- Capture wiring `1d480dd6-9667-498`: the first run aborted after a parent steer (48 min
+  with no code); resumed, it finished steps 1-2 only and is released. `capture()` (observe,
+  admit, plan, NeedWindows re-plan, read, transform, authorize, slice, `Commit<Published>`);
+  `Published` can only be built from `privacy::AuthorizedBody`; `FileSystem::stat` added;
+  `Store` unchanged. 8 table tests, including a protected-config canary absent from the
+  store with a positive control. Parent check: hashes match report 15; fmt 0; workspace
+  clippy 0; `cargo test -p memory` at 2,000 cases exit 0.
+  **Remaining:** property 4 with the real capture step on both engines (guard and
+  negative control), argv/env canary at the store sink, a NeedWindows assertion, and the
+  coverage of the NeedAuditRecheck/Blocked/Raced/Unavailable branches.
+
+**Round 7 (active; Sonnet, medium thinking; acknowledgements observed):**
+- Capture property 4 `22becdd8-ff3c-4dc`: owns new `tests/capture_property.rs` and
+  `implementation/16-capture-property4.md`. Property 4 on both engines driven by the real
+  `capture()` step, with an independent model, guard plus negative control, tamper control.
+- Capture sink `fd23e3c5-788b-475`: owns `src/capture.rs`, `tests/capture.rs` and a
+  Round 7 section of report 15. Public capture API is frozen (additions only). Launch
+  records into the commit, argv/env canaries at the store sink with a positive control,
+  NeedWindows assertions, and the Blocked/Raced/Unavailable/NeedAuditRecheck branches.
+
+**Round 7 result (both completed and released; parent-verified 2026-11-09):**
+- Capture property 4 `22becdd8-ff3c-4dc`: `tests/capture_property.rs` drives property 4
+  through the real `capture()` then `commit()` against a fake store, on both engines. It has
+  an independent reference, a store-reading oracle (9 tamper cases plus a positive control),
+  and a guard with negative controls. Its scope is 2 append sources, 4-byte pieces, identity
+  encoding and a synthetic filesystem. Liveness is waived once a foreign writer has parked
+  the owner.
+- Capture sink `fd23e3c5-788b-475`: `capture::attach_launches` (only `SanitizedLaunch`
+  becomes a `LaunchRecord`; digests de-duplicated). Argv, env and prompt canaries never
+  reach any stored object, with a transcript positive control. NeedWindows matching and
+  mismatching reads go through a recording seam. The failure branches have literal outcomes
+  and store nothing. `NeedAuditRecheck` is unreachable while audit evidence is always
+  `NotDue`, which is a known coverage gap. Nothing derives launches from hint scanning yet.
+- **Parent correction 1 (stale append index):** the property-4 worker found that after a
+  lost reply whose commit landed, `capture()` planned from a stale index (`Invalid(Overlap)`)
+  and had worked around it in the driver. The parent fixed `capture::append` so it uses the
+  index only when its position equals the remote's committed position (DESIGN 9.1, 9.3), and
+  removed the driver workaround. A reverted-fix mutant fails both engines (exit 101).
+- **Parent correction 2 (stale deletion flag):** gate 6 attempt 1 (seed 730207) failed
+  proptest property 4 ("removed source not recorded deleted") after a lost reply. The remote
+  entry's `deleted_at` is now authoritative, and the local flag counts only when the remote
+  has no entry. Seeds 730207, 730208 and 730209 pass. Attempt 1 is kept in
+  `evidence/10-slice2-round7/attempt1-stale-deletion-flag/`.
+
+**Integrated gate 6 (parent, unchanged wrapper, floor 98%):** seed 730207, 2,000 cases:
+**exit 0, all 12 subgates 0**. Nextest 291/291 with 2 skipped (P4 measurements). Coverage
+**4,361/4,444 = 98.1323%**, which is close to the floor, so new code must bring its own
+coverage. The 69 snapshotted files did not change during the run. Evidence is in
+`implementation/evidence/10-slice2-round7/`. `git diff --check` and `verify-evidence.py`
+both exit 0. This supersedes gate 5.
+
+**Slice-2 status: NOT accepted.** Done against fakes: hook, commit protocol, daemon state,
+capture wiring, property 4 with real capture, and property 5 at the store sink. Remaining:
+the daemon loop (lock wiring in `main.rs`, the 9.3 index rebuild, notify watcher, coalescer,
+15-min reconcile, 9.1 hint-dir owner check at start), hint-scan-to-launch wiring, the real
+filesystem adapter, zstd, and the P2/P2b R2 client. Open decisions 1-4 from round 5 still
+stand.
+
+**Next action:** a daemon-skeleton round (no bucket): `memory daemon` takes the lock first,
+prepares state, vets hints, rebuilds the index from a `Store` and runs reconcile over a real
+`FileSystem` adapter against the fake store, with tests that bring their own coverage.
+External blockers are unchanged: P5 authorization, and the P2/P2b bucket and token.
+
+**Round 8 groundwork (parent):** stubs `src/{realfs,daemon}.rs` declared in `lib.rs`;
+`cargo check --workspace --all-targets --locked` passes.
+
+**Round 8 (active; Sonnet, medium thinking; acknowledgements observed):**
+- Real filesystem `c0ac3590-5c38-4ed`: owns `src/realfs.rs`, `tests/realfs.rs`,
+  `implementation/17-realfs.md`. `RealFs: FileSystem` (trait frozen) and a bounded,
+  deterministic, non-following `walk` through `locate`. Synthetic temp dirs only.
+- Daemon skeleton `de6bf429-d347-4e9`: owns `src/daemon.rs`, `src/main.rs` (daemon
+  dispatch only), `tests/daemon.rs`, `implementation/18-daemon-skeleton.md`. Lock-first
+  startup, index rebuild, `reconcile_once` generic over `FileSystem`/`Store`, hint-scan
+  launch attachment, durable index/status. Does not depend on realfs; the binary never
+  simulates a successful capture.
+
+**Round 8 results (parent-verified 2026-11-09):**
+- Real filesystem `c0ac3590-5c38-4ed` (completed, released): `RealFs` (symlink_metadata,
+  NotFound gives `Ok(None)`, `FileId` = dev+ino+birth or `Birth::Unavailable`, `read` bounded
+  by `take(len)`) and a deterministic, non-following `walk` (depth 32, 500k entries) with
+  closed counts. Parent check: hashes match report 17; fmt 0; `tests/realfs` 11/11 at 2,000.
+- Daemon skeleton `de6bf429-d347-4e9` (released, **partial**): lock-first startup, rebuild
+  via `recover_base`, `reconcile_once`, durable index/status, hint scan. `memory daemon` runs
+  startup then exits 78 (lock held 75, config 2, other 1). 5 tests.
+- **Incident and parent correction:** the daemon change made `tests/harness.rs` spawn
+  `memory daemon` against the host's real `~/.local/state/memory`. It created an empty lock
+  file and two empty dirs there (no config, no data, no capture). The parent removed exactly
+  those, isolated the test in a temp state root (still asserting 78) and recorded the rule in
+  report 18. `cargo test -p memory` at 2,000 cases now exits 0.
+
+**Round 9 (all completed and released; Sonnet; acknowledgements observed):**
+- Daemon tests `77934662-df7c-468`: lost reply, foreign-writer parking, hint launch
+  attached once with the offset advanced only after landing, PauseHost, clock error,
+  damaged index/status, and Hegel and proptest daemon state machines with a guard and a
+  negative control. The parent killed a 20+ min run and steered the worker.
+- **Parent correction (daemon.rs, status write frequency):** profiling showed most of the
+  time under `write_durable`/`F_FULLFSYNC`. Status is now written at once when
+  `host_paused` or the parked list changes (and on the first round), otherwise at most
+  every 60 s, and always at shutdown. Durability is unchanged and no fsync-skipping seam
+  was added (report 18, correction 2).
+- Gate 7 attempt 1 (seed 730208) failed only coverage, at 97.6945%. It is kept in
+  `evidence/11-slice2-round8/attempt1-coverage-fail/`. Two test-only workers added tests
+  with literal expectations, and no `src/` change was made: coverage A `e23906e9-caf1-4c3`
+  (`tests/{capture,realfs}.rs`) and coverage B `9d218d67-e8fe-4d7` (`tests/daemon.rs`, 16
+  tests). They list the remaining unreachable lines with requested changes in reports 15,
+  17 and 18.
+
+**Integrated gate 7 (parent, unchanged wrapper, floor 98%):** seed 730209, 2,000 cases:
+**exit 0, all 12 subgates 0**. Nextest 341/341 with 2 skipped (P4 measurements), 1,026 s.
+Coverage **4,905/4,988 = 98.3360%**. The 73 snapshotted files did not change during the
+run. Evidence is in `implementation/evidence/11-slice2-round8/`. `git diff --check` and
+`verify-evidence.py` both exit 0, and `~/.local/state/memory` is absent. This supersedes
+gate 6.
+
+**Open items from rounds 8-9 (none is an operator blocker):**
+1. The daemon properties take about 6 min at 2,000 cases (real F_FULLFSYNC per round).
+   Options: smaller clock steps, or a simulation-only durability seam in `state.rs`.
+2. At 50 cases, the property coverage guards (commit_protocol, capture_property, daemon)
+   fail because the required shapes do not arise. They pass at the gate's 2,000 cases.
+   Ad-hoc `llvm-cov` runs must use 2,000 cases or `--ignore-run-fail`.
+3. Lines that cannot be reached without a seam: capture usize conversions,
+   authorize/admit re-check arms and planner arms; realfs `read_dir`/`file_type` faults;
+   daemon:218/404/542; state I/O fault arms. A small dead-code cleanup pass could remove
+   them.
+4. Round-5 open decisions 1-4 (hook argv, daemon owner check (now implemented in
+   state.rs), BaseUnchanged class, state root) still stand. Item 2 is resolved by
+   `StateDir::vet_hints_dir`.
+
+**Slice-2 status: NOT accepted.** Done against fakes and synthetic dirs: hook, commit
+protocol, daemon state, capture wiring, property 4 with real capture, property 5 at the
+store sink, real filesystem adapter and walk, daemon skeleton (startup and
+`reconcile_once`). Remaining: the notify watcher and coalescer timing, wiring
+`RealFs`/`walk` into `memory daemon` (the binary still exits 78 after startup), zstd, and
+the P2/P2b R2 client.
+
+**Next action:** a watcher/coalescer round plus wiring `RealFs` and `walk` into the daemon
+behind the fake store. Then commit the task-owned changes as a `gh stack` and run hosted
+CI. External blockers are unchanged: P5 authorization and the P2/P2b bucket and token
+(https://dash.cloudflare.com/).
+
+**Round 10 groundwork (parent):** stubs `src/{watch,resolve}.rs` declared in `lib.rs`;
+`cargo check --workspace --all-targets --locked` passes.
+
+**Round 10 (active; Sonnet, medium thinking; acknowledgements observed):**
+- Watcher `01e18367-66dc-424`: owns `src/watch.rs`, `tests/watch.rs`,
+  `implementation/19-watch.md`. Pure `Scheduler` over memory-core `Coalescer` plus a thin
+  notify `FsWatcher`; temp dirs only.
+- Resolver `07de85fd-6dde-426`: owns `src/resolve.rs`, `tests/resolve.rs`,
+  `implementation/20-resolve.md`. Symlink-chain facts, `to_source`, a `Sources`
+  implementation over `realfs::walk`, and an end-to-end synthetic-tree test into a fake
+  store.
+
+**Round 10 results (both completed and released):**
+- Watcher: `Scheduler` (pure, over memory-core `Coalescer`) plus notify `FsWatcher`; 16
+  tests including Hegel and proptest against an independent model; `watch.rs` 107/108.
+  Not wired into the daemon loop (report 19).
+- Resolver: `resolve_facts`, `to_source`, `SharedFs`, `WalkSources` implementing
+  `daemon::Sources`; 10 tests plus an end-to-end capture/commit into a fake store. The parent
+  added 2 tests (shared owner/profiles, unknown-owner count). `resolve.rs` 188/193 (report
+  20). Open: `walk` skips symlinks, so symlinked sources never reach `WalkSources`.
+
+**Integrated gate 8 (parent, unchanged wrapper, floor 98%):** seed 730210, 2,000 cases:
+**exit 0, all 12 subgates 0**. Nextest 369/369 with 2 skipped, 1,116 s. Coverage
+**5,200/5,289 = 98.3173%**. The 77 snapshotted files did not change during the run. Evidence
+is in `implementation/evidence/12-slice2-round10/`. `~/.local/state/memory` is absent.
+This supersedes gate 7.
+
+**PAUSED (operator request 2026-11-09: "pause at completion of the current slice").**
+Slice 2 cannot complete without P2/P2b (bucket and token), so the pause point is round 10
+gated. Slice 2 is NOT accepted. Remaining slice-2 work: wire `FsWatcher`/`Scheduler`,
+`WalkSources` and `SharedFs` into `memory daemon` (still exits 78 after startup), with the
+60 s tick and `ReadDir`/`ReconcileAll` execution; decide whether walk should report symlinks;
+zstd; the P2 R2 client; the hook argv decision. Nothing is committed. On resume, commit
+the task-owned changes as a `gh stack` and run hosted CI first.
+
+**Operator decisions (2026-11-09, answering the pause questions):**
+1. **P5 waived.** Slice 1 is not held on P5. Prefix-rewrite frequency is measured later from
+   the daemon's own replay counters (`Replay{WindowMismatch}`, `Replay{AdoptMismatch}`).
+2. **Bucket.** No separate acceptance bucket. Acceptance (P2/P2b, slices 2/2b/3) uses the
+   existing `agent-sessions` bucket with the `.env` credentials, and the bucket is cleaned
+   before rollout. This replaces DESIGN 6.1's separate acceptance bucket and fresh
+   production bucket.
+3. **Hook launch argv dropped.** The Rust hook records env facts only; no process-tree or
+   `kern.procargs2` read.
+4. **Symlinks are skipped** by the walk (counted, never captured). DESIGN 7.2's "resolve
+   every link" is to be corrected; the resolver's link handling stays as defence for paths
+   reached directly.
+5. **State root stays** `~/.local/state/memory` on both hosts.
+6. **`BaseUnchanged` exhaustion:** researched and measured as P11; decided as amendment A6
+   (new `Transient` class, full jitter, `known_ours`).
+7. **Slow daemon properties:** researched and measured as P12; decided as amendment A7
+   (production unchanged; test-only `SyncPolicy::None` plus a crash-point property).
+8. After research: finalise direction, align every project doc with the actual state, then
+   hand over to a new session.
+
+**Operations performed 2026-11-09 (operator-confirmed twice: "stop the current process,
+cleanup R2 and use that"):**
+- Stopped and disabled on this Mac: `agent-sessions-capture-experimental` (Go
+  `capture-v1 run`) and `com.agent-sessions.publication-refresh` (`launchctl bootout` +
+  `disable`, exit 0). `com.agent-sessions.publication-dashboard` left running: it reads
+  local DuckDB only. Plists are untouched; re-enable with `launchctl enable` + `bootstrap`.
+- Stopped and disabled on BC-01: user unit `agent-sessions-capture-experimental.service`
+  (`systemctl --user stop` + `disable`, exit 0; now inactive/disabled).
+- Still installed: Go capture hooks in Claude (8), Codex (6) and the Pi extension. They
+  write local hints/launch evidence into the Go spool only and never touch R2; with the
+  daemon stopped the spool grows (cap `max_spool_bytes` 8 GiB). They are removed at
+  cutover (DESIGN 18).
+- R2 inventory before deletion (ListObjectsV2, full): 435,620 objects, 15,157,294,405
+  bytes, oldest 2026-10-16, newest 2026-11-09T00:56Z; prefixes `capture-v1/` 353,722,
+  `v3/` 81,896, `delivery-artifacts/` 2; 0 multipart uploads. Inventory JSONL sha256
+  `4fec8738f28949c34b62beda23a1d456fb4ddcc29f85a9547f60fc2c2bcace09`.
+- Deleted `capture-v1/` (353,722, 1,384 s) and `v3/` (81,896, 247 s), DeleteObjects
+  batches of 1,000, zero per-key errors.
+- Kept: 2 `delivery-artifacts/<commit>/…/bundle.tar.gz` deployment bundles (13,939,328
+  bytes; one is the dashboard's runtime commit). They are not capture data; the contract
+  section 6 step 6 excludes unrelated objects. After-inventory: 2 objects, sha256
+  `b0571d6307c5bdb7f96cca1db47f344eb9286ab578c523f6d07e93d28f4ab812`.
+- Key lists are not in the repo (keys encode source paths); they were kept 0600 in the
+  session scratchpad, which is ephemeral. The deleted data is not recoverable from R2;
+  local sources on both hosts are untouched.
+
+**Handover 2026-11-09 (research done, direction final, docs aligned; nothing committed).**
+- Research (Sonnet, medium; acknowledgements observed; both released):
+  - P11 commit retry `6fa43f0a-129e-47b`: real R2 probe (889 requests under
+    `rust-acceptance/p9-<ts>/`, prefix deleted and verified empty) and a seeded simulation.
+    Parent reproduced the simulation exactly, confirmed R2 holds only the 2
+    `delivery-artifacts/` objects, found no credential/endpoint/account id in the files, and
+    ran the untested hybrid (rejected). `prototypes/P11-commit-retry.md`.
+  - P12 durable writes `4fb98828-4d5a-4e0`: APFS microbenchmark and end-to-end daemon
+    property runs on patched copies (421 s baseline, 14 s with sync skipped, all 30 pass).
+    Parent checked logs, SDK barrier semantics and that `rust/` is unchanged.
+    `prototypes/P12-durable-state-writes.md`.
+  - Both were renamed from P9/P10 because DESIGN 16 already uses those ids (amendment A8).
+- Direction: `docs/rust-rewrite/design-amendments-20261109.md` A0–A8. DESIGN.md, AGENTS.md
+  and the contract are hash-pinned and not edited.
+- Docs aligned: README, docs/README, security, gap register (revision recorded in
+  `handoff-documentation-identities.json`), rust/README, quality-gates, rust-rewrite README,
+  P5, 00-scope, reports 12, 18, 20. `verify-evidence.py` 0, `git diff --check` 0.
+- Source: `rust/` unchanged since gate 8 (all 77 snapshot hashes match), so gate 8 remains
+  the current integrated result. `~/.local/state/memory` absent.
+- Host state: Go capture daemons (Mac, BC-01) and Mac refresh job stopped and disabled; Go
+  hooks still installed and filling the local Go spool (4.8 GiB of an 8 GiB cap on the Mac;
+  at the cap the Go hook should refuse further spool writes, unverified). BC-01 is reachable
+  only when the Mac SSH agent has a key loaded (`ssh-add -l` was empty at handover).
+- Gaps found and not yet fixed: `disposition::backoff` has no jitter although DESIGN 11.2
+  requires it; a late `current.json` write from an earlier failed capture is misread as
+  `Foreign` (A6 fix).
+
+**Next actions for the new session (in order):**
+1. Commit the task-owned changes on `rust/scaffold` as a `gh stack` and run hosted CI
+   (`gh run watch <id> --interval 60 --exit-status`). Base CI run 41988501354 had a failing
+   Go fuzz job, so it is not a green baseline.
+2. Implement A7: `SyncPolicy` in `state.rs`, `None` in the daemon property `Sut`, a
+   default-is-`Full` test, and the crash-point property. Rerun the daemon tests at 2,000.
+3. Implement A6: `ErrorClass::Transient`, full-jitter backoff for `Offline`/`Transient`,
+   `Throttled` honouring `Retry-After`, `known_ours` in `verify`, with a test that drives the
+   late-write interleaving.
+4. P2: choose the S3 client against the `agent-sessions` bucket under `rust-acceptance/`
+   (amendment A2), then zstd, then wire `FsWatcher`/`Scheduler`, `WalkSources` and
+   `SharedFs` into `memory daemon` with the 60 s tick.
+5. Integrated gate (new evidence dir, next seed 730211), then slice-2 exit: a day of this
+   Mac's sessions captured. Remove the Go hooks only at cutover (DESIGN 18 step 2).
+6. Unmeasured: P12 on BC-01 (Linux fsync cost), natural-sleep P6.
+
+- Checkout: `/Users/mm/dev/memory`, initial branch `main`, base
+  `57d8400f632ab47a81e34d060f86d3687123153e`; parent created stack
+  `main ← rust/scaffold` with `gh stack init --base main rust/scaffold`.
+  Current branch is `rust/scaffold`; HEAD is still that base. All rewrite changes
+  remain **uncommitted**, nothing staged or pushed, and no Rust PR/hosted CI was
+  created. At initial inspection open PRs were dependency updates #32/#33; that list
+  was not refreshed during documentation handoff. Base CI run
+  https://github.com/mich-murphy/memory/actions/runs/41988501354 failed its Go fuzz
+  job; other six jobs passed. This is inherited evidence, not a green Rust baseline.
+- Pre-existing unstaged changes: AGENTS.md, README.md, docs/README.md,
+  docs/production-gap-register-20261102.md, docs/security.md,
+  docs/session-capture-contract.md, and this handoff (926 added/changed lines).
+  Pre-existing untracked: DESIGN.md and docs/rust-rewrite research. No staged changes.
+  Preserve all; frozen reports/experiments are not worker output.
+- Authority: implement and test the Rust replacement in slices; no incidental live
+  ingestion, service/hook changes, installs, credential reads, archive migration or
+  deletion. Do not re-enable capture. BC-01 synthetic scratch build only for the
+  explicit slice-0 gate. Acceptance bucket/token remain external prerequisites;
+  never substitute the existing archive credentials.
+- Acceptance: DESIGN.md sections 15–17, all nine development gates, independent
+  property oracles and mutation sensitivity, source-bound evidence, then actual
+  writer→reader→unchanged importer→event index→report. Native/R2 and seven-day
+  shadow gates on each host are distinct from offline checks and cannot be claimed
+  from unit tests. Slice 0 precedes slice 1; P1/P5 precede slice 1 and P2 precedes
+  slice 2.
+- Capabilities: subagent launch, status/tool activity, resume and in-flight steering
+  are available. Requested model and medium thinking are supported tool arguments;
+  startup/model success must still be observed. Git and gh stack available.
+- Parent owns this brief, acceptance, integration review and shared documentation.
+  Workers own disjoint implementation/prototype paths (assignments recorded below).
+  At session start no implementation workers were recorded. Historical challenge
+  workers are completed research, whose files remain frozen.
+- Evidence: implementation reports under `docs/rust-rewrite/implementation/`,
+  prototype reports/scripts under `docs/rust-rewrite/prototypes/`. Reports must
+  include exact commands, exit statuses, source hashes, limits and remaining gaps.
+  No secrets, private paths or transcript content in evidence.
+
+#### Ownership / progress
+
+- All dispatched workers used actual `openai/gpt-6.1-sol`, requested medium.
+  Startup and intermediate work were observed; aborts were resumed under the
+  same ownership, not silently taken over. Current states:
+- Scaffold `a113d593-47d7-430`: completed and explicitly released all paths;
+  parent owns workspace integration, Cargo, flake, gates and new Rust workflow.
+- Prototypes `7bece277-e8ba-48b`: completed/released all prototype paths.
+  Parent verified hashes/deterministic outcomes with `verify-evidence.py` (0).
+- Mapper/privacy `4beb9bdb-26c5-4c7`: completed/released reports 01/03,
+  privacy module and tests. Parent reviewed mapping and implementations;
+  exact source-qualified results are in those reports, not whole-system proof.
+- Mechanics `0c64a3da-6f9f-492`: completed coverage correction, explicitly
+  released again; five new external boundary tests, no production edits.
+- Privacy reviewer `3c71c653-aade-40c`: completed/released twelve independent
+  fixtures, report 05 and minimal Args parity fix after explicit delegation.
+- BC retry worker `df3c0ad7-0d12-406`: completed and explicitly released report
+  00/evidence03 after final-toolchain native probe passed. Actual gpt-6.1-sol,
+  medium requested; startup and progress observed. Prior scaffold worker had
+  released paths but its session retention expired; replacement was explicit.
+- Read-only handoff auditor `ec236af4-f61c-488`: completed, no owned/reserved paths;
+  parent applied its bounded navigation/security/report-status corrections.
+- All workers are completed/released; no background task or CI watcher remains.
+  Parent owns implementation/evidence paths.
+- Locator and manifests have not been assigned or implemented.
+- These pure prerequisites were staged without claiming slice-1 entry/acceptance.
+  The final BC native probe is now green; P5 evidence remains missing. Neither the
+  existing pure ports nor their tests waive the remaining prerequisite gates.
+- Parent: initial diffs reconciled; design and initial scaffold reviewed, prototype
+  source identities verified, frozen 33-file baseline unchanged. Owns brief,
+  integration wiring and independent acceptance. Reviewed privacy/mechanics and
+  correction diffs; reran invalidated canonical checks on a stable source snapshot.
+
+#### Decisions / verification
+
+- DESIGN.md read in full; contract goals, quality gates and challenge synthesis/DDIA
+  read. Final design supersedes historical Sonnet worker choice: current user asks
+  for gpt-6.1-sol medium. No design numbers changed.
+- No slice accepted yet. Isolated scaffold and corrected integrated local gates
+  passed; final-toolchain native BC Hegel probe also passed after the SSH retry.
+  P2/P2b need an operator-created acceptance bucket/token; natural-sleep P6 and
+  seven-day runs require elapsed observation, not simulation relabelled as live.
+- Parent review (`implementation/02-parent-review.md`) identified and the mapper
+  independently confirmed: published protected-content digests/offsets must be
+  over transformed bytes; an existing raw-hash object may have different encoded
+  bytes and its actual descriptor must be verified before publication; 64 bounds
+  delta traversal, not the retained checkpoint piece count. These are correctness
+  constraints for implementation, not changes to measured targets or decided formats.
+- Mapper's final F2/source-kind/fixture map reviewed. Known required artifact
+  families missing from illustrative enum need explicit variants/subtypes, not
+  silent unknown-kind treatment. No broad arbitrary-path fallback is allowed.
+- Mechanics corrections acknowledged and observed in source/tests: quoted opaque
+  ETags, dotted kind names, canonical hashes/schema constraints, snapshot audit
+  mismatch repair, exact `session_id` wire golden, and clippy correction. Current
+  2,000-case normal tests and actual compiled production-source mutation proof
+  passed. A manual bad-Plan control was insufficient and was supplemented, not
+  misrepresented as the actual mutation proof.
+- Privacy corrections acknowledged and observed: preclone bounds, canonical
+  capability binding, typed consumed rule table/digest, URL parser validation,
+  TOML native value retention, duplicate-strict lossless JSON numeric handling.
+  Parent-authored `parent_privacy_review.rs`: canonical pinned Nix **6/6 pass,
+  exit 0** after raw_value wiring. Own properties/doctests and integrated checks
+  passed on the recorded source; Args correction below invalidates affected prior
+  evidence. No actual sink/daemon privacy acceptance claimed.
+- Coverage toolchain repaired: official Rust 1.99 + matching LLVM23 tools pinned
+  independently. Instrumented hello and cargo-llvm-cov upstream tests passed;
+  parent verified original nixpkgs/Go lock node unchanged. Source-isolated scaffold
+  measured 49/50 lines (98%); the failed integrated attempt and corrected pass are
+  both recorded below.
+- Ownership resolved from actual worker transcript before wiring: scaffold added
+  url/raw_value and released Cargo; parent owns subsequent integration. No
+  overlapping source edits were performed.
+- Parent added `.github/workflows/rust.yml`: native Linux x86_64/ARM and Mac gates,
+  SHA-pinned actions, read-only permissions, preserved seed/status artifacts.
+  Canonical `make actionlint` and pedantic zizmor on new workflow **exit 0**;
+  zizmor was offline mode. Workflow configuration is NOT hosted CI evidence.
+- Initial final-toolchain BC retry failed SSH signing/publickey (255). On operator
+  request, authentication recovered and a fresh-scratch check passed using the
+  exact final flake/lock and official Rust 1.99/LLVM23.1.1. Earlier nixpkgs-toolchain
+  evidence was not substituted for this new check; actual BC architecture is x86_64.
+
+#### Integrated gate history and final correction
+
+Parent ran the unchanged integrated wrapper at 2,000 cases, seed 730107:
+**all subgates passed except coverage (exit 1)**. Coverage was 1,261/1,363 lines,
+92.5165%, below the independently measured scaffold floor 98% (49/50); floor is
+unchanged. All 43 source-snapshot files stayed unchanged during this run. Full
+logs, source snapshot and missing lines are under `implementation/evidence/01-integrated/`.
+Scaffold-only evidence is separately under `evidence/00-scaffold/`; parent checksum
+verification passed. Do not conflate the two source states.
+
+- Scaffold `a113d593-47d7-430` completed and explicitly released remaining paths,
+  including Cargo manifests/lock, scripts and memory/xtask diagnostics. Final
+  native BC official-toolchain probe subsequently passed (evidence03 below).
+- Privacy `4beb9bdb-26c5-4c7` completed/released: canonical focused tests,
+  2,000-case properties and compile-fail doctests passed. Earlier clippy blocker
+  was corrected by mechanics owner and integrated strict clippy passed.
+- Mechanics was explicitly resumed for coverage correction, completed/released;
+  external tests verify brands, schema, timing, duplicate completion and rules replay.
+- Independent privacy reviewer found scalar/object-leaf Args over-redaction against
+  Go keepArgs. Parent delegated minimal fix, reviewed regression, then advanced
+  transform version to `memory.privacy/2` and refreshed the digest golden. Reviewer
+  completed/released. Prior privacy hashes remain historical, not current proof.
+
+Final parent unchanged canonical wrapper: **exit 0**, 2,000 cases, seed **730108**.
+All subgates passed; **66/66 nextest**, **5/5 compile-fail doctests**, actual compiled
+source mutation killed by both engines; coverage **1,338/1,363 = 98.1658%**, immutable
+floor **98%**. No exclusions/removed assertions. All **45** captured source files
+unchanged during run. Evidence: `implementation/evidence/02-corrected/`; detailed
+independent review/limits: `implementation/02-parent-review.md`. Parent baseline
+verification and diff whitespace checks both 0; 33 frozen identities unchanged.
+
+#### Verified BC retry
+
+Operator-requested SSH retry succeeded. Final pinned native BC synthetic gate:
+**exit 0**, official Rust **1.99.0**, LLVM **23.1.1**, Hegel **0.52.0** static engine,
+**2,000 cases**, seed **730052**, Linux **x86_64**, not ARM. One selected positive
+property passed; deliberate wrong research property filtered as in the original
+probe. Default-PATH probe 127 was absent cargo outside Nix, not authentication.
+
+Parent independently inspected compiler/test output and scripts, checked all
+artifact checksums, compared remote-returned inputs to local source hashes, and
+reverified all 45 local green-gate source files unchanged. Evidence:
+`implementation/evidence/03-bc-recheck/`. **SSH/final-toolchain native probe blocker
+cleared**, not full integrated Linux/ARM/live acceptance. No services, capture or
+production source changed; no unchanged local full suite rerun.
+
+#### Next session — ordered continuation
+
+1. Read DESIGN.md in full/section 0, AGENTS.md, this active brief and
+   [parent review](rust-rewrite/implementation/02-parent-review.md). Preserve the
+   pre-existing dirty files and frozen research. Do not restart scaffold/toolchain
+   repair or retry an already-cleared SSH blocker merely because an old report says
+   pending. All worker paths are released; a new scoped assignment is safe, but
+   worker IDs may be beyond their resumable retention window.
+2. Reconcile `git status --short`, HEAD and actual diffs. Run `git diff --check` and
+   `python3 docs/rust-rewrite/implementation/verify-evidence.py`. Verify artifact
+   checksum manifests and compare current source hashes with
+   `docs/rust-rewrite/implementation/evidence/02-corrected/source-before.json` before
+   reusing the local green result. That snapshot is HEAD **plus dirty-file hashes**;
+   the archive is an overlay, not a replacement for the repository. Existing Go host
+   health was not freshly checked. Do not infer permission for live probes/changes.
+3. Resolve **P5**: identify an approved safe historical offset/prefix-hash metadata
+   input and measure prefix-rewrite frequency. If unavailable, record the precise
+   missing input; do not replace real-corpus evidence with synthetic results or read
+   private transcripts incidentally. P1 synthetic evidence exists, with limitations.
+4. Prepare **P2** once the separate acceptance bucket/scoped token is provisioned
+   (https://dash.cloudflare.com/), never use production credentials. Complete actual
+   Rust **P4** footprint and natural-sleep **P6** before slice 2; C/Python analogues
+   and simulated clocks do not satisfy them. **P8 and P2b are informational, not
+   blocking gates**; missing P8 data must not block slice entry.
+5. Continue the implementation below with gpt-6.1-sol medium workers, disjoint
+   ownership, parent review and unchanged canonical gates. Use the pinned Nix
+   commands in [quality gates](quality-gates.md#rust-rewrite-gates-implementation-in-progress);
+   local properties require 2,000 cases and coverage stays at or above 98%.
+
+| Delivery stage | Implemented / remaining |
+|---|---|
+| Foundation | Workspace, strict gate tooling, pure types/planner/coalescer/privacy/launch ports and independent tests implemented. Local gates and BC synthetic probe verified; no full slice/release acceptance recorded. |
+| Core (slice 1) | Locator, delta/checkpoint manifests, hint parsing and full required property/Go-regression counterpart coverage remain. Acceptance-map targets are not implemented counterparts. |
+| Mac daemon (slice 2) | Lock, real hooks/hints/watchers, durable index/status, reconciliation, chosen client, object publication and conditional commit/recovery protocol; fake-store faults and acceptance-bucket runs; append sources for all three agents and one-day totals. |
+| Reader (slice 2b) | Actual authoritative reader, restore/export, unchanged importer/index/report journey, seven-day Mac shadow comparison. Reader crate is a placeholder. |
+| Linux/snapshots (slice 3) | BC-01 integration, SQLite/WAL/config/shared-store snapshots, deletions, launch evidence, loss-window counts, P9/P10, footprint remeasurement and seven-day BC shadow. |
+| Delivery/cutover | Selectively commit task-owned changes, run hosted CI, keep inherited Go fuzz failure distinct; controlled fresh-production-bucket cutover only after acceptance, then inventory/deletion per DESIGN section 18. No live or destructive action authorized by this handoff update. |
+
+No production code, runtime behavior or canonical gate configuration changed during
+handoff reconciliation. README/doc map, Rust guide, gate descriptions and worker
+reports now point here; older work/host records below remain historical.
+
+The original 33-file preservation check correctly flagged the four now-authorized
+navigation/security document edits. **Original `baseline-identities.json` is unchanged.**
+`implementation/handoff-documentation-identities.json` records exact before/after
+hashes for only README.md, docs/README.md, docs/security.md and the gap-register
+navigation banner. The evidence verifier now enforces those four exact revisions
+plus **29 unchanged baseline identities**, including DESIGN, AGENTS, contract and
+frozen research; it does not silently exclude changed files. Six isolated verifier
+checks pass, including rejection of changed research, unrecorded doc edits, expanded
+exception scope and false original hashes.
+
+Handoff checks: artifact checksums for all four prior evidence sets passed (103
+files); all 45 integrated Rust source hashes still match; 109 local documentation
+link targets exist; `git diff --check` and the evidence verifier pass. Logs/replay
+script are in `implementation/evidence/04-handoff/`. A full Nix shell preparation
+hit the tool's 60-second cap before running checks while restoring dependencies;
+that attempt is recorded, not green. The small checks then passed using the exact
+Python 3.14.8 component resolved from the same locked nixpkgs input. No quality
+threshold/test timeout was changed and no unchanged Rust/Go suite was rerun.
+
+No commits, pushes, application installs, service changes, ingestion, archive
+cleanup or credential reads in this cleanup. All workers and task commands ended.
+
+## Historical operating ledger
+
+The following dated checkpoints preserve earlier observations and instructions.
+They are **not current Rust assignments, current host-health claims, or renewed
+operating authorization**. Use the active brief above for continuation.
+
+### November 7: direction change, Rust rewrite designed
+
+**Historical status at design approval (superseded above): design final, implementation not yet started; Go candidate recorded running on both hosts.**
+
+Revision, 2026-11-07 (later the same day). Six Sonnet reviewers challenged the design
+(`docs/rust-rewrite/challenge/01-06`), the parent synthesised and cross-checked the
+blockers against DDIA 2e (`00-synthesis.md`, `07-ddia-crosscheck.md`), and the operator
+decided: plaintext storage, one fresh shared bucket for both hosts, sessions never
+deleted, reader in scope (slice 2b), delta manifests with a checkpoint every 64, session
+opt-out retired, and none of the existing R2 data kept or migrated. DESIGN.md was
+rewritten for all ten blockers and the majors; its section 20 maps each finding to a
+section. The bullets below describe the original approval and are superseded where
+DESIGN.md differs (local state is now section 9, hint log is per-day files).
+
+Original startup plan at that checkpoint (historical, not current assignments):
+
+1. Read DESIGN.md section 0.
+2. Slice 0 (section 17) and the prototypes that need no R2 (section 16: P1, P3 to P8)
+   can start at once with Sonnet workers.
+3. External prerequisite: the operator creates an acceptance bucket and token (section
+   6.1). P2 (S3 client) and P2b need it; slice 2 needs P2.
+4. The one existing session opt-out record is removed at cutover (section 18 step 3),
+   not before, because the running Go path still honors it.
+
+Checks run for the revision: `manifest_cost.py` rerun (4,650 sessions, 27,683 captures,
+4.01 GB; full rewrite 457 MB, delta 29 MB). No code, gates or live systems were touched.
+
+The operator reviewed the Go candidate and directed a Rust rewrite. The design is
+[DESIGN.md](../DESIGN.md) at the repository root; its section 0 is the entry point for a
+fresh session. Evidence, reviewer reports and experiment scripts are in
+[docs/rust-rewrite/](rust-rewrite/). What changed in direction, all measured on this Mac
+on 2026-11-07:
+
+- Upload unit is an append piece per session window, not a whole source-epoch object.
+  Whole objects cost 10.7x the bytes on Claude history and 155x on Pi.
+- No spool, no SQLite job tables, no unix socket, no failure file. Three local files:
+  operator config, an append-only hint log the hooks write, one rebuildable index snapshot.
+- Hooks and filesystem notifications drive capture; a 15 min safety reconcile verifies.
+- Window defaults quiet 60 s, cap 300 s. Scope ends when `current.json` is durable.
+- Standards: adapted BeautifulRust lint table, Hegel property tests (verified building on
+  the Mac), `cargo-deny`, nextest, schema drift, monthly mutants on core.
+
+Nothing in the November 6 checkpoint below is an instruction for the Rust work. The Go
+operating steps, authority and containment commands remain valid for the running Go paths.
+The next action at that checkpoint was slice 0 and the prototypes. That startup work
+has since progressed; the active Rust brief above is the current continuation point.
+
+### November 6 (20:57Z Nov 5): resume here
+
+**Status: merged and running live on both hosts; not yet operationally accepted.**
+Mac step 3 has passed. BC-01 step 3 is complete except for two Codex checks, which wait on
+an operator approval. Step 4 (combined operation and budgets) has not started. A fresh
+session should read this subsection, then the
+[contract](session-capture-contract.md), then the dated entries under
+[Production delivery — November 4](#production-delivery--november-4). The newest entries
+are at the top of the wave 4 operating block.
+
+| Area | State at 2026-11-05 20:57Z |
+| --- | --- |
+| Source | `main` = `57d8400` (PR #53). The local checkout was fast-forwarded to it. This handoff is the only uncommitted change. Open PRs: only dependabot #32 and #33. |
+| Mac capture | LaunchAgent `agent-sessions-capture-experimental` is enabled and running, pid 48472 since 17:52:43Z. Binary `dc361b24…` (`57d8400`), launcher `91a49ec3…`. Coordinator 0.13 cores averaged over 3 h. Jobs: 21,610 published, 511 superseded, 1 pending (in flight). 0 quarantined, destination unpaused. Payloads 2,778 MiB of 8 GiB; queue 1,300 MiB. |
+| BC-01 capture | systemd user unit enabled and active, pid 224893, 0 restarts. Binary `a572a0bd…` (`57d8400`). 0.06 cores averaged over 2.5 h. Jobs: 47,788 published, 58 superseded. 0 undelivered, 0 quarantined. Payloads 930 MiB of 6 GiB; queue 1,447 MiB; 38 GB free. |
+| Mac analytics | Refresher (pid 19096) and dashboard (`http://127.0.0.1:8766/`, HTTP 200) run source `f94670a` (`tools/` is identical to `57d8400`). **Degraded, open (item 1 below).** |
+| Hooks | Mac: Claude, Codex and Pi all proven live. BC-01: Claude and Pi proven. **BC-01 Codex 0.163.0 hook trust is stale** (a bypass probe shows the hooks work). |
+| Privacy | One Codex exclusion record on the Mac (from the step-3 probe). By design (`exclusion.Registry.Excludes`, pinned by `TestRuntimePrivacyScopesAggregatesAndUntrustedIdentity`), it denies **all** Codex shared resources under `~/.codex`: about 7,900 active `policy_denied` discovery issues, and no Codex resource captured since 12:02:55Z. Do not delete the record: that would publish the excluded session's rows inside the shared Codex SQLite stores. BC-01 has 0 exclusion records. |
+
+**Authority (operator, 2026-11-04):**
+- Allowed:
+  - operating steps 1–4 (activation, acceptance, BC-01 SSH and R2 inventory);
+  - publishing branches and PRs, CI, and merging once green.
+- Excluded:
+  - step 5 (final defaults, legacy retirement, key deletion, reset);
+  - release tags;
+  - any reset of BC-01's queue;
+  - enrichment or epoch retention changes without a measured design and operator approval.
+- Containment when a regression appears:
+  - Mac: `<wrapper> capture-v1 service --action stop --apply --executable <wrapper> --config ~/.config/agent-sessions/capture-runtime.json`, then `launchctl disable gui/$UID/agent-sessions-capture-experimental`.
+  - BC-01: the same `service stop --apply` command.
+  - `<wrapper>` = `~/.local/libexec/agent-sessions-capture/agent-sessions`.
+
+**Working rules learned in this rollout:**
+- Report aggregates only. Never print identities, transcripts or credentials.
+- Open queue databases read-only (`file:...?mode=ro`).
+- BC-01 has no `sqlite3` CLI. Run `/usr/bin/python3` through `ssh bc-01 sh -s < script`.
+- The local login shell is fish, so wrap POSIX shell in scripts.
+- **Never write Codex `trusted_hash` entries.** Re-trusting is an operator action in Codex `/hooks`.
+- `--dangerously-bypass-hook-trust` is a per-invocation diagnostic only.
+- Probes are throwaway "Reply with the single word OK" sessions run in an empty temporary directory:
+  - Codex: `codex exec --skip-git-repo-check -s read-only`.
+  - Claude and Pi: `claude -p` / `pi -p`.
+- Outage simulation without root:
+  - Mac: `sandbox-exec` with outbound IP denied, plus `taskpolicy -b`.
+  - BC-01: `systemd-run --user -p RestrictAddressFamilies=AF_UNIX`. `unshare -rn` is blocked by AppArmor.
+- Measure CPU as a `ps -o time=` delta under the real supervisor. Background QoS changes Mac CPU about 3×.
+- Go, Python builds and tests run only in the private Docker harness (`launch.py`), never on the host.
+- The shared validation semaphore was retired on 2026-11-05. `~/.config/agents/validation.md` no longer exists.
+- Private evidence root: `~/.local/state/machines-validation-pilot/memory-delivery-20261102/` (`RUNBOOK.md`, `WAVE4-RULES.md`, `launch.py`, `reports/`, `scripts-*`).
+
+**Next actions, in order:**
+1. **Diagnose the refresher regression first** (it started after 18:38Z; nothing has been changed yet).
+   - BC-01 endpoint `process_failed` since its 20:45:17Z attempt. Last success was at 18:38:00Z.
+   - Head failures `current-unreadable` first appeared at 19:58Z. At 20:57Z they stood at 66: 46 Mac and 20 BC-01, all Pi and Codex resources that had been imported before.
+   - The Mac endpoint sweep slowed from about 19 minutes to about 2 hours (completed 18:43Z, then 20:45Z).
+   - A manual first page of `capture-v1 current-heads` with `capture-reader-bc01.json` at 20:55Z returned rc 0 in 22 s with 232 heads and 6 failures. So this is intermittent, or it happens on a later page.
+   - `run()` discards stderr, so reproduce one full paginated sweep with aggregate output to find the failing page or exit code.
+   - Suspects:
+     - per-head 5 s `CurrentHead` timeouts or R2 throttling with about 57k targets;
+     - the 300 s per-process timeout;
+     - load.
+   - This blocks step 4 freshness. The dashboard must not be described as healthy while it persists.
+2. **BC-01 Codex.** Operator: on BC-01 run `codex`, open `/hooks` and approve the 6 agent-sessions hooks. Then:
+   - run a normal (non-bypass) Codex probe and confirm a hook-driven capture (hints and native-evidence directory mtimes change, the job publishes);
+   - run a Codex privacy-exclusion probe (`AGENT_SESSIONS_DISABLE=1`) mirroring the Mac. Expect an exclusion record and no queue rows or analytics target. Codex shared resources on BC-01 will then be denied by design.
+   - Then record BC-01 step 3 as passed.
+3. **Step 4, combined operation.** Reconcile both inventories and run fresh-reader sweeps. Measure and agree budgets for:
+   - coordinator CPU: Mac about 0.13–0.29 cores, BC-01 about 0.06;
+   - refresher CPU: about 0.47 cores at `--interval 60`;
+   - refresher sweep duration and freshness;
+   - BC-01 discovery generation time: about 5 minutes, which is the wait for a hookless session;
+   - largest records;
+   - spool and retention horizon.
+4. **Decisions that need operator approval** (record them; do not implement unilaterally):
+   - **Epoch retention for in-place-rewritten artifacts.** Every unproven rewrite starts a full new epoch, and the latest manifest keeps all sealed epochs.
+     - Mac `thread_history_1.sqlite`: 6 epochs / 1,232 MiB encoded, about 205 MiB per Codex run (now frozen by the exclusion).
+     - BC-01: 4 epochs / 91 MiB.
+     - `~/.claude.json`: 206 epochs in 8 days.
+     - Two targets (one per host) are `export_too_large` against the refresher's 768 MiB `--max-bytes`.
+     - Old job rows keep full manifests, so queue manifests grow quadratically: Mac 578 MiB, against about 8 MiB for latest-only.
+   - Enrichment retention (earlier ER item).
+   - Whether shared multi-session agent stores (Codex SQLite, `history.jsonl`) should be captured whole at all.
+5. **Follow-ups**, not acceptance blockers:
+   - discovery change detection or cadence;
+   - refresher cost;
+   - `reclaim.go` mutation survivors;
+   - the burst-erase-newer mutant;
+   - macOS syncer test margin;
+   - blob-before-state layout;
+   - inbox inode-reuse limitation.
+
+### October 30 (historical): source integration complete; live operation not accepted
 
 **The PR/integration work is done. Memory has not been proved working live end to end
 on the merged source.** This documentation reconciliation does not deploy or activate it.
@@ -1280,9 +2193,783 @@ Operator request (2026-11-04):
   | 4 | `delivery/4-consumer` (`c38f77f`) | GAP-07/08 consumer |
   | 5 | `delivery/5-docs` | gap register, README index, this brief |
 
+- **Published:** stack #39, draft PRs https://github.com/mich-murphy/memory/pull/34 ←
+  https://github.com/mich-murphy/memory/pull/35 ← https://github.com/mich-murphy/memory/pull/36
+  ← https://github.com/mich-murphy/memory/pull/37 ← https://github.com/mich-murphy/memory/pull/38.
+  CI runs `41742160189` (#34), `41742170947` (#35), `41742181140` (#36), `41742194293`
+  (#37), `41742205567` (#38). The CI test matrix includes `macos-26`, which is the native
+  Darwin run.
+- **Wave 4 workers (step 3), all from `9220f28`, rules in private `WAVE4-RULES.md`:**
+  - DT `b0818be4-a557-4ae`, `fix/discovery-timeout` (`memory-wt/discovery-timeout`):
+    installed discovery timeout root cause and fix.
+  - WAL `d1379b0f-9cca-46a`, `fix/sqlite-wal-backup` (`memory-wt/sqlite-wal`): C4/P12
+    SQLite backup under a live writer.
+  - MO `1dcd7939-f9f4-4e6`, `test/model-optional-repair` (`memory-wt/model-optional`):
+    optional and repair objects in the model-history generator and oracle.
+  - Queued for the next free slot: hang-type mutants plus the redundant `publication.go:494`
+    guard; the repeated-rebase cost investigation.
+- **PR CI blocker (2026-11-04):** every stack layer fails `Tests` on at least one OS.
+  `internal/sessioncapture` hits the unchanged 600 s timeout under `make crap` on
+  ubuntu-24.04, arm and macos-26. `main`'s CI ran the package in 127–194 s; stack runs that
+  pass take 517–541 s. The dominant cost is layer 1's `TestSourceLimitIsTypedAndNotQuarantinedAsTransient`:
+  1030 real captures with O(sources) cost each, which is quadratic. It runs 4m48s–7m50s
+  alone on macOS CI. The local canonical green (372 s) did not predict CI-runner time.
+  - **Parent decision:** an unexported per-Queue source limit, defaulting to
+    `publication.MaxSources` and never above it, with no package global because the tests
+    run in parallel. The test exercises the same real capture path at a small limit, keeping
+    every assertion's intent, and cheap tests pin the 1024 default and reject invalid
+    values. This is not database seeding or skipped captures (option 3b stays ruled out).
+    Production behaviour is unchanged at the zero value.
+  - Worker SL `fix/source-limit-cost` (`memory-wt/source-limit-cost`, from layer-1
+    `ce7d913`). After it lands, the parent restacks layers 2–5 on top of it and reruns the
+    canonical check plus PR CI.
+  - MO is paused, because model-history growth spends the same package budget. It resumes
+    once the new margin is known.
+- **SL accepted and stack restacked (2026-11-04):**
+  - `aec56da` is byte-identical to snapshot `sl-1`.
+    - `sl-check2` exit 0: sessioncapture 435.3 s on layer 1 (medium, GOMAXPROCS=2).
+    - `sl-red1` RC=1 on a mutated default/bounds.
+    - `sl-mut1`: 11/11 killed.
+  - Top-of-stack port `sl-topcheck` exit 0: sessioncapture 282.6 s. The unchanged-baseline
+    comparison was not run.
+  - Layer 1 gained `cb38ac9` (cherry-pick `-x` of `aec56da`), and layers 2–5 were rebased
+    onto it. Two mechanical conflicts were resolved:
+    - `queue.go`: kept both test-only fields.
+    - `liveness_test.go`: kept `t.Parallel()`, `const limit = 32`, and the stricter
+      identity/sequence/PublicationID/source-count final check.
+  - The final tree `f710e4b` equals the `sl-topcheck` tree exactly.
+  - New heads: `cb38ac9`, `3d82ee8`, `70a464a`, `33603cc`, `88ea0f4`. They were pushed to
+    stack #39, and CI runs `41750085431`, `41750088224`, `41750100350`, `41750104317` and
+    `41750112805` started.
+- **Layer 1 CI `41750085431` green (all 7 jobs):** `make crap` sessioncapture 363.5 s
+  ubuntu-24.04, 356.4 s macos-26, 246.4 s arm (it was 600 s FAIL before the fix); syncer
+  (unchanged) 424.3 / 494.0 / 284.0 s.
+- **Restacked CI (2026-11-04):** layers 1–4 (`41750085431`, `41750088224`, `41750100350`,
+  `41750104317`) are green on all jobs. Layer 5 `41750112805` failed only on macos-26:
+  `internal/syncer` timed out at 600 s (running `TestLargePlainAndCompressedCaptureHasBoundedHeap`).
+  The stack makes no syncer code change.
+  - macOS syncer took 406–446 s on main and 494–600 s across the stack layers. sessioncapture
+    went from 150–164 s to 356–495 s. Layers 4 and 5 have identical code and differ by 60 s,
+    which points to a CPU-contention margin problem, not a hang.
+  - On medium `sl-topcheck`, the 95 new sessioncapture tests sum to about 214 s and the 219
+    pre-existing ones to about 165 s.
+  - **Decision:** reduce the new tests' CPU cost without weakening any assertion, rather
+    than rerunning until green.
+    - MO2 must first cut TestModelHistories' CPU by at least 40% with identical histories and
+      assertions, and its optional/repair additions must be CPU-neutral.
+    - Worker CM (`fix/ci-margin`, from `88ea0f4`) reduces the other heavy tests by at least
+      50% under race+cover, using the per-Queue knob precedent. No raw seeding and no skips.
+- **WAL (C4/P12) delivered:** `baf1d01` and `bdad5e0` on `fix/sqlite-wal-backup`.
+  - No torn snapshots were found. Concurrent-writer failures are now typed as
+    `ErrSQLiteSourceChanged`, and they are attributed to a change only when a recheck proves
+    the source moved.
+  - `wal-m2`: 11/11 mutants killed. Port `wal-c5` on `88ea0f4`: tests green, sessioncapture
+    267.1 s. Its `CHECK_RC=1` comes only from bare `go vet` unsafeptr findings in the
+    untouched `sqlite_authorized_vfs.go`; `make check` uses golangci govet, which reports
+    0 issues.
+  - Parent review returned one fix: `rejectSQLiteJournal` runs twice per check.
+- **Recovery after Pi reload (2026-11-04):** the reload cleared every worker record (DT,
+  WAL, MO2; CM had never started), and the Docker Desktop backend had stopped. Jobs
+  `dt-topcheck1`, `wal-c6`/`c7` and `mo-cpu11` were killed by the daemon loss and are not
+  evidence.
+  - Docker was restarted at its unchanged settings (Cpus 4, MemoryMiB 10240). MemTotal now
+    reads 64 KiB below the pin, so the `launch.py` guard accepts MemTotal within 1 MiB;
+    NCPU stays exact.
+  - Durable state recovered from disk: DT `acba80f` (`fix/discovery-timeout`), with the port
+    staged in `dt-top`; WAL `1421de3` (journal probe deduplicated, `wal-m3` 10/10 killed),
+    with the port staged in `wal-top`. Both snapshots (`dt-top1`, `wal-11`) are
+    byte-identical to the committed/staged trees.
+  - The parent relaunched `dt-topcheck2` and `wal-c8`. Fresh workers MO3 (model CPU, then
+    optional/repair) and CM (other heavy tests' CPU) were started with full briefs.
+- **WAL accepted (2026-11-04):** `baf1d01`, `bdad5e0` and `1421de3` on `fix/sqlite-wal-backup`.
+  `1421de3` probes the journal once per check, and its new test proves
+  `ErrSQLiteRollbackJournal` is never wrapped as `ErrSQLiteSourceChanged` (`wal-m3` 10/10
+  killed). Port check `wal-c8` (`wal-11` = `88ea0f4` + patch, medium): lint 0 issues,
+  adapters 9.8 s, safefile 1.0 s. `CHECK_RC=1` comes only from bare `go vet` unsafeptr
+  findings in `sqlite_authorized_vfs.go`, which is unchanged since `main` (`b68a412`); the
+  repository gate (golangci govet enable-all) is clean.
+- **DT accepted (2026-11-04):** `acba80f` on `fix/discovery-timeout`.
+  - Root cause: the installed discovery timeout on the Oct 29 queues was the pre-HintBatch
+    quadratic admission COUNT (L2, about 50 s at 30k), already fixed in the stack. At 30k
+    sources the base stack takes at most 4–6 s per call against the 60 s budget. The
+    remaining per-entry cost was rebuilding the exclusion registry and filesystem policy
+    set on every policy callback (about 25% of walk CPU).
+  - Fix: one lazily built policy snapshot per discovery call. Capture still rechecks policy
+    live, so an exclusion saved after the snapshot still prevents capture. Cold walk went
+    from 27.9 s to 13.4 s and the maximum call from 4.1 s to 2.1 s (`dt-prof1`/`dt-after1`).
+  - `DiscoveryComplete` is documented as current-sweep only (the Mac queue's
+    generation 56/completed 55 is that state) and pinned by a test.
+  - RED `dt-red1` (registry loads=184, want 1). Port `dt-topcheck2` (`88ea0f4` + patch,
+    medium) `CHECK_RC=0`: sessioncapture 286.3 s, cli 40.6 s. Parent scoped mutation
+    `p-dt-mut1`: 11/11 killed.
+  - Noted: `TestDiscoveryInstalledScale` is an env-gated measurement (`DT_SCALE`) that
+    skips by default; it makes no assertion.
+- **MO3 decision:** its profile shows the harness and oracle are under 10% of
+  TestModelHistories CPU. `Queue.Open` is about 31% (roughly 163 opens at about 79 ms;
+  `installBudgetTriggers` drops and recreates 20 triggers per open). The parent approved a
+  production change: skip trigger DDL only when `sqlite_master` holds byte-identical SQL,
+  and read `table_info` once per table. Each case gets RED tests, and the target is revised
+  to about 25–30%. CM baseline `cm-base2` (race+cover, medium): package 294.9 s wall,
+  345.5 s CPU.
+- **CM accepted in part; stack restacked again (2026-11-04):**
+  - Accepted test-only commits, byte-identical to `cm-2` (`cm-chk1` `CHECK_RC=0`):
+    `83c647f` (sealed 1024-source rebase fixtures; real MaxSources bound kept),
+    `5cf92c2` (at-ceiling inventory tests use the existing per-Queue `settledLimit`; default
+    pinned) and `7ddefcb` (smaller hint burst/inbox; inbox still crosses the real 1024 bound).
+  - **Rejected** `508c3de` (oracle seeds 12 → 6): it thins a property test.
+  - Evidence (race+cover, medium, interleaved A/B in one job): targeted tests about 120 s →
+    54 s CPU (`cm-ab2` rep2, without 508c3de); package 364.2 s → 247.7 s CPU, 320.7 s →
+    219.5 s wall (`cm-pkg3`, one pair under load). RED `cm-red1`–`cm-red3`: every rewritten
+    test fails its mutant except the burst test, whose final-state assertions cannot see a
+    lost newer observation (a limit of the original test, recorded).
+  - Not reducible test-side: TestCrashProcess (33 re-exec children) and the inbox bound
+    (1024 real files; `MaxInboxHints` is a package const).
+  - **MO3's Open schema-init change `c398748` declined:** correct and RED-covered, but
+    `mo-pab31` showed no package-level saving, and it changes schema init just before the
+    first upgrade of the real installed queues. Kept only on `test/model-optional-repair`.
+  - `7ddefcb` → layer 1 as `a0f0c44`; `83c647f`/`5cf92c2` → layer 2 as `22c237c`/`417d98b`.
+    Conflicts were only layer 3's `t.Parallel()` lines. Final tree `c0f1ac22` equals
+    `7ddefcb^{tree}` exactly. New heads `a0f0c44`, `417d98b`, `a28f270`, `4738df8`,
+    `a8bfde5`; CI runs `41774296803`, `41774297549`, `41774308069`, `41774310108`,
+    `41774320493`. Pre-restack heads are kept as `backup/pre-cm-*`.
+- **Stack #39 merged (2026-11-04):** after the CM restack, every layer passed CI on all
+  jobs (`41774296803`, `41774297549`, `41774308069`, `41774310108`, `41774320493`).
+  The tightest margin was macOS syncer at 530.1 s on layer 1 (main itself: 406–446 s);
+  sessioncapture took 246–449 s. The PRs were marked ready and merged atomically with
+  `gh stack merge 39 --merge` as `d975961`. `main`'s tree equals the tested `c0f1ac22`.
+  Post-merge `main` CI `41776192211` passed all 7 jobs, including macos-26.
+  - The active gh account `michaelmbc` has pull-only access; owner-only operations used
+    the logged-in `mich-murphy` token per command, with no global auth change.
+- **HM accepted (2026-11-04):** `0f19f9b` (`Publish` uses the exact `MarshalValidManifest`
+  bytes; the unreachable second size check is removed; `TestPublishRejectsOversizeManifestBeforeBackendAccess`
+  asserts the typed error with zero backend calls; RED `hm-pubred3`) and `096dc80` (step-budget
+  `TestHang*` tests). All 19 former hang-type timeouts are class (a), a missing fast test; no
+  liveness defect was found. `hm-mut3`: 19/19 KILLED in 1–6 s each. `hm-chk2` `CHECK_RC=0`.
+  The new tests cost about 4 s CPU under race against a 3 s budget; accepted, because
+  trimming saves about 1 s against a margin of about 70 s. The ordering note on
+  `TestHangAddColumnIfMissing...` matters only to the unshuffled mutation driver.
+- **RB accepted (2026-11-04):** `d5ff235` makes `sealSuperseded` linear with byte-identical
+  output (600-case property test against a verbatim copy of the old code; 5/5 RED in
+  `rb-red1`; `rb-mut1` 37 killed, 0 lived, 6 not viable). 256 active sources: 17.5 ms /
+  261k allocs → 0.33 ms / 1k (plain); 8 consecutive CURRENT moves at 256 sources:
+  1.65–1.9 s → 40 ms under race. The largest observed session has 379 sources.
+- **Step-3 integration `integration/step3` (from merged `d975961`):** clean cherry-picks
+  `ce6ef2d`, `4ce3d33`, `2dd8bbb` (WAL), `953def8` (DT), `a983e29`, `fd3faec` (HM),
+  `e75e9b4` (RB). Canonical gate `p-s3-canon1` on snapshot `p-s3-1`:
+  `CANONICAL_MAKE_CHECK_EXIT=0`, `SOURCE_POST_VERIFY_EXIT=0`, coverage PASS,
+  capture-acceptance OK (1 guarded skip), 1008 s wall.
+- **MO3 accepted (2026-11-04):** `806359a` adds `TestModelOptionalHistories` (12 histories,
+  164 ops; fake clock; no globals or `t.Parallel`; every scenario class is required to be
+  non-zero), byte-identical to `mo-61`, `mo-chk61` `CHECK_RC=0`, 6.1 s CPU under race+cover
+  (`mo-occ62`, budget 8 s). RED: missing withheld marker killed (`mo-redC2`); Optional skip
+  plus enrichment hold killed (`mo-redD`/`E`). **Limits:** optional payloads have three
+  overlapping protections, so dropping the rehold trigger, the Optional skip or the
+  enrichment hold alone is not observable at model level (`mo-redA2`/`B2`/`F`/`G2`
+  survived). Scoped mutation with this test alone: `reclaim.go` 15 killed / 11 lived /
+  4 timeouts (`mo-mut70`); `enrichment_selection.go` 36 / 13 / 0 (`mo-mut71`). The survivors
+  include the line 62 `payload_refs` backfill; they stay open. TestModelHistories is unchanged.
+  Cherry-picked as `c8b4aeb`; canonical gate `p-s3-canon2` on `p-s3-2`: both exits 0,
+  govulncheck clean, coverage and CRAP PASS, 874 s wall.
+- **Step-3 stack #46 published (2026-11-04):** PRs #41–#45, layers `step3/1-wal-backup`
+  `2dd8bbb`, `step3/2-discovery-policy` `953def8`, `step3/3-hang-mutants` `fd3faec`,
+  `step3/4-rebase-cost` `e75e9b4`, `step3/5-model-optional` `c8b4aeb` (top tree `5a5eb62e`
+  is the tree gated by `p-s3-canon2`). CI: layers 2–5 green on all jobs; layer 1 run
+  `41784370713` failed only on ubuntu-24.04-arm: `TestHintBurstCoalescesAndKeepsLatestBytes`
+  "runtime did not reach idle in 60s (lost wakeup?)" (shuffle `1793773024889103650`). That
+  test is already on `main` and is untouched by layer 1 (adapters only), so this is an
+  intermittent liveness failure. **Not rerun as a fix:** worker HB (`fix/hint-burst-liveness`
+  from `d975961`) is classifying it as a production lost wakeup, CPU starvation against a
+  60 s wall deadline, or a test defect, with RED/GREEN as applicable. Stack #46 merge waits on it.
+- **Hint-burst failure root-caused: test defect, not a lost wakeup (2026-11-04):**
+  `runtimeIdle` treated `superseded` jobs as unpublished, but production coalescing
+  (`acceptView` → `retireJobs`) legitimately supersedes an undelivered earlier job when
+  capture runs ahead of delivery (as on a contended runner). The predicate could then
+  never become true. Parent diagnostic (snapshot only, never committed), with a backend
+  gate holding writes until after the FINAL hints: 20 of 28 jobs superseded; old predicate
+  failed exactly as CI ("did not reach idle in 60s", 64.6/64.4 s, `p-hbdiag3`); new predicate
+  passed in about 5 s (`p-hbdiag2`). Ungated stressed runs had 0 superseded (`p-hbdiag1`,
+  deadline-cut after 5 passes), which is why HB's stress runs (`hb-rep1/2`, `hb-str1/2`,
+  `hb-pkg1`) never reproduced it.
+  - **HB accepted:** `d2a5638` (test only). Idle now requires no open source, ≥1 job, no job
+    outside {published, superseded}, and each session's newest job published (stricter than
+    before for the newest job). New deterministic `TestRuntimeIdleTreatsSupersededAsSettled`:
+    RED `hb-red2` on the old predicate, GREEN `hb-grn2`, `hb-chk2` `CHECK_RC=0`; byte-identical
+    to `hb-7`. The 60 s bound, stable-idle recheck, rows/attempts and exact-bytes checks are
+    unchanged.
+  - Folded into stack #46 layer 1 by cherry-pick; layers 2–5 rebased (pre-restack heads kept
+    as `backup/pre-hb-step3-*`). New heads `bbba14d`, `c763046`, `430bff4`, `0440a79`, `9858ccd`;
+    the top differs from the `p-s3-canon2` tree only by this test file. Canonical
+    `p-s3-canon3` on `p-s3-3`: both exits 0, govulncheck clean, coverage PASS, 963 s.
+- **Stack #46 CI after the HB restack:** layers 2–5 green on all jobs (`41798401238`,
+  `41798405783`, `41798415832`, `41798420324`). Layer 1 `41798396838` failed only on
+  macos-26: `internal/syncer` timed out at 600.36 s, while
+  `TestWarmIdleRequestsDoNotGrowWithFilesOrHistory` was running. Syncer code is unchanged
+  by both stacks; macOS syncer times with identical code are 429–580 s, including 543.6 s
+  on post-merge `main`. That is a margin failure: CPU contention with sessioncapture for
+  the first ~6 min, then a mostly serial package (7 parallel tests) on 3 cores. **Not
+  rerun as a fix:** worker SM (`fix/syncer-test-cost` from `d975961`) is cutting syncer
+  wall time by ≥35% under race+cover, with audited `t.Parallel()` and no weakening.
+  Heap-bound tests stay serial.
+- **SM: syncer margin fixed by CI scheduling, not test changes (2026-11-04):**
+  - Measured (medium, race+cover): `TestSimulatedSessions` is ~212 s of a ~367 s syncer wall
+    (8 seed child processes, 4 at a time, already parallel). The other ~177 tests sum to
+    ~156 s and are serial because `testenv.New` uses `t.Setenv`. No genuine fixture waste.
+  - **Declined (e)**, starting the simulation children early from `TestMain`: on 1 CPU,
+    package CPU rose from ~391 s to ~579 s (`sm-sh11/22/33` timed out; base `sm-shb11`
+    passed at 412 s), and the real-time
+    `TestArchiveRunHonorsItsOwnDeadlineAfterBackgroundRecovery` flaked (98 ms vs a 40 ms
+    deadline). Patch kept as `$R/scripts-sm/e-overlap-declined.patch`.
+  - **Accepted (f):** `85c3a66` makes `make cover` run two sequential `go test` invocations
+    with identical flags: every package except `COVER_ISOLATED` (`./internal/syncer`), then
+    syncer alone. Same coverage dirs and merge; union = `go list ./...`, disjoint (`sm-f2`);
+    either failure fails the recipe (`sm-cv7-b`, `sm-cv8-b` make rc 2); merge path proven
+    (`sm-cv3-b`). Byte-identical to `sm-3`. Parent follow-up `b3de5c2`: `go list` runs in
+    its own assignment so `set -e` sees its failure (it was hidden behind `grep` in a
+    pipeline). No test, timeout or gate changed.
+  - Folded into stack #46 layer 1; layers rebased (pre-restack heads `backup/pre-sm-step3-*`).
+    New heads `83a9a5a`, `be61c6d`, `c6a5059`, `aca80fb`, `2dcc37d`. Canonical `p-s3-canon4`
+    on `p-s3-4`: both exits 0, govulncheck clean, coverage PASS, 950 s; the two invocations
+    ran (sessioncapture 203.0 s, syncer 272.1 s alone).
+  - Push: the SSH agent now has no identities, so pushes use HTTPS with the `mich-murphy`
+    token per command (no global config change). The first HTTPS attempts were rejected
+    with 500 / `failure` during an active GitHub incident (Git operations, Pull Requests).
+- **Stack #46 CI after the SM restack (2026-11-04):** layer 1 `41814983396` (`83a9a5a`)
+  failed only on ubuntu-24.04-arm: `TestRuntimeDiscoveryExpiredSaveCannotResolvePriorIssue`
+  `runtime_discovery_admission_test.go:130: context deadline exceeded` (shuffle
+  `1793788488503719633`). This is a pre-existing test (b8cbed2), serial, untouched by the stack. Its second, clean
+  `discoverOnce` pass must succeed but reuses the 20 ms real-time `OperationTimeout` meant
+  only for the expiring first pass, so a contended save times out. Parent diagnosis: a test
+  defect (production default 60 s). **Not rerun as a fix:** worker RT
+  (`fix/realtime-deadline-tests` from `d975961`) is fixing it with a deterministic
+  delay RED, and auditing sessioncapture tests for the same pattern (small real-time budgets
+  on steps that must succeed).
+  - Layers 2–5 at the same heads passed on all jobs (`41817779694`, `41817779037`,
+    `41817776699`, `41817795533`). macOS times with syncer in its own invocation:
+    sessioncapture 297–320 s, syncer 388–500 s (before: 429–600 s). The margin is better
+    but still only about 100 s at worst on macOS; recorded as a residual risk.
+- **RT accepted; stack #46 merged (2026-11-04):**
+  - RT `97a00ac` (test only, byte-identical to `rt-4`): pass 2 of
+    `TestRuntimeDiscoveryExpiredSaveCannotResolvePriorIssue` uses `time.Second`; pass 1 keeps
+    its 20 ms expiry; assertions unchanged. RED `rt-red2` (30 ms stall after `tx.Commit`,
+    old test fails at line 130), GREEN `rt-green-mut`, `rt-check` `CHECK_RC=0`, `rt-c20`
+    (`^TestRuntimeDiscovery` ×20, small) green. Audit: the other short budgets either have
+    expiry as their subject or a ≥10× margin (`ExpiredCallbackAdmitsReturnedRequests`, 200 ms;
+    left, no RED). A `Now`-delay RED (`rt-red1`) was invalid and is not evidence.
+  - Folded into layer 1; heads `9366cd7`, `9dbd1a2`, `e65c142`, `ac779f9`, `bf3c21d`
+    (pre-restack `backup/pre-rt-step3-*`). Canonical `p-s3-canon5` on `p-s3-5`: both exits 0,
+    953 s. CI green on all jobs for all layers (`41820180067`, `41822029585`, `41822027711`,
+    `41822032217`, `41822037526`); macOS syncer 406–467 s.
+  - Merged atomically with `gh stack merge 46 --merge` as `f94670a`; `main`'s tree equals the
+    gated `a6df3379`. Post-merge `main` CI `41824671891`: all 7 jobs green.
+  - **Residual risk:** macOS syncer alone took 534.6 s on post-merge `main` (range 388–535 s
+    with its own invocation). The package itself is slow on macOS runners; the margin is
+    about 65 s at worst. Next lever, if it fails again: split `TestSimulatedSessions`'s 8
+    seed children into their own invocation (no seed or step reduction).
+- **Operating step 2, dormant staging on the Mac (2026-11-04):**
+  - Reproducible cross-build of merged `f94670a` in the Docker admission (`p-rel-build1`,
+    two clean passes, identical): darwin/arm64 `365db4df…`, linux/amd64 `ca002180…`;
+    Go 1.27.3, `-trimpath`, CGO 0, `main.version=f94670a` (snapshot has no `.git`, so no VCS
+    stamp). Staged 0700 in `<release>/merged-f94670a/` with `SHA256SUMS`; nothing installed
+    points there. Installed `.bin` unchanged (`6beae15a…`).
+  - Staged binary, credentials stripped, real config: `policy-pauses` → `null`; service plan
+    unit is byte-identical to the installed plist; hook plan: Claude and Codex unchanged,
+    **Pi extension drift** (`5042d95e → 68b02350`), which the installed b8cbed2 binary
+    plans identically: the installed file is the pre-`65759df` template (Oct 25) without the
+    `--no-session` guard in `launch`. Applying it is `hooks install --apply` (step 3).
+  - Staged read-only `work-status` fails on the un-migrated queue (`no such column:
+    dirty_since`); the column is added on the first writable open. Real queue hash unchanged
+    by every check (`509aa2cb…`).
+  - **Migration rehearsal on an independent copy** (APFS clone of payloads + SQLite-API
+    backup, `quick_check` ok, config copy redirecting only `spool`, credentials stripped):
+    staged `resume` rc 0 in 3.6 s, 41 MB RSS. Added `dirty_since`/`debounce_until`,
+    `payload_refs`/`payload_reclaim`, hold triggers and new indexes; replaced
+    `runtime_runnable_sources` by `_v2`. Jobs (20,308 published / 5 superseded), 19,413
+    captured sources, 18,456 payload files, destination state and `quick_check` unchanged.
+    The installed b8cbed2 binary still reads the migrated copy, so binary-only rollback is
+    possible.
+  - Copy also shows the installed Mac state: `Coverage=partial`, all three scopes `bounded`
+    at 1365 examined, 42 step errors (last `discovery: context deadline exceeded`, the DT
+    defect), 3,459 active discovery issues (mostly `protected_source_requires_scrub`:
+    claude 1626, codex 1507; `executable_source_requires_review` 224; `policy_denied` 52;
+    `unsupported_compressed_source` 18; `adapter_omission` 25).
+- **Operating step 3, Mac activation attempt 6 (2026-11-05 07:42Z–, `57d8400`), running; Mac step 3 passed 12:47Z** (current pid 48472 since the 17:52Z restart; see the checkpoint):
+  - PR #52 (RS: `ResolveWith` + per-call `FSMemo`, sharing Lstat/Readlink across
+    `evaluateAllowed`, the snapshot policy resolve and the `privacyOwner` leaf Lstat) merged
+    as `f2b6205`. 6 hand mutants killed, canonical `p-rs-canon1` exit 0, CI 7/7 green.
+  - PR #53 (HI/HI2: inbox tree fenced once per inbox identity `c5a7ca4`; constant hint SQL
+    with tx-scoped prepared statements `f91cc80`; EF test-budget fix `2f39987`) merged as
+    **`57d8400`**. `BenchmarkHintBatchUnchanged` 331 ms to 91 ms; 6 hand mutants killed;
+    canonical `p-hi-canon4` exit 0. Earlier canonical kills (`p-hi-canon1..3-contended`,
+    `p-ab-*-contended`) were host contention: paired base-vs-branch runs under the same
+    load timed out or slowed equally.
+  - First PR #53 CI run `41977817760` failed `TestRuntimeEnrichmentEnabledRunPublishesAndStatusDoesNotTakeLease`.
+    Pre-existing: reproduced on unchanged `ec43cff` (2/100 under contention). EF traced it
+    to slow serialized startup under fsync contention (`Open` up to 2.1 s, `InitRuntime` up
+    to 2.4 s, `synchronous=FULL` DDL) with no errors, retries or backoff; the fixed 5 s test
+    budget was wrong (9366cd7 pattern). Deadline 5 s to 30 s; RED with a 6 s startup-stall
+    mutant; paired repro 25/150 to 0/150.
+  - Harness: the operator retired the shared validation semaphore at 03:11Z (global
+    AGENTS.md; locks/tools volumes removed). `launch.py` no longer mounts or runs it;
+    admission is the 3-owned-container limit plus per-container `--cpus/--memory` caps.
+  - Build `p-rel-build6`, REPRODUCIBLE=yes: darwin `dc361b24…`, linux `a572a0bd…`; launcher
+    `91a49ec3…` unchanged. Staged at `merged-57d8400/` on the Mac and BC-01. Backup
+    `<release>/backup-pre-57d8400-20261105T074157/` (`quick_check` ok, 19,367 payloads,
+    21,421 published, 511 superseded, quota gap 1,778).
+  - The attempt-5 soak (01:35–07:41Z, about 6 h) stayed correct throughout: 0 undelivered at
+    every check except one transient, 0 unrepaired.
+  - Started 07:42:14Z (pid 8136). **Settled 0.294 cores under launchd** (10-minute CPU-time
+    delta after 5 minutes warm-up), down from 0.50 (attempt 5). 0 undelivered, 0 unrepaired.
+    Restarted 08:08:23Z (pid 13875) after a bounded diagnostic profile; 0.294 cores again over
+    20 minutes.
+  - Diagnostic profile (`p-diag-build5` `f9e7920a…`, background QoS, 0.277 cores,
+    `p-diag-pprof7/8`): discovery about 60 % (exclusion identity walk `isWithinStat` Stat
+    22 %, `privacyOwner` leaf Lstat 11 %, directory `os.Open` 9 %), hint upserts 9 %, native
+    inbox 10 %. Remaining cost is per-entry syscalls from re-walking unchanged trees every
+    10 s poll: a structural follow-up (change detection or cadence), not another per-call memo.
+  - **Analytics source switched** 08:33Z: refresher and dashboard plists changed only in the
+    source path `e8c96f8` → `f94670a` (prepared tree verified 32/32 files against git;
+    `requirements.txt` unchanged, so the existing runtime is reused; `tools/` identical at
+    `57d8400`). Backup `<release>/backup-analytics-pre-f94670a-20261105T083303/` (plists,
+    DuckDB and bodies APFS clones, `refresh.sqlite3` via `backup()`, `quick_check` ok).
+    Two post-switch sweeps: 2 endpoints, 33,268 expected targets, 0 discovery/endpoint/target
+    errors, 0 unimported; dashboard HTTP 200; empty stderr.
+  - **End to end (aggregate only):** the 200 most recently published Mac sessions in the
+    queue (171 Pi, 27 Claude, 2 Codex), matched on the decoded identity tuple, are all
+    imported by the refresher at or beyond their queue sequence; `mac` targets 14,469/14,469
+    imported, `bc01` 18,799/18,799, no head failures.
+  - Step-4 budget item: the refresher itself used about 0.47 cores averaged over 22 minutes
+    (60 s interval), more than the coordinator.
+  - **Hooks (aggregate, 08:58Z):** `hooks --action plan` shows no drift for Claude, Codex or
+    Pi. Hints inbox drained (0). Captured in the last 24 h: Claude 247, Pi 504, Codex 5;
+    last 2 h: Claude 4, Pi 8. Native evidence from Pi in the last 2 h (3 files), so the
+    updated Pi extension fires. Codex: each of the 6 agent-sessions hook commands has a
+    `hooks.state` trusted-hash entry, but `config.toml` (trust, 07:41 Oct 30) predates the
+    last `hooks.json` rewrite (08:38 Oct 30), and Codex's own log has no entries for 6.5 days,
+    so Codex hook firing is **not yet demonstrated**. Needs the operator to run Codex once and
+    approve `/hooks` if prompted; then confirm a Codex hook-driven capture.
+  - **Codex hook probes (09:00–09:06Z, throwaway "reply OK" sessions in an empty scratch
+    directory, read-only sandbox):** a normal `codex exec` ran only another tool's
+    `UserPromptSubmit` hook; none of the 6 agent-sessions hooks ran and the hints inbox was
+    untouched (the session was still captured by the 10 s discovery poll). A single
+    `--dangerously-bypass-hook-trust` invocation (per-invocation only; persisted trust not
+    changed) ran our `SessionStart` and `Stop` hooks, wrote to both inboxes, and the
+    coordinator drained them (hints 0, 11 Codex sources captured, 0 undelivered). So the
+    hooks work and the **persisted Codex trust for the rewritten hooks is stale**. The stored
+    `trusted_hash` values cannot be recomputed from outside Codex, and re-trusting is an
+    operator approval: run Codex interactively and approve the agent-sessions hooks in
+    `/hooks`. Then re-run a normal (non-bypass) probe and confirm a hook-driven Codex capture.
+    The probe sessions contain only the throwaway prompt and were captured like any session.
+  - **Codex hooks accepted (11:54Z):** after the operator approved the hooks in `/hooks`
+    (`config.toml` rewritten 22:50 local; 14 `hooks.state` entries, all 6 agent-sessions hooks
+    with a `trusted_hash`), a normal non-bypass `codex exec` probe ran our `SessionStart` and
+    `Stop` hooks, both inboxes changed, the coordinator drained the hints (0 left) and captured
+    3 Codex sources; 0 undelivered. Claude, Codex and Pi hooks are now all demonstrated live.
+  - **Privacy exclusion (12:02Z):** a throwaway Codex probe run with `AGENT_SESSIONS_DISABLE=1`
+    ran our hooks in disabled mode: no hint or native-evidence write, and one session
+    exclusion record persisted (policy `exclusions/` 0 → 1). Its rollout file exists on disk,
+    but after 6+ discovery polls it has no queue rows and no analytics target, while the
+    positive-control probe (same matcher) has both. Effective exclusion holds for discovery,
+    not only for hooks.
+  - **Source absence (12:05–12:19Z, own throwaway probe):** rollout file moved aside (not
+    deleted). With no trigger nothing changed; one explicit `capture-v1 hint` for the missing
+    path moved the source to `absent`, while the published job and the refresher import
+    (sequence 1) were preserved. Restoring the file plus one hint recaptured it
+    (pending → captured, sequences 2 and 3 published, refresher imported 3/3, attempts 0, no
+    error), then it settled with no further churn over 6 minutes. File restored to its
+    original path.
+  - **Destination outage/retry without another hook (12:21–12:47Z):** `service stop --apply`,
+    then the same wrapper/binary/config ran in the foreground under `taskpolicy -b` inside a
+    `sandbox-exec` profile denying all outbound IP (IPv4/IPv6 verified blocked, local DNS
+    allowed). A new throwaway Codex probe fired its hooks; its job was captured and went
+    `pending → retry` with `last_error=transient`, attempts climbing to 9 (above
+    `max_attempts` 8) with **no quarantine** and no destination pause (transport failures are
+    transient by design; `capturebackend.Open` makes no network call). The sandboxed
+    coordinator stayed up for the whole outage (stderr empty, exit 0 on TERM). After
+    `service start --apply` (pid 61435) with **no new hook**, the persisted backoff
+    elapsed and both outstanding jobs published (probe at 12:29:37, attempts 10, error
+    cleared); the refresher imported it (1/1). Afterwards: 0 undelivered, 0 quarantined,
+    analytics stderr empty, coordinator 0.28 cores over 600 s.
+  - **Mac step 3 result:** all required exercises pass on live state: Claude/Codex/Pi hooks,
+    automatic new-session capture through durable work, R2 publication, refresher import
+    and dashboard, restart, outage/retry without another hook, source absence with the
+    previous publication preserved, and effective privacy exclusion. Correctness is accepted.
+    Efficiency (coordinator about 0.29 cores, refresher about 0.47 cores) is measured and
+    understood; the numeric budget is a step-4 agreement, not a step-3 gate. Next: BC-01 step 3.
+- **Precautionary containment 17:46–17:52Z, lifted: suspected shared-store privacy leak
+  disproved.**
+  - Trigger: the refresher reported one typed `export_too_large` target (Mac Codex resource
+    `~/.codex/thread_history_1.sqlite`, 6 epochs, 3,520 MiB decoded against the 768 MiB
+    cap; the size check reads only the manifest, so failing sweeps download nothing).
+  - Suspicion: the excluded Codex probe (`AGENT_SESSIONS_DISABLE=1`) also has rows in the
+    shared stores `thread_history_1.sqlite` (1 turn, 3 items) and `state_5.sqlite` (2 rows),
+    which are captured whole as `sqlite-backup` artifacts. `history.jsonl` and
+    `session_index.jsonl` have no matching lines. Both hosts were stopped (Mac `service stop
+    --apply` + `launchctl disable`; BC-01 `service stop --apply`), each with 0 undelivered.
+  - **Disproved (implemented behavior):** `exclusion.Registry.Excludes` treats any source
+    with an empty session key under an excluded record's root as excluded, pinned by
+    `TestRuntimePrivacyScopesAggregatesAndUntrustedIdentity`. The record (12:03:02Z) is
+    scoped to `~/.codex`. Live evidence: 7,909 Codex `policy_denied` discovery issues are
+    active, 5,932 first seen at generation 419 and 1,957 at 420, including all five shared
+    stores; no Codex resource was captured or observed after 12:02:55Z (newest 11:56:58Z),
+    while Codex sessions and Claude resources kept being captured. Nothing excluded reached
+    R2, and the next epoch would not have been taken.
+  - Consequence (limitation, fail-closed by design): one Codex exclusion stops all Codex
+    shared-resource capture on that root while the record exists. It is reported explicitly
+    as `policy_denied` discovery issues, not silently. BC-01 has 0 exclusion records.
+  - Lifted at 17:52:43Z: Mac `launchctl enable` + `service start` (pid 48472); BC-01
+    `service start` (pid 4183307, 0 restarts). Two minutes later: Mac 21,558 published /
+    511 superseded, 0 quarantined, destination unpaused, still 0 Codex resources after the
+    exclusion; BC-01 47,756 / 58, 0 quarantined, unpaused.
+  - **Unbounded epoch growth (design question, not contained by itself):** every unproven
+    rewrite of an artifact begins a new full epoch and the latest manifest retains all
+    sealed epochs (contract §1), so local reclaim keeps them too. Mac: `~/.claude.json`
+    (scrubbed config) 206 epochs in 8 days; `thread_history_1.sqlite` gains 587 MiB per
+    Codex run; Claude model-catalog cache 20 epochs; 1,064 MiB of sealed-epoch payload
+    across 65 sessions. BC-01: 37 MiB across 94. Old job rows keep full manifests, so
+    storage grows quadratically: Mac queue 1,290 MiB (manifests 578 MiB, 544 MiB of it
+    in 135 sessions with ≥ 10 rows against 8 MiB latest-only); BC-01 1,447 MiB. Needs a
+    measured retention design and operator approval (like enrichment retention).
+- **Operating step 3, BC-01 activation (2026-11-05 12:49Z–, `57d8400`), drained (contained 17:48–17:52Z, see above):**
+  - Preflight: unit `disabled`/`inactive`, no coordinator, installed `.bin` `9373dca4…`,
+    launcher `6498537e…`; queue 10,470 pending / 19,113 published / 5 retry, destination
+    unpaused; spool 1.5 GB, 41 GB free.
+  - Backup `<release>/backup-pre-57d8400-20261105T124920/` (queue via `backup()`,
+    `quick_check` ok; payloads 27,541, hints 534, native evidence 250 copied and counted;
+    installed wrapper/bin/launcher/`path_fence.py`, unit + drop-in, Claude/Codex/Pi hook
+    configs; 28,338 files in `SHA256SUMS`, 1.6 GB).
+  - Schema `f94670a..57d8400`: only two additive `CREATE INDEX IF NOT EXISTS` partial
+    indexes. Rehearsal on a copy with the staged binary: `resume` rc 0, 15.9 s, 39 MB RSS,
+    job counts unchanged, both indexes present, installed `9373dca` still reads the migrated
+    copy, real queue hash unchanged; copy removed.
+  - Swapped `.bin` (`a572a0bd…`, `--version 57d8400`) and launcher (`91a49ec3…`) by
+    same-directory rename after `sha256sum -c`. `path_fence.py` left in place (unused by the
+    new launcher). `hooks install --apply`: only the Pi extension changed
+    (`3ea4f4bd → b3ec22b0`, the drift predicted in step 2); plan clean afterwards.
+  - `service start --apply` 12:51:10Z (`daemon-reload` + `enable --now`; unit file
+    unchanged), pid 1832897, 0 restarts.
+  - **Catch-up, not a loop:** the coordinator was off since Oct 29, so discovery found
+    17,903 new sources (16,737 Pi, mostly `artifact` role, mtimes mostly < 7 d) and 6,148
+    changed versions. 26,154 sessions got 0 new sequences and 4,449 got 1; the 15 with
+    ≥ 8 have 55–425 sources each. Pending jobs rose 10,433 → 19,596 while sources were
+    captured (pending sources 19,587 → 1 by 14:11Z, about 340/min), then began draining
+    (19,596 → 16,221 by 14:11Z). Throughout: 0 quarantined, destination unpaused, no
+    restarts, RSS 63–283 MB, about 1.9–2 cores of 4 (load1 2–5.6), spool 1.5 → 2.5 GB,
+    38.7 GB free.
+  - Drained to 0 pending by 17:23Z (the slow tail came from 36 sessions, then 3 Claude
+    sessions, delivered serially per session; 1 pending row had an attempt). Settled
+    0.054 cores over 600 s, RSS 155 MB, 0 restarts. Refresher: `bc01` 41,466/41,467
+    imported, 0 errors, newest import 2 s old; `mac` 14,478/14,479 (the one
+    `export_too_large` target above).
+  - Restart: exercised by the 17:48–17:52Z containment stop/start and the outage exercise,
+    with no lost or stuck work (0 restarts by systemd).
+  - **Hooks (18:00–18:16Z, own throwaway "Reply with the single word OK" probes in empty
+    temp dirs):** Claude 2.1.318 and Pi 1.5.0 `-p` probes each changed both inbox
+    directories, added one native-evidence row (267 → 270 over the three hook-driven probes)
+    and drained to 0 undelivered. **Codex 0.163.0: persisted hook trust is stale** (same as
+    the Mac before re-approval; `config.toml` unchanged since 00:59Z, 11 `trusted_hash`):
+    a normal `codex exec` ran no hook and the inboxes did not change. A per-invocation
+    `--dangerously-bypass-hook-trust` diagnostic probe fired SessionStart/UserPromptSubmit,
+    changed both inboxes and drained, so the installed hooks work. We do not write trust
+    hashes; the operator must re-approve in BC-01 Codex `/hooks`.
+  - Discovery-only capture of the unhooked Codex probe: rollout written 18:00:11Z, observed
+    18:03:32Z, captured 18:04:03Z, both jobs published. A BC-01 discovery generation takes
+    about 5 minutes (the Pi root needs many 1,365-entry slices; Codex/Claude walks finish
+    early and wait), so hookless sessions wait up to one generation. Freshness item for
+    step 4.
+  - **Destination outage/retry without another hook (18:17–18:25Z):** `unshare -rn` is
+    blocked by AppArmor (`apparmor_restrict_unprivileged_userns=1`); a transient
+    `systemd-run --user -p RestrictAddressFamilies=AF_UNIX` unit was verified to block
+    outbound IP (`EAFNOSUPPORT`). `service stop --apply`, then the identical wrapper/config
+    ran in that unit; a throwaway Pi probe fired its hook. Nine Claude/Codex/Pi jobs went
+    `pending → retry`/`transient`, attempts reaching 9–10 (above `max_attempts` 8), **no
+    quarantine**, destination never paused. After stopping the unit and `service start
+    --apply` (pid 224893, 0 restarts), with **no new hook** (hints dir mtime unchanged), all
+    nine published by 18:25:25Z. Transient unit collected (0 remaining).
+  - **Source absence (18:26–18:30Z, own first Codex probe):** rollout moved into a private
+    hold dir. No trigger: unchanged. One `capture-v1 hint` → `pending → absent`, published
+    sequences 1–2 preserved. Restored (bytes identical by SHA-256) plus one hint →
+    recaptured, sequence 3 published, attempts 1, no error; no churn over the next 80 s.
+  - Consumer (Mac refresher, 18:43Z): of 12 BC-01 sessions captured since 18:00Z, 10
+    imported at or beyond their queue sequence, 1 Codex session behind (sweep lag), and the
+    BC-01 `~/.codex/thread_history_1.sqlite` resource now also `export_too_large` (our
+    Codex probes each rewrite the 442 MiB DB, adding a full epoch). Status contract:
+    57,335 expected targets, 0 endpoint/incomplete errors, 2 `export_too_large`. A full
+    refresher sweep now takes about 19 minutes (status lines 18:19 and 18:38Z; native
+    sample shows DuckDB planning/reads, not a hang), a step-4 freshness/budget item.
+  - State at 18:45Z: Mac pid 48472, BC-01 pid 224893 (0 restarts, 38 GB free); both 0
+    undelivered, 0 quarantined. `thread_history_1.sqlite` latest manifest: Mac 6 epochs /
+    1,232 MiB encoded (about 205 MiB per Codex run; no new epochs while the Mac Codex
+    exclusion record denies Codex shared resources), BC-01 4 epochs / 91 MiB (about 23 MiB
+    per run). Payloads: Mac 2,778 MiB of an 8 GiB quota, BC-01 929 MiB of 6 GiB. The
+    retention horizon is a step-4 measurement and an operator retention decision.
+  - Remaining for BC-01 step 3: operator Codex `/hooks` re-approval on BC-01, then a
+    normal Codex probe and the effective privacy exclusion probe (Codex, mirroring the Mac;
+    a Codex exclusion denies Codex shared resources on that root, the least-impact agent).
+- **Operating step 3, Mac activation attempt 5 (2026-11-05 01:09Z–07:41Z, `ec43cff`), interim soak:**
+  - PR #51 (OW: per-call `allowed` memo `4f46e11`, per-call ownership memo `41d4d9f`,
+    tests and benchmark `fdf9bb8`, macOS temp-home test fix `86d233a`) merged as
+    **`ec43cff`**. The first CI run failed on `Tests (macos-26)` (`Policy calls = 1, want 2`)
+    because of `/var` → `/private/var` in the test home. Root-caused and fixed in the test;
+    then all 7 jobs green. Canonical gate `p-ow-canon1` exit 0. Benchmark with external
+    artifacts: about 3,067 ms to 144 ms per discovery call.
+  - Build `p-rel-build5`, REPRODUCIBLE=yes: darwin `2d334eb5…`, linux `0dc45ea1…`, staged
+    at `merged-ec43cff/` on the Mac and BC-01. Backup
+    `<release>/backup-pre-ec43cff-20261105T010938/` (`quick_check` ok, 19,167 payloads).
+  - **Settled about 0.50 cores under launchd** (10-minute CPU-time delta, 1 job), down from
+    0.78 (attempt 4) and 1.1–2.3 (attempt 3). 0 undelivered, 0 unrepaired; the quota gap
+    grows only with new sessions.
+  - Background-QoS profile of a diagnostic-only `ec43cff` build (`p-diag-pprof6`, about
+    0.52 cores): ownership cost removed (`classifyExternal` 48 s to 0.4 s). Remaining:
+    `capturepolicy.Resolve` 25 % (Lstat per component, twice per entry: `evaluateAllowed`
+    and `runtimeFilesystemPolicyWith`), `privacyOwner` leaf Lstat 12 %, hint upserts 12 %
+    (mostly statement parse/exec on unchanged rows), inbox-lock `syncQueueTree` fsync of
+    every ancestor on each 100 ms tick about 4 %, native inbox about 8 %.
+  - Restarted under launchd at 01:35:09Z as an interim soak (behaviour correct, bounded
+    background cost). Delegated: **RS** (`perf/discovery-resolve-memo`) per-call Lstat memo
+    for discovery `Resolve`/leaf metadata; **HI** (`perf/runtime-idle-io`) hint-upsert
+    statement reuse and inbox-lock fsync only when durability requires it.
+- **Operating step 3, Mac activation attempt 4 (2026-11-04 22:28–22:52Z), correct but contained on efficiency:**
+  - PR #49 (EQ: quota-gate backoff `bf4a60e`, partial claim indexes `f2e1000`, macOS
+    test portability `2b41faf`) merged as `62a37a2`. The first CI run failed on
+    `Tests (macos-26)`: `policy callbacks 9, want 6`, because `/var` is a symlink to
+    `/private/var` and the path picked up an extra identity. Root-caused and fixed in the
+    test, not rerun; then all 7 jobs passed. PR #50 (DP: per-call policy memo `d926699`,
+    tests and benchmark `1526e4c`; benchmark 2.43 s to 1.15 s per discovery call) merged
+    as **`068b013`**, all 7 jobs green. Canonical gates `p-eq-canon1` and `p-dp-canon1`
+    exit 0.
+  - Build `p-rel-build4`, REPRODUCIBLE=yes: darwin `69e25e79…`, linux `ca0a258b…`,
+    staged at `merged-068b013/` on the Mac and BC-01 (launcher `91a49ec3…` unchanged).
+    Backup `<release>/backup-pre-068b013-20261104T222812/` (`quick_check` ok, 19,133
+    payloads). Swapped `.bin`, ran `launchctl enable`, then `service start --executable`.
+  - **Behaviour correct:** 0 undelivered throughout, 1,562 repairs `repaired`, and the
+    quota gap grows only with new sessions (1,409 to 1,446). Inbox files are kept
+    (316 to 321), with no spin.
+  - **Settled CPU about 0.78 cores under launchd**, measured as a 10-minute CPU-time
+    delta with 13 real jobs. Down from 1.1–2.3 cores in attempt 3, but too high.
+    Contained at 22:52:51Z (`service stop`, then `launchctl disable`).
+  - Diagnostic-only build `p-diag-build3` (snapshot `p-diag-068b013`; `p-diag-build2`
+    used a stale snapshot name and is not evidence). Two bounded foreground runs on live
+    state: about **0.23 cores** at default priority and about **0.64 cores** under
+    `taskpolicy -b`, the same QoS as the plist's `ProcessType=Background`, with
+    comparable job counts. Efficiency-core scheduling roughly triples CPU time for the
+    same work.
+  - Profile under background QoS (`p-diag-pprof5`): discovery is about 73% of samples.
+    Per-entry `ReadOwnership` opens a new read-only SQLite connection for every Claude
+    external artifact (about 28%, through `privacyOwner` and `LookupOwner`).
+    `classifyExternal` re-runs `allowed` on the owner's main and `.zst` coordinates for
+    every artifact (about 14%). `Resolve` Lstat per component in
+    `runtimeFilesystemPolicyWith` takes about 14%, hint upserts about 7%, and the native
+    inbox now about 5% (was 22%).
+  - Delegated: **OW** (`perf/discovery-ownership-memo`, worktree
+    `memory-wt/discovery-ownership`) is to add per-discovery-call ownership and
+    owner-coordinate memoization, with decisions unchanged and live capture and
+    delivery rechecks untouched.
+- **Operating step 3, Mac activation attempt 3 (2026-11-05 05:22–05:42 local / 18:22–18:42Z), contained again:**
+  - PR #48 merged as **`c339e58`** (tree = `632d596`) after `Tests (macos-26)` passed on run
+    attempt 6 (attempts 1–5 cancelled with 0 steps: hosted macOS arm64 runner not acquired
+    during a GitHub Actions incident). Post-merge CI `41881213837` all 7 green.
+  - Backup `<release>/backup-pre-632d596-20261104T182039/` (SQLite-API queue backup, APFS
+    payload clone 19,122 files, `.bin`/launcher, `SHA256SUMS`). Swapped `.bin` to `632d596`
+    (`54d5e07d…`). `service --action start --apply` needs `--executable <wrapper>` (plan with
+    it is byte-identical to the installed plist; without it `SafePath` rejects the empty path).
+  - **Livelock fixed live:** within 2 min the churning session published its newest sequence
+    (527/527, was 73/510), all 1,562 repair rows `repaired`, no new jobs for 15 min.
+  - **Idle CPU remained ~1.1–2.3 cores** with no work; contained at 18:41:58Z
+    (`service stop`, `launchctl disable`). Queue (WAL-consistent `mode=ro`): `quick_check` ok,
+    0 pending, dest unpaused. Note: `immutable=1` ignores an existing `-wal`; use it only when
+    no `-wal` file exists (an immutable copy produced a stale ref and a false
+    "payload integrity failure" in a disposable replay).
+  - **Root cause (CPU profile of a diagnostic-only uncommitted build of `632d596`, foreground
+    on live state, 421 s):** `enrichment_work` is at `MaxEnrichmentWork` = 4,096 rows, all
+    terminal `attached`; nothing ever removes attached rows, so the "bounded count" is a
+    lifetime cap. Every `AcceptNativeEvidence` then fails `ErrQuota` in
+    `enqueueEnrichmentTx`, rolls back, and `drainNativeEvidence` leaves the file and retries
+    32 files every 100 ms (311 files stuck, each with a full policy check): ~22 % of samples.
+    `retryEnrichmentAdmission` re-tries the same quota-gap job (1,409 jobs with
+    `enrichment_gap='quota'`) every enrichment tick. Discovery per-file policy
+    `Stat`/`Lstat` is ~39 % (separate efficiency item, measured after the fix).
+    Copy replays cannot reproduce delivery (no credentials pauses the destination; a local
+    backend lacks remote objects), so live foreground profiling was used.
+  - Delegated: **EQ** (`fix/enrichment-quota-spin`, worktree `memory-wt/enrichment-quota`):
+    stop quota-blocked native-evidence/admission retries every tick (autonomous retry on
+    capacity change or bounded backoff; files deleted only after adoption; gap stays
+    visible) + partial indexes for the `enrichment_work`/`optional_repairs` claim scans.
+    **DP** (`perf/discovery-policy-cost`, worktree `memory-wt/discovery-policy`): per-Discover
+    memoization of policy inputs, decisions unchanged, live capture rechecks untouched.
+  - **Retention decision (ER design brief, read-only):** live budgets: enrichment metadata
+    29.9 MB / 128 MiB (22 %), native ~0 %, enrichment-held payloads 4 MB (16 objects, all
+    shared with raw manifests). Only the 4,096 row count binds. Counting only non-terminal
+    rows would just move the lifetime limit to ≈18k rows (byte budget), so the real fix is
+    retirement of attached rows/results/holds once no retained job head references them
+    (plus DELETE budget triggers, which are missing today). Retirement deletes local spool
+    evidence and changes the enrichment contract ("Work/result rows have bounded count"),
+    so it is **not** part of this acceptance: recorded as a follow-up gap needing a measured
+    design and operator approval. Until then enrichment for new sessions stays a visible
+    `enrichment_gap='quota'` (contract disposition: expose missing provenance), and raw
+    capture is unaffected.
+- **Operating step 3, Mac activation attempt 2 (2026-11-05 00:50–01:37), contained again:**
+  - HA fix `f0edd33` accepted (one clause in `recordHintOwnership`; RED `ha-red1`, GREEN
+    `ha-grn1`, check `ha-chk2` `CHECK_RC=0`, hand mutants killed; limit: no dedicated
+    "tolerate any ENOENT" mutant). PR #47 CI `41836779407` all 7 green; merged as
+    **`0721bdf`** (tree = `f0edd33`); post-merge CI `41839084452` green. Reproducible build
+    `p-rel-build2`: darwin `40a2e19b…`, linux `6a273703…`; staged in `<release>/merged-f0edd33/`
+    on both hosts (launcher unchanged). Disposable-copy replay of the live Mac spool: alive at
+    the 90 s timeout, 338 hints drained, the 5 absent-source hints became `absent`.
+  - Swapped Mac `.bin` to `f0edd33`, `launchctl enable`, `service start --apply` at 00:50:59.
+    Coordinator stayed up (runs=1, never exited). Backlog: pending sources peaked ~6,200 and
+    drained by ~01:25 (≈230/min); 20,020 captured, 5 absent, 0 quarantine; published
+    20,308 → 20,848; RSS 110–227 MB; CPU 230–325 % throughout.
+  - **After the drain CPU stayed ~2.6 cores** (the Oct 29 containment symptom): one Claude
+    session (24 optional artifact sources, one source with 23 epochs) produced ~25 superseded
+    jobs/min (last published seq 73, newest 510), withheld count sawtooth 14 → 5 → 14, its
+    repairs at 14–15 attempts. Two smaller sessions showed 46 and 12 superseded. Contained
+    at 01:37 (`service stop --apply`, `launchctl disable`); queue `quick_check` ok, dest
+    unpaused, 0 quarantine, 1 pending job.
+  - **Diagnosis (code-read, to be confirmed by RED test): raw-delivery / optional-repair
+    livelock.** `beginOptionalDelivery` upserts every selected optional row to `delivering`
+    (including rows already `repaired`); concurrently `optionalRepairNext` repairs one epoch
+    and calls `selectionView`, writing a new view that supersedes the job in delivery;
+    delivery's `finish()` then sets **every** `delivering` row of the session to `retry`;
+    `unavailableLatch` re-latches them, the next attempt fails `errOptionalUnavailable`, the
+    forced re-selection withholds them again and no job reaches CAS. Each new view also
+    re-verifies every non-optional payload (`selectionView`), consistent with the CPU.
+  - Fix delegated to worker **OR** (worktree `memory-wt/repair-livelock`, branch
+    `fix/optional-repair-livelock` from `0721bdf`). Mac state now: `f0edd33` installed,
+    capture contained, hooks current, refresher healthy on the old analytics source.
+  - **OR accepted: `632d596`** (diagnosis confirmed). `beginOptionalDelivery` records rows
+    that were `repaired`/`verified_attachment_pending` before marking them `delivering`;
+    `finish()` restores exactly those rows, and only when the job was superseded. Other rows
+    still become `retry`; completed deliveries still settle `repaired`; never-verified epochs
+    stay latched; restart conversion is unchanged. `unavailableLatch` split into
+    `optionalRepairState` + `latchBlocks` (no behaviour change). New
+    `optional_livelock_test.go` (3 tests), no existing tests changed. RED `or-red1` (rc 1:
+    wrong states after superseded delivery; "published optional sources after 6 rounds: 0,
+    want 3"), GREEN `or-green1` rc 0, full check `or-check3` `CHECK_RC=0` (sessioncapture
+    196 s). Hand mutants: latch-never-blocks, no-prior-recording killed; restore-regardless-
+    of-superseded survived until `TestCompletedDeliverySettlesVerifiedAttachmentPending` was
+    added (killed `or-mut5`). Committed files byte-identical to `or-4`. Limits: hook-driven
+    deterministic race (not a real concurrent race); each repair still writes a new view
+    (bounded churn, now convergent); no gremlins/standalone gocognit/CRAP run.
+  - PR **#48**, CI `41853992792`: 6 jobs green; `Tests (macos-26)` cancelled three times
+    with **0 steps run** ("job was not acquired by Runner of type hosted", macOS arm64
+    capacity notice; githubstatus showed an open Actions incident). Not a code result;
+    re-queued for runner acquisition only. Merge waits for a native macOS pass.
+  - Reproducible build `p-rel-build3` (REPRODUCIBLE=yes): darwin `54d5e07d…`, linux
+    `70309c28…`; staged and checksum-verified in `<release>/merged-632d596/` on the Mac and
+    BC-01 (launcher unchanged, `91a49ec3…`). Installed binaries are untouched. A copy replay
+    would need a live R2 or an empty local backend (which would republish everything and
+    not reproduce the remote state), so live confirmation is a watched reactivation.
+- **Operating step 3, Mac activation attempt 1 (2026-11-04 23:46–23:58), contained again:**
+  - Preflight ok (agent not loaded, no writer, dest unpaused). Backup at
+    `<release>/backup-pre-f94670a-20261104T234646/` (SQLite-API queue backup `quick_check` ok,
+    APFS-cloned payloads 18,456 files, b8cbed2 `.bin`/launcher, pre-update Pi extension,
+    refresher/dashboard plists, `SHA256SUMS`).
+  - Swapped `.bin` (`365db4df…`, `--version f94670a`) and launcher (`91a49ec3…`) by
+    same-directory rename. Next refresher sweep on the new binary: 0 discovery/endpoint/
+    target errors, 0 unimported, stderr empty. `hooks install --apply`: only the Pi
+    extension changed (`5042d95e → 68b02350`); plan now clean for all three agents.
+  - `service start --apply` first failed: launchd held the Oct 29 containment **disabled
+    override**. Activation authority covers lifting it (`launchctl enable`, archive
+    precedent). The coordinator then started, migrated the queue (staged `work-status`
+    reads it) and **exited rc 1 after ~20 s**; foreground reproduction:
+    `sessioncapture: source absent` in 0.8 s.
+  - **Root cause (production defect, f94670a and earlier):** `drainHints → Hint →
+    recordHintOwnership → RecordOwnership → check(…, false)` Lstats the original source; a
+    classified Claude `main` hint whose source was deleted returns bare `*sourceAbsence`,
+    which neither `recordHintOwnership` nor `drainHints` tolerates, so `inboxLoop` stops
+    `Run`. The hint is never removed, so every restart crash-loops. Mac inbox: 337 hints,
+    5 with absent sources (2 main, 3 subagent). Disposable-copy repro: all hints → rc 1;
+    absent-source hints removed → runs to timeout and drains the rest. BC-01 inbox: 499
+    hints, 89 absent (3 main), so BC-01 would fail the same way. `HintBatch` (discovery)
+    shares the path.
+  - Containment restored: `service stop --apply`, then `launchctl disable` (override back to
+    `disabled`). Current Mac state: f94670a binary/launcher and updated hooks installed
+    (hooks keep writing hints; the inbox format is unchanged), queue migrated, **no
+    coordinator**, refresher healthy on old analytics source. Policy directory untouched.
+    Binary-only rollback remains possible (b8cbed2 reads the migrated queue).
+  - Fix delegated to worker **HA** (`5c4b6b56-8b58-46e`, worktree
+    `memory-wt/hint-absence`, branch `fix/hint-source-absence` from `f94670a`): treat pure
+    source absence in ownership recording as non-fatal (raw hint already admitted; capture
+    later classifies `absent`), keep every other failure fatal; RED/GREEN, scoped mutation,
+    full check. Then stack → CI → merge → rebuild → re-stage → resume step 3.
+- **Operating step 2, BC-01 staging and coordinated switch plan (2026-11-04):**
+  - BC-01 (x86_64, 41 GB free, unit inactive, installed `.bin` `9373dca4…` untouched):
+    linux/amd64 `ca002180…` staged 0700 in `<release>/merged-f94670a/`, `sha256sum -c` OK,
+    `--version` `f94670a`. Staged read-only checks match the Mac (policy-pauses `null`,
+    service unit byte-identical, same pre-existing Pi drift `3ea4f4bd → b3ec22b0`,
+    `work-status` needs the migration). Installed status: 29,082 sources, 22 pending,
+    10,475 pending publications, 5 retrying, `Coverage=partial`, 20 step errors (last
+    `delivery: context deadline exceeded`), 2,431 active discovery issues.
+  - BC-01 migration rehearsal on a removed copy (Python SQLite backup; no `sqlite3` CLI):
+    staged `resume` rc 0, 6.9 s, 35 MB RSS; 10,470 pending / 19,113 published / 5 retry
+    and 27,541 payload files unchanged; 32,258 `payload_refs` backfilled, 0 reclaim;
+    installed binary still reads it; real queue hash unchanged.
+  - Launcher: installed `launcher.py` equals `b8cbed2:tools/capture-delivery/launch.py`;
+    merged `launch.py` (`91a49ec3…`) projects config credential references (same R2 names
+    here) and keeps `run` local-only on credential failure. Staged beside both binaries.
+  - Mac analytics: refresher/dashboard run the c9749dac Darwin runtime with e8c96f8 source;
+    `requirements.txt` is identical at c9749dac/e8c96f8/f94670a, so the runtime is reused.
+    f94670a `tools/analytics` staged at `~/.local/lib/agent-sessions-analytics/<f94670a>/source`
+    (32 files byte-verified against git). No DuckDB DDL change; the merged importer accepts
+    the legacy manifest fingerprint.
+  - **Order is fixed:** the merged reader requires the export `manifest_sha256` that
+    b8cbed2 lacks, while the installed reader tolerates the extra key. So swap capture
+    binary + launcher first, then the analytics source. The hint inbox is unchanged
+    b8cbed2..f94670a, so hooks firing during the swap stay readable.
+- **Operating step 2 read-only survey (2026-11-04, no changes):**
+  - Installed Mac `agent-sessions.bin` is the b8cbed2 Darwin build (`6beae15a…`), not merged
+    source. The capture plist exists and matches `ServicePlan`, but is not loaded. The
+    refresher (`com.agent-sessions.publication-refresh`) runs e8c96f8 analytics source and
+    calls `capture-v1 current-heads` through the capture wrapper, so **swapping `.bin` in
+    place is not dormant**. It changes a live consumer, and new artifacts must be staged
+    at a separate path until the coordinated switch.
+  - Hooks: Claude 8 and Codex 6 `capture-v1 hook` entries, plus the Pi extension; all point
+    at the wrapper, with no legacy entries. `hooks --action plan` (no `--apply`) is the
+    read-only drift check.
+  - Upgrade precedent: stop → preflight (SHA, `policy-pauses`, binding row, job counts)
+    → SQLite-API backup with `quick_check` → atomic `.bin` swap → `resume` only if a
+    destination pause exists → start (activation). The old b8cbed2 installer used
+    `restart`, which fails on an unloaded label; it must not be replayed.
+  - Open decisions for step 2: build from post-#46 `main` (not `d975961`); cross-compile
+    darwin/arm64 and linux/amd64 inside the Docker admission, with a recorded revision
+    and SHA256 (snapshots carry no `.git`, so no Go VCS stamp); the first writable open
+    of the real queues installs the new schema and triggers, so it belongs to activation
+    (step 3), not staging; analytics source/runtime staging must not interrupt the
+    running refresher's projection lock.
+- **Wave 4 workers HM, MO3 and RB completed and were accepted** (see entries above);
+  merged in stack #46 (`f94670a`).
+- **Operating step 1, read-only reconciliation (2026-11-04, aggregates only, no activation):**
+  - **Mac:** the capture LaunchAgent `agent-sessions-capture-experimental` has a plist with
+    RunAtLoad, but its service is **not loaded**. The wrapper script runs `launcher.py`
+    with `agent-sessions.bin`. `com.agent-sessions.publication-refresh` is running (60 s
+    interval, `--max-bytes` 805306368) and the dashboard plist is present.
+    - Queue `20261029-e3d6dd6e8bab4e8f` was last written on Oct 29 (DB 995 MB, WAL 12.5 MB).
+    - Jobs: 20,308 published and 5 superseded. Runtime sources: 19,413 captured.
+      0 quarantine rows and an empty `discovery_error`.
+    - Config: entries_per_root 4096, max_inventory_records 32768, operation_seconds 60,
+      max_attempts 8, poll 10 s, spool 8 GiB, min_free 4 GiB. No cadence keys, so
+      Q=30 s and M=300 s apply once the new binary runs.
+  - **BC-01:** the user unit file `agent-sessions-capture-experimental.service` (with
+    drop-in) is present, but **no unit is loaded or active** and no capture process runs.
+    - The queue was last written on Oct 29 (744 MB).
+    - Jobs: **10,470 pending**, 19,113 published, 5 retry. Runtime sources: 29,060
+      captured and 22 absent. 0 quarantine rows. `discovery_error='transient'`.
+    - Config as on the Mac except spool 6 GiB.
+    - The 10,470 pending jobs are accepted, unpublished work. They must be preserved and
+      drained by the new binary; never reset them. They are also the first live test of
+      the GAP-03 coalescing and reclamation on a real backlog.
+
 ## Next action: separately authorized operating acceptance
 
-The source-publication/merge request and this documentation request do **not** grant
+**Progress (2026-11-05):** steps 1 and 2 are done. Step 3 has passed on the Mac and is
+complete on BC-01 except the Codex hook and Codex exclusion checks. Step 4 has not
+started. The operator authorized steps 1–4 on 2026-11-04 (see
+[Production delivery — November 4](#production-delivery--november-4)); step 5 stays
+excluded. The current ordered actions are in the
+[resume-here checkpoint](#november-6-2057z-nov-5-resume-here).
+
+The original text below is kept as the plan. The October 30 source-publication/merge
+request and documentation request did **not** grant
 activation, deployment, original-source/R2/BC-01 SSH inventory, host/runtime changes,
 analytics refresh, release publication, archive reset/rebind/deletion or legacy retirement.
 The operating plan and authorization boundary are posted at:
@@ -1321,8 +3008,8 @@ the **assistant owns execution and follow-through**, not a list of manual operat
    inventory drift; exclude every new/current/in-flight/policy key and the already replaced
    global binding. Never blindly replay an old inventory, reset or deletion plan.
 
-Until then, the accurate status is **merged and development-qualified, not operationally
-accepted**. A new artifact, commit, green CI run or source merge does not cross this gate.
+Until then, the accurate status is **merged, development-qualified and running live on
+both hosts, not operationally accepted**. A new artifact, commit, green CI run or source merge does not cross this gate.
 
 ## Preservation, execution and evidence rules
 
@@ -1334,8 +3021,10 @@ accepted**. A new artifact, commit, green CI run or source merge does not cross 
   do not restore intentionally deleted `CLAUDE.md`.
 - `service install --apply` **starts capture**; `capture-v1 run` and
   `publication_refresh --once` are activation/mutation, not dormant staging.
-- Follow [quality gates](quality-gates.md) and read `~/.config/agents/validation.md`
-  before expensive work. Use pinned Nix and the shared Docker worker-side admission;
+- Follow [quality gates](quality-gates.md). The shared validation semaphore and
+  `~/.config/agents/validation.md` were retired on 2026-11-05; the private `launch.py`
+  harness now admits by its owned-container limit and per-container CPU/memory caps.
+  Use pinned Nix in Docker;
   source/dependencies/runtime and every module-cache alias/prepared tool must be read-only,
   actual validation network-none, both temporary variables on executable VM-native EXT4.
   Preserve native Go 600s/package, race/shuffle, fixtures/history counts and safety gates.

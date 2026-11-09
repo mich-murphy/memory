@@ -1,0 +1,18 @@
+# Run against memory-core only, excluding dev dependencies.
+[graph]
+all-features = true
+
+[bans]
+multiple-versions = "warn"
+# Ban known I/O/runtime dependencies even when introduced transitively.
+# sha2 CPU-feature detection requires libc on supported targets; only that
+# transitive wrapper is permitted. Direct libc and other wrappers remain banned.
+deny = [
+  { name = "tokio" }, { name = "async-std" }, { name = "smol" },
+  { name = "notify" }, { name = "mio" }, { name = "socket2" },
+  { name = "object_store" }, { name = "rusty-s3" }, { name = "ureq" },
+  { name = "reqwest" }, { name = "hyper" }, { name = "rusqlite" },
+  { name = "sqlx" }, { name = "diesel" }, { name = "walkdir" },
+  { name = "jwalk" }, { name = "cap-std" }, { name = "nix" },
+  { name = "rustix" }, { name = "libc", wrappers = ["cpufeatures"] }, { name = "fs2" },
+]
