@@ -550,6 +550,57 @@ cleanup R2 and use that"):**
    Mac's sessions captured. Remove the Go hooks only at cutover (DESIGN 18 step 2).
 6. Unmeasured: P12 on BC-01 (Linux fsync cost), natural-sleep P6.
 
+**Progress 2026-11-09, continued session (Sonnet workers, medium thinking; paused at the
+operator's request after A6).** This supersedes "nothing committed" above and in the
+Checkout bullet below.
+- Stack #56, all draft PRs: main ← `rust/scaffold` #54 (a6779d8 docs, b116965 CRAP fix) ←
+  `rust/workspace` #55 (d8fbc4f) ← `rust/sync-policy` #57 (3e29ebf, A7) ←
+  `rust/p2-s3-client` #58 (a6203c2, P2) ← `rust/transient-known-ours` #59 (c1ab3ec, A6).
+  `rust/.gitignore` now ignores `*.profraw`, so 48 coverage leftovers in `rust/crates/memory/`
+  stay untracked.
+- Step 1 is done. The first Go CI run failed `make crap`: the P11 probe `main` is a separate
+  module that `go test ./...` never covers, so it scored 0%. b116965 excludes
+  `docs/rust-rewrite/prototypes/` from the scan, which removes only that function. Hosted CI is
+  green on every branch. CI: 42557988848, 42559422321, 42559429114, 42559633115, 42563074511.
+  Rust gates: 42559422228, 42559428769, 42559633049, 42563074454.
+- Step 2 (A7) is done. Worker `778bac8e-8569-48e` completed and released its paths. The parent
+  reran fmt and clippy, and the daemon (30) and state (25) tests at 2,000 cases with seed
+  730211. Report: `implementation/21-sync-policy.md`.
+- Step 3 (A6) is done. Worker `81505ea7-f8fb-4be` aborted before handing over, and the parent
+  took over its paths. The parent then:
+  - reviewed the diff;
+  - clamped `Retry-After` to [1 s, 15 min], because 0 had given a hot retry;
+  - reran fmt, clippy, doctests, schemas and lints;
+  - ran nextest (378 passed) and the A6 suites at 2,000 cases with seed 730211.
+  Report: `implementation/22-transient-known-ours.md`.
+- Step 4, first part (P2 research) is done. Worker `07d193e2-bf21-4b6` completed and released
+  its paths. It recommends `rusty-s3` 0.11.0 with `ureq` 3.5.1: neither retries, so
+  `current.json` writes are never resent. On cleanup, prefix
+  `rust-acceptance/p2-20261109T033619Z/` was deleted, and the parent's own prefixed LIST of
+  `rust-acceptance/` returned 0 keys. The `.env` value scan of its files found 0 hits.
+  Report: `prototypes/P2-s3-client.md`.
+- Decisions still open from P2:
+  - Both clients fail `cargo deny` licenses on `CDLA-Permissive-2.0` (`webpki-roots`), so
+    allowing it in `rust/deny.toml` needs a decision.
+  - Map R2 400 `BadDigest` to a non-retryable class.
+  - Send only one checksum: R2 rejects MD5 and SHA-256 together.
+- Gaps:
+  - Flake predating A6: `core_coordinates::hegel_coordinates_order_proof_and_retention` fails
+    its coverage guard ("never produced proof-only") on seeds 6 and 13 of 1 to 30 at 500
+    cases. Fix it by raising that generator weight, never by lowering the guard.
+  - The daemon Hegel guard flake that the A7 worker saw did not reproduce at 500 cases for
+    seeds 1 to 20.
+  - `Transient` is not counted apart from `Throttled` in status, because there are no
+    per-class counters yet.
+  - The daemon computes the retry delay but does not schedule on it.
+  - There is no daemon-level late-write state-machine step.
+- Next action on resume:
+  1. Fix the `core_coordinates` guard weight.
+  2. Step 4, rest: decide the deny license, add the `rusty-s3`/`ureq` `Store` adapter (sketch in
+     P2), add zstd, then wire `FsWatcher`/`Scheduler`, `WalkSources` and `SharedFs` into
+     `memory daemon` with the 60 s tick.
+  3. Step 5.
+
 - Checkout: `/Users/mm/dev/memory`, initial branch `main`, base
   `57d8400f632ab47a81e34d060f86d3687123153e`; parent created stack
   `main ← rust/scaffold` with `gh stack init --base main rust/scaffold`.
