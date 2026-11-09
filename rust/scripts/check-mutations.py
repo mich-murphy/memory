@@ -90,7 +90,8 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="memory-mutations-") as directory:
         workspace = Path(directory) / "rust"
         shutil.copytree(ROOT, workspace, ignore=shutil.ignore_patterns("target", "artifacts", ".DS_Store"))
-        env["CARGO_TARGET_DIR"] = str(Path(directory) / "target")
+        # Private unless gates.sh shares one temp target between the sequential mutation scripts.
+        env["CARGO_TARGET_DIR"] = env.get("MEMORY_MUTATION_TARGET") or str(Path(directory) / "target")
         seen: list[list[str]] = []
         for m in MUTANTS:
             for command in m["tests"]:

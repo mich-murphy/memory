@@ -54,7 +54,9 @@ def main() -> int:
         shutil.copytree(ROOT, workspace,
                         ignore=shutil.ignore_patterns("target", "artifacts", ".DS_Store"))
         # Both baseline and mutant use one private target; no concurrent source-target writes.
-        env["CARGO_TARGET_DIR"] = str(Path(directory) / "target")
+        # gates.sh may pass MEMORY_MUTATION_TARGET, a temp target shared only by the mutation
+        # scripts it runs one after another, so registry dependencies compile once.
+        env["CARGO_TARGET_DIR"] = env.get("MEMORY_MUTATION_TARGET") or str(Path(directory) / "target")
         normal = run(workspace, env, "baseline")
         if normal.returncode != 0:
             print("baseline failed; mutation result not evaluated", file=sys.stderr)
