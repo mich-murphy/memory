@@ -55,6 +55,11 @@ revoke, crash, late write; 12-shape guard with per-shape negative controls); e94
 Integrated gate at e94a09b, seed 730212, 2,000 cases: all 13 subgates 0, nextest 391/391
 (2 ignored benchmarks), 12 compile-fail doctests, coverage 5595/5766 = 97.03 % (floor 80),
 sources unchanged across the run; `verify-evidence.py` 0.
+CI (PR #60): the first Rust run hit the macOS 30 min job limit 8 s after all 13 subgates
+returned 0 (Nix setup 13.6 min). 8794e19 lets `gates.sh` share one temp target between
+the two sequential mutation scripts (second script 14 s instead of a full dependency
+build); the timeout was not raised. Run 42627740003 at 8794e19: all three Rust runners
+success (macOS 21m45s), CI workflow 42627739897 success.
 Open: `LaunchRecord` unification (P3) not done; property 3 has no writer-version seam
 (`WRITER_VERSION` is compile-time) and no proptest twin; 1b "after one audit" untested
 (audit evidence is always `NotDue`); idle-minute wakeups not counted (`Counters.wakeups`
