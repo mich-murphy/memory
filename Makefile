@@ -100,8 +100,10 @@ bench-smoke:
 	go test -run='^$$' -bench=. -benchtime=1x ./...
 
 CRAP_FORMAT ?= table
+# docs/rust-rewrite/prototypes/ holds standalone research modules (own go.mod) that never ship.
 crap: cover
 	$(TOOL) go-crap scan ./... --coverage-profile=cover.out --exclude='internal/testenv/' \
+		--exclude='docs/rust-rewrite/prototypes/' \
 		--missing=pessimistic --threshold=30 --fail-above --top=10 --no-progress --format=$(CRAP_FORMAT)
 
 # MUTATE_DIFF=origin/main mutates only the lines changed since that ref.
