@@ -7,6 +7,7 @@
 //! most 4 raw bytes) feeding memory-core's manifest builder. This is not R2, not prototype P2
 //! and not the daemon.
 use hegel::{TestCase, generators as gs};
+use memory::capture::Published;
 use memory::commit::{
     Base, Commit, Failure, GET_ATTEMPTS, Landed, REBASE_RETRIES, Upload, check_fence, commit,
     disposition, manifest_key, recover_base,
@@ -292,17 +293,18 @@ impl FakeStore {
 }
 
 impl Store for FakeStore {
-    type Body = Vec<u8>;
-    fn document(bytes: Vec<u8>) -> Vec<u8> {
-        bytes
+    fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
+        self.put(key, body.as_ref().to_vec(), &Fence::Absent)
     }
-    fn put_if_absent(&mut self, key: &str, body: Vec<u8>) -> Result<ETag, StoreError> {
-        self.put(key, body, &Fence::Absent)
+    fn put_if_match(
+        &mut self,
+        key: &str,
+        etag: &ETag,
+        body: Published,
+    ) -> Result<ETag, StoreError> {
+        self.put(key, body.as_ref().to_vec(), &Fence::Match(etag))
     }
-    fn put_if_match(&mut self, key: &str, etag: &ETag, body: Vec<u8>) -> Result<ETag, StoreError> {
-        self.put(key, body, &Fence::Match(etag))
-    }
-    fn get(&mut self, key: &str) -> Result<Stored<Vec<u8>>, StoreError> {
+    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
         let op = Op::Get(kind_of(key));
         self.log.push((op, key.to_owned()));
         let effect = self.intercept(op);
@@ -325,7 +327,7 @@ type Disk = BTreeMap<u8, Vec<u8>>;
 
 struct Plan {
     changes: Vec<Change>,
-    uploads: Vec<Upload<Vec<u8>>>,
+    uploads: Vec<Upload>,
 }
 
 fn stamp(n: u32, variant: u8) -> EpochStamp {
@@ -338,12 +340,7 @@ fn stamp(n: u32, variant: u8) -> EpochStamp {
         rules: None,
     }
 }
-fn pieces_from(
-    bytes: &[u8],
-    from: usize,
-    variant: u8,
-    uploads: &mut Vec<Upload<Vec<u8>>>,
-) -> R<Vec<Piece>> {
+fn pieces_from(bytes: &[u8], from: usize, variant: u8, uploads: &mut Vec<Upload>) -> R<Vec<Piece>> {
     let tail = need(bytes.get(from..), "range")?;
     let mut out = Vec::new();
     let mut offset = from;
@@ -359,7 +356,7 @@ fn pieces_from(
         ));
         uploads.push(Upload {
             key: object_key(&raw),
-            body: stored,
+            body: Published::sim(stored),
         });
         offset += chunk.len();
     }
@@ -371,7 +368,7 @@ fn write_of(
     bytes: &[u8],
     from: usize,
     variant: u8,
-    uploads: &mut Vec<Upload<Vec<u8>>>,
+    uploads: &mut Vec<Upload>,
 ) -> R<SourceWrite> {
     Ok(SourceWrite {
         id: src_id(i)?,
@@ -763,7 +760,7 @@ impl Sut {
                         .map_err(e)?;
                         manifest = self
                             .store
-                            .put_if_absent(&manifest_key(&built.hash), built.bytes)
+                            .put_if_absent(&manifest_key(&built.hash), Published::sim(built.bytes))
                             .is_ok();
                     }
                 }
@@ -1509,7 +1506,7 @@ impl Rig {
         self.disk.insert(i, bytes.to_vec());
         self.history.entry(i).or_default().push(bytes.to_vec());
     }
-    fn request(&self) -> R<Commit<Vec<u8>>> {
+    fn request(&self) -> R<Commit> {
         let empty = OwnerState::default();
         let state = self.base.as_ref().map_or(&empty, |b| &b.state);
         let plan = plan(&self.disk, state, self.variant)?;
@@ -1519,7 +1516,7 @@ impl Rig {
             uploads: plan.uploads,
         })
     }
-    fn go_with(&mut self, request: Commit<Vec<u8>>) -> Run {
+    fn go_with(&mut self, request: Commit) -> Run {
         let mut pauses = Vec::new();
         let result = commit(&mut self.store, self.base.as_ref(), request, &mut |n| {
             pauses.push(n)

@@ -12,3 +12,4 @@ pub mod manifest;
 pub mod planner;
 pub mod privacy;
 pub mod slice;
+pub mod verify;

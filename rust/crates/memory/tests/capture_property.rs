@@ -286,10 +286,6 @@ impl FakeStore {
 }
 
 impl Store for FakeStore {
-    type Body = Published;
-    fn document(bytes: Vec<u8>) -> Published {
-        Published::document(bytes)
-    }
     fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
         self.put(key, body.as_ref().to_vec(), &Fence::Absent)
     }
@@ -301,7 +297,7 @@ impl Store for FakeStore {
     ) -> Result<ETag, StoreError> {
         self.put(key, body.as_ref().to_vec(), &Fence::Match(etag))
     }
-    fn get(&mut self, key: &str) -> Result<Stored<Published>, StoreError> {
+    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
         let effect = self.intercept(Op::Get(kind_of(key)));
         self.side_effect(key, effect.as_ref());
         self.gate()?;
@@ -310,7 +306,7 @@ impl Store for FakeStore {
         }
         let (body, version) = self.objects.get(key).ok_or(StoreError::NotFound)?;
         Ok(Stored {
-            body: Published::document(body.clone()),
+            body: body.clone(),
             etag: etag_of(*version)?,
         })
     }
@@ -705,10 +701,7 @@ impl Sut {
                         .map_err(e)?;
                         manifest = self
                             .store
-                            .put_if_absent(
-                                &manifest_key(&built.hash),
-                                Published::document(built.bytes),
-                            )
+                            .put_if_absent(&manifest_key(&built.hash), Published::sim(built.bytes))
                             .is_ok();
                     }
                 }

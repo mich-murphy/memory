@@ -55,23 +55,30 @@ pub trait FileSystem {
 /// `Ambiguous` is a reply that never arrived or could not be interpreted: the request may or
 /// may not have landed, so the caller must verify (DESIGN.md 7.4 step 5). `Offline` and
 /// `Server` are transient too, but the simulator may also have landed the write behind them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum StoreError {
     /// HTTP 412: an `If-None-Match: *` or `If-Match` precondition failed.
+    #[error("precondition failed")]
     PreconditionFailed,
     /// HTTP 404 (and a conditional write against a missing key).
+    #[error("not found")]
     NotFound,
     /// Connect, DNS, TLS or timeout failure.
+    #[error("offline")]
     Offline,
     /// HTTP 429 or 503 (DESIGN.md 11.2 `Throttled`), with the reply's `Retry-After` in whole
     /// seconds when it carried one (the adapter parses it).
+    #[error("throttled")]
     Throttled(Option<u32>),
     /// Any other 5xx reply. DESIGN.md 11.2 lists only 429/503 as throttled, so this
     /// retries with the `Offline` exponential backoff.
+    #[error("server error")]
     Server,
     /// HTTP 401 or 403.
+    #[error("authorization failed")]
     Auth,
     /// The outcome of the request is unknown (lost reply).
+    #[error("ambiguous reply")]
     Ambiguous,
 }
 
@@ -101,43 +108,70 @@ impl StoreError {
     }
 }
 
-impl std::fmt::Display for StoreError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::PreconditionFailed => "precondition failed",
-            Self::NotFound => "not found",
-            Self::Offline => "offline",
-            Self::Throttled(_) => "throttled",
-            Self::Server => "server error",
-            Self::Auth => "authorization failed",
-            Self::Ambiguous => "ambiguous reply",
-        })
-    }
-}
-impl std::error::Error for StoreError {}
-
-/// An object read back with the ETag that fences later writes.
+/// An object read back with the ETag that fences later writes. A download is not an upload,
+/// so the body is plain bytes and needs no capability.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Stored<B> {
+pub struct Stored {
     /// Object body.
-    pub body: B,
+    pub body: Vec<u8>,
     /// Opaque entity tag, used unchanged as the `If-Match` fence.
     pub etag: memory_core::domain::ETag,
 }
 
+/// The only body a [`Store`] accepts (DESIGN.md 8, R2: no byte leaves the host unless it is
+/// authorized or is the writer's own metadata).
+///
+/// It can be built in exactly two ways, both crate-private: a slice of a
+/// `memory_core::privacy::AuthorizedBody` (a piece) and the writer's own serialized
+/// manifest or `current.json`. It has no public constructor, `From<Vec<u8>>`, `Default` or
+/// `Deserialize`.
+///
+/// ```compile_fail,E0423
+/// let _ = memory::environment::Published(vec![1, 2, 3]);
+/// ```
+/// ```compile_fail
+/// let _ = memory::environment::Published::from(vec![1_u8]);
+/// ```
+/// ```compile_fail
+/// let _ = memory::environment::Published::default();
+/// ```
+/// ```compile_fail
+/// let _: memory::environment::Published = serde_json::from_str("[]").unwrap();
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Published(Vec<u8>);
+
+impl Published {
+    /// One piece: a byte range of an authorized body.
+    pub(crate) fn piece(
+        body: &memory_core::privacy::AuthorizedBody,
+        start: usize,
+        end: usize,
+    ) -> Option<Self> {
+        body.bytes().get(start..end).map(|b| Self(b.to_vec()))
+    }
+    /// The writer's own serialized metadata (manifest build output, `current.json`).
+    pub(crate) const fn metadata(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+    /// Simulation and test builds only: arbitrary stored bytes, so tests can model encodings
+    /// and foreign writers. Absent from the release binary (cargo feature `sim`).
+    #[cfg(feature = "sim")]
+    pub const fn sim(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+}
+impl AsRef<[u8]> for Published {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 /// Typed object store seam for the commit protocol (DESIGN.md 6.2, 7.4).
 ///
-/// `Body` is the authorized body capability. There is deliberately no production
-/// implementation and no public raw-bytes constructor: the later adapter must bind `Body` to
-/// `Authorized<Redacted<Bytes>>`, and piece bodies reach the driver only as values the caller
-/// obtained from policy. The only bytes the driver itself wraps are the writer's own
-/// metadata documents (manifests and `current.json`), through [`Store::document`]; they
-/// carry no source content. Tests bind `Body` to a test-only type.
+/// There is deliberately no production implementation. Uploads take [`Published`], which only
+/// privacy-authorized piece slices and the writer's own metadata can produce.
 pub trait Store {
-    /// The authorized body capability.
-    type Body: AsRef<[u8]>;
-    /// Wrap one of the writer's own metadata documents (manifest, `current.json`).
-    fn document(bytes: Vec<u8>) -> Self::Body;
     /// Immutable conditional creation (`If-None-Match: *`).
     ///
     /// # Errors
@@ -146,7 +180,7 @@ pub trait Store {
     fn put_if_absent(
         &mut self,
         key: &str,
-        body: Self::Body,
+        body: Published,
     ) -> Result<memory_core::domain::ETag, StoreError>;
     /// Replacement guarded by the ETag we hold (`If-Match`). Client retries stay disabled.
     ///
@@ -157,13 +191,13 @@ pub trait Store {
         &mut self,
         key: &str,
         etag: &memory_core::domain::ETag,
-        body: Self::Body,
+        body: Published,
     ) -> Result<memory_core::domain::ETag, StoreError>;
     /// Read an object and its ETag.
     ///
     /// # Errors
     /// [`StoreError::NotFound`] when absent, otherwise a transport or auth error.
-    fn get(&mut self, key: &str) -> Result<Stored<Self::Body>, StoreError>;
+    fn get(&mut self, key: &str) -> Result<Stored, StoreError>;
 }
 
 /// Per-wrapper observations, never a claim about unwrapped system calls.

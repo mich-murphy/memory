@@ -307,10 +307,6 @@ impl MemStore {
     }
 }
 impl Store for MemStore {
-    type Body = Published;
-    fn document(bytes: Vec<u8>) -> Published {
-        Published::document(bytes)
-    }
     fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
         self.put(key, body, None, true)
     }
@@ -322,10 +318,10 @@ impl Store for MemStore {
     ) -> Result<ETag, StoreError> {
         self.put(key, body, Some(etag), false)
     }
-    fn get(&mut self, key: &str) -> Result<Stored<Published>, StoreError> {
+    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
         let (b, v) = self.objects.get(key).ok_or(StoreError::NotFound)?;
         Ok(Stored {
-            body: Published::document(b.clone()),
+            body: b.clone(),
             etag: Self::tag(*v)?,
         })
     }

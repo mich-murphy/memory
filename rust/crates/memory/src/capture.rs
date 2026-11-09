@@ -7,14 +7,12 @@
 //! # How the type system keeps unredacted bytes out of the store
 //!
 //! [`Commit`] and [`Upload`] are generic over the body. This module only ever builds
-//! `Commit<Published>`. [`Published`] has a private field and its only piece constructor is a
+//! `Commit`. [`Published`] has a private field and its only piece constructor is a
 //! private function that slices a `memory_core::privacy::AuthorizedBody`, a value only
 //! `privacy::authorize` can produce (it consumes an `AdmittedSource` and a `RedactedBytes`,
 //! neither of which has a public constructor, see the compile-fail tests in memory-core).
-//! A production store adapter binds `Store::Body = Published`, so it cannot accept a raw
-//! `Vec<u8>` piece. [`Published::document`] is the one public constructor; it exists because
-//! `Store::document` must wrap the writer's own manifests and `current.json`, and this module
-//! never calls it for a piece.
+//! `Store` uploads take [`Published`] (defined in `environment`), whose only constructors are
+//! crate-private: a slice of an `AuthorizedBody` and the writer's own metadata.
 //!
 //! ```compile_fail
 //! let _ = memory::capture::Published(vec![1, 2, 3]);
@@ -38,32 +36,15 @@ use memory_core::planner::{
     AuditEvidence, Observation, PlanInput, Planning, Strategy, WindowEvidence, plan, window_ranges,
 };
 use memory_core::privacy::{
-    Admission, AdmittedSource, Authorization, AuthorizedBody, PolicyContext, Profile, Reason,
-    ResolvedSourceFacts, SanitizedLaunch, UnknownReason, admit, authorize, transform,
+    Admission, AdmittedSource, Authorization, PolicyContext, Profile, Reason, ResolvedSourceFacts,
+    SanitizedLaunch, UnknownReason, admit, authorize, transform,
 };
 use std::collections::BTreeMap;
 
 /// Largest raw piece (DESIGN.md 7.3).
 pub const MAX_PIECE_BYTES: usize = 8 * 1024 * 1024;
 
-/// The store body: bytes that passed privacy, or one of the writer's own documents.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Published(Vec<u8>);
-
-impl Published {
-    /// Wrap a metadata document (manifest, `current.json`). Never used for pieces here.
-    pub fn document(bytes: Vec<u8>) -> Self {
-        Self(bytes)
-    }
-    fn piece(body: &AuthorizedBody, start: usize, end: usize) -> Option<Self> {
-        body.bytes().get(start..end).map(|b| Self(b.to_vec()))
-    }
-}
-impl AsRef<[u8]> for Published {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
+pub use crate::environment::Published;
 
 /// One located source, as the shell resolved it.
 #[derive(Debug, Clone)]
@@ -168,7 +149,7 @@ pub struct Env<'a> {
 #[derive(Debug)]
 pub struct Captured {
     /// The commit request, when anything must be published.
-    pub commit: Option<Commit<Published>>,
+    pub commit: Option<Commit>,
     /// Local updates to apply after the commit lands.
     pub updates: Vec<Update>,
     /// Outcome per source, in input order.
@@ -178,7 +159,7 @@ pub struct Captured {
 #[derive(Default)]
 struct Acc {
     changes: Vec<Change>,
-    uploads: Vec<Upload<Published>>,
+    uploads: Vec<Upload>,
     updates: Vec<Update>,
 }
 
@@ -220,7 +201,7 @@ pub fn capture<F: FileSystem>(
 /// [`ManifestError`] if a record's digest input cannot be encoded; the header is then left
 /// unchanged.
 pub fn attach_launches(
-    commit: &mut Commit<Published>,
+    commit: &mut Commit,
     launches: &[SanitizedLaunch],
 ) -> Result<(), ManifestError> {
     let mut added: Vec<LaunchRecord> = Vec::new();

@@ -3,7 +3,6 @@
 //! echoes a configured value, and the token file is checked by metadata only, never read.
 use memory_core::domain::{Agent, ArchiveId, MachineId};
 use serde::Deserialize;
-use std::fmt;
 use std::io::Read;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -19,29 +18,40 @@ pub const DEFAULT_CAP_SECS: u64 = 300;
 pub const MAX_CAP_SECS: u64 = 86_400;
 
 /// Closed set of configuration failures. No variant carries a configured value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigError {
     /// The file could not be read.
+    #[error("config_read: {0}")]
     Read(std::io::ErrorKind),
     /// Not valid TOML, an unknown field, a missing field or a wrongly typed field.
+    #[error("config_parse")]
     Parse,
     /// `archive_id` is not a valid archive id.
+    #[error("config_archive_id")]
     ArchiveId,
     /// `machine_id` is not a valid machine id.
+    #[error("config_machine_id")]
     MachineId,
     /// `bucket` is not a valid bucket name.
+    #[error("config_bucket")]
     Bucket,
     /// `window` is zero, inverted or too long.
+    #[error("config_window")]
     Window,
     /// A root path is not absolute.
+    #[error("config_root_not_absolute")]
     RootNotAbsolute,
     /// `token_path` is not absolute.
+    #[error("config_token_path_not_absolute")]
     TokenPathNotAbsolute,
     /// The token file could not be inspected.
+    #[error("config_token_unavailable: {0}")]
     TokenUnavailable(std::io::ErrorKind),
     /// The token path is not a regular file.
+    #[error("config_token_not_file")]
     TokenNotFile,
     /// The token file is readable or writable by group or world.
+    #[error("config_token_permissions")]
     TokenPermissions,
 }
 
@@ -64,19 +74,6 @@ impl ConfigError {
         }
     }
 }
-
-impl fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Read(kind) | Self::TokenUnavailable(kind) => {
-                write!(f, "{}: {kind}", self.code())
-            }
-            _ => f.write_str(self.code()),
-        }
-    }
-}
-
-impl std::error::Error for ConfigError {}
 
 /// One agent root to scan.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

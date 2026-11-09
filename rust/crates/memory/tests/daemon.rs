@@ -120,10 +120,6 @@ impl MemStore {
     }
 }
 impl Store for MemStore {
-    type Body = Published;
-    fn document(bytes: Vec<u8>) -> Published {
-        Published::document(bytes)
-    }
     fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
         self.put(key, &body, None)
     }
@@ -135,10 +131,10 @@ impl Store for MemStore {
     ) -> Result<ETag, StoreError> {
         self.put(key, &body, Some(etag))
     }
-    fn get(&mut self, key: &str) -> Result<Stored<Published>, StoreError> {
+    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
         let (b, v) = self.objects.get(key).ok_or(StoreError::NotFound)?;
         Ok(Stored {
-            body: Published::document(b.clone()),
+            body: b.clone(),
             etag: Self::tag(*v)?,
         })
     }
@@ -494,10 +490,6 @@ impl FStore {
     }
 }
 impl Store for FStore {
-    type Body = Published;
-    fn document(bytes: Vec<u8>) -> Published {
-        Published::document(bytes)
-    }
     fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
         self.put(key, &body, None)
     }
@@ -509,11 +501,11 @@ impl Store for FStore {
     ) -> Result<ETag, StoreError> {
         self.put(key, &body, Some(etag))
     }
-    fn get(&mut self, key: &str) -> Result<Stored<Published>, StoreError> {
+    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
         self.gate()?;
         let (b, v) = self.objects.get(key).ok_or(StoreError::NotFound)?;
         Ok(Stored {
-            body: Published::document(b.clone()),
+            body: b.clone(),
             etag: Self::tag(*v)?,
         })
     }
@@ -1714,10 +1706,6 @@ struct Ghost {
     drop_current: bool,
 }
 impl Store for Ghost {
-    type Body = Published;
-    fn document(bytes: Vec<u8>) -> Published {
-        Published::document(bytes)
-    }
     fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
         if self.drop_current && key.ends_with("current.json") {
             return Err(StoreError::Ambiguous);
@@ -1732,7 +1720,7 @@ impl Store for Ghost {
     ) -> Result<ETag, StoreError> {
         self.inner.put_if_match(key, etag, body)
     }
-    fn get(&mut self, key: &str) -> Result<Stored<Published>, StoreError> {
+    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
         self.inner.get(key)
     }
 }
@@ -1763,6 +1751,7 @@ fn unlanded_first_write_resets_the_base_and_converges() -> R {
     let r = d.reconcile_once().map_err(e)?;
     assert_eq!((r.landed, r.failed), (0, 1));
     d.store_mut().drop_current = false;
+    d.clock_mut().0 = 61_000_000_000;
     let r = d.reconcile_once().map_err(e)?;
     assert_eq!((r.landed, r.failed), (1, 0));
     assert_eq!(d.root(), tmp.root());
@@ -1911,5 +1900,35 @@ fn prepare_sweeps_tmp_entries_and_stale_root_temp_files() -> R {
     assert!(left.is_empty(), "tmp/ is emptied");
     assert!(!stale.exists());
     assert!(keep.exists() && dotted.exists(), "only stale temp files go");
+    Ok(())
+}
+
+#[test]
+fn retry_delay_defers_the_owner_until_the_clock_passes_it() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let store = FStore {
+        offline: true,
+        ..FStore::default()
+    };
+    let mut d = boot(&tmp, &cfg, files_with(b"hello\n"), store, &list, WALL)?;
+    let r = d.reconcile_once().map_err(e)?;
+    assert_eq!((r.landed, r.failed, r.deferred), (0, 1, 0));
+    assert_eq!(r.failures.offline, 1);
+    assert_eq!(r.failures.throttled, 0);
+    d.store_mut().offline = false;
+    let puts = d.store_mut().put_log.len();
+    let r = d.reconcile_once().map_err(e)?;
+    assert_eq!((r.landed, r.failed, r.deferred), (0, 0, 1));
+    assert_eq!(
+        d.store_mut().put_log.len(),
+        puts,
+        "no store call while deferred"
+    );
+    d.clock_mut().mono = 61_000_000_000;
+    let r = d.reconcile_once().map_err(e)?;
+    assert_eq!((r.landed, r.failed, r.deferred), (1, 0, 0));
+    assert_eq!(d.status().failures.offline, 1);
     Ok(())
 }

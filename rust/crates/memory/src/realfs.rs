@@ -15,29 +15,21 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 /// Closed error vocabulary of the real filesystem adapter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum RealFsError {
     /// The handle was never registered.
+    #[error("unknown handle")]
     UnknownHandle,
     /// The range ends before it starts.
+    #[error("invalid range")]
     InvalidRange,
     /// The source is absent where presence was required (`stat_len`).
+    #[error("source absent")]
     Absent,
     /// An operating-system error other than absence; only the kind is kept.
+    #[error("io error: {0}")]
     Io(ErrorKind),
 }
-
-impl std::fmt::Display for RealFsError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnknownHandle => f.write_str("unknown handle"),
-            Self::InvalidRange => f.write_str("invalid range"),
-            Self::Absent => f.write_str("source absent"),
-            Self::Io(k) => write!(f, "io error: {k}"),
-        }
-    }
-}
-impl std::error::Error for RealFsError {}
 
 /// Operation counters, for the cost accounting of DESIGN.md 10.3.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

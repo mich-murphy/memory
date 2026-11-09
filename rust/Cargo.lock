@@ -512,6 +512,7 @@ name = "memory"
 version = "0.1.0"
 dependencies = [
  "hegeltest",
+ "memory",
  "memory-core",
  "notify",
  "proptest",
@@ -519,6 +520,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "thiserror",
  "toml",
 ]
 

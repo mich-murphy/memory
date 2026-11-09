@@ -15,7 +15,10 @@ use std::process::ExitCode;
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// How long the wrapper waits for stdin before giving up (Go: `stdinTimeout`, 2 s).
+/// How long the wrapper waits for a silent stdin before giving up (Go: `stdinTimeout`, 2 s).
+/// DESIGN.md 10.1 requires only that the hook exits 0 within budget on every path; the 1 ms
+/// p99 target (DESIGN.md 14 footprint table) is the in-process time on the normal path, not
+/// this deadline, which bounds a stdin that never closes.
 pub const STDIN_DEADLINE: Duration = Duration::from_secs(2);
 
 /// Closed set of outcomes of one hook invocation. Carries no input text.
@@ -322,7 +325,7 @@ fn process(agent: &str) -> HookResult {
         agent,
         stdin: &stdin,
         // The hook's own argv is `memory hook <agent>`; the agent's argv would need an
-        // ancestor walk, which does not fit the 1 ms budget. Env is inherited from the agent.
+        // ancestor walk, which does not fit the 1 ms in-process target (DESIGN.md footprint table). Env is inherited from the agent.
         argv: &[],
         env: &env,
         hints_dir: &hints,

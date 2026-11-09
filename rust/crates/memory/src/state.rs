@@ -6,7 +6,7 @@
 use memory_core::domain::MachineId;
 use sha2::{Digest, Sha256};
 use std::ffi::OsString;
-use std::fmt::{self, Write as _};
+use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
@@ -27,27 +27,37 @@ pub const WRITER_VERSION: &str = env!("CARGO_PKG_VERSION");
 const LOCK_NAME: &str = "daemon.lock";
 
 /// Closed set of state failures. No variant carries a path or a value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum StateError {
     /// Another process holds `daemon.lock`.
+    #[error("lock_held")]
     LockHeld,
     /// `flock` failed for a reason other than contention.
+    #[error("lock_unavailable: {0}")]
     LockUnavailable(ErrorKind),
     /// A filesystem call failed.
+    #[error("state_io: {0}")]
     Io(ErrorKind),
     /// A state directory is a symlink.
+    #[error("state_symlink")]
     Symlink,
     /// A state directory is not a directory.
+    #[error("state_not_directory")]
     NotDirectory,
     /// A state directory is group- or world-writable.
+    #[error("state_permissions")]
     Permissions,
     /// A state directory is not owned by the daemon's user.
+    #[error("state_not_owned")]
     NotOwned,
     /// A file or schema name is not a plain identifier.
+    #[error("state_invalid_name")]
     InvalidName,
     /// A body exceeds [`MAX_BODY_BYTES`].
+    #[error("state_too_large")]
     TooLarge,
     /// The stored machine id exists but is not a valid id. It is never overwritten.
+    #[error("machine_id_corrupt")]
     MachineIdCorrupt,
 }
 
@@ -78,17 +88,6 @@ impl StateError {
         }
     }
 }
-
-impl fmt::Display for StateError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::LockUnavailable(kind) | Self::Io(kind) => write!(f, "{}: {kind}", self.code()),
-            _ => f.write_str(self.code()),
-        }
-    }
-}
-
-impl std::error::Error for StateError {}
 
 fn io(error: std::io::Error) -> StateError {
     StateError::Io(error.kind())
@@ -418,7 +417,8 @@ pub enum SyncPolicy {
     /// Flush the file and the directory.
     #[default]
     Full,
-    /// Skip the flush calls only.
+    /// Skip the flush calls only. Simulation builds only (cargo feature `sim`, amendment A7).
+    #[cfg(feature = "sim")]
     None,
 }
 
@@ -426,6 +426,7 @@ fn fsync_dir(dir: &Path, sync: SyncPolicy) -> Result<(), StateError> {
     let dir = File::open(dir).map_err(io)?;
     match sync {
         SyncPolicy::Full => dir.sync_all().map_err(io),
+        #[cfg(feature = "sim")]
         SyncPolicy::None => Ok(()),
     }
 }
@@ -439,6 +440,7 @@ fn write_synced(path: &Path, bytes: &[u8], sync: SyncPolicy) -> std::io::Result<
     file.write_all(bytes)?;
     match sync {
         SyncPolicy::Full => file.sync_all(),
+        #[cfg(feature = "sim")]
         SyncPolicy::None => Ok(()),
     }
 }
@@ -555,14 +557,19 @@ impl StateDir {
     /// # Errors
     /// Directory refusals, [`StateError::NotOwned`] or [`StateError::Io`].
     pub fn prepare(lock: &DaemonLock) -> Result<Self, StateError> {
-        Self::prepare_with(lock, SyncPolicy::Full)
+        Self::prepare_inner(lock, SyncPolicy::Full)
     }
 
-    /// As [`StateDir::prepare`] with an explicit [`SyncPolicy`] (tests select `None`).
+    /// As [`StateDir::prepare`] with an explicit [`SyncPolicy`] (feature `sim`, tests only).
     ///
     /// # Errors
     /// As [`StateDir::prepare`].
+    #[cfg(feature = "sim")]
     pub fn prepare_with(lock: &DaemonLock, sync: SyncPolicy) -> Result<Self, StateError> {
+        Self::prepare_inner(lock, sync)
+    }
+
+    pub(crate) fn prepare_inner(lock: &DaemonLock, sync: SyncPolicy) -> Result<Self, StateError> {
         let root = lock.root().to_path_buf();
         let tmp = root.join("tmp");
         vet(&tmp, true)?;

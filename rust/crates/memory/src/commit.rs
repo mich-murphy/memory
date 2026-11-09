@@ -4,7 +4,7 @@
 //! behind simulator-controlled seams (DESIGN.md 12). The driver PUTs pieces (a 412 adopts
 //! the encoding that actually won, R2), PUTs the manifest if absent, performs the guarded
 //! `current.json` PUT and classifies the step 5 verification GET.
-use crate::environment::{Store, StoreError};
+use crate::environment::{Published, Store, StoreError};
 use memory_core::disposition::{Outcome, Pacing, Streak, transition_paced};
 use memory_core::domain::{
     CommitOutcome, Disposition, ETag, ErrorClass, Fault, Owner, OwnerParkReason, Sha256,
@@ -15,6 +15,7 @@ use memory_core::manifest::{
     Position, ProjectedKind, StoredEncoding, build, fold, manifest_hash, parse_current,
     recover_projection,
 };
+use memory_core::verify::{Verdict, classify};
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -46,23 +47,23 @@ pub struct Base {
 
 /// One piece object to PUT. The key is `objects/<raw sha256>.zst`.
 #[derive(Debug)]
-pub struct Upload<B> {
+pub struct Upload {
     /// Object key.
     pub key: String,
-    /// Authorized body capability.
-    pub body: B,
+    /// Upload body; only authorized pieces or writer metadata can build one.
+    pub body: Published,
 }
 
 /// Everything one commit needs. `changes` describe pieces with the encoding the caller
 /// produced; the driver rewrites a descriptor to the stored encoding when a PUT is a 412.
 #[derive(Debug)]
-pub struct Commit<B> {
+pub struct Commit {
     /// Manifest header: owner, time, writer, pending launch records.
     pub header: Header,
     /// Changes of the new manifest.
     pub changes: Vec<Change>,
     /// Piece objects to store first.
-    pub uploads: Vec<Upload<B>>,
+    pub uploads: Vec<Upload>,
 }
 
 /// A commit that is now durable.
@@ -219,6 +220,20 @@ fn not_landed(error: StoreError) -> Failure {
     }
 }
 
+/// SHA-256 of stored (encoded) object bytes; not a manifest identity.
+fn sha256_of(bytes: &[u8]) -> Sha256 {
+    manifest_hash(bytes)
+}
+
+/// A remote document that did not parse: a newer schema parks, anything else is corrupt.
+fn newer_or_corrupt(e: &ManifestError) -> Failure {
+    if e.commit_outcome() == Some(CommitOutcome::NewerSchema) {
+        Failure::NewerSchema
+    } else {
+        Failure::Corrupt
+    }
+}
+
 fn length(bytes: &[u8]) -> u64 {
     u64::try_from(bytes.len()).unwrap_or(u64::MAX)
 }
@@ -239,7 +254,7 @@ fn adopt_winner(changes: &mut [Change], winners: &BTreeMap<String, StoredEncodin
 /// the encoding that actually won (R2).
 fn upload_pieces<S: Store>(
     store: &mut S,
-    uploads: Vec<Upload<S::Body>>,
+    uploads: Vec<Upload>,
     changes: &mut [Change],
 ) -> Result<(), Failure> {
     let mut winners = BTreeMap::new();
@@ -253,7 +268,7 @@ fn upload_pieces<S: Store>(
                     upload.key,
                     StoredEncoding {
                         encoded_len: length(bytes),
-                        encoded_sha256: manifest_hash(bytes),
+                        encoded_sha256: sha256_of(bytes),
                     },
                 );
             }
@@ -264,37 +279,8 @@ fn upload_pieces<S: Store>(
     Ok(())
 }
 
-enum Verdict {
-    Ours(ETag),
-    /// `current.json` names an earlier manifest of ours that never reported landing.
-    Adopt {
-        etag: ETag,
-        built: Box<Built>,
-    },
-    Base {
-        etag: ETag,
-        manifest: Sha256,
-    },
-    Absent,
-}
-
-/// Classify the manifest a foreign `current.json` names: a newer schema parks for its own
-/// reason, anything else is a foreign writer.
-fn foreign_or_newer<S: Store>(store: &mut S, theirs: Sha256, ours: Sha256) -> Failure {
-    let newer = store.get(&manifest_key(&theirs)).is_ok_and(|stored| {
-        recover_projection(stored.body.as_ref())
-            .err()
-            .and_then(|e| e.commit_outcome())
-            == Some(CommitOutcome::NewerSchema)
-    });
-    if newer {
-        Failure::NewerSchema
-    } else {
-        Failure::Foreign { theirs, ours }
-    }
-}
-
-/// Step 5: GET `current.json` and compare. The manifest hash is the request id.
+/// Step 5: GET `current.json` and classify it with the pure [`classify`]. `Ok(None)` is 404
+/// through every attempt. The manifest hash is the request id.
 fn verify<S: Store>(
     store: &mut S,
     key: &str,
@@ -302,33 +288,28 @@ fn verify<S: Store>(
     previous: Option<Sha256>,
     known: &KnownOurs,
     pause: &mut dyn FnMut(u32),
-) -> Result<Verdict, Failure> {
+) -> Result<Option<Verdict>, Failure> {
     let mut last = StoreError::NotFound;
     for attempt in 0..GET_ATTEMPTS {
         match store.get(key) {
             Ok(stored) => {
-                let current = parse_current(stored.body.as_ref()).map_err(|e| {
-                    if e.commit_outcome() == Some(CommitOutcome::NewerSchema) {
-                        Failure::NewerSchema
-                    } else {
-                        Failure::Corrupt
-                    }
-                })?;
-                return if current.manifest == ours {
-                    Ok(Verdict::Ours(stored.etag))
-                } else if let Some(built) = known.get(&current.manifest) {
-                    Ok(Verdict::Adopt {
-                        etag: stored.etag,
-                        built: Box::new(built.clone()),
-                    })
-                } else if Some(current.manifest) == previous {
-                    Ok(Verdict::Base {
-                        etag: stored.etag,
-                        manifest: current.manifest,
-                    })
-                } else {
-                    Err(foreign_or_newer(store, current.manifest, ours))
-                };
+                let current = parse_current(&stored.body).map_err(|e| newer_or_corrupt(&e))?;
+                let verdict = classify(
+                    current.manifest,
+                    stored.etag,
+                    ours,
+                    previous,
+                    |h| known.contains_key(h),
+                    || {
+                        store.get(&manifest_key(&current.manifest)).is_ok_and(|m| {
+                            recover_projection(&m.body)
+                                .err()
+                                .and_then(|e| e.commit_outcome())
+                                == Some(CommitOutcome::NewerSchema)
+                        })
+                    },
+                );
+                return Ok(Some(verdict));
             }
             Err(StoreError::Auth) => {
                 return Err(Failure::LandingUnknown(ErrorClass::DestinationAuth));
@@ -340,14 +321,14 @@ fn verify<S: Store>(
         }
     }
     if last == StoreError::NotFound {
-        Ok(Verdict::Absent)
+        Ok(None)
     } else {
         Err(Failure::LandingUnknown(last.class()))
     }
 }
 
 fn put_document<S: Store>(store: &mut S, key: &str, bytes: Vec<u8>) -> Result<(), Failure> {
-    match store.put_if_absent(key, S::document(bytes)) {
+    match store.put_if_absent(key, Published::metadata(bytes)) {
         Ok(_) | Err(StoreError::PreconditionFailed) => Ok(()),
         Err(error) => Err(not_landed(error)),
     }
@@ -363,7 +344,7 @@ fn put_document<S: Store>(store: &mut S, key: &str, bytes: Vec<u8>) -> Result<()
 pub fn commit<S: Store>(
     store: &mut S,
     base: Option<&Base>,
-    request: Commit<S::Body>,
+    request: Commit,
     pause: &mut dyn FnMut(u32),
 ) -> Result<Landed, Failure> {
     commit_known(store, base, request, &mut KnownOurs::new(), pause)
@@ -379,7 +360,7 @@ pub fn commit<S: Store>(
 pub fn commit_known<S: Store>(
     store: &mut S,
     base: Option<&Base>,
-    request: Commit<S::Body>,
+    request: Commit,
     known: &mut KnownOurs,
     pause: &mut dyn FnMut(u32),
 ) -> Result<Landed, Failure> {
@@ -406,8 +387,8 @@ pub fn commit_known<S: Store>(
     loop {
         check_fence(&built.manifest, named)?;
         let attempt = match &fence {
-            Some(etag) => store.put_if_match(&key, etag, S::document(pointer.clone())),
-            None => store.put_if_absent(&key, S::document(pointer.clone())),
+            Some(etag) => store.put_if_match(&key, etag, Published::metadata(pointer.clone())),
+            None => store.put_if_absent(&key, Published::metadata(pointer.clone())),
         };
         match attempt {
             Ok(etag) => {
@@ -426,7 +407,7 @@ pub fn commit_known<S: Store>(
         }
         let mut absent = false;
         match verify(store, &key, ours, previous, known, pause)? {
-            Verdict::Ours(etag) => {
+            Some(Verdict::Ours { etag }) => {
                 known.clear();
                 return Ok(Landed {
                     outcome: CommitOutcome::AlreadyOurs { etag: etag.clone() },
@@ -435,23 +416,23 @@ pub fn commit_known<S: Store>(
                     follow_up: false,
                 });
             }
-            Verdict::Adopt {
-                etag,
-                built: earlier,
-            } => {
+            Some(Verdict::Adopt { etag, manifest }) => {
+                let earlier = known.get(&manifest).cloned().ok_or(Failure::Corrupt)?;
                 known.clear();
                 return Ok(Landed {
                     outcome: CommitOutcome::AlreadyOurs { etag: etag.clone() },
                     etag,
-                    built: *earlier,
+                    built: earlier,
                     follow_up: true,
                 });
             }
-            Verdict::Base { etag, manifest } => {
+            Some(Verdict::Base { etag, manifest }) => {
                 fence = Some(etag);
                 named = Some(manifest);
             }
-            Verdict::Absent => {
+            Some(Verdict::Foreign { theirs }) => return Err(Failure::Foreign { theirs, ours }),
+            Some(Verdict::NewerSchema) => return Err(Failure::NewerSchema),
+            None => {
                 // 404 is not final. Only a first write may retry step 3 (If-None-Match: *).
                 if fence.is_some() {
                     return Err(Failure::LandingUnknown(ErrorClass::Offline));
@@ -483,20 +464,7 @@ pub fn recover_base<S: Store>(store: &mut S, owner: &Owner) -> Result<Option<Bas
         Err(StoreError::NotFound) => return Ok(None),
         Err(error) => return Err(not_landed(error)),
     };
-    let current = parse_current(pointer.body.as_ref()).map_err(|e| {
-        if e.commit_outcome() == Some(CommitOutcome::NewerSchema) {
-            Failure::NewerSchema
-        } else {
-            Failure::Corrupt
-        }
-    })?;
-    let newer_or_corrupt = |e: ManifestError| {
-        if e.commit_outcome() == Some(CommitOutcome::NewerSchema) {
-            Failure::NewerSchema
-        } else {
-            Failure::Corrupt
-        }
-    };
+    let current = parse_current(&pointer.body).map_err(|e| newer_or_corrupt(&e))?;
     let mut hash = current.manifest;
     let mut chain: Vec<Vec<u8>> = Vec::new();
     loop {
@@ -507,11 +475,11 @@ pub fn recover_base<S: Store>(store: &mut S, owner: &Owner) -> Result<Option<Bas
             StoreError::NotFound | StoreError::PreconditionFailed => Failure::Corrupt,
             other => not_landed(other),
         })?;
-        let bytes = stored.body.as_ref().to_vec();
+        let bytes: Vec<u8> = stored.body;
         if manifest_hash(&bytes) != hash {
             return Err(Failure::Corrupt);
         }
-        let projection = recover_projection(&bytes).map_err(newer_or_corrupt)?;
+        let projection = recover_projection(&bytes).map_err(|e| newer_or_corrupt(&e))?;
         chain.push(bytes);
         match projection.kind {
             ProjectedKind::Checkpoint => break,
@@ -520,7 +488,7 @@ pub fn recover_base<S: Store>(store: &mut S, owner: &Owner) -> Result<Option<Bas
     }
     chain.reverse();
     let refs: Vec<&[u8]> = chain.iter().map(Vec::as_slice).collect();
-    let folded = fold(&refs).map_err(newer_or_corrupt)?;
+    let folded = fold(&refs).map_err(|e| newer_or_corrupt(&e))?;
     if folded.owner != *owner || folded.position.manifest != current.manifest {
         return Err(Failure::Corrupt);
     }

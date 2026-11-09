@@ -14,7 +14,7 @@
 //! The commit base (`current.json` ETag, owner state) is never persisted: every owner
 //! recovers it from the store on its first round after a start (`recover_base`).
 use crate::capture::{
-    Env, Local, Locals, MAX_PIECE_BYTES, Published, Source, Update, attach_launches, capture,
+    Env, Local, Locals, MAX_PIECE_BYTES, Source, Update, attach_launches, capture,
 };
 use crate::commit::{
     Base, Failure, KnownOurs, Landed, commit_known, disposition_paced, recover_base,
@@ -27,8 +27,8 @@ use crate::state::{
 };
 use memory_core::disposition::Streak;
 use memory_core::domain::{
-    Disposition, Owner, OwnerParkReason, ParkReason, RulesDigest, SessionKey, SnapshotFingerprint,
-    SourceId, SourceState,
+    Disposition, ErrorClass, Owner, OwnerParkReason, ParkReason, RulesDigest, SessionKey,
+    SnapshotFingerprint, SourceId, SourceState,
 };
 use memory_core::hint::{HintScan, LaunchHint, scan};
 use memory_core::manifest::{Header, ManifestError, Timestamp, Writer};
@@ -141,6 +141,50 @@ pub struct StatusBody {
     pub host_paused: bool,
     /// Parked owners; they are skipped until an operator clears them.
     pub parked: Vec<ParkedEntry>,
+    /// Failed attempts by error class since the status file was first created.
+    #[serde(default)]
+    pub failures: FailureCounts,
+}
+
+/// Failed attempts by [`ErrorClass`] (DESIGN.md 11.2, 11.3): `transient` is distinct from
+/// `throttled`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FailureCounts {
+    /// Connection, timeout and ambiguous failures.
+    pub offline: u64,
+    /// 429 and 503 replies.
+    pub throttled: u64,
+    /// `BaseUnchanged` through every rebase retry.
+    pub transient: u64,
+    /// Authorization failures.
+    pub destination_auth: u64,
+    /// Local resource failures.
+    pub local: u64,
+    /// Deterministic failures.
+    pub deterministic: u64,
+}
+
+impl FailureCounts {
+    fn bump(&mut self, class: &ErrorClass) {
+        let n = match class {
+            ErrorClass::Offline => &mut self.offline,
+            ErrorClass::Throttled => &mut self.throttled,
+            ErrorClass::Transient => &mut self.transient,
+            ErrorClass::DestinationAuth => &mut self.destination_auth,
+            ErrorClass::Local(_) => &mut self.local,
+            ErrorClass::Deterministic(_) => &mut self.deterministic,
+        };
+        *n = n.saturating_add(1);
+    }
+    fn add(&mut self, other: &Self) {
+        self.offline = self.offline.saturating_add(other.offline);
+        self.throttled = self.throttled.saturating_add(other.throttled);
+        self.transient = self.transient.saturating_add(other.transient);
+        self.destination_auth = self.destination_auth.saturating_add(other.destination_auth);
+        self.local = self.local.saturating_add(other.local);
+        self.deterministic = self.deterministic.saturating_add(other.deterministic);
+    }
 }
 
 /// Counts of one round.
@@ -154,6 +198,10 @@ pub struct RoundReport {
     pub skipped: usize,
     /// Owners parked by this round.
     pub parked: usize,
+    /// Owners skipped because a retry delay (`not_before`) has not elapsed.
+    pub deferred: usize,
+    /// Failures of this round by class.
+    pub failures: FailureCounts,
 }
 
 /// Source enumeration, supplied by the shell.
@@ -171,7 +219,7 @@ impl<T: FnMut() -> Vec<(Owner, Source)>> Sources for T {
 pub struct Parts<F, S, C, E> {
     /// Filesystem seam.
     pub fs: F,
-    /// Object store; its body is [`Published`].
+    /// Object store; uploads take `environment::Published`.
     pub store: S,
     /// Clock seam.
     pub clock: C,
@@ -181,7 +229,8 @@ pub struct Parts<F, S, C, E> {
     pub context: PolicyContext,
 }
 
-/// Start options that are not part of [`Parts`]. `Default` is production: [`SyncPolicy::Full`].
+/// Start options that are not part of [`Parts`]. Simulation builds only (cargo feature `sim`).
+#[cfg(feature = "sim")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StartOptions {
     /// State write flushing; only simulation tests select [`SyncPolicy::None`].
@@ -199,7 +248,7 @@ struct Opened {
 
 fn open(root: &Path, config_path: &Path, sync: SyncPolicy) -> Result<Opened, StartError> {
     let lock = DaemonLock::acquire(root).map_err(StartError::State)?;
-    let state = StateDir::prepare_with(&lock, sync).map_err(StartError::State)?;
+    let state = StateDir::prepare_inner(&lock, sync).map_err(StartError::State)?;
     state.vet_hints_dir().map_err(StartError::State)?;
     let config = Config::load(config_path).map_err(StartError::Config)?;
     let parsed = match state.read(StateFile::Index) {
@@ -244,6 +293,8 @@ struct OwnerRt {
     parked: Option<ParkedReason>,
     /// Manifests built since the last landed commit (A6); memory only.
     known_ours: KnownOurs,
+    /// Monotonic time before which the owner is not retried (from `Disposition::Retry`).
+    not_before: Option<Duration>,
 }
 
 impl OwnerRt {
@@ -254,6 +305,7 @@ impl OwnerRt {
             streak: Streak::default(),
             parked,
             known_ours: KnownOurs::new(),
+            not_before: None,
         }
     }
 }
@@ -273,7 +325,7 @@ struct ScannedFile {
 }
 
 fn stamp_of(wall_ns: i128) -> Result<(Timestamp, String), ManifestError> {
-    let secs = u64::try_from(wall_ns / 1_000_000_000).unwrap_or(0);
+    let secs = u64::try_from(wall_ns / 1_000_000_000).map_err(|_| ManifestError::BadTimestamp)?;
     let text = format!(
         "{}T{:02}:{:02}:{:02}Z",
         utc_day(secs),
@@ -305,7 +357,7 @@ pub struct Daemon<F, S, C, E> {
     draws: u64,
 }
 
-impl<F: FileSystem, S: Store<Body = Published>, C: Clock, E: Sources> Daemon<F, S, C, E> {
+impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     /// Startup in the documented order.
     ///
     /// # Errors
@@ -315,20 +367,30 @@ impl<F: FileSystem, S: Store<Body = Published>, C: Clock, E: Sources> Daemon<F, 
         config_path: &Path,
         parts: Parts<F, S, C, E>,
     ) -> Result<Self, StartError> {
-        Self::start_with(root, config_path, parts, StartOptions::default())
+        Self::start_inner(root, config_path, parts, SyncPolicy::Full)
     }
 
-    /// As [`Daemon::start`] with explicit [`StartOptions`] (tests only).
+    /// As [`Daemon::start`] with explicit [`StartOptions`] (feature `sim`, tests only).
     ///
     /// # Errors
     /// As [`Daemon::start`].
+    #[cfg(feature = "sim")]
     pub fn start_with(
         root: &Path,
         config_path: &Path,
         parts: Parts<F, S, C, E>,
         options: StartOptions,
     ) -> Result<Self, StartError> {
-        let opened = open(root, config_path, options.sync)?;
+        Self::start_inner(root, config_path, parts, options.sync)
+    }
+
+    fn start_inner(
+        root: &Path,
+        config_path: &Path,
+        parts: Parts<F, S, C, E>,
+        sync: SyncPolicy,
+    ) -> Result<Self, StartError> {
+        let opened = open(root, config_path, sync)?;
         let locals = opened
             .index
             .sources
@@ -490,14 +552,22 @@ impl<F: FileSystem, S: Store<Body = Published>, C: Clock, E: Sources> Daemon<F, 
         match disp {
             Disposition::Done => {
                 report.landed += 1;
+                rt.not_before = None;
                 false
             }
-            Disposition::Retry { .. } | Disposition::Cancelled => {
+            Disposition::Retry { after, class } => {
+                report.failed += 1;
+                report.failures.bump(&class);
+                rt.not_before = Some(at.saturating_add(after));
+                false
+            }
+            Disposition::Cancelled => {
                 report.failed += 1;
                 false
             }
-            Disposition::PauseHost { .. } => {
+            Disposition::PauseHost { class } => {
                 report.failed += 1;
+                report.failures.bump(&class);
                 true
             }
             Disposition::Park { reason } => {
@@ -528,6 +598,10 @@ impl<F: FileSystem, S: Store<Body = Published>, C: Clock, E: Sources> Daemon<F, 
             return false;
         }
         let at = Duration::from_nanos(self.clock.monotonic_ns());
+        if rt.not_before.is_some_and(|t| at < t) {
+            report.deferred += 1;
+            return false;
+        }
         if rt.needs_recover {
             match recover_base(&mut self.store, owner) {
                 Ok(base) => {
@@ -640,7 +714,8 @@ impl<F: FileSystem, S: Store<Body = Published>, C: Clock, E: Sources> Daemon<F, 
             .last_index
             .is_none_or(|last| now.saturating_sub(last) >= INDEX_INTERVAL);
         if self.dirty && (force || due) {
-            let body = serde_json::to_vec(&self.index_body()).unwrap_or_default();
+            let body = serde_json::to_vec(&self.index_body())
+                .map_err(|_| StateError::Io(std::io::ErrorKind::InvalidData))?;
             self.state.write(StateFile::Index, &body)?;
             self.dirty = false;
             self.last_index = Some(now);
@@ -678,6 +753,7 @@ impl<F: FileSystem, S: Store<Body = Published>, C: Clock, E: Sources> Daemon<F, 
             }
         }
         self.advance_hints(&files);
+        self.status.failures.add(&report.failures);
         self.status.rounds += 1;
         self.status.updated_at = text;
         let mut parked: Vec<ParkedEntry> = self
@@ -707,7 +783,8 @@ impl<F: FileSystem, S: Store<Body = Published>, C: Clock, E: Sources> Daemon<F, 
             .last_status
             .is_none_or(|last| now.saturating_sub(last) >= INDEX_INTERVAL);
         if force || due {
-            let body = serde_json::to_vec(&self.status).unwrap_or_default();
+            let body = serde_json::to_vec(&self.status)
+                .map_err(|_| StateError::Io(std::io::ErrorKind::InvalidData))?;
             self.state.write(StateFile::Status, &body)?;
             self.last_status = Some(now);
         }
