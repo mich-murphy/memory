@@ -39,6 +39,7 @@ fn request() -> PlanInput {
                     last_checked_at_ns: None,
                     consecutive_failures: 0,
                 },
+                whole_state: None,
             }),
             windows: Some(WindowEvidence {
                 head: hash(1),

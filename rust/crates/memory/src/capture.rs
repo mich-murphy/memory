@@ -19,14 +19,15 @@
 //! ```
 //!
 //! Limitations: piece encoding is the identity (no zstd yet; `encoded_*` equal the raw
-//! fields), the whole-stream digest is recomputed from a fresh read of `[0, to)` instead of a
-//! resumable hash, `Refresh` of a racy stat is not persisted, and audit evidence is always
+//! fields), the whole-stream digest resumes from the index's `Sha256State` for prefix-stable sources
+//! (otherwise it is recomputed from a fresh read of `[0, to)`), `Refresh` of a racy stat is not persisted, and audit evidence is always
 //! `NotDue`.
 use crate::commit::{Commit, Upload};
 use crate::environment::FileSystem;
 use memory_core::domain::{
     AuditState, EpochPosition, Fingerprint, Observed, Offset, Plan, RulesDigest, Sha256,
-    SnapshotFingerprint, SourceClass, SourceId, SourceKind, SourceState, WithholdReason,
+    Sha256State, SnapshotFingerprint, SourceClass, SourceId, SourceKind, SourceState,
+    WithholdReason,
 };
 use memory_core::manifest::{
     Change, EpochStamp, EpochWriter, Header, LaunchRecord, ManifestError, OwnerState, Piece,
@@ -260,6 +261,45 @@ fn read_exact<F: FileSystem>(fs: &mut F, handle: u64, len: u64) -> Result<Vec<u8
     }
 }
 
+/// Bytes `range` of the transformed stream whose first `from` bytes are still on disk
+/// (identity transform) and whose remainder is `delta`; reads only the on-disk part.
+fn stream_span<F: FileSystem>(
+    fs: &mut F,
+    handle: u64,
+    from: u64,
+    delta: &[u8],
+    range: &std::ops::Range<Offset>,
+    known: &[(u64, Vec<u8>)],
+) -> Result<Vec<u8>, SourceOutcome> {
+    let (start, end) = (range.start.get(), range.end.get());
+    let disk_end = end.min(from);
+    let mut out = Vec::new();
+    let cached = known.iter().find_map(|(at, bytes)| {
+        let lo = usize::try_from(start.checked_sub(*at)?).ok()?;
+        let hi = usize::try_from(disk_end.checked_sub(*at)?).ok()?;
+        bytes.get(lo..hi)
+    });
+    if start < disk_end
+        && let Some(hit) = cached
+    {
+        out.extend_from_slice(hit);
+    } else if start < disk_end {
+        let bytes = fs
+            .read(handle, start..disk_end)
+            .map_err(|_| SourceOutcome::Unavailable)?;
+        if u64::try_from(bytes.len()) != Ok(disk_end - start) {
+            return Err(SourceOutcome::Raced);
+        }
+        out = bytes;
+    }
+    if end > from {
+        let lo = usize::try_from(start.max(from) - from).map_err(|_| SourceOutcome::Raced)?;
+        let hi = usize::try_from(end - from).map_err(|_| SourceOutcome::Raced)?;
+        out.extend_from_slice(delta.get(lo..hi).ok_or(SourceOutcome::Raced)?);
+    }
+    Ok(out)
+}
+
 fn step<F: FileSystem>(
     fs: &mut F,
     src: &Source,
@@ -382,8 +422,13 @@ fn step<F: FileSystem>(
     }
 }
 
+/// Verified on-disk byte segments `(start, bytes)` that need not be read again.
+type Known = Vec<(u64, Vec<u8>)>;
+
 enum Mode {
-    Extend(Offset),
+    /// Extend from the offset; the state, when present, is the resumable digest of `[0, from)`.
+    /// `Known` are on-disk segments `(start, bytes)` already read and verified by the planner.
+    Extend(Offset, Option<Sha256State>, Known),
     Epoch,
     Replace,
 }
@@ -407,15 +452,28 @@ impl Job<'_> {
     ) -> Result<(), SourceOutcome> {
         let src = self.src;
         let (from, to, epoch) = match mode {
-            Mode::Extend(from) => (from.get(), from.get().max(self.observed.size), None),
+            Mode::Extend(from, ..) => (from.get(), from.get().max(self.observed.size), None),
             Mode::Epoch | Mode::Replace => (0, self.observed.size, Some(self.next_epoch)),
         };
-        let to = if matches!(mode, Mode::Extend(_)) {
-            self.observed.size.max(to)
-        } else {
-            to
+        // A delta read is valid only when the transform is prefix-stable and a verified
+        // resumable state for `[0, from)` exists; otherwise read the whole stream as before.
+        let resume = match &mode {
+            Mode::Extend(_, Some(state), _) if self.admitted.prefix_stable() && from <= to => {
+                Some(state.clone())
+            }
+            _ => None,
         };
-        let raw = read_exact(fs, src.handle, to)?;
+        let raw = if resume.is_some() {
+            let bytes = fs
+                .read(src.handle, from..to)
+                .map_err(|_| SourceOutcome::Unavailable)?;
+            if u64::try_from(bytes.len()) != Ok(to - from) {
+                return Err(SourceOutcome::Raced);
+            }
+            bytes
+        } else {
+            read_exact(fs, src.handle, to)?
+        };
         let redacted =
             transform(&self.admitted, &raw).map_err(|r| SourceOutcome::Withheld(withhold_of(r)))?;
         let body = match authorize(self.admitted_clone()?, redacted, self.env.context) {
@@ -423,16 +481,26 @@ impl Job<'_> {
             Authorization::Deny(r) => return Err(SourceOutcome::Withheld(withhold_of(r))),
             Authorization::Unknown(u) => return Err(SourceOutcome::Blocked(u)),
         };
-        let stream_len = body.bytes().len();
-        let start = usize::try_from(from).map_err(|_| SourceOutcome::Raced)?;
+        let (base, mut at) = if resume.is_some() {
+            (Offset::new(from), 0)
+        } else {
+            (
+                Offset::new(0),
+                usize::try_from(from).map_err(|_| SourceOutcome::Raced)?,
+            )
+        };
+        let body_len = body.bytes().len();
+        let stream_len = base
+            .get()
+            .checked_add(u64::try_from(body_len).map_err(|_| SourceOutcome::Raced)?)
+            .ok_or(SourceOutcome::Raced)?;
         let mut pieces = Vec::new();
-        let mut at = start;
         let step = self.env.piece_len.clamp(1, MAX_PIECE_BYTES);
-        while at < stream_len {
-            let end = at.saturating_add(step).min(stream_len);
+        while at < body_len {
+            let end = at.saturating_add(step).min(body_len);
             let piece = Published::piece(&body, at, end).ok_or(SourceOutcome::Raced)?;
             let described =
-                Piece::from_authorized(&body, at, end).map_err(|_| SourceOutcome::Raced)?;
+                Piece::from_authorized(&body, base, at, end).map_err(|_| SourceOutcome::Raced)?;
             pieces.push(described.clone());
             acc.uploads.push(Upload {
                 key: described.object().to_owned(),
@@ -440,24 +508,56 @@ impl Job<'_> {
             });
             at = end;
         }
-        let whole = manifest_hash(body.bytes());
+        let (whole, whole_state) = match &resume {
+            Some(state) => {
+                let next = state
+                    .extend(body.bytes())
+                    .map_err(|_| SourceOutcome::Raced)?;
+                (next.digest().map_err(|_| SourceOutcome::Raced)?, Some(next))
+            }
+            None => (
+                manifest_hash(body.bytes()),
+                if self.admitted.prefix_stable() {
+                    Sha256State::empty().extend(body.bytes()).ok()
+                } else {
+                    None
+                },
+            ),
+        };
         let write = SourceWrite {
             id: src.id.clone(),
             kind: src.kind.clone(),
             path: src.path.clone(),
             class: src.class.clone(),
             epoch: self.stamp(epoch),
-            size: u64::try_from(stream_len).map_err(|_| SourceOutcome::Raced)?,
+            size: stream_len,
             sha256: whole,
             pieces,
         };
         acc.changes.push(match mode {
-            Mode::Extend(_) => Change::Extend(write),
+            Mode::Extend(..) => Change::Extend(write),
             Mode::Epoch => Change::Epoch(write),
             Mode::Replace => Change::Replace(write),
         });
         if src.class == SourceClass::Append {
-            let w = windows_of(body.bytes()).ok_or(SourceOutcome::Raced)?;
+            let w = if resume.is_some() {
+                let (head, tail) = window_ranges(Offset::new(stream_len));
+                let mut digests = Vec::new();
+                for range in [head, tail] {
+                    let known: &[(u64, Vec<u8>)] = match &mode {
+                        Mode::Extend(_, _, k) => k,
+                        _ => &[],
+                    };
+                    let bytes = stream_span(fs, src.handle, from, body.bytes(), &range, known)?;
+                    digests.push(manifest_hash(&bytes));
+                }
+                let (Some(h), Some(t)) = (digests.first(), digests.get(1)) else {
+                    return Err(SourceOutcome::Raced);
+                };
+                WindowEvidence { head: *h, tail: *t }
+            } else {
+                windows_of(body.bytes()).ok_or(SourceOutcome::Raced)?
+            };
             let n = epoch.unwrap_or(self.next_epoch.saturating_sub(1));
             acc.updates.push(Update::Index(
                 src.id.clone(),
@@ -465,7 +565,7 @@ impl Job<'_> {
                     observed: self.observed.clone(),
                     position: EpochPosition {
                         epoch: n,
-                        captured_to: Offset::new(u64::try_from(stream_len).unwrap_or(u64::MAX)),
+                        captured_to: Offset::new(stream_len),
                         whole,
                         rules: self.rules,
                     },
@@ -475,6 +575,7 @@ impl Job<'_> {
                         last_checked_at_ns: None,
                         consecutive_failures: 0,
                     },
+                    whole_state,
                 }),
             ));
         }
@@ -519,6 +620,7 @@ fn append<F: FileSystem>(
     let mut adopt = None;
     let mut windows = None;
     let mut prefix = None;
+    let mut known: Known = Vec::new();
     let mut rounds = 0_u8;
     let (decision, adopted) = loop {
         rounds += 1;
@@ -549,6 +651,7 @@ fn append<F: FileSystem>(
                 };
                 let (head, tail) = window_ranges(state.position.captured_to);
                 let mut digests = Vec::new();
+                known.clear();
                 for range in [head, tail] {
                     let len = range.end.get().saturating_sub(range.start.get());
                     let Ok(bytes) = fs.read(src.handle, range.start.get()..range.end.get()) else {
@@ -558,6 +661,7 @@ fn append<F: FileSystem>(
                         return SourceOutcome::Raced;
                     }
                     digests.push(manifest_hash(&bytes));
+                    known.push((range.start.get(), bytes));
                 }
                 let (Some(h), Some(t)) = (digests.first(), digests.get(1)) else {
                     return SourceOutcome::Unavailable;
@@ -592,11 +696,28 @@ fn append<F: FileSystem>(
                     last_checked_at_ns: None,
                     consecutive_failures: 0,
                 },
+                whole_state: if job.admitted.prefix_stable() {
+                    Sha256State::empty().extend(bytes).ok()
+                } else {
+                    None
+                },
             }),
         ));
     }
     let mode = match decision {
-        Plan::Append { from, .. } if live => Mode::Extend(from),
+        Plan::Append { from, .. } if live => Mode::Extend(
+            from,
+            index
+                .as_ref()
+                .filter(|state| state.position.captured_to == from)
+                .and_then(|state| state.whole_state.clone())
+                .filter(|st| {
+                    index
+                        .as_ref()
+                        .is_some_and(|s| st.digest() == Ok(s.position.whole))
+                }),
+            known,
+        ),
         Plan::Replay { .. } => Mode::Epoch,
         Plan::Withheld { reason } => return SourceOutcome::Withheld(reason),
         _ => return SourceOutcome::Unchanged,

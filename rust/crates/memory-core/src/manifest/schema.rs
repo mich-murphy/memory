@@ -314,7 +314,8 @@ pub struct Piece {
 /// let _ = memory_core::manifest::Piece::new;
 /// ```
 impl Piece {
-    /// Describe `body[start..end]` of an authorized body. The digests and length are computed
+    /// Describe `body[start..end]` of an authorized body whose first byte sits at stream offset
+    /// `base`; the piece offset is `base + start`. The digests and length are computed
     /// here from the authorized bytes; the caller supplies no digest. Encoding is the identity
     /// until zstd lands, so the encoded fields equal the raw ones (see [`Piece::adopt_stored`]).
     ///
@@ -323,6 +324,7 @@ impl Piece {
     /// [`ManifestError::Overflow`] if an offset does not fit in `u64`.
     pub fn from_authorized(
         body: &AuthorizedBody,
+        base: Offset,
         start: usize,
         end: usize,
     ) -> Result<Self, ManifestError> {
@@ -333,9 +335,12 @@ impl Piece {
             .ok_or(ManifestError::BadPiece)?;
         let sha256 = manifest_hash(chunk);
         let len = u64::try_from(chunk.len()).map_err(|_| ManifestError::Overflow)?;
-        let offset = u64::try_from(start).map_err(|_| ManifestError::Overflow)?;
+        let local = u64::try_from(start).map_err(|_| ManifestError::Overflow)?;
+        let offset = base
+            .checked_add(local)
+            .map_err(|_| ManifestError::Overflow)?;
         Ok(Self {
-            offset: Offset::new(offset),
+            offset,
             len,
             sha256,
             object: object_key(&sha256),

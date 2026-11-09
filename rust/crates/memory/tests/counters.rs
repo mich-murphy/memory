@@ -153,7 +153,7 @@ impl Clock for Clk {
     }
 }
 
-fn src(owner_n: u64, handle: u64) -> R<(Owner, Source)> {
+fn src_with(owner_n: u64, handle: u64, profile: Profile) -> R<(Owner, Source)> {
     let path = format!("projects/p/s{owner_n}-{handle}.jsonl");
     Ok((
         Owner::Session(SessionKey {
@@ -175,7 +175,7 @@ fn src(owner_n: u64, handle: u64) -> R<(Owner, Source)> {
                 path_resolved: true,
                 root_resolved: true,
                 owner: Some("o".to_owned()),
-                profile: Profile::Transcript,
+                profile,
             },
         },
     ))
@@ -223,6 +223,9 @@ fn boot(tmp: &Tmp, cfg: &std::path::Path, fs: Fs, store: St, list: &[(Owner, Sou
 
 /// `owners` owners with `per` sources each; handles are 1-based and every file holds `bytes`.
 fn rig(owners: u64, per: u64, bytes: &[u8]) -> R<Rig> {
+    rig_with(owners, per, bytes, Profile::Transcript)
+}
+fn rig_with(owners: u64, per: u64, bytes: &[u8], profile: Profile) -> R<Rig> {
     let tmp = Tmp::new()?;
     let cfg = tmp.config()?;
     let mut list = Vec::new();
@@ -230,7 +233,7 @@ fn rig(owners: u64, per: u64, bytes: &[u8]) -> R<Rig> {
     for o in 0..owners {
         for k in 0..per {
             let handle = o * per + k + 1;
-            list.push(src(o, handle)?);
+            list.push(src_with(o, handle, profile)?);
             fs.inner.files.insert(handle, bytes.to_vec());
         }
     }
@@ -339,7 +342,7 @@ fn append_of_59kb_reads_at_most_59kb_plus_68kib() -> R {
     let (_, read, puts) = r.measure()?;
     assert!(puts > 0, "the append was captured");
     assert!(read <= 59_000 + 68 * 1024, "read {read} bytes");
-    // Measurement only: the same append to a 200 kB source (not asserted, see report).
+    // The same append to a 200 kB source must read no more: reads scale with the append.
     let mut big = rig(1, 1, &lines(200_000))?;
     big.converge()?;
     let mut more = lines(200_000);
@@ -347,6 +350,7 @@ fn append_of_59kb_reads_at_most_59kb_plus_68kib() -> R {
     big.d()?.fs_mut().inner.files.insert(1, more);
     let (_, big_read, _) = big.measure()?;
     eprintln!("59 KB append to a 200 kB source read {big_read} bytes");
+    assert!(big_read <= 59_000 + 68 * 1024, "read {big_read} bytes");
     Ok(())
 }
 
@@ -403,6 +407,66 @@ fn idempotence_case(tc: &TestCase) -> R {
 fn hegel_converged_reconcile_makes_zero_puts() {
     hegel::Hegel::new(|tc: TestCase| {
         let result = idempotence_case(&tc);
+        assert!(result.is_ok(), "{result:?}");
+    })
+    .run();
+}
+
+#[test]
+fn non_prefix_stable_source_still_reads_in_full() -> R {
+    let mut r = rig_with(1, 1, &lines(200_000), Profile::Config)?;
+    r.converge()?;
+    let mut more = lines(200_000);
+    more.extend(lines(59_000));
+    let size = more.len() as u64;
+    r.d()?.fs_mut().inner.files.insert(1, more);
+    let (_, read, puts) = r.measure()?;
+    assert!(puts > 0, "the append was captured");
+    assert!(read >= size, "read {read} < {size}");
+    Ok(())
+}
+
+fn hex_sha(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// The delta path (and the fallback after a lost or corrupted index) keeps the resumable
+/// whole-stream digest equal to the independent digest of the final file.
+#[test]
+fn hegel_delta_capture_matches_independent_whole_digest() {
+    hegel::Hegel::new(|tc: TestCase| {
+        let result = (|| -> R {
+            let mut r = rig(1, 1, b"")?;
+            r.d()?.fs_mut().inner.files.remove(&1);
+            let mut file: Vec<u8> = Vec::new();
+            for _ in 0..tc.draw(gs::integers::<u8>().min_value(1).max_value(6)) {
+                let n = usize::from(tc.draw(gs::integers::<u16>().min_value(2).max_value(3000)));
+                file.extend(lines(n));
+                r.d()?.fs_mut().inner.files.insert(1, file.clone());
+                r.round()?;
+                match tc.draw(gs::integers::<u8>().min_value(0).max_value(3)) {
+                    1 => {
+                        let _ = fs::remove_file(r.tmp.root().join("index.json"));
+                        r.restart()?;
+                    }
+                    2 => {
+                        fs::write(r.tmp.root().join("index.json"), b"{not json").map_err(e)?;
+                        r.restart()?;
+                    }
+                    _ => {}
+                }
+            }
+            r.converge()?;
+            let index = fs::read_to_string(r.tmp.root().join("index.json")).map_err(e)?;
+            if !index.contains(&hex_sha(&file)) {
+                return Err("index whole digest differs from the independent digest".to_owned());
+            }
+            Ok(())
+        })();
         assert!(result.is_ok(), "{result:?}");
     })
     .run();

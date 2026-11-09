@@ -112,6 +112,7 @@ fn state(bytes: &[u8], obs: Observed) -> SourceState {
             last_checked_at_ns: None,
             consecutive_failures: 0,
         },
+        whole_state: None,
     }
 }
 fn input(bytes: &[u8], obs: Observed, old: SourceState) -> PlanInput {

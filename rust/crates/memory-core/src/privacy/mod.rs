@@ -148,6 +148,20 @@ pub struct AdmittedSource {
     binding: [u8; 32],
 }
 
+impl AdmittedSource {
+    /// True only when `transform(prefix ++ delta) == prefix ++ transform(delta)` for every
+    /// split: no structural scrubbing (no recognized protected document) and no whole-text
+    /// check (Config/TextAsset scan across lines). Only then may a shell transform a delta alone.
+    pub fn prefix_stable(&self) -> bool {
+        !self
+            .facts
+            .identities
+            .iter()
+            .any(|name| document::recognizes(name))
+            && !matches!(self.facts.profile, Profile::Config | Profile::TextAsset)
+    }
+}
+
 /// Opaque transformed bytes; only transformation can construct them.
 pub struct RedactedBytes {
     bytes: Vec<u8>,

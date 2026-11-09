@@ -492,11 +492,11 @@ fn kinds_of(got: &memory::capture::Captured) -> Vec<&'static str> {
 #[test]
 fn need_windows_reads_head_and_tail_through_the_seam() -> R {
     // (new content, expected change, expected reads)
-    let cases: [(&[u8], &str); 2] = [
-        (b"0123456789abcdef", "extend"),
-        (b"X123456789abcdef", "epoch"),
+    let cases: [(&[u8], &str, std::ops::Range<u64>); 2] = [
+        (b"0123456789abcdef", "extend", 10..16),
+        (b"X123456789abcdef", "epoch", 0..16),
     ];
-    for (content, expected) in cases {
+    for (content, expected, planned) in cases {
         let mut rig = rig()?;
         transcript(&mut rig, b"0123456789");
         rig.cycle()?;
@@ -511,8 +511,9 @@ fn need_windows_reads_head_and_tail_through_the_seam() -> R {
             got.outcomes.first().map(|o| &o.1),
             Some(&SourceOutcome::Planned)
         );
-        // head window, tail window (both 0..10 at the old boundary), then the planned range.
-        assert_eq!(spy.reads, [0..10, 0..10, 0..16], "{content:?}");
+        // head window, tail window (both 0..10 at the old boundary), then the planned range:
+        // only the appended delta for an extend, the whole stream for an epoch.
+        assert_eq!(spy.reads, [0..10, 0..10, planned], "{content:?}");
     }
     Ok(())
 }

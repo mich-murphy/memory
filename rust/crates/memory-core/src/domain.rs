@@ -246,6 +246,100 @@ impl From<Sha256> for String {
         result
     }
 }
+/// Resumable SHA-256 of a stream prefix: a cost optimisation for the derived index only.
+///
+/// It is never proof. A caller must compare [`Sha256State::digest`] with the authoritative
+/// committed digest before resuming, and an absent or invalid state means "read the prefix again".
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct Sha256State(Vec<u8>);
+impl std::fmt::Debug for Sha256State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Sha256State(..)")
+    }
+}
+impl Sha256State {
+    fn hasher(&self) -> Result<sha2::Sha256, ValidationError> {
+        use sha2::digest::common::hazmat::SerializableState;
+        let serialized = sha2::digest::common::hazmat::SerializedState::<sha2::Sha256>::try_from(
+            self.0.as_slice(),
+        )
+        .map_err(|_| ValidationError::Hash)?;
+        <sha2::Sha256 as SerializableState>::deserialize(&serialized)
+            .map_err(|_| ValidationError::Hash)
+    }
+    fn of(hasher: &sha2::Sha256) -> Self {
+        use sha2::digest::common::hazmat::SerializableState;
+        Self(hasher.serialize().to_vec())
+    }
+    /// State of the empty stream.
+    pub fn empty() -> Self {
+        Self::of(&sha2::Sha256::default())
+    }
+    /// State after appending `bytes`.
+    ///
+    /// # Errors
+    /// `Hash` if this state is not a valid serialized hasher.
+    pub fn extend(&self, bytes: &[u8]) -> Result<Self, ValidationError> {
+        use sha2::Digest;
+        let mut hasher = self.hasher()?;
+        hasher.update(bytes);
+        Ok(Self::of(&hasher))
+    }
+    /// Digest of everything absorbed so far.
+    ///
+    /// # Errors
+    /// `Hash` if this state is not a valid serialized hasher.
+    pub fn digest(&self) -> Result<Sha256, ValidationError> {
+        use sha2::Digest;
+        Ok(Sha256::from_bytes(self.hasher()?.finalize().into()))
+    }
+}
+impl TryFrom<String> for Sha256State {
+    type Error = ValidationError;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let (pairs, rest) = value.as_bytes().as_chunks::<2>();
+        if !rest.is_empty() {
+            return Err(ValidationError::Hash);
+        }
+        let nibble = |b: u8| {
+            char::from(b)
+                .to_digit(16)
+                .and_then(|d| u8::try_from(d).ok())
+        };
+        let mut bytes = Vec::with_capacity(pairs.len());
+        for [high, low] in pairs {
+            if high.is_ascii_uppercase() || low.is_ascii_uppercase() {
+                return Err(ValidationError::Hash);
+            }
+            let (Some(h), Some(l)) = (nibble(*high), nibble(*low)) else {
+                return Err(ValidationError::Hash);
+            };
+            bytes.push((h << 4) | l);
+        }
+        let state = Self(bytes);
+        state.hasher()?;
+        Ok(state)
+    }
+}
+impl From<Sha256State> for String {
+    fn from(value: Sha256State) -> Self {
+        use std::fmt::Write;
+        let mut result = String::with_capacity(value.0.len() * 2);
+        for byte in value.0 {
+            let _ = write!(result, "{byte:02x}");
+        }
+        result
+    }
+}
+impl JsonSchema for Sha256State {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Sha256State".into()
+    }
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({"type": "string", "pattern": "^[0-9a-f]+$"})
+    }
+}
 /// Digest of transform rules and semantic version, not writer version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
@@ -554,6 +648,10 @@ pub struct SourceState {
     pub tail: Sha256,
     /// Audit bookkeeping.
     pub audit: AuditState,
+    /// Resumable hasher over exactly `[0, position.captured_to)` of the transformed stream.
+    /// Present only for prefix-stable sources; absent or mismatching means a full re-read.
+    #[serde(default)]
+    pub whole_state: Option<Sha256State>,
 }
 
 /// Closed reasons to begin a fresh epoch.
