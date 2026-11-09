@@ -8,7 +8,7 @@ use memory_core::domain::{
     SourceId, SourceKind,
 };
 use memory_core::privacy::{PolicyContext, Profile, ResolvedSourceFacts, rules_digest};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::PathBuf;
@@ -672,6 +672,15 @@ struct Observed {
 /// Safety: the chain is consistent, every object matches its descriptor, and every committed
 /// epoch is a prefix of bytes the (single) source once held.
 fn observe(store: &FStore, owner: &Owner, history: &[Vec<u8>]) -> R<Option<Observed>> {
+    observe_masked(store, owner, history, &BTreeSet::new())
+}
+/// [`observe`] with the per-position exemption of [`Reference::masked`].
+fn observe_masked(
+    store: &FStore,
+    owner: &Owner,
+    history: &[Vec<u8>],
+    masked: &BTreeSet<usize>,
+) -> R<Option<Observed>> {
     let Some(chain) = read_chain(store, owner)? else {
         return Ok(None);
     };
@@ -684,7 +693,7 @@ fn observe(store: &FStore, owner: &Owner, history: &[Vec<u8>]) -> R<Option<Obser
         for record in &entry.epochs {
             let bytes = reassemble(store, record)?;
             ensure(
-                history.iter().any(|v| v.starts_with(&bytes)),
+                held(history, masked, &bytes),
                 "committed bytes were never held by the source",
             )?;
             latest = Some(bytes);
@@ -1200,14 +1209,30 @@ struct Reference {
     effect: bool,
     /// The last step was a rewrite outside both windows.
     mid: bool,
-    /// A same-size rewrite between the head and tail windows is live and no truncate or
-    /// removal since could have forced a replay. Only an audit finds it (DESIGN 7.2), and
-    /// reconcile rounds run none, so 1b liveness is not required while this holds.
-    hidden: bool,
-    /// While `hidden`, what the daemon can have committed: the pre-rewrite bytes plus every
-    /// later append. Such a splice was held by no version of the source, so it joins the
-    /// history; this is the documented limit of window checks, not a relaxation of 1a.
-    shadow: Vec<u8>,
+    /// Positions ever changed by a same-size rewrite between the head and tail windows.
+    /// DESIGN 1a covers only changes that alter identity or touch a window; only an audit
+    /// finds such a rewrite (DESIGN 7.2) and reconcile rounds run none. At these positions,
+    /// and only these, a committed byte may be stale, but it must still be a value the source
+    /// held at that position. Never cleared: every committed epoch is rechecked on every step.
+    masked: BTreeSet<usize>,
+}
+
+/// `bytes[i]` is acceptable against `v[i]`: equal, or a masked position holding a value the
+/// source held there at some point.
+fn byte_ok(history: &[Vec<u8>], masked: &BTreeSet<usize>, i: usize, b: u8, v: u8) -> bool {
+    b == v || (masked.contains(&i) && history.iter().any(|w| w.get(i) == Some(&b)))
+}
+
+/// 1a oracle: `bytes` is a prefix of some version the source held, except at masked positions.
+fn held(history: &[Vec<u8>], masked: &BTreeSet<usize>, bytes: &[u8]) -> bool {
+    history.iter().any(|v| {
+        v.len() >= bytes.len()
+            && bytes
+                .iter()
+                .zip(v)
+                .enumerate()
+                .all(|(i, (b, x))| byte_ok(history, masked, i, *b, *x))
+    })
 }
 impl Reference {
     fn grow(&mut self, add: impl Iterator<Item = u8>) {
@@ -1215,10 +1240,6 @@ impl Reference {
         self.exists = true;
         self.file.extend_from_slice(&add);
         self.history.push(self.file.clone());
-        if self.hidden {
-            self.shadow.extend_from_slice(&add);
-            self.history.push(self.shadow.clone());
-        }
     }
     fn apply(&mut self, step: &Step) {
         self.effect = false;
@@ -1244,19 +1265,14 @@ impl Reference {
                         _ => d % len,
                     })
                 };
-                let before = self.file.clone();
-                if let Some(b) = pos.and_then(|p| self.file.get_mut(p)) {
+                if let Some(p) = pos
+                    && let Some(b) = self.file.get_mut(p)
+                {
                     *b = b.wrapping_add(1);
                     self.effect = true;
                     self.mid = zone % 3 == 2 && len > HEAD + TAIL;
                     if self.mid {
-                        if !self.hidden {
-                            self.shadow = before;
-                        }
-                        self.hidden = true;
-                    } else {
-                        // A head or tail window mismatch forces a replay of the whole file.
-                        self.hidden = false;
+                        self.masked.insert(p);
                     }
                     self.history.push(self.file.clone());
                 }
@@ -1266,14 +1282,12 @@ impl Reference {
                 let k = len * usize::from(*frac) / 255;
                 if self.exists && k < len {
                     self.file.truncate(k);
-                    self.hidden = false;
                     self.effect = true;
                     self.history.push(self.file.clone());
                 }
             }
             Step::RemoveSource if self.exists => {
                 self.effect = true;
-                self.hidden = false;
                 self.exists = false;
                 self.file.clear();
             }
@@ -1512,17 +1526,29 @@ impl Sut {
             "an owner was parked (false Foreign)",
         )?;
         let owner = self.owner.clone();
-        let observed = observe(self.daemon()?.store_mut(), &owner, &after.history)?;
+        let observed = observe_masked(
+            self.daemon()?.store_mut(),
+            &owner,
+            &after.history,
+            &after.masked,
+        )?;
         if let Some(o) = &observed {
             if o.epochs > 1 || self.max_epochs > 1 {
                 shapes.hit("multi-epoch");
             }
             self.max_epochs = self.max_epochs.max(o.epochs);
         }
-        if settled && after.exists && !after.file.is_empty() && !after.hidden {
+        if settled && after.exists && !after.file.is_empty() {
             let o = need(observed, "no chain after settle")?;
+            let latest = need(o.latest, "no epoch after settle")?;
+            // Exact everywhere except masked positions (an unaudited mid-file rewrite).
             ensure(
-                o.latest.as_deref() == Some(after.file.as_slice()),
+                latest.len() == after.file.len()
+                    && latest
+                        .iter()
+                        .zip(&after.file)
+                        .enumerate()
+                        .all(|(i, (b, x))| byte_ok(&after.history, &after.masked, i, *b, *x)),
                 "latest epoch differs from the source bytes after settle",
             )?;
         } else if settled
