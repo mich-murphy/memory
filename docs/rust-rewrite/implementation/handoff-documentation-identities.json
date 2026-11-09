@@ -4,11 +4,11 @@
   "sha256": {
     "README.md": {
       "before": "920de3235d3481dae536b0c6e2a5b99d54bb8ef85977809029365b9a19b2ec90",
-      "after": "e6846db4c09905af789afe335bd98f2d5de452d6b1963ed8dba199eded17fa8f"
+      "after": "cd4bba156c62f7bbfb16b00dca9467337c7ee64850d5caaecaef4c87dd435228"
     },
     "docs/README.md": {
       "before": "260fb9df627554930a467221ee505db2cfb2af2d1beac04ba6da87d71656c4dd",
-      "after": "94f140a4820155f482555d1432443188d5425410665b17ca94c195a8d047c51c"
+      "after": "e6da00c3311356b7a7bfd85e4b81fa1e271b6a0c757c26a55af1fbfeaa310a1c"
     },
     "docs/production-gap-register-20261102.md": {
       "before": "d73eeb2207d19fbb0f0f40bf66808541a98433fd3749e27ea4f8a24aa25a78cc",
@@ -46,6 +46,16 @@
       "after": {
         "README.md": "e6846db4c09905af789afe335bd98f2d5de452d6b1963ed8dba199eded17fa8f",
         "docs/README.md": "94f140a4820155f482555d1432443188d5425410665b17ca94c195a8d047c51c",
+        "docs/production-gap-register-20261102.md": "783a67afd9576b0d2da811c7156784be62c81fb9554f3814c9ec1525d2935099",
+        "docs/security.md": "1aca7b9c470e3dd0d7090a8f6b50229511054e0074fd6aa40762d1578047d420"
+      }
+    },
+    {
+      "date": "2026-11-10 (after the review and fix round)",
+      "reason": "Operator-requested state reconciliation: README.md and docs/README.md now point to the review and fix round (stack #56 top rust/coverage-floor-80, PR #60), its integrated gate on d8e80a6 (evidence 13, report 23) and the fixed 80% coverage backstop (A9). DESIGN.md, AGENTS.md and the contract are not revised.",
+      "after": {
+        "README.md": "cd4bba156c62f7bbfb16b00dca9467337c7ee64850d5caaecaef4c87dd435228",
+        "docs/README.md": "e6da00c3311356b7a7bfd85e4b81fa1e271b6a0c757c26a55af1fbfeaa310a1c",
         "docs/production-gap-register-20261102.md": "783a67afd9576b0d2da811c7156784be62c81fb9554f3814c9ec1525d2935099",
         "docs/security.md": "1aca7b9c470e3dd0d7090a8f6b50229511054e0074fd6aa40762d1578047d420"
       }

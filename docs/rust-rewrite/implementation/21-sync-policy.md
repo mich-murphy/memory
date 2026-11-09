@@ -1,6 +1,6 @@
 # 21. Sync policy for durable state writes (amendment A7)
 
-Status: implemented in the working tree, not committed. Evidence dated 2026-11-09.
+Status: implemented and committed (3e29ebf on `rust/sync-policy`, PR #57). Evidence dated 2026-11-09. Later: `SyncPolicy::None` and `start_with` are reachable only through the `sim` feature (2a18883, report 23).
 
 ## Changes
 - `rust/crates/memory/src/state.rs`

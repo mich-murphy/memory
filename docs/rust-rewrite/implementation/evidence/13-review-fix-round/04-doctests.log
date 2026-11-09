@@ -1,0 +1,31 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.18s
+   Doc-tests memory
+
+running 5 tests
+test crates/memory/src/capture.rs - capture (line 17) - compile fail ... ok
+test crates/memory/src/environment.rs - environment::Published (line 129) - compile fail ... ok
+test crates/memory/src/environment.rs - environment::Published (line 135) - compile fail ... ok
+test crates/memory/src/environment.rs - environment::Published (line 132) - compile fail ... ok
+test crates/memory/src/environment.rs - environment::Published (line 138) - compile fail ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.39s
+
+   Doc-tests memory_core
+
+running 7 tests
+test crates/memory-core/src/manifest/schema.rs - manifest::schema::Piece (line 313) - compile fail ... ok
+test crates/memory-core/src/manifest/schema.rs - manifest::schema::LaunchRecord (line 426) - compile fail ... ok
+test crates/memory-core/src/privacy/mod.rs - privacy (line 13) - compile fail ... ok
+test crates/memory-core/src/privacy/mod.rs - privacy (line 19) - compile fail ... ok
+test crates/memory-core/src/privacy/mod.rs - privacy (line 5) - compile fail ... ok
+test crates/memory-core/src/privacy/mod.rs - privacy (line 22) - compile fail ... ok
+test crates/memory-core/src/privacy/mod.rs - privacy (line 9) - compile fail ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.75s
+
+   Doc-tests memory_reader
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,6 +1,6 @@
 # 11. Coordinates (slice 1, row 7d)
 
-Status: implemented and tested synthetically, not committed. Coverage and gates.sh were not run.
+Status: implemented and tested synthetically; committed in d8fbc4f (`rust/workspace`, PR #55) and covered by later integrated gates (report 23). At the time of this report, coverage and gates.sh were not run.
 
 ## Semantics (`rust/crates/memory-core/src/coordinates.rs`)
 

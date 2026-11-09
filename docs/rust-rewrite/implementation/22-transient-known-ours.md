@@ -1,6 +1,6 @@
 # 22. A6: Transient class, full-jitter backoff, known_ours
 
-Status: implemented on rust/p2-s3-client (uncommitted). No secrets or transcript content.
+Status: implemented and committed (c1ab3ec on `rust/transient-known-ours`, PR #59). No secrets or transcript content. Later: per-class failure counts and per-owner `not_before` scheduling landed in 2a18883, and a daemon-level late-write step in 42e8826 (report 23), which close the gaps listed below.
 
 ## Changed files
 - memory-core/src/domain.rs: `ErrorClass::Transient`.

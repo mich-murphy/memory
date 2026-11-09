@@ -39,9 +39,14 @@ footprint, or the two seven-day native shadows. The line-coverage floor is a fix
 not a ratchet of the latest measurement; evidence for invariants comes from the
 independent-oracle properties, their coverage guards and the production mutation checks.
 It is never lowered to make a run pass. The earlier 98% floor was the scaffold's first
-measurement. The latest source-bound integrated run
-(gate 8, 2026-11-09) passed at **98.3173%** (5,200/5,289 lines), 369/369 nextest, 2,000
-cases, seed 730210; see [its evidence](rust-rewrite/implementation/evidence/12-slice2-round10/).
+measurement. The latest source-bound integrated run (review and fix round, 2026-11-10,
+`d8e80a6`) passed all 13 subgates at **97.03%** (5,595/5,766 lines), 391/391 nextest, 12
+compile-fail doctests, 2,000 cases, seed 730213; see
+[its evidence](rust-rewrite/implementation/evidence/13-review-fix-round/). Gate 8
+(98.3173%, seed 730210, [round 10](rust-rewrite/implementation/evidence/12-slice2-round10/))
+is superseded. Under `gates.sh` the two mutation scripts share one temporary target
+directory (`MEMORY_MUTATION_TARGET`), so the second does not rebuild dependencies; this kept
+the macOS job inside its unchanged 30-minute limit.
 At 2,000 cases the two daemon state-machine properties took about 6 minutes because every
 simulated round did real `F_FULLFSYNC` writes. Amendment A7 is implemented on
 `rust/sync-policy`: only those two properties select `SyncPolicy::None` and now take about

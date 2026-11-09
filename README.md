@@ -12,19 +12,21 @@ job tables, hooks/notifications with safety reconciliation, and one shared reade
 The [capture contract](docs/session-capture-contract.md) retains the goals and Go
 maintenance contract; its replaced mechanisms are not the Rust implementation plan.
 
-**Current Rust state (2026-11-09):** under [`rust/`](rust/README.md), slice 1 (pure core:
+**Current Rust state (2026-11-10):** under [`rust/`](rust/README.md), slice 1 (pure core:
 domain, locator, manifests, hints, planner, coalescer, privacy) meets its exit criteria, with
 P5 waived by the operator. Slice 2 is partly built against fakes and temp directories: the
-`memory hook` binary, the commit protocol, daemon state, capture wiring, the real filesystem
-adapter, the source resolver, the notify watcher/scheduler and a daemon skeleton. Integrated
-local gate 8 passed at 2,000 cases: 369/369 tests, 98.3173% coverage against the unchanged 98%
-floor. This is **not a functioning Rust collector or release acceptance**: `memory daemon`
-exits 78 after startup, and there is no R2 client, zstd or reader yet.
+`memory hook` binary, the commit protocol, daemon state, capture wiring (delta-only append
+reads), the real filesystem adapter, the source resolver, the notify watcher/scheduler, a
+daemon skeleton, property 4 and the counter tests. The latest integrated local gate passed on
+`d8e80a6` at 2,000 cases: all 13 subgates, 391/391 tests, production mutation checks killed,
+97.03% line coverage against the fixed 80% backstop (amendment A9). This is **not a
+functioning Rust collector or release acceptance**: `memory daemon` exits 78 after startup,
+and there is no R2 client, zstd, run loop or reader yet. See
+[report 23](docs/rust-rewrite/implementation/23-review-fix-round.md) for progress against
+DESIGN sections 15 and 17.
 
-The work is committed as draft gh stack #56 (PRs #54, #55, #57, #58, #59, top branch
-`rust/transient-known-ours`), green on hosted CI. A7 (test-only sync policy), the P2 client
-research and A6 (`Transient` class, jittered backoff, `known_ours`) landed after gate 8. No
-Rust deployment or cutover occurred.
+The work is committed as draft gh stack #56 (PRs #54, #55, #57, #58, #59, #60, top branch
+`rust/coverage-floor-80`), green on hosted CI. No Rust deployment or cutover occurred.
 On 2026-11-09, by operator instruction, the Go capture daemons (Mac and BC-01) and the Mac
 refresh job were stopped and disabled, and the old capture prefixes in the R2 bucket were
 deleted. The Go hooks are still installed and write only local spool files. Preserve existing

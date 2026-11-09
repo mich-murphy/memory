@@ -18,14 +18,18 @@ history, not current execution instructions or renewed operating authority.
 `gpt-6.1-sol` workers at medium effort, parent-owned quality and verification.
 This is the single active task brief; dated operating records below remain history.
 
-> **Resume here (2026-11-09 handover, updated after A6).** Read DESIGN.md, then
-> [design-amendments-20261109.md](rust-rewrite/design-amendments-20261109.md) (wins where
-> they conflict), then the "Handover 2026-11-09" block and the "Progress 2026-11-09,
-> continued session" block after its next-actions list. That progress block is the current
-> state: draft stack #56, top branch `rust/transient-known-ours`, steps 1–3 done and green on
-> hosted CI, P2 research done, its "Next action on resume" list is next. Earlier
-> blocker lists in this brief (P5 authorization, acceptance bucket/token, hook argv,
-> symlinks, state root) are resolved by that amendment and kept only as history.
+> **Resume here (updated 2026-11-10, after the review and fix round).** Read DESIGN.md, then
+> [design-amendments-20261109.md](rust-rewrite/design-amendments-20261109.md) (A0–A9, wins
+> where they conflict), then the "Session 2026-11-09, review and fix round" block directly
+> below, which is the current state: draft stack #56, top branch `rust/coverage-floor-80`
+> (PR #60), integrated gate green on `d8e80a6`
+> ([evidence 13](rust-rewrite/implementation/evidence/13-review-fix-round/),
+> [report 23](rust-rewrite/implementation/23-review-fix-round.md)), hosted CI green. Its
+> "Next" line is the next action. The "Handover 2026-11-09" and "Progress 2026-11-09,
+> continued session" blocks further down are history; their next-action lists are done
+> except step 4 (S3 adapter, zstd, run loop) and step 5. Earlier blocker lists in this brief
+> (P5 authorization, acceptance bucket/token, hook argv, symlinks, state root) are resolved
+> by the amendments and kept only as history.
 
 **Session 2026-11-09, review and fix round (current).** Branch `rust/coverage-floor-80` on
 stack #56 (9206235: A9, coverage floor 80 %). Baseline gate at 0f726a6, seed 730212, 2,000
@@ -54,7 +58,12 @@ revoke, crash, late write; 12-shape guard with per-shape negative controls); e94
 7.2), found when the first gate run at 2,000 cases failed on a model gap, not a daemon bug.
 Integrated gate at e94a09b, seed 730212, 2,000 cases: all 13 subgates 0, nextest 391/391
 (2 ignored benchmarks), 12 compile-fail doctests, coverage 5595/5766 = 97.03 % (floor 80),
-sources unchanged across the run; `verify-evidence.py` 0.
+sources unchanged across the run; `verify-evidence.py` 0. Rerun on the final source
+`d8e80a6` (after the 8794e19 gate-script change), seed 730213, 2,000 cases: identical
+results, 87 source files unchanged during the run; recorded in
+`implementation/evidence/13-review-fix-round/` and `implementation/23-review-fix-round.md`
+(which also maps DESIGN 15 and 17 progress). This supersedes gate 8 as the current
+integrated result.
 CI (PR #60): the first Rust run hit the macOS 30 min job limit 8 s after all 13 subgates
 returned 0 (Nix setup 13.6 min). 8794e19 lets `gates.sh` share one temp target between
 the two sequential mutation scripts (second script 14 s instead of a full dependency
@@ -64,8 +73,14 @@ Open: `LaunchRecord` unification (P3) not done; property 3 has no writer-version
 (`WRITER_VERSION` is compile-time) and no proptest twin; 1b "after one audit" untested
 (audit evidence is always `NotDue`); idle-minute wakeups not counted (`Counters.wakeups`
 stays 0); 30k reconcile 1.24 s debug, not asserted (footprint measurement); damaged
-`status.json` clears parks without a logged event (DESIGN 9.2 tension). Next: slice 2
-(S3 adapter `rusty-s3`+`ureq`, zstd, run loop) after the stack is reviewed.
+`status.json` clears parks without a logged event (DESIGN 9.2 tension); no `rename-replace`
+step in either property-4 state machine; the macOS llvm-cov "unconfirmed failure" of
+`hegel_daemon_state_machine` (run 42565602976, seed 938868371) was not root-caused, only not
+seen again (local gates and three CI runs green since); P2 decisions still open (`cargo deny` license for
+`CDLA-Permissive-2.0`, R2 `BadDigest` class, single checksum). Next: slice 2 (decide the
+license, S3 adapter `rusty-s3`+`ureq`, zstd, run loop wiring `FsWatcher`/`Scheduler`,
+`WalkSources`, `SharedFs` with the 60 s tick), then the slice-2 exit (a day of this Mac's
+sessions captured into `rust-acceptance/`, amendment A2), after the stack is reviewed.
 
 **Session 2026-11-08.** Operator instruction: continue from this brief
 with **Sonnet** subagents (supersedes the gpt-6.1-sol worker choice; medium thinking
@@ -630,7 +645,8 @@ Checkout bullet below.
 - Gaps:
   - Flake predating A6: `core_coordinates::hegel_coordinates_order_proof_and_retention` fails
     its coverage guard ("never produced proof-only") on seeds 6 and 13 of 1 to 30 at 500
-    cases. Fix it by raising that generator weight, never by lowering the guard.
+    cases. Fix it by raising that generator weight, never by lowering the guard. (Resolved
+    136cf0d by constructing a proof-only case; guard unchanged, seeds 1 to 30 pass.)
   - The daemon Hegel guard flake that the A7 worker saw did not reproduce at 500 cases for
     seeds 1 to 20.
   - Rust gates run 42565602976 (58c4347, docs-only change): `08-coverage` failed on macos-26
@@ -641,8 +657,9 @@ Checkout bullet below.
     simulation). Do not retry it away.
   - `Transient` is not counted apart from `Throttled` in status, because there are no
     per-class counters yet.
-  - The daemon computes the retry delay but does not schedule on it.
-  - There is no daemon-level late-write state-machine step.
+  - The daemon computes the retry delay but does not schedule on it. (Resolved 2a18883:
+    per-owner `not_before`, per-class failure counts.)
+  - There is no daemon-level late-write state-machine step. (Resolved 42e8826.)
 - Next action on resume:
   1. Fix the `core_coordinates` guard weight.
   2. Step 4, rest: decide the deny license, add the `rusty-s3`/`ureq` `Store` adapter (sketch in

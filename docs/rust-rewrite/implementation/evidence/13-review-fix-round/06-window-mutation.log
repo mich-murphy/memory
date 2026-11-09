@@ -1,0 +1,207 @@
+Hegel seed=730213 cases=2000; proptest seed=730213 cases=2000
+source sha256 crates/memory-core/src/planner.rs a85e522dcd30f6040351b62115c68c97e84f3b32cb22a085806895f93ea6f6a3
+source sha256 crates/memory-core/tests/core_mechanics.rs fdf9ee7440c7e6ef6d42a54d84a96f102584c07d4b908c320e56fb956fb03b6a
+source sha256 Cargo.lock 29dc6977454d84b1407090a29df3b61eb95d4d390f0f8dc2dc5488412d156a5f
+baseline: cargo test --locked -p memory-core --test core_mechanics property1_independent_capture_and_eligible_audit -- --nocapture
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling libc v0.2.191
+   Compiling syn v3.0.9
+   Compiling cfg-if v1.0.5
+   Compiling stable_deref_trait v1.2.1
+   Compiling serde_core v1.0.229
+   Compiling synstructure v0.14.0
+   Compiling zerovec-derive v0.11.7
+   Compiling zerofrom-derive v0.1.8
+   Compiling zerofrom v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling displaydoc v0.2.7
+   Compiling yoke v0.8.4
+   Compiling zerovec v0.11.9
+   Compiling rand_core v0.10.1
+   Compiling getrandom v0.4.3
+   Compiling tinystr v0.8.5
+   Compiling rustix v1.1.6
+   Compiling smallvec v1.16.5
+   Compiling utf_types v1.0.0
+   Compiling writeable v0.6.4
+   Compiling litemap v0.8.3
+   Compiling utf8_iter v1.1.0
+   Compiling icu_locale_core v2.4.0
+   Compiling potential_utf v0.1.6
+   Compiling zerotrie v0.2.5
+   Compiling errno v0.3.14
+   Compiling icu_properties_data v2.4.0
+   Compiling bitflags v2.13.2
+   Compiling icu_normalizer_data v2.4.0
+   Compiling icu_provider v2.4.0
+   Compiling icu_collections v2.4.0
+   Compiling memchr v2.8.3
+   Compiling typenum v1.20.1
+   Compiling once_cell v1.21.4
+   Compiling hybrid-array v0.4.15
+   Compiling regex-syntax v0.8.11
+   Compiling winnow v1.0.5
+   Compiling autocfg v1.5.1
+   Compiling zmij v1.0.23
+   Compiling num-traits v0.2.19
+   Compiling toml_parser v1.1.5+spec-1.1.0
+   Compiling icu_properties v2.4.0
+   Compiling icu_normalizer v2.4.0
+   Compiling rand v0.10.3
+   Compiling toml_datetime v1.1.3+spec-1.1.0
+   Compiling serde_spanned v1.1.3
+   Compiling ref-cast v1.0.27
+   Compiling serde_json v1.0.154
+   Compiling parking_lot_core v0.9.12
+   Compiling libm v0.2.16
+   Compiling dashu-int v0.6.2
+   Compiling toml_writer v1.2.0+spec-1.1.0
+   Compiling fastrand v2.5.0
+   Compiling num-modular v0.6.5
+   Compiling serde v1.0.229
+   Compiling dashu-base v0.6.1
+   Compiling tempfile v3.27.0
+   Compiling toml v1.2.1+spec-1.1.0
+   Compiling idna_adapter v1.2.2
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling aho-corasick v1.1.5
+   Compiling serde_derive v1.0.229
+   Compiling ref-cast-impl v1.0.27
+   Compiling serde_derive_internals v0.30.0
+   Compiling wait-timeout v0.2.1
+   Compiling quick-error v1.2.3
+   Compiling const-oid v0.10.2
+   Compiling bit-vec v0.10.1
+   Compiling itoa v1.0.18
+   Compiling static_assertions v1.1.0
+   Compiling thiserror v2.0.21
+   Compiling fnv v1.0.7
+   Compiling scopeguard v1.2.0
+   Compiling adler2 v2.0.1
+   Compiling percent-encoding v2.3.2
+   Compiling form_urlencoded v1.2.2
+   Compiling miniz_oxide v0.8.9
+   Compiling lock_api v0.4.14
+   Compiling rusty-fork v0.3.1
+   Compiling bit-set v0.11.1
+   Compiling digest v0.11.3
+   Compiling schemars_derive v1.2.3
+   Compiling regex-automata v0.4.18
+   Compiling idna v1.1.0
+   Compiling rand_xorshift v0.5.0
+   Compiling chacha20 v0.10.2
+   Compiling thiserror-impl v2.0.21
+   Compiling cpufeatures v0.3.1
+   Compiling syn v2.0.119
+   Compiling dyn-clone v1.0.20
+   Compiling rustc-hash v2.1.3
+   Compiling hashbrown v0.17.1
+   Compiling hegeltest v0.52.0
+   Compiling unarray v0.1.4
+   Compiling core_detect v1.0.0
+   Compiling proptest v1.12.0
+   Compiling hegeltest-macros v0.52.0
+   Compiling hegeltest-c v0.50.0
+   Compiling schemars v1.2.3
+   Compiling sha2 v0.11.1
+   Compiling parking_lot v0.12.5
+   Compiling regex v1.13.1
+   Compiling url v2.5.8
+   Compiling memory-core v0.1.0 (/private/tmp/nix-shell.GVTUB8/memory-window-mutation-nivtofam/rust/crates/memory-core)
+   Compiling proptest-state-machine v0.8.0
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 35.24s
+     Running tests/core_mechanics.rs (/tmp/nix-shell.GVTUB8/memory-mutation-target.0VC7BP/debug/deps/core_mechanics-39d8faf57e4977d5)
+
+running 2 tests
+proptest: FileFailurePersistence::SourceParallel set, but no source file known
+test hegel_property1_independent_capture_and_eligible_audit has been running for over 60 seconds
+test proptest_property1_independent_capture_and_eligible_audit has been running for over 60 seconds
+test proptest_property1_independent_capture_and_eligible_audit ... ok
+test hegel_property1_independent_capture_and_eligible_audit ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 125.86s
+
+baseline: exit=0
+disabled-window mutant: cargo test --locked -p memory-core --test core_mechanics property1_independent_capture_and_eligible_audit -- --nocapture
+   Compiling memory-core v0.1.0 (/private/tmp/nix-shell.GVTUB8/memory-window-mutation-nivtofam/rust/crates/memory-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.88s
+     Running tests/core_mechanics.rs (/tmp/nix-shell.GVTUB8/memory-mutation-target.0VC7BP/debug/deps/core_mechanics-39d8faf57e4977d5)
+
+running 2 tests
+proptest: FileFailurePersistence::SourceParallel set, but no source file known
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=27576
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=13788
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=6894
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=3447
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=1723
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=861
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=430
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=215
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=107
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=53
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=26
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=13
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=6
+let draw_1 = 0;
+thread 'hegel_property1_independent_capture_and_eligible_audit' (2) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=0
+
+To reproduce this failure, call this on the Hegel builder before run():
+    .reproduce_failure("AAEAAAAACgEAAAAA")
+test hegel_property1_independent_capture_and_eligible_audit ... FAILED
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=3
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=1
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:235:13:
+operation=1 seed=0
+proptest: FileFailurePersistence::SourceParallel set, but no source file known
+
+thread 'proptest_property1_independent_capture_and_eligible_audit' (360412104) panicked at crates/memory-core/tests/core_mechanics.rs:285:5:
+Err(Fail(Reason("operation=1 seed=0"), 0))
+test proptest_property1_independent_capture_and_eligible_audit ... FAILED
+
+failures:
+
+failures:
+    hegel_property1_independent_capture_and_eligible_audit
+    proptest_property1_independent_capture_and_eligible_audit
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.20s
+
+error: test failed, to rerun pass `-p memory-core --test core_mechanics`
+disabled-window mutant: exit=101
+PASS: unchanged baseline passed; actual window-check mutant compiled and failed the independent property1 runtime byte oracle

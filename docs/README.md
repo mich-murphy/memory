@@ -7,7 +7,8 @@
    replacement writer, with its evidence in [rust-rewrite/](rust-rewrite/). Start here for
    rewrite work; its section 0 lists what not to take direction from. Read it with the
    [2026-11-09 amendments](rust-rewrite/design-amendments-20261109.md), which win where
-   they conflict (bucket, P5, hook argv, symlinks, retry class, test sync policy).
+   they conflict (bucket, P5, hook argv, symlinks, retry class, test sync policy,
+   coverage backstop).
 1. **[Session capture contract](session-capture-contract.md)** — retained goals,
    writer/reader/analytics acceptance and running Go-path maintenance contract.
    For Rust, DESIGN.md supersedes its spool/work-queue/whole-object mechanisms.
@@ -57,10 +58,12 @@ mechanisms do not override DESIGN.md for Rust or the retained contract goals:
 - [Rust parent review](rust-rewrite/implementation/02-parent-review.md) — source-bound
   results, corrections, acceptance boundary and remaining work. Reports 00–05 in
   that directory retain worker-specific evidence, not independent release approvals.
-- [Latest integrated run, gate 8](rust-rewrite/implementation/evidence/12-slice2-round10/) —
-  369/369 nextest, 2,000-case properties, seed 730210, 98.3173% coverage against the
-  unchanged 98% floor; current for `rust/workspace` (d8fbc4f). A7 and A6 on stack #56 came
-  later and have hosted CI plus focused 2,000-case runs, not a new integrated gate.
+- [Latest integrated run, review and fix round](rust-rewrite/implementation/evidence/13-review-fix-round/) —
+  `d8e80a6`, all 13 subgates, 391/391 nextest, 2,000-case properties, seed 730213, production
+  mutation checks killed, 97.03% coverage against the fixed 80% backstop (A9). Its
+  [report 23](rust-rewrite/implementation/23-review-fix-round.md) maps progress against
+  DESIGN sections 15 and 17. Supersedes
+  [gate 8](rust-rewrite/implementation/evidence/12-slice2-round10/) (`d8fbc4f`, 98.3173%).
 - [Corrected integrated run](rust-rewrite/implementation/evidence/02-corrected/) — slice-0
   foundation result, superseded for current source by gate 8:
   66 tests, 5 compile-fail doctests, 2,000-case properties, actual source mutation,

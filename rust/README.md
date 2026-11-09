@@ -22,9 +22,12 @@ PROPERTY_CASES=2000 bash scripts/gates.sh
 # CI invocation: PROPERTY_CASES=500 bash scripts/gates.sh
 ```
 
-The canonical wrapper also runs workspace doctests (nextest does not) and the
-actual production-source window-mutation checker. Missing tools/scripts or a failed
-mutation baseline fail the wrapper, never skip successfully.
+The canonical wrapper also runs workspace doctests (nextest does not) and two
+production-source mutation checkers: `check-window-mutation.py` (planner window comparison)
+and `check-mutations.py` (blind `If-Match`, index advanced after a commit that did not land,
+skipped credential denylist). Under `gates.sh` both share one temporary target directory,
+removed afterwards. Missing tools/scripts or a failed mutation baseline fail the wrapper,
+never skip successfully.
 
 `artifacts/status.tsv` preserves each gate exit status; logs and seeds remain in
 `artifacts/`. Replay with `PROPERTY_SEED=<recorded> PROPERTY_CASES=2000`.
@@ -41,25 +44,39 @@ so the binary cannot silently simulate capture or restore. The reader crate is a
 placeholder. Tests must never resolve the real state root: set `MEMORY_STATE_DIR` to a
 temp directory and `env_clear()` (only `LLVM_PROFILE_FILE` passes through).
 
-The latest integrated local wrapper (gate 8) passed at 2,000 cases, seed 730210: all 12
-subgates, 369/369 nextest tests, 5,200/5,289 lines covered (98.3173%, floor unchanged at
-98%). See [its evidence](../docs/rust-rewrite/implementation/evidence/12-slice2-round10/).
+The latest integrated local wrapper (review and fix round, 2026-11-10) passed on
+`d8e80a6` at 2,000 cases, seed 730213: all 13 subgates, 391/391 nextest tests (2 ignored
+benchmarks), 12 compile-fail doctests, 5,595/5,766 lines covered (97.03%, floor 80%), no
+source changed during the run. See
+[its evidence](../docs/rust-rewrite/implementation/evidence/13-review-fix-round/) and
+[report 23](../docs/rust-rewrite/implementation/23-review-fix-round.md). Gate 8
+([round 10](../docs/rust-rewrite/implementation/evidence/12-slice2-round10/)) is superseded.
 
 The final pinned-toolchain synthetic Hegel probe passed on BC-01, Linux x86_64,
 at 2,000 cases/seed 730052. This is not the whole workspace native suite or ARM
 acceptance. Hosted CI (`.github/workflows/rust.yml`, ubuntu x86_64/arm64 and macOS, 500
-cases) is green on every branch of draft stack #56. After gate 8 the stack added A7
-(`SyncPolicy`, crash-point property), A6 (`ErrorClass::Transient`, full-jitter backoff,
-`known_ours`) and the P2 client choice (`rusty-s3` + `ureq`, not yet wired).
+cases) is green on every branch of draft stack #56, whose top is now `rust/coverage-floor-80`
+(PR #60). After gate 8 the stack added A7 (`SyncPolicy`, crash-point property), A6
+(`ErrorClass::Transient`, full-jitter backoff, `known_ours`), the P2 client choice
+(`rusty-s3` + `ureq`, not yet wired) and the review and fix round (report 23).
 
-Tests cover pure mechanics and known-file privacy boundaries; the actual-source
-mutation proves sensitivity to a disabled window comparison. The filesystem
-counters and lost-reply fixture validate test seams, not a real commit protocol.
-The structural epoch guard is not retained-history reconstruction or zero-PUT
-recovery, and authorized-body tests are not actual PUT/hint sink privacy proof.
-`proptest-state-machine` is available for property 4 in slice 2; its existence is
-not a state-machine correctness claim. Full DESIGN properties, footprint and
-writer→reader→importer→report acceptance remain outstanding.
+What the tests do and do not show:
+- Store uploads take `Published`, whose constructors are crate-private and slice an
+  `AuthorizedBody` or the writer's own metadata; compile-fail doctests prove raw bytes cannot
+  reach `Store`. This is sink privacy by type at the seam, not a live R2 check.
+- `environment::Counting` counts stats, bytes read and PUTs through production `Daemon` and
+  capture code over fakes: an idle round makes no reads or PUTs, 30,000 unchanged sources
+  take at most one stat each, and a 59 KB append to a 200 kB source reads 128,632 bytes
+  (bound 59 KB + 68 KiB). Timer wakeups are not counted; the 1 s/30k target is measured
+  (1.24 s in a debug build), not asserted.
+- Property 3 (zero PUTs after convergence, restart and index deletion) runs in Hegel only;
+  a writer-version change has no seam yet.
+- The daemon state machine (Hegel and proptest) covers append, rewrite, truncate,
+  remove-source, revoke/restore, crash before `current.json`, late write (A6), lost reply,
+  offline, restart and index deletion, with a 12-shape coverage guard and per-shape negative
+  controls. 1b liveness "after one audit" is untested because audit evidence is always
+  `NotDue`.
+- Footprint, native shadow and writer→reader→importer→report acceptance remain outstanding.
 
 `cargo deny` checks workspace licenses/advisories/sources; a separate pure-core
 ban invocation excludes dev dependencies. Dependency bans cannot prohibit
