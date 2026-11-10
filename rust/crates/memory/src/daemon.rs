@@ -9,21 +9,23 @@
 //! 4. [`Config::load`]: an invalid config refuses to start.
 //! 5. Read `index.json` (9.2): a missing or damaged index is rebuilt (9.3): locals start
 //!    empty, the commit base is recovered per owner from the store, capture adopts.
-//! 6. Read `status.json`: parked owners stay parked across restarts.
+//! 6. Read `status.json`: parked owners stay parked across restarts. A damaged or newer-schema
+//!    file is treated as missing (9.2); the daemon has no logging yet, so the event is kept
+//!    as a [`StateLoad`] on the daemon and counted in [`StatusBody::events`].
 //!
 //! The commit base (`current.json` ETag, owner state) is never persisted: every owner
 //! recovers it from the store on its first round after a start (`recover_base`).
 use crate::capture::{
-    Env, Local, Locals, MAX_PIECE_BYTES, Source, Update, attach_launches, capture,
+    Captured, Env, Local, Locals, MAX_PIECE_BYTES, Source, Update, attach_launches, capture,
 };
 use crate::commit::{
-    Base, Failure, KnownOurs, Landed, commit_known, disposition_paced, recover_base,
+    Base, Commit, Failure, KnownOurs, Landed, commit_known, disposition_paced, recover_base,
 };
 use crate::config::{Config, ConfigError};
 use crate::environment::{Clock, FileSystem, Store};
 use crate::hook::{is_day_name, utc_day};
 use crate::state::{
-    DaemonLock, Loaded, StateDir, StateError, StateFile, SyncPolicy, WRITER_VERSION,
+    DaemonLock, Loaded, MissingReason, StateDir, StateError, StateFile, SyncPolicy, WRITER_VERSION,
 };
 use memory_core::disposition::Streak;
 use memory_core::domain::{
@@ -33,9 +35,11 @@ use memory_core::domain::{
 use memory_core::hint::{HintScan, LaunchHint, scan};
 use memory_core::manifest::{Header, ManifestError, Timestamp, Writer};
 use memory_core::privacy::{PolicyContext, SanitizedLaunch, sanitize_launch};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
@@ -144,6 +148,42 @@ pub struct StatusBody {
     /// Failed attempts by error class since the status file was first created.
     #[serde(default)]
     pub failures: FailureCounts,
+    /// Events DESIGN.md would log, counted because the daemon has no logging yet.
+    #[serde(default)]
+    pub events: EventCounts,
+}
+
+/// How a state file read at startup came out (DESIGN.md 9.2). Closed; no content or path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateLoad {
+    /// Verified and parsed.
+    Loaded,
+    /// The file does not exist (a first start).
+    Missing,
+    /// Present but unusable: unreadable, failed its checksum, short or extra bytes, bad header,
+    /// unknown envelope version, or a verified body that does not parse.
+    Damaged,
+    /// Written by a build with a newer schema than this one understands.
+    NewerSchema,
+}
+
+/// Counted events that DESIGN.md 9.2 and 7.6 say are logged (the daemon has no logging yet).
+/// A damaged or newer-schema `status.json` restarts every counter, so the event it caused is
+/// recorded in the replacement.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EventCounts {
+    /// `status.json` was present but damaged at startup; parked list and host pause were lost.
+    pub status_damaged: u64,
+    /// `status.json` had a newer schema at startup; parked list and host pause were lost.
+    pub status_newer_schema: u64,
+    /// `index.json` was present but damaged at startup and was rebuilt.
+    pub index_damaged: u64,
+    /// `index.json` had a newer schema at startup and was rebuilt.
+    pub index_newer_schema: u64,
+    /// Owner commits that proceeded without their pending launch records (the digest input
+    /// could not be encoded); the records stay pending in the hint files.
+    pub launch_attach_failed: u64,
 }
 
 /// Failed attempts by [`ErrorClass`] (DESIGN.md 11.2, 11.3): `transient` is distinct from
@@ -202,6 +242,9 @@ pub struct RoundReport {
     pub deferred: usize,
     /// Failures of this round by class.
     pub failures: FailureCounts,
+    /// Owners whose commit went ahead without their pending launch records because attaching
+    /// them failed (DESIGN.md 7.6: the records stay pending in the hint files).
+    pub launch_unattached: usize,
 }
 
 /// Source enumeration, supplied by the shell.
@@ -242,8 +285,32 @@ struct Opened {
     state: StateDir,
     config: Config,
     index: IndexBody,
-    rebuilt: bool,
+    index_load: StateLoad,
     status: StatusBody,
+    status_load: StateLoad,
+}
+
+/// Read one state file and parse its body; every failure is a distinct [`StateLoad`], and the
+/// caller treats anything but `Loaded` as missing (DESIGN.md 9.2).
+fn load_state<T: DeserializeOwned>(state: &StateDir, file: StateFile) -> (Option<T>, StateLoad) {
+    match state.read(file) {
+        Loaded::Present(stored) => match serde_json::from_slice(&stored.body) {
+            Ok(body) => (Some(body), StateLoad::Loaded),
+            Err(_) => (None, StateLoad::Damaged),
+        },
+        Loaded::Missing(MissingReason::NotFound) => (None, StateLoad::Missing),
+        Loaded::Missing(MissingReason::NewerSchema) => (None, StateLoad::NewerSchema),
+        Loaded::Missing(_) => (None, StateLoad::Damaged),
+    }
+}
+
+/// Count a startup load that lost state.
+fn count_load(load: StateLoad, damaged: &mut u64, newer: &mut u64) {
+    match load {
+        StateLoad::Damaged => *damaged = damaged.saturating_add(1),
+        StateLoad::NewerSchema => *newer = newer.saturating_add(1),
+        StateLoad::Loaded | StateLoad::Missing => {}
+    }
 }
 
 fn open(root: &Path, config_path: &Path, sync: SyncPolicy) -> Result<Opened, StartError> {
@@ -251,22 +318,28 @@ fn open(root: &Path, config_path: &Path, sync: SyncPolicy) -> Result<Opened, Sta
     let state = StateDir::prepare_inner(&lock, sync).map_err(StartError::State)?;
     state.vet_hints_dir().map_err(StartError::State)?;
     let config = Config::load(config_path).map_err(StartError::Config)?;
-    let parsed = match state.read(StateFile::Index) {
-        Loaded::Present(stored) => serde_json::from_slice::<IndexBody>(&stored.body).ok(),
-        Loaded::Missing(_) => None,
-    };
-    let rebuilt = parsed.is_none();
-    let status = match state.read(StateFile::Status) {
-        Loaded::Present(stored) => serde_json::from_slice::<StatusBody>(&stored.body).ok(),
-        Loaded::Missing(_) => None,
-    };
+    let (index, index_load) = load_state::<IndexBody>(&state, StateFile::Index);
+    let (status, status_load) = load_state::<StatusBody>(&state, StateFile::Status);
+    let mut status = status.unwrap_or_default();
+    let events = &mut status.events;
+    count_load(
+        status_load,
+        &mut events.status_damaged,
+        &mut events.status_newer_schema,
+    );
+    count_load(
+        index_load,
+        &mut events.index_damaged,
+        &mut events.index_newer_schema,
+    );
     Ok(Opened {
         lock,
         state,
         config,
-        index: parsed.unwrap_or_default(),
-        rebuilt,
-        status: status.unwrap_or_default(),
+        index: index.unwrap_or_default(),
+        index_load,
+        status,
+        status_load,
     })
 }
 
@@ -336,6 +409,26 @@ fn stamp_of(wall_ns: i128) -> Result<(Timestamp, String), ManifestError> {
     Timestamp::try_from(text.clone()).map(|t| (t, text))
 }
 
+fn header_of(owner: &Owner, when: &Timestamp) -> Header {
+    Header {
+        owner: owner.clone(),
+        captured_at: when.clone(),
+        writer: Writer {
+            name: "memory".to_owned(),
+            version: WRITER_VERSION.to_owned(),
+            commit: "unknown".to_owned(),
+        },
+        launch: Vec::new(),
+    }
+}
+
+/// Whether attaching launch records worked; a failure is counted, never silent.
+fn note_attach(result: Result<(), ManifestError>, report: &mut RoundReport) -> bool {
+    let attached = result.is_ok();
+    report.launch_unattached += usize::from(!attached);
+    attached
+}
+
 /// The daemon: locked, prepared and loaded.
 pub struct Daemon<F, S, C, E> {
     _lock: DaemonLock,
@@ -350,7 +443,8 @@ pub struct Daemon<F, S, C, E> {
     hints: BTreeMap<String, u64>,
     owners: HashMap<Owner, OwnerRt>,
     status: StatusBody,
-    rebuilt: bool,
+    index_load: StateLoad,
+    status_load: StateLoad,
     dirty: bool,
     last_index: Option<Duration>,
     last_status: Option<Duration>,
@@ -424,7 +518,8 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             hints: opened.index.hints,
             owners,
             status: opened.status,
-            rebuilt: opened.rebuilt,
+            index_load: opened.index_load,
+            status_load: opened.status_load,
             dirty: false,
             last_index: None,
             last_status: None,
@@ -432,9 +527,18 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         })
     }
 
-    /// True when the index was missing or damaged at startup.
+    /// True when the index was missing, damaged or of a newer schema at startup.
     pub const fn rebuilt(&self) -> bool {
-        self.rebuilt
+        !matches!(self.index_load, StateLoad::Loaded)
+    }
+    /// How `index.json` loaded at startup.
+    pub const fn index_load(&self) -> StateLoad {
+        self.index_load
+    }
+    /// How `status.json` loaded at startup. `Damaged` and `NewerSchema` mean the parked list
+    /// and host pause were lost; the counters restarted and [`StatusBody::events`] says why.
+    pub const fn status_load(&self) -> StateLoad {
+        self.status_load
     }
     /// The current status body.
     pub const fn status(&self) -> &StatusBody {
@@ -583,49 +687,56 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         }
     }
 
-    /// Returns true when uploads must pause (host-scoped failure).
-    fn run_owner(
-        &mut self,
-        owner: &Owner,
-        sources: &[Source],
-        rt: &mut OwnerRt,
-        hints: &mut [ScannedFile],
-        when: &Timestamp,
-        report: &mut RoundReport,
-    ) -> bool {
+    /// The owner's turn: `Some(at)` when it should run now, else it is counted as skipped
+    /// (parked) or deferred (retry delay not elapsed).
+    fn due(&self, rt: &OwnerRt, report: &mut RoundReport) -> Option<Duration> {
         if rt.parked.is_some() {
             report.skipped += 1;
-            return false;
+            return None;
         }
         let at = Duration::from_nanos(self.clock.monotonic_ns());
         if rt.not_before.is_some_and(|t| at < t) {
             report.deferred += 1;
-            return false;
+            return None;
         }
-        if rt.needs_recover {
-            match recover_base(&mut self.store, owner) {
-                Ok(base) => {
-                    rt.base = base;
-                    rt.needs_recover = false;
-                }
-                Err(failure) => {
-                    let draw = self.next_draw();
-                    return Self::settle(rt, &Err(failure), at, draw, report);
-                }
+        Some(at)
+    }
+
+    /// Rebuild the commit base from the store when it is unknown. `Break(pause)` ends the turn
+    /// with the failure settled; `pause` is true when uploads must pause.
+    fn recover(
+        &mut self,
+        owner: &Owner,
+        rt: &mut OwnerRt,
+        at: Duration,
+        report: &mut RoundReport,
+    ) -> ControlFlow<bool> {
+        if !rt.needs_recover {
+            return ControlFlow::Continue(());
+        }
+        match recover_base(&mut self.store, owner) {
+            Ok(base) => {
+                rt.base = base;
+                rt.needs_recover = false;
+                ControlFlow::Continue(())
+            }
+            Err(failure) => {
+                let draw = self.next_draw();
+                ControlFlow::Break(Self::settle(rt, &Err(failure), at, draw, report))
             }
         }
-        let header = Header {
-            owner: owner.clone(),
-            captured_at: when.clone(),
-            writer: Writer {
-                name: "memory".to_owned(),
-                version: WRITER_VERSION.to_owned(),
-                commit: "unknown".to_owned(),
-            },
-            launch: Vec::new(),
-        };
+    }
+
+    /// Capture the owner's sources against the remote state of its base.
+    fn capture_owner(
+        &mut self,
+        owner: &Owner,
+        sources: &[Source],
+        rt: &OwnerRt,
+        when: &Timestamp,
+    ) -> Captured {
         let env = Env {
-            header,
+            header: header_of(owner, when),
             context: &self.context,
             now_ns: i64::try_from(self.clock.wall_ns()).unwrap_or(i64::MAX),
             piece_len: MAX_PIECE_BYTES,
@@ -635,18 +746,37 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             .as_ref()
             .map(|b| b.state.clone())
             .unwrap_or_default();
-        let got = capture(&mut self.fs, sources, &self.locals, &remote, &env);
-        let Some(mut request) = got.commit else {
-            self.apply(got.updates);
-            return false;
-        };
+        capture(&mut self.fs, sources, &self.locals, &remote, &env)
+    }
+
+    /// Attach the owner's pending launch records (DESIGN.md 7.6). False when that failed: the
+    /// commit still goes ahead without them, they stay pending, and the report counts it.
+    fn attach_pending(
+        request: &mut Commit,
+        hints: &[ScannedFile],
+        owner: &Owner,
+        report: &mut RoundReport,
+    ) -> bool {
         let launches: Vec<SanitizedLaunch> = hints
             .iter()
             .flat_map(|f| f.records.iter())
             .filter(|r| !r.done && r.owner == *owner)
             .filter_map(|r| r.launch.clone())
             .collect();
-        let attached = attach_launches(&mut request, &launches).is_ok();
+        note_attach(attach_launches(request, &launches), report)
+    }
+
+    /// Commit, then make the capture durable locally: updates and hint progress apply only once
+    /// the commit has landed.
+    fn land(
+        &mut self,
+        owner: &Owner,
+        rt: &mut OwnerRt,
+        request: Commit,
+        got: Captured,
+        hints: &mut [ScannedFile],
+        attached: bool,
+    ) -> Result<Landed, Failure> {
         let result = commit_known(
             &mut self.store,
             rt.base.as_ref(),
@@ -668,6 +798,33 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 }
             }
         }
+        result
+    }
+
+    /// One owner's turn: gate, recover, capture, attach launches, commit, settle. Returns true
+    /// when uploads must pause (host-scoped failure).
+    fn run_owner(
+        &mut self,
+        owner: &Owner,
+        sources: &[Source],
+        rt: &mut OwnerRt,
+        hints: &mut [ScannedFile],
+        when: &Timestamp,
+        report: &mut RoundReport,
+    ) -> bool {
+        let Some(at) = self.due(rt, report) else {
+            return false;
+        };
+        if let ControlFlow::Break(pause) = self.recover(owner, rt, at, report) {
+            return pause;
+        }
+        let mut got = self.capture_owner(owner, sources, rt, when);
+        let Some(mut request) = got.commit.take() else {
+            self.apply(got.updates);
+            return false;
+        };
+        let attached = Self::attach_pending(&mut request, hints, owner, report);
+        let result = self.land(owner, rt, request, got, hints, attached);
         let draw = self.next_draw();
         Self::settle(rt, &result, at, draw, report)
     }
@@ -754,6 +911,11 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         }
         self.advance_hints(&files);
         self.status.failures.add(&report.failures);
+        self.status.events.launch_attach_failed = self
+            .status
+            .events
+            .launch_attach_failed
+            .saturating_add(report.launch_unattached as u64);
         self.status.rounds += 1;
         self.status.updated_at = text;
         let mut parked: Vec<ParkedEntry> = self
@@ -806,5 +968,20 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     /// Path of the state root.
     pub fn root(&self) -> PathBuf {
         self.state.root().to_path_buf()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_launch_attachment_is_counted_and_reported_unattached() {
+        let mut report = RoundReport::default();
+        assert!(note_attach(Ok(()), &mut report));
+        assert_eq!(report.launch_unattached, 0);
+        assert!(!note_attach(Err(ManifestError::Encode), &mut report));
+        assert!(!note_attach(Err(ManifestError::Encode), &mut report));
+        assert_eq!(report.launch_unattached, 2);
     }
 }

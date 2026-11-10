@@ -64,6 +64,8 @@ struct MemFs {
     files: BTreeMap<u64, Vec<u8>>,
     /// Modification times set by `set`; a source never set through it keeps 1_000.
     mtimes: BTreeMap<u64, i64>,
+    /// File identity generation per path: `replace` gives the path a new inode.
+    generations: BTreeMap<u64, u64>,
     tick: i64,
 }
 impl MemFs {
@@ -73,6 +75,13 @@ impl MemFs {
             self.tick += 1;
             self.mtimes.insert(source, 1_000 + self.tick);
         }
+        self.files.insert(source, bytes.to_vec());
+    }
+    /// Rename-replace: a new file with a new identity appears at the same path.
+    fn replace(&mut self, source: u64, bytes: &[u8]) {
+        *self.generations.entry(source).or_default() += 1;
+        self.tick += 1;
+        self.mtimes.insert(source, 1_000 + self.tick);
         self.files.insert(source, bytes.to_vec());
     }
     fn remove(&mut self, source: u64) {
@@ -86,7 +95,7 @@ impl FileSystem for MemFs {
         Ok(self.files.get(&source).map(|b| Stat {
             id: FileId {
                 dev: 1,
-                ino: source,
+                ino: source | self.generations.get(&source).copied().unwrap_or(0) << 32,
                 birth: Birth::Unavailable,
             },
             size: u64::try_from(b.len()).unwrap_or(0),
@@ -104,11 +113,31 @@ impl FileSystem for MemFs {
     }
 }
 
+/// How a fake derives an ETag. R2 reports the MD5 of the body (P2 `etag_is_md5_of_body`), so
+/// the content model is measured for distinct bodies; what R2 answers for an identical rewrite
+/// is unmeasured, so the state machines run under both.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum EtagModel {
+    /// Every write gets a new ETag, even an identical rewrite.
+    #[default]
+    PerWrite,
+    /// The ETag is a function of the body: an identical rewrite keeps it.
+    Content,
+}
+fn content_token(body: &[u8]) -> u64 {
+    body.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
 #[derive(Default)]
 struct MemStore {
+    /// Body and ETag token.
     objects: BTreeMap<String, (Vec<u8>, u64)>,
+    /// Count of writes.
     version: u64,
     puts: u64,
+    model: EtagModel,
 }
 impl MemStore {
     fn tag(v: u64) -> Result<ETag, StoreError> {
@@ -124,16 +153,21 @@ impl MemStore {
         let existing = self.objects.get(key).map(|(_, v)| *v);
         match (fence, existing) {
             (None, Some(_)) => return Err(StoreError::PreconditionFailed),
-            (Some(_), None) => return Err(StoreError::NotFound),
+            // Measured on R2 (P2 `r2-os.jsonl`): If-Match on a missing key is 412, not 404.
+            (Some(_), None) => return Err(StoreError::PreconditionFailed),
             (Some(f), Some(v)) if &Self::tag(v)? != f => {
                 return Err(StoreError::PreconditionFailed);
             }
             _ => {}
         }
         self.version += 1;
+        let token = match self.model {
+            EtagModel::PerWrite => self.version,
+            EtagModel::Content => content_token(body.as_ref()),
+        };
         self.objects
-            .insert(key.to_owned(), (body.as_ref().to_vec(), self.version));
-        Self::tag(self.version)
+            .insert(key.to_owned(), (body.as_ref().to_vec(), token));
+        Self::tag(token)
     }
 }
 impl Store for MemStore {
@@ -283,7 +317,7 @@ fn second_process_exits_lock_held() -> R {
 // ====================================================================== Round 9
 use hegel::{TestCase, generators as gs};
 use memory::commit::manifest_key;
-use memory::daemon::{IndexBody, ParkedReason, StatusBody};
+use memory::daemon::{IndexBody, ParkedReason, StateLoad, StatusBody};
 use memory::state::{Loaded, StateDir, StateFile, read_durable};
 use memory_core::domain::{OwnerParkReason, Sha256};
 use memory_core::hint::{
@@ -376,6 +410,11 @@ struct Foreign {
 enum Effect {
     /// Land the write, then answer with the error (a lost reply).
     LandThen(StoreError),
+    /// Land the write, lose the reply, and the store stays unreachable (every request fails)
+    /// until the test clears `blackout`: the writer cannot verify what landed.
+    LandThenDark(StoreError),
+    /// Another client rewrites `current.json` with the same bytes just before this request.
+    Churn,
     /// A foreign writer advances the owner just before this request.
     Foreign(Foreign),
 }
@@ -418,8 +457,17 @@ struct FStore {
     crashed: Option<CrashAt>,
     /// After a held write the store is unreachable until the round ends.
     blackout: bool,
+    model: EtagModel,
+    /// `current.json` writes answered 412.
+    refused_current: u64,
 }
 impl FStore {
+    fn with_model(model: EtagModel) -> Self {
+        Self {
+            model,
+            ..Self::default()
+        }
+    }
     fn tag(v: u64) -> Result<ETag, StoreError> {
         ETag::try_from(format!("\"v{v}\"")).map_err(|_| StoreError::Server)
     }
@@ -429,9 +477,14 @@ impl FStore {
     fn peek(&self, key: &str) -> Option<&[u8]> {
         self.objects.get(key).map(|(b, _)| b.as_slice())
     }
-    fn write(&mut self, key: &str, body: Vec<u8>) {
+    fn write(&mut self, key: &str, body: Vec<u8>) -> u64 {
         self.version += 1;
-        self.objects.insert(key.to_owned(), (body, self.version));
+        let token = match self.model {
+            EtagModel::PerWrite => self.version,
+            EtagModel::Content => content_token(&body),
+        };
+        self.objects.insert(key.to_owned(), (body, token));
+        token
     }
     fn take_rule(&mut self, key: &str) -> Option<Effect> {
         if !key.ends_with("current.json") {
@@ -479,6 +532,11 @@ impl FStore {
             self.write(key, f.current.clone());
         }
         let is_current = key.ends_with("current.json");
+        if matches!(effect, Some(Effect::Churn))
+            && let Some((body, _)) = self.objects.get(key).cloned()
+        {
+            self.write(key, body);
+        }
         if let Some(at) = self.crash_at {
             let hit = match at {
                 CrashAt::Manifest => key.starts_with("manifests/"),
@@ -494,13 +552,16 @@ impl FStore {
             self.land_late(key);
         }
         let existing = self.objects.get(key).map(|(_, v)| *v);
-        match (fence, existing) {
-            (None, Some(_)) => return Err(StoreError::PreconditionFailed),
-            (Some(_), None) => return Err(StoreError::NotFound),
-            (Some(f), Some(v)) if &Self::tag(v)? != f => {
-                return Err(StoreError::PreconditionFailed);
-            }
-            _ => {}
+        let refused = match (fence, existing) {
+            (None, Some(_)) => true,
+            // Measured on R2 (P2 `r2-os.jsonl`): If-Match on a missing key is 412, not 404.
+            (Some(_), None) => true,
+            (Some(f), Some(v)) => &Self::tag(v)? != f,
+            (None, None) => false,
+        };
+        if refused {
+            self.refused_current += u64::from(is_current);
+            return Err(StoreError::PreconditionFailed);
         }
         if self.stall && is_current && self.late.is_none() {
             self.late = Some(Late {
@@ -511,11 +572,18 @@ impl FStore {
             self.stall = false;
             return Err(StoreError::Offline);
         }
-        self.write(key, body.as_ref().to_vec());
-        let tag = Self::tag(self.version)?;
-        if let Some(Effect::LandThen(err)) = effect {
-            self.lost_fired += 1;
-            return Err(err);
+        let tag = Self::tag(self.write(key, body.as_ref().to_vec()))?;
+        match effect {
+            Some(Effect::LandThen(err)) => {
+                self.lost_fired += 1;
+                return Err(err);
+            }
+            Some(Effect::LandThenDark(err)) => {
+                self.lost_fired += 1;
+                self.blackout = true;
+                return Err(err);
+            }
+            _ => {}
         }
         Ok(tag)
     }
@@ -1025,15 +1093,210 @@ fn damaged_index_and_status_are_treated_as_missing() -> R {
     let puts = store.put_log.len();
     let mut d = boot(&tmp, &cfg, fs, store, &list, WALL)?;
     assert!(d.rebuilt(), "damaged index rebuilds");
+    assert_eq!(
+        (d.index_load(), d.status_load()),
+        (StateLoad::Damaged, StateLoad::Damaged)
+    );
     assert_eq!(d.reconcile_once().map_err(e)?.landed, 0);
     assert_eq!(d.status().rounds, 1, "status counters restarted");
     assert_eq!(d.store_mut().put_log.len(), puts, "no re-upload");
     Ok(())
 }
 
+/// Replace the first `from` in a state file's header with `to` (same length keeps the body).
+fn patch_header(path: &Path, from: &str, to: &str) -> R {
+    let text = fs::read(path).map_err(e)?;
+    let head_end = need(text.iter().position(|b| *b == b'\n'), "header")?;
+    let (head, rest) = text.split_at(head_end);
+    let head = String::from_utf8(head.to_vec()).map_err(e)?;
+    ensure(head.contains(from), "header lacks the text to replace")?;
+    let mut out = head.replacen(from, to, 1).into_bytes();
+    out.extend_from_slice(rest);
+    fs::write(path, out).map_err(e)
+}
+
+/// A daemon that has run two rounds with an owner parked for a newer remote schema, then shut
+/// down; returns what a restart needs.
+fn parked_daemon(tmp: &Tmp, cfg: &Path, list: &[(Owner, Source)]) -> R<(MemFs, FStore)> {
+    // s1 is parked for a newer remote schema; s2 commits, so the index is written too.
+    let mut fs = files_with(b"hello\n");
+    fs.files.insert(2, b"world\n".to_vec());
+    let mut d = boot(tmp, cfg, fs, FStore::default(), list, WALL)?;
+    d.store_mut()
+        .write(&current_key(&owner_of("s1")?), NEWER.to_vec());
+    assert_eq!(d.reconcile_once().map_err(e)?.parked, 1);
+    d.reconcile_once().map_err(e)?;
+    let fs = std::mem::take(d.fs_mut());
+    let store = std::mem::take(d.store_mut());
+    d.shutdown().map_err(e)?;
+    Ok((fs, store))
+}
+
+/// DESIGN.md 9.2: a damaged or newer-schema `status.json` is treated as missing, so the parked
+/// list and host pause are lost. The daemon has no logging, so each case is a distinct open
+/// result and a persisted counter. Kills: mapping every failure to `Missing`, swapping the
+/// damaged and newer-schema classes, and not counting the event.
+#[test]
+fn status_and_index_load_cases_are_distinct_and_counted() -> R {
+    let list = vec![src_of("s1", 1)?, src_of("s2", 2)?];
+    // (what happens to status.json, expected result, expected counter after the restart)
+    type Damage = fn(&Tmp) -> R;
+    let cases: [(&str, Damage, StateLoad, [u64; 2]); 4] = [
+        (
+            "checksum flip",
+            |t| flip_last_byte(&t.root().join("status.json")),
+            StateLoad::Damaged,
+            [1, 0],
+        ),
+        (
+            "newer schema",
+            |t| {
+                patch_header(
+                    &t.root().join("status.json"),
+                    "memory.status/1",
+                    "memory.status/2",
+                )
+            },
+            StateLoad::NewerSchema,
+            [0, 1],
+        ),
+        (
+            "valid envelope, unparsable body",
+            |t| {
+                let lock = DaemonLock::acquire(&t.root()).map_err(e)?;
+                let state = StateDir::prepare(&lock).map_err(e)?;
+                state
+                    .write(StateFile::Status, b"{\"rounds\":\"x\"}")
+                    .map_err(e)
+            },
+            StateLoad::Damaged,
+            [1, 0],
+        ),
+        (
+            "deleted",
+            |t| fs::remove_file(t.root().join("status.json")).map_err(e),
+            StateLoad::Missing,
+            [0, 0],
+        ),
+    ];
+    for (label, damage, load, [damaged, newer]) in cases {
+        let tmp = Tmp::new()?;
+        let cfg = tmp.config(true)?;
+        let (fs, store) = parked_daemon(&tmp, &cfg, &list)?;
+        assert_eq!(
+            status_via_state_dir(&tmp)?.parked.len(),
+            1,
+            "{label}: parked"
+        );
+        damage(&tmp)?;
+        let mut d = boot(&tmp, &cfg, fs, store, &list, WALL)?;
+        assert_eq!(d.status_load(), load, "{label}");
+        assert_eq!(d.index_load(), StateLoad::Loaded, "{label}");
+        let events = d.status().events;
+        assert_eq!(
+            (events.status_damaged, events.status_newer_schema),
+            (damaged, newer),
+            "{label}"
+        );
+        assert_eq!((events.index_damaged, events.index_newer_schema), (0, 0));
+        assert!(
+            d.status().parked.is_empty() && !d.status().host_paused,
+            "{label}: the parked list is lost with the file"
+        );
+        // The event is persisted with the next status write and survives another restart.
+        d.reconcile_once().map_err(e)?;
+        let fs = std::mem::take(d.fs_mut());
+        let store = std::mem::take(d.store_mut());
+        d.shutdown().map_err(e)?;
+        let on_disk = status_via_state_dir(&tmp)?.events;
+        assert_eq!(
+            (on_disk.status_damaged, on_disk.status_newer_schema),
+            (damaged, newer),
+            "{label}: persisted"
+        );
+        let d = boot(&tmp, &cfg, fs, store, &list, WALL)?;
+        assert_eq!(
+            d.status_load(),
+            StateLoad::Loaded,
+            "{label}: replacement loads"
+        );
+        assert_eq!(
+            d.status().events,
+            on_disk,
+            "{label}: counters survive restart"
+        );
+    }
+    // The index: damaged and newer-schema rebuild and are counted; a missing one (first start)
+    // is not an event.
+    let cases: [(&str, Damage, StateLoad, [u64; 2]); 3] = [
+        (
+            "index checksum flip",
+            |t| flip_last_byte(&t.root().join("index.json")),
+            StateLoad::Damaged,
+            [1, 0],
+        ),
+        (
+            "index newer schema",
+            |t| {
+                patch_header(
+                    &t.root().join("index.json"),
+                    "memory.index/1",
+                    "memory.index/2",
+                )
+            },
+            StateLoad::NewerSchema,
+            [0, 1],
+        ),
+        (
+            "index deleted",
+            |t| fs::remove_file(t.root().join("index.json")).map_err(e),
+            StateLoad::Missing,
+            [0, 0],
+        ),
+    ];
+    for (label, damage, load, [damaged, newer]) in cases {
+        let tmp = Tmp::new()?;
+        let cfg = tmp.config(true)?;
+        let (fs, store) = parked_daemon(&tmp, &cfg, &list)?;
+        damage(&tmp)?;
+        let d = boot(&tmp, &cfg, fs, store, &list, WALL)?;
+        assert_eq!(d.index_load(), load, "{label}");
+        assert!(d.rebuilt(), "{label}");
+        assert_eq!(d.status_load(), StateLoad::Loaded, "{label}");
+        let events = d.status().events;
+        assert_eq!(
+            (events.index_damaged, events.index_newer_schema),
+            (damaged, newer),
+            "{label}"
+        );
+        assert_eq!(
+            d.status().parked.len(),
+            1,
+            "{label}: an index problem keeps the parked list"
+        );
+    }
+    // A first start: both files are missing and nothing is an event.
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let d = boot(
+        &tmp,
+        &cfg,
+        files_with(b"hello\n"),
+        FStore::default(),
+        &list,
+        WALL,
+    )?;
+    assert_eq!(
+        (d.index_load(), d.status_load()),
+        (StateLoad::Missing, StateLoad::Missing)
+    );
+    assert_eq!(d.status().events, memory::daemon::EventCounts::default());
+    Ok(())
+}
+
 // ---------------------------------------------------------------- coverage guard
 
-const SHAPE_NAMES: [&str; 12] = [
+const SHAPE_NAMES: [&str; 13] = [
     "restart",
     "lost-reply",
     "delete-index",
@@ -1046,6 +1309,7 @@ const SHAPE_NAMES: [&str; 12] = [
     "late-write",
     "multi-epoch",
     "big-file",
+    "rename-replace",
 ];
 const REQUIRED_NEW: [&str; 6] = [
     "rewrite",
@@ -1056,12 +1320,12 @@ const REQUIRED_NEW: [&str; 6] = [
     "late-write",
 ];
 struct Shapes {
-    n: [AtomicU64; 12],
+    n: [AtomicU64; SHAPE_NAMES.len()],
 }
 impl Shapes {
     const fn new() -> Self {
         Self {
-            n: [const { AtomicU64::new(0) }; 12],
+            n: [const { AtomicU64::new(0) }; SHAPE_NAMES.len()],
         }
     }
     fn hit(&self, name: &str) {
@@ -1133,19 +1397,44 @@ fn guard_has_negative_controls() {
 
 #[derive(Clone, Debug)]
 enum Step {
-    Append { seed: u8, n: u8 },
-    Bulk { seed: u8, kib: u8 },
-    Rewrite { zone: u8, delta: u16 },
-    Truncate { frac: u8 },
+    Append {
+        seed: u8,
+        n: u8,
+    },
+    Bulk {
+        seed: u8,
+        kib: u8,
+    },
+    Rewrite {
+        zone: u8,
+        delta: u16,
+    },
+    /// A new file with a new identity replaces the path, with the same bytes or one byte changed.
+    RenameReplace {
+        change: bool,
+        delta: u16,
+    },
+    Truncate {
+        frac: u8,
+    },
     RemoveSource,
     RevokeToken,
     RestoreToken,
-    Crash { manifest: bool },
-    LateWrite { seed: u8, n: u8 },
+    Crash {
+        manifest: bool,
+    },
+    LateWrite {
+        seed: u8,
+        n: u8,
+    },
     Round,
     DeleteIndex,
     Restart,
-    LostReply,
+    /// The next `current.json` write lands but its reply is lost; with `dark` the store then
+    /// stays unreachable, so the writer cannot verify the landing (LandingUnknown).
+    LostReply {
+        dark: bool,
+    },
     Offline,
     Online,
     Settle,
@@ -1162,8 +1451,10 @@ struct Reference {
     history: Vec<Vec<u8>>,
     /// The last step changed the source for real (not a no-op on an empty or absent file).
     effect: bool,
-    /// The last step was a rewrite outside both windows.
-    mid: bool,
+    /// The last step rewrote this position outside both windows.
+    mid_pos: Option<usize>,
+    /// The fake store derives ETags from content (see [`EtagModel`]).
+    content_etag: bool,
     /// Positions ever changed by a same-size rewrite between the head and tail windows.
     /// DESIGN 1a covers only changes that alter identity or touch a window; only an audit
     /// finds such a rewrite (DESIGN 7.2) and reconcile rounds run none. At these positions,
@@ -1198,7 +1489,7 @@ impl Reference {
     }
     fn apply(&mut self, step: &Step) {
         self.effect = false;
-        self.mid = false;
+        self.mid_pos = None;
         match step {
             Step::Append { seed, n } | Step::LateWrite { seed, n } => {
                 self.grow((0..(*n).max(1)).map(|k| seed.wrapping_add(k) % 3));
@@ -1225,10 +1516,21 @@ impl Reference {
                 {
                     *b = b.wrapping_add(1);
                     self.effect = true;
-                    self.mid = zone % 3 == 2 && len > HEAD + TAIL;
-                    if self.mid {
+                    if zone % 3 == 2 && len > HEAD + TAIL {
+                        self.mid_pos = Some(p);
                         self.masked.insert(p);
                     }
+                    self.history.push(self.file.clone());
+                }
+            }
+            Step::RenameReplace { change, delta } if self.exists => {
+                // A new identity is always detected (DESIGN 1a), so no position is masked.
+                self.effect = true;
+                if *change
+                    && let Some(i) = usize::from(*delta).checked_rem(self.file.len())
+                    && let Some(b) = self.file.get_mut(i)
+                {
+                    *b = b.wrapping_add(1);
                     self.history.push(self.file.clone());
                 }
             }
@@ -1263,10 +1565,11 @@ struct Sut {
     index_expected: bool,
     lost_seen: u64,
     late_seen: u64,
+    refused_seen: u64,
     max_epochs: usize,
 }
 impl Sut {
-    fn new() -> R<Self> {
+    fn new(model: EtagModel) -> R<Self> {
         let tmp = Tmp::new()?;
         let cfg = tmp.config(true)?;
         let list = vec![src_of("s1", 1)?];
@@ -1274,7 +1577,7 @@ impl Sut {
             &tmp,
             &cfg,
             MemFs::default(),
-            FStore::default(),
+            FStore::with_model(model),
             &list,
             WALL,
             SyncPolicy::None,
@@ -1290,6 +1593,7 @@ impl Sut {
             index_expected: false,
             lost_seen: 0,
             late_seen: 0,
+            refused_seen: 0,
             max_epochs: 0,
         })
     }
@@ -1344,6 +1648,22 @@ impl Sut {
         self.index_expected |= track_index && report.landed > 0;
         Ok(())
     }
+    /// Size of the newest committed epoch (0 when nothing is committed): what a rewrite of
+    /// already-committed bytes must fall inside.
+    fn committed_len(&mut self) -> R<u64> {
+        let owner = self.owner.clone();
+        let chain = read_chain(self.daemon()?.store_mut(), &owner)?;
+        Ok(chain
+            .and_then(|c| {
+                c.folded
+                    .state
+                    .sources
+                    .values()
+                    .filter_map(|entry| entry.epochs.last().map(|r| r.size))
+                    .max()
+            })
+            .unwrap_or(0))
+    }
     fn sync_file(&mut self, after: &Reference) -> R {
         let d = self.daemon()?;
         if after.exists {
@@ -1365,7 +1685,11 @@ impl Sut {
                     match step {
                         Step::Rewrite { .. } => {
                             shapes.hit("rewrite");
-                            if after.mid {
+                            // Only a rewrite of bytes a commit already carries counts: before
+                            // any commit there is nothing for a mid-file rewrite to go stale.
+                            if let Some(p) = after.mid_pos
+                                && self.committed_len()? > u64::try_from(p).unwrap_or(u64::MAX)
+                            {
                                 shapes.hit("rewrite-mid-file");
                             }
                         }
@@ -1381,6 +1705,15 @@ impl Sut {
                 }
                 if after.file.len() > HEAD + TAIL {
                     shapes.hit("big-file");
+                }
+            }
+            Step::RenameReplace { .. } => {
+                let committed = self.committed_len()?;
+                if after.exists {
+                    self.daemon()?.fs_mut().replace(1, &after.file);
+                }
+                if after.effect && committed > 0 {
+                    shapes.hit("rename-replace");
                 }
             }
             Step::Round => self.round(shapes)?,
@@ -1425,12 +1758,21 @@ impl Sut {
                 self.restart()?;
                 shapes.hit("restart");
             }
-            Step::LostReply => self
-                .daemon()?
-                .store_mut()
-                .arm(None, Effect::LandThen(StoreError::Ambiguous)),
+            Step::LostReply { dark } => {
+                let lost = StoreError::Ambiguous;
+                let effect = if *dark {
+                    Effect::LandThenDark(lost)
+                } else {
+                    Effect::LandThen(lost)
+                };
+                self.daemon()?.store_mut().arm(None, effect);
+            }
             Step::Offline => self.daemon()?.store_mut().offline = true,
-            Step::Online => self.daemon()?.store_mut().offline = false,
+            Step::Online => {
+                let store = self.daemon()?.store_mut();
+                store.offline = false;
+                store.blackout = false;
+            }
             Step::Settle => {
                 let store = self.daemon()?.store_mut();
                 store.offline = false;
@@ -1456,7 +1798,35 @@ impl Sut {
         }
         self.lost_seen = fired;
         self.late_seen = late;
+        // A `current.json` write is refused only when another write got in first, and in this
+        // model only a late write (A6) does. A refusal anywhere else means a round fenced on a
+        // stale base: a landing it could not verify, or a rebase-exhausted fence, was not reset.
+        let refused = self.daemon()?.store_mut().refused_current;
+        if !matches!(step, Step::LateWrite { .. }) {
+            ensure(
+                refused == self.refused_seen,
+                "a current.json write was refused outside a late write (stale If-Match base)",
+            )?;
+        }
+        self.refused_seen = refused;
         Ok(())
+    }
+    /// Every (size, digest) an epoch has had in any committed manifest of the chain.
+    fn committed_positions(&mut self) -> R<Vec<(u64, Sha256)>> {
+        let owner = self.owner.clone();
+        let Some(chain) = read_chain(self.daemon()?.store_mut(), &owner)? else {
+            return Ok(Vec::new());
+        };
+        let refs: Vec<&[u8]> = chain.manifests.iter().map(Vec::as_slice).collect();
+        let mut out = Vec::new();
+        for end in 1..=refs.len() {
+            let prefix = refs.get(..end).unwrap_or_default();
+            let folded = fold(prefix).map_err(e)?;
+            for entry in folded.state.sources.values() {
+                out.extend(entry.epochs.iter().map(|r| (r.size, r.sha256)));
+            }
+        }
+        Ok(out)
     }
     fn check(&mut self, after: &Reference, settled: bool, shapes: &Shapes) -> R {
         if self.ran {
@@ -1468,11 +1838,21 @@ impl Sut {
             }
         }
         if self.index_expected {
-            match file_state(&self.tmp, StateFile::Index) {
-                Loaded::Present(s) => {
-                    serde_json::from_slice::<IndexBody>(&s.body).map_err(e)?;
-                }
-                Loaded::Missing(r) => return Err(format!("index unreadable: {r:?}")),
+            ensure(
+                matches!(file_state(&self.tmp, StateFile::Index), Loaded::Present(_)),
+                "index unreadable",
+            )?;
+        }
+        // The index never runs ahead of the store: whatever position it records on disk was
+        // committed at some point (it may lag behind a newer commit, never lead one).
+        if let Some(index) = index_of(&self.tmp)? {
+            let committed = self.committed_positions()?;
+            for state in index.sources.values().filter_map(|s| s.index.as_ref()) {
+                let at = (state.position.captured_to.get(), state.position.whole);
+                ensure(
+                    at.0 == 0 || committed.contains(&at),
+                    "index.json records a position that was never committed",
+                )?;
             }
         }
         // No step here models a foreign writer, so an owner is never parked (A6).
@@ -1525,10 +1905,13 @@ struct World {
     shapes: &'static Shapes,
 }
 impl World {
-    fn new(shapes: &'static Shapes) -> R<Self> {
+    fn new(shapes: &'static Shapes, model: EtagModel) -> R<Self> {
         Ok(Self {
-            reference: Reference::default(),
-            sut: Sut::new()?,
+            reference: Reference {
+                content_etag: model == EtagModel::Content,
+                ..Reference::default()
+            },
+            sut: Sut::new(model)?,
             shapes,
         })
     }
@@ -1543,6 +1926,95 @@ impl World {
             });
         assert!(result.is_ok(), "{step:?}: {result:?}");
     }
+}
+
+fn model_of(reference: &Reference) -> EtagModel {
+    if reference.content_etag {
+        EtagModel::Content
+    } else {
+        EtagModel::PerWrite
+    }
+}
+
+/// Run `steps` through the same model, system and oracle the properties use.
+fn drive_script(steps: &[Step], shapes: &Shapes, model: EtagModel) -> R {
+    let mut reference = Reference {
+        content_etag: model == EtagModel::Content,
+        ..Reference::default()
+    };
+    let mut sut = Sut::new(model)?;
+    for step in steps {
+        reference.apply(step);
+        sut.exec(step, &reference, shapes)?;
+        sut.check(&reference, matches!(step, Step::Settle), shapes)?;
+    }
+    Ok(())
+}
+
+/// One scripted run per ETag model that forces every guarded shape, `rewrite-mid-file` included
+/// (a rewrite between the windows of bytes a commit already carries), so a property's coverage
+/// guard cannot fail by chance: the shapes are forced here and the random runs add frequency.
+fn scripted_shapes(shapes: &Shapes) -> R {
+    let append = |seed| Step::Append { seed, n: 3 };
+    let script = [
+        Step::Bulk { seed: 1, kib: 80 },
+        Step::Round,
+        Step::Rewrite { zone: 2, delta: 3 },
+        Step::Round,
+        Step::Rewrite { zone: 0, delta: 1 },
+        Step::Round,
+        Step::Truncate { frac: 100 },
+        Step::Round,
+        Step::RenameReplace {
+            change: false,
+            delta: 0,
+        },
+        Step::Round,
+        Step::RenameReplace {
+            change: true,
+            delta: 5,
+        },
+        Step::Round,
+        Step::LostReply { dark: false },
+        append(2),
+        Step::Round,
+        // The reply is lost and the store goes dark: the landing cannot be verified.
+        Step::LostReply { dark: true },
+        append(7),
+        Step::Round,
+        Step::Online,
+        Step::Round,
+        append(3),
+        Step::Crash { manifest: true },
+        append(4),
+        Step::Crash { manifest: false },
+        append(5),
+        Step::RevokeToken,
+        Step::Round,
+        Step::RestoreToken,
+        Step::LateWrite { seed: 6, n: 4 },
+        Step::DeleteIndex,
+        Step::Restart,
+        Step::Settle,
+        Step::RemoveSource,
+        Step::Settle,
+    ];
+    for model in [EtagModel::PerWrite, EtagModel::Content] {
+        drive_script(&script, shapes, model)?;
+    }
+    Ok(())
+}
+
+/// The script alone, with no random steps, produces every shape the guard requires.
+#[test]
+fn scripted_run_alone_produces_every_guarded_shape() -> R {
+    let local = Shapes::new();
+    scripted_shapes(&local)?;
+    // Two models, one script: every shape is hit at least once per model.
+    for (name, n) in local.counts() {
+        assert!(n >= 2, "{name} hit {n} times over two models");
+    }
+    require_all(&local.counts())
 }
 
 #[hegel::state_machine]
@@ -1570,6 +2042,12 @@ impl World {
         let zone = tc.draw(gs::integers::<u8>().min_value(0).max_value(2));
         let delta = tc.draw(gs::integers::<u16>());
         self.run(Step::Rewrite { zone, delta });
+    }
+    #[rule]
+    fn rename_replace(&mut self, tc: TestCase) {
+        let change = tc.draw(gs::booleans());
+        let delta = tc.draw(gs::integers::<u16>());
+        self.run(Step::RenameReplace { change, delta });
     }
     #[rule(weight = 2.0)]
     fn truncate(&mut self, tc: TestCase) {
@@ -1612,8 +2090,9 @@ impl World {
         self.run(Step::Restart);
     }
     #[rule(weight = 2.0)]
-    fn lost_reply(&mut self, _: TestCase) {
-        self.run(Step::LostReply);
+    fn lost_reply(&mut self, tc: TestCase) {
+        let dark = tc.draw(gs::booleans());
+        self.run(Step::LostReply { dark });
     }
     #[rule]
     fn offline(&mut self, _: TestCase) {
@@ -1631,8 +2110,15 @@ impl World {
 
 #[test]
 fn hegel_daemon_state_machine() {
+    let scripted = scripted_shapes(&HEGEL_SHAPES);
+    assert!(scripted.is_ok(), "{scripted:?}");
     hegel::Hegel::new(|tc: TestCase| {
-        let world = World::new(&HEGEL_SHAPES);
+        let model = if tc.draw(gs::booleans()) {
+            EtagModel::Content
+        } else {
+            EtagModel::PerWrite
+        };
+        let world = World::new(&HEGEL_SHAPES, model);
         assert!(world.is_ok(), "{:?}", world.as_ref().err());
         if let Ok(world) = world {
             hegel::stateful::machine(world).steps(12).run(tc);
@@ -1648,6 +2134,8 @@ fn step_strategy() -> BoxedStrategy<Step> {
         3 => (any::<u8>(), 1..=9_u8).prop_map(|(seed, n)| Step::Append { seed, n }),
         1 => (any::<u8>(), 1..=90_u8).prop_map(|(seed, kib)| Step::Bulk { seed, kib }),
         3 => (0..=2_u8, any::<u16>()).prop_map(|(zone, delta)| Step::Rewrite { zone, delta }),
+        1 => (any::<bool>(), any::<u16>())
+            .prop_map(|(change, delta)| Step::RenameReplace { change, delta }),
         2 => any::<u8>().prop_map(|frac| Step::Truncate { frac }),
         1 => Just(Step::RemoveSource),
         1 => Just(Step::RevokeToken),
@@ -1657,7 +2145,7 @@ fn step_strategy() -> BoxedStrategy<Step> {
         4 => Just(Step::Round),
         1 => Just(Step::DeleteIndex),
         1 => Just(Step::Restart),
-        2 => Just(Step::LostReply),
+        2 => any::<bool>().prop_map(|dark| Step::LostReply { dark }),
         1 => Just(Step::Offline),
         1 => Just(Step::Online),
         2 => Just(Step::Settle),
@@ -1669,7 +2157,12 @@ impl ReferenceStateMachine for RefMachine {
     type State = Reference;
     type Transition = Step;
     fn init_state() -> BoxedStrategy<Reference> {
-        Just(Reference::default()).boxed()
+        any::<bool>()
+            .prop_map(|content_etag| Reference {
+                content_etag,
+                ..Reference::default()
+            })
+            .boxed()
     }
     fn transitions(_: &Reference) -> BoxedStrategy<Step> {
         step_strategy()
@@ -1686,8 +2179,8 @@ struct PtMachine;
 impl StateMachineTest for PtMachine {
     type SystemUnderTest = PtSut;
     type Reference = RefMachine;
-    fn init_test(_: &Reference) -> PtSut {
-        let sut = Sut::new();
+    fn init_test(reference: &Reference) -> PtSut {
+        let sut = Sut::new(model_of(reference));
         assert!(sut.is_ok(), "{:?}", sut.as_ref().err());
         PtSut { sut }
     }
@@ -1711,6 +2204,8 @@ impl StateMachineTest for PtMachine {
 }
 #[test]
 fn proptest_daemon_state_machine() {
+    let scripted = scripted_shapes(&PROPTEST_SHAPES);
+    assert!(scripted.is_ok(), "{scripted:?}");
     let mut runner = TestRunner::new(Config {
         failure_persistence: None,
         ..Config::default()
@@ -1983,20 +2478,30 @@ fn authoritative_park_is_written_inside_the_interval() -> R {
 }
 
 #[test]
-fn two_parked_owners_are_listed_sorted() -> R {
+fn parked_owners_are_listed_sorted() -> R {
     let tmp = Tmp::new()?;
     let cfg = tmp.config(true)?;
-    let list = vec![src_of("s2", 2)?, src_of("s1", 1)?];
-    let mut fs = files_with(b"a\n");
-    fs.files.insert(2, b"b\n".to_vec());
+    // Eight owners, sources listed in reverse: with two, an unsorted HashMap order passes half
+    // of the runs; with eight it passes one in 40,320.
+    let names: Vec<String> = (1..=8).map(|i| format!("s{i}")).collect();
+    let mut list = Vec::new();
+    let mut fs = MemFs::default();
+    for (i, name) in names.iter().enumerate().rev() {
+        let handle = u64::try_from(i + 1).map_err(e)?;
+        list.push(src_of(name, handle)?);
+        fs.files
+            .insert(handle, format!("data {name}\n").into_bytes());
+    }
     let mut d = boot(&tmp, &cfg, fs, FStore::default(), &list, WALL)?;
-    let (a, b) = (owner_of("s1")?, owner_of("s2")?);
-    d.store_mut().write(&current_key(&a), NEWER.to_vec());
-    d.store_mut().write(&current_key(&b), NEWER.to_vec());
+    for name in &names {
+        d.store_mut()
+            .write(&current_key(&owner_of(name)?), NEWER.to_vec());
+    }
     let report = d.reconcile_once().map_err(e)?;
-    assert_eq!((report.parked, report.landed), (2, 0));
+    assert_eq!((report.parked, report.landed), (8, 0));
     let owners: Vec<Owner> = d.status().parked.iter().map(|p| p.owner.clone()).collect();
-    assert_eq!(owners, vec![a, b]);
+    let expected: Vec<Owner> = names.iter().map(|n| owner_of(n)).collect::<R<_>>()?;
+    assert_eq!(owners, expected);
     assert!(
         d.status()
             .parked
@@ -2059,7 +2564,8 @@ fn two_sources_of_one_owner_commit_once() -> R {
     Ok(())
 }
 
-/// Store that drops `current.json` writes without landing them and reports an ambiguous error.
+/// Store that drops `current.json` writes (first or fenced) without landing them and reports an
+/// ambiguous error.
 #[derive(Default)]
 struct Ghost {
     inner: MemStore,
@@ -2078,6 +2584,9 @@ impl Store for Ghost {
         etag: &ETag,
         body: Published,
     ) -> Result<ETag, StoreError> {
+        if self.drop_current && key.ends_with("current.json") {
+            return Err(StoreError::Ambiguous);
+        }
         self.inner.put_if_match(key, etag, body)
     }
     fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
@@ -2115,6 +2624,22 @@ fn unlanded_first_write_resets_the_base_and_converges() -> R {
     let r = d.reconcile_once().map_err(e)?;
     assert_eq!((r.landed, r.failed), (1, 0));
     assert_eq!(d.root(), tmp.root());
+    // A later write that does not land either (the base is now `Some`): it fails, and a later
+    // round lands it with the bytes of the file as it is by then.
+    d.fs_mut().files.insert(1, b"hello\nworld\n".to_vec());
+    d.store_mut().drop_current = true;
+    d.clock_mut().0 = 122_000_000_000;
+    let r = d.reconcile_once().map_err(e)?;
+    assert_eq!((r.landed, r.failed), (0, 1));
+    d.store_mut().drop_current = false;
+    d.clock_mut().0 = 183_000_000_000;
+    let r = d.reconcile_once().map_err(e)?;
+    assert_eq!((r.landed, r.failed), (1, 0));
+    let stored = d
+        .store_mut()
+        .get(&current_key(&owner()?))
+        .map_err(|x| format!("{x:?}"))?;
+    assert!(!stored.body.is_empty());
     Ok(())
 }
 
@@ -2222,6 +2747,7 @@ fn shutdown_table() -> R {
     assert_eq!(d.root(), tmp.root());
     d.shutdown().map_err(e)?;
     assert!(!tmp.root().join("status.json").exists());
+    assert!(!tmp.root().join("index.json").exists(), "nothing was dirty");
     // After a round, an unwritable root fails the flush.
     let tmp = Tmp::new()?;
     let cfg = tmp.config(true)?;
@@ -2290,5 +2816,187 @@ fn retry_delay_defers_the_owner_until_the_clock_passes_it() -> R {
     let r = d.reconcile_once().map_err(e)?;
     assert_eq!((r.landed, r.failed, r.deferred), (1, 0, 0));
     assert_eq!(d.status().failures.offline, 1);
+    Ok(())
+}
+
+// ---------------------------------------------------------------- surviving mutants (round 3)
+
+/// The round's report and the store's refusal counter after one reconcile at `mono_secs`.
+fn round_at(d: &mut D, mono_secs: u64) -> R<(memory::daemon::RoundReport, u64)> {
+    d.clock_mut().mono = mono_secs * 1_000_000_000;
+    let report = d.reconcile_once().map_err(e)?;
+    let refused = d.store_mut().refused_current;
+    Ok((report, refused))
+}
+
+fn latest_bytes(d: &mut D, session: &str, history: &[&[u8]]) -> R<Vec<u8>> {
+    let history: Vec<Vec<u8>> = history.iter().map(|h| h.to_vec()).collect();
+    let observed = observe(d.store_mut(), &owner_of(session)?, &history)?;
+    need(need(observed, "no chain")?.latest, "no epoch")
+}
+
+/// A landing that cannot be verified (the write landed, the reply was lost, the store went dark)
+/// resets the base: the next round recovers it from the store and finds nothing left to write.
+/// Kills D2 (a stale base kept after `LandingUnknown`): the stale round would capture again and
+/// have its fenced write refused (412) or re-upload.
+#[test]
+fn an_unverifiable_landing_resets_the_base_so_the_next_round_writes_nothing() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let mut d = boot(
+        &tmp,
+        &cfg,
+        files_with(b"hello\n"),
+        FStore::default(),
+        &list,
+        WALL,
+    )?;
+    assert_eq!(round_at(&mut d, 0)?.0.landed, 1);
+    bytes_in(&mut d, 1, b"hello\nworld\n");
+    d.store_mut()
+        .arm(None, Effect::LandThenDark(StoreError::Ambiguous));
+    let (report, _) = round_at(&mut d, 61)?;
+    assert_eq!((report.landed, report.failed), (0, 1));
+    assert_eq!(report.failures.offline, 1);
+    d.store_mut().blackout = false;
+    let puts = d.store_mut().put_log.len();
+    let (report, refused) = round_at(&mut d, 122)?;
+    assert_eq!((report.landed, report.failed, report.deferred), (0, 0, 0));
+    assert_eq!(refused, 0, "no write was fenced on a stale base");
+    assert_eq!(d.store_mut().put_log.len(), puts, "nothing left to write");
+    assert_eq!(
+        latest_bytes(&mut d, "s1", &[b"hello\n", b"hello\nworld\n"])?,
+        b"hello\nworld\n"
+    );
+    Ok(())
+}
+
+/// `BaseUnchanged` through every rebase retry is `Transient` (DESIGN.md 11.2): counted apart from
+/// `throttled`, and it resets the base (the ETag it held is stale). Kills D13 (`Transient`
+/// counted as `throttled`) and D2 (stale base kept after `BaseUnchanged`).
+#[test]
+fn rebase_exhaustion_counts_transient_not_throttled_and_resets_the_base() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let mut d = boot(
+        &tmp,
+        &cfg,
+        files_with(b"hello\n"),
+        FStore::with_model(EtagModel::PerWrite),
+        &list,
+        WALL,
+    )?;
+    assert_eq!(round_at(&mut d, 0)?.0.landed, 1);
+    bytes_in(&mut d, 1, b"hello\nworld\n");
+    // One first attempt and four retries, each refused because the ETag moved under it.
+    for _ in 0..5 {
+        d.store_mut()
+            .arm(Some(current_key(&owner_of("s1")?)), Effect::Churn);
+    }
+    let (report, refused) = round_at(&mut d, 61)?;
+    assert_eq!((report.landed, report.failed), (0, 1));
+    assert_eq!(refused, 5);
+    assert_eq!(report.failures.transient, 1);
+    assert_eq!(report.failures.throttled, 0);
+    assert_eq!(d.status().failures.transient, 1);
+    assert_eq!(d.status().failures.throttled, 0);
+    let (report, refused) = round_at(&mut d, 122)?;
+    assert_eq!((report.landed, report.failed), (1, 0));
+    assert_eq!(
+        refused, 5,
+        "the next round fenced on a fresh ETag: no new 412"
+    );
+    assert_eq!(
+        latest_bytes(&mut d, "s1", &[b"hello\n", b"hello\nworld\n"])?,
+        b"hello\nworld\n"
+    );
+    Ok(())
+}
+
+/// A6: a follow-up commit (the late write of an earlier capture was adopted) carries none of its
+/// own capture, so it applies no local updates. Kills D8: the index would claim the 7 bytes that
+/// never landed.
+#[test]
+fn a_follow_up_applies_no_local_updates_for_a_manifest_that_never_landed() -> R {
+    let model = EtagModel::PerWrite;
+    let mut reference = Reference::default();
+    let mut sut = Sut::new(model)?;
+    let shapes = Shapes::new();
+    // Attempt 1 commits the 3 bytes held now and is delayed; 4 more arrive; attempt 2 meets the
+    // late write of attempt 1 and adopts it.
+    for step in [
+        Step::Append { seed: 1, n: 3 },
+        Step::LateWrite { seed: 2, n: 4 },
+    ] {
+        reference.apply(&step);
+        sut.exec(&step, &reference, &shapes)?;
+        sut.check(&reference, false, &shapes)?;
+    }
+    assert_eq!(sut.daemon()?.store_mut().late_landed, 1);
+    let claimed: Vec<u64> = index_of(&sut.tmp)?
+        .map(|i| {
+            i.sources
+                .values()
+                .filter_map(|s| s.index.as_ref().map(|x| x.position.captured_to.get()))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        claimed.iter().all(|c| *c <= 3),
+        "the index claims bytes that never landed: {claimed:?}"
+    );
+    // The next rounds capture the rest, and only then does the index move to 7.
+    for _ in 0..2 {
+        sut.round(&shapes)?;
+    }
+    let owner = sut.owner.clone();
+    let observed = need(
+        observe(sut.daemon()?.store_mut(), &owner, &reference.history)?,
+        "chain",
+    )?;
+    assert_eq!(observed.latest.as_ref().map(Vec::len), Some(7));
+    Ok(())
+}
+
+fn captured_to_on_disk(tmp: &Tmp) -> R<Option<u64>> {
+    Ok(index_of(tmp)?.and_then(|i| {
+        i.sources
+            .values()
+            .find_map(|s| s.index.as_ref().map(|x| x.position.captured_to.get()))
+    }))
+}
+
+/// DESIGN.md 9.2: the index is flushed at shutdown even when it is dirty inside the 60 s
+/// interval. Kills D18 (shutdown skipping the index flush).
+#[test]
+fn shutdown_flushes_an_index_that_is_dirty_inside_the_interval() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let mut d = boot(
+        &tmp,
+        &cfg,
+        files_with(b"hello\n"),
+        FStore::default(),
+        &list,
+        WALL,
+    )?;
+    assert_eq!(round_at(&mut d, 0)?.0.landed, 1);
+    assert_eq!(
+        captured_to_on_disk(&tmp)?,
+        Some(6),
+        "first write is due at once"
+    );
+    d.fs_mut().set(1, b"hello\nworld\n");
+    assert_eq!(round_at(&mut d, 30)?.0.landed, 1);
+    assert_eq!(
+        captured_to_on_disk(&tmp)?,
+        Some(6),
+        "inside the interval the index is not rewritten"
+    );
+    d.shutdown().map_err(e)?;
+    assert_eq!(captured_to_on_disk(&tmp)?, Some(12), "shutdown flushed it");
     Ok(())
 }

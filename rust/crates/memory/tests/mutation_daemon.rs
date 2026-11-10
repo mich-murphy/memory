@@ -89,10 +89,31 @@ impl FileSystem for MemFs {
     }
 }
 
+/// How the fake derives an ETag. R2 reports the MD5 of the body (P2 `etag_is_md5_of_body`), so
+/// the content model is measured for distinct bodies; what R2 answers for an identical rewrite
+/// is unmeasured. The stale-ETag test needs an identical rewrite with a new ETag, so it runs
+/// per-write only; the failed-commit test runs under both.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum EtagModel {
+    /// Every write gets a new ETag, even an identical rewrite.
+    #[default]
+    PerWrite,
+    /// The ETag is a function of the body: an identical rewrite keeps it.
+    Content,
+}
+fn content_token(body: &[u8]) -> u64 {
+    body.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
 #[derive(Default)]
 struct MemStore {
+    /// Body and ETag token.
     objects: BTreeMap<String, (Vec<u8>, u64)>,
+    /// Count of writes.
     version: u64,
+    model: EtagModel,
     /// `current.json` writes refused with 412 (a stale `If-Match`).
     rejected: u32,
     /// Every write of `current.json` fails before landing.
@@ -115,7 +136,11 @@ impl MemStore {
         let existing = self.objects.get(key).map(|(_, v)| *v);
         match (fence, existing) {
             (None, Some(_)) => return Err(StoreError::PreconditionFailed),
-            (Some(_), None) => return Err(StoreError::NotFound),
+            // Measured on R2 (P2 `r2-os.jsonl`): If-Match on a missing key is 412, not 404.
+            (Some(_), None) => {
+                self.rejected += u32::from(current);
+                return Err(StoreError::PreconditionFailed);
+            }
             (Some(f), Some(v)) if &Self::tag(v)? != f => {
                 self.rejected += u32::from(current);
                 return Err(StoreError::PreconditionFailed);
@@ -123,9 +148,13 @@ impl MemStore {
             _ => {}
         }
         self.version += 1;
+        let token = match self.model {
+            EtagModel::PerWrite => self.version,
+            EtagModel::Content => content_token(body.as_ref()),
+        };
         self.objects
-            .insert(key.to_owned(), (body.as_ref().to_vec(), self.version));
-        Self::tag(self.version)
+            .insert(key.to_owned(), (body.as_ref().to_vec(), token));
+        Self::tag(token)
     }
 }
 impl Store for MemStore {
@@ -190,7 +219,7 @@ fn source() -> R<(Owner, Source)> {
 type Srcs = Box<dyn FnMut() -> Vec<(Owner, Source)>>;
 type D = Daemon<MemFs, MemStore, Clk, Srcs>;
 
-fn boot(tmp: &Tmp, initial: &[u8]) -> R<D> {
+fn boot(tmp: &Tmp, initial: &[u8], model: EtagModel) -> R<D> {
     let cfg = tmp.config()?;
     let list = vec![source()?];
     let sources: Srcs = Box::new(move || list.clone());
@@ -198,7 +227,10 @@ fn boot(tmp: &Tmp, initial: &[u8]) -> R<D> {
     files.files.insert(1, initial.to_vec());
     let parts = Parts {
         fs: files,
-        store: MemStore::default(),
+        store: MemStore {
+            model,
+            ..MemStore::default()
+        },
         clock: Clk(0),
         sources,
         context: PolicyContext {
@@ -245,7 +277,7 @@ fn current_key(d: &mut D) -> R<String> {
 #[test]
 fn stale_if_match_is_refused_by_the_store_before_the_rebase() -> R {
     let tmp = Tmp::new()?;
-    let mut d = boot(&tmp, b"first line\n")?;
+    let mut d = boot(&tmp, b"first line\n", EtagModel::PerWrite)?;
     let mut mono = 0;
     rounds(&mut d, &mut mono, 3);
     let key = current_key(&mut d)?;
@@ -274,8 +306,15 @@ fn stale_if_match_is_refused_by_the_store_before_the_rebase() -> R {
 /// same bytes are captured again and `current.json` appears.
 #[test]
 fn failed_commit_does_not_advance_the_local_index() -> R {
+    for model in [EtagModel::PerWrite, EtagModel::Content] {
+        failed_commit_case(model)?;
+    }
+    Ok(())
+}
+
+fn failed_commit_case(model: EtagModel) -> R {
     let tmp = Tmp::new()?;
-    let mut d = boot(&tmp, b"first line\nsecond line\n")?;
+    let mut d = boot(&tmp, b"first line\nsecond line\n", model)?;
     let mut mono = 0;
     d.store_mut().fail_current = true;
     rounds(&mut d, &mut mono, 2);

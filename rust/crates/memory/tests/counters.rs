@@ -92,10 +92,37 @@ impl FileSystem for MemFs {
     }
 }
 
+/// How the fake derives an ETag. R2 reports the MD5 of the body (P2 `etag_is_md5_of_body`), so
+/// the content model is measured for distinct bodies; what R2 answers for an identical rewrite
+/// is unmeasured, so the properties run under both.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum EtagModel {
+    /// Every write gets a new ETag, even an identical rewrite.
+    #[default]
+    PerWrite,
+    /// The ETag is a function of the body: an identical rewrite keeps it.
+    Content,
+}
+fn content_token(body: &[u8]) -> u64 {
+    body.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+fn model_from(tc: &TestCase) -> EtagModel {
+    if tc.draw(gs::booleans()) {
+        EtagModel::Content
+    } else {
+        EtagModel::PerWrite
+    }
+}
+
 #[derive(Default)]
 struct MemStore {
+    /// Body and ETag token.
     objects: BTreeMap<String, (Vec<u8>, u64)>,
+    /// Count of writes.
     version: u64,
+    model: EtagModel,
 }
 impl MemStore {
     fn tag(v: u64) -> Result<ETag, StoreError> {
@@ -110,16 +137,21 @@ impl MemStore {
         let existing = self.objects.get(key).map(|(_, v)| *v);
         match (fence, existing) {
             (None, Some(_)) => return Err(StoreError::PreconditionFailed),
-            (Some(_), None) => return Err(StoreError::NotFound),
+            // Measured on R2 (P2 `r2-os.jsonl`): If-Match on a missing key is 412, not 404.
+            (Some(_), None) => return Err(StoreError::PreconditionFailed),
             (Some(f), Some(v)) if &Self::tag(v)? != f => {
                 return Err(StoreError::PreconditionFailed);
             }
             _ => {}
         }
         self.version += 1;
+        let token = match self.model {
+            EtagModel::PerWrite => self.version,
+            EtagModel::Content => content_token(body.as_ref()),
+        };
         self.objects
-            .insert(key.to_owned(), (body.as_ref().to_vec(), self.version));
-        Self::tag(self.version)
+            .insert(key.to_owned(), (body.as_ref().to_vec(), token));
+        Self::tag(token)
     }
 }
 impl Store for MemStore {
@@ -226,6 +258,9 @@ fn rig(owners: u64, per: u64, bytes: &[u8]) -> R<Rig> {
     rig_with(owners, per, bytes, Profile::Transcript)
 }
 fn rig_with(owners: u64, per: u64, bytes: &[u8], profile: Profile) -> R<Rig> {
+    rig_model(owners, per, bytes, profile, EtagModel::PerWrite)
+}
+fn rig_model(owners: u64, per: u64, bytes: &[u8], profile: Profile, model: EtagModel) -> R<Rig> {
     let tmp = Tmp::new()?;
     let cfg = tmp.config()?;
     let mut list = Vec::new();
@@ -237,7 +272,11 @@ fn rig_with(owners: u64, per: u64, bytes: &[u8], profile: Profile) -> R<Rig> {
             fs.inner.files.insert(handle, bytes.to_vec());
         }
     }
-    let d = boot(&tmp, &cfg, fs, St::default(), &list)?;
+    let store = St::new(MemStore {
+        model,
+        ..MemStore::default()
+    });
+    let d = boot(&tmp, &cfg, fs, store, &list)?;
     Ok(Rig {
         tmp,
         cfg,
@@ -327,7 +366,13 @@ fn reconcile_at_30k_unchanged_sources_stats_each_once() -> R {
         "30k-source unchanged reconcile: {:?} (1 s target is a footprint measurement, not asserted)",
         started.elapsed()
     );
-    assert!(stats <= 30_000, "stats {stats}");
+    // DESIGN.md 15: at most one stat per source. The wall-time target is not asserted; this
+    // call-count bound is its deterministic proxy (work per source is constant, so the time is
+    // linear in the sources), and the lower bound keeps it from passing by not looking at all.
+    assert!(
+        (1..=30_000).contains(&stats),
+        "stats {stats} for 30,000 sources"
+    );
     assert_eq!((read, puts), (0, 0));
     Ok(())
 }
@@ -357,7 +402,7 @@ fn append_of_59kb_reads_at_most_59kb_plus_68kib() -> R {
 fn idempotence_case(tc: &TestCase) -> R {
     let owners = u64::from(tc.draw(gs::integers::<u8>().min_value(1).max_value(3)));
     let per = u64::from(tc.draw(gs::integers::<u8>().min_value(1).max_value(3)));
-    let mut r = rig(owners, per, b"")?;
+    let mut r = rig_model(owners, per, b"", Profile::Transcript, model_from(tc))?;
     for h in 1..=owners * per {
         r.d()?.fs_mut().inner.files.remove(&h);
     }
@@ -440,7 +485,7 @@ fn hex_sha(bytes: &[u8]) -> String {
 fn hegel_delta_capture_matches_independent_whole_digest() {
     hegel::Hegel::new(|tc: TestCase| {
         let result = (|| -> R {
-            let mut r = rig(1, 1, b"")?;
+            let mut r = rig_model(1, 1, b"", Profile::Transcript, model_from(&tc))?;
             r.d()?.fs_mut().inner.files.remove(&1);
             let mut file: Vec<u8> = Vec::new();
             for _ in 0..tc.draw(gs::integers::<u8>().min_value(1).max_value(6)) {

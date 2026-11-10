@@ -9,8 +9,8 @@
 use hegel::{TestCase, generators as gs};
 use memory::capture::Published;
 use memory::commit::{
-    Base, Commit, Failure, GET_ATTEMPTS, Landed, Upload, check_fence, commit, disposition,
-    manifest_key, recover_base,
+    Base, Commit, Failure, GET_ATTEMPTS, KnownOurs, Landed, Upload, check_fence, commit,
+    commit_known, disposition, manifest_key, recover_base,
 };
 use memory::environment::{Store, StoreError, Stored};
 use memory_core::disposition::Streak;
@@ -21,8 +21,8 @@ use memory_core::domain::{
 use memory_core::limits::current_key;
 use memory_core::manifest::{
     Change, Current, EpochRecord, EpochStamp, EpochWriter, Header, Manifest, ManifestError,
-    OwnerState, Piece, ProjectedKind, SourceWrite, StoredEncoding, Timestamp, Writer, build, fold,
-    manifest_hash, object_key, parse_current, parse_manifest, recover_projection,
+    OwnerState, Piece, Position, ProjectedKind, SourceWrite, StoredEncoding, Timestamp, Writer,
+    build, fold, manifest_hash, object_key, parse_current, parse_manifest, recover_projection,
 };
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestRunner};
@@ -151,11 +151,30 @@ enum Fence<'a> {
     Match(&'a ETag),
 }
 
+/// How the fake derives an ETag. R2 reports the MD5 of the body (P2: `etag_is_md5_of_body`), so
+/// the content model is measured for distinct bodies; what R2 answers for an identical rewrite
+/// is unmeasured, so the state machines run under both.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum EtagModel {
+    /// Every write gets a new ETag, even an identical rewrite.
+    #[default]
+    PerWrite,
+    /// The ETag is a function of the body: an identical rewrite keeps it.
+    Content,
+}
+fn content_token(body: &[u8]) -> u64 {
+    body.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
 /// Deterministic object store with S3/R2 conditional-write semantics and scripted faults.
+/// `objects` holds the body and its ETag token; `version` counts writes.
 #[derive(Default)]
 struct FakeStore {
     objects: BTreeMap<String, (Vec<u8>, u64)>,
     version: u64,
+    model: EtagModel,
     offline: bool,
     revoked: bool,
     rules: Vec<Rule>,
@@ -206,9 +225,20 @@ impl FakeStore {
     fn count(&self, op: Op) -> usize {
         self.log.iter().filter(|(o, _)| *o == op).count()
     }
-    fn write(&mut self, key: &str, body: Vec<u8>) {
+    fn with_model(model: EtagModel) -> Self {
+        Self {
+            model,
+            ..Self::default()
+        }
+    }
+    fn write(&mut self, key: &str, body: Vec<u8>) -> u64 {
         self.version += 1;
-        self.objects.insert(key.to_owned(), (body, self.version));
+        let token = match self.model {
+            EtagModel::PerWrite => self.version,
+            EtagModel::Content => content_token(&body),
+        };
+        self.objects.insert(key.to_owned(), (body, token));
+        token
     }
     fn remove(&mut self, key: &str) {
         self.objects.remove(key);
@@ -274,14 +304,14 @@ impl FakeStore {
         let allowed = match (fence, existing) {
             (Fence::Absent, None) => true,
             (Fence::Absent, Some(_)) => false,
-            (Fence::Match(_), None) => return Err(StoreError::NotFound),
+            // Measured on R2 (P2 `r2-os.jsonl`): If-Match on a missing key is 412, not 404.
+            (Fence::Match(_), None) => false,
             (Fence::Match(tag), Some(v)) => etag_of(v)? == **tag,
         };
         if !allowed {
             return Err(StoreError::PreconditionFailed);
         }
-        self.write(key, body);
-        let tag = etag_of(self.version)?;
+        let tag = etag_of(self.write(key, body))?;
         match effect {
             Some(Effect::LandThen { err, then_offline }) => {
                 self.offline |= then_offline;
@@ -669,9 +699,9 @@ struct Sut {
 }
 
 impl Sut {
-    fn new() -> R<Self> {
+    fn new(model: EtagModel) -> R<Self> {
         Ok(Self {
-            store: FakeStore::default(),
+            store: FakeStore::with_model(model),
             owner: owner()?,
             base: None,
             needs_recover: true,
@@ -937,11 +967,14 @@ struct Reference {
     authorized: bool,
     parked: bool,
     foreign_armed: bool,
+    /// ETag model of the store this run drives (see [`EtagModel`]).
+    model: EtagModel,
 }
 
 impl Reference {
-    fn new() -> Self {
+    fn with_model(model: EtagModel) -> Self {
         Self {
+            model,
             files: Disk::new(),
             history: History::new(),
             committed: BTreeMap::new(),
@@ -1042,10 +1075,10 @@ struct World {
     shapes: &'static Shapes,
 }
 impl World {
-    fn new(shapes: &'static Shapes) -> R<Self> {
+    fn new(shapes: &'static Shapes, model: EtagModel) -> R<Self> {
         Ok(Self {
-            reference: Reference::new(),
-            sut: Sut::new()?,
+            reference: Reference::with_model(model),
+            sut: Sut::new(model)?,
             shapes,
         })
     }
@@ -1157,8 +1190,15 @@ impl World {
 
 #[test]
 fn hegel_property4_commit_state_machine() {
+    let scripted = scripted_shapes(&HEGEL_SHAPES);
+    assert!(scripted.is_ok(), "{scripted:?}");
     hegel::Hegel::new(|tc: TestCase| {
-        let world = World::new(&HEGEL_SHAPES);
+        let model = if tc.draw(gs::booleans()) {
+            EtagModel::Content
+        } else {
+            EtagModel::PerWrite
+        };
+        let world = World::new(&HEGEL_SHAPES, model);
         assert!(world.is_ok(), "{:?}", world.as_ref().err());
         if let Ok(world) = world {
             hegel::stateful::machine(world).steps(40).run(tc);
@@ -1203,7 +1243,15 @@ impl ReferenceStateMachine for RefMachine {
     type State = Reference;
     type Transition = Step;
     fn init_state() -> BoxedStrategy<Reference> {
-        Just(Reference::new()).boxed()
+        any::<bool>()
+            .prop_map(|content| {
+                Reference::with_model(if content {
+                    EtagModel::Content
+                } else {
+                    EtagModel::PerWrite
+                })
+            })
+            .boxed()
     }
     fn transitions(_: &Reference) -> BoxedStrategy<Step> {
         step_strategy()
@@ -1221,8 +1269,8 @@ struct PtMachine;
 impl StateMachineTest for PtMachine {
     type SystemUnderTest = PtSut;
     type Reference = RefMachine;
-    fn init_test(_: &Reference) -> PtSut {
-        let sut = Sut::new();
+    fn init_test(reference: &Reference) -> PtSut {
+        let sut = Sut::new(reference.model);
         assert!(sut.is_ok(), "{:?}", sut.as_ref().err());
         PtSut { sut }
     }
@@ -1255,6 +1303,8 @@ impl StateMachineTest for PtMachine {
 
 #[test]
 fn proptest_property4_commit_state_machine() {
+    let scripted = scripted_shapes(&PROPTEST_SHAPES);
+    assert!(scripted.is_ok(), "{scripted:?}");
     let mut runner = TestRunner::new(Config {
         failure_persistence: None,
         ..Config::default()
@@ -1294,16 +1344,60 @@ fn guard_has_negative_controls() {
     assert!(require_all(&full).is_ok());
 }
 
+/// The script alone, with no random steps, produces every shape the guard requires.
+#[test]
+fn scripted_run_alone_produces_every_guarded_shape() -> R {
+    let local = Shapes::new();
+    scripted_shapes(&local)?;
+    // Two models, one script: each shape is hit at least once per model.
+    for (name, n) in local.counts() {
+        assert!(n >= 2, "{name} hit {n} times over two models");
+    }
+    require_all(&local.counts())
+}
+
 /// Scripted run through the same machinery the properties use.
 fn drive(steps: &[Step]) -> R<(Reference, Sut)> {
-    let mut reference = Reference::new();
-    let mut sut = Sut::new()?;
+    drive_with(steps, &SCRATCH_SHAPES, EtagModel::PerWrite)
+}
+fn drive_with(steps: &[Step], shapes: &Shapes, model: EtagModel) -> R<(Reference, Sut)> {
+    let mut reference = Reference::with_model(model);
+    let mut sut = Sut::new(model)?;
     for step in steps {
         reference.apply(step);
-        sut.exec(step, &reference, &SCRATCH_SHAPES)?;
-        sut.check(&reference, &SCRATCH_SHAPES)?;
+        sut.exec(step, &reference, shapes)?;
+        sut.check(&reference, shapes)?;
     }
     Ok((reference, sut))
+}
+/// One scripted run per ETag model that produces every guarded shape through the same oracle
+/// the properties use, so the coverage guard of a property cannot fail by chance: the shapes are
+/// forced here, and the random runs add frequency on top.
+fn scripted_shapes(shapes: &Shapes) -> R {
+    let script = [
+        app(0, 0, 5),
+        Step::Reconcile,
+        // A rewrite inside committed bytes opens a second epoch.
+        Step::Rewrite {
+            src: 0,
+            pos: 0,
+            byte: 0,
+        },
+        Step::Reconcile,
+        app(0, 1, 3),
+        Step::CommittedReplyLost {
+            then_offline: false,
+        },
+        app(0, 2, 3),
+        Step::CrashAfterManifest,
+        Step::Restart,
+        Step::DeleteIndex,
+        Step::Settle,
+    ];
+    for model in [EtagModel::PerWrite, EtagModel::Content] {
+        drive_with(&script, shapes, model)?;
+    }
+    Ok(())
 }
 fn app(src: u8, seed: u8, n: u8) -> Step {
     Step::Append { src, seed, n }
@@ -1317,15 +1411,27 @@ fn directed_crash_after_manifest_then_new_writer_version_adopts_winner_encoding(
         Step::Reconcile,
         Step::Settle,
     ])?;
-    // The crashed attempt left an unreferenced manifest; the retry used another encoding
-    // version, got 412s and described the stored (winner) encoding.
-    let manifests = sut
-        .store
-        .objects
-        .keys()
-        .filter(|k| k.starts_with("manifests/"))
-        .count();
-    assert_eq!(manifests, 2);
+    // The crashed attempt (writer variant 0) stored the pieces; the retry (variant 1) got 412s
+    // and must describe the stored encoding, not its own: every committed descriptor equals
+    // the winner's bytes, which carry variant byte 0.
+    let chain = need(read_chain(&sut.store, &sut.owner)?, "chain")?;
+    let mut pieces = 0;
+    for entry in chain.folded.state.sources.values() {
+        for record in &entry.epochs {
+            for piece in &record.pieces {
+                let stored = need(sut.store.peek(piece.object()), "stored piece")?;
+                assert_eq!(
+                    stored.first(),
+                    Some(&0),
+                    "the winner is the variant-0 encoding"
+                );
+                assert_eq!(piece.encoded_sha256(), sha(stored));
+                assert_eq!(piece.encoded_len(), len64(stored));
+                pieces += 1;
+            }
+        }
+    }
+    assert!(pieces > 0, "something was committed");
     Ok(())
 }
 
@@ -1343,7 +1449,15 @@ fn directed_delete_index_and_removed_source_recover_from_the_store() -> R {
         Step::Settle,
     ])?;
     assert_eq!(reference.committed.get(&1), Some(&None));
-    assert!(sut.base.is_some());
+    // The removal was committed, not just modelled: the folded store state marks source 1
+    // deleted and keeps source 0 live.
+    let chain = need(read_chain(&sut.store, &sut.owner)?, "chain")?;
+    let deleted = |i: u8| -> R<bool> {
+        let entry = need(chain.folded.state.sources.get(&src_id(i)?), "source entry")?;
+        Ok(entry.deleted_at.is_some())
+    };
+    assert!(deleted(1)?);
+    assert!(!deleted(0)?);
     Ok(())
 }
 
@@ -1787,9 +1901,15 @@ fn a_404_under_a_fence_is_landing_unknown() -> R {
     rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
     let key = rig.current_key();
     rig.store.remove(&key);
-    let (failure, _) = rig.failed()?;
+    let before = rig.store.count(Op::Put(Kind::Current));
+    let (failure, pauses) = rig.failed()?;
     assert_eq!(failure, Failure::LandingUnknown(ErrorClass::Offline));
     assert!(failure.base_may_be_stale());
+    // Only a first write may retry step 3: under a fence there is exactly one PUT, then the
+    // verification GETs (4 attempts, 3 pauses) and no second PUT.
+    assert_eq!(rig.store.count(Op::Put(Kind::Current)) - before, 1);
+    assert_eq!(rig.store.count(Op::Get(Kind::Current)), 4);
+    assert_eq!(pauses.len(), 3);
     Ok(())
 }
 
@@ -2051,21 +2171,59 @@ fn disposition_maps_every_commit_result() -> R {
     );
     assert_eq!(d, Disposition::Done);
     assert_eq!(streak, Streak::default());
+    // Draw 0 and no Retry-After: every jittered wait is its minimum. Each row pins the class the
+    // scheduler sees and the streak the failure leaves behind.
     let prior = Streak::default();
-    for (failure, shape) in [
-        (Failure::NotLanded(ErrorClass::Throttled), "retry"),
-        (Failure::LandingUnknown(ErrorClass::Offline), "retry"),
-        (Failure::NotLanded(ErrorClass::DestinationAuth), "pause"),
-        (Failure::BaseUnchanged, "retry"),
-        (Failure::Invalid(ManifestError::BadLink), "retry"),
-        (Failure::Corrupt, "retry"),
+    let bumped = Streak {
+        retries: 1,
+        ..Streak::default()
+    };
+    let retry = |class| Disposition::Retry {
+        after: Duration::from_secs(1),
+        class,
+    };
+    let deterministic = |streak_retries| Streak {
+        deterministic: 1,
+        fault: Some(Fault::Schema),
+        first_at: Some(Duration::ZERO),
+        retries: streak_retries,
+    };
+    for (failure, want, streak) in [
+        (
+            Failure::NotLanded(ErrorClass::Throttled),
+            retry(ErrorClass::Throttled),
+            bumped.clone(),
+        ),
+        (
+            Failure::LandingUnknown(ErrorClass::Offline),
+            retry(ErrorClass::Offline),
+            bumped.clone(),
+        ),
+        (
+            Failure::NotLanded(ErrorClass::DestinationAuth),
+            Disposition::PauseHost,
+            prior.clone(),
+        ),
+        (
+            Failure::BaseUnchanged,
+            retry(ErrorClass::Transient),
+            bumped.clone(),
+        ),
+        (
+            Failure::Invalid(ManifestError::BadLink),
+            retry(ErrorClass::Deterministic(Fault::Schema)),
+            deterministic(1),
+        ),
+        (
+            Failure::Corrupt,
+            retry(ErrorClass::Deterministic(Fault::Schema)),
+            deterministic(1),
+        ),
     ] {
-        let (d, _) = disposition(&Err(failure), false, Duration::ZERO, &prior);
-        let ok = match shape {
-            "retry" => matches!(d, Disposition::Retry { .. }),
-            _ => matches!(d, Disposition::PauseHost),
-        };
-        assert!(ok, "{shape}: {d:?}");
+        let label = format!("{failure:?}");
+        let (d, next) = disposition(&Err(failure), false, Duration::ZERO, &prior);
+        assert_eq!(d, want, "{label}");
+        assert_eq!(next, streak, "{label}");
     }
     let (d, _) = disposition(
         &Err(Failure::NotLanded(ErrorClass::Offline)),
@@ -2079,39 +2237,74 @@ fn disposition_maps_every_commit_result() -> R {
     Ok(())
 }
 
+/// The class table feeds the disposition (DESIGN.md 11.2); the Display text is std's business.
 #[test]
-fn store_errors_classify_and_display() {
+fn store_errors_classify() {
     let table = [
-        (
-            StoreError::Auth,
-            ErrorClass::DestinationAuth,
-            "authorization failed",
-        ),
-        (
-            StoreError::Throttled(None),
-            ErrorClass::Throttled,
-            "throttled",
-        ),
-        (StoreError::Server, ErrorClass::Offline, "server error"),
-        (StoreError::Offline, ErrorClass::Offline, "offline"),
-        (
-            StoreError::Ambiguous,
-            ErrorClass::Offline,
-            "ambiguous reply",
-        ),
-        (StoreError::NotFound, ErrorClass::Offline, "not found"),
-        (
-            StoreError::PreconditionFailed,
-            ErrorClass::Offline,
-            "precondition failed",
-        ),
+        (StoreError::Auth, ErrorClass::DestinationAuth),
+        (StoreError::Throttled(None), ErrorClass::Throttled),
+        (StoreError::Throttled(Some(7)), ErrorClass::Throttled),
+        (StoreError::Server, ErrorClass::Offline),
+        (StoreError::Offline, ErrorClass::Offline),
+        (StoreError::Ambiguous, ErrorClass::Offline),
+        (StoreError::NotFound, ErrorClass::Offline),
+        (StoreError::PreconditionFailed, ErrorClass::Offline),
     ];
-    for (error, class, text) in table {
-        assert_eq!(error.class(), class);
-        assert_eq!(error.to_string(), text);
-        let boxed: Box<dyn std::error::Error> = Box::new(error);
-        assert_eq!(boxed.to_string(), text);
+    for (error, class) in table {
+        assert_eq!(error.class(), class, "{error:?}");
     }
+}
+
+/// DESIGN.md 11.2: a throttled reply's `Retry-After` reaches the scheduler. Kills: making
+/// `Failure::retry_after` return `None`, and deleting its `Throttled` arm.
+#[test]
+fn a_throttled_reply_carries_its_retry_after_into_the_disposition() -> R {
+    let mut rig = Rig::seeded(&[1, 2, 3])?;
+    rig.store.arm(
+        Op::Put(Kind::Object),
+        Effect::FailBefore(StoreError::Throttled(Some(7))),
+    );
+    let (failure, _) = rig.failed()?;
+    assert_eq!(
+        failure,
+        Failure::Throttled {
+            retry_after: Some(Duration::from_secs(7))
+        }
+    );
+    assert_eq!(failure.retry_after(), Some(Duration::from_secs(7)));
+    let (d, _) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
+    assert_eq!(
+        d,
+        Disposition::Retry {
+            after: Duration::from_secs(7),
+            class: ErrorClass::Throttled
+        }
+    );
+    // Without a Retry-After, the jittered minimum applies; other failures carry none.
+    let mut rig = Rig::seeded(&[1, 2, 3])?;
+    rig.store.arm(
+        Op::Put(Kind::Object),
+        Effect::FailBefore(StoreError::Throttled(None)),
+    );
+    let (failure, _) = rig.failed()?;
+    assert_eq!(failure, Failure::Throttled { retry_after: None });
+    let (d, _) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
+    assert_eq!(
+        d,
+        Disposition::Retry {
+            after: Duration::from_secs(1),
+            class: ErrorClass::Throttled
+        }
+    );
+    for other in [
+        Failure::NotLanded(ErrorClass::Offline),
+        Failure::LandingUnknown(ErrorClass::Throttled),
+        Failure::BaseUnchanged,
+        Failure::Corrupt,
+    ] {
+        assert_eq!(other.retry_after(), None, "{other:?}");
+    }
+    Ok(())
 }
 
 // ------------------------------------------------------------------ recovery
@@ -2180,6 +2373,19 @@ fn recover_base_failures_are_classified() -> R {
     );
     assert_eq!(recover(&mut store), Err(Failure::NewerSchema));
 
+    // A current.json that names a manifest the store holds under another key.
+    let mut store = clone_store(&rig.store);
+    let first = need(
+        rig.store
+            .objects
+            .keys()
+            .find(|k| k.starts_with("manifests/")),
+        "a manifest",
+    )?;
+    let stray = need(rig.store.peek(first), "its bytes")?.to_vec();
+    store.write(&key, stray);
+    assert_eq!(recover(&mut store), Err(Failure::Corrupt));
+
     // A chain that names another owner does not fold into this owner's base.
     let mut store = clone_store(&rig.store);
     let alien = build(None, header(&owner_named("s2")?, "x")?, vec![]).map_err(e)?;
@@ -2192,10 +2398,76 @@ fn recover_base_failures_are_classified() -> R {
     Ok(())
 }
 
+/// `recover_base` stops at the first manifest that does not hash to its key instead of walking
+/// on. Kills: skipping the `manifest_hash(&bytes) != hash` check (the fold would still reject
+/// the chain, but only after fetching the rest of it).
+#[test]
+fn recover_base_stops_at_the_first_manifest_that_does_not_match_its_key() -> R {
+    let mut rig = Rig::seeded(&[1, 2, 3])?;
+    let mut hashes = vec![rig.landed()?.built.hash];
+    for k in 4..=6_u8 {
+        rig.put_file(0, &(1..=k).collect::<Vec<u8>>());
+        hashes.push(rig.landed()?.built.hash);
+    }
+    // Seq 0..3. Under the key of seq 2 sit the bytes of seq 1: a valid delta that links on to
+    // seq 0, so a walk that does not check the hash would carry on fetching.
+    let two = need(hashes.get(2), "seq 2")?;
+    let one = need(hashes.get(1), "seq 1")?;
+    let valid_other = need(rig.store.peek(&manifest_key(one)), "seq 1 bytes")?.to_vec();
+    let mut store = clone_store(&rig.store);
+    store.write(&manifest_key(two), valid_other);
+    assert_eq!(recover_base(&mut store, &rig.owner), Err(Failure::Corrupt));
+    assert_eq!(
+        store.count(Op::Get(Kind::Manifest)),
+        2,
+        "head and the mismatched manifest, nothing further"
+    );
+    // The untampered store still recovers.
+    let mut store = clone_store(&rig.store);
+    assert_eq!(recover_base(&mut store, &rig.owner), Ok(rig.base.clone()));
+    Ok(())
+}
+
+/// The walk is bounded: a chain with no checkpoint is abandoned after 65 manifests
+/// (`CHECKPOINT_INTERVAL` is 64; the cap trips when 65 are already held). The chain is forged
+/// from `build` with repeated positions, which `fold` would reject as non-contiguous; the point
+/// is how much of a hostile store is fetched. Kills: removing the cap or moving it by one.
+#[test]
+fn recover_base_gives_up_after_sixty_five_manifests_without_a_checkpoint() -> R {
+    let owner = owner()?;
+    let mut store = FakeStore::default();
+    let root = build(None, header(&owner, "x")?, vec![]).map_err(e)?;
+    store.write(&manifest_key(&root.hash), root.bytes.clone());
+    let mut previous = root.hash;
+    for _ in 0..70 {
+        let base = Position {
+            seq: 1,
+            manifest: previous,
+            checkpoint: root.hash,
+        };
+        let delta = build(
+            Some((&base, &OwnerState::default())),
+            header(&owner, "x")?,
+            vec![],
+        )
+        .map_err(e)?;
+        store.write(&manifest_key(&delta.hash), delta.bytes);
+        previous = delta.hash;
+    }
+    store.write(
+        &current_key(&owner),
+        Current::new(previous, 2, ts()?).to_bytes().map_err(e)?,
+    );
+    assert_eq!(recover_base(&mut store, &owner), Err(Failure::Corrupt));
+    assert_eq!(store.count(Op::Get(Kind::Manifest)), 65);
+    Ok(())
+}
+
 fn clone_store(store: &FakeStore) -> FakeStore {
     FakeStore {
         objects: store.objects.clone(),
         version: store.version,
+        model: store.model,
         ..FakeStore::default()
     }
 }
@@ -2222,11 +2494,11 @@ fn seventy_commits_cross_a_checkpoint_and_still_recover() -> R {
 
 // ------------------------------------------------------------------ A6 known_ours
 
-use memory::commit::{KnownOurs, commit_known};
-
 /// Capture A builds M1 and fails (its `current.json` PUT and every verification GET are
 /// refused). Capture B builds M2. M1's delayed write then lands just before B's PUT.
-fn late_write(known_for_b: Option<KnownOurs>) -> R<(Rig, Result<Landed, Failure>, Sha256)> {
+fn late_write(
+    known_for_b: Option<KnownOurs>,
+) -> R<(Rig, Result<Landed, Failure>, Sha256, KnownOurs)> {
     let mut rig = Rig::two_commits()?;
     let mut known = KnownOurs::new();
     rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
@@ -2269,13 +2541,19 @@ fn late_write(known_for_b: Option<KnownOurs>) -> R<(Rig, Result<Landed, Failure>
         &mut known_b,
         &mut |_| {},
     );
-    Ok((rig, b, m1))
+    Ok((rig, b, m1, known_b))
 }
 
 #[test]
 fn late_write_of_an_earlier_failed_capture_is_adopted_and_followed_up() -> R {
-    let (mut rig, b, m1) = late_write(None)?;
+    let (mut rig, b, m1, known) = late_write(None)?;
     let landed = b.map_err(e)?;
+    // Adopting the earlier attempt's manifest is a landing: the set is cleared (A6).
+    assert!(
+        known.is_empty(),
+        "known_ours kept {} manifests",
+        known.len()
+    );
     assert!(matches!(landed.outcome, CommitOutcome::AlreadyOurs { .. }));
     assert!(landed.follow_up);
     assert_eq!(landed.built.hash, m1);
@@ -2287,9 +2565,75 @@ fn late_write_of_an_earlier_failed_capture_is_adopted_and_followed_up() -> R {
     rig.assert_safe()
 }
 
+/// A6: `known_ours` holds the manifests built since the last landed commit. Kills: removing the
+/// `known.clear()` after a landed `Committed` or after a verified `AlreadyOurs` (the adopted
+/// case is asserted in the late-write test above).
+#[test]
+fn known_ours_is_cleared_whenever_a_commit_lands() -> R {
+    for lost_reply in [false, true] {
+        let mut rig = Rig::two_commits()?;
+        let mut known = KnownOurs::new();
+        rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
+        // Attempt 1 cannot reach the store at the pointer write, nor read it back.
+        rig.store.arm(
+            Op::Put(Kind::Current),
+            Effect::FailBefore(StoreError::Offline),
+        );
+        rig.store.arm_n(
+            Op::Get(Kind::Current),
+            0,
+            GET_ATTEMPTS,
+            Effect::FailBefore(StoreError::Offline),
+        );
+        let request = rig.request()?;
+        let first = commit_known(
+            &mut rig.store,
+            rig.base.as_ref(),
+            request,
+            &mut known,
+            &mut |_| {},
+        );
+        assert!(
+            matches!(first, Err(Failure::LandingUnknown(_))),
+            "{first:?}"
+        );
+        assert_eq!(
+            known.len(),
+            1,
+            "the failed attempt's manifest is remembered"
+        );
+        if lost_reply {
+            rig.store.arm(
+                Op::Put(Kind::Current),
+                Effect::LandThen {
+                    err: StoreError::Ambiguous,
+                    then_offline: false,
+                },
+            );
+        }
+        let request = rig.request()?;
+        let landed = commit_known(
+            &mut rig.store,
+            rig.base.as_ref(),
+            request,
+            &mut known,
+            &mut |_| {},
+        )
+        .map_err(e)?;
+        let kind_ok = if lost_reply {
+            matches!(landed.outcome, CommitOutcome::AlreadyOurs { .. })
+        } else {
+            matches!(landed.outcome, CommitOutcome::Committed { .. })
+        };
+        assert!(kind_ok, "{:?}", landed.outcome);
+        assert!(known.is_empty(), "lost_reply={lost_reply}: set not cleared");
+    }
+    Ok(())
+}
+
 #[test]
 fn late_write_of_an_unknown_manifest_is_foreign() -> R {
-    let (_, b, _) = late_write(Some(KnownOurs::new()))?;
+    let (_, b, _, _) = late_write(Some(KnownOurs::new()))?;
     assert!(matches!(b, Err(Failure::Foreign { .. })), "{b:?}");
     Ok(())
 }
