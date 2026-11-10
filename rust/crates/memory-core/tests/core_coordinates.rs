@@ -1,11 +1,12 @@
 //! Root coordinates: Go fixtures as synthetic rows plus order, proof and retention properties.
+mod common;
+use common::Shapes;
 use hegel::{TestCase, generators as gs};
 use memory_core::coordinates::*;
 use memory_core::domain::Agent;
 use memory_core::locator::RootNamespace;
 use proptest::prelude::*;
 use std::collections::BTreeSet;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 const PI: Agent = Agent::Pi;
 const CLAUDE: Agent = Agent::Claude;
@@ -525,39 +526,21 @@ fn justified(s: &Scenario, a: &Agent, path: &str) -> bool {
             .any(|o| &o.agent == a && at_root(o.identity) && under(path, &o.path))
 }
 
-struct Stats {
-    compiled: AtomicU64,
-    resolved: AtomicU64,
-    proof_only: AtomicU64,
-}
-static HEGEL_STATS: Stats = Stats::new();
-static PROPTEST_STATS: Stats = Stats::new();
-impl Stats {
-    const fn new() -> Self {
-        Self {
-            compiled: AtomicU64::new(0),
-            resolved: AtomicU64::new(0),
-            proof_only: AtomicU64::new(0),
-        }
-    }
-    fn guard(&self) {
-        for (name, n) in [
-            ("compiled", &self.compiled),
-            ("resolved", &self.resolved),
-            ("proof-only", &self.proof_only),
-        ] {
-            assert!(
-                n.load(Ordering::Relaxed) > 0,
-                "generator never produced {name}"
-            );
-        }
-    }
-}
-fn bump(c: &AtomicU64) {
-    c.fetch_add(1, Ordering::Relaxed);
-}
+const COMPILED: usize = 0;
+const RESOLVED: usize = 1;
+const PROOF_ONLY: usize = 2;
+const SHAPE_NAMES: [&str; 3] = ["compiled", "resolved", "proof-only"];
+static HEGEL_STATS: Shapes<3> = Shapes::new(SHAPE_NAMES);
+static PROPTEST_STATS: Shapes<3> = Shapes::new(SHAPE_NAMES);
 
-fn check(bytes: &[u8], seed: u64, stats: &Stats) {
+/// One root and a proof twin (same identity at the root and at a path no root or alias
+/// covers): it compiles, resolves, and resolves PROOF_PATH by proof alone. Running it first
+/// makes the three guarded shapes deterministic, so the guard after the random cases is only
+/// a backstop (it failed in 23 of 100 default-case runs when the generator had to find a
+/// proof twin by chance).
+const PROOF_TWIN: [u8; 8] = [0, 0, 0, 0, 5, 0, 0, 0];
+
+fn check(bytes: &[u8], seed: u64, stats: &Shapes<3>) {
     let s = decode(bytes);
     let first = compile(&s.0, &s.1, &s.2);
     // (a) order independence over roots, aliases, observations and chain.
@@ -571,7 +554,7 @@ fn check(bytes: &[u8], seed: u64, stats: &Stats) {
     let (Ok(i), Ok(j)) = (first, second) else {
         return;
     };
-    bump(&stats.compiled);
+    stats.bump(COMPILED);
     assert_eq!(i, j);
     for ag in [CLAUDE, PI, CODEX] {
         for p in POOL {
@@ -581,14 +564,14 @@ fn check(bytes: &[u8], seed: u64, stats: &Stats) {
             let Ok(c) = x else {
                 continue;
             };
-            bump(&stats.resolved);
+            stats.bump(RESOLVED);
             assert!(justified(&s, &ag, p), "unproven alias resolved");
             assert!(s.0.iter().any(|r| r.agent == ag && r.path == c.root));
             assert!(RootNamespace::new(&c.namespace).is_ok());
             let declared = s.0.iter().any(|r| r.agent == ag && under(p, &r.path))
                 || s.1.iter().any(|x| x.agent == ag && under(p, &x.path));
             if !declared {
-                bump(&stats.proof_only);
+                stats.bump(PROOF_ONLY);
             }
             // (c) every input spelling is retained.
             assert!(s.3.iter().all(|e| c.identities.contains(e)));
@@ -601,6 +584,7 @@ fn check(bytes: &[u8], seed: u64, stats: &Stats) {
 
 #[test]
 fn hegel_coordinates_order_proof_and_retention() {
+    check(&PROOF_TWIN, 1, &HEGEL_STATS);
     hegel::Hegel::new(|tc: TestCase| {
         let n = usize::from(tc.draw(gs::integers::<u8>()) % 48) * 4;
         let bytes: Vec<u8> = (0..n).map(|_| tc.draw(gs::integers::<u8>())).collect();
@@ -608,11 +592,13 @@ fn hegel_coordinates_order_proof_and_retention() {
         check(&bytes, seed, &HEGEL_STATS);
     })
     .run();
-    HEGEL_STATS.guard();
+    let guard = HEGEL_STATS.guard(SHAPE_NAMES.len());
+    assert!(guard.is_ok(), "{guard:?}");
 }
 
 #[test]
 fn proptest_coordinates_order_proof_and_retention() {
+    check(&PROOF_TWIN, 1, &PROPTEST_STATS);
     let mut runner = proptest::test_runner::TestRunner::default();
     let strat = (prop::collection::vec(any::<u8>(), 0..192), any::<u16>());
     let result = runner.run(&strat, |(bytes, seed)| {
@@ -620,11 +606,16 @@ fn proptest_coordinates_order_proof_and_retention() {
         Ok(())
     });
     assert!(result.is_ok(), "{result:?}");
-    PROPTEST_STATS.guard();
+    let guard = PROPTEST_STATS.guard(SHAPE_NAMES.len());
+    assert!(guard.is_ok(), "{guard:?}");
 }
 
 #[test]
-fn stats_guard_bites() {
-    let r = std::panic::catch_unwind(|| Stats::new().guard());
-    assert!(r.is_err());
+fn the_fixed_proof_twin_alone_reaches_every_guarded_shape() {
+    // Mutant: a decoder or `check` change that stops the twin from producing a proof-only
+    // resolution would make the random run's guard flaky again; this pins it without any
+    // generator.
+    let alone = Shapes::new(SHAPE_NAMES);
+    check(&PROOF_TWIN, 1, &alone);
+    assert_eq!(alone.guard(SHAPE_NAMES.len()), Ok(()));
 }

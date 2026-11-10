@@ -2,93 +2,49 @@
 use memory_core::{coalescer::*, domain::*, planner::*};
 use std::time::Duration;
 
-#[test]
-fn every_coordinate_brand_validates_its_own_boundary_and_preserves_valid_spelling()
--> Result<(), Box<dyn std::error::Error>> {
-    let valid = "root-qualified.0123456789_ABC:def-ghi";
-    let archive = ArchiveId::try_from(valid.to_owned())?;
-    let machine = MachineId::try_from(valid.to_owned())?;
-    let session = SessionId::try_from(valid.to_owned())?;
-    let source = SourceId::try_from(valid.to_owned())?;
-    assert_eq!(archive.as_str(), valid);
-    assert_eq!(machine.as_str(), valid);
-    assert_eq!(session.as_str(), valid);
-    assert_eq!(source.as_str(), valid);
-    assert_eq!(String::from(archive.clone()), valid);
-    assert_eq!(String::from(machine.clone()), valid);
-    assert_eq!(String::from(session.clone()), valid);
-    assert_eq!(String::from(source.clone()), valid);
-    assert_eq!(serde_json::to_value(&archive)?, serde_json::json!(valid));
-    assert_eq!(serde_json::to_value(&machine)?, serde_json::json!(valid));
-    assert_eq!(serde_json::to_value(&session)?, serde_json::json!(valid));
-    assert_eq!(serde_json::to_value(&source)?, serde_json::json!(valid));
-    assert_eq!(
-        serde_json::from_value::<ArchiveId>(serde_json::json!(valid))?,
-        archive
-    );
-    assert_eq!(
-        serde_json::from_value::<MachineId>(serde_json::json!(valid))?,
-        machine
-    );
-    assert_eq!(
-        serde_json::from_value::<SessionId>(serde_json::json!(valid))?,
-        session
-    );
-    assert_eq!(
-        serde_json::from_value::<SourceId>(serde_json::json!(valid))?,
-        source
-    );
-    for invalid in ["", ".", "..", "slash/name", "a\nb", "é"] {
-        assert_eq!(
-            ArchiveId::try_from(invalid.to_owned()),
-            Err(ValidationError::Identifier)
-        );
-        assert_eq!(
-            MachineId::try_from(invalid.to_owned()),
-            Err(ValidationError::Identifier)
-        );
-        assert_eq!(
-            SessionId::try_from(invalid.to_owned()),
-            Err(ValidationError::Identifier)
-        );
-        assert_eq!(
-            SourceId::try_from(invalid.to_owned()),
-            Err(ValidationError::Identifier)
-        );
-        assert!(serde_json::from_value::<ArchiveId>(serde_json::json!(invalid)).is_err());
-        assert!(serde_json::from_value::<MachineId>(serde_json::json!(invalid)).is_err());
-        assert!(serde_json::from_value::<SessionId>(serde_json::json!(invalid)).is_err());
-        assert!(serde_json::from_value::<SourceId>(serde_json::json!(invalid)).is_err());
-    }
-    let maximum = "a".repeat(1024);
-    assert_eq!(ArchiveId::try_from(maximum.clone())?.as_str(), maximum);
-    assert_eq!(MachineId::try_from(maximum.clone())?.as_str(), maximum);
-    assert_eq!(SessionId::try_from(maximum.clone())?.as_str(), maximum);
-    assert_eq!(SourceId::try_from(maximum.clone())?.as_str(), maximum);
-    let too_long = "a".repeat(1025);
-    assert_eq!(
-        ArchiveId::try_from(too_long.clone()),
-        Err(ValidationError::Identifier)
-    );
-    assert_eq!(
-        MachineId::try_from(too_long.clone()),
-        Err(ValidationError::Identifier)
-    );
-    assert_eq!(
-        SessionId::try_from(too_long.clone()),
-        Err(ValidationError::Identifier)
-    );
-    assert_eq!(
-        SourceId::try_from(too_long),
-        Err(ValidationError::Identifier)
-    );
-    Ok(())
+/// One body for the four coordinate brands: spelling is preserved, the 1024/1025 byte
+/// boundary and the invalid set are rejected both by `try_from` and on the wire.
+macro_rules! brand_boundary_test {
+    ($name:ident, $brand:ident) => {
+        #[test]
+        fn $name() -> Result<(), Box<dyn std::error::Error>> {
+            let valid = "root-qualified.0123456789_ABC:def-ghi";
+            let brand = $brand::try_from(valid.to_owned())?;
+            assert_eq!(brand.as_str(), valid);
+            assert_eq!(String::from(brand.clone()), valid);
+            assert_eq!(serde_json::to_value(&brand)?, serde_json::json!(valid));
+            assert_eq!(
+                serde_json::from_value::<$brand>(serde_json::json!(valid))?,
+                brand
+            );
+            for invalid in ["", ".", "..", "slash/name", "a\nb", "\u{e9}"] {
+                assert_eq!(
+                    $brand::try_from(invalid.to_owned()),
+                    Err(ValidationError::Identifier),
+                    "{invalid:?}"
+                );
+                assert!(serde_json::from_value::<$brand>(serde_json::json!(invalid)).is_err());
+            }
+            let maximum = "a".repeat(1024);
+            assert_eq!($brand::try_from(maximum.clone())?.as_str(), maximum);
+            assert_eq!(
+                $brand::try_from("a".repeat(1025)),
+                Err(ValidationError::Identifier)
+            );
+            Ok(())
+        }
+    };
 }
+brand_boundary_test!(archive_id_validates_its_own_boundary, ArchiveId);
+brand_boundary_test!(machine_id_validates_its_own_boundary, MachineId);
+brand_boundary_test!(session_id_validates_its_own_boundary, SessionId);
+brand_boundary_test!(source_id_validates_its_own_boundary, SourceId);
 
 #[test]
-fn opaque_fence_and_canonical_digest_serde_schemas_describe_their_distinct_domains()
+fn opaque_fence_and_canonical_digest_keep_their_distinct_domains()
 -> Result<(), Box<dyn std::error::Error>> {
-    let spelling = "W/\"opaque+/= λ\"";
+    // Schema shape is pinned by `cargo xtask schemas --check`; only validation is asserted.
+    let spelling = "W/\"opaque+/= \u{3bb}\"";
     let fence = ETag::try_from(spelling.to_owned())?;
     assert_eq!(serde_json::to_value(&fence)?, serde_json::json!(spelling));
     assert_eq!(String::from(fence.clone()), spelling);
@@ -99,18 +55,6 @@ fn opaque_fence_and_canonical_digest_serde_schemas_describe_their_distinct_domai
     assert_eq!(
         ETag::try_from("bad\u{0085}header".to_owned()),
         Err(ValidationError::EntityTag)
-    );
-    let fence_schema = serde_json::to_value(schemars::schema_for!(ETag))?;
-    assert_eq!(fence_schema.get("title"), Some(&serde_json::json!("ETag")));
-    assert_eq!(fence_schema.get("type"), Some(&serde_json::json!("string")));
-    assert_eq!(fence_schema.get("minLength"), Some(&serde_json::json!(1)));
-    assert_eq!(
-        fence_schema.get("pattern"),
-        Some(&serde_json::json!(r"^[^\u0000-\u001f\u007f-\u009f]+$"))
-    );
-    assert!(
-        fence_schema.get("maxLength").is_none(),
-        "entity tags are not coordinate IDs"
     );
     let canonical = "0123456789abcdef".repeat(4);
     let digest: Sha256 = serde_json::from_value(serde_json::json!(canonical))?;
@@ -124,13 +68,6 @@ fn opaque_fence_and_canonical_digest_serde_schemas_describe_their_distinct_domai
     ] {
         assert_eq!(Sha256::try_from(invalid), Err(ValidationError::Hash));
     }
-    let hash_schema = serde_json::to_value(schemars::schema_for!(Sha256))?;
-    assert_eq!(hash_schema.get("title"), Some(&serde_json::json!("Sha256")));
-    assert_eq!(hash_schema.get("type"), Some(&serde_json::json!("string")));
-    assert_eq!(
-        hash_schema.get("pattern"),
-        Some(&serde_json::json!("^[0-9a-f]{64}$"))
-    );
     Ok(())
 }
 

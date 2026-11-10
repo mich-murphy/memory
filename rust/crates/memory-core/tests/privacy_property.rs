@@ -432,7 +432,7 @@ fn noise_leaf(byte: u8, toml: bool) -> Value {
     match byte % 5 {
         0 => json!(format!("safe-text-{byte}")),
         1 => json!(i64::from(byte)),
-        2 => json!(byte % 2 == 0),
+        2 => json!(byte.is_multiple_of(2)),
         3 if toml => json!("toml-has-no-null"),
         3 => Value::Null,
         _ => json!(1.5),
@@ -491,7 +491,7 @@ fn build(p: &Params<'_>, toml: bool, family: Family) -> Built {
         let mut doc = std::mem::take(&mut built.doc);
         if place(&mut doc, &segs, value).is_some() {
             built.secret_positions += 1;
-            if matches!(leaf, Leaf::Strict | Leaf::Plain) && selector % 6 == 0 {
+            if matches!(leaf, Leaf::Strict | Leaf::Plain) && selector.is_multiple_of(6) {
                 plain_secrets.extend(built.canaries.get(before).cloned());
             }
         } else {

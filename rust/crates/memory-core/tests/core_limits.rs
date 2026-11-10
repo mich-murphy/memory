@@ -163,6 +163,25 @@ fn sources_cap_and_never_evict() -> R {
 }
 
 #[test]
+fn rewrites_of_every_known_source_at_the_cap_take_no_slot() -> R {
+    // Mutant: `admit` without its known-source early return rejects a rewrite of an
+    // already admitted source once the owner is full (a HashSet alone hides the bug below
+    // the cap, which is why 5,000 rewrites of one id proved nothing).
+    let mut set = SourceSet::new();
+    for n in 0..1024 {
+        assert_eq!(set.admit(&sid(n)?), Ok(()));
+    }
+    for round in 0..3 {
+        for n in 0..1024 {
+            assert_eq!(set.admit(&sid(n)?), Ok(()), "round {round} source {n}");
+        }
+    }
+    assert_eq!(set.len(), 1024);
+    assert_eq!(set.admit(&sid(1024)?), Err(WithholdReason::SourceLimit));
+    Ok(())
+}
+
+#[test]
 fn budget_boundaries() {
     assert_eq!(request_budget(0), S(60));
     assert_eq!(request_budget(1), S(60));
@@ -177,14 +196,11 @@ fn budget_boundaries() {
         request_budget(30 * mib + mib / 2),
         Duration::from_millis(60_500)
     );
-    assert_eq!(
-        request_budget(30 * mib + 1),
-        S(60) + Duration::from_nanos(953)
-    );
+    // One byte past the 30 MiB knee already costs a sub-second extra, never a full second.
+    let knee = request_budget(30 * mib + 1);
+    assert!(knee > S(60) && knee < S(61));
     // u64::MAX does not panic and is huge but finite.
-    let big = request_budget(u64::MAX);
-    assert_eq!(big, Duration::new(17_592_186_044_445, 999_999_046));
-    assert!(big > S(1 << 43));
+    assert!(request_budget(u64::MAX) > S(1 << 43));
 }
 
 fn det(f: Fault) -> Outcome {

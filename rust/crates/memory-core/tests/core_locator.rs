@@ -1019,6 +1019,29 @@ fn matrix_rows_match_independent_expectations() -> TestResult {
     Ok(())
 }
 
+/// Every string constant a JSON schema lists as an allowed value (`const` or `enum`).
+fn collect_wire_names(schema: &serde_json::Value, out: &mut Vec<String>) {
+    match schema {
+        serde_json::Value::Object(map) => {
+            for (key, value) in map {
+                match (key.as_str(), value) {
+                    ("const", serde_json::Value::String(name)) => out.push(name.clone()),
+                    ("enum", serde_json::Value::Array(names)) => {
+                        out.extend(names.iter().filter_map(|n| n.as_str().map(str::to_owned)));
+                    }
+                    _ => collect_wire_names(value, out),
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_wire_names(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[test]
 fn every_kind_but_generated_snapshot_and_every_asset_is_reachable() -> TestResult {
     let mut kinds = HashSet::new();
@@ -1029,38 +1052,16 @@ fn every_kind_but_generated_snapshot_and_every_asset_is_reachable() -> TestResul
             roles.insert(role);
         }
     }
-    let expected = [
-        "claude.transcript",
-        "claude.subagent",
-        "claude.tool_results",
-        "claude.todos",
-        "claude.tasks",
-        "claude.teams",
-        "claude.file_history",
-        "claude.debug",
-        "claude.history",
-        "claude.config",
-        "codex.rollout",
-        "codex.compressed",
-        "codex.store",
-        "codex.history",
-        "codex.config",
-        "pi.session",
-        "pi.settings",
-        "pi.models",
-        "claude.session_env",
-        "claude.plan",
-        "claude.paste",
-        "claude.usage",
-        "claude.memory",
-        "claude.aux",
-        "pi.aux",
-        "codex.memory",
-        "codex.log",
-        "pi.config",
-        "pi.log",
-    ];
-    for k in expected {
+    // Derived from the enum's own schema, so a new kind forces a fixture row; the only
+    // kind that is never a path kind is the generated snapshot.
+    let mut expected = Vec::new();
+    collect_wire_names(
+        &serde_json::to_value(schemars::schema_for!(SourceKind))?,
+        &mut expected,
+    );
+    expected.retain(|name| name != "pi.snapshot");
+    ensure!(expected.len() >= 29, "schema walk found {expected:?}");
+    for k in &expected {
         ensure!(
             kinds.contains(&format!("\"{k}\"")),
             "kind never located: {k}"

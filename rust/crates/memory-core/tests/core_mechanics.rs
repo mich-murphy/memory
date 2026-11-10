@@ -1,72 +1,28 @@
 //! Independent byte-model safety prerequisites, not store/manifest acceptance.
+mod common;
+use common::Shapes;
 use hegel::{TestCase, generators as gs};
 use memory_core::planner::Strategy;
 use memory_core::{coalescer::*, domain::*, planner::*};
 use proptest::prelude::*;
 use sha2::{Digest, Sha256 as Hasher};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 /// Independent counters of generated case shapes (coverage guard, DESIGN.md section 15).
-struct Shapes {
-    multi_epoch: AtomicU64,
-    window_rewrite: AtomicU64,
-    interior_audit: AtomicU64,
-    truncate_regrow: AtomicU64,
-    identity_replacement: AtomicU64,
-}
-impl Shapes {
-    const fn new() -> Self {
-        Self {
-            multi_epoch: AtomicU64::new(0),
-            window_rewrite: AtomicU64::new(0),
-            interior_audit: AtomicU64::new(0),
-            truncate_regrow: AtomicU64::new(0),
-            identity_replacement: AtomicU64::new(0),
-        }
-    }
-    fn counts(&self) -> [(&'static str, u64); 5] {
-        [
-            ("multi-epoch", self.multi_epoch.load(Ordering::Relaxed)),
-            (
-                "rewrite-detected-at-window",
-                self.window_rewrite.load(Ordering::Relaxed),
-            ),
-            (
-                "interior-rewrite-with-audit",
-                self.interior_audit.load(Ordering::Relaxed),
-            ),
-            (
-                "truncate-regrow",
-                self.truncate_regrow.load(Ordering::Relaxed),
-            ),
-            (
-                "identity-replacement",
-                self.identity_replacement.load(Ordering::Relaxed),
-            ),
-        ]
-    }
-}
-fn bump(counter: &AtomicU64) {
-    counter.fetch_add(1, Ordering::Relaxed);
-}
-/// Fails when any required shape was never generated over the run.
-fn require_all_shapes(counts: &[(&'static str, u64)]) -> Result<(), String> {
-    let missing: Vec<_> = counts
-        .iter()
-        .filter(|(_, n)| *n == 0)
-        .map(|(k, _)| *k)
-        .collect();
-    if missing.is_empty() && !counts.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
-            "coverage guard: generator never produced {missing:?}"
-        ))
-    }
-}
-static HEGEL_SHAPES: Shapes = Shapes::new();
-static PROPTEST_SHAPES: Shapes = Shapes::new();
+const MULTI_EPOCH: usize = 0;
+const WINDOW_REWRITE: usize = 1;
+const INTERIOR_AUDIT: usize = 2;
+const TRUNCATE_REGROW: usize = 3;
+const IDENTITY_REPLACEMENT: usize = 4;
+const SHAPE_NAMES: [&str; 5] = [
+    "multi-epoch",
+    "rewrite-detected-at-window",
+    "interior-rewrite-with-audit",
+    "truncate-regrow",
+    "identity-replacement",
+];
+static HEGEL_SHAPES: Shapes<5> = Shapes::new(SHAPE_NAMES);
+static PROPTEST_SHAPES: Shapes<5> = Shapes::new(SHAPE_NAMES);
 
 fn digest(bytes: &[u8]) -> Sha256 {
     Sha256::from_bytes(Hasher::digest(bytes).into())
@@ -159,7 +115,7 @@ fn reassemble(old: &[u8], current: &[u8], plan: Plan) -> Vec<u8> {
     }
 }
 /// Generator owns complete bytes, edits and capture schedule, independent of planner.
-fn capture_oracle(seed: u16, shapes: &Shapes) {
+fn capture_oracle(seed: u16, shapes: &Shapes<5>) {
     let n = 73_728 + usize::from(seed % 1024);
     let initial: Vec<_> = (0..n).map(|i| (i as u8).wrapping_add(seed as u8)).collect();
     let mut seen = [false; 10];
@@ -213,10 +169,10 @@ fn capture_oracle(seed: u16, shapes: &Shapes) {
         let is_replay = matches!(capture_plan, Plan::Replay { .. });
         replayed |= is_replay;
         if is_replay {
-            bump(&shapes.multi_epoch);
+            shapes.bump(MULTI_EPOCH);
             match operation {
-                1..=4 => bump(&shapes.window_rewrite),
-                6 => bump(&shapes.truncate_regrow),
+                1..=4 => shapes.bump(WINDOW_REWRITE),
+                6 => shapes.bump(TRUNCATE_REGROW),
                 _ => {}
             }
         }
@@ -228,7 +184,7 @@ fn capture_oracle(seed: u16, shapes: &Shapes) {
                 }
             )
         {
-            bump(&shapes.identity_replacement);
+            shapes.bump(IDENTITY_REPLACEMENT);
         }
         let assembled = reassemble(&initial, &current, capture_plan);
         if operation != 8 {
@@ -256,7 +212,7 @@ fn capture_oracle(seed: u16, shapes: &Shapes) {
             current
         );
         if operation == 8 {
-            bump(&shapes.interior_audit);
+            shapes.bump(INTERIOR_AUDIT);
         }
         if let Some(flag) = seen.get_mut(operation) {
             *flag = true;
@@ -272,7 +228,7 @@ fn capture_oracle(seed: u16, shapes: &Shapes) {
 fn hegel_property1_independent_capture_and_eligible_audit() {
     hegel::Hegel::new(|tc: TestCase| capture_oracle(tc.draw(gs::integers::<u16>()), &HEGEL_SHAPES))
         .run();
-    let guard = require_all_shapes(&HEGEL_SHAPES.counts());
+    let guard = HEGEL_SHAPES.guard(SHAPE_NAMES.len());
     assert!(guard.is_ok(), "{guard:?}");
 }
 #[test]
@@ -283,49 +239,8 @@ fn proptest_property1_independent_capture_and_eligible_audit() {
         Ok(())
     });
     assert!(result.is_ok(), "{result:?}");
-    let guard = require_all_shapes(&PROPTEST_SHAPES.counts());
+    let guard = PROPTEST_SHAPES.guard(SHAPE_NAMES.len());
     assert!(guard.is_ok(), "{guard:?}");
-}
-#[test]
-fn property1_coverage_guard_negative_controls_bite() {
-    let zero = Shapes::new();
-    let err = require_all_shapes(&zero.counts());
-    assert!(err.is_err_and(|e| e.contains("multi-epoch") && e.contains("identity-replacement")));
-    assert!(require_all_shapes(&[]).is_err());
-    for missing in 0..5 {
-        let shapes = Shapes::new();
-        for (i, c) in [
-            &shapes.multi_epoch,
-            &shapes.window_rewrite,
-            &shapes.interior_audit,
-            &shapes.truncate_regrow,
-            &shapes.identity_replacement,
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            if i != missing {
-                bump(c);
-            }
-        }
-        let name = shapes.counts().get(missing).map(|c| c.0);
-        let err = require_all_shapes(&shapes.counts());
-        assert!(
-            err.is_err_and(|e| name.is_some_and(|n| e.contains(n))),
-            "{missing}"
-        );
-    }
-    let full = Shapes::new();
-    for c in [
-        &full.multi_epoch,
-        &full.window_rewrite,
-        &full.interior_audit,
-        &full.truncate_regrow,
-        &full.identity_replacement,
-    ] {
-        bump(c);
-    }
-    assert!(require_all_shapes(&full.counts()).is_ok());
 }
 fn owner() -> Result<Owner, ValidationError> {
     Ok(Owner::Shared {
@@ -527,17 +442,7 @@ fn owner_wire_goldens_and_schema_use_session_id_and_distinct_shared_coordinates(
         key.get("additionalProperties"),
         Some(&serde_json::json!(false))
     );
-    let shared_schema = schema
-        .pointer("/oneOf/1/properties/shared")
-        .ok_or("missing shared schema")?;
-    assert_eq!(
-        shared_schema.get("required"),
-        Some(&serde_json::json!(["archive", "machine", "agent"]))
-    );
-    assert!(shared_schema.pointer("/properties/session_id").is_none());
-    assert_eq!(
-        shared_schema.get("additionalProperties"),
-        Some(&serde_json::json!(false))
-    );
+    // The shared arm's schema (a `/oneOf/1` pointer) is pinned by `cargo xtask schemas
+    // --check`; its wire behaviour is the golden and the rejected `session_id` above.
     Ok(())
 }

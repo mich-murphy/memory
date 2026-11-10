@@ -11,59 +11,26 @@ use proptest::prelude::*;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256 as Hasher};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::atomic::{AtomicU64, Ordering};
+mod common;
+use common::Shapes;
 
 /// Independent counters of generated history shapes (coverage guard, DESIGN.md section 15).
-struct Shapes {
-    multi_epoch: AtomicU64,
-    snapshot_replacement: AtomicU64,
-    delete: AtomicU64,
-    fold_across_checkpoint: AtomicU64,
-}
-impl Shapes {
-    const fn new() -> Self {
-        Self {
-            multi_epoch: AtomicU64::new(0),
-            snapshot_replacement: AtomicU64::new(0),
-            delete: AtomicU64::new(0),
-            fold_across_checkpoint: AtomicU64::new(0),
-        }
-    }
-    fn counts(&self, with_fold: bool) -> Vec<(&'static str, u64)> {
-        let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
-        let mut v = vec![
-            ("multi-epoch", load(&self.multi_epoch)),
-            ("snapshot-replacement", load(&self.snapshot_replacement)),
-            ("delete", load(&self.delete)),
-        ];
-        if with_fold {
-            v.push(("fold-across-checkpoint", load(&self.fold_across_checkpoint)));
-        }
-        v
-    }
-}
-fn bump(c: &AtomicU64) {
-    c.fetch_add(1, Ordering::Relaxed);
-}
-/// Fails when any required shape was never generated over the run.
-fn require_all_shapes(counts: &[(&'static str, u64)]) -> Result<(), String> {
-    let missing: Vec<_> = counts
-        .iter()
-        .filter(|(_, n)| *n == 0)
-        .map(|(k, _)| *k)
-        .collect();
-    if missing.is_empty() && !counts.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
-            "coverage guard: generator never produced {missing:?}"
-        ))
-    }
-}
-static HEGEL_ROUNDTRIP: Shapes = Shapes::new();
-static PROPTEST_ROUNDTRIP: Shapes = Shapes::new();
-static HEGEL_FOLD: Shapes = Shapes::new();
-static PROPTEST_FOLD: Shapes = Shapes::new();
+const MULTI_EPOCH: usize = 0;
+const SNAPSHOT_REPLACEMENT: usize = 1;
+const DELETE: usize = 2;
+const FOLD_ACROSS_CHECKPOINT: usize = 3;
+const SHAPE_NAMES: [&str; 4] = [
+    "multi-epoch",
+    "snapshot-replacement",
+    "delete",
+    "fold-across-checkpoint",
+];
+/// Round-trip histories need the first three shapes, fold histories all four.
+const ROUNDTRIP_SHAPES: usize = 3;
+static HEGEL_ROUNDTRIP: Shapes<4> = Shapes::new(SHAPE_NAMES);
+static PROPTEST_ROUNDTRIP: Shapes<4> = Shapes::new(SHAPE_NAMES);
+static HEGEL_FOLD: Shapes<4> = Shapes::new(SHAPE_NAMES);
+static PROPTEST_FOLD: Shapes<4> = Shapes::new(SHAPE_NAMES);
 
 type R = Result<(), Box<dyn std::error::Error>>;
 
@@ -1377,7 +1344,7 @@ fn gen_change(
     ctr: &mut u64,
     model: &mut BTreeMap<String, MSrc>,
     idx: u64,
-    shapes: &Shapes,
+    shapes: &Shapes<4>,
 ) -> Result<Change, Box<dyn std::error::Error>> {
     let name = format!("s{idx}");
     let append = idx.is_multiple_of(2);
@@ -1390,7 +1357,7 @@ fn gen_change(
     if exists && live && r >= 8 {
         let src = model.get_mut(&name).ok_or("model")?;
         src.deleted = true;
-        bump(&shapes.delete);
+        shapes.bump(DELETE);
         return Ok(Change::Deleted {
             id: SourceId::try_from(name)?,
             kind: kind_of(append),
@@ -1450,10 +1417,10 @@ fn gen_change(
         }
     }
     if exists {
-        bump(if append {
-            &shapes.multi_epoch
+        shapes.bump(if append {
+            MULTI_EPOCH
         } else {
-            &shapes.snapshot_replacement
+            SNAPSHOT_REPLACEMENT
         });
     }
     let write = swrite(&name, append, epoch, end, whole, pieces)?;
@@ -1468,7 +1435,7 @@ fn history_shapes(
     seed: u64,
     len: u64,
     nsrc: u64,
-    shapes: &Shapes,
+    shapes: &Shapes<4>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut rng = Rng(seed | 1);
     let mut ctr = 0_u64;
@@ -1565,7 +1532,7 @@ fn history_shapes(
                     let slice = chain.get(s - 64..s).ok_or("range")?;
                     let refs: Vec<&[u8]> = slice.iter().map(Vec::as_slice).collect();
                     let mut folded = fold(&refs)?;
-                    bump(&shapes.fold_across_checkpoint);
+                    shapes.bump(FOLD_ACROSS_CHECKPOINT);
                     assert_eq!(folded.position.seq, seq - 1);
                     assert_eq!(Some(folded.position.manifest), prev_hash);
                     folded.state.apply_changes(&changes)?;
@@ -1593,13 +1560,13 @@ fn history_shapes(
     Ok(())
 }
 
-fn guarded_hegel(shapes: &'static Shapes, fold: bool, f: fn(&TestCase) -> R) {
+fn guarded_hegel(shapes: &'static Shapes<4>, required: usize, f: fn(&TestCase) -> R) {
     hegel::Hegel::new(move |tc: TestCase| {
         let r = f(&tc);
         assert!(r.is_ok(), "{r:?}");
     })
     .run();
-    let g = require_all_shapes(&shapes.counts(fold));
+    let g = shapes.guard(required);
     assert!(g.is_ok(), "{g:?}");
 }
 fn roundtrip_hegel(tc: &TestCase) -> R {
@@ -1615,11 +1582,11 @@ fn fold_hegel(tc: &TestCase) -> R {
 }
 #[test]
 fn hegel_roundtrip_of_arbitrary_valid_manifests() {
-    guarded_hegel(&HEGEL_ROUNDTRIP, false, roundtrip_hegel);
+    guarded_hegel(&HEGEL_ROUNDTRIP, ROUNDTRIP_SHAPES, roundtrip_hegel);
 }
 #[test]
 fn hegel_deltas_from_checkpoint_equal_next_checkpoint() {
-    guarded_hegel(&HEGEL_FOLD, true, fold_hegel);
+    guarded_hegel(&HEGEL_FOLD, SHAPE_NAMES.len(), fold_hegel);
 }
 #[test]
 fn proptest_roundtrip_of_arbitrary_valid_manifests() {
@@ -1629,7 +1596,7 @@ fn proptest_roundtrip_of_arbitrary_valid_manifests() {
             .map_err(|e| TestCaseError::fail(format!("{e:?}")))
     });
     assert!(r.is_ok(), "{r:?}");
-    let g = require_all_shapes(&PROPTEST_ROUNDTRIP.counts(false));
+    let g = PROPTEST_ROUNDTRIP.guard(ROUNDTRIP_SHAPES);
     assert!(g.is_ok(), "{g:?}");
 }
 #[test]
@@ -1640,52 +1607,15 @@ fn proptest_deltas_from_checkpoint_equal_next_checkpoint() {
             .map_err(|e| TestCaseError::fail(format!("{e:?}")))
     });
     assert!(r.is_ok(), "{r:?}");
-    let g = require_all_shapes(&PROPTEST_FOLD.counts(true));
+    let g = PROPTEST_FOLD.guard(SHAPE_NAMES.len());
     assert!(g.is_ok(), "{g:?}");
 }
 #[test]
-fn property6_coverage_guard_negative_controls_bite() {
-    let zero = Shapes::new();
-    let err = require_all_shapes(&zero.counts(true));
-    assert!(err.is_err_and(|e| e.contains("multi-epoch") && e.contains("fold-across-checkpoint")));
-    assert!(require_all_shapes(&[]).is_err());
-    for missing in 0..4 {
-        let sh = Shapes::new();
-        for (i, c) in [
-            &sh.multi_epoch,
-            &sh.snapshot_replacement,
-            &sh.delete,
-            &sh.fold_across_checkpoint,
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            if i != missing {
-                bump(c);
-            }
-        }
-        let counts = sh.counts(true);
-        let name = counts.get(missing).map(|c| c.0);
-        let err = require_all_shapes(&counts);
-        assert!(
-            err.is_err_and(|e| name.is_some_and(|n| e.contains(n))),
-            "{missing}"
-        );
-    }
-    let full = Shapes::new();
-    for c in [
-        &full.multi_epoch,
-        &full.snapshot_replacement,
-        &full.delete,
-        &full.fold_across_checkpoint,
-    ] {
-        bump(c);
-    }
-    assert!(require_all_shapes(&full.counts(true)).is_ok());
-    // A tiny real run (3 histories of 2 manifests) cannot reach a checkpoint fold: guard fails.
-    let small = Shapes::new();
+fn a_short_history_cannot_reach_a_checkpoint_fold_and_the_guard_says_so() {
+    // A tiny real run (2 manifests) never folds across a checkpoint: the fold guard fails.
+    let small = Shapes::new(SHAPE_NAMES);
     assert!(history_shapes(1, 2, 1, &small).is_ok());
-    assert!(require_all_shapes(&small.counts(true)).is_err());
+    assert!(small.guard(SHAPE_NAMES.len()).is_err());
 }
 
 #[expect(
