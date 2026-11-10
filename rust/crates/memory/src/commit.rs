@@ -28,10 +28,7 @@ pub const REBASE_RETRIES: u32 = 4;
 /// Attempts of the verification GET while it errors or answers 404.
 pub const GET_ATTEMPTS: u32 = 4;
 
-/// Key of an immutable manifest, `manifests/<sha256 of manifest bytes>.json`.
-pub fn manifest_key(hash: &Sha256) -> String {
-    format!("manifests/{}.json", String::from(*hash))
-}
+pub use memory_core::limits::manifest_key;
 
 /// The committed position we fence on: what the index (or a recovery) says `current.json`
 /// names, with the ETag it was read under.
