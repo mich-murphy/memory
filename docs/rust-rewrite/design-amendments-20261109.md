@@ -365,3 +365,32 @@ every test that is not a named property (361), `05-hegel` the `hegel_` tests (30
 `06-proptest` the `proptest_` tests (28), all with nextest: 419 tests, each once, at the same
 case counts.
 
+## A13. Operator decisions on the open review items (2026-11-11)
+
+### A13.1 Shadow run and cutover criteria (DESIGN 17 slice 2b, 18; resolves A10.7)
+
+Operator decision.
+
+- The slice 2b cross-check "sessions the Go candidate captured and Rust did not" is dropped: the
+  Go archive was deleted on 2026-11-09 (A2), so it cannot run. Its coverage purpose is served by
+  counting local session files that have no captured owner. The slice's main check, comparing
+  every restored session with `transform(local)`, is unchanged.
+- Exit criterion for the shadow run and for cutover: 2 consecutive days with zero restore
+  mismatches, zero parked owners, and zero local session files without a captured owner. This
+  replaces the "at least 7 days" and "7-day" shadow-run lengths in 17 slices 2b and 3.
+- Abort triggers: any restore mismatch, any owner parked as `Foreign`, or any privacy canary
+  found in an export stops the run until the cause is found.
+- Section 18 steps 1 and 6 are already overtaken by A2 (one bucket, old archive deleted).
+
+### A13.2 Prerequisites of the first production write (DESIGN 6.3, 7.3, 11, 13; resolves A10.3)
+
+Operator decision. No production write happens before all of these exist:
+
+- zstd encoding of pieces, so the `zstd-3` label and the `.zst` key suffix are true. No
+  `identity` encoding is added to the schema.
+- the audit (A12.2);
+- hint retention (A11.2);
+- `tracing` to stderr as DESIGN 11 and 13 specify, replacing the interim event counters of A11.3.
+
+Logging and hint retention land with the slice that wires the daemon.
+
