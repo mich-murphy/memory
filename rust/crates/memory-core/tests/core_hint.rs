@@ -1004,7 +1004,13 @@ fn expected_launch(
         let [kind, d] = op.to_le_bytes();
         let (entries_in, entries_out) = argv_piece(kind, d, &fresh(i + 1));
         if argv_in.len() + entries_in.len() > 32 {
-            // Past the 32-entry bound: everything further must be dropped, canaries too.
+            // Pad to the 32-entry bound with positional canaries (published as redacted),
+            // so no value flag is cut from its value; everything after the bound must be
+            // dropped, canaries too.
+            while argv_in.len() < 32 {
+                argv_in.push(fresh(1000 + argv_in.len()));
+                argv_out.push(s(REDACTED));
+            }
             argv_in.extend(entries_in);
             continue;
         }
