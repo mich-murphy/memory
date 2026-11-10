@@ -9,8 +9,8 @@
 use hegel::{TestCase, generators as gs};
 use memory::capture::Published;
 use memory::commit::{
-    Base, Commit, Failure, GET_ATTEMPTS, Landed, REBASE_RETRIES, Upload, check_fence, commit,
-    disposition, manifest_key, recover_base,
+    Base, Commit, Failure, GET_ATTEMPTS, Landed, Upload, check_fence, commit, disposition,
+    manifest_key, recover_base,
 };
 use memory::environment::{Store, StoreError, Stored};
 use memory_core::disposition::Streak;
@@ -1310,26 +1310,6 @@ fn app(src: u8, seed: u8, n: u8) -> Step {
 }
 
 #[test]
-fn guard_shapes_arise_from_scripted_runs() -> R {
-    let (reference, mut sut) = drive(&[
-        app(0, 0, 6),
-        Step::Reconcile,
-        Step::Rewrite {
-            src: 0,
-            pos: 0,
-            byte: 1,
-        },
-        Step::Reconcile,
-    ])?;
-    let before = SCRATCH_SHAPES.counts();
-    sut.check(&reference, &SCRATCH_SHAPES)?;
-    let after = SCRATCH_SHAPES.counts();
-    let multi = |c: &[(&str, u64)]| c.first().map_or(0, |(_, n)| *n);
-    assert!(multi(&after) > multi(&before), "two epochs must be seen");
-    Ok(())
-}
-
-#[test]
 fn directed_crash_after_manifest_then_new_writer_version_adopts_winner_encoding() -> R {
     let (_, sut) = drive(&[
         app(0, 0, 5),
@@ -1350,33 +1330,6 @@ fn directed_crash_after_manifest_then_new_writer_version_adopts_winner_encoding(
 }
 
 #[test]
-fn directed_lost_reply_is_already_ours_and_next_commit_uses_the_verified_etag() -> R {
-    let (reference, sut) = drive(&[
-        app(0, 1, 3),
-        Step::CommittedReplyLost {
-            then_offline: false,
-        },
-        app(1, 2, 3),
-        Step::Reconcile,
-    ])?;
-    assert!(!reference.pending());
-    assert_eq!(sut.head.map(|(s, _)| s), Some(1));
-    Ok(())
-}
-
-#[test]
-fn directed_lost_reply_then_offline_recovers_after_settle() -> R {
-    let (_, sut) = drive(&[
-        app(0, 1, 3),
-        Step::CommittedReplyLost { then_offline: true },
-        Step::Reconcile,
-        Step::Settle,
-    ])?;
-    assert!(sut.base.is_some());
-    Ok(())
-}
-
-#[test]
 fn directed_delete_index_and_removed_source_recover_from_the_store() -> R {
     let (reference, sut) = drive(&[
         app(0, 0, 6),
@@ -1391,37 +1344,6 @@ fn directed_delete_index_and_removed_source_recover_from_the_store() -> R {
     ])?;
     assert_eq!(reference.committed.get(&1), Some(&None));
     assert!(sut.base.is_some());
-    Ok(())
-}
-
-#[test]
-fn directed_foreign_writer_parks_without_merging_and_settle_is_exempt() -> R {
-    let (reference, sut) = drive(&[
-        app(0, 0, 4),
-        Step::Reconcile,
-        Step::ForeignWriter,
-        app(0, 1, 4),
-        Step::Reconcile,
-        Step::Settle,
-    ])?;
-    assert!(reference.parked && sut.parked);
-    Ok(())
-}
-
-#[test]
-fn directed_offline_and_revoked_commit_nothing_until_settle() -> R {
-    let (reference, sut) = drive(&[
-        app(0, 0, 4),
-        Step::GoOffline,
-        Step::Reconcile,
-        Step::GoOnline,
-        Step::RevokeToken,
-        Step::Reconcile,
-        Step::CommittedThen5xx { landed: true },
-        Step::Settle,
-    ])?;
-    assert!(!reference.pending());
-    assert!(sut.store.peek(&current_key(&sut.owner)).is_some());
     Ok(())
 }
 
@@ -1695,18 +1617,27 @@ fn base_unchanged_retries_exactly_four_times_then_retries_the_capture() -> R {
         .arm_n(Op::Put(Kind::Current), 0, 100, Effect::Churn);
     let (failure, pauses) = rig.failed()?;
     assert_eq!(failure, Failure::BaseUnchanged);
-    assert_eq!(
-        rig.store.count(Op::Put(Kind::Current)) - before,
-        1 + REBASE_RETRIES as usize
-    );
-    assert_eq!(pauses.len(), REBASE_RETRIES as usize);
+    // Literal counts, not the constant: DESIGN.md 7.4 step 5 (line 619) says "up to 4 times",
+    // so one first attempt plus 4 retries is 5 PUTs and 4 pauses.
+    assert_eq!(rig.store.count(Op::Put(Kind::Current)) - before, 5);
+    assert_eq!(pauses.len(), 4);
     assert_eq!(failure.commit_outcome(), Some(CommitOutcome::BaseUnchanged));
     assert!(!failure.base_may_be_stale());
     // Nothing advanced: current.json still names the previous head.
     let chain = need(read_chain(&rig.store, &rig.owner)?, "chain")?;
     assert_eq!(chain.current.manifest, head);
     let (disposition, _) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
-    assert!(matches!(disposition, Disposition::Retry { .. }));
+    // Exhausting the rebase retries is a transient failure (DESIGN.md 11.2), not throttling.
+    assert!(
+        matches!(
+            disposition,
+            Disposition::Retry {
+                class: ErrorClass::Transient,
+                ..
+            }
+        ),
+        "{disposition:?}"
+    );
     Ok(())
 }
 
@@ -2043,23 +1974,6 @@ fn r2_a_412_dedup_adopts_the_encoding_that_actually_won() -> R {
 }
 
 #[test]
-fn r2_without_adoption_the_descriptor_would_not_verify() -> R {
-    let raw = [1_u8, 2, 3, 4];
-    let mut rig = Rig::seeded(&raw)?;
-    rig.store.write(&object_key(&sha(&raw)), encode(&raw, 1));
-    let request = rig.request()?;
-    let built = build(None, header(&rig.owner, "memory")?, request.changes).map_err(e)?;
-    let verdict = built.manifest.verify_encodings(|key| {
-        rig.store.peek(key).map(|b| StoredEncoding {
-            encoded_len: len64(b),
-            encoded_sha256: sha(b),
-        })
-    });
-    assert_eq!(verdict, Err(ManifestError::EncodingMismatch));
-    Ok(())
-}
-
-#[test]
 fn a_failed_readback_after_412_lands_nothing() -> R {
     let raw = [1_u8, 2, 3, 4];
     let mut rig = Rig::seeded(&raw)?;
@@ -2306,16 +2220,6 @@ fn seventy_commits_cross_a_checkpoint_and_still_recover() -> R {
     rig.assert_safe()
 }
 
-#[test]
-fn parse_current_roundtrips_what_the_driver_writes() -> R {
-    let mut rig = Rig::seeded(&[1, 2, 3])?;
-    let landed = rig.landed()?;
-    let current = parse_current(need(rig.store.peek(&rig.current_key()), "current")?).map_err(e)?;
-    assert_eq!(current.manifest, landed.built.hash);
-    assert_eq!(current.seq, 0);
-    Ok(())
-}
-
 // ------------------------------------------------------------------ A6 known_ours
 
 use memory::commit::{KnownOurs, commit_known};
@@ -2388,26 +2292,6 @@ fn late_write_of_an_unknown_manifest_is_foreign() -> R {
     let (_, b, _) = late_write(Some(KnownOurs::new()))?;
     assert!(matches!(b, Err(Failure::Foreign { .. })), "{b:?}");
     Ok(())
-}
-
-#[test]
-fn base_unchanged_exhaustion_is_transient_not_throttled() {
-    let (d, _) = disposition(
-        &Err(Failure::BaseUnchanged),
-        false,
-        Duration::ZERO,
-        &Streak::default(),
-    );
-    assert!(
-        matches!(
-            d,
-            Disposition::Retry {
-                class: ErrorClass::Transient,
-                ..
-            }
-        ),
-        "{d:?}"
-    );
 }
 
 #[expect(

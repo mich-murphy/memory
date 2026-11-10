@@ -25,8 +25,8 @@ run 03-core-bans bash -c 'cd crates/memory-core && cargo deny --locked --exclude
 run 04-nextest cargo nextest run --workspace --locked
 # nextest intentionally does not execute rustdoc examples.
 run 04-doctests cargo test --workspace --doc --locked -- --test-threads=2
-run 05-hegel cargo test -p memory-core --test scaffold hegel_ --locked -- --test-threads=2 --nocapture
-run 06-proptest cargo test -p memory-core --test scaffold proptest_ --locked -- --test-threads=2 --nocapture
+run 05-hegel cargo test --workspace --locked hegel_ -- --test-threads=2 --nocapture
+run 06-proptest cargo test --workspace --locked proptest_ -- --test-threads=2 --nocapture
 # One temp target for both sequential mutation scripts (never the source target), removed after.
 MEMORY_MUTATION_TARGET="$(mktemp -d "${TMPDIR:-/tmp}/memory-mutation-target.XXXXXX")"
 export MEMORY_MUTATION_TARGET

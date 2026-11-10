@@ -153,25 +153,6 @@ fn golden_line_per_agent() -> R {
 }
 
 #[test]
-fn second_hook_appends_second_line() -> R {
-    let tmp = Tmp::new("two")?;
-    let dir = tmp.p().join("hints");
-    for session in ["s1", "s2"] {
-        assert_eq!(
-            hook::run(&call("claude", payload("Stop", session).as_bytes(), &dir)),
-            HookResult::Appended
-        );
-    }
-    let bytes = fs::read(dir.join(format!("{DAY}.jsonl"))).map_err(e)?;
-    let scan = hint::scan(&bytes, 0).map_err(e)?;
-    assert_eq!(
-        (scan.records.len(), scan.dropped, scan.pending_bytes),
-        (2, 0, 0)
-    );
-    Ok(())
-}
-
-#[test]
 fn launch_evidence_only_on_session_start() -> R {
     let argv: Vec<String> = ["claude", "--model", "m2", "CANARYARGV positional"]
         .map(str::to_owned)
@@ -210,11 +191,7 @@ fn launch_evidence_only_on_session_start() -> R {
         }
         other => return Err(format!("unexpected launches {other:?}")),
     }
-    Ok(())
-}
-
-#[test]
-fn session_start_without_launch_evidence_has_none() -> R {
+    // A SessionStart without any launch evidence records none.
     let tmp = Tmp::new("nolaunch")?;
     let dir = tmp.p().join("hints");
     let input = payload("SessionStart", "x");

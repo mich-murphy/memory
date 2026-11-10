@@ -178,10 +178,31 @@ fn read_exact_short_and_past_eof() -> TestResult {
         ),
         "missing file read"
     );
+    let dir = rfs.register(t.path());
+    let got = rfs.read(dir, 0..1);
+    ensure!(
+        matches!(got, Err(RealFsError::Io(_))),
+        "directory read is an io error: {got:?}"
+    );
     fs::OpenOptions::new().write(true).open(&f)?.set_len(4)?;
     ensure!(rfs.read(h, 2..8)? == b"23", "short read after truncation");
+    // Failed reads above (missing, directory, handle, range) are not counted.
     let c = rfs.counters();
     ensure!(c.reads == 6 && c.bytes_read == 18, "counters {c:?}");
+    // An unreadable file reports its io kind (root bypasses mode bits and reads it).
+    {
+        use std::io::ErrorKind;
+        use std::os::unix::fs::PermissionsExt;
+        let p = t.write("secret.txt", b"abc")?;
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o000))?;
+        let locked = rfs.register(&p);
+        let got = rfs.read(locked, 0..3);
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o644))?;
+        ensure!(
+            got == Err(RealFsError::Io(ErrorKind::PermissionDenied)) || got == Ok(b"abc".to_vec()),
+            "{got:?}"
+        );
+    }
     Ok(())
 }
 
@@ -345,6 +366,37 @@ fn walk_depth_and_entry_bounds() -> TestResult {
         d.max_depth == 32 && d.max_entries == 500_000,
         "documented defaults"
     );
+    // The entry bound can stop partway through one directory, keeping the first sorted entry.
+    let t = Tmp::new()?;
+    t.write("r/a.txt", b"x")?;
+    t.write("r/b.txt", b"x")?;
+    t.write("r/c.txt", b"x")?;
+    let rs = vec![(
+        t.path().join("r"),
+        roots(Agent::Claude, RootLayout::AgentDir)?,
+    )];
+    let w = walk(
+        &rs,
+        &WalkLimits {
+            max_depth: 32,
+            max_entries: 1,
+        },
+    );
+    ensure!(w.truncated && w.entries == 1 && w.files.len() == 1, "{w:?}");
+    ensure!(
+        w.files
+            .first()
+            .is_some_and(|f| f.1.components().join("/") == "a.txt"),
+        "first sorted entry kept: {w:?}"
+    );
+    let exact = walk(
+        &rs,
+        &WalkLimits {
+            max_depth: 32,
+            max_entries: 3,
+        },
+    );
+    ensure!(!exact.truncated && exact.files.len() == 3, "{exact:?}");
     Ok(())
 }
 
@@ -442,91 +494,6 @@ proptest! {
 }
 
 // ---- Coverage round
-
-#[test]
-fn read_errors_carry_the_io_kind() -> TestResult {
-    use std::io::ErrorKind;
-    let t = Tmp::new()?;
-    t.write("d/x", b"x")?;
-    let mut f = RealFs::new();
-    let dir = f.register(t.path().join("d"));
-    let missing = f.register(t.path().join("nope"));
-    let before = f.counters();
-    ensure!(
-        f.read(missing, 0..1) == Err(RealFsError::Io(ErrorKind::NotFound)),
-        "missing file"
-    );
-    let got = f.read(dir, 0..1);
-    ensure!(
-        matches!(got, Err(RealFsError::Io(_))),
-        "directory read is an io error: {got:?}"
-    );
-    ensure!(f.counters() == before, "failed reads are not counted");
-    ensure!(
-        f.read(99, 0..1) == Err(RealFsError::UnknownHandle),
-        "handle"
-    );
-    let (start, end) = (std::hint::black_box(5_u64), 2_u64);
-    ensure!(
-        f.read(dir, start..end) == Err(RealFsError::InvalidRange),
-        "range"
-    );
-    Ok(())
-}
-
-#[test]
-fn unreadable_file_is_permission_denied_on_read() -> TestResult {
-    use std::io::ErrorKind;
-    use std::os::unix::fs::PermissionsExt;
-    let t = Tmp::new()?;
-    let p = t.write("secret.txt", b"abc")?;
-    fs::set_permissions(&p, fs::Permissions::from_mode(0o000))?;
-    let mut f = RealFs::new();
-    let h = f.register(&p);
-    let got = f.read(h, 0..3);
-    fs::set_permissions(&p, fs::Permissions::from_mode(0o644))?;
-    // Root bypasses mode bits; otherwise the kind is PermissionDenied.
-    ensure!(
-        got == Err(RealFsError::Io(ErrorKind::PermissionDenied)) || got == Ok(b"abc".to_vec()),
-        "{got:?}"
-    );
-    Ok(())
-}
-
-#[test]
-fn walk_entry_bound_stops_partway_through_a_directory() -> TestResult {
-    let t = Tmp::new()?;
-    t.write("r/a.txt", b"x")?;
-    t.write("r/b.txt", b"x")?;
-    t.write("r/c.txt", b"x")?;
-    let rs = vec![(
-        t.path().join("r"),
-        roots(Agent::Claude, RootLayout::AgentDir)?,
-    )];
-    let w = walk(
-        &rs,
-        &WalkLimits {
-            max_depth: 32,
-            max_entries: 1,
-        },
-    );
-    ensure!(w.truncated && w.entries == 1 && w.files.len() == 1, "{w:?}");
-    ensure!(
-        w.files
-            .first()
-            .is_some_and(|f| f.1.components().join("/") == "a.txt"),
-        "first sorted entry kept: {w:?}"
-    );
-    let exact = walk(
-        &rs,
-        &WalkLimits {
-            max_depth: 32,
-            max_entries: 3,
-        },
-    );
-    ensure!(!exact.truncated && exact.files.len() == 3, "{exact:?}");
-    Ok(())
-}
 
 #[test]
 fn walk_skips_sockets_and_fifos_without_counting_them_as_files() -> TestResult {

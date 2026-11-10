@@ -39,49 +39,6 @@ fn publish(path: &str, bytes: &[u8]) -> Result<AuthorizedBody, &'static str> {
 }
 
 #[test]
-fn malformed_selected_url_does_not_preserve_invalid_port_literal()
--> Result<(), Box<dyn std::error::Error>> {
-    let body = publish(
-        "synthetic/.mcp.json",
-        br#"{"mcpServers":{"demo":{"url":"https://host:FixtureCanary/"}}}"#,
-    )?;
-    let value: serde_json::Value = serde_json::from_slice(body.bytes())?;
-    assert_eq!(
-        value.pointer("/mcpServers/demo/url"),
-        Some(&serde_json::Value::String("[redacted]".to_owned()))
-    );
-    Ok(())
-}
-
-#[test]
-fn malformed_selected_url_does_not_preserve_invalid_escape_literal()
--> Result<(), Box<dyn std::error::Error>> {
-    let body = publish(
-        "synthetic/.mcp.json",
-        br#"{"mcpServers":{"demo":{"url":"https://host/%ZZFixtureCanary"}}}"#,
-    )?;
-    let value: serde_json::Value = serde_json::from_slice(body.bytes())?;
-    assert_eq!(
-        value.pointer("/mcpServers/demo/url"),
-        Some(&serde_json::Value::String("[redacted]".to_owned()))
-    );
-    Ok(())
-}
-
-#[test]
-fn scrubbed_toml_retains_unrelated_datetime_type() -> Result<(), Box<dyn std::error::Error>> {
-    let body = publish(
-        "synthetic/config.toml",
-        b"when = 1979-05-27T07:32:00Z\n[mcp_servers.demo.env]\nAPI_KEY = \"FixtureCanary\"\n",
-    )?;
-    let output = std::str::from_utf8(body.bytes())?;
-    let value: toml::Value = toml::from_str(output)?;
-    assert!(value.get("when").is_some_and(toml::Value::is_datetime));
-    assert!(!output.contains("FixtureCanary"));
-    Ok(())
-}
-
-#[test]
 fn transformed_capability_cannot_be_rebound_to_a_protected_source() -> Result<(), &'static str> {
     let policy = context();
     let Admission::Allow(transcript) = admit(

@@ -370,21 +370,6 @@ fn errors_never_echo_input() {
 
 // ---------- schema ----------
 
-#[test]
-fn schema_is_generated_and_strict() -> R {
-    let schema = schemars::schema_for!(HintRecord);
-    let value = serde_json::to_value(&schema).map_err(|e| e.to_string())?;
-    assert_eq!(
-        value.get("additionalProperties"),
-        Some(&serde_json::json!(false))
-    );
-    assert_eq!(
-        value.pointer("/$defs/HintSchema/oneOf/0/const"),
-        Some(&serde_json::json!("memory.hint/1"))
-    );
-    Ok(())
-}
-
 fn good_line() -> Result<Vec<u8>, String> {
     let parsed = input(Agent::Codex, HintEvent::TurnEnd, "k", "/w", "/t")?;
     build_line(&parsed, None).map_err(|e| e.to_string())

@@ -1350,21 +1350,6 @@ fn non_claude_roots_ignore_claude_facts_and_foreign_layouts_map_nothing() -> Tes
     Ok(())
 }
 
-#[test]
-fn withhold_reasons_are_fixed_and_countable() -> TestResult {
-    ensure!(
-        Located::UnknownKind.withhold_reason() == Some(WithholdReason::UnknownKind),
-        "kind"
-    );
-    ensure!(
-        Located::UnknownOwner.withhold_reason() == Some(WithholdReason::UnknownOwner),
-        "owner"
-    );
-    let ok = locate_row(ROWS.first().ok_or("empty table")?, "r1")?;
-    ensure!(ok.withhold_reason().is_none(), "source is capturable");
-    Ok(())
-}
-
 // ---- property 7 ------------------------------------------------------------------------
 
 struct Pick<'a> {

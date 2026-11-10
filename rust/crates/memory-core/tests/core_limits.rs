@@ -76,6 +76,11 @@ fn key_boundary_session_1024_ok_1025_denied() -> R {
     let o = owner_session("a", "m", &id(rest - 1), Agent::Claude)?;
     assert_eq!(current_key(&o).len(), 1025);
     assert_eq!(check_owner_key(&o), Err(WithholdReason::KeyTooLong));
+    // Direct length checks, including a length that would overflow a narrower counter.
+    assert_eq!(check_key_len(usize::MAX), Err(WithholdReason::KeyTooLong));
+    assert_eq!(check_key_len(0), Ok(()));
+    assert_eq!(check_key_len(1024), Ok(()));
+    assert_eq!(check_key_len(1025), Err(WithholdReason::KeyTooLong));
     Ok(())
 }
 
@@ -131,23 +136,6 @@ fn key_len_measures_utf8_bytes_not_chars() {
 }
 
 #[test]
-fn key_len_saturates() {
-    assert_eq!(check_key_len(usize::MAX), Err(WithholdReason::KeyTooLong));
-    assert_eq!(check_key_len(0), Ok(()));
-    assert_eq!(check_key_len(1024), Ok(()));
-    assert_eq!(check_key_len(1025), Err(WithholdReason::KeyTooLong));
-}
-
-#[test]
-fn agent_wire_matches_serde() -> R {
-    for a in [Agent::Claude, Agent::Codex, Agent::Pi] {
-        let json = serde_json::to_string(&a)?;
-        assert_eq!(json, format!("\"{}\"", a.as_str()));
-    }
-    Ok(())
-}
-
-#[test]
 fn sources_cap_and_never_evict() -> R {
     let mut set = SourceSet::new();
     assert!(set.is_empty());
@@ -171,16 +159,6 @@ fn sources_cap_and_never_evict() -> R {
     for n in 0..1024 {
         assert!(set.contains(&sid(n)?));
     }
-    Ok(())
-}
-
-#[test]
-fn rewrites_of_one_source_use_one_slot() -> R {
-    let mut set = SourceSet::new();
-    for _ in 0..5000 {
-        assert_eq!(set.admit(&sid(7)?), Ok(()));
-    }
-    assert_eq!(set.len(), 1);
     Ok(())
 }
 

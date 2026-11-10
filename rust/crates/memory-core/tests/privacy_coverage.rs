@@ -236,6 +236,8 @@ fn malformed_url_forms_never_escape_as_literals() -> TestResult {
         "https://host/#%ZZ",
         "https://[broken/fixture",
         "https://host:99999/fixture",
+        "https://host:FixtureCanary/",
+        "https://host/%ZZFixtureCanary",
     ] {
         let output = json(
             "synthetic/mcp.json",
@@ -366,12 +368,14 @@ fn protected_depth_and_conservative_expansion_fail_closed() -> TestResult {
 
 #[test]
 fn toml_nested_arrays_preserve_native_values_when_strings_change() -> TestResult {
-    let input = b"safe = [[1, 2], [3, 4]]\nwhen = 1979-05-27\n[mcp_servers.demo]\nbearer_token = 'fixture-literal'\nargs = ['--token', 'fixture-arg']\n";
+    let input = b"safe = [[1, 2], [3, 4]]\nwhen = 1979-05-27\nstamp = 1979-05-27T07:32:00Z\n[mcp_servers.demo]\nbearer_token = 'fixture-literal'\nargs = ['--token', 'fixture-arg']\n";
     let output = transformed("synthetic/config.toml", Profile::Config, input)?;
     let value: toml::Value = toml::from_str(std::str::from_utf8(&output)?)?;
     let original: toml::Value = toml::from_str(std::str::from_utf8(input)?)?;
     assert_eq!(value.get("safe"), original.get("safe"));
     assert_eq!(value.get("when"), original.get("when"));
+    assert_eq!(value.get("stamp"), original.get("stamp"));
+    assert!(value.get("stamp").is_some_and(toml::Value::is_datetime));
     assert!(!std::str::from_utf8(&output)?.contains("fixture-"));
     Ok(())
 }

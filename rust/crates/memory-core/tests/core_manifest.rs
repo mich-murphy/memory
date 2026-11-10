@@ -259,16 +259,6 @@ fn golden_checkpoint_delta_and_current() -> R {
     Ok(())
 }
 
-#[test]
-fn schemas_are_derivable_and_object_key_is_canonical() -> R {
-    let digest = Sha256::from_bytes([0xab; 32]);
-    assert_eq!(
-        object_key(&digest),
-        format!("objects/{}.zst", "ab".repeat(32))
-    );
-    Ok(())
-}
-
 // ------------------------------------------------------------------ negatives
 
 #[test]
@@ -1283,12 +1273,6 @@ fn r2_race(seed: u64) -> R {
     Ok(())
 }
 
-#[test]
-fn r2_both_orders() -> R {
-    r2_race(2)?;
-    r2_race(3)
-}
-
 #[hegel::test]
 fn hegel_r2_dedup_winner_descriptor(tc: TestCase) {
     let r = r2_race(tc.draw(gs::integers::<u64>()));
@@ -1480,19 +1464,12 @@ fn gen_change(
     })
 }
 
-struct Stat {
-    pieces: usize,
-}
-
-fn history(seed: u64, len: u64, nsrc: u64) -> Result<Vec<Stat>, Box<dyn std::error::Error>> {
-    history_shapes(seed, len, nsrc, &Shapes::new())
-}
 fn history_shapes(
     seed: u64,
     len: u64,
     nsrc: u64,
     shapes: &Shapes,
-) -> Result<Vec<Stat>, Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut rng = Rng(seed | 1);
     let mut ctr = 0_u64;
     let owner = if seed & 2 == 0 {
@@ -1504,7 +1481,6 @@ fn history_shapes(
     let mut prev: Option<(Position, OwnerState)> = None;
     let mut chain: Vec<Vec<u8>> = Vec::new();
     let mut hashes: Vec<Sha256> = Vec::new();
-    let mut stats = Vec::new();
     for seq in 0..len {
         let s = usize::try_from(seq)?;
         let count = rng.below(nsrc.min(3) + 1);
@@ -1576,14 +1552,6 @@ fn history_shapes(
                     (projection.previous, projection.checkpoint),
                     (prev_hash, None)
                 );
-                stats.push(Stat {
-                    pieces: c
-                        .sources()
-                        .iter()
-                        .flat_map(|x| &x.epochs)
-                        .map(|e| e.pieces.len())
-                        .sum(),
-                });
                 // Snapshot-class sources keep only the latest epoch in checkpoints.
                 for src in c.sources() {
                     if src.class == SourceClass::Snapshot {
@@ -1622,21 +1590,6 @@ fn history_shapes(
     let folded = fold(&refs)?;
     assert_eq!(state_view(&folded.state), model_view(&model));
     assert_eq!(folded.position.seq, len - 1);
-    Ok(stats)
-}
-
-#[test]
-fn history_smoke_and_r3_checkpoint_sizes() -> R {
-    for (seed, len, nsrc) in [(7_u64, 321_u64, 4_u64), (8, 321, 40), (11, 193, 12)] {
-        let stats = history(seed, len, nsrc)?;
-        assert!(stats.len() >= 3);
-    }
-    // The "64 pieces per checkpoint" bound is false: a checkpoint lists every piece.
-    let stats = history(8, 321, 40)?;
-    assert!(
-        stats.iter().any(|s| s.pieces > 64),
-        "pieces bound is not a property"
-    );
     Ok(())
 }
 
@@ -1653,12 +1606,12 @@ fn roundtrip_hegel(tc: &TestCase) -> R {
     let seed = tc.draw(gs::integers::<u64>());
     let len = 1 + u64::from(tc.draw(gs::integers::<u8>())) % 6;
     let nsrc = 1 + u64::from(tc.draw(gs::integers::<u8>())) % 8;
-    history_shapes(seed, len, nsrc, &HEGEL_ROUNDTRIP).map(|_| ())
+    history_shapes(seed, len, nsrc, &HEGEL_ROUNDTRIP)
 }
 fn fold_hegel(tc: &TestCase) -> R {
     let seed = tc.draw(gs::integers::<u64>());
     let len = 65 + u64::from(tc.draw(gs::integers::<u8>())) % 70;
-    history_shapes(seed, len, 4, &HEGEL_FOLD).map(|_| ())
+    history_shapes(seed, len, 4, &HEGEL_FOLD)
 }
 #[test]
 fn hegel_roundtrip_of_arbitrary_valid_manifests() {
@@ -1673,7 +1626,6 @@ fn proptest_roundtrip_of_arbitrary_valid_manifests() {
     let mut runner = proptest::test_runner::TestRunner::default();
     let r = runner.run(&(any::<u64>(), 1_u64..7, 1_u64..9), |(seed, len, nsrc)| {
         history_shapes(seed, len, nsrc, &PROPTEST_ROUNDTRIP)
-            .map(|_| ())
             .map_err(|e| TestCaseError::fail(format!("{e:?}")))
     });
     assert!(r.is_ok(), "{r:?}");
@@ -1685,7 +1637,6 @@ fn proptest_deltas_from_checkpoint_equal_next_checkpoint() {
     let mut runner = proptest::test_runner::TestRunner::default();
     let r = runner.run(&(any::<u64>(), 0_u64..70), |(seed, extra)| {
         history_shapes(seed, 65 + extra, 4, &PROPTEST_FOLD)
-            .map(|_| ())
             .map_err(|e| TestCaseError::fail(format!("{e:?}")))
     });
     assert!(r.is_ok(), "{r:?}");

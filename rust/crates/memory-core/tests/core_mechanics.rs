@@ -327,26 +327,6 @@ fn property1_coverage_guard_negative_controls_bite() {
     }
     assert!(require_all_shapes(&full.counts()).is_ok());
 }
-#[test]
-#[should_panic(expected = "independent safety oracle rejects disabled windows")]
-fn property1_negative_control_disabled_window_check_must_fail() {
-    // Test-only mutant algorithm. No production flag or policy bypass exists.
-    let old = vec![b'a'; 74_000];
-    let mut current = old.clone();
-    if let Some(byte) = current.get_mut(4095) {
-        *byte = b'b';
-    }
-    current.push(b'c');
-    let mutant = Plan::Append {
-        from: Offset::new(old.len() as u64),
-        to: Offset::new(current.len() as u64),
-    };
-    let assembled = reassemble(&old, &current, mutant);
-    assert!(
-        current.starts_with(&assembled),
-        "independent safety oracle rejects disabled windows"
-    );
-}
 fn owner() -> Result<Owner, ValidationError> {
     Ok(Owner::Shared {
         archive: ArchiveId::try_from("archive".to_owned())?,

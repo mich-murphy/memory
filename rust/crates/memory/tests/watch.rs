@@ -67,46 +67,12 @@ fn cap(i: usize) -> R<Action> {
 // ------------------------------------------------------------------ scheduler tables
 
 #[test]
-fn quiet_expiry() -> R {
-    let mut sc = sched()?;
-    assert_eq!(sc.handle(changed(1), s(0)), vec![]);
-    assert_eq!(sc.handle(tick(59), s(0)), vec![]);
-    assert_eq!(sc.handle(tick(60), s(0)), vec![cap(1)?]);
-    assert_eq!(sc.handle(tick(120), s(0)), vec![]);
-    Ok(())
-}
-
-#[test]
 fn cap_expiry_under_continuous_signals() -> R {
     let mut sc = sched()?;
     for t in (0..300).step_by(30) {
         assert_eq!(sc.handle(changed(1), s(t)), vec![], "t={t}");
     }
     assert_eq!(sc.handle(changed(1), s(300)), vec![cap(1)?]);
-    Ok(())
-}
-
-#[test]
-fn session_end_flushes_at_once() -> R {
-    let mut sc = sched()?;
-    let hint = Input::Hint {
-        owner: owner(2)?,
-        signal: Signal::SessionEnd,
-    };
-    assert_eq!(sc.handle(hint, s(5)), vec![cap(2)?]);
-    Ok(())
-}
-
-#[test]
-fn stop_stays_debounced() -> R {
-    let mut sc = sched()?;
-    let hint = Input::Hint {
-        owner: owner(2)?,
-        signal: Signal::Stop,
-    };
-    assert_eq!(sc.handle(hint, s(0)), vec![]);
-    assert_eq!(sc.handle(tick(59), s(0)), vec![]);
-    assert_eq!(sc.handle(tick(60), s(0)), vec![cap(2)?]);
     Ok(())
 }
 

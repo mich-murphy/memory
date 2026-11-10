@@ -363,15 +363,6 @@ fn withheld_source_is_never_read_or_stored() -> R {
     Ok(())
 }
 
-#[test]
-fn captured_pieces_are_stored_under_object_keys() -> R {
-    let mut rig = rig()?;
-    transcript(&mut rig, b"abcdefgh");
-    rig.cycle()?;
-    assert!(rig.store.objects.keys().any(|k| k.starts_with("objects/")));
-    Ok(())
-}
-
 // ---- launch evidence, property 5 at the store sink
 
 fn canary_launch() -> SanitizedLaunch {

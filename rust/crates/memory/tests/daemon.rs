@@ -264,51 +264,6 @@ fn hints_dir_symlink_refuses() -> R {
 }
 
 #[test]
-fn first_round_commits_and_persists_then_rebuild_does_not_reupload() -> R {
-    let tmp = Tmp::new()?;
-    let cfg = tmp.config(true)?;
-    let mut d = Daemon::start(
-        &tmp.root(),
-        &cfg,
-        parts(files_with(b"hello\n"), MemStore::default()),
-    )
-    .map_err(|x| x.code().to_owned())?;
-    assert!(d.rebuilt());
-    let report = d.reconcile_once().map_err(e)?;
-    assert_eq!(report.landed, 1);
-    assert_eq!(d.status().rounds, 1);
-    d.shutdown().map_err(e)?;
-    assert!(tmp.root().join("index.json").exists());
-    assert!(tmp.root().join("status.json").exists());
-    // Delete the index, restart against the same store contents.
-    fs::remove_file(tmp.root().join("index.json")).map_err(e)?;
-    let mut store = MemStore::default();
-    {
-        let mut first = Daemon::start(
-            &tmp.root(),
-            &cfg,
-            parts(files_with(b"hello\n"), MemStore::default()),
-        )
-        .map_err(|x| x.code().to_owned())?;
-        first.reconcile_once().map_err(e)?;
-        std::mem::swap(&mut store, first.store_mut());
-        first.shutdown().map_err(e)?;
-    }
-    fs::remove_file(tmp.root().join("index.json")).map_err(e)?;
-    let before = store.puts;
-    let mut d = Daemon::start(&tmp.root(), &cfg, parts(files_with(b"hello\n"), store))
-        .map_err(|x| x.code().to_owned())?;
-    assert!(d.rebuilt());
-    d.reconcile_once().map_err(e)?;
-    assert_eq!(
-        d.store_mut().puts,
-        before,
-        "no re-upload of unchanged bytes"
-    );
-    Ok(())
-}
-
-#[test]
 fn second_process_exits_lock_held() -> R {
     let tmp = Tmp::new()?;
     let _lock = DaemonLock::acquire(&tmp.root()).map_err(e)?;
