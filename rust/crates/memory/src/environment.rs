@@ -184,9 +184,14 @@ pub trait Store {
     ) -> Result<memory_core::domain::ETag, StoreError>;
     /// Replacement guarded by the ETag we hold (`If-Match`). Client retries stay disabled.
     ///
+    /// R2 answers 412 to `If-Match` on a missing key (P2 traces; 2026-11-11 probe,
+    /// amendment A13.4), not 404, and its ETag is the MD5 of the body. An implementation
+    /// therefore returns [`StoreError::PreconditionFailed`] for a missing key as well as a
+    /// stale fence, and does not return [`StoreError::NotFound`] from this call.
+    ///
     /// # Errors
-    /// [`StoreError::PreconditionFailed`] on a stale fence, [`StoreError::NotFound`] when the
-    /// key is missing, otherwise a transport or auth error.
+    /// [`StoreError::PreconditionFailed`] on a stale fence or a missing key, otherwise a
+    /// transport or auth error.
     fn put_if_match(
         &mut self,
         key: &str,
