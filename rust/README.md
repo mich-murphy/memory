@@ -22,7 +22,8 @@ PROPERTY_CASES=2000 bash scripts/gates.sh
 # CI invocation: PROPERTY_CASES=500 bash scripts/gates.sh
 ```
 
-The canonical wrapper also runs workspace doctests (nextest does not) and two
+The canonical wrapper also runs workspace doctests (nextest does not), gates `05-hegel` and
+`06-proptest` (every `hegel_` and every `proptest_` test in the workspace), and two
 production-source mutation checkers: `check-window-mutation.py` (planner window comparison)
 and `check-mutations.py` (blind `If-Match`, index advanced after a commit that did not land,
 skipped credential denylist). Under `gates.sh` both share one temporary target directory,
@@ -46,7 +47,7 @@ temp directory and `env_clear()` (only `LLVM_PROFILE_FILE` passes through).
 
 The latest integrated local wrapper (review and fix round, 2026-11-10) passed on
 `d8e80a6` at 2,000 cases, seed 730213: all 13 subgates, 391/391 nextest tests (2 ignored
-benchmarks), 12 compile-fail doctests, 5,595/5,766 lines covered (97.03%, floor 80%), no
+benchmarks; the later test review removed 24 tests and merged 9, not re-counted), 12 compile-fail doctests, 5,595/5,766 lines covered (97.03%, floor 80%), no
 source changed during the run. See
 [its evidence](../docs/rust-rewrite/implementation/evidence/13-review-fix-round/) and
 [report 23](../docs/rust-rewrite/implementation/23-review-fix-round.md). Gate 8
@@ -83,5 +84,7 @@ ban invocation excludes dev dependencies. Dependency bans cannot prohibit
 `std::fs`/`std::net`; review core source boundaries too. Later runtimes must use
 safe APIs for flock/F_FULLFSYNC and must never suppress `forbid(unsafe_code)`.
 
-Monthly diagnostic: `cargo mutants -p memory-core --jobs 2` (not run at bootstrap).
+Monthly diagnostic: `cargo mutants -p memory-core --jobs 2` (not run at bootstrap, and nothing
+schedules it). First baseline, 2026-11-10, example tests only, `memory-core` not run:
+`capture.rs` 62.5%, `commit.rs` 89.5%, `state.rs` 91.6% (design-amendments A10.8).
 The parent owns `.github/workflows/rust.yml`; hosted CI execution remains parent-owned.

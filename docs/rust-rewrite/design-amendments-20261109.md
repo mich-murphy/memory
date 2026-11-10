@@ -138,3 +138,128 @@ percentage as a floor") is replaced: the floor is a fixed backstop, not the late
   removed rather than kept for line count.
 - The floor is still a hard gate and is not lowered to make a run pass. Raising it is allowed only
   as a recorded decision, never automatically from a measurement.
+
+## A10. Corrections of fact and evidence labels (2026-11-10)
+
+Source: the design and test review ([24](implementation/24-design-and-test-review.md); reports 01,
+02, 03, W2 to W5 in the review scratchpad, not preserved in the repo). The operator agreed to
+correct factual errors. No design decision or value changes. DESIGN.md is not edited. Line numbers
+below are DESIGN.md as of commit `aa04050`. Where an entry conflicts with DESIGN.md, the entry wins.
+
+### A10.1 Table 3.1 is 30 s data (DESIGN 2 R6, lines 96-97; 3.1, lines 111-117)
+
+Wrong text: line 111 "### 3.1 Upload policy, quiet 60 s, cap 300 s unless stated [measured,
+`policy_sim.py`, 30 s window]"; R6 "10.7x on Claude history and 155x on Pi history. [measured,
+`policy_sim.py`]". Evidence: `experiments/policy_sim.py:24` is `def captures(ev,Q=30,M=300)` and
+the only call is `captures(ev)`; the table's max pieces "1,700" equals the 30 s row of 3.2, while
+the 60 s row has 898. Corrected reading: read the 3.1 heading as "quiet 30 s, cap 300 s". Every
+cell of the table, and R6's 10.7x and 155x, are 30 s data, tagged `[measured, 30 s]` and not
+measured at 60 s. No 60 s value is invented. The only 60 s figures are the all-agent counts in 3.2
+(27,481 captures, max 898 pieces) and 3.7 (27,683 captures, 11.4% manifest share). The script reads
+private local transcripts and no raw output was saved, so a reader cannot regenerate the table.
+
+### A10.2 The object key hashes the transformed bytes (DESIGN 4 lines 240-241; 6.2 lines 371-374; 7.3 lines 564-568)
+
+Wrong text: line 371 "`objects/<sha256 of raw piece bytes>.zst`", line 373 "Keying by the raw
+hash...", step 2 "Feed the raw bytes to the piece SHA-256 and to the whole-file `Sha256State`",
+step 6 "PUT `objects/<raw sha256>.zst`". Evidence: `capture.rs` runs `transform` then `authorize`
+(about lines 477-480) before slicing; `Piece::from_authorized` (memory-core `manifest/schema.rs`
+about lines 325-350) sets `sha256 = manifest_hash(chunk)` over the authorized chunk and
+`object = object_key(&sha256)`; the whole-stream digest is over the same body (`capture.rs`
+about 513-523, read only there). The manifest records `sha256` (pre-encoding) plus `encoded_len`
+and `encoded_sha256`. In `commit.rs` (`upload_pieces`, `adopt_winner`), a 412 reads the stored
+object and the manifest records the winner's stored encoding.
+
+Corrected reading: the key is `objects/<sha256 of the transformed piece bytes>.zst`, where
+transformed means after the section 8.3 scrub and before compression. Order in 7.3: transform,
+authorize, digest the transformed bytes (piece and whole-file), compress and digest the encoded
+bytes, PUT. After a 412 the manifest carries the stored object's encoding, not the writer's. The
+zstd-upgrade benefit in line 373 still holds (the key does not depend on compression). Why this is
+right: after a scrub-rule fix the same input scrubs differently, so the key and manifest change;
+hashing the raw bytes would give the old key, a 412, and adoption of the old, less scrubbed
+object. Residual: the previously uploaded object stays in the bucket, unreferenced, until a
+deletion tool exists (DESIGN 19 decision 4). The 6.3 example's `<raw>` placeholders mean this
+digest.
+
+### A10.3 Open: encoding label versus identity bytes (DESIGN 6.3 line 429; 7.3 line 566)
+
+Manifests carry `"encoding": "zstd-3"` and keys end `.zst` (`Piece::from_authorized` sets
+`Encoding::Zstd3`), while `capture.rs` (module doc, about line 21) says "piece encoding is the
+identity (no zstd yet; `encoded_*` equal the raw fields)". No decision is made here. It must be
+resolved before the first production write, by one of: (a) label identity now (a new `Encoding`
+value and key suffix), or (b) land zstd before any write. Otherwise a reader that decodes per the
+label fails, and a later zstd writer would 412 against identity objects and adopt them under the
+same label.
+
+### A10.4 The 8 MiB piece cap and the 80 MiB bound are unmeasured (DESIGN 7.3 lines 559, 595-597; D18 line 1281)
+
+Wrong text: "Pieces are at most 8 MiB raw. [default, prototype P4]" and "at most 80 MiB for
+incompressible data. [target, prototype P4]". Evidence: `prototypes/P4-synthetic-footprint.md`,
+row 8 MiB x 8 random buffers: 83.89 MB payload and 135.12 MB process peak, in a Python process,
+against the 128 MB peak target (line 1146). It says the benchmark "does not justify a change to
+the 8 MiB / 8 uploads defaults" and calls the target "not measured acceptance". Corrected
+reading: the cap, the 2 hash jobs and the 8 uploads are `[default, unmeasured]`. "80 MiB" is payload
+arithmetic (2 x 8 MiB + 8 x 8 MiB = 83.89 MB), not a measured peak. The measurement that settles
+it: peak RSS of the Rust daemon with 8 concurrent 8 MiB incompressible PUTs and a 30k-entry index,
+against 128 MB.
+
+### A10.5 Constants without measurements (DESIGN 7.6 line 650; 9.1 line 786; 10.3 line 871; 11.2 line 926; 15 line 1081)
+
+Values unchanged. Corrected reading: each of these is `[default, unmeasured]`: the 3 h park span
+(line 926; a reviewer's "for example", `challenge/04`, no measurement), 7-day hint retention (lines
+650, 786), the 2 and 8 concurrency limits (A10.4), and the 80% coverage floor (line 1081 as
+replaced by A9; actual 97.03%, so it cannot catch a fall from 97 to 81, and no measurement supports
+80; it is a backstop). The 64 MiB hint-read bound (`daemon.rs` `MAX_HINT_FILE`) and 64 MiB state
+body bound (`state.rs` `MAX_FILE_BYTES`) appear only in code and have no evidence.
+
+The "every 15 min" safety reconcile (line 871) is `[default]`, backed by walk cost only. New dated
+evidence (2026-11-10, W4 Q3): notify 8.2.0 with `RecursiveMode::Recursive` on FSEvents, 5 runs
+per configuration, each file created, appended and renamed. 1k files: no loss. 10k files in about
+0.8 s: loss in 2 of 5 runs (15 and 309 files, up to 3.09%). 50k files in about 4.5 s: loss in 3 of 5
+runs (up to 0.23%). Every run with missing files also had at least one rescan flag and vice versa;
+no silent loss in 50 runs. That supports `Rescan -> ReconcileAll` as the loss cover and makes the
+timer a backstop. Limits: one Mac, 5 runs per configuration, FSEvents only, not exercised through
+the real scheduler; a directory moved in with 1,000 children yielded no child events (found only
+by a rescan of that directory or the timer).
+
+### A10.6 `sync_all` is F_FULLFSYNC (DESIGN 9.2 lines 802-811)
+
+Added evidence (2026-11-10, W4 Q1, rustc 1.99.0 as pinned in `flake.nix`): std 1.99.0
+`library/std/src/sys/fs/unix.rs` `os_fsync` is `libc::fcntl(fd, libc::F_FULLFSYNC)` under
+`target_vendor = "apple"`. A dyld `__interpose` of `fcntl` and `fsync` showed 43 `F_FULLFSYNC`
+calls for 43 `sync_all`/`sync_data` calls, including a directory handle, and no plain `fsync`.
+Limits: shows the call is issued and returns 0, not that media is durable; APFS only.
+
+### A10.7 Open: slice 2b cross-check and section 18 criteria (DESIGN 17 lines 1206-1208; 18 lines 1216-1231)
+
+Text affected: "Sessions the Go candidate captured and Rust did not are counted as a coverage
+cross-check" (slice 2b), and section 18 as a whole. After A0 and A2 the Go writers are stopped and
+the old archive is deleted (2026-11-09), before any Rust acceptance. The cross-check therefore
+cannot run as written, and section 18 has no numeric exit criteria and no abort triggers (a search
+of DESIGN.md and this file finds none). Nothing is invented here; both are open items needing an
+operator decision. Candidate substitutes found in the repo, not chosen: the local Go spool that the
+still-installed hooks write (A0; `docs/session-capture-handoff.md`, cap `max_spool_bytes`); local
+sources on both hosts, left untouched by the deletion; the `transform(local)` versus restored
+comparison already in slice 2b (shares the transform code with the writer, so it cannot catch a
+transform fault); the Rust daemon's own counters (A1: `Replay{...}`, parked, oldest uncaptured age).
+
+### A10.8 Monthly cargo-mutants is not implemented; flake rates (DESIGN 15 line 1084)
+
+Wrong text: "Monthly: `cargo mutants` on `memory-core`." reads as existing. Nothing in
+`rust/scripts/gates.sh`, `.github/workflows/rust.yml` or any schedule runs it. Corrected reading:
+not yet implemented. The only mutation evidence is the hand-written checkers. First measured
+baseline, 2026-11-10, cargo-mutants 27.1.0, 500 cases, example tests only (303 tests, `hegel_` and
+`proptest_` excluded), 222 of 223 mutants finished (disk full): `capture.rs` 62.5% (35 caught, 21
+missed, 14 unviable), `commit.rs` 89.5%, `state.rs` 91.6%, total 81.9%. `memory-core` (1,157
+mutants) not run. Property flake rates (W2, 500-case runs): `proptest_daemon_state_machine` failed
+5 of 59 runs (8.5%, Wilson 3.7% to 18.4%), always the `rewrite-mid-file` coverage guard, so about
+8.5% of gate runs fail by chance; a plain default-case run fails about 62%. That is why the guard
+shapes are being made deterministic.
+
+### A10.9 Gate descriptions (quality-gates.md, rust/README.md)
+
+At `aa04050`, gates `05-hegel` and `06-proptest` run every `hegel_` and `proptest_` test in the
+workspace (`cargo test --workspace --locked hegel_` and `proptest_`). The xtask cli test no longer
+runs `xtask schemas` in write mode, so `07-schema` (`--check`) can fail. The 391/391 nextest count
+is from `d8e80a6`; the test review removed 24 tests and merged 9, so the count changed and has
+not been re-recorded. Both documents are updated.

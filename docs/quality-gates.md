@@ -29,8 +29,8 @@ nix develop --max-jobs 2 --cores 2 --command sh -c \
 ```
 
 The wrapper runs format, strict clippy, dependency/license/security and pure-core
-dependency bans, nextest, compile-fail doctests, Hegel, proptest, the actual production
-window-comparison mutation, the three-invariant mutation check (`scripts/check-mutations.py`: a blind/latest-ETag `If-Match`, a local index advanced after a commit that did not land, and a skipped credential denylist, each applied once to production source in one private copy and required to fail an independent-oracle test; see `crates/memory/tests/mutation_daemon.rs`), schema drift, coverage and the deliberate-lint checker. It records seeds and each command's exact status under `rust/artifacts/`;
+dependency bans, nextest, compile-fail doctests, Hegel (every `hegel_` test in the workspace), proptest (every `proptest_` test in the workspace), the actual production
+window-comparison mutation, the three-invariant mutation check (`scripts/check-mutations.py`: a blind/latest-ETag `If-Match`, a local index advanced after a commit that did not land, and a skipped credential denylist, each applied once to production source in one private copy and required to fail an independent-oracle test; see `crates/memory/tests/mutation_daemon.rs`), schema drift (the xtask cli test no longer writes schemas, so `cargo xtask schemas --check` can fail), coverage and the deliberate-lint checker. It records seeds and each command's exact status under `rust/artifacts/`;
 a failed or unavailable gate makes the aggregate fail. CI uses at least 500 cases,
 local slice acceptance requires 2,000. A scaffold/property pass is not proof of
 the daemon, real R2 semantics, privacy at the actual store sink, restore/import,
@@ -40,7 +40,7 @@ not a ratchet of the latest measurement; evidence for invariants comes from the
 independent-oracle properties, their coverage guards and the production mutation checks.
 It is never lowered to make a run pass. The earlier 98% floor was the scaffold's first
 measurement. The latest source-bound integrated run (review and fix round, 2026-11-10,
-`d8e80a6`) passed all 13 subgates at **97.03%** (5,595/5,766 lines), 391/391 nextest, 12
+`d8e80a6`) passed all 13 subgates at **97.03%** (5,595/5,766 lines), 391/391 nextest (before the 2026-11-10 test review removed 24 tests and merged 9; not re-counted), 12
 compile-fail doctests, 2,000 cases, seed 730213; see
 [its evidence](rust-rewrite/implementation/evidence/13-review-fix-round/). Gate 8
 (98.3173%, seed 730210, [round 10](rust-rewrite/implementation/evidence/12-slice2-round10/))
