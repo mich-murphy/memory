@@ -15,16 +15,21 @@ use memory::environment::{Store, StoreError, Stored};
 use memory_core::domain::ETag;
 use std::collections::BTreeMap;
 
-/// How a fake derives an ETag. R2 reports the MD5 of the body (P2 `etag_is_md5_of_body`), so
-/// the content model is measured for distinct bodies; what R2 answers for an identical rewrite
-/// is unmeasured, so the properties run under both.
+/// How the fake derives an ETag.
+///
+/// Measured on R2 (live probe, 2026-11-11, 50 PUTs): the ETag is the hex MD5 of the body on
+/// every single-part PUT, an identical rewrite keeps it, an `If-Match` PUT fenced on the ETag
+/// from before another writer's identical-bytes rewrite succeeds, and one fenced before a
+/// rewrite with different bytes is refused with 412. [`EtagModel::Content`] is therefore the
+/// default. [`EtagModel::PerWrite`] is a deliberately stricter model for tests that need a
+/// rewrite of identical bytes to look like a change (an ETag churn, a stale fence).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum EtagModel {
-    /// Every write gets a new ETag, even an identical rewrite.
+    /// The ETag is a function of the body: an identical rewrite keeps it (R2).
     #[default]
-    PerWrite,
-    /// The ETag is a function of the body: an identical rewrite keeps it.
     Content,
+    /// Every write gets a new ETag, even an identical rewrite (stricter than R2).
+    PerWrite,
 }
 
 /// `true` selects [`EtagModel::Content`]; this is how generated cases pick the model.

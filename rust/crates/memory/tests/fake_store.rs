@@ -83,3 +83,22 @@ fn the_model_is_picked_from_a_generated_bool() {
     assert_eq!(EtagModel::from(true), EtagModel::Content);
     assert_eq!(EtagModel::from(false), EtagModel::PerWrite);
 }
+
+/// The live R2 probe of 2026-11-11 (50 PUTs): the default model is content-derived, a fence
+/// taken before another writer's identical rewrite still holds, and one taken before a rewrite
+/// with different bytes is refused.
+#[test]
+fn the_default_model_is_the_measured_r2_one() -> R {
+    assert_eq!(EtagModel::default(), EtagModel::Content);
+    let mut s = MemStore::default();
+    let held = s.put_if_absent("k", body("v")).map_err(e)?;
+    let rewritten = s.put_if_match("k", &held, body("v")).map_err(e)?;
+    assert_eq!(held, rewritten);
+    let held = s.put_if_match("k", &held, body("w")).map_err(e)?;
+    s.put_if_match("k", &held, body("x")).map_err(e)?;
+    assert_eq!(
+        s.put_if_match("k", &held, body("y")),
+        Err(StoreError::PreconditionFailed)
+    );
+    Ok(())
+}

@@ -1665,6 +1665,9 @@ fn unlanded_5xx_reads_base_unchanged_and_retries_from_step_three() -> R {
 #[test]
 fn etag_churn_is_base_unchanged_then_committed_with_the_fresh_etag() -> R {
     let mut rig = Rig::two_commits()?;
+    // An identical-bytes rewrite that changes the ETag cannot happen on R2 (content-derived
+    // ETags); this test needs the stricter per-write model to churn it.
+    rig.store.mem.model = EtagModel::PerWrite;
     rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
     rig.store.arm(Op::Put(Kind::Current), Effect::Churn);
     let landed = rig.landed()?;
@@ -1676,6 +1679,9 @@ fn etag_churn_is_base_unchanged_then_committed_with_the_fresh_etag() -> R {
 #[test]
 fn base_unchanged_retries_exactly_four_times_then_retries_the_capture() -> R {
     let mut rig = Rig::two_commits()?;
+    // An identical-bytes rewrite that changes the ETag cannot happen on R2 (content-derived
+    // ETags); this test needs the stricter per-write model to churn it.
+    rig.store.mem.model = EtagModel::PerWrite;
     rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
     let head = need(rig.base.clone(), "base")?.position.manifest;
     let before = rig.store.count(Op::Put(Kind::Current));
