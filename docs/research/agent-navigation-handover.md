@@ -19,7 +19,7 @@ Original goal: analyse repeated file discovery in **R2-collected** BusinessCraft
 - Historical task mining must use **R2-derived history**, not local Pi history.
 - New experimental session logs were used only to measure the experiments themselves.
 - Prompt caching in `pi-claude-sdk` was already addressed before this work. Large resumed sessions/compactions remain a separate context-cost concern.
-- `dev-01` is accessed as **`ssh bc-01`** from this machine.
+- `dev-01` is accessed as **`ssh dev-01`** from this machine.
 
 ## Checkouts and authoritative files
 
