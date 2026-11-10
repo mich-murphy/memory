@@ -1680,3 +1680,69 @@ proptest! {
         prop_assert!(r.is_ok(), "{:?}", r);
     }
 }
+
+#[test]
+fn root_relative_path_length_limit_is_exactly_4096_bytes() -> TestResult {
+    // Mutant: `raw.len() > MAX_PATH` -> `>=`.
+    let mut parts = vec!["a".repeat(100); 40];
+    parts.push("b".repeat(56));
+    let at_limit = parts.join("/");
+    ensure!(
+        at_limit.len() == 4096,
+        "fixture is {} bytes",
+        at_limit.len()
+    );
+    ensure!(
+        RootRelativePath::parse(&at_limit).is_ok(),
+        "4096 bytes must parse"
+    );
+    let over = format!("{at_limit}b");
+    ensure!(
+        RootRelativePath::parse(&over) == Err(InputError::TooLong),
+        "4097 bytes must be TooLong"
+    );
+    Ok(())
+}
+
+#[test]
+fn malformed_pi_stems_and_cwd_directories_are_not_sessions() -> TestResult {
+    // Mutants: each `&&` -> `||` in `pi_stem_ok` (a stem needs a uuid AND a timestamp date
+    // AND a non-empty body of timestamp characters) and `len > 4` -> `>= 4` in `pi_cwd`.
+    let ok = format!("2026-01-02T03-04-05.123Z_{UA}");
+    let stems = [
+        format!("2026-01-02X03-04-05.123Z_{UA}"),
+        format!("2026-01-02T03-04-05.123Z_{}", "z".repeat(36)),
+        format!("2026-01-02T_{UA}"),
+        format!("2026-01-02T03 04_{UA}"),
+    ];
+    let roots = make_roots(Home::Pi, "r1", &[], false)?;
+    let session = |path: &str| -> Result<bool, Box<dyn std::error::Error>> {
+        Ok(matches!(
+            locate(&RootRelativePath::parse(path)?, &roots),
+            Located::Source {
+                kind: SourceKind::PiSession,
+                role: Role::Main,
+                ..
+            }
+        ))
+    };
+    ensure!(
+        session(&format!("{ok}.jsonl"))?,
+        "the well-formed stem is a session"
+    );
+    for stem in &stems {
+        ensure!(
+            !session(&format!("{stem}.jsonl"))?,
+            "{stem} must not be a session"
+        );
+    }
+    ensure!(
+        session(&format!("--c--/{ok}.jsonl"))?,
+        "a 5-byte cwd directory is accepted"
+    );
+    ensure!(
+        !session(&format!("----/{ok}.jsonl"))?,
+        "a 4-byte `----` is not a cwd directory"
+    );
+    Ok(())
+}
