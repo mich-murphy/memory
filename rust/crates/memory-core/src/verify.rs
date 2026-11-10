@@ -84,4 +84,3 @@ pub fn classify(
         Verdict::Foreign { theirs: current }
     }
 }
-
