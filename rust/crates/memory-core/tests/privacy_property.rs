@@ -783,3 +783,76 @@ fn transcripts_and_other_known_sources_are_not_scrubbed() {
     );
     assert_eq!(body.map(|b| b.bytes().to_vec()).ok(), Some(known.to_vec()));
 }
+
+// ---------- named regressions found by the mutation baseline ----------
+
+fn publish_config(name: &str, doc: &str) -> Result<Vec<u8>, Withheld> {
+    publish(config_facts(name, 1), doc.as_bytes()).map(|body| body.bytes().to_vec())
+}
+
+fn admitted(path: &str, profile: Profile) -> Result<privacy::AdmittedSource, Withheld> {
+    match privacy::admit(&context(), facts(vec![path.to_owned()], profile, 1)) {
+        Admission::Allow(source) => Ok(source),
+        _ => Err(Withheld::Admission),
+    }
+}
+
+#[test]
+fn only_unrecognized_non_text_sources_are_prefix_stable() -> Result<(), Withheld> {
+    // Mutants: `prefix_stable` constant true/false, `&&` -> `||`, either `!` deleted. A shell
+    // that transforms a delta alone for a protected document would leak what whole-document
+    // scrubbing removes.
+    assert!(admitted("/f/session.jsonl", Profile::Transcript)?.prefix_stable());
+    assert!(admitted("/f/known.data", Profile::OtherKnown)?.prefix_stable());
+    assert!(!admitted("/f/settings.json", Profile::OtherKnown)?.prefix_stable());
+    assert!(!admitted("/f/session.jsonl", Profile::TextAsset)?.prefix_stable());
+    assert!(!admitted("/f/session.jsonl", Profile::Config)?.prefix_stable());
+    assert!(!admitted("/f/config.toml", Profile::Config)?.prefix_stable());
+    Ok(())
+}
+
+#[test]
+fn protected_document_limit_is_exactly_eight_mib() {
+    // Mutant: `bytes.len() > MAX_PROTECTED_BYTES` -> `>=`. The limit is on the raw input and
+    // never falls back to publishing raw bytes.
+    let max = privacy::MAX_PROTECTED_BYTES;
+    let frame = r#"{"n_pad":""#.len() + r#""}"#.len();
+    let doc = |len: usize| format!(r#"{{"n_pad":"{}"}}"#, "x".repeat(len - frame));
+    let at_limit = doc(max);
+    assert_eq!(at_limit.len(), max);
+    assert_eq!(
+        publish_config("settings.json", &at_limit).map(|b| b.len()),
+        Ok(max)
+    );
+    assert_eq!(
+        publish_config("settings.json", &doc(max + 1)),
+        Err(Withheld::Transform(Reason::SourceLimit))
+    );
+}
+
+#[test]
+fn url_with_a_malformed_percent_escape_is_withheld_whole() {
+    // Mutant: `valid_escapes` accepts an escape when only one of its two digits is hex.
+    let url = |value: &str| {
+        let doc = format!(r#"{{"mcpServers":{{"a":{{"url":"{value}"}}}}}}"#);
+        let out = publish_config("mcp.json", &doc).map_err(|why| format!("{why:?}"))?;
+        let parsed: Value = serde_json::from_slice(&out).map_err(|e| e.to_string())?;
+        parsed
+            .pointer("/mcpServers/a/url")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| "no url".to_owned())
+    };
+    assert_eq!(
+        url("https://h.example/a%41b"),
+        Ok("https://h.example/a%41b".to_owned())
+    );
+    for bad in [
+        "https://h.example/a%4zb",
+        "https://h.example/a%z4b",
+        "https://h.example/a%zzb",
+        "https://h.example/a%4",
+    ] {
+        assert_eq!(url(bad), Ok("[redacted]".to_owned()), "{bad}");
+    }
+}
