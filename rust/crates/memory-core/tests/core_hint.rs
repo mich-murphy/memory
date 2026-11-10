@@ -5,6 +5,7 @@ use memory_core::domain::{Agent, SessionId};
 use memory_core::hint::*;
 use memory_core::privacy::sanitize_launch;
 use proptest::prelude::*;
+use std::collections::BTreeMap;
 
 type R = Result<(), String>;
 
@@ -864,6 +865,294 @@ fn check_canaries(n: u64, session: u8) -> R {
         return Err(s("oracle is vacuous"));
     }
     Ok(())
+}
+
+// ---------- generated launch records (DESIGN.md 8.4 oracle, independent of `safe()`) ----------
+//
+// Each generated piece carries its own expectation, authored from the 8.4 text: a value
+// flag followed by a value that is unsafe BY CONSTRUCTION (whitespace, leading dash, shell
+// metacharacters, a secret-name segment, over-long or non-ASCII) must publish
+// `[redacted]`; a value from the safe vocabulary must publish verbatim. The expected argv is
+// compared exactly, so neither a leak nor an over-redaction passes.
+
+const DESIGN_VALUE_FLAGS: [&str; 9] = [
+    "--model",
+    "-m",
+    "--provider",
+    "--permission-mode",
+    "--session-id",
+    "--session",
+    "--config",
+    "--config-dir",
+    "--cwd",
+];
+const DESIGN_ENV_NAMES: [&str; 9] = [
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "CLAUDE_CONFIG_DIR",
+    "MAX_THINKING_TOKENS",
+    "MAX_MCP_OUTPUT_TOKENS",
+    "DISABLE_PROMPT_CACHING",
+];
+const NOT_ALLOWLISTED_ENV: [&str; 7] = [
+    "UNKNOWN",
+    "PROMPT_TEXT",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "anthropic_model",
+    "ANTHROPIC_MODEL_X",
+];
+const SAFE_VOCABULARY: [&str; 6] = [
+    "opus",
+    "claude-sonnet-4.5",
+    "a/b:c@d+e",
+    "gpt5",
+    "opt/cfg/dir",
+    "bypassPermissions",
+];
+const KEPT_FLAGS: [&str; 4] = ["--resume", "--continue", "--no-session", "--full-auto"];
+const UNKNOWN_FLAGS: [&str; 5] = ["--prompt", "--api-key", "--system-prompt", "--token", "-p"];
+const REDACTED: &str = "[redacted]";
+
+fn unsafe_value(c: &str, d: u8) -> String {
+    match d % 12 {
+        0 => format!("{c} tail"),
+        1 => format!("-{c}"),
+        2 => format!(".{c}"),
+        3 => format!("{c}$HOME"),
+        4 => format!("{c}-token"),
+        5 => format!("{c}_api_key"),
+        6 => format!("{c}.secret"),
+        7 => format!("my_passwd_{c}"),
+        8 => format!("{c}{}", "a".repeat(256)),
+        9 => format!("{c}\u{e9}"),
+        10 => format!("{c}\n"),
+        _ => format!("{c};rm"),
+    }
+}
+fn nth(items: &[&str], d: u8) -> String {
+    items
+        .get(usize::from(d) % items.len())
+        .map_or_else(String::new, |item| (*item).to_owned())
+}
+
+struct Expected {
+    argv_in: Vec<String>,
+    argv_out: Vec<String>,
+    env_in: Vec<String>,
+    env_out: BTreeMap<String, String>,
+    env_offered: BTreeMap<String, Vec<String>>,
+    canaries: Vec<String>,
+}
+
+/// One argv piece: its input entries and the entries DESIGN 8.4 says are published.
+fn argv_piece(kind: u8, d: u8, c: &str) -> (Vec<String>, Vec<String>) {
+    let flag = nth(&DESIGN_VALUE_FLAGS, d);
+    let safe = nth(&SAFE_VOCABULARY, d);
+    match kind % 9 {
+        0 => (
+            vec![flag.clone(), unsafe_value(c, d)],
+            vec![flag, s(REDACTED)],
+        ),
+        1 => (
+            vec![format!("{flag}={}", unsafe_value(c, d))],
+            vec![flag, s(REDACTED)],
+        ),
+        2 => (vec![flag.clone(), safe.clone()], vec![flag, safe]),
+        3 => (vec![format!("{flag}={safe}")], vec![flag, safe]),
+        4 => (
+            vec![nth(&UNKNOWN_FLAGS, d), s(c)],
+            vec![s(REDACTED), s(REDACTED)],
+        ),
+        5 => (vec![s(c)], vec![s(REDACTED)]),
+        6 => (
+            vec![format!("{}={c}", nth(&KEPT_FLAGS, d))],
+            vec![s(REDACTED)],
+        ),
+        7 => (vec![nth(&KEPT_FLAGS, d)], vec![nth(&KEPT_FLAGS, d)]),
+        _ => (
+            vec![format!(
+                r#"{{"headers":{{"Authorization":"Bearer {c}"}},"env":{{"API_KEY":"{c}"}}}}"#
+            )],
+            vec![s(REDACTED)],
+        ),
+    }
+}
+
+fn expected_launch(
+    n: u64,
+    argv_ops: &[u16],
+    env_ops: &[u16],
+    program: u8,
+    dangling: bool,
+) -> Expected {
+    let mut canaries = Vec::new();
+    let mut fresh = |k: usize| {
+        let c = canary(n, u8::try_from(k % 200).unwrap_or(0));
+        canaries.push(c.clone());
+        c
+    };
+    let (prog_in, prog_out) = match program % 5 {
+        0 => (s("/opt/bin/claude"), s("claude")),
+        1 => (format!("/x/{}/node", fresh(0)), s("node")),
+        2 => (format!("{}/pi", fresh(0)), s("pi")),
+        3 => (fresh(0), s(REDACTED)),
+        _ => (format!("/usr/bin/{}", fresh(0)), s(REDACTED)),
+    };
+    let mut argv_in = vec![prog_in];
+    let mut argv_out = vec![prog_out];
+    for (i, op) in argv_ops.iter().enumerate() {
+        let [kind, d] = op.to_le_bytes();
+        let (entries_in, entries_out) = argv_piece(kind, d, &fresh(i + 1));
+        if argv_in.len() + entries_in.len() > 32 {
+            // Past the 32-entry bound: everything further must be dropped, canaries too.
+            argv_in.extend(entries_in);
+            continue;
+        }
+        argv_in.extend(entries_in);
+        argv_out.extend(entries_out);
+    }
+    if dangling && argv_in.len() < 32 {
+        argv_in.push(s("--model"));
+        argv_out.extend([s("--model"), s(REDACTED)]);
+    }
+    argv_out.truncate(32);
+    let mut env_in = Vec::new();
+    let mut env_out: BTreeMap<String, String> = BTreeMap::new();
+    let mut env_offered: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (i, op) in env_ops.iter().take(12).enumerate() {
+        let [kind, d] = op.to_le_bytes();
+        let name = nth(&DESIGN_ENV_NAMES, d);
+        let c = fresh(100 + i);
+        match kind % 6 {
+            0 => env_in.push(format!("{name}={}", unsafe_value(&c, d))),
+            1 => env_in.push(format!("{}={c}", nth(&NOT_ALLOWLISTED_ENV, d))),
+            2 | 3 => {
+                env_in.push(format!("{name}={}", nth(&SAFE_VOCABULARY, d)));
+                env_offered
+                    .entry(name.clone())
+                    .or_default()
+                    .push(nth(&SAFE_VOCABULARY, d));
+                env_out.insert(name, nth(&SAFE_VOCABULARY, d));
+            }
+            4 => env_in.push(c),
+            _ => env_in.push(name),
+        }
+    }
+    Expected {
+        argv_in,
+        argv_out,
+        env_in,
+        env_out,
+        env_offered,
+        canaries,
+    }
+}
+
+fn check_generated_launch(
+    n: u64,
+    argv_ops: &[u16],
+    env_ops: &[u16],
+    program: u8,
+    dangling: bool,
+) -> R {
+    let ex = expected_launch(n, argv_ops, env_ops, program, dangling);
+    let launch = sanitize_launch(&ex.argv_in, &ex.env_in);
+    if launch.argv() != ex.argv_out.as_slice() {
+        return Err(format!(
+            "argv {:?} != expected {:?}",
+            launch.argv(),
+            ex.argv_out
+        ));
+    }
+    if ex.env_out.len() <= 8 {
+        if launch.env() != &ex.env_out {
+            return Err(format!(
+                "env {:?} != expected {:?}",
+                launch.env(),
+                ex.env_out
+            ));
+        }
+    } else {
+        // DESIGN 8.4: at most 8 names; which 8 is not specified, so only the bound and
+        // "every published pair was a safe offer" are asserted.
+        let offered_only = launch.env().iter().all(|(name, value)| {
+            ex.env_offered
+                .get(name)
+                .is_some_and(|values| values.contains(value))
+        });
+        if launch.env().len() != 8 || !offered_only {
+            return Err(format!("env bound violated: {:?}", launch.env()));
+        }
+    }
+    let parsed = input(
+        Agent::Claude,
+        HintEvent::SessionStart,
+        "sess",
+        "/w",
+        "/t.jsonl",
+    )?;
+    let line = build_line(&parsed, Some(&launch)).map_err(|e| e.to_string())?;
+    for needle in &ex.canaries {
+        if find(&line, needle.as_bytes()) || find(&line, needle.to_lowercase().as_bytes()) {
+            return Err(format!("canary {needle} reached the hint line"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn generated_launch_fixed_shapes() {
+    // Every argv kind x decoration and every env kind, so a plain run fails without
+    // generation (mutant: `safe()` always true).
+    let argv: Vec<u16> = (0..9u16)
+        .flat_map(|k| (0..12u16).map(move |d| (d << 8) | k))
+        .collect();
+    for chunk in argv.chunks(12) {
+        assert_eq!(check_generated_launch(7, chunk, &[], 0, false), Ok(()));
+    }
+    let env: Vec<u16> = (0..6u16)
+        .flat_map(|k| (0..12u16).map(move |d| (d << 8) | k))
+        .collect();
+    for chunk in env.chunks(8) {
+        assert_eq!(check_generated_launch(7, &[], chunk, 1, true), Ok(()));
+    }
+    // Nine distinct allowlisted names with safe values: the ninth is dropped (cap of 8).
+    let nine: Vec<u16> = (0..9u16).map(|d| (d << 8) | 2).collect();
+    assert_eq!(check_generated_launch(7, &[], &nine, 0, false), Ok(()));
+    // 40 single-entry pieces: the 32-entry bound drops the tail, canaries included.
+    let long = vec![5u16; 40];
+    assert_eq!(check_generated_launch(7, &long, &[], 0, true), Ok(()));
+}
+
+#[hegel::test]
+fn hegel_generated_launch_records_publish_no_canary(tc: TestCase) {
+    let n = tc.draw(gs::integers::<u64>());
+    let argv_ops: Vec<u16> = tc.draw(gs::vecs(gs::integers::<u16>()).max_size(40));
+    let env_ops: Vec<u16> = tc.draw(gs::vecs(gs::integers::<u16>()).max_size(12));
+    let program = tc.draw(gs::integers::<u8>());
+    let dangling = tc.draw(gs::booleans());
+    assert_eq!(
+        check_generated_launch(n, &argv_ops, &env_ops, program, dangling),
+        Ok(())
+    );
+}
+
+proptest! {
+    #[test]
+    fn proptest_generated_launch_records_publish_no_canary(
+        n in any::<u64>(),
+        argv_ops in prop::collection::vec(any::<u16>(), 0..40),
+        env_ops in prop::collection::vec(any::<u16>(), 0..12),
+        program in any::<u8>(),
+        dangling in any::<bool>(),
+    ) {
+        prop_assert_eq!(check_generated_launch(n, &argv_ops, &env_ops, program, dangling), Ok(()));
+    }
 }
 
 #[test]
