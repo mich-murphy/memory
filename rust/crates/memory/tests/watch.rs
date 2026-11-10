@@ -254,7 +254,7 @@ struct Model {
 /// Kind (9 shapes), owner index, and a gap that is below the quiet window three times in
 /// four, so runs of signals reach the 300 s cap without ever being quiet for 60 s.
 fn decode(n: u32) -> (u32, usize, u64) {
-    let wide = (n / 24) % 4 == 0;
+    let wide = (n / 24).is_multiple_of(4);
     let gap = if wide { (n / 96) % 201 } else { (n / 96) % 50 };
     (
         n % 9,
