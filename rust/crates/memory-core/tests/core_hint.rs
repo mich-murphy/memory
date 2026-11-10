@@ -1349,6 +1349,68 @@ fn opaque_run_and_bracket_suffix_bounds_are_exact() {
 }
 
 #[test]
+fn non_ascii_lookalikes_are_not_published_in_any_slot() {
+    // Mutant: `(?i-u:` restored to Unicode-aware `(?i:` in SWITCH_VALUE makes the
+    // U+017F (long s) spelling of `false` match, so the first two switch assertions fail.
+    for value in [
+        "fal\u{17f}e",
+        "FAL\u{17f}E",
+        "\u{ff54}rue",
+        "tru\u{212a}",
+        "\u{ff10}",
+        "\u{661}",
+    ] {
+        assert_eq!(env_value("DISABLE_PROMPT_CACHING", value), None, "{value}");
+    }
+    // The ASCII spellings, any case, stay accepted.
+    for value in ["0", "1", "true", "TRUE", "True", "false", "FaLsE"] {
+        assert_eq!(
+            env_value("DISABLE_PROMPT_CACHING", value).as_deref(),
+            Some(value)
+        );
+    }
+    for value in [
+        "claude-\u{17f}onnet",
+        "opu\u{17f}",
+        "mod\u{e9}l",
+        "\u{ff21}bc",
+    ] {
+        assert_eq!(env_value("ANTHROPIC_MODEL", value), None, "{value}");
+        assert_eq!(
+            argv_after_model("--model", value),
+            ["claude", "--model", "[redacted]"],
+            "{value}"
+        );
+    }
+    for value in ["anthrop\u{131}c", "\u{17f}"] {
+        assert_eq!(
+            argv_after_model("--provider", value),
+            ["claude", "--provider", "[redacted]"],
+            "{value}"
+        );
+    }
+    for value in ["pla\u{131}n", "accept\u{17f}"] {
+        assert_eq!(
+            argv_after_model("--permission-mode", value),
+            ["claude", "--permission-mode", "[redacted]"],
+            "{value}"
+        );
+    }
+    for value in ["\u{ff11}\u{ff12}", "\u{661}\u{662}"] {
+        assert_eq!(env_value("MAX_THINKING_TOKENS", value), None, "{value}");
+        assert_eq!(env_value("MAX_MCP_OUTPUT_TOKENS", value), None, "{value}");
+    }
+    for value in ["roll\u{17f}", "\u{ff41}/b"] {
+        assert_eq!(
+            argv_after_model("--session-id", value),
+            ["claude", "--session-id", "[redacted]"],
+            "{value}"
+        );
+        assert_eq!(env_value("CLAUDE_CONFIG_DIR", value), None, "{value}");
+    }
+}
+
+#[test]
 fn legitimate_launch_values_are_published_verbatim() {
     let model = [
         "opus",

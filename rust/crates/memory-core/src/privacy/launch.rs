@@ -71,7 +71,7 @@ const MODEL_VALUE: &str = r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}(\[[0-9a-z]{1,8
 const PROVIDER_VALUE: &str = r"^[A-Za-z][A-Za-z0-9._-]{0,63}$";
 const MODE_VALUE: &str = r"^[A-Za-z][A-Za-z-]{0,31}$";
 const COUNT_VALUE: &str = r"^[0-9]{1,9}$";
-const SWITCH_VALUE: &str = r"^(?i:0|1|true|false)$";
+const SWITCH_VALUE: &str = r"^(?i-u:0|1|true|false)$";
 /// A token that starts with one of these (compared case-folded) is a provider key.
 const KEY_PREFIXES: [&str; 17] = [
     "sk-",
