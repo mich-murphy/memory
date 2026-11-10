@@ -621,3 +621,30 @@ proptest::proptest! {
         proptest::prop_assert_eq!(doc.get("unrelated").and_then(serde_json::Value::as_str), Some(safe.as_str()));
     }
 }
+
+#[test]
+fn text_guard_unterminated_reference_quote_and_one_mib_boundary_are_exact()
+-> Result<(), Box<dyn std::error::Error>> {
+    // Mutant: `complete && !quoted` -> `complete || !quoted`. An unterminated double quote
+    // around a reference is not a reference; the guard must treat it as a literal.
+    let source = admitted(&["SKILL.md"], Profile::TextAsset)?;
+    assert!(matches!(
+        privacy::transform(&source, b"export API_KEY=\"${HOME}"),
+        Err(Reason::SecretInText)
+    ));
+    // Mutants on `bytes.len() > 1024 * 1024`: the guard scans exactly 1 MiB and skips one
+    // byte more (a documented bound, not a fail-open accident).
+    let one_mib = 1024 * 1024;
+    let mut scanned = b"export API_KEY=literal\n".to_vec();
+    scanned.resize(one_mib, b' ');
+    assert!(matches!(
+        privacy::transform(&source, &scanned),
+        Err(Reason::SecretInText)
+    ));
+    scanned.push(b' ');
+    assert_eq!(
+        body(&["SKILL.md"], Profile::TextAsset, &scanned)?.bytes(),
+        scanned.as_slice()
+    );
+    Ok(())
+}
