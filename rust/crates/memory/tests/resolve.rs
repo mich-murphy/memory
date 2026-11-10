@@ -1,11 +1,10 @@
 //! Resolver tests (slice 2): synthetic temp trees only; no real agent directories.
-use memory::capture::{Env, Locals, Published, capture};
+use memory::capture::{Env, Locals, capture};
 use memory::commit::{Base, commit};
 use memory::daemon::Sources;
-use memory::environment::{Store, StoreError, Stored};
 use memory::realfs::{RealFs, WalkLimits, walk};
 use memory::resolve::{MAX_HOPS, SharedFs, WalkSources, resolve_facts, to_source};
-use memory_core::domain::{Agent, ArchiveId, ETag, MachineId, Owner};
+use memory_core::domain::{Agent, ArchiveId, MachineId, Owner};
 use memory_core::locator::{Located, RootLayout, RootNamespace, RootRelativePath, Roots, locate};
 use memory_core::manifest::{Header, OwnerState, Timestamp, Writer};
 use memory_core::privacy::{Admission, PolicyContext, Reason, UnknownReason, admit, rules_digest};
@@ -14,6 +13,10 @@ use std::fs;
 use std::os::unix::fs::{MetadataExt, symlink};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+#[path = "common/store.rs"]
+mod mem_store;
+use mem_store::MemStore;
 
 type R<T = ()> = Result<T, Box<dyn std::error::Error>>;
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -273,58 +276,6 @@ fn shared_fs_reports_busy_instead_of_panicking() -> R {
     assert!(fs_.stat_len(h).is_err());
     assert!(fs_.read(h, 0..1).is_err());
     Ok(())
-}
-
-#[derive(Default)]
-struct MemStore {
-    objects: BTreeMap<String, (Vec<u8>, u64)>,
-    version: u64,
-}
-impl MemStore {
-    fn tag(v: u64) -> Result<ETag, StoreError> {
-        ETag::try_from(format!("\"v{v}\"")).map_err(|_| StoreError::Server)
-    }
-    fn put(
-        &mut self,
-        key: &str,
-        body: Published,
-        fence: Option<&ETag>,
-        create: bool,
-    ) -> Result<ETag, StoreError> {
-        let existing = self.objects.get(key).map(|(_, v)| *v);
-        match (create, existing) {
-            (true, Some(_)) => return Err(StoreError::PreconditionFailed),
-            (false, None) => return Err(StoreError::NotFound),
-            (false, Some(v)) if Some(&Self::tag(v)?) != fence => {
-                return Err(StoreError::PreconditionFailed);
-            }
-            _ => {}
-        }
-        self.version += 1;
-        self.objects
-            .insert(key.to_owned(), (body.as_ref().to_vec(), self.version));
-        Self::tag(self.version)
-    }
-}
-impl Store for MemStore {
-    fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
-        self.put(key, body, None, true)
-    }
-    fn put_if_match(
-        &mut self,
-        key: &str,
-        etag: &ETag,
-        body: Published,
-    ) -> Result<ETag, StoreError> {
-        self.put(key, body, Some(etag), false)
-    }
-    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
-        let (b, v) = self.objects.get(key).ok_or(StoreError::NotFound)?;
-        Ok(Stored {
-            body: b.clone(),
-            etag: Self::tag(*v)?,
-        })
-    }
 }
 
 fn contains(store: &MemStore, needle: &[u8]) -> bool {

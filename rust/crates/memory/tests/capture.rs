@@ -1,113 +1,29 @@
 //! Capture wiring table tests (slice 2). Synthetic in-memory filesystem and fake store only.
 //! Not the real filesystem, not zstd, not R2, not the daemon loop.
-use memory::capture::{Env, Locals, Published, Source, SourceOutcome, attach_launches, capture};
+use memory::capture::{Env, Locals, Source, SourceOutcome, attach_launches, capture};
 use memory::commit::Commit;
 use memory::commit::{Base, commit};
-use memory::environment::{FileSystem, Stat, Store, StoreError, Stored};
+use memory::environment::{FileSystem, Stat};
 use memory_core::domain::{
-    Agent, ArchiveId, Birth, ETag, FileId, MachineId, Owner, SessionId, SessionKey, SourceClass,
-    SourceId, SourceKind, WithholdReason,
+    Agent, ArchiveId, MachineId, Owner, SessionId, SessionKey, SourceClass, SourceId, SourceKind,
+    WithholdReason,
 };
 use memory_core::manifest::{Change, Header, OwnerState, Timestamp, Writer, manifest_hash};
 use memory_core::privacy::{
     PolicyContext, Profile, ResolvedSourceFacts, SanitizedLaunch, UnknownReason, rules_digest,
     sanitize_launch,
 };
-use std::collections::BTreeMap;
+
+#[path = "common/fs.rs"]
+mod mem_fs;
+#[path = "common/store.rs"]
+mod mem_store;
+use mem_fs::MemFs;
+use mem_store::MemStore;
 
 type R<T = ()> = Result<T, String>;
 fn e<E: std::fmt::Debug>(err: E) -> String {
     format!("{err:?}")
-}
-
-#[derive(Default)]
-struct MemFs {
-    files: BTreeMap<u64, Vec<u8>>,
-    mtimes: BTreeMap<u64, i64>,
-    clock: i64,
-}
-impl MemFs {
-    /// Write a file and advance its mtime, as a real write would.
-    fn set(&mut self, source: u64, bytes: &[u8]) {
-        self.clock += 1_000;
-        self.files.insert(source, bytes.to_vec());
-        self.mtimes.insert(source, self.clock);
-    }
-}
-impl FileSystem for MemFs {
-    type Error = ();
-    fn stat(&mut self, source: u64) -> Result<Option<Stat>, ()> {
-        Ok(self.files.get(&source).map(|b| Stat {
-            id: FileId {
-                dev: 1,
-                ino: source,
-                birth: Birth::Unavailable,
-            },
-            size: u64::try_from(b.len()).unwrap_or(0),
-            mtime_ns: self.mtimes.get(&source).copied().unwrap_or(0),
-        }))
-    }
-    fn stat_len(&mut self, source: u64) -> Result<u64, ()> {
-        Ok(self.stat(source)?.ok_or(())?.size)
-    }
-    fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, ()> {
-        let bytes = self.files.get(&source).ok_or(())?;
-        let start = usize::try_from(range.start).map_err(|_| ())?;
-        let end = usize::try_from(range.end).map_err(|_| ())?.min(bytes.len());
-        Ok(bytes.get(start..end).unwrap_or_default().to_vec())
-    }
-}
-
-#[derive(Default)]
-struct MemStore {
-    objects: BTreeMap<String, (Vec<u8>, u64)>,
-    version: u64,
-}
-impl MemStore {
-    fn tag(v: u64) -> Result<ETag, StoreError> {
-        ETag::try_from(format!("\"v{v}\"")).map_err(|_| StoreError::Server)
-    }
-    fn put(
-        &mut self,
-        key: &str,
-        body: Published,
-        fence: Option<&ETag>,
-        create: bool,
-    ) -> Result<ETag, StoreError> {
-        let existing = self.objects.get(key).map(|(_, v)| *v);
-        match (create, existing) {
-            (true, Some(_)) => return Err(StoreError::PreconditionFailed),
-            (false, None) => return Err(StoreError::NotFound),
-            (false, Some(v)) if Some(&Self::tag(v)?) != fence => {
-                return Err(StoreError::PreconditionFailed);
-            }
-            _ => {}
-        }
-        self.version += 1;
-        self.objects
-            .insert(key.to_owned(), (body.as_ref().to_vec(), self.version));
-        Self::tag(self.version)
-    }
-}
-impl Store for MemStore {
-    fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
-        self.put(key, body, None, true)
-    }
-    fn put_if_match(
-        &mut self,
-        key: &str,
-        etag: &ETag,
-        body: Published,
-    ) -> Result<ETag, StoreError> {
-        self.put(key, body, Some(etag), false)
-    }
-    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
-        let (b, v) = self.objects.get(key).ok_or(StoreError::NotFound)?;
-        Ok(Stored {
-            body: b.clone(),
-            etag: Self::tag(*v)?,
-        })
-    }
 }
 
 fn owner() -> R<Owner> {

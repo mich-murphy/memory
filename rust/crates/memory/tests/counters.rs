@@ -3,20 +3,28 @@
 //! The 1 s target for a 30k-source reconcile stays a footprint measurement: wall time is
 //! printed, never asserted (it would be a flaky gate under coverage instrumentation).
 use hegel::{TestCase, generators as gs};
-use memory::capture::{Published, Source};
+use memory::capture::Source;
 use memory::daemon::{Daemon, Parts, StartOptions};
-use memory::environment::{Clock, Counters, Counting, FileSystem, Stat, Store, StoreError, Stored};
+use memory::environment::{Counters, Counting};
 use memory::state::SyncPolicy;
 use memory_core::domain::{
-    Agent, ArchiveId, Birth, ETag, FileId, MachineId, Owner, SessionId, SessionKey, SourceClass,
-    SourceId, SourceKind,
+    Agent, ArchiveId, MachineId, Owner, SessionId, SessionKey, SourceClass, SourceId, SourceKind,
 };
 use memory_core::privacy::{PolicyContext, Profile, ResolvedSourceFacts, rules_digest};
-use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+#[path = "common/fs.rs"]
+mod mem_fs;
+#[path = "common/store.rs"]
+mod mem_store;
+#[path = "common/clock.rs"]
+mod test_clock;
+use mem_fs::MemFs;
+use mem_store::{EtagModel, MemStore};
+use test_clock::TestClock;
 
 type R<T = ()> = Result<T, String>;
 fn e<E: std::fmt::Debug>(err: E) -> String {
@@ -64,125 +72,8 @@ impl Drop for Tmp {
     }
 }
 
-#[derive(Default)]
-struct MemFs {
-    files: BTreeMap<u64, Vec<u8>>,
-}
-impl FileSystem for MemFs {
-    type Error = ();
-    fn stat(&mut self, source: u64) -> Result<Option<Stat>, ()> {
-        Ok(self.files.get(&source).map(|b| Stat {
-            id: FileId {
-                dev: 1,
-                ino: source,
-                birth: Birth::Unavailable,
-            },
-            size: u64::try_from(b.len()).unwrap_or(0),
-            mtime_ns: i64::try_from(b.len()).unwrap_or(0),
-        }))
-    }
-    fn stat_len(&mut self, source: u64) -> Result<u64, ()> {
-        Ok(self.stat(source)?.ok_or(())?.size)
-    }
-    fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, ()> {
-        let bytes = self.files.get(&source).ok_or(())?;
-        let start = usize::try_from(range.start).map_err(|_| ())?;
-        let end = usize::try_from(range.end).map_err(|_| ())?.min(bytes.len());
-        Ok(bytes.get(start..end).unwrap_or_default().to_vec())
-    }
-}
-
-/// How the fake derives an ETag. R2 reports the MD5 of the body (P2 `etag_is_md5_of_body`), so
-/// the content model is measured for distinct bodies; what R2 answers for an identical rewrite
-/// is unmeasured, so the properties run under both.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum EtagModel {
-    /// Every write gets a new ETag, even an identical rewrite.
-    #[default]
-    PerWrite,
-    /// The ETag is a function of the body: an identical rewrite keeps it.
-    Content,
-}
-fn content_token(body: &[u8]) -> u64 {
-    body.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
-        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
-    })
-}
 fn model_from(tc: &TestCase) -> EtagModel {
-    if tc.draw(gs::booleans()) {
-        EtagModel::Content
-    } else {
-        EtagModel::PerWrite
-    }
-}
-
-#[derive(Default)]
-struct MemStore {
-    /// Body and ETag token.
-    objects: BTreeMap<String, (Vec<u8>, u64)>,
-    /// Count of writes.
-    version: u64,
-    model: EtagModel,
-}
-impl MemStore {
-    fn tag(v: u64) -> Result<ETag, StoreError> {
-        ETag::try_from(format!("\"v{v}\"")).map_err(|_| StoreError::Server)
-    }
-    fn put(
-        &mut self,
-        key: &str,
-        body: &Published,
-        fence: Option<&ETag>,
-    ) -> Result<ETag, StoreError> {
-        let existing = self.objects.get(key).map(|(_, v)| *v);
-        match (fence, existing) {
-            (None, Some(_)) => return Err(StoreError::PreconditionFailed),
-            // Measured on R2 (P2 `r2-os.jsonl`): If-Match on a missing key is 412, not 404.
-            (Some(_), None) => return Err(StoreError::PreconditionFailed),
-            (Some(f), Some(v)) if &Self::tag(v)? != f => {
-                return Err(StoreError::PreconditionFailed);
-            }
-            _ => {}
-        }
-        self.version += 1;
-        let token = match self.model {
-            EtagModel::PerWrite => self.version,
-            EtagModel::Content => content_token(body.as_ref()),
-        };
-        self.objects
-            .insert(key.to_owned(), (body.as_ref().to_vec(), token));
-        Self::tag(token)
-    }
-}
-impl Store for MemStore {
-    fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
-        self.put(key, &body, None)
-    }
-    fn put_if_match(
-        &mut self,
-        key: &str,
-        etag: &ETag,
-        body: Published,
-    ) -> Result<ETag, StoreError> {
-        self.put(key, &body, Some(etag))
-    }
-    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
-        let (b, v) = self.objects.get(key).ok_or(StoreError::NotFound)?;
-        Ok(Stored {
-            body: b.clone(),
-            etag: Self::tag(*v)?,
-        })
-    }
-}
-
-struct Clk(u64);
-impl Clock for Clk {
-    fn monotonic_ns(&self) -> u64 {
-        self.0
-    }
-    fn wall_ns(&self) -> i128 {
-        1_794_000_000_000_000_000
-    }
+    EtagModel::from(tc.draw(gs::booleans()))
 }
 
 fn src_with(owner_n: u64, handle: u64, profile: Profile) -> R<(Owner, Source)> {
@@ -216,7 +107,7 @@ fn src_with(owner_n: u64, handle: u64, profile: Profile) -> R<(Owner, Source)> {
 type Fs = Counting<MemFs>;
 type St = Counting<MemStore>;
 type Srcs = Box<dyn FnMut() -> Vec<(Owner, Source)>>;
-type D = Daemon<Fs, St, Clk, Srcs>;
+type D = Daemon<Fs, St, TestClock, Srcs>;
 
 struct Rig {
     tmp: Tmp,
@@ -232,7 +123,7 @@ fn boot(tmp: &Tmp, cfg: &std::path::Path, fs: Fs, store: St, list: &[(Owner, Sou
     let parts = Parts {
         fs,
         store,
-        clock: Clk(0),
+        clock: TestClock::at(0),
         sources,
         context: PolicyContext {
             valid: true,
@@ -269,7 +160,7 @@ fn rig_model(owners: u64, per: u64, bytes: &[u8], profile: Profile, model: EtagM
         for k in 0..per {
             let handle = o * per + k + 1;
             list.push(src_with(o, handle, profile)?);
-            fs.inner.files.insert(handle, bytes.to_vec());
+            fs.inner.set(handle, bytes);
         }
     }
     let store = St::new(MemStore {
@@ -294,7 +185,7 @@ impl Rig {
         self.mono += 61_000_000_000;
         let mono = self.mono;
         let d = self.d()?;
-        d.clock_mut().0 = mono;
+        d.clock_mut().mono = mono;
         d.reconcile_once().map_err(e)?;
         Ok(())
     }
