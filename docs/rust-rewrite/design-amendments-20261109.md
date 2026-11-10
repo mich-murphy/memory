@@ -305,3 +305,54 @@ is regular and is the file the last stat observed; otherwise nothing is read and
 retried. Measured before the fix: a symlink swapped in between stat and read was followed.
 Residual, not addressed by DESIGN: an intermediate directory component swapped for a symlink.
 
+## A12. Operator decisions from the review round (2026-11-10)
+
+### A12.1 Launch values need a safe shape, not only a safe name (DESIGN 8.4)
+
+Operator decision. 8.4 published a launch value when its name was not a secret name, so
+`--model sk-ant-...` or `ANTHROPIC_MODEL=sk-ant-...` would have been published. A value (argv
+value after a value flag, or an allowlisted env value; the same rule for both) is now published
+only if all of the following hold. Otherwise argv publishes `[redacted]` and the env entry is
+omitted, the existing 8.4 outcomes.
+
+1. It matches the shape of its slot. Model (`--model`, `-m`, the five `ANTHROPIC_*_MODEL`
+   names): `^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}(\[[0-9a-z]{1,8}\])?$`. `--provider`:
+   `^[A-Za-z][A-Za-z0-9._-]{0,63}$`. `--permission-mode`: `^[A-Za-z][A-Za-z-]{0,31}$`.
+   `MAX_THINKING_TOKENS`, `MAX_MCP_OUTPUT_TOKENS`: `^[0-9]{1,9}$`. `DISABLE_PROMPT_CACHING`:
+   `0`, `1`, `true` or `false` in any case. Session, config and cwd slots and
+   `CLAUDE_CONFIG_DIR`: the existing safe-value shape.
+2. It is not a secret name (unchanged).
+3. Split on `/ : @ + .`, no segment starts, ASCII case-folded, with `sk-`, `sk_`, `ghp_`, `gho_`,
+   `ghu_`, `ghs_`, `ghr_`, `github_pat_`, `glpat-`, `xoxb-`, `xoxp-`, `xoxa-`, `xoxs-`, `xapp-`,
+   `hf_`, `npm_`, `pypi-` or `eyJ`, or is `AIza` plus 16 or more characters, or `AKIA`/`ASIA`
+   plus 16 or more uppercase letters or digits.
+4. No segment of 32 or more bytes is opaque: all alphanumeric with a letter and a digit, or
+   containing an uppercase letter, a lowercase letter and a digit.
+
+Changes in what is published: a model value with a bracket suffix such as `[1m]` is now
+published; a 32-character hex session id without dashes is now redacted; numeric and switch env
+values are limited to their shapes. Known limits, accepted: a key of unknown format shorter than
+32 characters passes in a model or path slot; a long hyphenated lowercase-and-digit run passes
+because real model names need it.
+
+### A12.2 The audit is a prerequisite of the first production write (DESIGN 7.2, 16 P5, A1)
+
+Operator decision. A rewrite of already captured bytes that falls between the head and tail
+windows is detected only by the audit (7.2), and the audit is not implemented (capture always
+reports it as not due). The capture property found this case and now avoids generating it.
+No production write happens before the audit exists and a property covers that case.
+
+### A12.3 Base recovery reads at most 64 manifests (DESIGN 6.3)
+
+Operator decision. Checkpoints sit at `seq % 64 == 0`, so the longest valid chain is a
+checkpoint plus 63 deltas. The code accepted a 65th GET; it now gives up after 64, matching 6.3
+("at most 64 manifest GETs").
+
+### A12.4 `rustix` is a direct dependency of the `memory` crate (DESIGN 13)
+
+Operator decision. Pinned to the version already in the lockfile, features `std` and `fs`, for
+named open flags and errno values in the source read. It does not close the residual race in
+A11.5: source paths are not guaranteed canonical (resolution can fall back to the raw path, and
+legitimate paths have symlinked parents such as `/var` on macOS). Closing it needs a rule that
+the source adapter reads only canonical paths, carried by a type that only resolution builds.
+
