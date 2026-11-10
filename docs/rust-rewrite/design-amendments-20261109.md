@@ -263,3 +263,45 @@ workspace (`cargo test --workspace --locked hegel_` and `proptest_`). The xtask 
 runs `xtask schemas` in write mode, so `07-schema` (`--check`) can fail. The 391/391 nextest count
 is from `d8e80a6`; the test review removed 24 tests and merged 9, so the count changed and has
 not been re-recorded. Both documents are updated.
+
+## A11. Implementation findings from the review round (2026-11-10)
+
+Source: [24](implementation/24-design-and-test-review.md). No design value changes.
+
+### A11.1 A failed hook write loses that launch record without trace (DESIGN 9.1, 10.1, 10.4)
+
+DESIGN 10.1 makes the hook silent and exit 0 on every path, and 9.1 removes the failure log.
+10.4 says launch evidence is the exception to "a lost hint is a latency bug" and that 7.6 keeps
+its file. That covers the daemon side only: when the hook's own write fails (`ENOSPC`, a refused
+directory), the launch record for that session is lost and nothing records it. This is accepted,
+not fixed: A3 already reduced launch evidence to environment facts. No hook failure log is added.
+The hook's unused result codes (`HookResult::code`) are removed because nothing consumes them.
+Open option, not adopted: the daemon counts sessions committed with no launch record.
+
+### A11.2 Hint retention is not implemented (DESIGN 7.6, 9.1)
+
+9.1 keeps a hint day file "for 7 days and until every launch record in the file is committed".
+The daemon reads hint files and never deletes one. This is a prerequisite of the slice that
+wires the daemon: a sweep at start and on tick that removes a file only when both conditions hold.
+
+### A11.3 State-load events are counted, not logged (DESIGN 9.2, 11.3)
+
+9.2 treats a damaged or newer-schema `index.json` or `status.json` as missing and says the event
+is logged. The `memory` crate has no logging dependency yet. Until it does, startup classifies
+each load (loaded, missing, damaged, newer schema) and `status.json` carries an `events` block
+that counts damaged and newer-schema loads and failed launch attachments. "Treat as missing" is
+unchanged. Open, tied to the logging decision: the log line itself, keeping the damaged file,
+and whether an older build may overwrite a newer-schema `status.json`.
+
+### A11.4 State file size bounds (DESIGN 9)
+
+DESIGN states no number. The code bounds a state file body at 64 MiB (67,108,864 bytes) and its
+header line at 256 bytes; both are now pinned by boundary tests. `[default, unmeasured]`
+
+### A11.5 Source read refuses a changed file (DESIGN 7.2, 8.2)
+
+The source read opens with `O_NOFOLLOW | O_NONBLOCK` and checks on the open handle that the file
+is regular and is the file the last stat observed; otherwise nothing is read and the source is
+retried. Measured before the fix: a symlink swapped in between stat and read was followed.
+Residual, not addressed by DESIGN: an intermediate directory component swapped for a symlink.
+

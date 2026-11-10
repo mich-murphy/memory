@@ -4,14 +4,14 @@
 //! and the UTC day as arguments, and returns a closed [`HookResult`]. [`main_entry`] is the
 //! thin process wrapper. Every path ends in exit 0, nothing is ever printed, there is no
 //! retry and no wait on the daemon.
-use crate::state::{StateError, vet};
+use crate::state::{StateError, default_root, vet};
 use memory_core::domain::Agent;
 use memory_core::hint::{self, HintEvent, MAX_HOOK_INPUT_BYTES};
 use memory_core::privacy::sanitize_launch;
 use std::fs::OpenOptions;
 use std::io::{IsTerminal, Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -47,26 +47,6 @@ pub enum HookResult {
     ShortWrite,
     /// No state directory could be determined.
     NoStateDir,
-}
-
-impl HookResult {
-    /// Fixed code for diagnostics. Never derived from input.
-    #[must_use]
-    pub const fn code(self) -> &'static str {
-        match self {
-            Self::Appended => "appended",
-            Self::UnknownAgent => "unknown_agent",
-            Self::InvalidDate => "invalid_date",
-            Self::BadInput => "bad_input",
-            Self::BuildFailed => "build_failed",
-            Self::DirRefused => "dir_refused",
-            Self::DirUnavailable => "dir_unavailable",
-            Self::OpenFailed => "open_failed",
-            Self::WriteFailed => "write_failed",
-            Self::ShortWrite => "short_write",
-            Self::NoStateDir => "no_state_dir",
-        }
-    }
 }
 
 /// Inputs of one hook run.
@@ -274,14 +254,6 @@ pub fn run(call: &HookCall<'_>) -> HookResult {
     append(call.hints_dir, call.today, &line)
 }
 
-fn state_dir() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("MEMORY_STATE_DIR") {
-        return Some(PathBuf::from(dir));
-    }
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join(".local/state/memory"))
-}
-
 /// [`read_bounded`] on a thread, abandoned after `deadline`: a silent reader yields an empty
 /// payload. On timeout the reader stays blocked and ends with the process.
 pub fn read_with_deadline<R: Read + Send + 'static>(reader: R, deadline: Duration) -> Vec<u8> {
@@ -307,7 +279,7 @@ fn process(agent: &str) -> HookResult {
     if parse_agent(agent).is_none() {
         return HookResult::UnknownAgent;
     }
-    let Some(state) = state_dir() else {
+    let Some(state) = default_root() else {
         return HookResult::NoStateDir;
     };
     let stdin = read_stdin_with_deadline();

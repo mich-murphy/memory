@@ -354,33 +354,6 @@ fn core_creates_missing_dirs_0700_and_file_0600() -> R {
 // ------------------------------------------------------------------ helpers
 
 #[test]
-fn result_codes_are_fixed_and_distinct() {
-    use HookResult::*;
-    let all = [
-        Appended,
-        UnknownAgent,
-        InvalidDate,
-        BadInput,
-        BuildFailed,
-        DirRefused,
-        DirUnavailable,
-        OpenFailed,
-        WriteFailed,
-        ShortWrite,
-        NoStateDir,
-    ];
-    let mut codes: Vec<&str> = all.iter().map(|r| r.code()).collect();
-    codes.sort_unstable();
-    codes.dedup();
-    assert_eq!(codes.len(), all.len());
-    assert!(
-        codes
-            .iter()
-            .all(|c| c.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'))
-    );
-}
-
-#[test]
 fn utc_day_known_values() {
     for (secs, day) in [
         (0, "1970-01-01"),

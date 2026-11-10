@@ -102,7 +102,7 @@ pub fn root_from(state_dir: Option<OsString>, home: Option<OsString>) -> Option<
     Some(PathBuf::from(home?).join(".local/state/memory"))
 }
 
-/// State root from the environment, the same rule as the hook.
+/// State root from the environment. The hook and the daemon both call this, so they agree.
 #[must_use]
 pub fn default_root() -> Option<PathBuf> {
     root_from(
