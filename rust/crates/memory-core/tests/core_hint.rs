@@ -951,14 +951,83 @@ const NOT_ALLOWLISTED_ENV: [&str; 7] = [
     "anthropic_model",
     "ANTHROPIC_MODEL_X",
 ];
-const SAFE_VOCABULARY: [&str; 6] = [
+// Legitimate values per slot, authored from real tool usage (not from the production
+// shapes): each must be published verbatim.
+const LEGIT_MODEL: [&str; 11] = [
     "opus",
+    "claude-fable-5-1",
+    "claude-opus-5-5",
     "claude-sonnet-4.5",
-    "a/b:c@d+e",
+    "gpt-5.2-codex",
+    "us.anthropic.claude-sonnet-5-5:0",
+    "openrouter/anthropic/claude-sonnet",
+    "claude-opus-5-5[1m]",
+    "anthropic.claude-sonnet-5-5-20260101-v1:0",
     "gpt5",
-    "opt/cfg/dir",
-    "bypassPermissions",
+    "a/b:c@d+e",
 ];
+const LEGIT_PROVIDER: [&str; 5] = [
+    "anthropic",
+    "openai",
+    "amazon-bedrock",
+    "azure-openai-responses",
+    "google.vertex",
+];
+const LEGIT_MODE: [&str; 5] = [
+    "default",
+    "acceptEdits",
+    "bypassPermissions",
+    "plan",
+    "dont-ask",
+];
+const LEGIT_PLAIN: [&str; 4] = [
+    "0f8b2c1e-3d4a-4b5c-8d6e-7f8091a2b3c4",
+    "opt/cfg/dir",
+    "a/b:c@d+e",
+    "claude-sonnet-4.5",
+];
+const LEGIT_COUNT: [&str; 5] = ["0", "1", "8192", "32000", "200000"];
+const LEGIT_SWITCH: [&str; 4] = ["0", "1", "true", "false"];
+
+fn legit_for_flag(flag: &str, d: u8) -> String {
+    nth(
+        match flag {
+            "--model" | "-m" => &LEGIT_MODEL,
+            "--provider" => &LEGIT_PROVIDER[..],
+            "--permission-mode" => &LEGIT_MODE[..],
+            _ => &LEGIT_PLAIN[..],
+        },
+        d,
+    )
+}
+fn legit_for_env(name: &str, d: u8) -> String {
+    nth(
+        match name {
+            "MAX_THINKING_TOKENS" | "MAX_MCP_OUTPUT_TOKENS" => &LEGIT_COUNT[..],
+            "DISABLE_PROMPT_CACHING" => &LEGIT_SWITCH[..],
+            "CLAUDE_CONFIG_DIR" => &LEGIT_PLAIN[..],
+            _ => &LEGIT_MODEL[..],
+        },
+        d,
+    )
+}
+/// Secret-shaped values; every one embeds the canary `c`, so a leak is detectable.
+fn secret_value(c: &str, d: u8) -> String {
+    match d % 12 {
+        0 => format!("sk-ant-api03-{c}"),
+        1 => format!("sk-{c}"),
+        2 => format!("ghp_{c}"),
+        3 => format!("github_pat_{c}"),
+        4 => format!("xoxb-{c}"),
+        5 => format!("AKIA{}", c.to_uppercase()),
+        6 => format!("AIza{c}"),
+        7 => format!("eyJ{c}.e30.sig"),
+        8 => format!("{c}{}", "0123456789abcdef".repeat(2)),
+        9 => format!("{c}-Ab9_Zy8-Qw7_Er6-Ty5"),
+        10 => format!("openrouter/sk-or-v1-{c}"),
+        _ => format!("us.anthropic.sk_{c}"),
+    }
+}
 const KEPT_FLAGS: [&str; 4] = ["--resume", "--continue", "--no-session", "--full-auto"];
 const UNKNOWN_FLAGS: [&str; 5] = ["--prompt", "--api-key", "--system-prompt", "--token", "-p"];
 const REDACTED: &str = "[redacted]";
@@ -997,8 +1066,8 @@ struct Expected {
 /// One argv piece: its input entries and the entries DESIGN 8.4 says are published.
 fn argv_piece(kind: u8, d: u8, c: &str) -> (Vec<String>, Vec<String>) {
     let flag = nth(&DESIGN_VALUE_FLAGS, d);
-    let safe = nth(&SAFE_VOCABULARY, d);
-    match kind % 9 {
+    let safe = legit_for_flag(&flag, d);
+    match kind % 11 {
         0 => (
             vec![flag.clone(), unsafe_value(c, d)],
             vec![flag, s(REDACTED)],
@@ -1019,6 +1088,14 @@ fn argv_piece(kind: u8, d: u8, c: &str) -> (Vec<String>, Vec<String>) {
             vec![s(REDACTED)],
         ),
         7 => (vec![nth(&KEPT_FLAGS, d)], vec![nth(&KEPT_FLAGS, d)]),
+        8 => (
+            vec![flag.clone(), secret_value(c, d)],
+            vec![flag, s(REDACTED)],
+        ),
+        9 => (
+            vec![format!("{flag}={}", secret_value(c, d))],
+            vec![flag, s(REDACTED)],
+        ),
         _ => (
             vec![format!(
                 r#"{{"headers":{{"Authorization":"Bearer {c}"}},"env":{{"API_KEY":"{c}"}}}}"#
@@ -1079,16 +1156,18 @@ fn expected_launch(
         let [kind, d] = op.to_le_bytes();
         let name = nth(&DESIGN_ENV_NAMES, d);
         let c = fresh(100 + i);
-        match kind % 6 {
+        match kind % 8 {
             0 => env_in.push(format!("{name}={}", unsafe_value(&c, d))),
+            6 | 7 => env_in.push(format!("{name}={}", secret_value(&c, d))),
             1 => env_in.push(format!("{}={c}", nth(&NOT_ALLOWLISTED_ENV, d))),
             2 | 3 => {
-                env_in.push(format!("{name}={}", nth(&SAFE_VOCABULARY, d)));
+                let legit = legit_for_env(&name, d);
+                env_in.push(format!("{name}={legit}"));
                 env_offered
                     .entry(name.clone())
                     .or_default()
-                    .push(nth(&SAFE_VOCABULARY, d));
-                env_out.insert(name, nth(&SAFE_VOCABULARY, d));
+                    .push(legit.clone());
+                env_out.insert(name, legit);
             }
             4 => env_in.push(c),
             _ => env_in.push(name),
@@ -1156,17 +1235,216 @@ fn check_generated_launch(
     Ok(())
 }
 
+// ---------- launch value-shape rule (DESIGN.md 8.4 amendment), literal expectations ----------
+
+fn argv_after_model(flag: &str, value: &str) -> Vec<String> {
+    sanitize_launch(&[s("claude"), s(flag), s(value)], &[])
+        .argv()
+        .to_vec()
+}
+fn env_value(name: &str, value: &str) -> Option<String> {
+    sanitize_launch(&[], &[format!("{name}={value}")])
+        .env()
+        .get(name)
+        .cloned()
+}
+
+#[test]
+fn secret_shaped_launch_values_are_redacted_in_argv_and_dropped_from_env() {
+    let exact_32 = "a1".repeat(16);
+    let dashed_32 = "Ab1-".repeat(8);
+    let rejected = [
+        "sk-ant-api03-AbCdEf",
+        "sk-proj-abc",
+        "SK-ANT-api03-x",
+        "sk_live_abc",
+        "ghp_abc",
+        "gho_abc",
+        "github_pat_11ABC",
+        "glpat-abc",
+        "xoxb-1-2-abc",
+        "xapp-1-A",
+        "hf_abc",
+        "npm_abc",
+        "pypi-AgEI",
+        "AKIAIOSFODNN7EXAMPLE",
+        "ASIAIOSFODNN7EXAMPLE",
+        "AIzaSyA-abcdefghijklmnop",
+        "eyJhbGciOiJIUzI1NiJ9.e30.sig",
+        "openrouter/sk-or-v1-abc",
+        "us.anthropic.sk-ant-abc",
+        "0123456789abcdef0123456789abcdef01234567",
+        exact_32.as_str(),
+        dashed_32.as_str(),
+    ];
+    for value in rejected {
+        assert_eq!(
+            argv_after_model("--model", value),
+            ["claude", "--model", "[redacted]"],
+            "argv {value}"
+        );
+        assert_eq!(
+            sanitize_launch(&[s("claude"), format!("-m={value}")], &[]).argv(),
+            ["claude", "-m", "[redacted]"],
+            "argv eq {value}"
+        );
+        assert_eq!(env_value("ANTHROPIC_MODEL", value), None, "env {value}");
+        assert_eq!(
+            env_value("ANTHROPIC_DEFAULT_HAIKU_MODEL", value),
+            None,
+            "env haiku {value}"
+        );
+        assert_eq!(
+            argv_after_model("--session-id", value),
+            ["claude", "--session-id", "[redacted]"],
+            "session {value}"
+        );
+        assert_eq!(env_value("CLAUDE_CONFIG_DIR", value), None, "dir {value}");
+    }
+    // Narrow slots reject key shapes by their own allow-shape.
+    assert_eq!(
+        argv_after_model("--provider", "sk-ant-api03-abc"),
+        ["claude", "--provider", "[redacted]"]
+    );
+    assert_eq!(
+        argv_after_model("--permission-mode", "sk-ant-api03-abc"),
+        ["claude", "--permission-mode", "[redacted]"]
+    );
+    assert_eq!(env_value("MAX_THINKING_TOKENS", "sk-ant-abc"), None);
+    assert_eq!(env_value("MAX_MCP_OUTPUT_TOKENS", "1234567890"), None);
+    assert_eq!(env_value("DISABLE_PROMPT_CACHING", "sk-ant-abc"), None);
+    assert_eq!(env_value("DISABLE_PROMPT_CACHING", "2"), None);
+    assert_eq!(
+        argv_after_model("--provider", "a/b"),
+        ["claude", "--provider", "[redacted]"]
+    );
+    assert_eq!(
+        argv_after_model("--permission-mode", "plan9"),
+        ["claude", "--permission-mode", "[redacted]"]
+    );
+}
+
+#[test]
+fn opaque_run_and_bracket_suffix_bounds_are_exact() {
+    let ok_31 = format!("{}a", "a1".repeat(15));
+    let ok_dashed_31 = format!("{}Ab1", "Ab1-".repeat(7));
+    for value in [ok_31.as_str(), ok_dashed_31.as_str(), "x/0123456789abcdef"] {
+        assert_eq!(env_value("ANTHROPIC_MODEL", value).as_deref(), Some(value));
+    }
+    // Opaque runs are measured per segment, not over the whole value.
+    let two_segments = format!("{}/{}", "a1".repeat(15), "b2".repeat(15));
+    assert_eq!(
+        env_value("ANTHROPIC_MODEL", &two_segments).as_deref(),
+        Some(two_segments.as_str())
+    );
+    assert_eq!(
+        env_value("ANTHROPIC_MODEL", "m[12345678]").as_deref(),
+        Some("m[12345678]")
+    );
+    assert_eq!(env_value("ANTHROPIC_MODEL", "m[123456789]"), None);
+    assert_eq!(env_value("ANTHROPIC_MODEL", "m[]"), None);
+    assert_eq!(env_value("ANTHROPIC_MODEL", "m[1M]"), None);
+    // The brackets are for model slots only.
+    assert_eq!(env_value("CLAUDE_CONFIG_DIR", "m[1m]"), None);
+}
+
+#[test]
+fn legitimate_launch_values_are_published_verbatim() {
+    let model = [
+        "opus",
+        "claude-fable-5-1",
+        "claude-opus-5-5",
+        "gpt-5.2-codex",
+        "us.anthropic.claude-sonnet-5-5:0",
+        "openrouter/anthropic/claude-sonnet",
+        "claude-opus-5-5[1m]",
+        "claude-sonnet-4-5-20250929-thinking",
+        "anthropic.claude-sonnet-5-5-20260101-v1:0",
+        "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "ft:gpt-4o-mini:acme::9ABcdEf",
+        "skylark-7b",
+    ];
+    for value in model {
+        assert_eq!(
+            argv_after_model("--model", value),
+            ["claude", "--model", value],
+            "argv {value}"
+        );
+        for name in [
+            "ANTHROPIC_MODEL",
+            "ANTHROPIC_SMALL_FAST_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        ] {
+            assert_eq!(
+                env_value(name, value).as_deref(),
+                Some(value),
+                "{name} {value}"
+            );
+        }
+    }
+    let cases: [(&str, &[&str]); 6] = [
+        (
+            "--provider",
+            &["anthropic", "amazon-bedrock", "google.vertex"],
+        ),
+        (
+            "--permission-mode",
+            &["default", "acceptEdits", "bypassPermissions", "plan"],
+        ),
+        ("--session-id", &["0f8b2c1e-3d4a-4b5c-8d6e-7f8091a2b3c4"]),
+        ("--session", &["rollout-2026-11-09"]),
+        ("--config", &["opt/cfg/dir", "a/b:c@d+e"]),
+        ("--cwd", &["w/p"]),
+    ];
+    for (flag, values) in cases {
+        for value in values {
+            assert_eq!(
+                argv_after_model(flag, value),
+                ["claude", flag, value],
+                "{flag} {value}"
+            );
+        }
+    }
+    assert_eq!(
+        argv_after_model("--config-dir", "Users/x/.claude"),
+        ["claude", "--config-dir", "Users/x/.claude"]
+    );
+    assert_eq!(
+        argv_after_model("--config-dir", "/Users/x/.claude"),
+        ["claude", "--config-dir", "[redacted]"]
+    );
+    for (name, values) in [
+        ("MAX_THINKING_TOKENS", &["0", "8192", "32000", "200000"][..]),
+        ("MAX_MCP_OUTPUT_TOKENS", &["25000", "123456789"][..]),
+        (
+            "DISABLE_PROMPT_CACHING",
+            &["0", "1", "true", "false", "TRUE"][..],
+        ),
+        ("CLAUDE_CONFIG_DIR", &["opt/cfg/dir"][..]),
+    ] {
+        for value in values {
+            assert_eq!(
+                env_value(name, value).as_deref(),
+                Some(*value),
+                "{name} {value}"
+            );
+        }
+    }
+}
+
 #[test]
 fn generated_launch_fixed_shapes() {
     // Every argv kind x decoration and every env kind, so a plain run fails without
     // generation (mutant: `safe()` always true).
-    let argv: Vec<u16> = (0..9u16)
+    let argv: Vec<u16> = (0..11u16)
         .flat_map(|k| (0..12u16).map(move |d| (d << 8) | k))
         .collect();
     for chunk in argv.chunks(12) {
         assert_eq!(check_generated_launch(7, chunk, &[], 0, false), Ok(()));
     }
-    let env: Vec<u16> = (0..6u16)
+    let env: Vec<u16> = (0..8u16)
         .flat_map(|k| (0..12u16).map(move |d| (d << 8) | k))
         .collect();
     for chunk in env.chunks(8) {

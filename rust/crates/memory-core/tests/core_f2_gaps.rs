@@ -227,7 +227,7 @@ fn row1b_env_bound_is_eight_accepted_entries_in_input_order() {
     for rot in 0..9 {
         let mut names: Vec<&str> = ALLOWED_ENV.to_vec();
         names.rotate_left(rot);
-        let entries: Vec<String> = names.iter().map(|k| format!("{k}=v1")).collect();
+        let entries: Vec<String> = names.iter().map(|k| format!("{k}=1")).collect();
         let env = env_of(&entries);
         assert_eq!(env.len(), 8, "rotation {rot}");
         let expect: BTreeSet<&str> = names.iter().take(8).copied().collect();
@@ -246,7 +246,7 @@ fn row1b_env_bound_is_eight_accepted_entries_in_input_order() {
         "anthropic_model=a".into(),
         "ANTHROPIC_API_KEY=a".into(),
     ];
-    entries.extend(ALLOWED_ENV.iter().skip(1).map(|k| format!("{k}=v1")));
+    entries.extend(ALLOWED_ENV.iter().skip(1).map(|k| format!("{k}=1")));
     let env = env_of(&entries);
     assert_eq!(env.len(), 8);
     assert!(!env.contains_key("ANTHROPIC_MODEL"));
