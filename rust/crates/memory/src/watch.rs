@@ -267,13 +267,18 @@ impl InboxRx {
 pub struct FsWatcher {
     _watcher: RecommendedWatcher,
     rx: InboxRx,
+    skipped: usize,
 }
 
 impl FsWatcher {
-    /// Watch each root recursively.
+    /// Watch each existing root recursively. A root that does not exist is skipped and
+    /// counted ([`FsWatcher::skipped_roots`]); the safety reconcile finds the directory
+    /// once it exists (amendment A13.6). With every root missing the watcher still starts
+    /// and watches nothing.
     ///
     /// # Errors
-    /// Returns the notify error if the watcher or any root watch cannot be created.
+    /// Returns the notify error if the watcher cannot be created or a root that exists
+    /// cannot be watched (permission denied, not a directory). Only a missing root is skipped.
     pub fn new(roots: &[PathBuf]) -> notify::Result<Self> {
         let (tx, rx) = inbox(INBOX_CAPACITY);
         let mut watcher = notify::recommended_watcher(move |result| {
@@ -281,13 +286,35 @@ impl FsWatcher {
                 tx.push(input);
             }
         })?;
+        let mut skipped = 0;
         for root in roots {
+            // FSEvents accepts a regular file as a root, so check the kind ourselves
+            // (following a symlinked root, as the operating system does for the watch).
+            match std::fs::metadata(root) {
+                Ok(meta) if meta.is_dir() => {}
+                Ok(_) => {
+                    return Err(notify::Error::generic("watch root is not a directory")
+                        .add_path(root.clone()));
+                }
+                Err(io) if io.kind() == std::io::ErrorKind::NotFound => {
+                    skipped += 1;
+                    continue;
+                }
+                Err(io) => return Err(notify::Error::io(io).add_path(root.clone())),
+            }
             watcher.watch(root, RecursiveMode::Recursive)?;
         }
         Ok(Self {
             _watcher: watcher,
             rx,
+            skipped,
         })
+    }
+
+    /// How many configured roots did not exist when the watcher started.
+    #[must_use]
+    pub fn skipped_roots(&self) -> usize {
+        self.skipped
     }
 
     /// Wait up to `timeout` for the next input.

@@ -517,11 +517,48 @@ fn fs_watcher_reports_directory_moved_in_with_children() -> R {
 }
 
 #[test]
-fn fs_watcher_rejects_a_missing_root() -> R {
-    // Documents the current behaviour: one absent root fails the whole watcher (report 02).
+fn fs_watcher_skips_a_missing_root_and_counts_it() -> R {
     // A quiet-period check is deliberately absent: FSEvents startup noise has no bound.
     let tmp = Tmp::new()?;
-    assert!(FsWatcher::new(&[tmp.0.join("missing")]).is_err());
-    assert!(FsWatcher::new(&[tmp.0.clone(), tmp.0.join("missing")]).is_err());
+    let missing = tmp.0.join("missing");
+    let all_missing = FsWatcher::new(std::slice::from_ref(&missing)).map_err(e)?;
+    assert_eq!(all_missing.skipped_roots(), 1);
+    let w = FsWatcher::new(&[missing, tmp.0.clone()]).map_err(e)?;
+    assert_eq!(w.skipped_roots(), 1);
+    let file = tmp.0.join("a.jsonl");
+    fs::write(&file, "x").map_err(e)?;
+    assert!(
+        wait_for(
+            &w,
+            |i| matches!(i, Input::PathChanged { path } if *path == file)
+        ),
+        "no PathChanged for {}",
+        file.display()
+    );
+    let none = FsWatcher::new(&[]).map_err(e)?;
+    assert_eq!(none.skipped_roots(), 0);
+    Ok(())
+}
+
+#[test]
+fn fs_watcher_rejects_a_root_that_is_a_regular_file() -> R {
+    let tmp = Tmp::new()?;
+    let file = tmp.0.join("not-a-dir");
+    fs::write(&file, "x").map_err(e)?;
+    assert!(FsWatcher::new(&[file]).is_err());
+    Ok(())
+}
+
+#[test]
+fn fs_watcher_rejects_a_root_it_cannot_inspect() -> R {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = Tmp::new()?;
+    let locked = tmp.0.join("locked");
+    fs::create_dir_all(locked.join("root")).map_err(e)?;
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).map_err(e)?;
+    let result = FsWatcher::new(&[locked.join("root")]);
+    // Restore before asserting so the temp dir is removable either way.
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o700)).map_err(e)?;
+    assert!(result.is_err());
     Ok(())
 }
