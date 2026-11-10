@@ -1,10 +1,10 @@
 //! Watcher tests: scheduler tables, properties against an independent model, translation
 //! of notify events, and real FsWatcher runs on temp dirs this file creates.
 use hegel::{TestCase, generators as gs};
-use memory::watch::{Action, FsWatcher, Input, Scheduler, translate};
+use memory::watch::{Action, FsWatcher, Input, Scheduler, inbox, translate, translate_with};
 use memory_core::coalescer::{CoalescerError, Signal, Window, WindowSeconds};
 use memory_core::domain::{Agent, ArchiveId, MachineId, Owner, SessionId, SessionKey};
-use notify::event::{AccessKind, CreateKind, Flag, ModifyKind, RemoveKind};
+use notify::event::{AccessKind, CreateKind, Flag, ModifyKind, RemoveKind, RenameMode};
 use notify::{Event, EventKind};
 use proptest::prelude::*;
 use std::collections::BTreeMap;
@@ -193,6 +193,55 @@ fn translate_covers_every_event_shape() -> R {
     Ok(())
 }
 
+#[test]
+fn directory_moved_into_a_root_reads_its_children() {
+    // FSEvents reports a moved-in directory as one rename event (W4 Q3), with no create flag.
+    let dir = PathBuf::from("/r/o1/moved");
+    let ev = |k| Event::new(k).add_path(dir.clone());
+    let rename = EventKind::Modify(ModifyKind::Name(RenameMode::Any));
+    let is_dir = |p: &Path| p == Path::new("/r/o1/moved");
+    assert_eq!(
+        translate_with(Ok(ev(rename)), is_dir),
+        vec![Input::DirCreated { path: dir.clone() }]
+    );
+    assert_eq!(
+        translate_with(Ok(ev(EventKind::Create(CreateKind::Any))), is_dir),
+        vec![Input::DirCreated { path: dir.clone() }]
+    );
+    // A renamed file, or a renamed-away path that no longer exists, is a plain change.
+    let changed = vec![Input::PathChanged { path: dir.clone() }];
+    assert_eq!(translate_with(Ok(ev(rename)), |_| false), changed);
+    // Content modifications of a directory path are not directory appearances.
+    assert_eq!(
+        translate_with(Ok(ev(EventKind::Modify(ModifyKind::Any))), is_dir),
+        changed
+    );
+    assert_eq!(
+        translate_with(Ok(ev(EventKind::Remove(RemoveKind::Folder))), is_dir),
+        changed
+    );
+}
+
+#[test]
+fn full_inbox_drops_inputs_and_reports_one_rescan() {
+    let (tx, rx) = inbox(2);
+    let at = |n: u32| Input::PathChanged {
+        path: PathBuf::from(format!("/r/o1/{n}")),
+    };
+    for n in 0..5 {
+        tx.push(at(n));
+    }
+    // The overflow is reported first, once; then the queued inputs, then silence.
+    let none = Duration::ZERO;
+    assert_eq!(rx.recv_timeout(none), Some(Input::Rescan));
+    assert_eq!(rx.recv_timeout(none), Some(at(0)));
+    assert_eq!(rx.recv_timeout(none), Some(at(1)));
+    assert_eq!(rx.recv_timeout(none), None);
+    // After draining, the queue accepts inputs again without a spurious rescan.
+    tx.push(at(9));
+    assert_eq!(rx.recv_timeout(none), Some(at(9)));
+}
+
 // ------------------------------------------------------------------ properties
 
 /// Independent model: per-owner pending window and in-flight flag, no shared code.
@@ -202,11 +251,15 @@ struct Model {
     in_flight: bool,
 }
 
+/// Kind (9 shapes), owner index, and a gap that is below the quiet window three times in
+/// four, so runs of signals reach the 300 s cap without ever being quiet for 60 s.
 fn decode(n: u32) -> (u32, usize, u64) {
+    let wide = (n / 24) % 4 == 0;
+    let gap = if wide { (n / 96) % 201 } else { (n / 96) % 50 };
     (
-        n % 6,
-        usize::try_from((n / 6) % 4).unwrap_or(0),
-        u64::from((n / 24) % 201),
+        n % 9,
+        usize::try_from((n / 9) % 4).unwrap_or(0),
+        u64::from(gap),
     )
 }
 
@@ -218,6 +271,8 @@ fn property(raw: &[u32]) -> R {
         let (kind, who, dt) = decode(n);
         now += dt;
         let mut actions = Vec::new();
+        let mut reads = Vec::new();
+        let mut completed = false;
         let signalled = match kind {
             0 => {
                 actions.extend(sc.handle(changed(who), s(now)));
@@ -239,7 +294,8 @@ fn property(raw: &[u32]) -> R {
             }
             4 => {
                 let who = who % 3;
-                if model.get(&who).is_some_and(|m| m.in_flight) {
+                completed = model.get(&who).is_some_and(|m| m.in_flight);
+                if completed {
                     actions.extend(sc.complete(&owner(who)?, s(now)).map_err(e)?);
                     if let Some(m) = model.get_mut(&who) {
                         m.in_flight = false;
@@ -249,8 +305,22 @@ fn property(raw: &[u32]) -> R {
                 }
                 None
             }
-            _ => {
+            5 => {
                 actions.extend(sc.handle(Input::Rescan, s(now)));
+                None
+            }
+            6 => {
+                actions.extend(sc.handle(tick(now), s(0)));
+                None
+            }
+            7 => {
+                let path = PathBuf::from(format!("/r/o{who}/d"));
+                actions.extend(sc.handle(Input::DirCreated { path: path.clone() }, s(now)));
+                reads.push(Action::ReadDir { path });
+                None
+            }
+            _ => {
+                actions.extend(sc.handle(Input::WatcherError, s(now)));
                 None
             }
         };
@@ -261,6 +331,19 @@ fn property(raw: &[u32]) -> R {
                 Some((first, _, f)) => (first, now, f || flush),
                 None => (now, now, flush),
             });
+        }
+        // Non-capture actions: a directory is read, loss and errors reconcile everything.
+        let mut other_want = reads;
+        if matches!(kind, 5 | 8) || (kind == 4 && !completed) {
+            other_want.push(Action::ReconcileAll);
+        }
+        let other_got: Vec<Action> = actions
+            .iter()
+            .filter(|a| !matches!(a, Action::Capture { .. }))
+            .cloned()
+            .collect();
+        if other_got != other_want {
+            return Err(format!("t={now} actions {other_got:?} want {other_want:?}"));
         }
         let got: Vec<Owner> = actions
             .into_iter()
@@ -398,32 +481,47 @@ fn fs_watcher_reports_file_write() -> R {
 }
 
 #[test]
-fn fs_watcher_reports_new_directory_with_file() -> R {
+fn fs_watcher_reports_new_directory() -> R {
     let tmp = Tmp::new()?;
     let w = FsWatcher::new(std::slice::from_ref(&tmp.0)).map_err(e)?;
     let dir = tmp.0.join("sub");
     fs::create_dir(&dir).map_err(e)?;
     fs::write(dir.join("b.jsonl"), "x").map_err(e)?;
-    let seen = wait_for(&w, |i| match i {
-        Input::DirCreated { path } => *path == dir,
-        Input::PathChanged { path } => path.starts_with(&dir),
-        _ => false,
-    });
-    assert!(
-        seen,
-        "neither DirCreated nor a file event under {}",
-        dir.display()
+    let seen = wait_for(
+        &w,
+        |i| matches!(i, Input::DirCreated { path } if *path == dir),
     );
+    assert!(seen, "no DirCreated for {}", dir.display());
     Ok(())
 }
 
 #[test]
-fn fs_watcher_rejects_missing_root_and_times_out_quietly() -> R {
+fn fs_watcher_reports_directory_moved_in_with_children() -> R {
+    let tmp = Tmp::new()?;
+    let root = tmp.0.join("root");
+    let stage = tmp.0.join("stage");
+    fs::create_dir_all(&root).map_err(e)?;
+    fs::create_dir_all(stage.join("p")).map_err(e)?;
+    fs::write(stage.join("p/k.jsonl"), "x").map_err(e)?;
+    let w = FsWatcher::new(std::slice::from_ref(&root)).map_err(e)?;
+    let dir = root.join("p");
+    fs::rename(stage.join("p"), &dir).map_err(e)?;
+    // The children produce no events (W4 Q3); the directory itself must be reported so
+    // the scheduler reads it.
+    let seen = wait_for(
+        &w,
+        |i| matches!(i, Input::DirCreated { path } if *path == dir),
+    );
+    assert!(seen, "no DirCreated for moved-in {}", dir.display());
+    Ok(())
+}
+
+#[test]
+fn fs_watcher_rejects_a_missing_root() -> R {
+    // Documents the current behaviour: one absent root fails the whole watcher (report 02).
+    // A quiet-period check is deliberately absent: FSEvents startup noise has no bound.
     let tmp = Tmp::new()?;
     assert!(FsWatcher::new(&[tmp.0.join("missing")]).is_err());
-    let w = FsWatcher::new(std::slice::from_ref(&tmp.0)).map_err(e)?;
-    // Drain startup noise, then expect a timeout.
-    while w.recv_timeout(Duration::from_millis(300)).is_some() {}
-    assert_eq!(w.recv_timeout(Duration::from_millis(50)), None);
+    assert!(FsWatcher::new(&[tmp.0.clone(), tmp.0.join("missing")]).is_err());
     Ok(())
 }

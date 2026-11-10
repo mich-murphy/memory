@@ -3,14 +3,17 @@
 //! Two layers. [`Scheduler`] is pure: it consumes [`Input`] values with a caller-supplied
 //! monotonic time, drives the memory-core [`Coalescer`] and returns closed [`Action`]s. It
 //! never reads a clock. [`FsWatcher`] is a thin shell over the notify recommended watcher
-//! that translates notify events into [`Input`] values on an `std::sync::mpsc` channel.
+//! that translates notify events into [`Input`] values on an bounded `std::sync::mpsc` queue.
 //! Neither is wired into the daemon loop yet.
 use memory_core::coalescer::Coalescer;
 use memory_core::coalescer::{CoalescerError, Signal, WakeAction, Window, wake_action};
 use memory_core::domain::Owner;
-use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher, event::CreateKind};
+use notify::event::{CreateKind, ModifyKind};
+use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::time::Duration;
 
 /// Everything the scheduler reacts to.
@@ -164,35 +167,106 @@ impl<F: FnMut(&Path) -> Option<Owner>> Scheduler<F> {
     }
 }
 
-/// Translate one notify result into scheduler inputs.
+/// Translate one notify result into scheduler inputs, asking the filesystem whether a
+/// created or renamed-in path is a directory.
 pub fn translate(result: notify::Result<Event>) -> Vec<Input> {
+    translate_with(result, Path::is_dir)
+}
+
+/// [`translate`] with the directory test injected, so the mapping is pure.
+///
+/// A directory that appears must become [`Input::DirCreated`] so its existing children are
+/// read (DESIGN.md 10.2). FSEvents reports a directory moved into a root as one rename
+/// event with no create flag and none for its children (W4 Q3: 1000 of 1000 children
+/// unreported), and notify's rename kinds carry no is-dir bit, so `is_dir` decides. A rename
+/// or create of a file, or a rename-from of a path that no longer exists, stays
+/// [`Input::PathChanged`].
+pub fn translate_with(result: notify::Result<Event>, is_dir: impl Fn(&Path) -> bool) -> Vec<Input> {
     let Ok(event) = result else {
         return vec![Input::WatcherError];
     };
     if event.need_rescan() {
         return vec![Input::Rescan];
     }
+    let appears = matches!(
+        event.kind,
+        EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_))
+    );
     match event.kind {
-        EventKind::Create(CreateKind::Folder) => event
-            .paths
-            .into_iter()
-            .map(|path| Input::DirCreated { path })
-            .collect(),
         EventKind::Any | EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
             event
                 .paths
                 .into_iter()
-                .map(|path| Input::PathChanged { path })
+                .map(|path| {
+                    if matches!(event.kind, EventKind::Create(CreateKind::Folder))
+                        || (appears && is_dir(&path))
+                    {
+                        Input::DirCreated { path }
+                    } else {
+                        Input::PathChanged { path }
+                    }
+                })
                 .collect()
         }
         EventKind::Access(_) | EventKind::Other => Vec::new(),
     }
 }
 
+/// Capacity of the watcher's input queue. Far above the 15 events a quiet host produces
+/// per second; a burst beyond it is an overflow, handled as a lost-event rescan.
+const INBOX_CAPACITY: usize = 65_536;
+
+/// Producer half of the bounded input queue. When the queue is full the input is dropped and
+/// an overflow flag is set; the consumer then yields one [`Input::Rescan`], which is the
+/// "producer outruns consumer, flag set" row of DESIGN.md 10.4.
+#[derive(Clone)]
+pub struct InboxTx {
+    tx: SyncSender<Input>,
+    overflow: Arc<AtomicBool>,
+}
+
+/// Consumer half of the bounded input queue.
+pub struct InboxRx {
+    rx: Receiver<Input>,
+    overflow: Arc<AtomicBool>,
+}
+
+/// A bounded queue of watcher inputs with overflow reported as [`Input::Rescan`].
+pub fn inbox(capacity: usize) -> (InboxTx, InboxRx) {
+    let (tx, rx) = sync_channel(capacity);
+    let overflow = Arc::new(AtomicBool::new(false));
+    (
+        InboxTx {
+            tx,
+            overflow: Arc::clone(&overflow),
+        },
+        InboxRx { rx, overflow },
+    )
+}
+
+impl InboxTx {
+    /// Queue an input, or record an overflow when the queue is full.
+    pub fn push(&self, input: Input) {
+        if let Err(TrySendError::Full(_)) = self.tx.try_send(input) {
+            self.overflow.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+impl InboxRx {
+    /// Wait up to `timeout` for the next input. A pending overflow is reported first.
+    pub fn recv_timeout(&self, timeout: Duration) -> Option<Input> {
+        if self.overflow.swap(false, Ordering::SeqCst) {
+            return Some(Input::Rescan);
+        }
+        self.rx.recv_timeout(timeout).ok()
+    }
+}
+
 /// Recursive notify watcher over a set of roots.
 pub struct FsWatcher {
     _watcher: RecommendedWatcher,
-    rx: Receiver<Input>,
+    rx: InboxRx,
 }
 
 impl FsWatcher {
@@ -201,10 +275,10 @@ impl FsWatcher {
     /// # Errors
     /// Returns the notify error if the watcher or any root watch cannot be created.
     pub fn new(roots: &[PathBuf]) -> notify::Result<Self> {
-        let (tx, rx): (Sender<Input>, Receiver<Input>) = channel();
+        let (tx, rx) = inbox(INBOX_CAPACITY);
         let mut watcher = notify::recommended_watcher(move |result| {
             for input in translate(result) {
-                let _ = tx.send(input);
+                tx.push(input);
             }
         })?;
         for root in roots {
@@ -218,6 +292,6 @@ impl FsWatcher {
 
     /// Wait up to `timeout` for the next input.
     pub fn recv_timeout(&self, timeout: Duration) -> Option<Input> {
-        self.rx.recv_timeout(timeout).ok()
+        self.rx.recv_timeout(timeout)
     }
 }

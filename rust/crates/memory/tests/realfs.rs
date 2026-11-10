@@ -181,8 +181,8 @@ fn read_exact_short_and_past_eof() -> TestResult {
     let dir = rfs.register(t.path());
     let got = rfs.read(dir, 0..1);
     ensure!(
-        matches!(got, Err(RealFsError::Io(_))),
-        "directory read is an io error: {got:?}"
+        got == Err(RealFsError::Changed),
+        "a directory is not a regular file: {got:?}"
     );
     fs::OpenOptions::new().write(true).open(&f)?.set_len(4)?;
     ensure!(rfs.read(h, 2..8)? == b"23", "short read after truncation");
@@ -429,7 +429,7 @@ fn walk_counts_unreadable_dirs_and_missing_root() -> TestResult {
 }
 
 #[test]
-fn walk_counts_non_utf8_names_and_non_regular_files() -> TestResult {
+fn walk_counts_non_utf8_names_where_the_filesystem_allows_them() -> TestResult {
     use std::os::unix::ffi::OsStrExt;
     let t = Tmp::new()?;
     fs::create_dir_all(t.path().join("r"))?;
@@ -437,7 +437,8 @@ fn walk_counts_non_utf8_names_and_non_regular_files() -> TestResult {
         .path()
         .join("r")
         .join(std::ffi::OsStr::from_bytes(b"bad\xff.txt"));
-    // APFS rejects non-UTF-8 names; the branch is then exercised only on Linux.
+    // APFS rejects non-UTF-8 names (the create fails and the walk must stay clean); ext4
+    // accepts them (the walk must count the name and not return it).
     let bad_made = fs::write(bad, b"x").is_ok();
     t.write("r/ok.txt", b"x")?;
     let rs = vec![(
@@ -449,6 +450,8 @@ fn walk_counts_non_utf8_names_and_non_regular_files() -> TestResult {
         w.invalid_names == u64::from(bad_made) && w.files.len() == 1,
         "{w:?}"
     );
+    #[cfg(target_os = "linux")]
+    ensure!(bad_made, "ext4 and tmpfs accept non-UTF-8 names");
     Ok(())
 }
 
@@ -495,6 +498,12 @@ proptest! {
 
 // ---- Coverage round
 
+fn mkfifo(path: &Path) -> TestResult {
+    let status = std::process::Command::new("mkfifo").arg(path).status()?;
+    ensure!(status.success(), "mkfifo failed");
+    Ok(())
+}
+
 #[test]
 fn walk_skips_sockets_and_fifos_without_counting_them_as_files() -> TestResult {
     let t = Tmp::new()?;
@@ -502,6 +511,7 @@ fn walk_skips_sockets_and_fifos_without_counting_them_as_files() -> TestResult {
     t.write("r/ok.txt", b"x")?;
     let sock = t.path().join("r/s.sock");
     let listener = std::os::unix::net::UnixListener::bind(&sock)?;
+    mkfifo(&t.path().join("r/f.fifo"))?;
     let rs = vec![(
         t.path().join("r"),
         roots(Agent::Claude, RootLayout::AgentDir)?,
@@ -509,8 +519,92 @@ fn walk_skips_sockets_and_fifos_without_counting_them_as_files() -> TestResult {
     let w = walk(&rs, &WalkLimits::default());
     drop(listener);
     ensure!(
-        w.files.len() == 1 && w.entries == 2 && w.symlinks == 0 && w.invalid_names == 0,
+        w.files.len() == 1 && w.entries == 3 && w.symlinks == 0 && w.invalid_names == 0,
         "{w:?}"
+    );
+    Ok(())
+}
+
+// ---- Read-time identity (DESIGN.md 7.1, 7.2, 8.2): a swap after stat is never followed.
+
+const CANARY: &[u8] = b"CANARY-TARGET-BYTES";
+
+#[test]
+fn read_refuses_a_symlink_swapped_in_after_stat() -> TestResult {
+    let t = Tmp::new()?;
+    let src = t.write("src.jsonl", b"original\n")?;
+    let target = t.write("secret.txt", CANARY)?;
+    let mut rfs = RealFs::new();
+    let h = rfs.register(&src);
+    rfs.stat(h)?.ok_or("missing")?;
+    fs::remove_file(&src)?;
+    std::os::unix::fs::symlink(&target, &src)?;
+    let got = rfs.read(h, 0..64);
+    ensure!(got == Err(RealFsError::Changed), "{got:?}");
+    ensure!(rfs.counters().reads == 0, "a refused read is not counted");
+    Ok(())
+}
+
+#[test]
+fn read_never_follows_a_final_symlink_even_without_a_prior_stat() -> TestResult {
+    // No stat observation exists, so only O_NOFOLLOW stands between the path and the target.
+    let t = Tmp::new()?;
+    let target = t.write("secret.txt", CANARY)?;
+    let link = t.path().join("link.jsonl");
+    std::os::unix::fs::symlink(&target, &link)?;
+    let mut rfs = RealFs::new();
+    let h = rfs.register(&link);
+    let got = rfs.read(h, 0..64);
+    ensure!(got == Err(RealFsError::Changed), "{got:?}");
+    let dangling = t.path().join("dangling");
+    std::os::unix::fs::symlink(t.path().join("nowhere"), &dangling)?;
+    let d = rfs.register(&dangling);
+    let got = rfs.read(d, 0..64);
+    ensure!(got == Err(RealFsError::Changed), "{got:?}");
+    Ok(())
+}
+
+#[test]
+fn read_detects_a_different_regular_file_swapped_in_after_stat() -> TestResult {
+    let t = Tmp::new()?;
+    let src = t.write("src.jsonl", b"original\n")?;
+    let mut rfs = RealFs::new();
+    let h = rfs.register(&src);
+    rfs.stat(h)?.ok_or("missing")?;
+    let other = t.write("other.new", CANARY)?;
+    fs::rename(&other, &src)?;
+    let got = rfs.read(h, 0..64);
+    ensure!(got == Err(RealFsError::Changed), "{got:?}");
+    // A fresh stat observes the new file; the same bytes are then readable.
+    rfs.stat(h)?.ok_or("missing")?;
+    ensure!(
+        rfs.read(h, 0..64)? == CANARY,
+        "re-observed file is readable"
+    );
+    Ok(())
+}
+
+#[test]
+fn read_does_not_block_on_or_read_a_fifo_or_directory() -> TestResult {
+    let t = Tmp::new()?;
+    let src = t.write("src.jsonl", b"original\n")?;
+    let mut rfs = RealFs::new();
+    let h = rfs.register(&src);
+    rfs.stat(h)?.ok_or("missing")?;
+    fs::remove_file(&src)?;
+    mkfifo(&src)?;
+    // With a prior stat, and for a never-stat'd FIFO (is-regular check alone).
+    ensure!(
+        rfs.read(h, 0..64) == Err(RealFsError::Changed),
+        "fifo after stat"
+    );
+    let fresh = rfs.register(&src);
+    ensure!(rfs.read(fresh, 0..64) == Err(RealFsError::Changed), "fifo");
+    fs::remove_file(&src)?;
+    fs::create_dir(&src)?;
+    ensure!(
+        rfs.read(h, 0..64) == Err(RealFsError::Changed),
+        "dir after stat"
     );
     Ok(())
 }
