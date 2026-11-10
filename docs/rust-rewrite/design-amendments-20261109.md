@@ -356,3 +356,12 @@ A11.5: source paths are not guaranteed canonical (resolution can fall back to th
 legitimate paths have symlinked parents such as `/var` on macOS). Closing it needs a rule that
 the source adapter reads only canonical paths, carried by a type that only resolution builds.
 
+### A12.5 Gates 04 to 06 run each test once (supersedes the commands in A10.9)
+
+With the properties also running in `04-nextest`, hosted runs on `ubuntu-24.04` and `macos-26`
+passed every test but exceeded the 30 minute job limit during `08-coverage` (run 42787616630;
+before the review the job took 24 to 25 minutes). The limit is unchanged. `04-nextest` now runs
+every test that is not a named property (361), `05-hegel` the `hegel_` tests (30) and
+`06-proptest` the `proptest_` tests (28), all with nextest: 419 tests, each once, at the same
+case counts.
+

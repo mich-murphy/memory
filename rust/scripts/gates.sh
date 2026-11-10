@@ -22,11 +22,14 @@ run 01-fmt cargo fmt --check
 run 02-clippy cargo clippy --workspace --all-targets --locked -- -Dwarnings
 run 03-deny cargo deny --locked check
 run 03-core-bans bash -c 'cd crates/memory-core && cargo deny --locked --exclude-dev check bans'
-run 04-nextest cargo nextest run --workspace --locked
+# Each test runs once across 04, 05 and 06: 04 runs everything that is not a named property,
+# 05 the Hegel properties, 06 the proptest twins. Running the properties in 04 as well put
+# the hosted run over its 30 minute limit.
+run 04-nextest cargo nextest run --workspace --locked -E 'not (test(/hegel_/) | test(/proptest_/))'
 # nextest intentionally does not execute rustdoc examples.
 run 04-doctests cargo test --workspace --doc --locked -- --test-threads=2
-run 05-hegel cargo test --workspace --locked hegel_ -- --test-threads=2 --nocapture
-run 06-proptest cargo test --workspace --locked proptest_ -- --test-threads=2 --nocapture
+run 05-hegel cargo nextest run --workspace --locked -E 'test(/hegel_/)'
+run 06-proptest cargo nextest run --workspace --locked -E 'test(/proptest_/)'
 # One temp target for both sequential mutation scripts (never the source target), removed after.
 MEMORY_MUTATION_TARGET="$(mktemp -d "${TMPDIR:-/tmp}/memory-mutation-target.XXXXXX")"
 export MEMORY_MUTATION_TARGET
