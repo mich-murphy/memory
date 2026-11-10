@@ -2428,38 +2428,72 @@ fn recover_base_stops_at_the_first_manifest_that_does_not_match_its_key() -> R {
     Ok(())
 }
 
-/// The walk is bounded: a chain with no checkpoint is abandoned after 65 manifests
-/// (`CHECKPOINT_INTERVAL` is 64; the cap trips when 65 are already held). The chain is forged
-/// from `build` with repeated positions, which `fold` would reject as non-contiguous; the point
-/// is how much of a hostile store is fetched. Kills: removing the cap or moving it by one.
+/// Checkpoints sit at `seq % 64 == 0` (DESIGN.md 6.3), so the longest valid walk is the
+/// checkpoint at seq 0 plus 63 deltas (head seq 63): 64 manifest GETs, DESIGN.md's "at most 64
+/// manifest GETs". Seq 64 is itself a checkpoint. Kills: a cap below 64 (`> 63`).
 #[test]
-fn recover_base_gives_up_after_sixty_five_manifests_without_a_checkpoint() -> R {
+fn recover_base_recovers_the_longest_valid_chain_of_sixty_four_manifests() -> R {
     let owner = owner()?;
     let mut store = FakeStore::default();
-    let root = build(None, header(&owner, "x")?, vec![]).map_err(e)?;
-    store.write(&manifest_key(&root.hash), root.bytes.clone());
-    let mut previous = root.hash;
-    for _ in 0..70 {
-        let base = Position {
-            seq: 1,
-            manifest: previous,
-            checkpoint: root.hash,
-        };
-        let delta = build(
-            Some((&base, &OwnerState::default())),
+    let mut built = build(None, header(&owner, "x")?, vec![]).map_err(e)?;
+    store.write(&manifest_key(&built.hash), built.bytes.clone());
+    for _ in 0..63 {
+        built = build(
+            Some((&built.position, &built.state)),
             header(&owner, "x")?,
             vec![],
         )
         .map_err(e)?;
-        store.write(&manifest_key(&delta.hash), delta.bytes);
-        previous = delta.hash;
+        store.write(&manifest_key(&built.hash), built.bytes.clone());
     }
+    assert_eq!(built.position.seq, 63);
     store.write(
         &current_key(&owner),
-        Current::new(previous, 2, ts()?).to_bytes().map_err(e)?,
+        Current::new(built.hash, 63, ts()?).to_bytes().map_err(e)?,
     );
-    assert_eq!(recover_base(&mut store, &owner), Err(Failure::Corrupt));
-    assert_eq!(store.count(Op::Get(Kind::Manifest)), 65);
+    let base = recover_base(&mut store, &owner)
+        .map_err(e)?
+        .ok_or("no base")?;
+    assert_eq!(base.position.seq, 63);
+    assert_eq!(store.count(Op::Get(Kind::Manifest)), 64);
+    Ok(())
+}
+
+/// A chain of 65 manifests (checkpoint plus 64 deltas) cannot be valid: it is abandoned after
+/// exactly 64 manifest GETs, before the 65th is fetched. The chain is forged from `build` with
+/// repeated positions, which `fold` would reject as non-contiguous; the point is how much of a
+/// hostile store is fetched. Kills: removing the cap, or moving it up by one (`> 64`, which
+/// fetches 65) or down (`>= 63`, which fetches 63).
+#[test]
+fn recover_base_gives_up_after_sixty_four_gets_when_the_chain_is_one_too_long() -> R {
+    for deltas in [64_usize, 70] {
+        let owner = owner()?;
+        let mut store = FakeStore::default();
+        let root = build(None, header(&owner, "x")?, vec![]).map_err(e)?;
+        store.write(&manifest_key(&root.hash), root.bytes.clone());
+        let mut previous = root.hash;
+        for _ in 0..deltas {
+            let base = Position {
+                seq: 1,
+                manifest: previous,
+                checkpoint: root.hash,
+            };
+            let delta = build(
+                Some((&base, &OwnerState::default())),
+                header(&owner, "x")?,
+                vec![],
+            )
+            .map_err(e)?;
+            store.write(&manifest_key(&delta.hash), delta.bytes);
+            previous = delta.hash;
+        }
+        store.write(
+            &current_key(&owner),
+            Current::new(previous, 2, ts()?).to_bytes().map_err(e)?,
+        );
+        assert_eq!(recover_base(&mut store, &owner), Err(Failure::Corrupt));
+        assert_eq!(store.count(Op::Get(Kind::Manifest)), 64, "{deltas} deltas");
+    }
     Ok(())
 }
 

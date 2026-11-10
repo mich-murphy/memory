@@ -465,7 +465,9 @@ pub fn recover_base<S: Store>(store: &mut S, owner: &Owner) -> Result<Option<Bas
     let mut hash = current.manifest;
     let mut chain: Vec<Vec<u8>> = Vec::new();
     loop {
-        if chain.len() as u64 > CHECKPOINT_INTERVAL {
+        // A valid chain is a checkpoint (seq % 64 == 0) plus at most 63 deltas: 64 manifests.
+        // Holding 64 without having reached a checkpoint means a 65th GET cannot be valid.
+        if chain.len() as u64 >= CHECKPOINT_INTERVAL {
             return Err(Failure::Corrupt);
         }
         let stored = store.get(&manifest_key(&hash)).map_err(|e| match e {
