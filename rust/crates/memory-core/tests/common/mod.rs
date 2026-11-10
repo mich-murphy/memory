@@ -2,7 +2,9 @@
 //!
 //! A property that never generated a required shape proves nothing about it. Each property
 //! owns a `static Shapes`, bumps the shape it just exercised and calls [`Shapes::guard`]
-//! after its run. The guard itself is tested once, in `coverage_guard.rs`.
+//! after its run. Only randomly generated cases may bump a guarded `static`: a fixed
+//! scenario that bumps the same counters makes the guard unable to fail. Fixed scenarios use
+//! their own local `Shapes`. The guard itself is tested once, in `coverage_guard.rs`.
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Counters of generated case shapes, in a fixed order.

@@ -534,10 +534,7 @@ static HEGEL_STATS: Shapes<3> = Shapes::new(SHAPE_NAMES);
 static PROPTEST_STATS: Shapes<3> = Shapes::new(SHAPE_NAMES);
 
 /// One root and a proof twin (same identity at the root and at a path no root or alias
-/// covers): it compiles, resolves, and resolves PROOF_PATH by proof alone. Running it first
-/// makes the three guarded shapes deterministic, so the guard after the random cases is only
-/// a backstop (it failed in 23 of 100 default-case runs when the generator had to find a
-/// proof twin by chance).
+/// covers): it compiles, resolves, and resolves PROOF_PATH by proof alone.
 const PROOF_TWIN: [u8; 8] = [0, 0, 0, 0, 5, 0, 0, 0];
 
 fn check(bytes: &[u8], seed: u64, stats: &Shapes<3>) {
@@ -582,14 +579,31 @@ fn check(bytes: &[u8], seed: u64, stats: &Shapes<3>) {
     }
 }
 
+/// Build a scenario state-aware, so each guarded shape is reached by most random cases
+/// (no filtering or assuming): a base root, some noise chunks (usually few, sometimes many),
+/// and, in 7 of 8 cases, a proof twin of the base root appended last. The twin is the only way
+/// a path resolves by proof alone, so if this stops producing `proof-only` the guard fails.
+fn plan(noise: &[u8], base: [u8; 3], twin: u8) -> Vec<u8> {
+    let mut bytes = vec![0, base[0], base[1], 0];
+    bytes.extend_from_slice(noise);
+    if !twin.is_multiple_of(8) {
+        bytes.extend_from_slice(&[5, 0, 0, base[2]]);
+    }
+    bytes
+}
+
 #[test]
 fn hegel_coordinates_order_proof_and_retention() {
-    check(&PROOF_TWIN, 1, &HEGEL_STATS);
     hegel::Hegel::new(|tc: TestCase| {
-        let n = usize::from(tc.draw(gs::integers::<u8>()) % 48) * 4;
-        let bytes: Vec<u8> = (0..n).map(|_| tc.draw(gs::integers::<u8>())).collect();
+        let big = tc.draw(gs::integers::<u8>()).is_multiple_of(4);
+        let chunks = usize::from(tc.draw(gs::integers::<u8>())) % if big { 48 } else { 4 };
+        let noise: Vec<u8> = (0..chunks * 4)
+            .map(|_| tc.draw(gs::integers::<u8>()))
+            .collect();
+        let base = [(); 3].map(|()| tc.draw(gs::integers::<u8>()));
+        let twin = tc.draw(gs::integers::<u8>());
         let seed = u64::from(tc.draw(gs::integers::<u16>()));
-        check(&bytes, seed, &HEGEL_STATS);
+        check(&plan(&noise, base, twin), seed, &HEGEL_STATS);
     })
     .run();
     let guard = HEGEL_STATS.guard(SHAPE_NAMES.len());
@@ -598,11 +612,14 @@ fn hegel_coordinates_order_proof_and_retention() {
 
 #[test]
 fn proptest_coordinates_order_proof_and_retention() {
-    check(&PROOF_TWIN, 1, &PROPTEST_STATS);
     let mut runner = proptest::test_runner::TestRunner::default();
-    let strat = (prop::collection::vec(any::<u8>(), 0..192), any::<u16>());
-    let result = runner.run(&strat, |(bytes, seed)| {
-        check(&bytes, u64::from(seed), &PROPTEST_STATS);
+    let noise = prop_oneof![
+        3 => prop::collection::vec(any::<u8>(), 0..16),
+        1 => prop::collection::vec(any::<u8>(), 0..192),
+    ];
+    let strat = (noise, any::<[u8; 3]>(), any::<u8>(), any::<u16>());
+    let result = runner.run(&strat, |(noise, base, twin, seed)| {
+        check(&plan(&noise, base, twin), u64::from(seed), &PROPTEST_STATS);
         Ok(())
     });
     assert!(result.is_ok(), "{result:?}");
@@ -611,10 +628,12 @@ fn proptest_coordinates_order_proof_and_retention() {
 }
 
 #[test]
-fn the_fixed_proof_twin_alone_reaches_every_guarded_shape() {
+fn the_fixed_proof_twin_reaches_every_shape_and_the_oracle_holds_on_it() {
+    // Deterministic: proves the shapes are reachable and that `check`'s oracle (order
+    // independence, justification, retention) passes on them. It records into its own counters
+    // that no guard reads, so it can never satisfy a random run's coverage guard.
     // Mutant: a decoder or `check` change that stops the twin from producing a proof-only
-    // resolution would make the random run's guard flaky again; this pins it without any
-    // generator.
+    // resolution makes this fail.
     let alone = Shapes::new(SHAPE_NAMES);
     check(&PROOF_TWIN, 1, &alone);
     assert_eq!(alone.guard(SHAPE_NAMES.len()), Ok(()));
