@@ -401,6 +401,56 @@ fn reader_rejects_and_counts_bad_own_lines() -> R {
 }
 
 #[test]
+fn another_version_is_counted_as_version_and_a_broken_current_one_as_dropped() -> R {
+    // Mutants: `peek.schema != SCHEMA` -> `==` (swaps the two counters, invisible when both
+    // kinds appear once together), and `stdin.len() > MAX_HOOK_INPUT_BYTES` -> `>=`.
+    let good = good_line()?;
+    let g = text(&good)?.trim_end().to_owned();
+    let v2 = g.replace("memory.hint/1", "memory.hint/2");
+    let out = scan(format!("{v2}\n").as_bytes(), 0).map_err(|e| e.to_string())?;
+    assert_eq!((out.rejected_version, out.dropped), (1, 0));
+    let broken = g.replacen("\"agent\"", "\"unknown\":1,\"agent\"", 1);
+    let out = scan(format!("{broken}\n").as_bytes(), 0).map_err(|e| e.to_string())?;
+    assert_eq!((out.rejected_version, out.dropped), (0, 1));
+    Ok(())
+}
+
+#[test]
+fn hook_input_and_event_name_limits_are_exact() {
+    let c = Agent::Claude;
+    let json = |pad: usize| {
+        format!(
+            r#"{{"hook_event_name":"Stop","session_id":"s","p":"{}"}}"#,
+            "x".repeat(pad)
+        )
+    };
+    let overhead = json(0).len();
+    let at_limit = json(MAX_HOOK_INPUT_BYTES - overhead);
+    assert_eq!(at_limit.len(), MAX_HOOK_INPUT_BYTES);
+    assert!(parse(&c, &at_limit).is_ok());
+    assert_eq!(
+        parse(&c, &json(MAX_HOOK_INPUT_BYTES - overhead + 1)),
+        Err(HookInputError::TooLarge)
+    );
+    // An event name of exactly 64 bytes still maps (underscores are ignored); 65 does not.
+    let named = |n: usize| {
+        let name = format!("Stop{}", "_".repeat(n - 4));
+        parse(
+            &c,
+            &format!(r#"{{"hook_event_name":"{name}","session_id":"s"}}"#),
+        )
+    };
+    assert!(named(64).is_ok());
+    assert!(named(65).is_err());
+}
+
+#[test]
+fn hint_paths_expose_the_exact_validated_spelling() {
+    let path = HintPath::try_from(s("/work/dir")).map_err(|e| e.to_string());
+    assert_eq!(path.as_ref().map(HintPath::as_str), Ok("/work/dir"));
+}
+
+#[test]
 fn reader_pending_tail_resume_and_midfile_fragment() -> R {
     let good = good_line()?;
     let (head, _) = good.split_at(good.len() - 5);
