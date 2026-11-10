@@ -1,19 +1,29 @@
 //! Daemon skeleton tests: temp dirs, in-memory filesystem, fake store. No real adapters.
 use memory::capture::{Published, Source};
 use memory::daemon::{Daemon, Parts, StartError, StartOptions};
-use memory::environment::{Clock, FileSystem, Stat, Store, StoreError, Stored};
+use memory::environment::{Store, StoreError, Stored};
 use memory::state::{DaemonLock, EXIT_LOCK_HELD, SyncPolicy};
 use memory_core::domain::{
-    Agent, ArchiveId, Birth, ETag, FileId, MachineId, Owner, SessionId, SessionKey, SourceClass,
-    SourceId, SourceKind,
+    Agent, ArchiveId, ETag, MachineId, Owner, SessionId, SessionKey, SourceClass, SourceId,
+    SourceKind,
 };
 use memory_core::privacy::{PolicyContext, Profile, ResolvedSourceFacts, rules_digest};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+#[path = "common/fs.rs"]
+mod mem_fs;
+#[path = "common/store.rs"]
+mod mem_store;
+#[path = "common/clock.rs"]
+mod test_clock;
+use mem_fs::MemFs;
+use mem_store::{EtagModel, MemStore};
+use test_clock::{TestClock, WALL};
 
 type R<T = ()> = Result<T, String>;
 fn e<E: std::fmt::Debug>(err: E) -> String {
@@ -59,148 +69,6 @@ impl Drop for Tmp {
     }
 }
 
-#[derive(Default)]
-struct MemFs {
-    files: BTreeMap<u64, Vec<u8>>,
-    /// Modification times set by `set`; a source never set through it keeps 1_000.
-    mtimes: BTreeMap<u64, i64>,
-    /// File identity generation per path: `replace` gives the path a new inode.
-    generations: BTreeMap<u64, u64>,
-    tick: i64,
-}
-impl MemFs {
-    /// Replace a source's bytes; a real change moves the mtime, as a real write does.
-    fn set(&mut self, source: u64, bytes: &[u8]) {
-        if self.files.get(&source).map(Vec::as_slice) != Some(bytes) {
-            self.tick += 1;
-            self.mtimes.insert(source, 1_000 + self.tick);
-        }
-        self.files.insert(source, bytes.to_vec());
-    }
-    /// Rename-replace: a new file with a new identity appears at the same path.
-    fn replace(&mut self, source: u64, bytes: &[u8]) {
-        *self.generations.entry(source).or_default() += 1;
-        self.tick += 1;
-        self.mtimes.insert(source, 1_000 + self.tick);
-        self.files.insert(source, bytes.to_vec());
-    }
-    fn remove(&mut self, source: u64) {
-        self.files.remove(&source);
-        self.mtimes.remove(&source);
-    }
-}
-impl FileSystem for MemFs {
-    type Error = ();
-    fn stat(&mut self, source: u64) -> Result<Option<Stat>, ()> {
-        Ok(self.files.get(&source).map(|b| Stat {
-            id: FileId {
-                dev: 1,
-                ino: source | self.generations.get(&source).copied().unwrap_or(0) << 32,
-                birth: Birth::Unavailable,
-            },
-            size: u64::try_from(b.len()).unwrap_or(0),
-            mtime_ns: self.mtimes.get(&source).copied().unwrap_or(1_000),
-        }))
-    }
-    fn stat_len(&mut self, source: u64) -> Result<u64, ()> {
-        Ok(self.stat(source)?.ok_or(())?.size)
-    }
-    fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, ()> {
-        let bytes = self.files.get(&source).ok_or(())?;
-        let start = usize::try_from(range.start).map_err(|_| ())?;
-        let end = usize::try_from(range.end).map_err(|_| ())?.min(bytes.len());
-        Ok(bytes.get(start..end).unwrap_or_default().to_vec())
-    }
-}
-
-/// How a fake derives an ETag. R2 reports the MD5 of the body (P2 `etag_is_md5_of_body`), so
-/// the content model is measured for distinct bodies; what R2 answers for an identical rewrite
-/// is unmeasured, so the state machines run under both.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum EtagModel {
-    /// Every write gets a new ETag, even an identical rewrite.
-    #[default]
-    PerWrite,
-    /// The ETag is a function of the body: an identical rewrite keeps it.
-    Content,
-}
-fn content_token(body: &[u8]) -> u64 {
-    body.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
-        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
-    })
-}
-
-#[derive(Default)]
-struct MemStore {
-    /// Body and ETag token.
-    objects: BTreeMap<String, (Vec<u8>, u64)>,
-    /// Count of writes.
-    version: u64,
-    puts: u64,
-    model: EtagModel,
-}
-impl MemStore {
-    fn tag(v: u64) -> Result<ETag, StoreError> {
-        ETag::try_from(format!("\"v{v}\"")).map_err(|_| StoreError::Server)
-    }
-    fn put(
-        &mut self,
-        key: &str,
-        body: &Published,
-        fence: Option<&ETag>,
-    ) -> Result<ETag, StoreError> {
-        self.puts += 1;
-        let existing = self.objects.get(key).map(|(_, v)| *v);
-        match (fence, existing) {
-            (None, Some(_)) => return Err(StoreError::PreconditionFailed),
-            // Measured on R2 (P2 `r2-os.jsonl`): If-Match on a missing key is 412, not 404.
-            (Some(_), None) => return Err(StoreError::PreconditionFailed),
-            (Some(f), Some(v)) if &Self::tag(v)? != f => {
-                return Err(StoreError::PreconditionFailed);
-            }
-            _ => {}
-        }
-        self.version += 1;
-        let token = match self.model {
-            EtagModel::PerWrite => self.version,
-            EtagModel::Content => content_token(body.as_ref()),
-        };
-        self.objects
-            .insert(key.to_owned(), (body.as_ref().to_vec(), token));
-        Self::tag(token)
-    }
-}
-impl Store for MemStore {
-    fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
-        self.put(key, &body, None)
-    }
-    fn put_if_match(
-        &mut self,
-        key: &str,
-        etag: &ETag,
-        body: Published,
-    ) -> Result<ETag, StoreError> {
-        self.put(key, &body, Some(etag))
-    }
-    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
-        let (b, v) = self.objects.get(key).ok_or(StoreError::NotFound)?;
-        Ok(Stored {
-            body: b.clone(),
-            etag: Self::tag(*v)?,
-        })
-    }
-}
-
-struct Clk(u64);
-impl Clock for Clk {
-    fn monotonic_ns(&self) -> u64 {
-        self.0
-    }
-    fn wall_ns(&self) -> i128 {
-        1_794_000_000_000_000_000
-    }
-}
-
 fn owner() -> R<Owner> {
     Ok(Owner::Session(SessionKey {
         archive: ArchiveId::try_from("a".to_owned()).map_err(e)?,
@@ -233,13 +101,13 @@ fn source() -> R<(Owner, Source)> {
 }
 
 type Sources = Box<dyn FnMut() -> Vec<(Owner, Source)>>;
-fn parts(fs: MemFs, store: MemStore) -> Parts<MemFs, MemStore, Clk, Sources> {
+fn parts(fs: MemFs, store: MemStore) -> Parts<MemFs, MemStore, TestClock, Sources> {
     let one = source().ok();
     let sources: Sources = Box::new(move || one.clone().into_iter().collect());
     Parts {
         fs,
         store,
-        clock: Clk(0),
+        clock: TestClock::at(0),
         sources,
         context: PolicyContext {
             valid: true,
@@ -354,8 +222,6 @@ fn contains(hay: &[u8], needle: &[u8]) -> bool {
     hay.windows(needle.len().max(1)).any(|w| w == needle)
 }
 
-const WALL: i128 = 1_794_000_000_000_000_000;
-
 fn owner_of(session: &str) -> R<Owner> {
     Ok(Owner::Session(SessionKey {
         archive: ArchiveId::try_from("a".to_owned()).map_err(e)?,
@@ -385,19 +251,6 @@ fn src_of(session: &str, handle: u64) -> R<(Owner, Source)> {
             },
         },
     ))
-}
-
-struct FClk {
-    mono: u64,
-    wall: i128,
-}
-impl Clock for FClk {
-    fn monotonic_ns(&self) -> u64 {
-        self.mono
-    }
-    fn wall_ns(&self) -> i128 {
-        self.wall
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -437,11 +290,12 @@ struct Late {
     fence: Option<u64>,
 }
 
-/// Fake store with S3/R2 conditional-write semantics and scripted faults on `current.json`.
+/// The shared store with scripted faults on `current.json` that need state inside one PUT
+/// (a held write that lands late, a crash point, a blackout). The faults that only act
+/// around a call are done by decorating the store instead, as `Ghost` does.
 #[derive(Default)]
 struct FStore {
-    objects: BTreeMap<String, (Vec<u8>, u64)>,
-    version: u64,
+    store: MemStore,
     offline: bool,
     revoked: bool,
     rules: Vec<Rule>,
@@ -457,34 +311,24 @@ struct FStore {
     crashed: Option<CrashAt>,
     /// After a held write the store is unreachable until the round ends.
     blackout: bool,
-    model: EtagModel,
     /// `current.json` writes answered 412.
     refused_current: u64,
 }
 impl FStore {
     fn with_model(model: EtagModel) -> Self {
         Self {
-            model,
+            store: MemStore {
+                model,
+                ..MemStore::default()
+            },
             ..Self::default()
         }
-    }
-    fn tag(v: u64) -> Result<ETag, StoreError> {
-        ETag::try_from(format!("\"v{v}\"")).map_err(|_| StoreError::Server)
     }
     fn arm(&mut self, key: Option<String>, effect: Effect) {
         self.rules.push(Rule { key, effect });
     }
     fn peek(&self, key: &str) -> Option<&[u8]> {
-        self.objects.get(key).map(|(b, _)| b.as_slice())
-    }
-    fn write(&mut self, key: &str, body: Vec<u8>) -> u64 {
-        self.version += 1;
-        let token = match self.model {
-            EtagModel::PerWrite => self.version,
-            EtagModel::Content => content_token(&body),
-        };
-        self.objects.insert(key.to_owned(), (body, token));
-        token
+        self.store.objects.get(key).map(|(b, _)| b.as_slice())
     }
     fn take_rule(&mut self, key: &str) -> Option<Effect> {
         if !key.ends_with("current.json") {
@@ -499,9 +343,9 @@ impl FStore {
     /// The held write from an earlier attempt arrives; it lands only if its fence still holds.
     fn land_late(&mut self, key: &str) {
         if let Some(late) = self.late.take() {
-            let now = self.objects.get(key).map(|(_, v)| *v);
+            let now = self.store.objects.get(key).map(|(_, v)| *v);
             if now == late.fence {
-                self.write(key, late.body);
+                self.store.write(key, late.body);
                 self.late_landed += 1;
             }
         }
@@ -526,16 +370,16 @@ impl FStore {
         self.put_log.push(key.to_owned());
         let effect = self.take_rule(key);
         if let Some(Effect::Foreign(f)) = &effect {
-            if !self.objects.contains_key(&f.manifest_key) {
-                self.write(&f.manifest_key, f.manifest.clone());
+            if !self.store.objects.contains_key(&f.manifest_key) {
+                self.store.write(&f.manifest_key, f.manifest.clone());
             }
-            self.write(key, f.current.clone());
+            self.store.write(key, f.current.clone());
         }
         let is_current = key.ends_with("current.json");
         if matches!(effect, Some(Effect::Churn))
-            && let Some((body, _)) = self.objects.get(key).cloned()
+            && let Some((body, _)) = self.store.objects.get(key).cloned()
         {
-            self.write(key, body);
+            self.store.write(key, body);
         }
         if let Some(at) = self.crash_at {
             let hit = match at {
@@ -551,18 +395,10 @@ impl FStore {
         if is_current {
             self.land_late(key);
         }
-        let existing = self.objects.get(key).map(|(_, v)| *v);
-        let refused = match (fence, existing) {
-            (None, Some(_)) => true,
-            // Measured on R2 (P2 `r2-os.jsonl`): If-Match on a missing key is 412, not 404.
-            (Some(_), None) => true,
-            (Some(f), Some(v)) => &Self::tag(v)? != f,
-            (None, None) => false,
-        };
-        if refused {
-            self.refused_current += u64::from(is_current);
-            return Err(StoreError::PreconditionFailed);
-        }
+        let existing = self
+            .store
+            .check(key, fence)
+            .inspect_err(|_| self.refused_current += u64::from(is_current))?;
         if self.stall && is_current && self.late.is_none() {
             self.late = Some(Late {
                 body: body.as_ref().to_vec(),
@@ -572,7 +408,7 @@ impl FStore {
             self.stall = false;
             return Err(StoreError::Offline);
         }
-        let tag = Self::tag(self.write(key, body.as_ref().to_vec()))?;
+        let tag = MemStore::tag(self.store.write(key, body.as_ref().to_vec()))?;
         match effect {
             Some(Effect::LandThen(err)) => {
                 self.lost_fired += 1;
@@ -602,10 +438,10 @@ impl Store for FStore {
     }
     fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
         self.gate()?;
-        let (b, v) = self.objects.get(key).ok_or(StoreError::NotFound)?;
+        let (b, v) = self.store.objects.get(key).ok_or(StoreError::NotFound)?;
         Ok(Stored {
             body: b.clone(),
-            etag: Self::tag(*v)?,
+            etag: MemStore::tag(*v)?,
         })
     }
 }
@@ -770,7 +606,7 @@ fn make_foreign(store: &FStore, owner: &Owner) -> R<Foreign> {
 // ---------------------------------------------------------------- daemon helpers
 
 type FSrcs = Box<dyn FnMut() -> Vec<(Owner, Source)> + Send>;
-type D = Daemon<MemFs, FStore, FClk, FSrcs>;
+type D = Daemon<MemFs, FStore, TestClock, FSrcs>;
 
 fn boot(
     tmp: &Tmp,
@@ -796,7 +632,10 @@ fn boot_sync(
     let parts = Parts {
         fs,
         store,
-        clock: FClk { mono: 0, wall },
+        clock: TestClock {
+            wall,
+            ..TestClock::at(0)
+        },
         sources,
         context: PolicyContext {
             valid: true,
@@ -998,6 +837,7 @@ fn hint_launch_attached_once_and_offset_advances_after_commit() -> R {
     assert_eq!(obs.launches, 1, "attached exactly once");
     assert!(
         d.store_mut()
+            .store
             .objects
             .values()
             .all(|(b, _)| !contains(b, canary.as_bytes())),
@@ -1123,6 +963,7 @@ fn parked_daemon(tmp: &Tmp, cfg: &Path, list: &[(Owner, Source)]) -> R<(MemFs, F
     fs.files.insert(2, b"world\n".to_vec());
     let mut d = boot(tmp, cfg, fs, FStore::default(), list, WALL)?;
     d.store_mut()
+        .store
         .write(&current_key(&owner_of("s1")?), NEWER.to_vec());
     assert_eq!(d.reconcile_once().map_err(e)?.parked, 1);
     d.reconcile_once().map_err(e)?;
@@ -1633,11 +1474,11 @@ impl Sut {
         let mono = self.mono;
         let d = self.daemon()?;
         d.clock_mut().mono = mono;
-        let (before, revoked) = (d.store_mut().version, d.store_mut().revoked);
+        let (before, revoked) = (d.store_mut().store.version, d.store_mut().revoked);
         let report = d.reconcile_once().map_err(e)?;
         if revoked {
             ensure(
-                d.store_mut().version == before,
+                d.store_mut().store.version == before,
                 "a write landed while the token was revoked",
             )?;
             if d.status().host_paused {
@@ -1669,7 +1510,7 @@ impl Sut {
         if after.exists {
             d.fs_mut().set(1, &after.file);
         } else {
-            d.fs_mut().remove(1);
+            d.fs_mut().files.remove(&1);
         }
         Ok(())
     }
@@ -1710,7 +1551,8 @@ impl Sut {
             Step::RenameReplace { .. } => {
                 let committed = self.committed_len()?;
                 if after.exists {
-                    self.daemon()?.fs_mut().replace(1, &after.file);
+                    let fs = self.daemon()?.fs_mut();
+                    fs.replace(1, &after.file, fs.generation(1) + 1);
                 }
                 if after.effect && committed > 0 {
                     shapes.hit("rename-replace");
@@ -1929,11 +1771,7 @@ impl World {
 }
 
 fn model_of(reference: &Reference) -> EtagModel {
-    if reference.content_etag {
-        EtagModel::Content
-    } else {
-        EtagModel::PerWrite
-    }
+    EtagModel::from(reference.content_etag)
 }
 
 /// Run `steps` through the same model, system and oracle the properties use.
@@ -2113,11 +1951,7 @@ fn hegel_daemon_state_machine() {
     let scripted = scripted_shapes(&HEGEL_SHAPES);
     assert!(scripted.is_ok(), "{scripted:?}");
     hegel::Hegel::new(|tc: TestCase| {
-        let model = if tc.draw(gs::booleans()) {
-            EtagModel::Content
-        } else {
-            EtagModel::PerWrite
-        };
+        let model = EtagModel::from(tc.draw(gs::booleans()));
         let world = World::new(&HEGEL_SHAPES, model);
         assert!(world.is_ok(), "{:?}", world.as_ref().err());
         if let Ok(world) = world {
@@ -2246,10 +2080,7 @@ fn boot_shared(tmp: &Tmp, cfg: &Path, fs: MemFs, list: &Shared) -> R<D> {
     let parts = Parts {
         fs,
         store: FStore::default(),
-        clock: FClk {
-            mono: 0,
-            wall: WALL,
-        },
+        clock: TestClock::at(0),
         sources,
         context: PolicyContext {
             valid: true,
@@ -2457,7 +2288,7 @@ fn authoritative_park_is_written_inside_the_interval() -> R {
     assert_eq!(disk_status(&tmp)?.rounds, 1);
     shared.lock().map_err(e)?.push(src_of("s2", 2)?);
     let o2 = owner_of("s2")?;
-    d.store_mut().write(&current_key(&o2), NEWER.to_vec());
+    d.store_mut().store.write(&current_key(&o2), NEWER.to_vec());
     d.clock_mut().mono = 10_000_000_000;
     let report = d.reconcile_once().map_err(e)?;
     assert_eq!((report.parked, report.landed), (1, 0));
@@ -2495,6 +2326,7 @@ fn parked_owners_are_listed_sorted() -> R {
     let mut d = boot(&tmp, &cfg, fs, FStore::default(), &list, WALL)?;
     for name in &names {
         d.store_mut()
+            .store
             .write(&current_key(&owner_of(name)?), NEWER.to_vec());
     }
     let report = d.reconcile_once().map_err(e)?;
@@ -2525,7 +2357,9 @@ fn corrupt_remote_parks_the_source_after_three_hours() -> R {
         &list,
         WALL,
     )?;
-    d.store_mut().write(&current_key(&o), b"garbage".to_vec());
+    d.store_mut()
+        .store
+        .write(&current_key(&o), b"garbage".to_vec());
     let hour = 3_600_000_000_000;
     let mut seen = Vec::new();
     for at in [0, hour, 3 * hour] {
@@ -2606,7 +2440,7 @@ fn unlanded_first_write_resets_the_base_and_converges() -> R {
             inner: MemStore::default(),
             drop_current: true,
         },
-        clock: Clk(0),
+        clock: TestClock::at(0),
         sources,
         context: PolicyContext {
             valid: true,
@@ -2620,7 +2454,7 @@ fn unlanded_first_write_resets_the_base_and_converges() -> R {
     let r = d.reconcile_once().map_err(e)?;
     assert_eq!((r.landed, r.failed), (0, 1));
     d.store_mut().drop_current = false;
-    d.clock_mut().0 = 61_000_000_000;
+    d.clock_mut().mono = 61_000_000_000;
     let r = d.reconcile_once().map_err(e)?;
     assert_eq!((r.landed, r.failed), (1, 0));
     assert_eq!(d.root(), tmp.root());
@@ -2628,11 +2462,11 @@ fn unlanded_first_write_resets_the_base_and_converges() -> R {
     // round lands it with the bytes of the file as it is by then.
     d.fs_mut().files.insert(1, b"hello\nworld\n".to_vec());
     d.store_mut().drop_current = true;
-    d.clock_mut().0 = 122_000_000_000;
+    d.clock_mut().mono = 122_000_000_000;
     let r = d.reconcile_once().map_err(e)?;
     assert_eq!((r.landed, r.failed), (0, 1));
     d.store_mut().drop_current = false;
-    d.clock_mut().0 = 183_000_000_000;
+    d.clock_mut().mono = 183_000_000_000;
     let r = d.reconcile_once().map_err(e)?;
     assert_eq!((r.landed, r.failed), (1, 0));
     let stored = d

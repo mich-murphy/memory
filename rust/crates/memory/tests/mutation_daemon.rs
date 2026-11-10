@@ -3,18 +3,27 @@
 //! rejected, never the production line that the mutant changes.
 use memory::capture::{Published, Source};
 use memory::daemon::{Daemon, Parts, StartOptions};
-use memory::environment::{Clock, FileSystem, Stat, Store, StoreError, Stored};
+use memory::environment::{Store, StoreError, Stored};
 use memory::state::SyncPolicy;
 use memory_core::domain::{
-    Agent, ArchiveId, Birth, ETag, FileId, MachineId, Owner, SessionId, SessionKey, SourceClass,
-    SourceId, SourceKind,
+    Agent, ArchiveId, ETag, MachineId, Owner, SessionId, SessionKey, SourceClass, SourceId,
+    SourceKind,
 };
 use memory_core::privacy::{PolicyContext, Profile, ResolvedSourceFacts, rules_digest};
-use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+#[path = "common/fs.rs"]
+mod mem_fs;
+#[path = "common/store.rs"]
+mod mem_store;
+#[path = "common/clock.rs"]
+mod test_clock;
+use mem_fs::MemFs;
+use mem_store::{EtagModel, MemStore};
+use test_clock::TestClock;
 
 type R<T = ()> = Result<T, String>;
 fn e<E: std::fmt::Debug>(err: E) -> String {
@@ -61,105 +70,22 @@ impl Drop for Tmp {
     }
 }
 
+/// The shared store plus the two things this file's oracle needs: a count of the stale
+/// `If-Match` writes of `current.json` the store refused, and a switch that makes every write
+/// of `current.json` fail before landing.
 #[derive(Default)]
-struct MemFs {
-    files: BTreeMap<u64, Vec<u8>>,
-}
-impl FileSystem for MemFs {
-    type Error = ();
-    fn stat(&mut self, source: u64) -> Result<Option<Stat>, ()> {
-        Ok(self.files.get(&source).map(|b| Stat {
-            id: FileId {
-                dev: 1,
-                ino: source,
-                birth: Birth::Unavailable,
-            },
-            size: u64::try_from(b.len()).unwrap_or(0),
-            mtime_ns: i64::try_from(b.len()).unwrap_or(0),
-        }))
-    }
-    fn stat_len(&mut self, source: u64) -> Result<u64, ()> {
-        Ok(self.stat(source)?.ok_or(())?.size)
-    }
-    fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, ()> {
-        let bytes = self.files.get(&source).ok_or(())?;
-        let start = usize::try_from(range.start).map_err(|_| ())?;
-        let end = usize::try_from(range.end).map_err(|_| ())?.min(bytes.len());
-        Ok(bytes.get(start..end).unwrap_or_default().to_vec())
-    }
-}
-
-/// How the fake derives an ETag. R2 reports the MD5 of the body (P2 `etag_is_md5_of_body`), so
-/// the content model is measured for distinct bodies; what R2 answers for an identical rewrite
-/// is unmeasured. The stale-ETag test needs an identical rewrite with a new ETag, so it runs
-/// per-write only; the failed-commit test runs under both.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum EtagModel {
-    /// Every write gets a new ETag, even an identical rewrite.
-    #[default]
-    PerWrite,
-    /// The ETag is a function of the body: an identical rewrite keeps it.
-    Content,
-}
-fn content_token(body: &[u8]) -> u64 {
-    body.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
-        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
-    })
-}
-
-#[derive(Default)]
-struct MemStore {
-    /// Body and ETag token.
-    objects: BTreeMap<String, (Vec<u8>, u64)>,
-    /// Count of writes.
-    version: u64,
-    model: EtagModel,
+struct Judged {
+    inner: MemStore,
     /// `current.json` writes refused with 412 (a stale `If-Match`).
     rejected: u32,
-    /// Every write of `current.json` fails before landing.
     fail_current: bool,
 }
-impl MemStore {
-    fn tag(v: u64) -> Result<ETag, StoreError> {
-        ETag::try_from(format!("\"v{v}\"")).map_err(|_| StoreError::Server)
-    }
-    fn put(
-        &mut self,
-        key: &str,
-        body: &Published,
-        fence: Option<&ETag>,
-    ) -> Result<ETag, StoreError> {
-        let current = key.ends_with("current.json");
-        if current && self.fail_current {
+impl Store for Judged {
+    fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
+        if self.fail_current && key.ends_with("current.json") {
             return Err(StoreError::Offline);
         }
-        let existing = self.objects.get(key).map(|(_, v)| *v);
-        match (fence, existing) {
-            (None, Some(_)) => return Err(StoreError::PreconditionFailed),
-            // Measured on R2 (P2 `r2-os.jsonl`): If-Match on a missing key is 412, not 404.
-            (Some(_), None) => {
-                self.rejected += u32::from(current);
-                return Err(StoreError::PreconditionFailed);
-            }
-            (Some(f), Some(v)) if &Self::tag(v)? != f => {
-                self.rejected += u32::from(current);
-                return Err(StoreError::PreconditionFailed);
-            }
-            _ => {}
-        }
-        self.version += 1;
-        let token = match self.model {
-            EtagModel::PerWrite => self.version,
-            EtagModel::Content => content_token(body.as_ref()),
-        };
-        self.objects
-            .insert(key.to_owned(), (body.as_ref().to_vec(), token));
-        Self::tag(token)
-    }
-}
-impl Store for MemStore {
-    fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
-        self.put(key, &body, None)
+        self.inner.put_if_absent(key, body)
     }
     fn put_if_match(
         &mut self,
@@ -167,24 +93,18 @@ impl Store for MemStore {
         etag: &ETag,
         body: Published,
     ) -> Result<ETag, StoreError> {
-        self.put(key, &body, Some(etag))
+        let current = key.ends_with("current.json");
+        if self.fail_current && current {
+            return Err(StoreError::Offline);
+        }
+        let result = self.inner.put_if_match(key, etag, body);
+        if current && result == Err(StoreError::PreconditionFailed) {
+            self.rejected += 1;
+        }
+        result
     }
     fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
-        let (b, v) = self.objects.get(key).ok_or(StoreError::NotFound)?;
-        Ok(Stored {
-            body: b.clone(),
-            etag: Self::tag(*v)?,
-        })
-    }
-}
-
-struct Clk(u64);
-impl Clock for Clk {
-    fn monotonic_ns(&self) -> u64 {
-        self.0
-    }
-    fn wall_ns(&self) -> i128 {
-        1_794_000_000_000_000_000
+        self.inner.get(key)
     }
 }
 
@@ -217,21 +137,24 @@ fn source() -> R<(Owner, Source)> {
 }
 
 type Srcs = Box<dyn FnMut() -> Vec<(Owner, Source)>>;
-type D = Daemon<MemFs, MemStore, Clk, Srcs>;
+type D = Daemon<MemFs, Judged, TestClock, Srcs>;
 
 fn boot(tmp: &Tmp, initial: &[u8], model: EtagModel) -> R<D> {
     let cfg = tmp.config()?;
     let list = vec![source()?];
     let sources: Srcs = Box::new(move || list.clone());
     let mut files = MemFs::default();
-    files.files.insert(1, initial.to_vec());
+    files.set(1, initial);
     let parts = Parts {
         fs: files,
-        store: MemStore {
-            model,
-            ..MemStore::default()
+        store: Judged {
+            inner: MemStore {
+                model,
+                ..MemStore::default()
+            },
+            ..Judged::default()
         },
-        clock: Clk(0),
+        clock: TestClock::at(0),
         sources,
         context: PolicyContext {
             valid: true,
@@ -256,7 +179,7 @@ fn boot(tmp: &Tmp, initial: &[u8], model: EtagModel) -> R<D> {
 fn rounds(d: &mut D, mono: &mut u64, n: usize) {
     for _ in 0..n {
         *mono += 3_600_000_000_000;
-        d.clock_mut().0 = *mono;
+        d.clock_mut().mono = *mono;
         let _ = d.reconcile_once();
     }
 }
@@ -264,6 +187,7 @@ fn rounds(d: &mut D, mono: &mut u64, n: usize) {
 fn current_key(d: &mut D) -> R<String> {
     need(
         d.store_mut()
+            .inner
             .objects
             .keys()
             .find(|k| k.ends_with("current.json"))
@@ -281,19 +205,21 @@ fn stale_if_match_is_refused_by_the_store_before_the_rebase() -> R {
     let mut mono = 0;
     rounds(&mut d, &mut mono, 3);
     let key = current_key(&mut d)?;
-    let before = need(d.store_mut().objects.get(&key).cloned(), "current")?;
+    let before = need(d.store_mut().inner.objects.get(&key).cloned(), "current")?;
     assert_eq!(d.store_mut().rejected, 0);
     {
-        let st = d.store_mut();
+        let st = &mut d.store_mut().inner;
         st.version += 1;
         let v = st.version;
         if let Some(o) = st.objects.get_mut(&key) {
             o.1 = v;
         }
     }
-    need(d.fs_mut().files.get_mut(&1), "file")?.extend_from_slice(b"second line\n");
+    let mut grown = need(d.fs_mut().files.get(&1).cloned(), "file")?;
+    grown.extend_from_slice(b"second line\n");
+    d.fs_mut().set(1, &grown);
     rounds(&mut d, &mut mono, 3);
-    let after = need(d.store_mut().objects.get(&key).cloned(), "current")?;
+    let after = need(d.store_mut().inner.objects.get(&key).cloned(), "current")?;
     assert_ne!(before.0, after.0, "the appended bytes never landed");
     assert!(
         d.store_mut().rejected >= 1,
@@ -320,6 +246,7 @@ fn failed_commit_case(model: EtagModel) -> R {
     rounds(&mut d, &mut mono, 2);
     assert!(
         d.store_mut()
+            .inner
             .objects
             .keys()
             .all(|k| !k.ends_with("current.json"))
@@ -342,6 +269,7 @@ fn failed_commit_case(model: EtagModel) -> R {
     rounds(&mut d, &mut mono, 6);
     assert!(
         d.store_mut()
+            .inner
             .objects
             .keys()
             .any(|k| k.ends_with("current.json")),
