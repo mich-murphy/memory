@@ -206,19 +206,49 @@ fn read_exact_short_and_past_eof() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn error_display_is_closed() {
-    for (e, s) in [
-        (RealFsError::UnknownHandle, "unknown handle"),
-        (RealFsError::InvalidRange, "invalid range"),
-        (RealFsError::Absent, "source absent"),
-    ] {
-        assert_eq!(e.to_string(), s);
+/// One value per variant; the exhaustive match fails to compile when a variant is added.
+fn sample(kind: std::io::ErrorKind) -> [RealFsError; 5] {
+    let all = [
+        RealFsError::UnknownHandle,
+        RealFsError::InvalidRange,
+        RealFsError::Absent,
+        RealFsError::Changed,
+        RealFsError::Io(kind),
+    ];
+    for error in &all {
+        match error {
+            RealFsError::UnknownHandle
+            | RealFsError::InvalidRange
+            | RealFsError::Absent
+            | RealFsError::Changed
+            | RealFsError::Io(_) => {}
+        }
     }
-    assert!(
-        RealFsError::Io(std::io::ErrorKind::NotFound)
-            .to_string()
-            .starts_with("io error")
+    all
+}
+
+#[test]
+fn error_text_is_closed() {
+    use std::io::ErrorKind;
+    for kind in [
+        ErrorKind::NotFound,
+        ErrorKind::PermissionDenied,
+        ErrorKind::Other,
+    ] {
+        for error in sample(kind) {
+            let text = error.to_string();
+            assert!(text.is_ascii(), "{text}");
+            assert!(!text.contains('/'), "{text}");
+        }
+    }
+    // The Io text is a function of the kind alone.
+    assert_eq!(
+        RealFsError::Io(ErrorKind::NotFound).to_string(),
+        "io error: entity not found"
+    );
+    assert_ne!(
+        RealFsError::Io(ErrorKind::NotFound).to_string(),
+        RealFsError::Io(ErrorKind::PermissionDenied).to_string()
     );
 }
 
