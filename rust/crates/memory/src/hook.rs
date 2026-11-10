@@ -4,12 +4,13 @@
 //! and the UTC day as arguments, and returns a closed [`HookResult`]. [`main_entry`] is the
 //! thin process wrapper. Every path ends in exit 0, nothing is ever printed, there is no
 //! retry and no wait on the daemon.
+use crate::state::{StateError, vet};
 use memory_core::domain::Agent;
 use memory_core::hint::{self, HintEvent, MAX_HOOK_INPUT_BYTES};
 use memory_core::privacy::sanitize_launch;
-use std::fs::{DirBuilder, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::{IsTerminal, Read, Write};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::mpsc;
@@ -201,23 +202,14 @@ pub fn read_bounded<R: Read>(mut reader: R) -> Vec<u8> {
     out
 }
 
+/// Vet the hints directory with the shared rule (`state::vet`, DESIGN.md 9.1) and return its
+/// owner. Refusals are `DirRefused`; every I/O failure is `DirUnavailable`.
 fn vet_dir(dir: &Path) -> Result<u32, HookResult> {
-    let meta = match std::fs::symlink_metadata(dir) {
-        Ok(meta) => meta,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            DirBuilder::new()
-                .recursive(true)
-                .mode(0o700)
-                .create(dir)
-                .map_err(|_| HookResult::DirUnavailable)?;
-            std::fs::symlink_metadata(dir).map_err(|_| HookResult::DirUnavailable)?
-        }
-        Err(_) => return Err(HookResult::DirUnavailable),
-    };
-    if !meta.is_dir() || meta.mode() & 0o022 != 0 {
-        return Err(HookResult::DirRefused);
+    match vet(dir, true) {
+        Ok(meta) => Ok(meta.uid()),
+        Err(StateError::Io(_)) => Err(HookResult::DirUnavailable),
+        Err(_) => Err(HookResult::DirRefused),
     }
-    Ok(meta.uid())
 }
 
 fn append(dir: &Path, today: &str, line: &[u8]) -> HookResult {
@@ -234,7 +226,8 @@ fn append(dir: &Path, today: &str, line: &[u8]) -> HookResult {
     else {
         return HookResult::OpenFailed;
     };
-    // Safe Rust has no geteuid. A file we just opened with O_CREAT is ours unless it already
+    // The hook has no daemon lock and no probe file, so unlike `StateDir::vet_dir` it cannot
+    // learn the daemon's uid up front. Safe Rust has no geteuid. A file we just opened with O_CREAT is ours unless it already
     // existed, so "directory owner == file owner" stands in for "directory is ours".
     match file.metadata() {
         Ok(meta) if meta.uid() == dir_uid => {}
@@ -289,20 +282,25 @@ fn state_dir() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".local/state/memory"))
 }
 
+/// [`read_bounded`] on a thread, abandoned after `deadline`: a silent reader yields an empty
+/// payload. On timeout the reader stays blocked and ends with the process.
+pub fn read_with_deadline<R: Read + Send + 'static>(reader: R, deadline: Duration) -> Vec<u8> {
+    let (tx, rx) = mpsc::channel();
+    let spawned = std::thread::Builder::new().spawn(move || {
+        let _ = tx.send(read_bounded(reader));
+    });
+    if spawned.is_err() {
+        return Vec::new();
+    }
+    rx.recv_timeout(deadline).unwrap_or_default()
+}
+
 fn read_stdin_with_deadline() -> Vec<u8> {
     let stdin = std::io::stdin();
     if stdin.is_terminal() {
         return Vec::new();
     }
-    let (tx, rx) = mpsc::channel();
-    let spawned = std::thread::Builder::new().spawn(move || {
-        let _ = tx.send(read_bounded(stdin.lock()));
-    });
-    if spawned.is_err() {
-        return Vec::new();
-    }
-    // On timeout the reader stays blocked and ends with the process.
-    rx.recv_timeout(STDIN_DEADLINE).unwrap_or_default()
+    read_with_deadline(stdin, STDIN_DEADLINE)
 }
 
 fn process(agent: &str) -> HookResult {

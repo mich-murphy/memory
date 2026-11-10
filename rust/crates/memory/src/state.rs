@@ -113,7 +113,12 @@ pub fn default_root() -> Option<PathBuf> {
 
 /// Create (0700) if missing, then refuse a symlink, a non-directory or a group/world-writable
 /// directory. Only the final component is examined; a symlinked parent is allowed.
-fn vet(path: &Path, create: bool) -> Result<fs::Metadata, StateError> {
+///
+/// The one implementation of the hints-directory rule (DESIGN.md 9.1), shared with `hook.rs`,
+/// which runs it without the daemon lock. Ownership is checked by the callers, because each
+/// learns the daemon's uid differently: [`StateDir::vet_dir`] from the probe file, the hook
+/// from the day file it just opened.
+pub(crate) fn vet(path: &Path, create: bool) -> Result<fs::Metadata, StateError> {
     let meta = match fs::symlink_metadata(path) {
         Ok(meta) => meta,
         Err(error) if create && error.kind() == ErrorKind::NotFound => {
@@ -420,15 +425,96 @@ pub enum SyncPolicy {
     /// Skip the flush calls only. Simulation builds only (cargo feature `sim`, amendment A7).
     #[cfg(feature = "sim")]
     None,
+    /// As `Full` for the directory, but the file flush fails with an injected error, to test
+    /// that a failed fsync discards the temp file (DESIGN.md 9.2). Simulation builds only.
+    #[cfg(feature = "sim")]
+    FailFileSync,
+}
+
+/// Durability steps actually performed, in order, for tests (feature `sim` only). Each step is
+/// recorded by the one helper that makes the real call, after the call returns. Thread-local,
+/// so parallel tests do not see each other's steps. Production builds have no recorder.
+#[cfg(feature = "sim")]
+pub mod trace {
+    use std::cell::RefCell;
+
+    /// One durability step.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Step {
+        /// The envelope bytes were written to the temp file.
+        Write,
+        /// A flush of a temp file (attempted, whether or not it succeeded).
+        SyncFile,
+        /// `rename(2)` of the temp file over the destination.
+        Rename,
+        /// `link(2)` of the temp file to a destination that must not exist.
+        Link,
+        /// A flush of the containing directory.
+        SyncDir,
+    }
+
+    thread_local! {
+        static STEPS: RefCell<Vec<Step>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub(super) fn note(step: Step) {
+        STEPS.with(|steps| steps.borrow_mut().push(step));
+    }
+
+    /// Take and clear this thread's recorded steps.
+    #[must_use]
+    pub fn take() -> Vec<Step> {
+        STEPS.with(|steps| std::mem::take(&mut *steps.borrow_mut()))
+    }
 }
 
 fn fsync_dir(dir: &Path, sync: SyncPolicy) -> Result<(), StateError> {
+    #[cfg(feature = "sim")]
+    if sync == SyncPolicy::None {
+        return Ok(());
+    }
+    let _ = sync;
     let dir = File::open(dir).map_err(io)?;
+    let result = dir.sync_all().map_err(io);
+    #[cfg(feature = "sim")]
+    trace::note(trace::Step::SyncDir);
+    result
+}
+
+fn sync_file(file: &File, sync: SyncPolicy) -> std::io::Result<()> {
     match sync {
-        SyncPolicy::Full => dir.sync_all().map_err(io),
+        SyncPolicy::Full => {
+            let result = file.sync_all();
+            #[cfg(feature = "sim")]
+            trace::note(trace::Step::SyncFile);
+            result
+        }
         #[cfg(feature = "sim")]
         SyncPolicy::None => Ok(()),
+        #[cfg(feature = "sim")]
+        SyncPolicy::FailFileSync => {
+            trace::note(trace::Step::SyncFile);
+            Err(std::io::Error::other("injected file sync failure"))
+        }
     }
+}
+
+fn rename_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    let result = fs::rename(from, to);
+    #[cfg(feature = "sim")]
+    if result.is_ok() {
+        trace::note(trace::Step::Rename);
+    }
+    result
+}
+
+fn link_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    let result = fs::hard_link(from, to);
+    #[cfg(feature = "sim")]
+    if result.is_ok() {
+        trace::note(trace::Step::Link);
+    }
+    result
 }
 
 fn write_synced(path: &Path, bytes: &[u8], sync: SyncPolicy) -> std::io::Result<()> {
@@ -438,11 +524,9 @@ fn write_synced(path: &Path, bytes: &[u8], sync: SyncPolicy) -> std::io::Result<
         .mode(0o600)
         .open(path)?;
     file.write_all(bytes)?;
-    match sync {
-        SyncPolicy::Full => file.sync_all(),
-        #[cfg(feature = "sim")]
-        SyncPolicy::None => Ok(()),
-    }
+    #[cfg(feature = "sim")]
+    trace::note(trace::Step::Write);
+    sync_file(&file, sync)
 }
 
 /// A temporary file written and fsynced but not yet published (steps 1 and 2). Dropping it
@@ -499,7 +583,7 @@ impl Staged {
     /// # Errors
     /// [`StateError::Io`]; the temp file is removed on a failed rename.
     pub fn publish(self) -> Result<(), StateError> {
-        if let Err(error) = fs::rename(&self.tmp, &self.dest) {
+        if let Err(error) = rename_file(&self.tmp, &self.dest) {
             let _ = fs::remove_file(&self.tmp);
             return Err(io(error));
         }
@@ -513,7 +597,7 @@ impl Staged {
     /// # Errors
     /// [`StateError::Io`] other than "already exists".
     pub fn publish_new(self) -> Result<bool, StateError> {
-        let linked = fs::hard_link(&self.tmp, &self.dest);
+        let linked = link_file(&self.tmp, &self.dest);
         let _ = fs::remove_file(&self.tmp);
         match linked {
             Ok(()) => fsync_dir(&self.dir, self.sync).map(|()| true),
@@ -567,6 +651,16 @@ impl StateDir {
     #[cfg(feature = "sim")]
     pub fn prepare_with(lock: &DaemonLock, sync: SyncPolicy) -> Result<Self, StateError> {
         Self::prepare_inner(lock, sync)
+    }
+
+    /// This directory with another [`SyncPolicy`] for later writes (feature `sim`, tests only).
+    #[cfg(feature = "sim")]
+    #[must_use]
+    pub fn with_sync(&self, sync: SyncPolicy) -> Self {
+        Self {
+            sync,
+            ..self.clone()
+        }
     }
 
     pub(crate) fn prepare_inner(lock: &DaemonLock, sync: SyncPolicy) -> Result<Self, StateError> {

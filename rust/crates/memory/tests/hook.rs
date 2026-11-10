@@ -579,8 +579,61 @@ fn other_subcommands_keep_explicit_failure() -> R {
     Ok(())
 }
 
-/// A parent that writes nothing useful and never closes stdin must not hold the hook past
-/// the 2 s deadline (plus scheduling slack); bound asserted: 4.5 s.
+/// A reader that yields `first` once, then blocks until its sender is dropped.
+struct Stalls {
+    first: Cursor<Vec<u8>>,
+    release: std::sync::mpsc::Receiver<()>,
+}
+
+impl std::io::Read for Stalls {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.first.read(buf)?;
+        if n == 0 {
+            let _ = self.release.recv();
+        }
+        Ok(n)
+    }
+}
+
+/// No wall-clock bound: the injected deadline is 1 ms, and the assertion is that the call
+/// returns at all, empty, while the reader is still blocked. Kills: removing the timeout
+/// (`recv` instead of `recv_timeout`, which would hang) and returning the partial bytes.
+#[test]
+fn silent_or_partial_reader_is_abandoned_at_the_deadline() {
+    for first in [Vec::new(), b"{\"hook_event_name\":\"Stop\",".to_vec()] {
+        let (hold, release) = std::sync::mpsc::channel();
+        let got = hook::read_with_deadline(
+            Stalls {
+                first: Cursor::new(first),
+                release,
+            },
+            Duration::from_millis(1),
+        );
+        assert!(got.is_empty());
+        drop(hold);
+    }
+}
+
+/// A complete object returns without waiting for EOF or the deadline: the injected deadline is
+/// one hour, so a version that waited would hang. Kills: reading to EOF before returning.
+#[test]
+fn complete_object_returns_before_a_long_deadline() {
+    let object = payload("Stop", "inproc").into_bytes();
+    let (hold, release) = std::sync::mpsc::channel();
+    let got = hook::read_with_deadline(
+        Stalls {
+            first: Cursor::new(object.clone()),
+            release,
+        },
+        Duration::from_secs(3600),
+    );
+    assert_eq!(got, object);
+    drop(hold);
+}
+
+/// Process-level wiring check of `STDIN_DEADLINE`; the deadline logic itself is pinned without
+/// wall-clock bounds by the two tests above. A parent that writes nothing useful and never
+/// closes stdin must not hold the hook past the 2 s deadline (plus scheduling slack); bound asserted: 4.5 s.
 #[test]
 fn stdin_left_open_exits_within_bound() -> R {
     let tmp = Tmp::new("open")?;
@@ -798,7 +851,9 @@ fn percentile(sorted: &[u128], pct: usize) -> u128 {
 }
 
 /// Synthetic P4: in-process time of read_bounded + run (the whole hook minus process start),
-/// 2,000 runs. Run with `--release --ignored --nocapture`. Not slice-2 acceptance.
+/// 2,000 runs, asserting the DESIGN.md 14 footprint target (p99 at most 1 ms). Timing-sensitive
+/// by nature, so it belongs in no loaded CI job: run it in a quiet release job
+/// (`--release -- --ignored p4_core_latency`) as slice-2 footprint acceptance (prototype P4).
 #[test]
 #[ignore = "measurement: run with --release -- --ignored --nocapture"]
 fn p4_core_latency() -> R {
@@ -828,10 +883,15 @@ fn p4_core_latency() -> R {
         samples.len(),
         p99 <= 1_000_000
     );
+    assert!(
+        p99 <= 1_000_000,
+        "hook in-process p99 {p99} ns exceeds the 1 ms target"
+    );
     Ok(())
 }
 
 /// Informational spawn latency of the hook binary versus /usr/bin/true, 300 runs each.
+/// DESIGN.md 14 lists spawn latency as informational, so only the exit status is asserted.
 #[test]
 #[ignore = "measurement: run with --release -- --ignored --nocapture"]
 fn p4_spawn_latency() -> R {
@@ -860,7 +920,8 @@ fn p4_spawn_latency() -> R {
             if let Some(mut pipe) = child.stdin.take() {
                 let _ = pipe.write_all(&input);
             }
-            child.wait().map_err(e)?;
+            let status = child.wait().map_err(e)?;
+            assert!(status.success(), "the hook exits 0 on every path");
             v.push(start.elapsed().as_nanos());
         }
         v.sort_unstable();

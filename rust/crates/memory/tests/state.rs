@@ -2,6 +2,7 @@
 //! crash simulation, hint-dir vetting, machine id and properties. Temp dirs only.
 use hegel::{TestCase, generators as gs};
 use memory::config::{Config, ConfigError};
+use memory::state::trace::{self, Step};
 use memory::state::{
     DaemonLock, Loaded, MAX_BODY_BYTES, MAX_HEADER_BYTES, MissingReason, Schema, StateDir,
     StateError, StateFile, SyncPolicy, decode, encode, read_durable, root_from, stage,
@@ -1015,4 +1016,193 @@ proptest! {
         let r = crash_point(&old, &new, point, &junk, none);
         prop_assert!(r.is_ok(), "{r:?}");
     }
+}
+
+// ------------------------------------------- durability order (DESIGN.md 9.2 steps 2 to 4)
+
+const DURABLE: [Step; 4] = [Step::Write, Step::SyncFile, Step::Rename, Step::SyncDir];
+
+/// Kills: deleting or reordering the file flush, the rename or the directory flush in
+/// `stage_with`, `Staged::publish` or `fsync_dir` (including `fsync_dir -> Ok(())`).
+#[test]
+fn durable_write_flushes_file_then_renames_then_flushes_directory() -> R {
+    let tmp = Tmp::new("order")?;
+    let (_lock, dir) = open(&tmp)?;
+    // Preparation itself: one probe flush, no rename, no directory flush.
+    let _ = trace::take();
+    dir.write(StateFile::Status, b"v1").map_err(e)?;
+    assert_eq!(trace::take(), DURABLE, "first write");
+    dir.write(StateFile::Status, b"v2").map_err(e)?;
+    assert_eq!(trace::take(), DURABLE, "overwrite");
+    write_durable(dir.root(), "other.json", SCHEMA, b"x").map_err(e)?;
+    assert_eq!(trace::take(), DURABLE, "write_durable");
+    // Staging stops after the file flush, as a crash would; publish does the rest.
+    let staged = stage(dir.root(), "staged.json", SCHEMA, b"y").map_err(e)?;
+    assert_eq!(trace::take(), [Step::Write, Step::SyncFile], "stage");
+    staged.publish().map_err(e)?;
+    assert_eq!(trace::take(), [Step::Rename, Step::SyncDir], "publish");
+    Ok(())
+}
+
+/// Kills: removing the file flush or the directory flush from `publish_new`, or linking
+/// before the file is flushed.
+#[test]
+fn create_once_flushes_file_then_links_then_flushes_directory() -> R {
+    let tmp = Tmp::new("orderlink")?;
+    let (_lock, dir) = open(&tmp)?;
+    let _ = trace::take();
+    let id = MachineId::try_from("bc-01".to_owned()).map_err(e)?;
+    dir.create_machine_id(&id).map_err(e)?;
+    assert_eq!(
+        trace::take(),
+        [Step::Write, Step::SyncFile, Step::Link, Step::SyncDir],
+        "created"
+    );
+    // The loser of the race flushes its temp file, finds the file, and flushes nothing else.
+    dir.create_machine_id(&id).map_err(e)?;
+    assert_eq!(
+        trace::take(),
+        [Step::Write, Step::SyncFile],
+        "already exists"
+    );
+    Ok(())
+}
+
+/// Kills: dropping the probe flush in `prepare_inner`, or adding unflushed or extra durable
+/// steps to preparation. DESIGN.md 9.1 and 9.2 require no flush for the vetted directories
+/// themselves, so preparation is exactly one probe-file flush.
+#[test]
+fn state_directory_preparation_performs_one_probe_flush() -> R {
+    let tmp = Tmp::new("orderprep")?;
+    let lock = DaemonLock::acquire(&tmp.p().join("state")).map_err(e)?;
+    let _ = trace::take();
+    let _dir = StateDir::prepare(&lock).map_err(e)?;
+    assert_eq!(trace::take(), [Step::Write, Step::SyncFile]);
+    Ok(())
+}
+
+/// Kills: ignoring a failed file flush (the rename would run), keeping the temp file after
+/// it, or flushing the directory after it. DESIGN.md 9.2: a failed fsync discards the temp.
+#[test]
+fn failed_file_flush_keeps_old_target_and_leaves_no_temp() -> R {
+    let tmp = Tmp::new("syncfail")?;
+    let root = tmp.p().join("state");
+    let lock = DaemonLock::acquire(&root).map_err(e)?;
+    let dir = StateDir::prepare(&lock).map_err(e)?;
+    dir.write(StateFile::Status, b"old").map_err(e)?;
+    let failing = dir.with_sync(SyncPolicy::FailFileSync);
+    let _ = trace::take();
+    assert_eq!(
+        failing.write(StateFile::Status, b"new"),
+        Err(StateError::Io(std::io::ErrorKind::Other))
+    );
+    assert_eq!(
+        trace::take(),
+        [Step::Write, Step::SyncFile],
+        "no rename or directory flush"
+    );
+    assert_eq!(temp_count(&root)?, 0);
+    let Loaded::Present(stored) = failing.read(StateFile::Status) else {
+        return Err("old file lost".into());
+    };
+    assert_eq!(stored.body, b"old");
+    // Same for create-once: nothing is published.
+    let id = MachineId::try_from("bc-01".to_owned()).map_err(e)?;
+    assert!(failing.create_machine_id(&id).is_err());
+    assert_eq!(temp_count(&root)?, 0);
+    assert!(!root.join("machine_id").exists());
+    Ok(())
+}
+
+// ------------------------------------------------------------------ size boundaries
+
+/// Literal sizes: the 64 MiB body bound and the 256-byte header bound. DESIGN.md is silent on
+/// both numbers; they come from the implementation record (implementation/18-daemon-skeleton.md,
+/// "body > MAX_BODY_BYTES -> TooLarge"). Kills `MAX_BODY_BYTES` and `MAX_HEADER_BYTES`
+/// constant changes.
+#[test]
+fn size_bounds_have_their_documented_values() {
+    assert_eq!(MAX_BODY_BYTES, 67_108_864);
+    assert_eq!(MAX_HEADER_BYTES, 256);
+}
+
+/// Kills `body.len() > MAX_BODY_BYTES` -> `>=` in `encode`.
+#[test]
+fn encode_accepts_exactly_the_body_bound_and_refuses_one_more() -> R {
+    let exact = vec![0_u8; 67_108_864];
+    let bytes = encode(SCHEMA, &exact).map_err(e)?;
+    assert!(matches!(decode(&bytes, SCHEMA), Loaded::Present(_)));
+    assert_eq!(
+        encode(SCHEMA, &vec![0_u8; 67_108_865]),
+        Err(StateError::TooLarge)
+    );
+    Ok(())
+}
+
+/// Kills the `MAX_FILE_BYTES` arithmetic (`+` -> `-` or `*`) and `>=` -> `>` in `read_durable`:
+/// the largest envelope `encode` can produce is read back, a file one byte longer than the
+/// documented file bound is too large.
+#[test]
+fn read_durable_reads_the_largest_envelope_and_refuses_the_next_size() -> R {
+    let tmp = Tmp::new("maxfile")?;
+    let schema = Schema {
+        name: "m",
+        version: 1,
+    };
+    let path = tmp.p().join("max");
+    write_durable(tmp.p(), "max", schema, &vec![7_u8; 67_108_864]).map_err(e)?;
+    let Loaded::Present(stored) = read_durable(&path, schema) else {
+        return Err("largest envelope unreadable".into());
+    };
+    assert_eq!(stored.body.len(), 67_108_864);
+    // 64 MiB + 256 + 1 bytes is the documented read cap: that size and above is too large.
+    let over = tmp.p().join("over");
+    let f = fs::File::create(&over).map_err(e)?;
+    f.set_len(67_108_864 + 256 + 1).map_err(e)?;
+    assert_eq!(
+        missing(&read_durable(&over, schema)),
+        Some(MissingReason::TooLarge)
+    );
+    // One byte less is read (and then fails the header check, not the size check).
+    let under = tmp.p().join("under");
+    let f = fs::File::create(&under).map_err(e)?;
+    f.set_len(67_108_864 + 256).map_err(e)?;
+    assert_eq!(
+        missing(&read_durable(&under, schema)),
+        Some(MissingReason::BadHeader)
+    );
+    Ok(())
+}
+
+/// Kills `MAX_HEADER_BYTES + 1` -> `-` or `*` in `decode`: a header line of exactly 256 bytes
+/// plus its newline is accepted; with 257 bytes before the newline it is a bad header.
+#[test]
+fn decode_accepts_a_256_byte_header_and_refuses_257() -> R {
+    let body = b"b";
+    let sha = {
+        let bytes = encode(SCHEMA, body).map_err(e)?;
+        let text = String::from_utf8(bytes).map_err(e)?;
+        let first = text.lines().next().ok_or("no header")?;
+        first.rsplit(' ').next().ok_or("no sha")?.to_owned()
+    };
+    // `memory-state/1 NAME/1 W 1 SHA` padded through the writer-version field.
+    let header = |pad: usize| {
+        let fixed = format!("memory-state/1 memory.test/1 {{W}} 1 {sha}");
+        let w = "w".repeat(pad);
+        fixed.replace("{W}", &w)
+    };
+    let base = header(0).len();
+    let at = |len: usize| -> Vec<u8> {
+        let mut v = header(len - base).into_bytes();
+        v.push(b'\n');
+        v.extend_from_slice(body);
+        v
+    };
+    assert_eq!(at(256).iter().position(|b| *b == b'\n'), Some(256));
+    assert!(matches!(decode(&at(256), SCHEMA), Loaded::Present(_)));
+    assert_eq!(
+        missing(&decode(&at(257), SCHEMA)),
+        Some(MissingReason::BadHeader)
+    );
+    Ok(())
 }
