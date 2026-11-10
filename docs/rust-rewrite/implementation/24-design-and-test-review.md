@@ -131,6 +131,25 @@ the valid maximum; watcher aborts on a missing root (DESIGN silent); hand-copied
 constants versus a `rustix`/`libc` dependency; test fakes still copied across test files;
 `cargo mutants` not run on the whole workspace; live R2 probes; A10.3 and A10.7.
 
+## Round 4 (complete, integrated)
+
+| Branch | Content |
+|---|---|
+| `rust/realfs-rustix` | Named `rustix` open flags and errno replace hand-copied per-platform values (A12.4) |
+| `rust/launch-value-rule` | Value-shape rule for launch argv and env values (A12.1) |
+| `rust/chain-cap-oracle-memo` | `recover_base` reads at most 64 manifests (A12.3); capture property oracle memoised; amendment A12 |
+
+Parent verification on the final stack (HEAD `9b7b48d`): `PROPERTY_CASES=500 bash
+scripts/gates.sh`, seed 778961796, all 13 sub-gates 0; nextest 419 passed, 2 skipped, 234 s;
+`hegel_property4_capture_state_machine` 30 s; line coverage 5826/5962 = 97.72%;
+`verify-evidence.py` PASS. Not checked: Linux target build (target not in the Nix shell),
+hosted CI, whole-workspace `cargo mutants`.
+
+Still open (operator): live R2 probes; `GET_ATTEMPTS` literal; `realfs` error-text test;
+`zstd-3` label (A10.3); slice 2b cross-check and section 18 criteria (A10.7); env cap 8 of 9;
+watcher on a missing root; logging (A11.3); canonical-path type to close the parent-directory
+race (A12.4); hint retention (A11.2); shared test fakes; 30-seed guard confirmation.
+
 ## Next action
 
-Operator decisions on the open items; parent diff review; then push the stack.
+Stack submitted as PRs; operator decisions on the open items.
