@@ -8,7 +8,7 @@ use memory_core::domain::{
     Agent, ArchiveId, Birth, ETag, FileId, MachineId, Owner, SessionId, SessionKey, SourceClass,
     SourceId, SourceKind, WithholdReason,
 };
-use memory_core::manifest::{Change, Header, OwnerState, Timestamp, Writer};
+use memory_core::manifest::{Change, Header, OwnerState, Timestamp, Writer, manifest_hash};
 use memory_core::privacy::{
     PolicyContext, Profile, ResolvedSourceFacts, SanitizedLaunch, UnknownReason, rules_digest,
     sanitize_launch,
@@ -758,5 +758,168 @@ fn adopt_prefix_read_failures_have_literal_outcomes() -> R {
         assert!(got.commit.is_none());
         assert_eq!(rig.store.objects.len(), objects);
     }
+    Ok(())
+}
+
+// ---- Round 3: exact bytes, windows and manifest fields (cargo-mutants gaps in capture.rs)
+
+/// Deterministic content: byte `i` is a pure function of `i`, so a longer file always
+/// starts with every shorter one.
+fn pattern(len: usize) -> Vec<u8> {
+    (0..len)
+        .map(|i| u8::try_from((i * 7 + 3) % 251).unwrap_or(0))
+        .collect()
+}
+fn span(bytes: &[u8], range: std::ops::Range<usize>) -> R<&[u8]> {
+    bytes
+        .get(range)
+        .ok_or_else(|| "range outside bytes".to_owned())
+}
+fn index_of(rig: &Rig) -> R<memory_core::domain::SourceState> {
+    let id = &rig.sources.first().ok_or("no source")?.id;
+    rig.locals
+        .get(id)
+        .and_then(|l| l.index.clone())
+        .ok_or_else(|| "no index".to_owned())
+}
+
+/// First capture of `old` bytes, then growth to `new`: the second capture must publish
+/// exactly the delta, describe it with literal piece offsets and lengths, record the exact
+/// head and tail window digests of the new stream, and the next growth must still extend
+/// (an index holding wrong windows would force a spurious epoch).
+fn extend_records_exact_windows(
+    (old, new): (usize, usize),
+    piece_len: usize,
+    pieces: &[(u64, u64)],
+    head: std::ops::Range<usize>,
+    tail: std::ops::Range<usize>,
+) -> R {
+    let data = pattern(new + 10);
+    let mut rig = rig()?;
+    rig.piece_len = piece_len;
+    transcript(&mut rig, span(&data, 0..old)?);
+    assert_eq!(kinds(&rig.cycle()?.1), ["epoch"]);
+    transcript(&mut rig, span(&data, 0..new)?);
+    let (outcomes, changes) = rig.cycle()?;
+    assert_eq!(outcomes, [SourceOutcome::Planned]);
+    let [Change::Extend(write)] = changes.as_slice() else {
+        return Err(format!("expected one extend, got {:?}", kinds(&changes)));
+    };
+    assert_eq!(write.size, u64::try_from(new).map_err(e)?);
+    assert_eq!(write.sha256, manifest_hash(span(&data, 0..new)?));
+    let described: Vec<(u64, u64)> = write
+        .pieces
+        .iter()
+        .map(|p| (p.offset().get(), p.len()))
+        .collect();
+    assert_eq!(described, pieces);
+    // The uploaded objects are exactly the appended bytes, in order.
+    let mut uploaded = Vec::new();
+    for piece in &write.pieces {
+        let (body, _) = rig
+            .store
+            .objects
+            .get(piece.object())
+            .ok_or("piece object")?;
+        uploaded.extend_from_slice(body);
+    }
+    assert_eq!(uploaded, span(&data, old..new)?);
+    let state = index_of(&rig)?;
+    assert_eq!(
+        state.position.captured_to.get(),
+        u64::try_from(new).map_err(e)?
+    );
+    assert_eq!(state.head, manifest_hash(span(&data, head)?));
+    assert_eq!(state.tail, manifest_hash(span(&data, tail)?));
+    transcript(&mut rig, span(&data, 0..new + 10)?);
+    let (_, next) = rig.cycle()?;
+    assert_eq!(kinds(&next), ["extend"]);
+    Ok(())
+}
+
+#[test]
+fn extend_across_the_head_window_publishes_exact_delta_and_window_digests() -> R {
+    // Head window [0, 4096) is shorter than the file; the tail window is the whole file.
+    extend_records_exact_windows(
+        (5000, 8000),
+        1000,
+        &[(5000, 1000), (6000, 1000), (7000, 1000)],
+        0..4096,
+        0..8000,
+    )
+}
+
+#[test]
+fn extend_across_the_tail_window_publishes_exact_delta_and_window_digests() -> R {
+    // 72,000 > 65,536: the tail window starts at 6,464 and no longer overlaps the head.
+    extend_records_exact_windows(
+        (70_000, 72_000),
+        8192,
+        &[(70_000, 2000)],
+        0..4096,
+        6464..72_000,
+    )
+}
+
+#[test]
+fn piece_size_is_capped_at_eight_mebibytes_whatever_the_request() -> R {
+    let mut rig = rig()?;
+    rig.piece_len = 64 * 1024 * 1024;
+    let data = pattern(8 * 1024 * 1024 + 5);
+    transcript(&mut rig, &data);
+    let (_, changes) = rig.cycle()?;
+    let [Change::Epoch(write)] = changes.as_slice() else {
+        return Err(format!("expected one epoch, got {:?}", kinds(&changes)));
+    };
+    let described: Vec<(u64, u64)> = write
+        .pieces
+        .iter()
+        .map(|p| (p.offset().get(), p.len()))
+        .collect();
+    assert_eq!(described, [(0, 8_388_608), (8_388_608, 5)]);
+    Ok(())
+}
+
+#[test]
+fn extend_from_an_empty_capture_reads_nothing_beyond_the_delta() -> R {
+    let mut rig = rig()?;
+    transcript(&mut rig, b"");
+    assert_eq!(kinds(&rig.cycle()?.1), ["epoch"]);
+    rig.fs.set(1, b"0123456789");
+    let mut spy = Spy {
+        inner: std::mem::take(&mut rig.fs),
+        ..Spy::default()
+    };
+    let got = run_spy(&mut rig, &mut spy)?;
+    assert_eq!(kinds_of(&got), ["extend"]);
+    // Two empty window reads at the old boundary, then the delta; deriving the new windows
+    // from the verified prefix and the delta needs no further read, not even an empty one.
+    assert_eq!(spy.reads, [0..0, 0..0, 0..10]);
+    Ok(())
+}
+
+#[test]
+fn non_prefix_stable_source_with_an_index_is_read_whole_not_as_a_delta() -> R {
+    let mut rig = rig()?;
+    transcript(&mut rig, b"{\"a\":1}\n");
+    assert_eq!(kinds(&rig.cycle()?.1), ["epoch"]);
+    assert!(index_of(&rig)?.whole_state.is_some());
+    // The source is now recognized as a protected JSON document: transforming a delta alone
+    // is invalid, so the whole stream must be read and transformed again.
+    rig.sources.first_mut().ok_or("source")?.facts.identities = vec!["settings.json".to_owned()];
+    // Still one valid document (trailing whitespace), so the whole stream transforms fine
+    // while the lone delta "\n" is not a document at all.
+    rig.fs.set(1, b"{\"a\":1}\n\n");
+    let mut spy = Spy {
+        inner: std::mem::take(&mut rig.fs),
+        ..Spy::default()
+    };
+    let got = run_spy(&mut rig, &mut spy)?;
+    assert_eq!(
+        got.outcomes.first().map(|o| &o.1),
+        Some(&SourceOutcome::Planned)
+    );
+    assert_eq!(kinds_of(&got), ["extend"]);
+    assert_eq!(spy.reads.last(), Some(&(0..9)), "whole stream, not 8..9");
     Ok(())
 }

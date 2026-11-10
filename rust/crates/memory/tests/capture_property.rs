@@ -42,8 +42,17 @@ fn ensure(condition: bool, what: &str) -> R {
 }
 
 const SOURCES: u8 = 2;
+/// Raw piece size of scripted runs and the proptest twin.
 const PIECE: usize = 4;
 const SETTLE_ROUNDS: usize = 5;
+/// The planner's head window (`memory_core::planner::HEAD_WINDOW_BYTES`): files above this are
+/// where the head window stops being the whole file.
+const HEAD_WINDOW: u64 = 4096;
+/// The tail window (`TAIL_WINDOW_BYTES`): above this the tail window stops overlapping the head.
+const TAIL_WINDOW: u64 = 65536;
+/// Raw piece sizes a Hegel case may run with: tiny pieces for many-piece small files, large
+/// pieces so that files past the windows stay cheap to store and verify.
+const PIECE_CHOICES: [usize; 4] = [4, 64, 1024, 8192];
 
 fn sha(bytes: &[u8]) -> Sha256 {
     manifest_hash(bytes)
@@ -87,6 +96,8 @@ fn handle(i: u8) -> u64 {
 struct MemFs {
     files: BTreeMap<u64, Vec<u8>>,
     mtimes: BTreeMap<u64, i64>,
+    /// File identity generation per path: a rename-replace gives the path a new identity.
+    generations: BTreeMap<u64, u32>,
     clock: i64,
 }
 impl MemFs {
@@ -96,13 +107,22 @@ impl MemFs {
         self.files.insert(source, bytes.to_vec());
         self.mtimes.insert(source, self.clock);
     }
+    /// Put a file with identity `generation` at the path (a rename over the old one).
+    fn replace(&mut self, source: u64, bytes: &[u8], generation: u32) {
+        self.generations.insert(source, generation);
+        self.set(source, bytes);
+    }
+    fn generation(&self, source: u64) -> u32 {
+        self.generations.get(&source).copied().unwrap_or(0)
+    }
 }
 impl FileSystem for MemFs {
     type Error = ();
     fn stat(&mut self, source: u64) -> Result<Option<Stat>, ()> {
+        let dev = 1 + u64::from(self.generation(source));
         Ok(self.files.get(&source).map(|b| Stat {
             id: FileId {
-                dev: 1,
+                dev,
                 ino: source,
                 birth: Birth::Unavailable,
             },
@@ -401,6 +421,10 @@ struct Observed {
     /// Latest epoch bytes per source; `None` for a deleted source.
     sources: BTreeMap<u8, Option<Vec<u8>>>,
     max_epochs: usize,
+    /// Committed epoch count per source.
+    epochs: BTreeMap<u8, usize>,
+    /// Largest committed epoch, in bytes.
+    max_size: u64,
     seq: u64,
     hash: Sha256,
     hashes: Vec<(u64, Sha256)>,
@@ -415,16 +439,20 @@ fn observe(store: &FakeStore, owner: &Owner, history: &History) -> R<Option<Obse
         return Ok(None);
     };
     let mut sources = BTreeMap::new();
+    let mut epochs = BTreeMap::new();
     let mut max_epochs = 0;
+    let mut max_size = 0;
     for (id, entry) in &chain.folded.state.sources {
         let i = need(
             (0..SOURCES).find(|i| src_id(*i).is_ok_and(|s| s == *id)),
             "unknown source id",
         )?;
         max_epochs = max_epochs.max(entry.epochs.len());
+        epochs.insert(i, entry.epochs.len());
         let versions = need(history.get(&i), "source has no history")?;
         let mut latest = None;
         for record in &entry.epochs {
+            max_size = max_size.max(record.size);
             let bytes = reassemble(store, record)?;
             ensure(
                 versions.iter().any(|v| v.starts_with(&bytes)),
@@ -444,6 +472,8 @@ fn observe(store: &FakeStore, owner: &Owner, history: &History) -> R<Option<Obse
     Ok(Some(Observed {
         sources,
         max_epochs,
+        epochs,
+        max_size,
         seq: chain.current.seq,
         hash: chain.current.manifest,
         hashes: chain.hashes,
@@ -476,6 +506,12 @@ struct Shapes {
     crash_after_manifest: AtomicU64,
     lost_reply: AtomicU64,
     delete_index: AtomicU64,
+    /// A directed rename-replace check ran: indexed, settled, committed, same bytes.
+    identity_checked: AtomicU64,
+    /// A committed epoch is longer than the head window.
+    past_head_window: AtomicU64,
+    /// A committed epoch is longer than the tail window.
+    past_tail_window: AtomicU64,
 }
 impl Shapes {
     const fn new() -> Self {
@@ -485,6 +521,9 @@ impl Shapes {
             crash_after_manifest: AtomicU64::new(0),
             lost_reply: AtomicU64::new(0),
             delete_index: AtomicU64::new(0),
+            identity_checked: AtomicU64::new(0),
+            past_head_window: AtomicU64::new(0),
+            past_tail_window: AtomicU64::new(0),
         }
     }
     fn counts(&self) -> Vec<(&'static str, u64)> {
@@ -495,6 +534,9 @@ impl Shapes {
             ("crash-after-manifest", load(&self.crash_after_manifest)),
             ("lost-reply", load(&self.lost_reply)),
             ("delete-index", load(&self.delete_index)),
+            ("identity-checked", load(&self.identity_checked)),
+            ("past-head-window", load(&self.past_head_window)),
+            ("past-tail-window", load(&self.past_tail_window)),
         ]
     }
 }
@@ -541,12 +583,13 @@ fn run_capture(
     remote: &OwnerState,
     context: &PolicyContext,
     owner: &Owner,
+    piece_len: usize,
 ) -> R<Captured> {
     let env = Env {
         header: header(owner, "memory")?,
         context,
         now_ns: 10_000_000_000,
-        piece_len: PIECE,
+        piece_len,
     };
     Ok(capture(fs, sources, locals, remote, &env))
 }
@@ -563,11 +606,13 @@ struct Sut {
     needs_recover: bool,
     parked: bool,
     head: Option<(u64, Sha256)>,
+    piece_len: usize,
 }
 
 impl Sut {
-    fn new() -> R<Self> {
+    fn new(piece_len: usize) -> R<Self> {
         Ok(Self {
+            piece_len,
             fs: MemFs::default(),
             store: FakeStore::default(),
             owner: owner()?,
@@ -580,11 +625,15 @@ impl Sut {
             head: None,
         })
     }
-    /// Mirror the model's file for `src` into the synthetic filesystem.
+    /// Mirror the model's file for `src` into the synthetic filesystem: its bytes and its
+    /// identity generation (a rename-replace is a new file at the same path).
     fn sync_file(&mut self, src: u8, after: &Reference) {
         match after.files.get(&src) {
             Some(bytes) => {
-                if self.fs.files.get(&handle(src)) != Some(bytes) {
+                let generation = after.generation.get(&src).copied().unwrap_or(0);
+                if self.fs.generation(handle(src)) != generation {
+                    self.fs.replace(handle(src), bytes, generation);
+                } else if self.fs.files.get(&handle(src)) != Some(bytes) {
                     self.fs.set(handle(src), bytes);
                 }
             }
@@ -651,6 +700,7 @@ impl Sut {
             state,
             &self.context,
             &self.owner,
+            self.piece_len,
         )?;
         let Some(request) = got.commit else {
             for update in got.updates {
@@ -687,6 +737,7 @@ impl Sut {
                     state,
                     &self.context,
                     &self.owner,
+                    self.piece_len,
                 )?;
                 if let Some(request) = got.commit {
                     for upload in request.uploads {
@@ -711,10 +762,37 @@ impl Sut {
     }
     fn exec(&mut self, step: &Step, after: &Reference, shapes: &Shapes) -> R {
         match step {
-            Step::Append { src, .. }
-            | Step::Rewrite { src, .. }
-            | Step::Truncate { src, .. }
-            | Step::RemoveSource { src } => self.sync_file(*src, after),
+            Step::Append { src, .. } | Step::RemoveSource { src } => self.sync_file(*src, after),
+            Step::Rewrite { src, .. } | Step::Truncate { src, .. } => {
+                // Directed: for a settled, indexed, committed source every change the windows
+                // can see (a rewrite is never placed where only an audit would see it, a
+                // truncation always replays) is followed by the store after one fault-free
+                // reconcile.
+                let before = self.settled_epochs(*src)?;
+                self.sync_file(*src, after);
+                if before.is_some() {
+                    self.reconcile()?;
+                    self.follows(*src, &after.files)?;
+                }
+            }
+            Step::RenameReplace { src, same, .. } => {
+                // Directed: for a settled, indexed, committed source a new file at the path
+                // (new bytes or the same bytes) starts a new epoch at once (DESIGN.md 7.2: an
+                // identity change replays). Same bytes cannot reveal it any other way.
+                let before = self.settled_epochs(*src)?;
+                self.sync_file(*src, after);
+                if let Some(before) = before {
+                    self.reconcile()?;
+                    self.follows(*src, &after.files)?;
+                    ensure(
+                        self.epoch_count(*src)? > before,
+                        "a new file at the same path did not start a new epoch",
+                    )?;
+                    if *same {
+                        bump(&shapes.identity_checked);
+                    }
+                }
+            }
             Step::Reconcile => {
                 self.reconcile()?;
             }
@@ -788,18 +866,61 @@ impl Sut {
                 }
             }
             Step::Settle => {
-                self.store.offline = false;
-                self.store.revoked = false;
-                self.store.clear_transient_keep_none();
-                for _ in 0..SETTLE_ROUNDS {
-                    self.reconcile()?;
-                }
+                self.quiesce()?;
                 if !after.foreign_seen {
                     self.liveness(&after.files, &after.history)?;
                 }
             }
         }
         Ok(())
+    }
+    /// Clear every transient fault and reconcile until the owner settles; the last report.
+    fn quiesce(&mut self) -> R<Report> {
+        self.store.offline = false;
+        self.store.revoked = false;
+        self.store.clear_transient();
+        let mut last = Report::Idle;
+        for _ in 0..SETTLE_ROUNDS {
+            last = self.reconcile()?;
+        }
+        Ok(last)
+    }
+    /// Committed epoch count of `src`, read straight from the store.
+    fn epoch_count(&self, src: u8) -> R<usize> {
+        let id = src_id(src)?;
+        Ok(read_chain(&self.store, &self.owner)?
+            .and_then(|c| c.folded.state.sources.get(&id).map(|s| s.epochs.len()))
+            .unwrap_or(0))
+    }
+    /// The latest committed epoch of `src` equals the bytes it has on disk.
+    fn follows(&self, src: u8, disk: &Disk) -> R {
+        let id = src_id(src)?;
+        let chain = need(read_chain(&self.store, &self.owner)?, "nothing committed")?;
+        let entry = need(chain.folded.state.sources.get(&id), "source not committed")?;
+        let latest = need(entry.epochs.last(), "source has no epoch")?;
+        ensure(
+            disk.get(&src)
+                .is_some_and(|b| reassemble(&self.store, latest).is_ok_and(|e| e == *b)),
+            "a settled source did not follow its change after one reconcile",
+        )
+    }
+    /// Settle, then the committed epoch count of `src` when its change must be seen next:
+    /// the source exists, was committed, is indexed, nothing is parked and no
+    /// foreign writer is armed. `None` when any of those fails (the step is then undirected).
+    fn settled_epochs(&mut self, src: u8) -> R<Option<usize>> {
+        let last = self.quiesce()?;
+        let indexed = self
+            .locals
+            .get(&src_id(src)?)
+            .is_some_and(|l| l.index.is_some());
+        let epochs = self.epoch_count(src)?;
+        let ready = last == Report::Idle
+            && !self.parked
+            && !self.store.foreign_armed()
+            && indexed
+            && epochs >= 1
+            && self.fs.files.contains_key(&handle(src));
+        Ok(ready.then_some(epochs))
     }
     /// Liveness after settle: the latest epoch equals the current source bytes where the
     /// source exists, and a removed source that was ever committed is recorded deleted.
@@ -836,16 +957,26 @@ impl Sut {
             )?;
         }
         self.head = Some((observed.seq, observed.hash));
+        // Appends never start an epoch: a source has at most one epoch per destructive change
+        // the model made to it (rewrite, truncation, removal, rename-replace) plus the first.
+        // A wrongly computed window digest or a lost resume state would replay needlessly.
+        for (src, epochs) in &observed.epochs {
+            let allowed = 1 + reference.destructive.get(src).copied().unwrap_or(0);
+            ensure(
+                *epochs <= allowed,
+                "needless epoch: more epochs than destructive changes",
+            )?;
+        }
         if observed.max_epochs >= 2 {
             bump(&shapes.multi_epoch);
         }
+        if observed.max_size > HEAD_WINDOW {
+            bump(&shapes.past_head_window);
+        }
+        if observed.max_size > TAIL_WINDOW {
+            bump(&shapes.past_tail_window);
+        }
         Ok(())
-    }
-}
-impl FakeStore {
-    /// Settle clears transient faults; an armed foreign writer stays (it is not a fault).
-    fn clear_transient_keep_none(&mut self) {
-        self.clear_transient();
     }
 }
 
@@ -853,16 +984,42 @@ impl FakeStore {
 
 #[derive(Clone, Debug)]
 enum Step {
-    Append { src: u8, seed: u8, n: u8 },
-    Rewrite { src: u8, pos: u8, byte: u8 },
-    Truncate { src: u8, len: u8 },
-    RemoveSource { src: u8 },
+    Append {
+        src: u8,
+        seed: u8,
+        n: u32,
+    },
+    /// Flip the byte at `pos % len` (nothing for a missing or empty file).
+    Rewrite {
+        src: u8,
+        pos: u64,
+        byte: u8,
+    },
+    /// Keep the first `len % file_len + 1` bytes.
+    Truncate {
+        src: u8,
+        len: u64,
+    },
+    RemoveSource {
+        src: u8,
+    },
+    /// A new file (new identity) at the same path: `n` fresh bytes, or the same bytes.
+    RenameReplace {
+        src: u8,
+        seed: u8,
+        n: u32,
+        same: bool,
+    },
     Reconcile,
     CrashBeforePut,
     CrashAfterPiece,
     CrashAfterManifest,
-    CommittedReplyLost { then_offline: bool },
-    CommittedThen5xx { landed: bool },
+    CommittedReplyLost {
+        then_offline: bool,
+    },
+    CommittedThen5xx {
+        landed: bool,
+    },
     Restart,
     DeleteIndex,
     GoOffline,
@@ -881,6 +1038,29 @@ struct Reference {
     files: Disk,
     history: History,
     foreign_seen: bool,
+    /// File identity generation per source (bumped by a rename-replace).
+    generation: BTreeMap<u8, u32>,
+    /// Changes that may legitimately start an epoch, per source (counted on an existing file).
+    destructive: BTreeMap<u8, usize>,
+}
+
+/// Bytes between the head and tail windows of a file longer than both are certified only by
+/// a full audit (DESIGN.md 7.2; capture runs none), so the model never makes an edit that only
+/// an audit could see: such an index moves to the start of the tail window.
+fn detectable(index: usize, len: usize) -> usize {
+    let head = usize::try_from(HEAD_WINDOW).unwrap_or(usize::MAX);
+    let tail_start = len.saturating_sub(usize::try_from(TAIL_WINDOW).unwrap_or(usize::MAX));
+    if (head..tail_start).contains(&index) {
+        tail_start
+    } else {
+        index
+    }
+}
+
+fn fill(seed: u8, n: u32) -> Vec<u8> {
+    (0..n.max(1))
+        .map(|k| seed.wrapping_add(u8::try_from(k % 256).unwrap_or(0)) % 3)
+        .collect()
 }
 
 impl Reference {
@@ -889,6 +1069,14 @@ impl Reference {
             files: Disk::new(),
             history: History::new(),
             foreign_seen: false,
+            generation: BTreeMap::new(),
+            destructive: BTreeMap::new(),
+        }
+    }
+    /// Count a change that may start an epoch, when the file exists.
+    fn destroy(&mut self, src: u8) {
+        if self.files.contains_key(&src) {
+            *self.destructive.entry(src).or_default() += 1;
         }
     }
     fn record(&mut self, src: u8) {
@@ -902,29 +1090,47 @@ impl Reference {
     fn apply(&mut self, step: &Step) {
         match step {
             Step::Append { src, seed, n } => {
-                let add: Vec<u8> = (0..(*n).max(1)).map(|k| seed.wrapping_add(k) % 3).collect();
-                self.files.entry(*src).or_default().extend(add);
+                self.files.entry(*src).or_default().extend(fill(*seed, *n));
                 self.record(*src);
             }
             Step::Rewrite { src, pos, byte } => {
+                self.destroy(*src);
                 if let Some(file) = self.files.get_mut(src)
-                    && let Some(index) = usize::from(*pos).checked_rem(file.len())
-                    && let Some(b) = file.get_mut(index)
+                    && let Some(index) = usize::try_from(*pos)
+                        .ok()
+                        .and_then(|p| p.checked_rem(file.len()))
+                    && let at = detectable(index, file.len())
+                    && let Some(b) = file.get_mut(at)
                 {
                     *b = b.wrapping_add(1 + byte % 2);
                 }
                 self.record(*src);
             }
             Step::Truncate { src, len } => {
+                self.destroy(*src);
                 if let Some(file) = self.files.get_mut(src)
-                    && let Some(k) = usize::from(*len).checked_rem(file.len())
+                    && let Some(k) = usize::try_from(*len)
+                        .ok()
+                        .and_then(|l| l.checked_rem(file.len()))
                 {
                     file.truncate(k + 1);
                 }
                 self.record(*src);
             }
             Step::RemoveSource { src } => {
+                self.destroy(*src);
                 self.files.remove(src);
+            }
+            Step::RenameReplace { src, seed, n, same } => {
+                let existed = self.files.contains_key(src);
+                self.destroy(*src);
+                if existed {
+                    *self.generation.entry(*src).or_default() += 1;
+                }
+                if !(*same && existed) {
+                    self.files.insert(*src, fill(*seed, *n));
+                }
+                self.record(*src);
             }
             Step::ForeignWriter => self.foreign_seen = true,
             Step::Reconcile
@@ -946,17 +1152,80 @@ impl Reference {
 
 // ------------------------------------------------------------------ Hegel state machine
 
+/// Generator-efficiency counters, printed to stderr when `CAPTURE_PROPERTY_STATS` is set.
+/// They classify what the state-aware generation produced; they assert nothing.
+struct Stats {
+    cases: AtomicU64,
+    cases_without_bytes: AtomicU64,
+    cases_past_head: AtomicU64,
+    cases_past_tail: AtomicU64,
+    steps: AtomicU64,
+    rewrite_truncate: AtomicU64,
+    rewrite_truncate_on_empty: AtomicU64,
+    remove: AtomicU64,
+    remove_on_missing: AtomicU64,
+    crash: AtomicU64,
+    crash_without_data: AtomicU64,
+    restart_delete_index: AtomicU64,
+    restart_delete_index_before_commit: AtomicU64,
+}
+static STATS: Stats = Stats {
+    cases: AtomicU64::new(0),
+    cases_without_bytes: AtomicU64::new(0),
+    cases_past_head: AtomicU64::new(0),
+    cases_past_tail: AtomicU64::new(0),
+    steps: AtomicU64::new(0),
+    rewrite_truncate: AtomicU64::new(0),
+    rewrite_truncate_on_empty: AtomicU64::new(0),
+    remove: AtomicU64::new(0),
+    remove_on_missing: AtomicU64::new(0),
+    crash: AtomicU64::new(0),
+    crash_without_data: AtomicU64::new(0),
+    restart_delete_index: AtomicU64::new(0),
+    restart_delete_index_before_commit: AtomicU64::new(0),
+};
+impl Stats {
+    fn report(&self) -> String {
+        let n = |c: &AtomicU64| c.load(Ordering::Relaxed);
+        let pct = |part: &AtomicU64, whole: &AtomicU64| {
+            format!(
+                "{}/{} ({:.1}%)",
+                n(part),
+                n(whole),
+                100.0 * n(part) as f64 / (n(whole).max(1)) as f64
+            )
+        };
+        format!(
+            "capture_property generator stats\n  cases without any byte: {}\n  cases with a file > {HEAD_WINDOW} B: {}\n  cases with a file > {TAIL_WINDOW} B: {}\n  steps: {}\n  rewrite/truncate on a missing or empty file: {}\n  remove on a missing source: {}\n  crash with no data on disk: {}\n  restart/delete-index before any commit: {}",
+            pct(&self.cases_without_bytes, &self.cases),
+            pct(&self.cases_past_head, &self.cases),
+            pct(&self.cases_past_tail, &self.cases),
+            n(&self.steps),
+            pct(&self.rewrite_truncate_on_empty, &self.rewrite_truncate),
+            pct(&self.remove_on_missing, &self.remove),
+            pct(&self.crash_without_data, &self.crash),
+            pct(
+                &self.restart_delete_index_before_commit,
+                &self.restart_delete_index
+            ),
+        )
+    }
+}
+
 struct World {
     reference: Reference,
     sut: Sut,
     shapes: &'static Shapes,
+    /// Longest file this case ever held.
+    longest: u64,
 }
 impl World {
-    fn new(shapes: &'static Shapes) -> R<Self> {
+    fn new(shapes: &'static Shapes, piece_len: usize) -> R<Self> {
         Ok(Self {
             reference: Reference::new(),
-            sut: Sut::new()?,
+            sut: Sut::new(piece_len)?,
             shapes,
+            longest: 0,
         })
     }
     fn try_run(&mut self, step: &Step) -> R {
@@ -965,8 +1234,127 @@ impl World {
         self.sut.check(&self.reference, self.shapes)
     }
     fn run(&mut self, step: Step) {
+        self.count(&step);
         let result = self.try_run(&step);
         assert!(result.is_ok(), "{step:?}: {result:?}");
+        let longest = self.reference.files.values().map(|f| len64(f)).max();
+        self.longest = self.longest.max(longest.unwrap_or(0));
+    }
+    /// Classify the step against the state it is about to run in (statistics only).
+    fn count(&self, step: &Step) {
+        let bump_if = |cond: bool, counter: &AtomicU64| {
+            if cond {
+                bump(counter);
+            }
+        };
+        let empty = |src: &u8| self.reference.files.get(src).is_none_or(Vec::is_empty);
+        bump(&STATS.steps);
+        match step {
+            Step::Rewrite { src, .. } | Step::Truncate { src, .. } => {
+                bump(&STATS.rewrite_truncate);
+                bump_if(empty(src), &STATS.rewrite_truncate_on_empty);
+            }
+            Step::RemoveSource { src } => {
+                bump(&STATS.remove);
+                bump_if(
+                    !self.reference.files.contains_key(src),
+                    &STATS.remove_on_missing,
+                );
+            }
+            Step::CrashBeforePut | Step::CrashAfterPiece | Step::CrashAfterManifest => {
+                bump(&STATS.crash);
+                bump_if(
+                    self.reference.files.values().all(Vec::is_empty),
+                    &STATS.crash_without_data,
+                );
+            }
+            Step::Restart | Step::DeleteIndex => {
+                bump(&STATS.restart_delete_index);
+                bump_if(
+                    self.sut.head.is_none(),
+                    &STATS.restart_delete_index_before_commit,
+                );
+            }
+            _ => {}
+        }
+    }
+    /// A source that currently has a file, drawn; `None` when there is none.
+    fn draw_existing(&self, tc: &TestCase) -> Option<u8> {
+        let keys: Vec<u8> = self.reference.files.keys().copied().collect();
+        let last = keys.len().checked_sub(1)?;
+        let index = tc.draw(gs::integers::<usize>().max_value(last));
+        keys.get(index).copied()
+    }
+    fn len_of(&self, src: u8) -> u64 {
+        self.reference.files.get(&src).map_or(0, |f| len64(f))
+    }
+    /// Append size: mostly a few bytes, often hundreds to thousands (so a few appends cross
+    /// the 4,096-byte head window), sometimes aimed at the window edge, rarely past the
+    /// 65,536-byte tail window (only with pieces large enough to keep that cheap).
+    fn draw_size(&self, tc: &TestCase, src: u8) -> u32 {
+        // Every step re-verifies every stored piece, so a case's piece size bounds its file size.
+        let piece = self.sut.piece_len;
+        let class = tc.draw(gs::integers::<u8>().max_value(39));
+        match class {
+            24..=31 if piece >= 64 => tc.draw(gs::integers::<u32>().min_value(100).max_value(4200)),
+            32..=38 if piece >= 64 => {
+                let off = tc.draw(gs::integers::<u64>().max_value(4));
+                let target = HEAD_WINDOW - 2 + off;
+                u32::try_from(target.saturating_sub(self.len_of(src)).max(1)).unwrap_or(1)
+            }
+            // Large: only with big pieces, and only onto a file that is not already large.
+            39 if piece >= 1024 && self.len_of(src) < TAIL_WINDOW => {
+                tc.draw(gs::integers::<u32>().min_value(65_600).max_value(70_000))
+            }
+            _ => tc.draw(gs::integers::<u32>().min_value(1).max_value(9)),
+        }
+    }
+    /// An append to a drawn source.
+    fn draw_append(&mut self, tc: &TestCase) {
+        let src = draw_src(tc);
+        let seed = tc.draw(gs::integers::<u8>());
+        let n = self.draw_size(tc, src);
+        self.run(Step::Append { src, seed, n });
+    }
+    /// A byte offset in `[0, len)` that is interesting for the windows: the start, the head
+    /// window edge, the middle, the last bytes, or the start of the tail window.
+    fn draw_pos(tc: &TestCase, len: u64) -> u64 {
+        let zone = tc.draw(gs::integers::<u8>().max_value(4));
+        let off = tc.draw(gs::integers::<u64>().max_value(3));
+        let last = len.saturating_sub(1);
+        match zone {
+            0 => off,
+            1 => HEAD_WINDOW - 2 + off,
+            2 => len / 2 + off,
+            3 => last.saturating_sub(off),
+            _ => len.saturating_sub(TAIL_WINDOW) + off,
+        }
+        .min(last)
+    }
+    /// Data that a crash or a lost reply can lose: give a drawn source new bytes first.
+    fn with_pending_data(&mut self, tc: &TestCase) {
+        self.draw_append(tc);
+    }
+    /// Something committed, so that a restart or a lost index has something to recover.
+    fn with_committed_state(&mut self, tc: &TestCase) {
+        if self.sut.head.is_none() {
+            self.draw_append(tc);
+            self.run(Step::Reconcile);
+        }
+    }
+}
+impl Drop for World {
+    fn drop(&mut self) {
+        bump(&STATS.cases);
+        if self.longest == 0 {
+            bump(&STATS.cases_without_bytes);
+        }
+        if self.longest > HEAD_WINDOW {
+            bump(&STATS.cases_past_head);
+        }
+        if self.longest > TAIL_WINDOW {
+            bump(&STATS.cases_past_tail);
+        }
     }
 }
 fn draw_src(tc: &TestCase) -> u8 {
@@ -977,61 +1365,83 @@ fn draw_src(tc: &TestCase) -> u8 {
 impl World {
     #[rule(weight = 3.0)]
     fn append(&mut self, tc: TestCase) {
-        let src = draw_src(&tc);
-        let seed = tc.draw(gs::integers::<u8>());
-        let n = tc.draw(gs::integers::<u8>().min_value(1).max_value(9));
-        self.run(Step::Append { src, seed, n });
+        self.draw_append(&tc);
     }
     #[rule(weight = 2.0)]
     fn rewrite(&mut self, tc: TestCase) {
-        let src = draw_src(&tc);
-        let pos = tc.draw(gs::integers::<u8>().max_value(24));
+        let Some(src) = self.draw_existing(&tc) else {
+            return self.draw_append(&tc);
+        };
+        let pos = Self::draw_pos(&tc, self.len_of(src));
         let byte = tc.draw(gs::integers::<u8>());
         self.run(Step::Rewrite { src, pos, byte });
     }
     #[rule(weight = 2.0)]
     fn truncate(&mut self, tc: TestCase) {
-        let src = draw_src(&tc);
-        let len = tc.draw(gs::integers::<u8>().max_value(24));
-        self.run(Step::Truncate { src, len });
+        let Some(src) = self.draw_existing(&tc) else {
+            return self.draw_append(&tc);
+        };
+        // Keep `len + 1` bytes, at an interesting edge of the file.
+        let flen = self.len_of(src);
+        let keep = Self::draw_pos(&tc, flen);
+        self.run(Step::Truncate { src, len: keep });
     }
     #[rule]
     fn remove_source(&mut self, tc: TestCase) {
-        let src = draw_src(&tc);
+        let Some(src) = self.draw_existing(&tc) else {
+            return self.draw_append(&tc);
+        };
         self.run(Step::RemoveSource { src });
+    }
+    #[rule(weight = 1.5)]
+    fn rename_replace(&mut self, tc: TestCase) {
+        let Some(src) = self.draw_existing(&tc) else {
+            return self.draw_append(&tc);
+        };
+        let seed = tc.draw(gs::integers::<u8>());
+        let n = self.draw_size(&tc, src);
+        let same = tc.draw(gs::booleans());
+        self.run(Step::RenameReplace { src, seed, n, same });
     }
     #[rule(weight = 4.0)]
     fn reconcile(&mut self, _: TestCase) {
         self.run(Step::Reconcile);
     }
     #[rule]
-    fn crash_before_put(&mut self, _: TestCase) {
+    fn crash_before_put(&mut self, tc: TestCase) {
+        self.with_pending_data(&tc);
         self.run(Step::CrashBeforePut);
     }
     #[rule]
-    fn crash_after_piece(&mut self, _: TestCase) {
+    fn crash_after_piece(&mut self, tc: TestCase) {
+        self.with_pending_data(&tc);
         self.run(Step::CrashAfterPiece);
     }
     #[rule]
-    fn crash_after_manifest(&mut self, _: TestCase) {
+    fn crash_after_manifest(&mut self, tc: TestCase) {
+        self.with_pending_data(&tc);
         self.run(Step::CrashAfterManifest);
     }
     #[rule(weight = 2.0)]
     fn committed_reply_lost(&mut self, tc: TestCase) {
+        self.with_pending_data(&tc);
         let then_offline = tc.draw(gs::booleans());
         self.run(Step::CommittedReplyLost { then_offline });
     }
     #[rule]
     fn committed_then_5xx(&mut self, tc: TestCase) {
+        self.with_pending_data(&tc);
         let landed = tc.draw(gs::booleans());
         self.run(Step::CommittedThen5xx { landed });
     }
     #[rule]
-    fn restart(&mut self, _: TestCase) {
+    fn restart(&mut self, tc: TestCase) {
+        self.with_committed_state(&tc);
         self.run(Step::Restart);
     }
     #[rule]
-    fn delete_index(&mut self, _: TestCase) {
+    fn delete_index(&mut self, tc: TestCase) {
+        self.with_committed_state(&tc);
         self.run(Step::DeleteIndex);
     }
     #[rule]
@@ -1068,13 +1478,24 @@ impl World {
 #[test]
 fn hegel_property4_capture_state_machine() {
     hegel::Hegel::new(|tc: TestCase| {
-        let world = World::new(&HEGEL_SHAPES);
+        let pick = tc.draw(gs::integers::<usize>().max_value(PIECE_CHOICES.len() - 1));
+        let piece_len = PIECE_CHOICES.get(pick).copied().unwrap_or(PIECE);
+        let world = World::new(&HEGEL_SHAPES, piece_len);
         assert!(world.is_ok(), "{:?}", world.as_ref().err());
-        if let Ok(world) = world {
+        if let Ok(mut world) = world {
+            // Every case starts with bytes on disk; a case with no data tests nothing.
+            world.draw_append(&tc);
             hegel::stateful::machine(world).steps(40).run(tc);
         }
     })
+    // A keyed run stores shrunk failures (under `.hegel/`, untracked) and replays them first.
+    .settings(
+        hegel::Settings::new().database_key("memory::capture_property::hegel_property4_capture"),
+    )
     .run();
+    if std::env::var_os("CAPTURE_PROPERTY_STATS").is_some() {
+        eprintln!("{}", STATS.report());
+    }
     let guard = require_all(&HEGEL_SHAPES.counts());
     assert!(guard.is_ok(), "{guard:?} {:?}", HEGEL_SHAPES.counts());
 }
@@ -1083,13 +1504,28 @@ fn hegel_property4_capture_state_machine() {
 
 fn step_strategy() -> BoxedStrategy<Step> {
     let src = 0..SOURCES;
+    // Sizes and offsets: mostly tiny, sometimes crossing the 4,096-byte head window (the
+    // proptest twin runs 512-byte pieces, so a 4,200-byte append is eight pieces). Offsets
+    // wrap modulo the file length.
+    let size = prop_oneof![
+        8 => 1..=9_u32,
+        3 => 100..=4200_u32,
+        1 => 4090..=4100_u32,
+    ];
+    let offset = prop_oneof![
+        6 => 0..=24_u64,
+        2 => 4090..=4100_u64,
+        2 => 0..=9000_u64,
+    ];
     prop_oneof![
-        3 => (src.clone(), any::<u8>(), 1..=9_u8)
+        3 => (src.clone(), any::<u8>(), size.clone())
             .prop_map(|(src, seed, n)| Step::Append { src, seed, n }),
-        2 => (src.clone(), 0..=24_u8, any::<u8>())
+        2 => (src.clone(), offset.clone(), any::<u8>())
             .prop_map(|(src, pos, byte)| Step::Rewrite { src, pos, byte }),
-        2 => (src.clone(), 0..=24_u8).prop_map(|(src, len)| Step::Truncate { src, len }),
-        1 => src.prop_map(|src| Step::RemoveSource { src }),
+        2 => (src.clone(), offset).prop_map(|(src, len)| Step::Truncate { src, len }),
+        1 => src.clone().prop_map(|src| Step::RemoveSource { src }),
+        1 => (src.clone(), any::<u8>(), size, any::<bool>())
+            .prop_map(|(src, seed, n, same)| Step::RenameReplace { src, seed, n, same }),
         4 => Just(Step::Reconcile),
         1 => Just(Step::CrashBeforePut),
         1 => Just(Step::CrashAfterPiece),
@@ -1132,7 +1568,7 @@ impl StateMachineTest for PtMachine {
     type SystemUnderTest = PtSut;
     type Reference = RefMachine;
     fn init_test(_: &Reference) -> PtSut {
-        let sut = Sut::new();
+        let sut = Sut::new(512);
         assert!(sut.is_ok(), "{:?}", sut.as_ref().err());
         PtSut { sut }
     }
@@ -1175,8 +1611,10 @@ fn proptest_property4_capture_state_machine() {
         Ok(())
     });
     assert!(result.is_ok(), "{result:?}");
-    let guard = require_all(&PROPTEST_SHAPES.counts());
-    assert!(guard.is_ok(), "{guard:?} {:?}", PROPTEST_SHAPES.counts());
+    // The proptest twin is not state-aware, so only the original five shapes are required.
+    let counts = PROPTEST_SHAPES.counts();
+    let guard = require_all(counts.get(..5).unwrap_or_default());
+    assert!(guard.is_ok(), "{guard:?} {counts:?}");
 }
 
 // ------------------------------------------------------------------ guard and controls
@@ -1186,8 +1624,9 @@ fn guard_has_negative_controls() {
     let zero = Shapes::new();
     assert!(require_all(&zero.counts()).is_err());
     assert!(require_all(&[]).is_err());
-    for missing in 0..5 {
-        let mut counts = vec![1_u64; 5];
+    let shapes = zero.counts().len();
+    for missing in 0..shapes {
+        let mut counts = vec![1_u64; shapes];
         if let Some(c) = counts.get_mut(missing) {
             *c = 0;
         }
@@ -1207,7 +1646,7 @@ fn guard_has_negative_controls() {
 /// Scripted run through the same machinery the properties use.
 fn drive(steps: &[Step], shapes: &Shapes) -> R<(Reference, Sut)> {
     let mut reference = Reference::new();
-    let mut sut = Sut::new()?;
+    let mut sut = Sut::new(SCRIPT_PIECE)?;
     for step in steps {
         reference.apply(step);
         sut.exec(step, &reference, shapes)?;
@@ -1215,8 +1654,47 @@ fn drive(steps: &[Step], shapes: &Shapes) -> R<(Reference, Sut)> {
     }
     Ok((reference, sut))
 }
-fn app(src: u8, seed: u8, n: u8) -> Step {
+/// Piece size of scripted runs (the faulty shapes need pieces, not many of them).
+const SCRIPT_PIECE: usize = 1024;
+fn app(src: u8, seed: u8, n: u32) -> Step {
     Step::Append { src, seed, n }
+}
+
+/// The shapes the guard requires of the Hegel run, produced by a fixed script: the guard in
+/// the property is a backstop for the generator, this test is the deterministic proof that
+/// each shape is reachable through the real capture.
+#[test]
+fn window_and_identity_shapes_arise_from_a_scripted_run() -> R {
+    let shapes = Shapes::new();
+    let (_, sut) = drive(
+        &[
+            app(0, 0, 5000),
+            Step::Reconcile,
+            app(0, 1, 3000),
+            Step::Reconcile,
+            // Same bytes, new file at the path: must start a new epoch at once.
+            Step::RenameReplace {
+                src: 0,
+                seed: 0,
+                n: 1,
+                same: true,
+            },
+            app(0, 2, 66_000),
+            Step::Reconcile,
+        ],
+        &shapes,
+    )?;
+    let counts = shapes.counts();
+    for shape in ["identity-checked", "past-head-window", "past-tail-window"] {
+        ensure(
+            counts.iter().any(|(name, n)| *name == shape && *n > 0),
+            shape,
+        )?;
+    }
+    ensure(
+        sut.epoch_count(0)? == 2,
+        "one rename-replace, so two epochs",
+    )
 }
 
 #[test]
@@ -1245,7 +1723,7 @@ fn guard_shapes_arise_from_a_scripted_run_with_the_real_capture() -> R {
         ],
         &shapes,
     )?;
-    require_all(&shapes.counts())?;
+    require_all(shapes.counts().get(..5).unwrap_or_default())?;
     let observed = need(
         observe(&sut.store, &sut.owner, &reference.history)?,
         "committed",

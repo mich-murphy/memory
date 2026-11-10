@@ -38,8 +38,8 @@ use memory_core::planner::{
     window_ranges,
 };
 use memory_core::privacy::{
-    Admission, AdmittedSource, Authorization, PolicyContext, Profile, Reason, ResolvedSourceFacts,
-    SanitizedLaunch, UnknownReason, admit, authorize, transform,
+    Admission, AdmittedSource, Authorization, AuthorizedBody, PolicyContext, Profile, Reason,
+    ResolvedSourceFacts, SanitizedLaunch, UnknownReason, admit, authorize, transform,
 };
 use std::collections::BTreeMap;
 
@@ -250,11 +250,19 @@ fn windows_of(stream: &[u8]) -> Option<WindowEvidence> {
     })
 }
 
-fn read_exact<F: FileSystem>(fs: &mut F, handle: u64, len: u64) -> Result<Vec<u8>, SourceOutcome> {
+/// Read exactly `range` through the seam. The seam's own error is not an absence and is
+/// reported as `Unavailable` (its detail stays in the adapter: `FileSystem::Error` carries
+/// no bound a closed `SourceOutcome` could keep); a short read is a racing shrink, `Raced`.
+fn read_checked<F: FileSystem>(
+    fs: &mut F,
+    handle: u64,
+    range: std::ops::Range<u64>,
+) -> Result<Vec<u8>, SourceOutcome> {
+    let want = range.end.saturating_sub(range.start);
     let bytes = fs
-        .read(handle, 0..len)
+        .read(handle, range)
         .map_err(|_| SourceOutcome::Unavailable)?;
-    if u64::try_from(bytes.len()) == Ok(len) {
+    if u64::try_from(bytes.len()) == Ok(want) {
         Ok(bytes)
     } else {
         Err(SourceOutcome::Raced)
@@ -273,31 +281,51 @@ fn stream_span<F: FileSystem>(
 ) -> Result<Vec<u8>, SourceOutcome> {
     let (start, end) = (range.start.get(), range.end.get());
     let disk_end = end.min(from);
-    let mut out = Vec::new();
-    let cached = known.iter().find_map(|(at, bytes)| {
-        let lo = usize::try_from(start.checked_sub(*at)?).ok()?;
-        let hi = usize::try_from(disk_end.checked_sub(*at)?).ok()?;
-        bytes.get(lo..hi)
-    });
-    if start < disk_end
-        && let Some(hit) = cached
-    {
-        out.extend_from_slice(hit);
-    } else if start < disk_end {
-        let bytes = fs
-            .read(handle, start..disk_end)
-            .map_err(|_| SourceOutcome::Unavailable)?;
-        if u64::try_from(bytes.len()) != Ok(disk_end - start) {
-            return Err(SourceOutcome::Raced);
+    let mut out = if start < disk_end {
+        let cached = known.iter().find_map(|(at, bytes)| {
+            let lo = usize::try_from(start.checked_sub(*at)?).ok()?;
+            let hi = usize::try_from(disk_end.checked_sub(*at)?).ok()?;
+            bytes.get(lo..hi)
+        });
+        match cached {
+            Some(hit) => hit.to_vec(),
+            None => read_checked(fs, handle, start..disk_end)?,
         }
-        out = bytes;
-    }
+    } else {
+        Vec::new()
+    };
     if end > from {
         let lo = usize::try_from(start.max(from) - from).map_err(|_| SourceOutcome::Raced)?;
         let hi = usize::try_from(end - from).map_err(|_| SourceOutcome::Raced)?;
         out.extend_from_slice(delta.get(lo..hi).ok_or(SourceOutcome::Raced)?);
     }
     Ok(out)
+}
+
+/// Planner input for a source whose stat found nothing; counts the absence unless its
+/// deletion was already committed.
+fn absence_plan(
+    src: &Source,
+    local: &Local,
+    recorded: bool,
+    rules: Option<RulesDigest>,
+    acc: &mut Acc,
+) -> Planning {
+    let observation = if recorded {
+        Observation::DeletionRecorded
+    } else {
+        let consecutive = local.missing.saturating_add(1);
+        acc.updates
+            .push(Update::Missing(src.id.clone(), consecutive));
+        Observation::missing(consecutive)
+    };
+    plan(&PlanInput {
+        withheld: None,
+        observation,
+        strategy: Strategy::Append(AppendBasis::Fresh),
+        rules,
+        audit: AuditEvidence::NotDue,
+    })
 }
 
 fn step<F: FileSystem>(
@@ -322,26 +350,11 @@ fn step<F: FileSystem>(
         .then_some(env.context.rules)
         .flatten()
         .map(|r| RulesDigest::new(Sha256::from_bytes(r)));
-    let stat = match fs.stat(src.handle) {
-        Ok(stat) => stat,
-        Err(_) => return SourceOutcome::Unavailable,
+    let Ok(stat) = fs.stat(src.handle) else {
+        return SourceOutcome::Unavailable;
     };
     let Some(stat) = stat else {
-        let consecutive = local.missing.saturating_add(1);
-        let observation = if recorded {
-            Observation::DeletionRecorded
-        } else {
-            acc.updates
-                .push(Update::Missing(src.id.clone(), consecutive));
-            Observation::missing(consecutive)
-        };
-        let planning = plan(&PlanInput {
-            withheld: None,
-            observation,
-            strategy: Strategy::Append(AppendBasis::Fresh),
-            rules,
-            audit: AuditEvidence::NotDue,
-        });
+        let planning = absence_plan(src, local, recorded, rules, acc);
         if let Planning::Ready {
             plan: Plan::Deleted,
             ..
@@ -383,32 +396,7 @@ fn step<F: FileSystem>(
                 size: stat.size,
                 mtime_ns: stat.mtime_ns,
             });
-            let planning = plan(&PlanInput {
-                withheld: None,
-                observation: Observation::Present(observed.clone()),
-                strategy: Strategy::Snapshot {
-                    previous: local.snapshot.as_ref().map(|(f, _)| f.clone()),
-                    current: fp.clone(),
-                    previous_rules: local.snapshot.as_ref().and_then(|(_, r)| *r),
-                },
-                rules,
-                audit: AuditEvidence::NotDue,
-            });
-            match planning {
-                Planning::Ready {
-                    plan: Plan::Snapshot | Plan::Replay { .. },
-                    ..
-                } => match job.write(fs, Mode::Replace, acc) {
-                    Ok(()) => {
-                        acc.updates
-                            .push(Update::Snapshot(src.id.clone(), fp, rules));
-                        SourceOutcome::Planned
-                    }
-                    Err(outcome) => outcome,
-                },
-                Planning::Ready { .. } => SourceOutcome::Unchanged,
-                Planning::NeedWindows | Planning::NeedAuditRecheck => SourceOutcome::Unavailable,
-            }
+            snapshot(fs, &job, local, fp, acc)
         }
         SourceClass::Append => {
             let remote_pos = live.and_then(|e| e.epochs.last()).map(|l| EpochPosition {
@@ -417,13 +405,51 @@ fn step<F: FileSystem>(
                 whole: l.sha256,
                 rules: l.epoch.rules,
             });
-            append(fs, &job, local, remote_pos, live.is_some(), acc)
+            append(fs, &job, local, remote_pos, acc)
         }
+    }
+}
+
+/// A snapshot source: replace the stored object when its fingerprint or the rules changed.
+fn snapshot<F: FileSystem>(
+    fs: &mut F,
+    job: &Job<'_>,
+    local: &Local,
+    fp: SnapshotFingerprint,
+    acc: &mut Acc,
+) -> SourceOutcome {
+    let planning = plan(&PlanInput {
+        withheld: None,
+        observation: Observation::Present(job.observed.clone()),
+        strategy: Strategy::Snapshot {
+            previous: local.snapshot.as_ref().map(|(f, _)| f.clone()),
+            current: fp.clone(),
+            previous_rules: local.snapshot.as_ref().and_then(|(_, r)| *r),
+        },
+        rules: job.rules,
+        audit: AuditEvidence::NotDue,
+    });
+    match planning {
+        Planning::Ready {
+            plan: Plan::Snapshot | Plan::Replay { .. },
+            ..
+        } => match job.write(fs, Mode::Replace, acc) {
+            Ok(()) => {
+                acc.updates
+                    .push(Update::Snapshot(job.src.id.clone(), fp, job.rules));
+                SourceOutcome::Planned
+            }
+            Err(outcome) => outcome,
+        },
+        Planning::Ready { .. } => SourceOutcome::Unchanged,
+        Planning::NeedWindows | Planning::NeedAuditRecheck => SourceOutcome::Unavailable,
     }
 }
 
 /// Verified on-disk byte segments `(start, bytes)` that need not be read again.
 type Known = Vec<(u64, Vec<u8>)>;
+/// Borrowed [`Known`] segments.
+type Segments<'a> = &'a [(u64, Vec<u8>)];
 
 enum Mode {
     /// Extend from the offset; the state, when present, is the resumable digest of `[0, from)`.
@@ -455,33 +481,13 @@ impl Job<'_> {
             Mode::Extend(from, ..) => (from.get(), from.get().max(self.observed.size), None),
             Mode::Epoch | Mode::Replace => (0, self.observed.size, Some(self.next_epoch)),
         };
-        // A delta read is valid only when the transform is prefix-stable and a verified
-        // resumable state for `[0, from)` exists; otherwise read the whole stream as before.
-        let resume = match &mode {
-            Mode::Extend(_, Some(state), _) if self.admitted.prefix_stable() && from <= to => {
-                Some(state.clone())
-            }
-            _ => None,
+        let resume = self.resume_state(&mode, from, to);
+        let raw = match resume {
+            Some(_) => read_checked(fs, src.handle, from..to)?,
+            None => read_checked(fs, src.handle, 0..to)?,
         };
-        let raw = if resume.is_some() {
-            let bytes = fs
-                .read(src.handle, from..to)
-                .map_err(|_| SourceOutcome::Unavailable)?;
-            if u64::try_from(bytes.len()) != Ok(to - from) {
-                return Err(SourceOutcome::Raced);
-            }
-            bytes
-        } else {
-            read_exact(fs, src.handle, to)?
-        };
-        let redacted =
-            transform(&self.admitted, &raw).map_err(|r| SourceOutcome::Withheld(withhold_of(r)))?;
-        let body = match authorize(self.admitted_clone()?, redacted, self.env.context) {
-            Authorization::Allow(body) => body,
-            Authorization::Deny(r) => return Err(SourceOutcome::Withheld(withhold_of(r))),
-            Authorization::Unknown(u) => return Err(SourceOutcome::Blocked(u)),
-        };
-        let (base, mut at) = if resume.is_some() {
+        let body = self.authorized_body(&raw)?;
+        let (base, first) = if resume.is_some() {
             (Offset::new(from), 0)
         } else {
             (
@@ -489,41 +495,12 @@ impl Job<'_> {
                 usize::try_from(from).map_err(|_| SourceOutcome::Raced)?,
             )
         };
-        let body_len = body.bytes().len();
         let stream_len = base
             .get()
-            .checked_add(u64::try_from(body_len).map_err(|_| SourceOutcome::Raced)?)
+            .checked_add(u64::try_from(body.bytes().len()).map_err(|_| SourceOutcome::Raced)?)
             .ok_or(SourceOutcome::Raced)?;
-        let mut pieces = Vec::new();
-        let step = self.env.piece_len.clamp(1, MAX_PIECE_BYTES);
-        while at < body_len {
-            let end = at.saturating_add(step).min(body_len);
-            let piece = Published::piece(&body, at, end).ok_or(SourceOutcome::Raced)?;
-            let described =
-                Piece::from_authorized(&body, base, at, end).map_err(|_| SourceOutcome::Raced)?;
-            pieces.push(described.clone());
-            acc.uploads.push(Upload {
-                key: described.object().to_owned(),
-                body: piece,
-            });
-            at = end;
-        }
-        let (whole, whole_state) = match &resume {
-            Some(state) => {
-                let next = state
-                    .extend(body.bytes())
-                    .map_err(|_| SourceOutcome::Raced)?;
-                (next.digest().map_err(|_| SourceOutcome::Raced)?, Some(next))
-            }
-            None => (
-                manifest_hash(body.bytes()),
-                if self.admitted.prefix_stable() {
-                    Sha256State::empty().extend(body.bytes()).ok()
-                } else {
-                    None
-                },
-            ),
-        };
+        let pieces = self.slice(&body, base, first, acc)?;
+        let (whole, whole_state) = self.whole_digest(resume.as_ref(), body.bytes())?;
         let write = SourceWrite {
             id: src.id.clone(),
             kind: src.kind.clone(),
@@ -540,46 +517,133 @@ impl Job<'_> {
             Mode::Replace => Change::Replace(write),
         });
         if src.class == SourceClass::Append {
-            let w = if resume.is_some() {
-                let (head, tail) = window_ranges(Offset::new(stream_len));
-                let mut digests = Vec::new();
-                for range in [head, tail] {
-                    let known: &[(u64, Vec<u8>)] = match &mode {
-                        Mode::Extend(_, _, k) => k,
-                        _ => &[],
-                    };
-                    let bytes = stream_span(fs, src.handle, from, body.bytes(), &range, known)?;
-                    digests.push(manifest_hash(&bytes));
-                }
-                let (Some(h), Some(t)) = (digests.first(), digests.get(1)) else {
-                    return Err(SourceOutcome::Raced);
-                };
-                WindowEvidence { head: *h, tail: *t }
-            } else {
-                windows_of(body.bytes()).ok_or(SourceOutcome::Raced)?
+            let known: &[(u64, Vec<u8>)] = match &mode {
+                Mode::Extend(_, _, known) => known,
+                Mode::Epoch | Mode::Replace => &[],
             };
-            let n = epoch.unwrap_or(self.next_epoch.saturating_sub(1));
-            acc.updates.push(Update::Index(
-                src.id.clone(),
-                Box::new(SourceState {
-                    observed: self.observed.clone(),
-                    position: EpochPosition {
-                        epoch: n,
-                        captured_to: Offset::new(stream_len),
-                        whole,
-                        rules: self.rules,
-                    },
-                    head: w.head,
-                    tail: w.tail,
-                    audit: AuditState {
-                        last_checked_at_ns: None,
-                        consecutive_failures: 0,
-                    },
-                    whole_state,
-                }),
-            ));
+            let resumed = resume.is_some().then_some((from, known));
+            let windows = self.windows(fs, resumed, body.bytes(), stream_len)?;
+            let position = EpochPosition {
+                epoch: epoch.unwrap_or(self.next_epoch.saturating_sub(1)),
+                captured_to: Offset::new(stream_len),
+                whole,
+                rules: self.rules,
+            };
+            let state = self.state(position, windows, whole_state);
+            acc.updates
+                .push(Update::Index(src.id.clone(), Box::new(state)));
         }
         Ok(())
+    }
+    /// A delta read is valid only when the transform is prefix-stable and a verified
+    /// resumable state for `[0, from)` exists; otherwise the whole stream is read again.
+    fn resume_state(&self, mode: &Mode, from: u64, to: u64) -> Option<Sha256State> {
+        match mode {
+            Mode::Extend(_, Some(state), _) if self.admitted.prefix_stable() && from <= to => {
+                Some(state.clone())
+            }
+            _ => None,
+        }
+    }
+    /// Privacy transform, then the final authorization of the transformed bytes.
+    fn authorized_body(&self, raw: &[u8]) -> Result<AuthorizedBody, SourceOutcome> {
+        let redacted =
+            transform(&self.admitted, raw).map_err(|r| SourceOutcome::Withheld(withhold_of(r)))?;
+        match authorize(self.admitted_clone()?, redacted, self.env.context) {
+            Authorization::Allow(body) => Ok(body),
+            Authorization::Deny(r) => Err(SourceOutcome::Withheld(withhold_of(r))),
+            Authorization::Unknown(u) => Err(SourceOutcome::Blocked(u)),
+        }
+    }
+    /// Slice `body` from `at` into pieces of the configured size; `base` is the stream
+    /// offset of `body[0]`. Pushes each piece's upload and returns the descriptors.
+    fn slice(
+        &self,
+        body: &AuthorizedBody,
+        base: Offset,
+        mut at: usize,
+        acc: &mut Acc,
+    ) -> Result<Vec<Piece>, SourceOutcome> {
+        let body_len = body.bytes().len();
+        let step = self.env.piece_len.clamp(1, MAX_PIECE_BYTES);
+        let mut pieces = Vec::new();
+        while at < body_len {
+            let end = at.saturating_add(step).min(body_len);
+            let piece = Published::piece(body, at, end).ok_or(SourceOutcome::Raced)?;
+            let described =
+                Piece::from_authorized(body, base, at, end).map_err(|_| SourceOutcome::Raced)?;
+            pieces.push(described.clone());
+            acc.uploads.push(Upload {
+                key: described.object().to_owned(),
+                body: piece,
+            });
+            at = end;
+        }
+        Ok(pieces)
+    }
+    /// Whole-stream digest and its resumable state: continued from `resume`, otherwise
+    /// recomputed from the whole body (kept only for prefix-stable sources).
+    fn whole_digest(
+        &self,
+        resume: Option<&Sha256State>,
+        body: &[u8],
+    ) -> Result<(Sha256, Option<Sha256State>), SourceOutcome> {
+        match resume {
+            Some(state) => {
+                let next = state.extend(body).map_err(|_| SourceOutcome::Raced)?;
+                Ok((next.digest().map_err(|_| SourceOutcome::Raced)?, Some(next)))
+            }
+            None => Ok((manifest_hash(body), self.whole_state_of(body))),
+        }
+    }
+    /// Resumable digest state over `bytes`, for prefix-stable sources only.
+    fn whole_state_of(&self, bytes: &[u8]) -> Option<Sha256State> {
+        if self.admitted.prefix_stable() {
+            Sha256State::empty().extend(bytes).ok()
+        } else {
+            None
+        }
+    }
+    /// Head and tail window digests of the new stream. A resumed write (`Some((from, known))`)
+    /// holds only the delta in memory, so the windows are assembled from verified on-disk
+    /// segments and the delta; otherwise `body` is the whole stream.
+    fn windows<F: FileSystem>(
+        &self,
+        fs: &mut F,
+        resumed: Option<(u64, Segments<'_>)>,
+        body: &[u8],
+        stream_len: u64,
+    ) -> Result<WindowEvidence, SourceOutcome> {
+        let Some((from, known)) = resumed else {
+            return windows_of(body).ok_or(SourceOutcome::Raced);
+        };
+        let handle = self.src.handle;
+        let (head, tail) = window_ranges(Offset::new(stream_len));
+        let head = stream_span(fs, handle, from, body, &head, known)?;
+        let tail = stream_span(fs, handle, from, body, &tail, known)?;
+        Ok(WindowEvidence {
+            head: manifest_hash(&head),
+            tail: manifest_hash(&tail),
+        })
+    }
+    /// The append index entry for this capture.
+    fn state(
+        &self,
+        position: EpochPosition,
+        windows: WindowEvidence,
+        whole_state: Option<Sha256State>,
+    ) -> SourceState {
+        SourceState {
+            observed: self.observed.clone(),
+            position,
+            head: windows.head,
+            tail: windows.tail,
+            audit: AuditState {
+                last_checked_at_ns: None,
+                consecutive_failures: 0,
+            },
+            whole_state,
+        }
     }
     fn stamp(&self, epoch: Option<u32>) -> EpochStamp {
         EpochStamp {
@@ -601,36 +665,59 @@ impl Job<'_> {
     }
 }
 
-fn append<F: FileSystem>(
+/// What the planning rounds of one append source settled on.
+struct Resolved {
+    plan: Plan,
+    /// The remote position adopted by this plan, with `prefix` its verified bytes.
+    adopted: Option<EpochPosition>,
+    prefix: Option<Vec<u8>>,
+    /// Head and tail segments read at the old boundary, reusable by the write.
+    known: Known,
+}
+
+/// Head and tail windows at the old committed boundary, and the bytes they were read from.
+fn read_windows<F: FileSystem>(
+    fs: &mut F,
+    handle: u64,
+    captured_to: Offset,
+) -> Result<(WindowEvidence, Known), SourceOutcome> {
+    let (head, tail) = window_ranges(captured_to);
+    let head_bytes = read_checked(fs, handle, head.start.get()..head.end.get())?;
+    let tail_bytes = read_checked(fs, handle, tail.start.get()..tail.end.get())?;
+    let evidence = WindowEvidence {
+        head: manifest_hash(&head_bytes),
+        tail: manifest_hash(&tail_bytes),
+    };
+    Ok((
+        evidence,
+        vec![
+            (head.start.get(), head_bytes),
+            (tail.start.get(), tail_bytes),
+        ],
+    ))
+}
+
+/// Planning rounds an append source may need: windows, then an adopted prefix, then the
+/// decision. The planner never asks for more, so a fourth answer is a fault, not work.
+const MAX_ROUNDS: usize = 4;
+
+/// Plan, answering the planner's evidence requests through the seam, until it decides.
+fn resolve<F: FileSystem>(
     fs: &mut F,
     job: &Job<'_>,
-    local: &Local,
-    remote: Option<EpochPosition>,
-    live: bool,
-    acc: &mut Acc,
-) -> SourceOutcome {
-    let src = job.src;
-    // The remote position is authoritative and the index is a deletable cache (DESIGN.md
-    // 9.1, 9.3). An index that disagrees with the committed position (for example after a
-    // lost reply whose commit did land) is ignored, so the planner adopts or replays.
-    let index = local
-        .index
-        .clone()
-        .filter(|state| remote.as_ref() == Some(&state.position));
+    index: Option<&SourceState>,
+    remote: Option<&EpochPosition>,
+) -> Result<Resolved, SourceOutcome> {
+    let handle = job.src.handle;
     let mut adopt = None;
     let mut windows = None;
     let mut prefix = None;
-    let mut known: Known = Vec::new();
-    let mut rounds = 0_u8;
-    let (decision, adopted) = loop {
-        rounds += 1;
-        if rounds > 4 {
-            return SourceOutcome::Unavailable;
-        }
+    let mut known = Known::new();
+    for _ in 0..MAX_ROUNDS {
         let planning = plan(&PlanInput {
             withheld: None,
             observation: Observation::Present(job.observed.clone()),
-            strategy: Strategy::Append(match (&index, &remote) {
+            strategy: Strategy::Append(match (index, remote) {
                 (Some(state), _) => AppendBasis::Indexed {
                     state: Box::new(state.clone()),
                     windows: windows.clone(),
@@ -646,77 +733,73 @@ fn append<F: FileSystem>(
         });
         match planning {
             Planning::NeedWindows => {
-                let Some(state) = &index else {
-                    return SourceOutcome::Unavailable;
-                };
-                let (head, tail) = window_ranges(state.position.captured_to);
-                let mut digests = Vec::new();
-                known.clear();
-                for range in [head, tail] {
-                    let len = range.end.get().saturating_sub(range.start.get());
-                    let Ok(bytes) = fs.read(src.handle, range.start.get()..range.end.get()) else {
-                        return SourceOutcome::Unavailable;
-                    };
-                    if u64::try_from(bytes.len()) != Ok(len) {
-                        return SourceOutcome::Raced;
-                    }
-                    digests.push(manifest_hash(&bytes));
-                    known.push((range.start.get(), bytes));
-                }
-                let (Some(h), Some(t)) = (digests.first(), digests.get(1)) else {
-                    return SourceOutcome::Unavailable;
-                };
-                windows = Some(WindowEvidence { head: *h, tail: *t });
+                let state = index.ok_or(SourceOutcome::Unavailable)?;
+                let (evidence, segments) = read_windows(fs, handle, state.position.captured_to)?;
+                windows = Some(evidence);
+                known = segments;
             }
-            Planning::NeedAuditRecheck => return SourceOutcome::Unavailable,
+            Planning::NeedAuditRecheck => return Err(SourceOutcome::Unavailable),
             Planning::Ready {
                 plan: Plan::Adopt { remote },
                 ..
-            } => match read_exact(fs, src.handle, remote.captured_to.get()) {
-                Ok(bytes) => {
-                    adopt = Some(manifest_hash(&bytes));
-                    prefix = Some(bytes);
-                }
-                Err(outcome) => return outcome,
-            },
-            Planning::Ready { plan, adopted, .. } => break (plan, adopted),
+            } => {
+                let bytes = read_checked(fs, handle, 0..remote.captured_to.get())?;
+                adopt = Some(manifest_hash(&bytes));
+                prefix = Some(bytes);
+            }
+            Planning::Ready { plan, adopted, .. } => {
+                return Ok(Resolved {
+                    plan,
+                    adopted,
+                    prefix,
+                    known,
+                });
+            }
         }
-    };
-    if let (Some(pos), Some(bytes)) = (adopted, &prefix)
-        && let Some(w) = windows_of(bytes)
-    {
-        acc.updates.push(Update::Index(
-            src.id.clone(),
-            Box::new(SourceState {
-                observed: job.observed.clone(),
-                position: pos,
-                head: w.head,
-                tail: w.tail,
-                audit: AuditState {
-                    last_checked_at_ns: None,
-                    consecutive_failures: 0,
-                },
-                whole_state: if job.admitted.prefix_stable() {
-                    Sha256State::empty().extend(bytes).ok()
-                } else {
-                    None
-                },
-            }),
-        ));
     }
-    let mode = match decision {
-        Plan::Append { from, .. } if live => Mode::Extend(
+    Err(SourceOutcome::Unavailable)
+}
+
+fn append<F: FileSystem>(
+    fs: &mut F,
+    job: &Job<'_>,
+    local: &Local,
+    remote: Option<EpochPosition>,
+    acc: &mut Acc,
+) -> SourceOutcome {
+    let src = job.src;
+    // The remote position is authoritative and the index is a deletable cache (DESIGN.md
+    // 9.1, 9.3). An index that disagrees with the committed position (for example after a
+    // lost reply whose commit did land) is ignored, so the planner adopts or replays.
+    let index = local
+        .index
+        .clone()
+        .filter(|state| remote.as_ref() == Some(&state.position));
+    let resolved = match resolve(fs, job, index.as_ref(), remote.as_ref()) {
+        Ok(resolved) => resolved,
+        Err(outcome) => return outcome,
+    };
+    if let (Some(position), Some(bytes)) = (resolved.adopted, &resolved.prefix)
+        && let Some(windows) = windows_of(bytes)
+    {
+        let state = job.state(position, windows, job.whole_state_of(bytes));
+        acc.updates
+            .push(Update::Index(src.id.clone(), Box::new(state)));
+    }
+    // An append plan exists only for a live remote position (indexed or unindexed basis).
+    let mode = match resolved.plan {
+        Plan::Append { from, .. } => Mode::Extend(
             from,
             index
                 .as_ref()
                 .filter(|state| state.position.captured_to == from)
-                .and_then(|state| state.whole_state.clone())
-                .filter(|st| {
-                    index
-                        .as_ref()
-                        .is_some_and(|s| st.digest() == Ok(s.position.whole))
+                .and_then(|state| {
+                    state
+                        .whole_state
+                        .clone()
+                        .filter(|st| st.digest() == Ok(state.position.whole))
                 }),
-            known,
+            resolved.known,
         ),
         Plan::Replay { .. } => Mode::Epoch,
         Plan::Withheld { reason } => return SourceOutcome::Withheld(reason),
