@@ -1,6 +1,6 @@
 //! Pure admission limits: `current.json` key length, distinct sources per owner and the
 //! size-scaled request budget (DESIGN.md sections 6.2 and 7.3). No I/O, no clock.
-use crate::domain::{Owner, SourceId, WithholdReason};
+use crate::domain::{Owner, Sha256, SourceId, WithholdReason};
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -15,11 +15,17 @@ pub const BUDGET_BASE: Duration = Duration::from_secs(30);
 /// Assumed upload throughput in bytes per second (1 MiB/s).
 pub const BUDGET_BYTES_PER_SEC: u64 = 1024 * 1024;
 
+// Object-key layout (DESIGN.md section 6.1): the one place its spelling lives. The shell
+// reaches it through these functions and never formats a key itself.
+const SESSION_PREFIX: &str = "sessions/";
+const SHARED_PREFIX: &str = "shared/";
+const CURRENT_SUFFIX: &str = "/current.json";
+
 /// Exact `current.json` key for an owner.
 pub fn current_key(owner: &Owner) -> String {
     match owner {
         Owner::Session(k) => format!(
-            "sessions/{}/{}/{}/{}/current.json",
+            "{SESSION_PREFIX}{}/{}/{}/{}{CURRENT_SUFFIX}",
             k.archive.as_str(),
             k.machine.as_str(),
             k.agent.as_str(),
@@ -30,7 +36,7 @@ pub fn current_key(owner: &Owner) -> String {
             machine,
             agent,
         } => format!(
-            "shared/{}/{}/{}/current.json",
+            "{SHARED_PREFIX}{}/{}/{}{CURRENT_SUFFIX}",
             archive.as_str(),
             machine.as_str(),
             agent.as_str()
@@ -38,13 +44,23 @@ pub fn current_key(owner: &Owner) -> String {
     }
 }
 
+/// Key of an immutable manifest, `manifests/<sha256 of manifest bytes>.json`.
+pub fn manifest_key(hash: &Sha256) -> String {
+    format!("manifests/{}.json", String::from(*hash))
+}
+
+/// Object key `objects/<sha256 of raw piece bytes>.zst`.
+pub fn object_key(raw: &Sha256) -> String {
+    format!("objects/{}.zst", String::from(*raw))
+}
+
 /// UTF-8 byte length of the key for raw segments (`session` is `None` for shared owners).
 /// Saturating, so hostile lengths cannot wrap.
 pub fn current_key_len(archive: &str, machine: &str, agent: &str, session: Option<&str>) -> usize {
-    // "sessions/" + "/" x3 + "/current.json" or "shared/" + "/" x2 + "/current.json".
+    // The fixed text of `current_key`, plus one "/" between segments.
     let (fixed, session_len) = match session {
-        Some(s) => ("sessions/".len() + 3 + "/current.json".len(), s.len()),
-        None => ("shared/".len() + 2 + "/current.json".len(), 0),
+        Some(s) => (SESSION_PREFIX.len() + 3 + CURRENT_SUFFIX.len(), s.len()),
+        None => (SHARED_PREFIX.len() + 2 + CURRENT_SUFFIX.len(), 0),
     };
     fixed
         .saturating_add(archive.len())

@@ -8,7 +8,7 @@
 //! fields and any other `memory.hint/` version.
 use crate::domain::{Agent, SessionId, Sha256};
 use crate::privacy::SanitizedLaunch;
-use crate::slice::{self, RangeError};
+use crate::slice::RangeError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256 as Hasher};
@@ -532,7 +532,7 @@ fn scan_line(line: &[u8], end: u64, out: &mut HintScan) {
             .map(|(at, _)| at),
     );
     for start in starts {
-        let Ok(candidate) = slice::bytes(line, start..line.len()) else {
+        let Some(candidate) = line.get(start..) else {
             continue;
         };
         match classify(candidate) {
@@ -558,7 +558,7 @@ fn scan_line(line: &[u8], end: u64, out: &mut HintScan) {
 /// [`RangeError`] if `start` lies beyond the buffer.
 pub fn scan(buffer: &[u8], start: u64) -> Result<HintScan, RangeError> {
     let from = usize::try_from(start).map_err(|_| RangeError)?;
-    let rest = slice::bytes(buffer, from..buffer.len())?;
+    let rest = buffer.get(from..).ok_or(RangeError)?;
     let mut out = HintScan {
         records: Vec::new(),
         dropped: 0,

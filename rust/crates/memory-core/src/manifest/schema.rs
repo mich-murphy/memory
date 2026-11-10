@@ -1,6 +1,7 @@
 use super::state::SourceEntry;
 use super::{CHECKPOINT_INTERVAL, ManifestError};
 use crate::domain::{Offset, Owner, RulesDigest, Sha256, SourceClass, SourceId, SourceKind};
+use crate::limits::object_key;
 use crate::privacy::{AuthorizedBody, SanitizedLaunch};
 use schemars::JsonSchema;
 use serde::de::{self, DeserializeOwned, MapAccess, SeqAccess, Visitor};
@@ -282,11 +283,6 @@ pub struct StoredEncoding {
     pub encoded_len: u64,
     /// SHA-256 of the stored bytes.
     pub encoded_sha256: Sha256,
-}
-
-/// Object key `objects/<sha256 of raw piece bytes>.zst`.
-pub fn object_key(raw: &Sha256) -> String {
-    format!("objects/{}.zst", String::from(*raw))
 }
 
 /// One contiguous byte range of transformed content (not line aligned).
@@ -693,7 +689,10 @@ pub struct Delta {
 }
 impl Delta {
     /// Assemble a delta; validated by the builder and by parsing, never by the caller.
-    #[expect(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one parameter per wire field, like `Checkpoint::new`; the only caller is `build`, which already destructures `Header`"
+    )]
     pub(super) fn new(
         owner: Owner,
         seq: u64,

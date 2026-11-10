@@ -1,4 +1,4 @@
-//! Checked byte-range access shared by future offset code.
+//! The error for a byte range outside its buffer (a hint scan offset past the end).
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -9,11 +9,3 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 #[error("byte range out of bounds")]
 pub struct RangeError;
-
-/// Return a checked byte range without panicking.
-///
-/// # Errors
-/// Returns [`RangeError`] for an inverted or out-of-bounds range.
-pub fn bytes(buffer: &[u8], range: std::ops::Range<usize>) -> Result<&[u8], RangeError> {
-    buffer.get(range).ok_or(RangeError)
-}

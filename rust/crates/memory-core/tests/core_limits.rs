@@ -163,6 +163,22 @@ fn sources_cap_and_never_evict() -> R {
 }
 
 #[test]
+fn manifest_and_object_keys_have_the_published_layout() -> R {
+    // Mutant: any change to the `manifests/<hash>.json` or `objects/<hash>.zst` spelling,
+    // the single definition both the core and the shell use.
+    let hash = Sha256::try_from("0123456789abcdef".repeat(4))?;
+    assert_eq!(
+        manifest_key(&hash),
+        "manifests/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.json"
+    );
+    assert_eq!(
+        object_key(&hash),
+        "objects/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.zst"
+    );
+    Ok(())
+}
+
+#[test]
 fn rewrites_of_every_known_source_at_the_cap_take_no_slot() -> R {
     // Mutant: `admit` without its known-source early return rejects a rewrite of an
     // already admitted source once the owner is full (a HashSet alone hides the bug below

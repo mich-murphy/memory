@@ -23,133 +23,60 @@ pub enum ValidationError {
     Overflow,
 }
 
-/// Validated ArchiveId boundary value. IDs allow ASCII coordinates, not traversal.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct ArchiveId(String);
-impl TryFrom<String> for ArchiveId {
-    type Error = ValidationError;
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.is_empty()
-            || value.len() > 1024
-            || value == "."
-            || value == ".."
-            || !value
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
-        {
-            return Err(ValidationError::Identifier);
+/// One definition of the coordinate identifier rule, for the four ID brands that share it.
+/// Each brand is a distinct type so coordinates cannot be swapped; the rule, the wire form
+/// and the exported JSON schema are identical by construction.
+macro_rules! identifier {
+    ($name:ident) => {
+        #[doc = concat!(
+            "Validated ",
+            stringify!($name),
+            " boundary value. IDs allow ASCII coordinates, not traversal."
+        )]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+        #[serde(try_from = "String", into = "String")]
+        pub struct $name(String);
+        impl TryFrom<String> for $name {
+            type Error = ValidationError;
+            fn try_from(value: String) -> Result<Self, Self::Error> {
+                if value.is_empty()
+                    || value.len() > 1024
+                    || value == "."
+                    || value == ".."
+                    || !value
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
+                {
+                    return Err(ValidationError::Identifier);
+                }
+                Ok(Self(value))
+            }
         }
-        Ok(Self(value))
-    }
-}
-impl From<ArchiveId> for String {
-    fn from(value: ArchiveId) -> Self {
-        value.0
-    }
-}
-impl ArchiveId {
-    /// Return the validated spelling.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// Validated MachineId boundary value. IDs allow ASCII coordinates, not traversal.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct MachineId(String);
-impl TryFrom<String> for MachineId {
-    type Error = ValidationError;
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.is_empty()
-            || value.len() > 1024
-            || value == "."
-            || value == ".."
-            || !value
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
-        {
-            return Err(ValidationError::Identifier);
+        impl From<$name> for String {
+            fn from(value: $name) -> Self {
+                value.0
+            }
         }
-        Ok(Self(value))
-    }
-}
-impl From<MachineId> for String {
-    fn from(value: MachineId) -> Self {
-        value.0
-    }
-}
-impl MachineId {
-    /// Return the validated spelling.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// Validated SessionId boundary value. IDs allow ASCII coordinates, not traversal.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct SessionId(String);
-impl TryFrom<String> for SessionId {
-    type Error = ValidationError;
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.is_empty()
-            || value.len() > 1024
-            || value == "."
-            || value == ".."
-            || !value
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
-        {
-            return Err(ValidationError::Identifier);
+        impl $name {
+            /// Return the validated spelling.
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
         }
-        Ok(Self(value))
-    }
-}
-impl From<SessionId> for String {
-    fn from(value: SessionId) -> Self {
-        value.0
-    }
-}
-impl SessionId {
-    /// Return the validated spelling.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// Validated SourceId boundary value. IDs allow ASCII coordinates, not traversal.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct SourceId(String);
-impl TryFrom<String> for SourceId {
-    type Error = ValidationError;
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.is_empty()
-            || value.len() > 1024
-            || value == "."
-            || value == ".."
-            || !value
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
-        {
-            return Err(ValidationError::Identifier);
+        impl JsonSchema for $name {
+            fn schema_name() -> std::borrow::Cow<'static, str> {
+                stringify!($name).into()
+            }
+            fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+                schemars::json_schema!({"type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._:-]+$"})
+            }
         }
-        Ok(Self(value))
-    }
+    };
 }
-impl From<SourceId> for String {
-    fn from(value: SourceId) -> Self {
-        value.0
-    }
-}
-impl SourceId {
-    /// Return the validated spelling.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
+identifier!(ArchiveId);
+identifier!(MachineId);
+identifier!(SessionId);
+identifier!(SourceId);
 
 /// Opaque HTTP entity tag used unchanged as a store fence, including quotes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -870,42 +797,6 @@ pub enum CommitOutcome {
     },
     /// Park instead of parse retry loop.
     NewerSchema,
-}
-
-impl JsonSchema for ArchiveId {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "ArchiveId".into()
-    }
-    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({"type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._:-]+$"})
-    }
-}
-
-impl JsonSchema for MachineId {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "MachineId".into()
-    }
-    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({"type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._:-]+$"})
-    }
-}
-
-impl JsonSchema for SessionId {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "SessionId".into()
-    }
-    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({"type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._:-]+$"})
-    }
-}
-
-impl JsonSchema for SourceId {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "SourceId".into()
-    }
-    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({"type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._:-]+$"})
-    }
 }
 
 impl JsonSchema for ETag {

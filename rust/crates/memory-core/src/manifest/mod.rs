@@ -18,6 +18,7 @@ mod state;
 /// Every manifest whose `seq` is a multiple of this is a checkpoint.
 pub const CHECKPOINT_INTERVAL: u64 = 64;
 
+pub use crate::limits::object_key;
 pub use build::{Built, Folded, Header, Position, build, fold};
 pub use error::ManifestError;
 pub use recovery::{ProjectedKind, ProjectedSource, Projection, recover_projection};
@@ -25,6 +26,6 @@ pub use schema::{
     Change, Checkpoint, CheckpointSource, Current, CurrentSchema, Delta, Encoding, EpochRecord,
     EpochStamp, EpochWriter, LaunchRecord, Manifest, ManifestSchema, Piece, SchemaStatus,
     SourceWrite, StoredEncoding, Timestamp, Writer, check_no_duplicate_keys, classify_schema,
-    manifest_hash, object_key, parse_current, parse_manifest,
+    manifest_hash, parse_current, parse_manifest,
 };
 pub use state::{OwnerState, SourceEntry};
