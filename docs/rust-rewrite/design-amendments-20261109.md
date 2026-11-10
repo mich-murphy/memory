@@ -424,3 +424,17 @@ deleted and verified empty (39 keys created, 0 remaining). One client, one netwo
 - The probe used several thousand list requests, more than the roughly 200 planned, because of
   the polling schedule and one aborted attempt. Stored data stayed at a few MiB and is deleted.
 
+### A13.5 The verification GET is attempted 4 times (DESIGN 7.4 step 5)
+
+Operator decision. 7.4 says "retry the GET with backoff" and gives no number. The value is 4
+attempts with 3 pauses between them, the same count as the rebase retries. Tests assert the
+literal.
+
+### A13.6 The watcher skips a root that does not exist (DESIGN 10.2)
+
+Operator decision. A configured root that does not exist (an agent that is not installed) is
+skipped and counted; the other roots are watched, and the safety reconcile finds the directory
+once it exists. A root that exists but is not a directory, or cannot be inspected, is still an
+error. Also fixed: a symlink to a directory is never treated as a directory by the watcher
+(DESIGN 7.1, 8.2).
+
