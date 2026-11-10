@@ -1059,7 +1059,6 @@ struct Expected {
     argv_out: Vec<String>,
     env_in: Vec<String>,
     env_out: BTreeMap<String, String>,
-    env_offered: BTreeMap<String, Vec<String>>,
     canaries: Vec<String>,
 }
 
@@ -1151,7 +1150,6 @@ fn expected_launch(
     argv_out.truncate(32);
     let mut env_in = Vec::new();
     let mut env_out: BTreeMap<String, String> = BTreeMap::new();
-    let mut env_offered: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (i, op) in env_ops.iter().take(12).enumerate() {
         let [kind, d] = op.to_le_bytes();
         let name = nth(&DESIGN_ENV_NAMES, d);
@@ -1163,10 +1161,6 @@ fn expected_launch(
             2 | 3 => {
                 let legit = legit_for_env(&name, d);
                 env_in.push(format!("{name}={legit}"));
-                env_offered
-                    .entry(name.clone())
-                    .or_default()
-                    .push(legit.clone());
                 env_out.insert(name, legit);
             }
             4 => env_in.push(c),
@@ -1178,7 +1172,6 @@ fn expected_launch(
         argv_out,
         env_in,
         env_out,
-        env_offered,
         canaries,
     }
 }
@@ -1199,25 +1192,12 @@ fn check_generated_launch(
             ex.argv_out
         ));
     }
-    if ex.env_out.len() <= 8 {
-        if launch.env() != &ex.env_out {
-            return Err(format!(
-                "env {:?} != expected {:?}",
-                launch.env(),
-                ex.env_out
-            ));
-        }
-    } else {
-        // DESIGN 8.4: at most 8 names; which 8 is not specified, so only the bound and
-        // "every published pair was a safe offer" are asserted.
-        let offered_only = launch.env().iter().all(|(name, value)| {
-            ex.env_offered
-                .get(name)
-                .is_some_and(|values| values.contains(value))
-        });
-        if launch.env().len() != 8 || !offered_only {
-            return Err(format!("env bound violated: {:?}", launch.env()));
-        }
+    if launch.env() != &ex.env_out {
+        return Err(format!(
+            "env {:?} != expected {:?}",
+            launch.env(),
+            ex.env_out
+        ));
     }
     let parsed = input(
         Agent::Claude,
@@ -1512,7 +1492,7 @@ fn generated_launch_fixed_shapes() {
     for chunk in env.chunks(8) {
         assert_eq!(check_generated_launch(7, &[], chunk, 1, true), Ok(()));
     }
-    // Nine distinct allowlisted names with safe values: the ninth is dropped (cap of 8).
+    // Nine distinct allowlisted names with safe values: all nine are published.
     let nine: Vec<u16> = (0..9u16).map(|d| (d << 8) | 2).collect();
     assert_eq!(check_generated_launch(7, &[], &nine, 0, false), Ok(()));
     // 40 single-entry pieces: the 32-entry bound drops the tail, canaries included.

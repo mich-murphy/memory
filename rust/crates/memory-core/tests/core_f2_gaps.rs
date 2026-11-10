@@ -222,22 +222,20 @@ fn env_of(entries: &[String]) -> BTreeMap<String, String> {
 }
 
 #[test]
-fn row1b_env_bound_is_eight_accepted_entries_in_input_order() {
-    // Nine distinct allowlisted names exist, so the bound is observable only with all nine.
+fn row1b_env_publishes_every_allowlisted_name_in_any_order() {
+    // The allowlist of nine names is the only bound (amendment A13.3): no name is dropped,
+    // whatever order the environment lists them in.
+    assert_eq!(ALLOWED_ENV.len(), 9);
     for rot in 0..9 {
         let mut names: Vec<&str> = ALLOWED_ENV.to_vec();
         names.rotate_left(rot);
         let entries: Vec<String> = names.iter().map(|k| format!("{k}=1")).collect();
         let env = env_of(&entries);
-        assert_eq!(env.len(), 8, "rotation {rot}");
-        let expect: BTreeSet<&str> = names.iter().take(8).copied().collect();
+        let expect: BTreeSet<&str> = ALLOWED_ENV.iter().copied().collect();
         let got: BTreeSet<&str> = env.keys().map(String::as_str).collect();
-        assert_eq!(
-            got, expect,
-            "rotation {rot}: the last accepted entry is dropped"
-        );
+        assert_eq!(got, expect, "rotation {rot}");
     }
-    // Rejected entries, malformed entries and unknown names do not consume the budget.
+    // Rejected entries, malformed entries and unknown names are never published.
     let mut entries: Vec<String> = vec![
         "PATH=/bin".into(),
         "NOEQUALS".into(),
@@ -250,13 +248,10 @@ fn row1b_env_bound_is_eight_accepted_entries_in_input_order() {
     let env = env_of(&entries);
     assert_eq!(env.len(), 8);
     assert!(!env.contains_key("ANTHROPIC_MODEL"));
-    // A repeated key does not add an entry; the later value wins before the bound is reached.
+    // A repeated key does not add an entry; the later value wins.
     let env = env_of(&["ANTHROPIC_MODEL=a".into(), "ANTHROPIC_MODEL=b".into()]);
     assert_eq!(env.len(), 1);
     assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("b"));
-    // Eight accepted entries then a ninth is dropped even if it is valid.
-    let nine: Vec<String> = ALLOWED_ENV.iter().map(|k| format!("{k}=1")).collect();
-    assert!(!env_of(&nine).contains_key("DISABLE_PROMPT_CACHING"));
 }
 
 #[test]

@@ -394,3 +394,33 @@ Operator decision. No production write happens before all of these exist:
 
 Logging and hint retention land with the slice that wires the daemon.
 
+### A13.3 No separate cap on allowlisted environment names (DESIGN 8.4)
+
+Operator decision. 8.4 says "at most 8 exact names" and lists nine. The cap came from the Go
+code (`internal/launch/native.go:58`, `len(out) == 8`) with no stated reason, and which name was
+dropped depended on the order of the process environment. The closed allowlist of nine names is
+the bound; every allowlisted name whose value passes A12.1 is published.
+
+### A13.4 Measured on R2, 2026-11-11: ETags and writes from a dead process (DESIGN 7.4, 15)
+
+Operator-approved live probes under `rust-acceptance/<run-id>/`, synthetic bytes, prefixes
+deleted and verified empty (39 keys created, 0 remaining). One client, one network path, one day.
+
+- ETag. For a single-part PUT the ETag is the hex MD5 of the body (50 of 50). Rewriting
+  identical bytes keeps the ETag, so `If-Match` with the earlier ETag still succeeds after another
+  writer's identical rewrite (5 of 5) and fails with 412 after a different rewrite (5 of 5).
+  `x-amz-version-id` changes on every write. Consequence: the fence cannot see an
+  identical-bytes rewrite of `current.json`. That is harmless only because the bytes of
+  `current.json` name a manifest hash that is unique per commit; this must stay true. Test fakes
+  treat the content-derived ETag as the real behaviour.
+- A PUT whose client is killed after the whole request was handed to the kernel still lands:
+  8 of 10 unconditional and 7 of 10 with `If-None-Match: *`, complete bodies only, first visible
+  205 to 507 ms after the kill, nothing later in polls out to 10 minutes. Killed after half the
+  body or before any body byte: 0 of 10 each, which is not proof it cannot happen.
+- Open for the slice that wires the daemon: a process that starts within about a second of its
+  predecessor's death can verify `current.json` before the predecessor's last write lands. The
+  startup delay of DESIGN 11.2 (0 to 60 s jitter, not implemented) would cover the observed
+  window; the minimum safe delay needs an operator decision.
+- The probe used several thousand list requests, more than the roughly 200 planned, because of
+  the polling schedule and one aborted attempt. Stored data stayed at a few MiB and is deleted.
+

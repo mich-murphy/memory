@@ -200,9 +200,6 @@ pub fn sanitize_launch(argv: &[String], environ: &[String]) -> SanitizedLaunch {
     out.truncate(32);
     let mut env = BTreeMap::new();
     for entry in environ {
-        if env.len() == 8 {
-            break;
-        }
         let Some((key, value)) = entry.split_once('=') else {
             continue;
         };
