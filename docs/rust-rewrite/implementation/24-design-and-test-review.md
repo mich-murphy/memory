@@ -95,7 +95,42 @@ Test verdicts (worker counts, 384 tests): 36 remove, 22 merge, 29 strengthen, re
   3.7-18%). At library defaults a plain run fails about 62% of the time. Seed 98595426
   reproduces the miss.
 
+## Round 3 (complete, integrated as a stack on `rust/coverage-floor-80`, not pushed)
+
+| Branch | Content |
+|---|---|
+| `rust/test-review-cut` | W1 test cut, schema gate fix, gates 05/06 |
+| `rust/design-amendments-a10` | Amendment A10 (DESIGN.md untouched; first draft edited it in place, a coordinator briefing error, corrected) |
+| `rust/realfs-nofollow-watch` | Source read opens `O_NOFOLLOW`, rechecks identity on the handle; watcher maps a moved-in directory to a directory read; bounded inbox |
+| `rust/state-durability-seam` | Durable-write step recorder under `sim` and ordering tests; size-bound tests; one hints-dir vetting rule; injectable hook deadline |
+| `rust/commit-daemon-tests` | Deterministic guard shapes; tests for the surviving commit/daemon mutants; fakes return 412 for If-Match on a missing key and run under two ETag models; state-load events counted; `run_owner` split |
+| `rust/hook-dead-code` | `HookResult::code` and duplicate state-root lookup removed; amendment A11 |
+| `rust/capture-tests-simplify` | `stream_span`, resume-guard and piece-cap tests; Hegel capture machine reaches both window sizes, rename-replace step, failure database; `Job::write`/`append`/`step` split |
+| `rust/core-privacy-properties` | Generated launch and document privacy properties with proptest twins; `identifier!` macro; one key layout; pure-core `clippy.toml`; `commit.rs` re-exports `manifest_key` |
+
+Parent verification on the integrated stack (HEAD `51fdd22`):
+`PROPERTY_CASES=500 bash scripts/gates.sh`, seed 1442705893, all 13 sub-gates 0; nextest 415
+passed, 2 skipped, 368 s; line coverage 5766/5902 = 97.70%; `verify-evidence.py` PASS.
+`hegel_property4_capture_state_machine` now takes 254 s at 500 cases on a quiet machine
+(about 30 s before).
+
+Worker-reported, not rerun by the parent: `capture.rs` mutation score 61.7% -> 93.5%
+(example tests only); `memory-core` baselines privacy 87%, planner 94%, locator 97%, hint 82%
+before the new tests; coordinates guard 0 failures in 120 runs; daemon/commit guards 0 misses
+in 49 runs (30 seeds per machine asked, not reached).
+
+Parent review still owed: line-by-line read of the capture, daemon and memory-core diffs, in
+particular the removal of the `live` guard and the fixed four-round loop in `capture.rs`
+(argued unreachable, untestable); the A10/A11 text.
+
+Open items: mid-file rewrite between the windows has no detection path until the audit is
+implemented (the capture property now avoids generating it); hint retention (A11.2); logging
+decision (A11.3); secret-shaped values such as `sk-ant-...` pass DESIGN 8.4; which 8 of 9
+allowlisted env names survive is unspecified; `recover_base` accepts 65 manifests where 64 is
+the valid maximum; watcher aborts on a missing root (DESIGN silent); hand-copied `O_NOFOLLOW`
+constants versus a `rustix`/`libc` dependency; test fakes still copied across test files;
+`cargo mutants` not run on the whole workspace; live R2 probes; A10.3 and A10.7.
+
 ## Next action
 
-All workers are complete. Waiting on the operator: commit the W1 diff or not; whether
-production fixes and the missing tests are in scope; the open decisions above.
+Operator decisions on the open items; parent diff review; then push the stack.
