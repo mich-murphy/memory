@@ -302,3 +302,42 @@ fn window_ranges_clamp_at_zero_and_old_committed_endpoint_without_overflow() {
         assert!(head.end.get() + (tail.end.get() - tail.start.get()) <= 69632);
     }
 }
+
+#[test]
+fn settled_unchanged_file_needs_no_windows_and_no_stat_refresh() {
+    // Mutant: `observed.size == captured_to` -> `!=`. A settled, byte-for-byte unchanged
+    // file is `Unchanged` without asking for window evidence and without a stat refresh;
+    // the mutant asks for windows (or refreshes) on every idle tick.
+    let mut r = request();
+    assert_eq!(
+        plan(&r),
+        Planning::Ready {
+            plan: Plan::Unchanged,
+            refresh_stat: false,
+            adopted: None
+        }
+    );
+    if let Strategy::Append(AppendBasis::Indexed { windows, .. }) = &mut r.strategy {
+        *windows = None;
+    }
+    assert_eq!(
+        plan(&r),
+        Planning::Ready {
+            plan: Plan::Unchanged,
+            refresh_stat: false,
+            adopted: None
+        }
+    );
+}
+
+#[test]
+fn consecutive_missing_reconciles_confirm_deletion_at_exactly_two() {
+    // Mutant: `consecutive >= 2` -> `< 2` (and the 1/2 boundary).
+    assert_eq!(Observation::missing(0), Observation::MissingOnce);
+    assert_eq!(Observation::missing(1), Observation::MissingOnce);
+    assert_eq!(Observation::missing(2), Observation::MissingConfirmed);
+    assert_eq!(
+        Observation::missing(u32::MAX),
+        Observation::MissingConfirmed
+    );
+}
