@@ -217,6 +217,23 @@ struct FakeStore {
     offline: bool,
     revoked: bool,
     rules: Vec<Rule>,
+    /// Digest memo for the oracle: `key -> (write version, length, SHA-256)`. Objects change
+    /// only through `write` and `remove`, and `write` gives every object a fresh global
+    /// version, so a memo entry is current exactly when its version is the stored one. A
+    /// tampered or replaced object is therefore always re-hashed from its actual bytes.
+    digests: std::cell::RefCell<BTreeMap<String, (u64, u64, Sha256)>>,
+    /// Parse and fold memo for the oracle, keyed by manifest hash. A manifest is content
+    /// addressed and `read_chain` re-checks every manifest's stored bytes against its hash
+    /// on each read, so what was parsed or folded from those bytes cannot be stale.
+    parsed: std::cell::RefCell<BTreeMap<String, ParsedManifest>>,
+    folded: std::cell::RefCell<BTreeMap<String, memory_core::manifest::Folded>>,
+}
+
+/// What the oracle needs from one manifest, parsed once per distinct content.
+#[derive(Clone)]
+struct ParsedManifest {
+    projection: memory_core::manifest::Projection,
+    manifest: memory_core::manifest::Manifest,
 }
 
 fn kind_of(key: &str) -> Kind {
@@ -247,6 +264,19 @@ impl FakeStore {
     }
     fn peek(&self, key: &str) -> Option<&[u8]> {
         self.objects.get(key).map(|(body, _)| body.as_slice())
+    }
+    /// Length and SHA-256 of the object at `key`, hashing it once per stored version.
+    fn digest(&self, key: &str) -> Option<(u64, Sha256)> {
+        let (body, version) = self.objects.get(key)?;
+        let mut memo = self.digests.borrow_mut();
+        if let Some((v, len, hash)) = memo.get(key)
+            && v == version
+        {
+            return Some((*len, *hash));
+        }
+        let (len, hash) = (len64(body), sha(body));
+        memo.insert(key.to_owned(), (*version, len, hash));
+        Some((len, hash))
     }
     fn write(&mut self, key: &str, body: Vec<u8>) {
         self.version += 1;
@@ -348,24 +378,56 @@ fn read_chain(store: &FakeStore, owner: &Owner) -> R<Option<Chain>> {
     };
     let current = parse_current(pointer).map_err(e)?;
     let mut hash = current.manifest;
-    let mut raw: Vec<(Sha256, u64, Vec<u8>)> = Vec::new();
+    let head = hash;
+    let mut raw: Vec<(Sha256, ParsedManifest)> = Vec::new();
     loop {
         ensure(raw.len() <= 64, "chain longer than 64")?;
         let bytes = need(
             store.peek(&manifest_key(&hash)),
             "referenced manifest missing",
         )?;
-        ensure(sha(bytes) == hash, "manifest hash mismatch")?;
-        let projection = recover_projection(bytes).map_err(e)?;
-        raw.push((hash, projection.seq, bytes.to_vec()));
-        match projection.kind {
+        let (_, stored_hash) = need(store.digest(&manifest_key(&hash)), "manifest digest")?;
+        ensure(stored_hash == hash, "manifest hash mismatch")?;
+        let memoised = store.parsed.borrow().get(&manifest_key(&hash)).cloned();
+        let parsed = match memoised {
+            Some(parsed) => parsed,
+            None => {
+                let parsed = ParsedManifest {
+                    projection: recover_projection(bytes).map_err(e)?,
+                    manifest: parse_manifest(bytes).map_err(e)?,
+                };
+                store
+                    .parsed
+                    .borrow_mut()
+                    .insert(manifest_key(&hash), parsed.clone());
+                parsed
+            }
+        };
+        let (kind, previous) = (parsed.projection.kind, parsed.projection.previous);
+        raw.push((hash, parsed));
+        match kind {
             ProjectedKind::Checkpoint => break,
-            ProjectedKind::Delta => hash = need(projection.previous, "delta without previous")?,
+            ProjectedKind::Delta => hash = need(previous, "delta without previous")?,
         }
     }
     raw.reverse();
-    let refs: Vec<&[u8]> = raw.iter().map(|(_, _, b)| b.as_slice()).collect();
-    let folded = fold(&refs).map_err(e)?;
+    let memoised = store.folded.borrow().get(&manifest_key(&head)).cloned();
+    let folded = match memoised {
+        Some(folded) => folded,
+        None => {
+            let chain: Vec<&[u8]> = raw
+                .iter()
+                .filter_map(|(h, _)| store.peek(&manifest_key(h)))
+                .collect();
+            ensure(chain.len() == raw.len(), "referenced manifest missing")?;
+            let folded = fold(&chain).map_err(e)?;
+            store
+                .folded
+                .borrow_mut()
+                .insert(manifest_key(&head), folded.clone());
+            folded
+        }
+    };
     ensure(
         folded.position.seq == current.seq,
         "current.seq != head seq",
@@ -375,13 +437,13 @@ fn read_chain(store: &FakeStore, owner: &Owner) -> R<Option<Chain>> {
         "current names another manifest",
     )?;
     ensure(folded.owner == *owner, "owner mismatch")?;
-    for (_, _, bytes) in &raw {
-        parse_manifest(bytes)
-            .map_err(e)?
+    for (_, parsed) in &raw {
+        parsed
+            .manifest
             .verify_encodings(|key| {
-                store.peek(key).map(|b| StoredEncoding {
-                    encoded_len: len64(b),
-                    encoded_sha256: sha(b),
+                store.digest(key).map(|(len, hash)| StoredEncoding {
+                    encoded_len: len,
+                    encoded_sha256: hash,
                 })
             })
             .map_err(e)?;
@@ -389,7 +451,7 @@ fn read_chain(store: &FakeStore, owner: &Owner) -> R<Option<Chain>> {
     Ok(Some(Chain {
         folded,
         current,
-        hashes: raw.iter().map(|(h, s, _)| (*s, *h)).collect(),
+        hashes: raw.iter().map(|(h, p)| (p.projection.seq, *h)).collect(),
     }))
 }
 
@@ -399,12 +461,13 @@ fn reassemble(store: &FakeStore, record: &EpochRecord) -> R<Vec<u8>> {
     let mut out: Vec<u8> = Vec::new();
     for piece in &record.pieces {
         let stored = need(store.peek(piece.object()), "piece object missing")?;
+        let (stored_len, stored_sha) = need(store.digest(piece.object()), "piece digest")?;
         ensure(
-            sha(stored) == piece.encoded_sha256() && len64(stored) == piece.encoded_len(),
+            stored_sha == piece.encoded_sha256() && stored_len == piece.encoded_len(),
             "descriptor differs from stored encoding",
         )?;
         ensure(
-            sha(stored) == piece.sha256() && len64(stored) == piece.len(),
+            stored_sha == piece.sha256() && stored_len == piece.len(),
             "piece bytes differ from descriptor",
         )?;
         ensure(len64(&out) == piece.offset().get(), "piece offset gap")?;
