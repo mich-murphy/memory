@@ -31,6 +31,10 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+#[path = "common/store.rs"]
+mod mem_store;
+use mem_store::{EtagModel, MemStore};
+
 type R<T = ()> = Result<T, String>;
 
 fn e<E: std::fmt::Debug>(err: E) -> String {
@@ -146,35 +150,11 @@ struct Rule {
     times: u32,
     effect: Effect,
 }
-enum Fence<'a> {
-    Absent,
-    Match(&'a ETag),
-}
-
-/// How the fake derives an ETag. R2 reports the MD5 of the body (P2: `etag_is_md5_of_body`), so
-/// the content model is measured for distinct bodies; what R2 answers for an identical rewrite
-/// is unmeasured, so the state machines run under both.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum EtagModel {
-    /// Every write gets a new ETag, even an identical rewrite.
-    #[default]
-    PerWrite,
-    /// The ETag is a function of the body: an identical rewrite keeps it.
-    Content,
-}
-fn content_token(body: &[u8]) -> u64 {
-    body.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
-        (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
-    })
-}
-
-/// Deterministic object store with S3/R2 conditional-write semantics and scripted faults.
-/// `objects` holds the body and its ETag token; `version` counts writes.
+/// The shared store with scripted faults, as a decorator: the faults act around the inner
+/// call, the R2 conditional-write rules stay in `MemStore`.
 #[derive(Default)]
 struct FakeStore {
-    objects: BTreeMap<String, (Vec<u8>, u64)>,
-    version: u64,
-    model: EtagModel,
+    mem: MemStore,
     offline: bool,
     revoked: bool,
     rules: Vec<Rule>,
@@ -190,10 +170,6 @@ fn kind_of(key: &str) -> Kind {
         Kind::Object
     }
 }
-fn etag_of(version: u64) -> Result<ETag, StoreError> {
-    ETag::try_from(format!("\"v{version}\"")).map_err(|_| StoreError::Server)
-}
-
 impl FakeStore {
     fn arm(&mut self, op: Op, effect: Effect) {
         self.arm_n(op, 0, 1, effect);
@@ -216,32 +192,23 @@ impl FakeStore {
             .any(|r| matches!(r.effect, Effect::Foreign(_)))
     }
     fn peek(&self, key: &str) -> Option<&[u8]> {
-        self.objects.get(key).map(|(body, _)| body.as_slice())
+        self.mem.objects.get(key).map(|(body, _)| body.as_slice())
     }
     fn etag(&self, key: &str) -> R<ETag> {
-        let (_, version) = need(self.objects.get(key), "no such key")?;
-        etag_of(*version).map_err(e)
+        let (_, token) = need(self.mem.objects.get(key), "no such key")?;
+        MemStore::tag(*token).map_err(e)
     }
     fn count(&self, op: Op) -> usize {
         self.log.iter().filter(|(o, _)| *o == op).count()
     }
     fn with_model(model: EtagModel) -> Self {
         Self {
-            model,
+            mem: MemStore {
+                model,
+                ..MemStore::default()
+            },
             ..Self::default()
         }
-    }
-    fn write(&mut self, key: &str, body: Vec<u8>) -> u64 {
-        self.version += 1;
-        let token = match self.model {
-            EtagModel::PerWrite => self.version,
-            EtagModel::Content => content_token(&body),
-        };
-        self.objects.insert(key.to_owned(), (body, token));
-        token
-    }
-    fn remove(&mut self, key: &str) {
-        self.objects.remove(key);
     }
     fn intercept(&mut self, op: Op) -> Option<Effect> {
         let mut hit = None;
@@ -269,15 +236,15 @@ impl FakeStore {
         match effect {
             Some(Effect::Revoke) => self.revoked = true,
             Some(Effect::Churn) => {
-                if let Some((body, _)) = self.objects.get(key).cloned() {
-                    self.write(key, body);
+                if let Some((body, _)) = self.mem.objects.get(key).cloned() {
+                    self.mem.write(key, body);
                 }
             }
             Some(Effect::Foreign(f)) => {
-                if !self.objects.contains_key(&f.manifest_key) {
-                    self.write(&f.manifest_key, f.manifest.clone());
+                if !self.mem.objects.contains_key(&f.manifest_key) {
+                    self.mem.write(&f.manifest_key, f.manifest.clone());
                 }
-                self.write(key, f.current.clone());
+                self.mem.write(key, f.current.clone());
             }
             _ => {}
         }
@@ -291,7 +258,12 @@ impl FakeStore {
             Ok(())
         }
     }
-    fn put(&mut self, key: &str, body: Vec<u8>, fence: &Fence<'_>) -> Result<ETag, StoreError> {
+    fn put(
+        &mut self,
+        key: &str,
+        body: Published,
+        fence: Option<&ETag>,
+    ) -> Result<ETag, StoreError> {
         let op = Op::Put(kind_of(key));
         self.log.push((op, key.to_owned()));
         let effect = self.intercept(op);
@@ -300,18 +272,10 @@ impl FakeStore {
         if let Some(Effect::FailBefore(err)) = &effect {
             return Err(*err);
         }
-        let existing = self.objects.get(key).map(|(_, v)| *v);
-        let allowed = match (fence, existing) {
-            (Fence::Absent, None) => true,
-            (Fence::Absent, Some(_)) => false,
-            // Measured on R2 (P2 `r2-os.jsonl`): If-Match on a missing key is 412, not 404.
-            (Fence::Match(_), None) => false,
-            (Fence::Match(tag), Some(v)) => etag_of(v)? == **tag,
-        };
-        if !allowed {
-            return Err(StoreError::PreconditionFailed);
-        }
-        let tag = etag_of(self.write(key, body))?;
+        let tag = match fence {
+            None => self.mem.put_if_absent(key, body),
+            Some(etag) => self.mem.put_if_match(key, etag, body),
+        }?;
         match effect {
             Some(Effect::LandThen { err, then_offline }) => {
                 self.offline |= then_offline;
@@ -324,7 +288,7 @@ impl FakeStore {
 
 impl Store for FakeStore {
     fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
-        self.put(key, body.as_ref().to_vec(), &Fence::Absent)
+        self.put(key, body, None)
     }
     fn put_if_match(
         &mut self,
@@ -332,7 +296,7 @@ impl Store for FakeStore {
         etag: &ETag,
         body: Published,
     ) -> Result<ETag, StoreError> {
-        self.put(key, body.as_ref().to_vec(), &Fence::Match(etag))
+        self.put(key, body, Some(etag))
     }
     fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
         let op = Op::Get(kind_of(key));
@@ -343,11 +307,7 @@ impl Store for FakeStore {
         if let Some(Effect::FailBefore(err) | Effect::LandThen { err, .. }) = &effect {
             return Err(*err);
         }
-        let (body, version) = self.objects.get(key).ok_or(StoreError::NotFound)?;
-        Ok(Stored {
-            body: body.clone(),
-            etag: etag_of(*version)?,
-        })
+        self.mem.get(key)
     }
 }
 
@@ -1193,11 +1153,7 @@ fn hegel_property4_commit_state_machine() {
     let scripted = scripted_shapes(&HEGEL_SHAPES);
     assert!(scripted.is_ok(), "{scripted:?}");
     hegel::Hegel::new(|tc: TestCase| {
-        let model = if tc.draw(gs::booleans()) {
-            EtagModel::Content
-        } else {
-            EtagModel::PerWrite
-        };
+        let model = EtagModel::from(tc.draw(gs::booleans()));
         let world = World::new(&HEGEL_SHAPES, model);
         assert!(world.is_ok(), "{:?}", world.as_ref().err());
         if let Ok(world) = world {
@@ -1244,13 +1200,7 @@ impl ReferenceStateMachine for RefMachine {
     type Transition = Step;
     fn init_state() -> BoxedStrategy<Reference> {
         any::<bool>()
-            .prop_map(|content| {
-                Reference::with_model(if content {
-                    EtagModel::Content
-                } else {
-                    EtagModel::PerWrite
-                })
-            })
+            .prop_map(|content| Reference::with_model(EtagModel::from(content)))
             .boxed()
     }
     fn transitions(_: &Reference) -> BoxedStrategy<Step> {
@@ -1467,6 +1417,7 @@ fn oracle_detects_tampered_store_contents() -> R {
     let key_of = |sut: &Sut, prefix: &str| -> R<String> {
         need(
             sut.store
+                .mem
                 .objects
                 .keys()
                 .find(|k| k.starts_with(prefix))
@@ -1477,12 +1428,12 @@ fn oracle_detects_tampered_store_contents() -> R {
     // A referenced object disappears.
     let (reference, mut sut) = drive(&steps)?;
     let object = key_of(&sut, "objects/")?;
-    sut.store.remove(&object);
+    sut.store.mem.objects.remove(&object);
     assert!(sut.check(&reference, &SCRATCH_SHAPES).is_err());
     // The stored encoding no longer matches its descriptor.
     let (reference, mut sut) = drive(&steps)?;
     let object = key_of(&sut, "objects/")?;
-    sut.store.write(&object, encode(&[9, 9], 0));
+    sut.store.mem.write(&object, encode(&[9, 9], 0));
     assert!(sut.check(&reference, &SCRATCH_SHAPES).is_err());
     // current.json claims another seq.
     let (reference, mut sut) = drive(&steps)?;
@@ -1490,7 +1441,7 @@ fn oracle_detects_tampered_store_contents() -> R {
     let pointer = Current::new(cur.1, cur.0 + 5, ts()?)
         .to_bytes()
         .map_err(e)?;
-    sut.store.write(&current_key(&sut.owner), pointer);
+    sut.store.mem.write(&current_key(&sut.owner), pointer);
     assert!(sut.check(&reference, &SCRATCH_SHAPES).is_err());
     // The model expects different committed bytes (1a / expectation).
     let (mut reference, mut sut) = drive(&steps)?;
@@ -1510,7 +1461,7 @@ fn oracle_detects_tampered_store_contents() -> R {
     assert!(sut.check(&reference, &SCRATCH_SHAPES).is_err());
     // Nothing committed while the model expects commits.
     let (reference, mut sut) = drive(&steps)?;
-    sut.store.remove(&current_key(&sut.owner));
+    sut.store.mem.objects.remove(&current_key(&sut.owner));
     assert!(sut.check(&reference, &SCRATCH_SHAPES).is_err());
     Ok(())
 }
@@ -1632,6 +1583,7 @@ fn later_write_is_fenced_by_the_etag_and_chains_previous() -> R {
     };
     let first = rig
         .store
+        .mem
         .objects
         .keys()
         .filter(|k| k.starts_with("manifests/"))
@@ -1900,7 +1852,7 @@ fn a_404_under_a_fence_is_landing_unknown() -> R {
     let mut rig = Rig::two_commits()?;
     rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
     let key = rig.current_key();
-    rig.store.remove(&key);
+    rig.store.mem.objects.remove(&key);
     let before = rig.store.count(Op::Put(Kind::Current));
     let (failure, pauses) = rig.failed()?;
     assert_eq!(failure, Failure::LandingUnknown(ErrorClass::Offline));
@@ -1978,7 +1930,7 @@ fn offline_store_lands_nothing_and_retries_as_offline() -> R {
     rig.store.offline = true;
     let (failure, _) = rig.failed()?;
     assert_eq!(failure, Failure::NotLanded(ErrorClass::Offline));
-    assert!(rig.store.objects.is_empty());
+    assert!(rig.store.mem.objects.is_empty());
     let (d, streak) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
     assert!(matches!(
         d,
@@ -1999,7 +1951,7 @@ fn revoked_token_pauses_the_host_and_lands_nothing() -> R {
     assert_eq!(failure, Failure::NotLanded(ErrorClass::DestinationAuth));
     let (d, _) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
     assert!(matches!(d, Disposition::PauseHost));
-    assert!(rig.store.objects.is_empty());
+    assert!(rig.store.mem.objects.is_empty());
     Ok(())
 }
 
@@ -2068,7 +2020,7 @@ fn r2_a_412_dedup_adopts_the_encoding_that_actually_won() -> R {
     let mut rig = Rig::seeded(&raw)?;
     // Another writer version stored the same raw piece with a different encoding.
     let winner = encode(&raw, 1);
-    rig.store.write(&object_key(&sha(&raw)), winner.clone());
+    rig.store.mem.write(&object_key(&sha(&raw)), winner.clone());
     let ours = encode(&raw, 0);
     assert_ne!(sha(&ours), sha(&winner));
     let landed = rig.landed()?;
@@ -2097,7 +2049,9 @@ fn r2_a_412_dedup_adopts_the_encoding_that_actually_won() -> R {
 fn a_failed_readback_after_412_lands_nothing() -> R {
     let raw = [1_u8, 2, 3, 4];
     let mut rig = Rig::seeded(&raw)?;
-    rig.store.write(&object_key(&sha(&raw)), encode(&raw, 1));
+    rig.store
+        .mem
+        .write(&object_key(&sha(&raw)), encode(&raw, 1));
     rig.store.arm(
         Op::Get(Kind::Object),
         Effect::FailBefore(StoreError::Server),
@@ -2119,7 +2073,7 @@ fn an_invalid_manifest_is_deterministic_and_never_reaches_the_store() -> R {
     };
     let (result, _) = rig.go_with(request);
     assert_eq!(result, Err(Failure::Invalid(ManifestError::MissingSource)));
-    assert!(rig.store.objects.is_empty());
+    assert!(rig.store.mem.objects.is_empty());
     let (d, _) = disposition(&result, false, Duration::ZERO, &Streak::default());
     assert!(matches!(d, Disposition::Retry { .. }));
     Ok(())
@@ -2335,11 +2289,11 @@ fn recover_base_failures_are_classified() -> R {
     );
 
     let mut store = clone_store(&rig.store);
-    store.remove(&key);
+    store.mem.objects.remove(&key);
     assert_eq!(recover(&mut store), Err(Failure::Corrupt));
 
     let mut store = clone_store(&rig.store);
-    store.write(&key, b"{\"changed\":true}".to_vec());
+    store.mem.write(&key, b"{\"changed\":true}".to_vec());
     assert_eq!(recover(&mut store), Err(Failure::Corrupt));
 
     let mut store = clone_store(&rig.store);
@@ -2353,11 +2307,11 @@ fn recover_base_failures_are_classified() -> R {
     );
 
     let mut store = clone_store(&rig.store);
-    store.write(&rig.current_key(), b"{".to_vec());
+    store.mem.write(&rig.current_key(), b"{".to_vec());
     assert_eq!(recover(&mut store), Err(Failure::Corrupt));
 
     let mut store = clone_store(&rig.store);
-    store.write(
+    store.mem.write(
         &rig.current_key(),
         br#"{"schema":"memory.current/2"}"#.to_vec(),
     );
@@ -2366,8 +2320,8 @@ fn recover_base_failures_are_classified() -> R {
     let mut store = clone_store(&rig.store);
     let body = br#"{"schema":"memory.manifest/2"}"#.to_vec();
     let newer = sha(&body);
-    store.write(&manifest_key(&newer), body);
-    store.write(
+    store.mem.write(&manifest_key(&newer), body);
+    store.mem.write(
         &rig.current_key(),
         Current::new(newer, 9, ts()?).to_bytes().map_err(e)?,
     );
@@ -2377,20 +2331,21 @@ fn recover_base_failures_are_classified() -> R {
     let mut store = clone_store(&rig.store);
     let first = need(
         rig.store
+            .mem
             .objects
             .keys()
             .find(|k| k.starts_with("manifests/")),
         "a manifest",
     )?;
     let stray = need(rig.store.peek(first), "its bytes")?.to_vec();
-    store.write(&key, stray);
+    store.mem.write(&key, stray);
     assert_eq!(recover(&mut store), Err(Failure::Corrupt));
 
     // A chain that names another owner does not fold into this owner's base.
     let mut store = clone_store(&rig.store);
     let alien = build(None, header(&owner_named("s2")?, "x")?, vec![]).map_err(e)?;
-    store.write(&manifest_key(&alien.hash), alien.bytes);
-    store.write(
+    store.mem.write(&manifest_key(&alien.hash), alien.bytes);
+    store.mem.write(
         &rig.current_key(),
         Current::new(alien.hash, 0, ts()?).to_bytes().map_err(e)?,
     );
@@ -2415,7 +2370,7 @@ fn recover_base_stops_at_the_first_manifest_that_does_not_match_its_key() -> R {
     let one = need(hashes.get(1), "seq 1")?;
     let valid_other = need(rig.store.peek(&manifest_key(one)), "seq 1 bytes")?.to_vec();
     let mut store = clone_store(&rig.store);
-    store.write(&manifest_key(two), valid_other);
+    store.mem.write(&manifest_key(two), valid_other);
     assert_eq!(recover_base(&mut store, &rig.owner), Err(Failure::Corrupt));
     assert_eq!(
         store.count(Op::Get(Kind::Manifest)),
@@ -2436,7 +2391,9 @@ fn recover_base_recovers_the_longest_valid_chain_of_sixty_four_manifests() -> R 
     let owner = owner()?;
     let mut store = FakeStore::default();
     let mut built = build(None, header(&owner, "x")?, vec![]).map_err(e)?;
-    store.write(&manifest_key(&built.hash), built.bytes.clone());
+    store
+        .mem
+        .write(&manifest_key(&built.hash), built.bytes.clone());
     for _ in 0..63 {
         built = build(
             Some((&built.position, &built.state)),
@@ -2444,10 +2401,12 @@ fn recover_base_recovers_the_longest_valid_chain_of_sixty_four_manifests() -> R 
             vec![],
         )
         .map_err(e)?;
-        store.write(&manifest_key(&built.hash), built.bytes.clone());
+        store
+            .mem
+            .write(&manifest_key(&built.hash), built.bytes.clone());
     }
     assert_eq!(built.position.seq, 63);
-    store.write(
+    store.mem.write(
         &current_key(&owner),
         Current::new(built.hash, 63, ts()?).to_bytes().map_err(e)?,
     );
@@ -2470,7 +2429,9 @@ fn recover_base_gives_up_after_sixty_four_gets_when_the_chain_is_one_too_long() 
         let owner = owner()?;
         let mut store = FakeStore::default();
         let root = build(None, header(&owner, "x")?, vec![]).map_err(e)?;
-        store.write(&manifest_key(&root.hash), root.bytes.clone());
+        store
+            .mem
+            .write(&manifest_key(&root.hash), root.bytes.clone());
         let mut previous = root.hash;
         for _ in 0..deltas {
             let base = Position {
@@ -2484,10 +2445,10 @@ fn recover_base_gives_up_after_sixty_four_gets_when_the_chain_is_one_too_long() 
                 vec![],
             )
             .map_err(e)?;
-            store.write(&manifest_key(&delta.hash), delta.bytes);
+            store.mem.write(&manifest_key(&delta.hash), delta.bytes);
             previous = delta.hash;
         }
-        store.write(
+        store.mem.write(
             &current_key(&owner),
             Current::new(previous, 2, ts()?).to_bytes().map_err(e)?,
         );
@@ -2499,9 +2460,11 @@ fn recover_base_gives_up_after_sixty_four_gets_when_the_chain_is_one_too_long() 
 
 fn clone_store(store: &FakeStore) -> FakeStore {
     FakeStore {
-        objects: store.objects.clone(),
-        version: store.version,
-        model: store.model,
+        mem: MemStore {
+            objects: store.mem.objects.clone(),
+            version: store.mem.version,
+            model: store.mem.model,
+        },
         ..FakeStore::default()
     }
 }

@@ -8,10 +8,10 @@
 use hegel::{TestCase, generators as gs};
 use memory::capture::{Captured, Env, Local, Locals, Published, Source, capture};
 use memory::commit::{Base, Failure, Landed, commit, manifest_key, recover_base};
-use memory::environment::{FileSystem, Stat, Store, StoreError, Stored};
+use memory::environment::{Store, StoreError, Stored};
 use memory_core::domain::{
-    Agent, ArchiveId, Birth, CommitOutcome, ETag, FileId, MachineId, Owner, SessionId, SessionKey,
-    Sha256, SourceClass, SourceId, SourceKind,
+    Agent, ArchiveId, CommitOutcome, ETag, MachineId, Owner, SessionId, SessionKey, Sha256,
+    SourceClass, SourceId, SourceKind,
 };
 use memory_core::limits::current_key;
 use memory_core::manifest::{
@@ -24,6 +24,13 @@ use proptest::test_runner::{Config, TestRunner};
 use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+#[path = "common/fs.rs"]
+mod mem_fs;
+#[path = "common/store.rs"]
+mod mem_store;
+use mem_fs::MemFs;
+use mem_store::MemStore;
 
 type R<T = ()> = Result<T, String>;
 
@@ -92,55 +99,6 @@ fn handle(i: u8) -> u64 {
 
 // ------------------------------------------------------------------ synthetic filesystem
 
-#[derive(Default)]
-struct MemFs {
-    files: BTreeMap<u64, Vec<u8>>,
-    mtimes: BTreeMap<u64, i64>,
-    /// File identity generation per path: a rename-replace gives the path a new identity.
-    generations: BTreeMap<u64, u32>,
-    clock: i64,
-}
-impl MemFs {
-    /// Write a file and advance its mtime, as a real write would.
-    fn set(&mut self, source: u64, bytes: &[u8]) {
-        self.clock += 1_000;
-        self.files.insert(source, bytes.to_vec());
-        self.mtimes.insert(source, self.clock);
-    }
-    /// Put a file with identity `generation` at the path (a rename over the old one).
-    fn replace(&mut self, source: u64, bytes: &[u8], generation: u32) {
-        self.generations.insert(source, generation);
-        self.set(source, bytes);
-    }
-    fn generation(&self, source: u64) -> u32 {
-        self.generations.get(&source).copied().unwrap_or(0)
-    }
-}
-impl FileSystem for MemFs {
-    type Error = ();
-    fn stat(&mut self, source: u64) -> Result<Option<Stat>, ()> {
-        let dev = 1 + u64::from(self.generation(source));
-        Ok(self.files.get(&source).map(|b| Stat {
-            id: FileId {
-                dev,
-                ino: source,
-                birth: Birth::Unavailable,
-            },
-            size: len64(b),
-            mtime_ns: self.mtimes.get(&source).copied().unwrap_or(0),
-        }))
-    }
-    fn stat_len(&mut self, source: u64) -> Result<u64, ()> {
-        Ok(self.stat(source)?.ok_or(())?.size)
-    }
-    fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, ()> {
-        let bytes = self.files.get(&source).ok_or(())?;
-        let start = usize::try_from(range.start).map_err(|_| ())?;
-        let end = usize::try_from(range.end).map_err(|_| ())?.min(bytes.len());
-        Ok(bytes.get(start..end).unwrap_or_default().to_vec())
-    }
-}
-
 fn source(i: u8) -> R<Source> {
     let path = format!("projects/p/s{i}.jsonl");
     Ok(Source {
@@ -204,16 +162,11 @@ struct Rule {
     op: Op,
     effect: Effect,
 }
-enum Fence<'a> {
-    Absent,
-    Match(&'a ETag),
-}
-
-/// Deterministic object store with S3/R2 conditional-write semantics and scripted faults.
+/// The shared store with scripted faults, as a decorator: the faults act around the inner
+/// call, the R2 conditional-write rules stay in `MemStore`.
 #[derive(Default)]
 struct FakeStore {
-    objects: BTreeMap<String, (Vec<u8>, u64)>,
-    version: u64,
+    mem: MemStore,
     offline: bool,
     revoked: bool,
     rules: Vec<Rule>,
@@ -245,10 +198,6 @@ fn kind_of(key: &str) -> Kind {
         Kind::Object
     }
 }
-fn etag_of(version: u64) -> Result<ETag, StoreError> {
-    ETag::try_from(format!("\"v{version}\"")).map_err(|_| StoreError::Server)
-}
-
 impl FakeStore {
     fn arm(&mut self, op: Op, effect: Effect) {
         self.rules.push(Rule { op, effect });
@@ -263,11 +212,11 @@ impl FakeStore {
             .any(|r| matches!(r.effect, Effect::Foreign(_)))
     }
     fn peek(&self, key: &str) -> Option<&[u8]> {
-        self.objects.get(key).map(|(body, _)| body.as_slice())
+        self.mem.objects.get(key).map(|(body, _)| body.as_slice())
     }
     /// Length and SHA-256 of the object at `key`, hashing it once per stored version.
     fn digest(&self, key: &str) -> Option<(u64, Sha256)> {
-        let (body, version) = self.objects.get(key)?;
+        let (body, version) = self.mem.objects.get(key)?;
         let mut memo = self.digests.borrow_mut();
         if let Some((v, len, hash)) = memo.get(key)
             && v == version
@@ -278,23 +227,16 @@ impl FakeStore {
         memo.insert(key.to_owned(), (*version, len, hash));
         Some((len, hash))
     }
-    fn write(&mut self, key: &str, body: Vec<u8>) {
-        self.version += 1;
-        self.objects.insert(key.to_owned(), (body, self.version));
-    }
-    fn remove(&mut self, key: &str) {
-        self.objects.remove(key);
-    }
     fn intercept(&mut self, op: Op) -> Option<Effect> {
         let index = self.rules.iter().position(|r| r.op == op)?;
         Some(self.rules.remove(index).effect)
     }
     fn side_effect(&mut self, key: &str, effect: Option<&Effect>) {
         if let Some(Effect::Foreign(f)) = effect {
-            if !self.objects.contains_key(&f.manifest_key) {
-                self.write(&f.manifest_key, f.manifest.clone());
+            if !self.mem.objects.contains_key(&f.manifest_key) {
+                self.mem.write(&f.manifest_key, f.manifest.clone());
             }
-            self.write(key, f.current.clone());
+            self.mem.write(key, f.current.clone());
         }
     }
     fn gate(&self) -> Result<(), StoreError> {
@@ -306,25 +248,22 @@ impl FakeStore {
             Ok(())
         }
     }
-    fn put(&mut self, key: &str, body: Vec<u8>, fence: &Fence<'_>) -> Result<ETag, StoreError> {
+    fn put(
+        &mut self,
+        key: &str,
+        body: Published,
+        fence: Option<&ETag>,
+    ) -> Result<ETag, StoreError> {
         let effect = self.intercept(Op::Put(kind_of(key)));
         self.side_effect(key, effect.as_ref());
         self.gate()?;
         if let Some(Effect::FailBefore(err)) = &effect {
             return Err(*err);
         }
-        let existing = self.objects.get(key).map(|(_, v)| *v);
-        let allowed = match (fence, existing) {
-            (Fence::Absent, None) => true,
-            (Fence::Absent, Some(_)) => false,
-            (Fence::Match(_), None) => return Err(StoreError::NotFound),
-            (Fence::Match(tag), Some(v)) => etag_of(v)? == **tag,
-        };
-        if !allowed {
-            return Err(StoreError::PreconditionFailed);
-        }
-        self.write(key, body);
-        let tag = etag_of(self.version)?;
+        let tag = match fence {
+            None => self.mem.put_if_absent(key, body),
+            Some(etag) => self.mem.put_if_match(key, etag, body),
+        }?;
         match effect {
             Some(Effect::LandThen { err, then_offline }) => {
                 self.offline |= then_offline;
@@ -337,7 +276,7 @@ impl FakeStore {
 
 impl Store for FakeStore {
     fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
-        self.put(key, body.as_ref().to_vec(), &Fence::Absent)
+        self.put(key, body, None)
     }
     fn put_if_match(
         &mut self,
@@ -345,7 +284,7 @@ impl Store for FakeStore {
         etag: &ETag,
         body: Published,
     ) -> Result<ETag, StoreError> {
-        self.put(key, body.as_ref().to_vec(), &Fence::Match(etag))
+        self.put(key, body, Some(etag))
     }
     fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
         let effect = self.intercept(Op::Get(kind_of(key)));
@@ -354,11 +293,7 @@ impl Store for FakeStore {
         if let Some(Effect::FailBefore(err) | Effect::LandThen { err, .. }) = &effect {
             return Err(*err);
         }
-        let (body, version) = self.objects.get(key).ok_or(StoreError::NotFound)?;
-        Ok(Stored {
-            body: body.clone(),
-            etag: etag_of(*version)?,
-        })
+        self.mem.get(key)
     }
 }
 
@@ -694,9 +629,9 @@ impl Sut {
         match after.files.get(&src) {
             Some(bytes) => {
                 let generation = after.generation.get(&src).copied().unwrap_or(0);
-                if self.fs.generation(handle(src)) != generation {
-                    self.fs.replace(handle(src), bytes, generation);
-                } else if self.fs.files.get(&handle(src)) != Some(bytes) {
+                if self.fs.generation(handle(src)) != u64::from(generation) {
+                    self.fs.replace(handle(src), bytes, u64::from(generation));
+                } else {
                     self.fs.set(handle(src), bytes);
                 }
             }
@@ -1829,6 +1764,7 @@ fn oracle_detects_tampered_store_contents() -> R {
     let key_of = |sut: &Sut, prefix: &str| -> R<String> {
         need(
             sut.store
+                .mem
                 .objects
                 .keys()
                 .find(|k| k.starts_with(prefix))
@@ -1843,12 +1779,12 @@ fn oracle_detects_tampered_store_contents() -> R {
     // A referenced object disappears.
     let (reference, mut sut) = drive(&steps, &shapes)?;
     let object = key_of(&sut, "objects/")?;
-    sut.store.remove(&object);
+    sut.store.mem.objects.remove(&object);
     assert!(sut.check(&reference, &shapes).is_err());
     // The stored encoding no longer matches its descriptor.
     let (reference, mut sut) = drive(&steps, &shapes)?;
     let object = key_of(&sut, "objects/")?;
-    sut.store.write(&object, vec![9, 9]);
+    sut.store.mem.write(&object, vec![9, 9]);
     assert!(sut.check(&reference, &shapes).is_err());
     // current.json claims another seq.
     let (reference, mut sut) = drive(&steps, &shapes)?;
@@ -1856,7 +1792,7 @@ fn oracle_detects_tampered_store_contents() -> R {
     let pointer = Current::new(cur.1, cur.0 + 5, ts()?)
         .to_bytes()
         .map_err(e)?;
-    sut.store.write(&current_key(&sut.owner), pointer);
+    sut.store.mem.write(&current_key(&sut.owner), pointer);
     assert!(sut.check(&reference, &shapes).is_err());
     // Committed bytes the source never held violate 1a.
     let (mut reference, mut sut) = drive(&steps, &shapes)?;
