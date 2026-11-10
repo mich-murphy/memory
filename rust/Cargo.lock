@@ -517,6 +517,7 @@ dependencies = [
  "notify",
  "proptest",
  "proptest-state-machine",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

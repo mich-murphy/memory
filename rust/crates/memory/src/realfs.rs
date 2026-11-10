@@ -3,14 +3,16 @@
 //!
 //! Stat observation follows DESIGN.md 7.1 and 7.2: `symlink_metadata`, so a symlink is
 //! reported as itself (its own inode, size and times) and never followed. `walk` skips
-//! symlinks entirely and counts them. No `unsafe`, no new dependencies.
+//! symlinks entirely and counts them. No `unsafe`; open flags and errno come from `rustix`.
 
 use crate::environment::{FileSystem, Stat};
 use memory_core::domain::{Birth, FileId};
 use memory_core::locator::{Located, RootRelativePath, Roots, locate};
+use rustix::fs::{Mode, OFlags};
+use rustix::io::Errno;
 use std::fs;
 use std::io::{ErrorKind, Read, Seek, SeekFrom};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -55,42 +57,6 @@ pub struct RealFs {
     observed: Vec<Option<FileId>>,
     counters: Counters,
 }
-
-/// `O_NOFOLLOW | O_NONBLOCK` for this platform. `libc` is not a dependency, so the values
-/// are spelled out (checked against libc 0.2: bsd/apple `O_NOFOLLOW` 0x100, `O_NONBLOCK`
-/// 0x4; Linux `O_NONBLOCK` 0x800, `O_NOFOLLOW` 0x20000 on x86_64, riscv64 and s390x and
-/// 0x8000 on aarch64 and arm). `O_NONBLOCK` keeps a FIFO swapped in after the stat from
-/// blocking the open; it does not change reads of regular files.
-#[cfg(target_os = "macos")]
-const OPEN_FLAGS: i32 = 0x100 | 0x4;
-#[cfg(all(
-    target_os = "linux",
-    any(target_arch = "x86_64", target_arch = "riscv64", target_arch = "s390x")
-))]
-const OPEN_FLAGS: i32 = 0x20000 | 0x800;
-#[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "arm")))]
-const OPEN_FLAGS: i32 = 0x8000 | 0x800;
-#[cfg(not(any(
-    target_os = "macos",
-    all(
-        target_os = "linux",
-        any(
-            target_arch = "x86_64",
-            target_arch = "riscv64",
-            target_arch = "s390x",
-            target_arch = "aarch64",
-            target_arch = "arm"
-        )
-    )
-)))]
-compile_error!("RealFs: O_NOFOLLOW value is not known for this target; add it here");
-
-/// `ELOOP`, which `open(2)` with `O_NOFOLLOW` returns for a final symlink. `ErrorKind` has
-/// no stable variant for it, so the errno is compared (62 on macOS, 40 on Linux).
-#[cfg(target_os = "macos")]
-const ELOOP: i32 = 62;
-#[cfg(not(target_os = "macos"))]
-const ELOOP: i32 = 40;
 
 impl RealFs {
     /// Empty adapter.
@@ -179,17 +145,21 @@ impl FileSystem for RealFs {
         // file, and the file the last stat saw. Intermediate path components are still
         // resolved by the kernel: a directory component swapped for a symlink after
         // `resolve` is a residual race that DESIGN.md 8.2 does not address.
-        let mut file = fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(OPEN_FLAGS)
-            .open(self.path(source)?)
-            .map_err(|e| {
-                if e.raw_os_error() == Some(ELOOP) {
-                    RealFsError::Changed
-                } else {
-                    io(e)
-                }
-            })?;
+        // `NONBLOCK` keeps a FIFO swapped in after the stat from blocking the open; it
+        // does not change reads of regular files.
+        let mut file = rustix::fs::open(
+            self.path(source)?,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map(fs::File::from)
+        .map_err(|e| {
+            if e == Errno::LOOP {
+                RealFsError::Changed
+            } else {
+                io(e.into())
+            }
+        })?;
         let meta = file.metadata().map_err(io)?;
         let expected = usize::try_from(source)
             .ok()
