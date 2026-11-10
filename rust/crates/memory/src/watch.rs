@@ -170,7 +170,13 @@ impl<F: FnMut(&Path) -> Option<Owner>> Scheduler<F> {
 /// Translate one notify result into scheduler inputs, asking the filesystem whether a
 /// created or renamed-in path is a directory.
 pub fn translate(result: notify::Result<Event>) -> Vec<Input> {
-    translate_with(result, Path::is_dir)
+    translate_with(result, is_real_dir)
+}
+
+/// A real directory. A symlink, even to a directory, is not one: the walk never follows
+/// symlinks (DESIGN.md 7.1, 8.2).
+fn is_real_dir(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir())
 }
 
 /// [`translate`] with the directory test injected, so the mapping is pure.

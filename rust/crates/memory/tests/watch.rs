@@ -562,3 +562,21 @@ fn fs_watcher_rejects_a_root_it_cannot_inspect() -> R {
     assert!(result.is_err());
     Ok(())
 }
+
+#[test]
+fn translate_never_treats_a_symlink_as_a_directory() -> R {
+    let tmp = Tmp::new()?;
+    let real = tmp.0.join("real");
+    let link = tmp.0.join("link");
+    fs::create_dir(&real).map_err(e)?;
+    std::os::unix::fs::symlink(&real, &link).map_err(e)?;
+    for kind in [
+        EventKind::Create(CreateKind::Any),
+        EventKind::Modify(ModifyKind::Name(RenameMode::To)),
+    ] {
+        let at = |p: &PathBuf| translate(Ok(Event::new(kind).add_path(p.clone())));
+        assert_eq!(at(&link), vec![Input::PathChanged { path: link.clone() }]);
+        assert_eq!(at(&real), vec![Input::DirCreated { path: real.clone() }]);
+    }
+    Ok(())
+}
