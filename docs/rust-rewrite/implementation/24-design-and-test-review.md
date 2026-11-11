@@ -1,11 +1,13 @@
 # 24. Design, test and complexity review (2026-11-10)
 
-Coordinator brief. The parent session owns this file and acceptance. Status: in progress.
+Coordinator brief. The parent session owns this file and acceptance. Status: rounds 1 to 5
+complete; mutant triage and two operator decisions open (see Round 5).
 
 ## Checkout
 
 - `/Users/mm/dev/memory`, branch `rust/coverage-floor-80`, base HEAD `6ea015e`, clean at start.
-- Nothing is committed by this task unless the operator asks.
+- At the start nothing was to be committed; the operator later asked for commits and PRs
+  (stack #56).
 
 ## Scope and acceptance
 
@@ -150,6 +152,70 @@ Still open (operator): live R2 probes; `GET_ATTEMPTS` literal; `realfs` error-te
 watcher on a missing root; logging (A11.3); canonical-path type to close the parent-directory
 race (A12.4); hint retention (A11.2); shared test fakes; 30-seed guard confirmation.
 
+## Round 5 (complete, integrated above `rust/gates-properties-once`)
+
+Operator decisions applied (amendment A13): shadow-run exit is 2 consecutive days with zero
+restore mismatches, parked owners and uncaptured local sessions; the Go cross-check is dropped;
+zstd, the audit, hint retention and `tracing` are prerequisites of the first production write;
+the 8-entry env cap is removed (it came from Go `internal/launch/native.go:58`, no design
+reason); verification GET is 4 attempts; the watcher skips and counts a missing root.
+
+| Branch | Content |
+|---|---|
+| `rust/gates-properties-once` | Gates 04 to 06 run each test once. The round 3 change made 05/06 repeat gate 04's properties and two hosted runners hit the 30 minute limit (coordinator error) |
+| `rust/review-decisions-a13` | Amendment A13.1, A13.2 |
+| `rust/guards-read-random-only` | `core_coordinates` guard reads only random cases; switch shape ASCII-only |
+| `rust/env-allowlist-no-cap` | Env cap removed; A13.3, A13.4 |
+| `rust/shared-test-fakes` | One `MemStore`, `MemFs`, `TestClock` under `tests/common/`; the store defaults to the measured content ETag; `tests/fake_store.rs` pins the fake |
+| `rust/watcher-roots-error-text` | Missing root skipped and counted; a symlink is never a directory; `RealFsError` text test; A13.5, A13.6 |
+| `rust/daemon-commit-guards-random` | Daemon and commit guards read only random cases; state-aware generators; GET attempt literals; two test-model fixes (below) |
+
+Findings of this round:
+
+- Independent read-only review of rounds 3 and 4 (scratchpad `review/R5-B-stack-review.md`)
+  found the round 3 coverage guards could not fail: a scripted prologue bumped the counters
+  the guard read. Fixed in all three files. Parent check: with the `late-write` or
+  `lost-reply` step disabled in the generator, the guard fails and names the shape.
+- Live R2 probes (operator-approved, `review/R5-E-r2-probes.md`, A13.4): the ETag is the MD5
+  of the body; a PUT from a killed process landed in 15 of 20 trials, up to 0.5 s later.
+  39 keys created, 39 deleted, prefixes verified empty. The probe used several thousand list
+  requests against about 200 planned.
+- With the guards real and the generators state-aware, the daemon state machines failed for
+  the first time. Both failures were faults in the test model, not in production code:
+  1. Settle ran four rounds of 61 s, less than the 15 minute maximum retry delay (DESIGN
+     11.2), so a run of failures left the owner rightly deferred. Settle now advances past the
+     delay first. Regression test `settle_converges_after_a_long_offline_run_once_the_retry_delay_passes`.
+  2. The oracle required every refused `current.json` write to fall inside the step that
+     injected a late write. A truncate that regrows the same bytes makes the round report
+     `Unchanged`, so the held write lands steps later. The fake now counts refusals with no
+     late write ahead of them and the oracle requires that count to be zero. Regression test
+     `a_held_write_that_lands_steps_later_is_adopted_and_the_store_converges`. A stale-base
+     mutant in `settle` is still caught by both state machines and two directed tests.
+
+Parent verification on the final stack (HEAD `8532325`):
+
+- `PROPERTY_CASES=500 bash scripts/gates.sh`, seed 3481505894, all 13 sub-gates 0; 373 + 30 +
+  28 tests passed; line coverage 5840/5976 = 97.72%; `verify-evidence.py` PASS. The machine
+  was shared with a mutation run, so wall times (05-hegel 714 s, 06-proptest 672 s) are high.
+- 40 random-seed runs at library-default case counts of each of the four daemon and commit
+  state machines, `HEGEL_DATABASE=disabled`: 0 failures in 160. The same campaign before fix
+  2 failed 3 of 30 on `proptest_daemon_state_machine`.
+
+`cargo mutants`, example tests only, tree `da01300`, interrupted and not triaged: `commit.rs`
+100%, `hook.rs` 98.0%, `privacy/launch.rs` 97.8%, `coordinates.rs` 95.7%, `config.rs` 93.8%,
+`capture.rs` 93.5%, `disposition.rs` 92.6%, `resolve.rs` 92.5%, `realfs.rs` 88.1%,
+`privacy/document.rs` 86.8%, `daemon.rs` 78.1% (15 of 21 misses in the `next_draw` jitter),
+`environment.rs` 61.1%. `state.rs`, `watch.rs` and the rest of `memory-core` incomplete.
+
+Not done: triage of the missed mutants; a canonical-path type for the parent-directory race
+(A12.4); removal of `FileSystem::stat_len` if it has no production caller; a parent rerun of
+the `GET_ATTEMPTS` mutants (3 and 5), which the worker reported caught; Linux target build
+locally (hosted CI covers it).
+
+Open (operator): minimum startup delay before a restarted daemon's first commit (A13.4;
+5 s suggested); whether the 2-day criterion also replaces the 7-day shadow runs of DESIGN 17
+slices 2b and 3 (A13.1 currently says it does).
+
 ## Next action
 
-Stack submitted as PRs; operator decisions on the open items.
+Push the stack and watch hosted CI; operator decisions on the two open items.

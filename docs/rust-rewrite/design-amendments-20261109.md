@@ -333,7 +333,9 @@ Changes in what is published: a model value with a bracket suffix such as `[1m]`
 published; a 32-character hex session id without dashes is now redacted; numeric and switch env
 values are limited to their shapes. Known limits, accepted: a key of unknown format shorter than
 32 characters passes in a model or path slot; a long hyphenated lowercase-and-digit run passes
-because real model names need it.
+because real model names need it; a model name with one segment of 32 or more bytes that mixes
+upper case, lower case and digits (for example `Llama-4-Maverick-17B-128E-Instruct-FP8`) is
+redacted, which fails closed.
 
 ### A12.2 The audit is a prerequisite of the first production write (DESIGN 7.2, 16 P5, A1)
 
