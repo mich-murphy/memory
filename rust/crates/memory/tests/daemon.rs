@@ -1162,11 +1162,37 @@ const REQUIRED_NEW: [&str; 6] = [
 ];
 struct Shapes {
     n: [AtomicU64; SHAPE_NAMES.len()],
+    /// Generator-efficiency counters: cases in which each shape was reached, and the totals
+    /// at the end of the previous case. They assert nothing (see `end_case`).
+    cases: AtomicU64,
+    cases_with: [AtomicU64; SHAPE_NAMES.len()],
+    last: [AtomicU64; SHAPE_NAMES.len()],
 }
 impl Shapes {
     const fn new() -> Self {
         Self {
             n: [const { AtomicU64::new(0) }; SHAPE_NAMES.len()],
+            cases: AtomicU64::new(0),
+            cases_with: [const { AtomicU64::new(0) }; SHAPE_NAMES.len()],
+            last: [const { AtomicU64::new(0) }; SHAPE_NAMES.len()],
+        }
+    }
+    /// A random case ended: count each shape it reached. When `SHAPE_RATES` names a file, the
+    /// per-case counts so far are written there (replacing it), so a run can be measured.
+    fn end_case(&self, label: &str) {
+        bump(&self.cases);
+        for ((n, last), with) in self.n.iter().zip(&self.last).zip(&self.cases_with) {
+            let now = n.load(Ordering::Relaxed);
+            if now != last.swap(now, Ordering::Relaxed) {
+                bump(with);
+            }
+        }
+        if let Some(path) = std::env::var_os("SHAPE_RATES") {
+            let mut line = format!("{label} cases={}", self.cases.load(Ordering::Relaxed));
+            for (name, with) in SHAPE_NAMES.iter().zip(&self.cases_with) {
+                line.push_str(&format!(" {name}={}", with.load(Ordering::Relaxed)));
+            }
+            let _ = fs::write(path, line);
         }
     }
     fn hit(&self, name: &str) {
@@ -1302,6 +1328,13 @@ struct Reference {
     /// and only these, a committed byte may be stale, but it must still be a value the source
     /// held at that position. Never cleared: every committed epoch is rechecked on every step.
     masked: BTreeSet<usize>,
+    /// Generator hints, never read by an oracle: the source changed since the last round
+    /// (bytes a commit does not carry yet), some round ran with bytes on disk (something is
+    /// probably committed), a lost reply is armed, and the token is revoked.
+    dirty: bool,
+    synced: bool,
+    lost_armed: bool,
+    revoked: bool,
 }
 
 /// `bytes[i]` is acceptable against `v[i]`: equal, or a masked position holding a value the
@@ -1328,7 +1361,34 @@ impl Reference {
         self.file.extend_from_slice(&add);
         self.history.push(self.file.clone());
     }
+    /// Update the generator hints (see the fields) for `step`.
+    fn hint(&mut self, step: &Step) {
+        match step {
+            Step::Append { .. }
+            | Step::Bulk { .. }
+            | Step::Rewrite { .. }
+            | Step::RenameReplace { .. }
+            | Step::Truncate { .. }
+            | Step::RemoveSource
+            | Step::LateWrite { .. } => self.dirty = true,
+            Step::Round | Step::Settle | Step::Crash { .. } => {
+                self.dirty = false;
+                self.synced |= self.exists && !self.file.is_empty();
+            }
+            Step::LostReply { .. } => self.lost_armed = true,
+            Step::RevokeToken => self.revoked = true,
+            Step::RestoreToken => self.revoked = false,
+            _ => {}
+        }
+        if matches!(step, Step::Round | Step::Settle) {
+            self.lost_armed = false;
+        }
+        if matches!(step, Step::Settle) {
+            self.revoked = false;
+        }
+    }
     fn apply(&mut self, step: &Step) {
+        self.hint(step);
         self.effect = false;
         self.mid_pos = None;
         match step {
@@ -1855,6 +1915,52 @@ fn scripted_run_alone_produces_every_guarded_shape() -> R {
     require_all(&local.counts())
 }
 
+/// State-aware generation: the guarded shapes need bytes on disk that a commit does not carry
+/// yet (a crash, a lost reply, a revoked token, a late write), or bytes a commit already
+/// carries (a mid-file rewrite, a removal, a rename, a second epoch). These helpers act on the
+/// state the model is in, instead of drawing steps that usually have nothing to act on; they
+/// never filter or discard a case.
+impl World {
+    fn has_bytes(&self) -> bool {
+        self.reference.exists && !self.reference.file.is_empty()
+    }
+    fn draw_append(&mut self, tc: &TestCase) {
+        let seed = tc.draw(gs::integers::<u8>());
+        let n = tc.draw(gs::integers::<u8>().min_value(1).max_value(9));
+        self.run(Step::Append { seed, n });
+    }
+    /// Bytes on disk (an append creates them if there are none).
+    fn with_bytes(&mut self, tc: &TestCase) {
+        if !self.has_bytes() {
+            self.draw_append(tc);
+        }
+    }
+    /// Bytes on disk that the next round would commit.
+    fn with_pending(&mut self, tc: &TestCase) {
+        if !self.has_bytes() || !self.reference.dirty {
+            self.draw_append(tc);
+        }
+    }
+    /// Bytes on disk that the newest commit carries in full (a round commits them).
+    fn with_committed(&mut self, tc: &TestCase) {
+        self.with_bytes(tc);
+        let committed = self.sut.committed_len();
+        assert!(committed.is_ok(), "{committed:?}");
+        if committed.unwrap_or(0) < u64::try_from(self.reference.file.len()).unwrap_or(u64::MAX) {
+            self.run(Step::Round);
+        }
+    }
+    /// A committed file between the head and tail windows.
+    fn with_committed_big(&mut self, tc: &TestCase) {
+        if self.reference.file.len() <= HEAD + TAIL {
+            let seed = tc.draw(gs::integers::<u8>());
+            let kib = tc.draw(gs::integers::<u8>().min_value(69).max_value(90));
+            self.run(Step::Bulk { seed, kib });
+        }
+        self.with_committed(tc);
+    }
+}
+
 #[hegel::state_machine]
 impl World {
     #[rule(weight = 3.0)]
@@ -1877,28 +1983,52 @@ impl World {
     }
     #[rule(weight = 3.0)]
     fn rewrite(&mut self, tc: TestCase) {
+        self.with_bytes(&tc);
         let zone = tc.draw(gs::integers::<u8>().min_value(0).max_value(2));
         let delta = tc.draw(gs::integers::<u16>());
         self.run(Step::Rewrite { zone, delta });
     }
+    /// A rewrite between the windows of bytes a commit already carries.
+    #[rule(weight = 3.0)]
+    fn rewrite_mid_file(&mut self, tc: TestCase) {
+        self.with_committed_big(&tc);
+        let delta = tc.draw(gs::integers::<u16>());
+        self.run(Step::Rewrite { zone: 2, delta });
+    }
     #[rule]
     fn rename_replace(&mut self, tc: TestCase) {
+        self.with_committed(&tc);
         let change = tc.draw(gs::booleans());
         let delta = tc.draw(gs::integers::<u16>());
         self.run(Step::RenameReplace { change, delta });
     }
     #[rule(weight = 2.0)]
     fn truncate(&mut self, tc: TestCase) {
+        self.with_bytes(&tc);
         let frac = tc.draw(gs::integers::<u8>());
         self.run(Step::Truncate { frac });
     }
+    /// A new epoch: a changed file replaces committed bytes, then a round commits it.
+    #[rule(weight = 2.0)]
+    fn replace_committed(&mut self, tc: TestCase) {
+        self.with_committed(&tc);
+        let delta = tc.draw(gs::integers::<u16>());
+        self.run(Step::RenameReplace {
+            change: true,
+            delta,
+        });
+        self.run(Step::Round);
+    }
     #[rule]
-    fn remove_source(&mut self, _: TestCase) {
+    fn remove_source(&mut self, tc: TestCase) {
+        self.with_committed(&tc);
         self.run(Step::RemoveSource);
     }
     #[rule]
-    fn revoke_token(&mut self, _: TestCase) {
+    fn revoke_token(&mut self, tc: TestCase) {
+        self.with_pending(&tc);
         self.run(Step::RevokeToken);
+        self.run(Step::Round);
     }
     #[rule]
     fn restore_token(&mut self, _: TestCase) {
@@ -1906,11 +2036,13 @@ impl World {
     }
     #[rule(weight = 2.0)]
     fn crash(&mut self, tc: TestCase) {
+        self.with_pending(&tc);
         let manifest = tc.draw(gs::booleans());
         self.run(Step::Crash { manifest });
     }
     #[rule(weight = 2.0)]
     fn late_write(&mut self, tc: TestCase) {
+        self.with_pending(&tc);
         let seed = tc.draw(gs::integers::<u8>());
         let n = tc.draw(gs::integers::<u8>().min_value(1).max_value(9));
         self.run(Step::LateWrite { seed, n });
@@ -1929,8 +2061,10 @@ impl World {
     }
     #[rule(weight = 2.0)]
     fn lost_reply(&mut self, tc: TestCase) {
+        self.with_pending(&tc);
         let dark = tc.draw(gs::booleans());
         self.run(Step::LostReply { dark });
+        self.run(Step::Round);
     }
     #[rule]
     fn offline(&mut self, _: TestCase) {
@@ -1948,8 +2082,6 @@ impl World {
 
 #[test]
 fn hegel_daemon_state_machine() {
-    let scripted = scripted_shapes(&HEGEL_SHAPES);
-    assert!(scripted.is_ok(), "{scripted:?}");
     hegel::Hegel::new(|tc: TestCase| {
         let model = EtagModel::from(tc.draw(gs::booleans()));
         let world = World::new(&HEGEL_SHAPES, model);
@@ -1957,34 +2089,144 @@ fn hegel_daemon_state_machine() {
         if let Ok(world) = world {
             hegel::stateful::machine(world).steps(12).run(tc);
         }
+        HEGEL_SHAPES.end_case("hegel");
     })
     .run();
     let guard = require_all(&HEGEL_SHAPES.counts());
     assert!(guard.is_ok(), "{guard:?} {:?}", HEGEL_SHAPES.counts());
 }
 
-fn step_strategy() -> BoxedStrategy<Step> {
-    prop_oneof![
-        3 => (any::<u8>(), 1..=9_u8).prop_map(|(seed, n)| Step::Append { seed, n }),
-        1 => (any::<u8>(), 1..=90_u8).prop_map(|(seed, kib)| Step::Bulk { seed, kib }),
-        3 => (0..=2_u8, any::<u16>()).prop_map(|(zone, delta)| Step::Rewrite { zone, delta }),
-        1 => (any::<bool>(), any::<u16>())
-            .prop_map(|(change, delta)| Step::RenameReplace { change, delta }),
-        2 => any::<u8>().prop_map(|frac| Step::Truncate { frac }),
-        1 => Just(Step::RemoveSource),
-        1 => Just(Step::RevokeToken),
-        1 => Just(Step::RestoreToken),
-        2 => any::<bool>().prop_map(|manifest| Step::Crash { manifest }),
-        2 => (any::<u8>(), 1..=9_u8).prop_map(|(seed, n)| Step::LateWrite { seed, n }),
-        4 => Just(Step::Round),
-        1 => Just(Step::DeleteIndex),
-        1 => Just(Step::Restart),
-        2 => any::<bool>().prop_map(|dark| Step::LostReply { dark }),
-        1 => Just(Step::Offline),
-        1 => Just(Step::Online),
-        2 => Just(Step::Settle),
-    ]
-    .boxed()
+/// The steps to draw from in `state`: the usual mix, plus extra weight on what acts on the
+/// state (no filtering or assuming). The guarded shapes need bytes on disk that a commit does
+/// not carry yet (a crash, a lost reply, a revoked token, a late write) or bytes it already
+/// carries (a mid-file rewrite, a removal, a rename), and a mid-file rewrite needs a file between
+/// the windows (more than `HEAD + TAIL` bytes).
+fn step_strategy(state: &Reference) -> BoxedStrategy<Step> {
+    let has = state.exists && !state.file.is_empty();
+    let big = state.file.len() > HEAD + TAIL;
+    let committed = has && state.synced && !state.dirty;
+    let pending = has && state.dirty;
+    let append = || {
+        (any::<u8>(), 1..=9_u8)
+            .prop_map(|(seed, n)| Step::Append { seed, n })
+            .boxed()
+    };
+    let bulk_big = || {
+        (any::<u8>(), 69..=90_u8)
+            .prop_map(|(seed, kib)| Step::Bulk { seed, kib })
+            .boxed()
+    };
+    let mut steps: Vec<(u32, BoxedStrategy<Step>)> = vec![
+        (3, append()),
+        (
+            1,
+            (any::<u8>(), 1..=90_u8)
+                .prop_map(|(seed, kib)| Step::Bulk { seed, kib })
+                .boxed(),
+        ),
+        (
+            3,
+            (0..=2_u8, any::<u16>())
+                .prop_map(|(zone, delta)| Step::Rewrite { zone, delta })
+                .boxed(),
+        ),
+        (
+            1,
+            (any::<bool>(), any::<u16>())
+                .prop_map(|(change, delta)| Step::RenameReplace { change, delta })
+                .boxed(),
+        ),
+        (
+            2,
+            any::<u8>().prop_map(|frac| Step::Truncate { frac }).boxed(),
+        ),
+        (1, Just(Step::RemoveSource).boxed()),
+        (1, Just(Step::RevokeToken).boxed()),
+        (1, Just(Step::RestoreToken).boxed()),
+        (
+            2,
+            any::<bool>()
+                .prop_map(|manifest| Step::Crash { manifest })
+                .boxed(),
+        ),
+        (
+            2,
+            (any::<u8>(), 1..=9_u8)
+                .prop_map(|(seed, n)| Step::LateWrite { seed, n })
+                .boxed(),
+        ),
+        (4, Just(Step::Round).boxed()),
+        (1, Just(Step::DeleteIndex).boxed()),
+        (1, Just(Step::Restart).boxed()),
+        (
+            2,
+            any::<bool>()
+                .prop_map(|dark| Step::LostReply { dark })
+                .boxed(),
+        ),
+        (1, Just(Step::Offline).boxed()),
+        (1, Just(Step::Online).boxed()),
+        (2, Just(Step::Settle).boxed()),
+    ];
+    if !has {
+        steps.push((8, append()));
+        steps.push((3, bulk_big()));
+    }
+    if has && !big {
+        steps.push((5, bulk_big()));
+    }
+    if pending {
+        // Bytes a commit does not carry yet: the shapes that need them, and a round.
+        steps.push((5, Just(Step::Round).boxed()));
+        steps.push((
+            3,
+            any::<bool>()
+                .prop_map(|manifest| Step::Crash { manifest })
+                .boxed(),
+        ));
+        steps.push((
+            3,
+            (any::<u8>(), 1..=9_u8)
+                .prop_map(|(seed, n)| Step::LateWrite { seed, n })
+                .boxed(),
+        ));
+        if !state.lost_armed {
+            steps.push((
+                3,
+                any::<bool>()
+                    .prop_map(|dark| Step::LostReply { dark })
+                    .boxed(),
+            ));
+        }
+        if !state.revoked {
+            steps.push((3, Just(Step::RevokeToken).boxed()));
+        }
+    }
+    if state.lost_armed || state.revoked {
+        steps.push((6, Just(Step::Round).boxed()));
+    }
+    if committed {
+        steps.push((
+            3,
+            (any::<bool>(), any::<u16>())
+                .prop_map(|(change, delta)| Step::RenameReplace { change, delta })
+                .boxed(),
+        ));
+        steps.push((2, Just(Step::RemoveSource).boxed()));
+        steps.push((
+            2,
+            any::<u8>().prop_map(|frac| Step::Truncate { frac }).boxed(),
+        ));
+        if big {
+            steps.push((
+                10,
+                any::<u16>()
+                    .prop_map(|delta| Step::Rewrite { zone: 2, delta })
+                    .boxed(),
+            ));
+        }
+    }
+    proptest::strategy::Union::new_weighted(steps).boxed()
 }
 struct RefMachine;
 impl ReferenceStateMachine for RefMachine {
@@ -1998,8 +2240,8 @@ impl ReferenceStateMachine for RefMachine {
             })
             .boxed()
     }
-    fn transitions(_: &Reference) -> BoxedStrategy<Step> {
-        step_strategy()
+    fn transitions(state: &Reference) -> BoxedStrategy<Step> {
+        step_strategy(state)
     }
     fn apply(mut state: Reference, transition: &Step) -> Reference {
         state.apply(transition);
@@ -2034,12 +2276,11 @@ impl StateMachineTest for PtMachine {
                 .and_then(|()| sut.check(&after, true, &PROPTEST_SHAPES));
             assert!(result.is_ok(), "final settle: {result:?}");
         }
+        PROPTEST_SHAPES.end_case("proptest");
     }
 }
 #[test]
 fn proptest_daemon_state_machine() {
-    let scripted = scripted_shapes(&PROPTEST_SHAPES);
-    assert!(scripted.is_ok(), "{scripted:?}");
     let mut runner = TestRunner::new(Config {
         failure_persistence: None,
         ..Config::default()

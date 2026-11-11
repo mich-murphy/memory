@@ -605,6 +605,11 @@ struct Shapes {
     crash_after_manifest: AtomicU64,
     lost_reply: AtomicU64,
     delete_index: AtomicU64,
+    /// Generator-efficiency counters: cases in which each shape was reached, and the totals at
+    /// the end of the previous case. They assert nothing (see `end_case`).
+    cases: AtomicU64,
+    cases_with: [AtomicU64; 5],
+    last: [AtomicU64; 5],
 }
 impl Shapes {
     const fn new() -> Self {
@@ -614,6 +619,25 @@ impl Shapes {
             crash_after_manifest: AtomicU64::new(0),
             lost_reply: AtomicU64::new(0),
             delete_index: AtomicU64::new(0),
+            cases: AtomicU64::new(0),
+            cases_with: [const { AtomicU64::new(0) }; 5],
+            last: [const { AtomicU64::new(0) }; 5],
+        }
+    }
+    /// A random case ended: count each shape it reached. When `SHAPE_RATES` names a file, the
+    /// per-case counts so far are written there (replacing it), so a run can be measured.
+    fn end_case(&self, label: &str) {
+        bump(&self.cases);
+        let counts = self.counts();
+        let mut line = format!("{label} cases={}", self.cases.load(Ordering::Relaxed));
+        for (((name, now), last), with) in counts.iter().zip(&self.last).zip(&self.cases_with) {
+            if *now != last.swap(*now, Ordering::Relaxed) {
+                bump(with);
+            }
+            line.push_str(&format!(" {name}={}", with.load(Ordering::Relaxed)));
+        }
+        if let Some(path) = std::env::var_os("SHAPE_RATES") {
+            let _ = std::fs::write(path, line);
         }
     }
     fn counts(&self) -> Vec<(&'static str, u64)> {
@@ -1056,6 +1080,42 @@ fn draw_src(tc: &TestCase) -> u8 {
     tc.draw(gs::integers::<u8>().min_value(0).max_value(SOURCES - 1))
 }
 
+/// State-aware generation: the guarded shapes need a source with bytes that are not yet
+/// committed (a crash or lost reply), or bytes that are (a second epoch, a deleted index), and
+/// a store that is reachable. These helpers act on the state the model is in, instead of
+/// drawing steps that usually have nothing to act on; they never filter or discard a case.
+impl World {
+    fn committed_any(&self) -> bool {
+        self.reference.committed.values().any(Option::is_some)
+    }
+    /// A source whose bytes are not yet committed (an append creates one if there is none).
+    fn with_pending(&mut self, tc: &TestCase) {
+        if !self.reference.pending() {
+            let src = draw_src(tc);
+            let seed = tc.draw(gs::integers::<u8>());
+            let n = tc.draw(gs::integers::<u8>().min_value(1).max_value(9));
+            self.run(Step::Append { src, seed, n });
+        }
+    }
+    /// The network and the token let a capture reach the store.
+    fn reachable(&mut self) {
+        if !self.reference.online {
+            self.run(Step::GoOnline);
+        }
+        if !self.reference.authorized {
+            self.run(Step::RestoreToken);
+        }
+    }
+    /// Something committed: pending bytes reach the store through a reconcile.
+    fn with_committed(&mut self, tc: &TestCase) {
+        if !self.committed_any() {
+            self.with_pending(tc);
+            self.reachable();
+            self.run(Step::Reconcile);
+        }
+    }
+}
+
 #[hegel::state_machine]
 impl World {
     #[rule(weight = 3.0)]
@@ -1098,6 +1158,43 @@ impl World {
     #[rule]
     fn crash_after_manifest(&mut self, _: TestCase) {
         self.run(Step::CrashAfterManifest);
+    }
+    /// A crash after the manifest PUT, with bytes to commit and a reachable store.
+    #[rule(weight = 2.0)]
+    fn crash_after_manifest_with_pending(&mut self, tc: TestCase) {
+        self.with_pending(&tc);
+        self.reachable();
+        self.run(Step::CrashAfterManifest);
+    }
+    /// A lost `current.json` reply, with bytes to commit and a reachable store; the store stays
+    /// reachable after the loss in three cases of four, so the landing can be verified.
+    #[rule(weight = 2.0)]
+    fn lost_reply_with_pending(&mut self, tc: TestCase) {
+        self.with_pending(&tc);
+        self.reachable();
+        let then_offline = tc.draw(gs::integers::<u8>()).is_multiple_of(4);
+        self.run(Step::CommittedReplyLost { then_offline });
+    }
+    /// A rewrite inside committed bytes, then a reconcile: a second epoch.
+    #[rule(weight = 2.0)]
+    fn rewrite_committed(&mut self, tc: TestCase) {
+        self.with_committed(&tc);
+        self.reachable();
+        let committed: Vec<u8> = (0..SOURCES)
+            .filter(|i| self.reference.committed.get(i).is_some_and(Option::is_some))
+            .collect();
+        let pick = usize::from(tc.draw(gs::integers::<u8>())) % committed.len().max(1);
+        let src = committed.get(pick).copied().unwrap_or(0);
+        let pos = tc.draw(gs::integers::<u8>().max_value(24));
+        let byte = tc.draw(gs::integers::<u8>());
+        self.run(Step::Rewrite { src, pos, byte });
+        self.run(Step::Reconcile);
+    }
+    /// Deleting the local index once something is committed.
+    #[rule(weight = 1.5)]
+    fn delete_index_after_commit(&mut self, tc: TestCase) {
+        self.with_committed(&tc);
+        self.run(Step::DeleteIndex);
     }
     #[rule(weight = 2.0)]
     fn committed_reply_lost(&mut self, tc: TestCase) {
@@ -1150,8 +1247,6 @@ impl World {
 
 #[test]
 fn hegel_property4_commit_state_machine() {
-    let scripted = scripted_shapes(&HEGEL_SHAPES);
-    assert!(scripted.is_ok(), "{scripted:?}");
     hegel::Hegel::new(|tc: TestCase| {
         let model = EtagModel::from(tc.draw(gs::booleans()));
         let world = World::new(&HEGEL_SHAPES, model);
@@ -1159,6 +1254,7 @@ fn hegel_property4_commit_state_machine() {
         if let Ok(world) = world {
             hegel::stateful::machine(world).steps(40).run(tc);
         }
+        HEGEL_SHAPES.end_case("hegel");
     })
     .run();
     let guard = require_all(&HEGEL_SHAPES.counts());
@@ -1167,31 +1263,101 @@ fn hegel_property4_commit_state_machine() {
 
 // ------------------------------------------------------------------ proptest state machine
 
-fn step_strategy() -> BoxedStrategy<Step> {
+/// The steps to draw from in `state`: the usual mix, plus extra weight on what acts on the
+/// state (no filtering or assuming). The guarded shapes need bytes not yet committed on a
+/// reachable store (crash after the manifest, a lost reply), or committed bytes (a second epoch,
+/// a deleted index).
+fn step_strategy(state: &Reference) -> BoxedStrategy<Step> {
     let src = 0..SOURCES;
-    prop_oneof![
-        3 => (src.clone(), any::<u8>(), 1..=9_u8)
-            .prop_map(|(src, seed, n)| Step::Append { src, seed, n }),
-        2 => (src.clone(), 0..=24_u8, any::<u8>())
-            .prop_map(|(src, pos, byte)| Step::Rewrite { src, pos, byte }),
-        2 => (src.clone(), 0..=24_u8).prop_map(|(src, len)| Step::Truncate { src, len }),
-        1 => src.prop_map(|src| Step::RemoveSource { src }),
-        4 => Just(Step::Reconcile),
-        1 => Just(Step::CrashBeforePut),
-        1 => Just(Step::CrashAfterPiece),
-        1 => Just(Step::CrashAfterManifest),
-        2 => any::<bool>().prop_map(|then_offline| Step::CommittedReplyLost { then_offline }),
-        1 => any::<bool>().prop_map(|landed| Step::CommittedThen5xx { landed }),
-        1 => Just(Step::Restart),
-        1 => Just(Step::DeleteIndex),
-        1 => Just(Step::GoOffline),
-        1 => Just(Step::GoOnline),
-        1 => Just(Step::RevokeToken),
-        1 => Just(Step::RestoreToken),
-        1 => Just(Step::ForeignWriter),
-        2 => Just(Step::Settle),
-    ]
-    .boxed()
+    let reachable = !state.parked && state.online && state.authorized;
+    let pending = state.pending();
+    let committed = state.committed.values().any(Option::is_some);
+    let mut steps: Vec<(u32, BoxedStrategy<Step>)> = vec![
+        (
+            3,
+            (src.clone(), any::<u8>(), 1..=9_u8)
+                .prop_map(|(src, seed, n)| Step::Append { src, seed, n })
+                .boxed(),
+        ),
+        (
+            2,
+            (src.clone(), 0..=24_u8, any::<u8>())
+                .prop_map(|(src, pos, byte)| Step::Rewrite { src, pos, byte })
+                .boxed(),
+        ),
+        (
+            2,
+            (src.clone(), 0..=24_u8)
+                .prop_map(|(src, len)| Step::Truncate { src, len })
+                .boxed(),
+        ),
+        (
+            1,
+            src.clone()
+                .prop_map(|src| Step::RemoveSource { src })
+                .boxed(),
+        ),
+        (4, Just(Step::Reconcile).boxed()),
+        (1, Just(Step::CrashBeforePut).boxed()),
+        (1, Just(Step::CrashAfterPiece).boxed()),
+        (1, Just(Step::CrashAfterManifest).boxed()),
+        (
+            2,
+            any::<bool>()
+                .prop_map(|then_offline| Step::CommittedReplyLost { then_offline })
+                .boxed(),
+        ),
+        (
+            1,
+            any::<bool>()
+                .prop_map(|landed| Step::CommittedThen5xx { landed })
+                .boxed(),
+        ),
+        (1, Just(Step::Restart).boxed()),
+        (1, Just(Step::DeleteIndex).boxed()),
+        (1, Just(Step::GoOffline).boxed()),
+        (1, Just(Step::GoOnline).boxed()),
+        (1, Just(Step::RevokeToken).boxed()),
+        (1, Just(Step::RestoreToken).boxed()),
+        (1, Just(Step::ForeignWriter).boxed()),
+        (2, Just(Step::Settle).boxed()),
+    ];
+    if !pending {
+        // Nothing to commit: new bytes first.
+        steps.push((
+            8,
+            (src.clone(), any::<u8>(), 1..=9_u8)
+                .prop_map(|(src, seed, n)| Step::Append { src, seed, n })
+                .boxed(),
+        ));
+    }
+    if reachable && pending {
+        steps.push((6, Just(Step::CrashAfterManifest).boxed()));
+        steps.push((
+            6,
+            Just(Step::CommittedReplyLost {
+                then_offline: false,
+            })
+            .boxed(),
+        ));
+        steps.push((4, Just(Step::Reconcile).boxed()));
+    }
+    if committed {
+        steps.push((3, Just(Step::DeleteIndex).boxed()));
+        steps.push((
+            4,
+            (src, 0..=24_u8, any::<u8>())
+                .prop_map(|(src, pos, byte)| Step::Rewrite { src, pos, byte })
+                .boxed(),
+        ));
+    }
+    if !state.online {
+        steps.push((4, Just(Step::GoOnline).boxed()));
+    }
+    if !state.authorized {
+        steps.push((4, Just(Step::RestoreToken).boxed()));
+    }
+    proptest::strategy::Union::new_weighted(steps).boxed()
 }
 
 struct RefMachine;
@@ -1203,8 +1369,8 @@ impl ReferenceStateMachine for RefMachine {
             .prop_map(|content| Reference::with_model(EtagModel::from(content)))
             .boxed()
     }
-    fn transitions(_: &Reference) -> BoxedStrategy<Step> {
-        step_strategy()
+    fn transitions(state: &Reference) -> BoxedStrategy<Step> {
+        step_strategy(state)
     }
     fn apply(mut state: Reference, transition: &Step) -> Reference {
         state.apply(transition);
@@ -1248,13 +1414,12 @@ impl StateMachineTest for PtMachine {
                 .and_then(|()| sut.check(&last, &PROPTEST_SHAPES));
             assert!(result.is_ok(), "final settle: {result:?}");
         }
+        PROPTEST_SHAPES.end_case("proptest");
     }
 }
 
 #[test]
 fn proptest_property4_commit_state_machine() {
-    let scripted = scripted_shapes(&PROPTEST_SHAPES);
-    assert!(scripted.is_ok(), "{scripted:?}");
     let mut runner = TestRunner::new(Config {
         failure_persistence: None,
         ..Config::default()
