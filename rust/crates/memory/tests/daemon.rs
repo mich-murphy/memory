@@ -313,6 +313,8 @@ struct FStore {
     blackout: bool,
     /// `current.json` writes answered 412.
     refused_current: u64,
+    /// Refusals of a `current.json` write that no late write explains: none landed just before.
+    refused_unexplained: u64,
 }
 impl FStore {
     fn with_model(model: EtagModel) -> Self {
@@ -341,14 +343,18 @@ impl FStore {
         Some(self.rules.remove(at).effect)
     }
     /// The held write from an earlier attempt arrives; it lands only if its fence still holds.
-    fn land_late(&mut self, key: &str) {
-        if let Some(late) = self.late.take() {
-            let now = self.store.objects.get(key).map(|(_, v)| *v);
-            if now == late.fence {
-                self.store.write(key, late.body);
-                self.late_landed += 1;
-            }
+    /// True when it landed.
+    fn land_late(&mut self, key: &str) -> bool {
+        let Some(late) = self.late.take() else {
+            return false;
+        };
+        let now = self.store.objects.get(key).map(|(_, v)| *v);
+        if now != late.fence {
+            return false;
         }
+        self.store.write(key, late.body);
+        self.late_landed += 1;
+        true
     }
     fn gate(&self) -> Result<(), StoreError> {
         if self.crashed.is_some() || self.blackout {
@@ -392,13 +398,11 @@ impl FStore {
             }
         }
         self.gate()?;
-        if is_current {
-            self.land_late(key);
-        }
-        let existing = self
-            .store
-            .check(key, fence)
-            .inspect_err(|_| self.refused_current += u64::from(is_current))?;
+        let late_landed = is_current && self.land_late(key);
+        let existing = self.store.check(key, fence).inspect_err(|_| {
+            self.refused_current += u64::from(is_current);
+            self.refused_unexplained += u64::from(is_current && !late_landed);
+        })?;
         if self.stall && is_current && self.late.is_none() {
             self.late = Some(Late {
                 body: body.as_ref().to_vec(),
@@ -1466,7 +1470,6 @@ struct Sut {
     index_expected: bool,
     lost_seen: u64,
     late_seen: u64,
-    refused_seen: u64,
     max_epochs: usize,
 }
 impl Sut {
@@ -1494,7 +1497,6 @@ impl Sut {
             index_expected: false,
             lost_seen: 0,
             late_seen: 0,
-            refused_seen: 0,
             max_epochs: 0,
         })
     }
@@ -1705,16 +1707,14 @@ impl Sut {
         self.lost_seen = fired;
         self.late_seen = late;
         // A `current.json` write is refused only when another write got in first, and in this
-        // model only a late write (A6) does. A refusal anywhere else means a round fenced on a
-        // stale base: a landing it could not verify, or a rebase-exhausted fence, was not reset.
-        let refused = self.daemon()?.store_mut().refused_current;
-        if !matches!(step, Step::LateWrite { .. }) {
-            ensure(
-                refused == self.refused_seen,
-                "a current.json write was refused outside a late write (stale If-Match base)",
-            )?;
-        }
-        self.refused_seen = refused;
+        // model only a late write (A6) does: the refusal comes in the very PUT the held write
+        // lands ahead of. That PUT can come steps later, when the round after the stall had
+        // nothing to commit. Any other refusal means a round fenced on a stale base: a landing
+        // it could not verify, or a rebase-exhausted fence, was not reset.
+        ensure(
+            self.daemon()?.store_mut().refused_unexplained == 0,
+            "a current.json write was refused with no late write ahead of it (stale If-Match base)",
+        )?;
         Ok(())
     }
     /// Every (size, digest) an epoch has had in any committed manifest of the chain.
@@ -3093,6 +3093,33 @@ fn settle_converges_after_a_long_offline_run_once_the_retry_delay_passes() -> R 
             world.run(Step::LateWrite { seed: 0, n: 1 });
         }
         world.run(Step::Settle);
+    }
+    Ok(())
+}
+
+/// Found by `proptest_daemon_state_machine` at random seeds: the bytes after the stall equal
+/// what is already committed, so the round after it has nothing to write and the held write
+/// stays in flight. It lands ahead of a later round's write, which is refused, adopted (A6) and
+/// followed by a normal commit.
+#[test]
+fn a_held_write_that_lands_steps_later_is_adopted_and_the_store_converges() -> R {
+    for model in [EtagModel::PerWrite, EtagModel::Content] {
+        let shapes: &'static Shapes = Box::leak(Box::new(Shapes::new()));
+        let mut world = World::new(shapes, model)?;
+        for step in [
+            Step::Append { seed: 108, n: 4 },
+            Step::Round,
+            Step::Truncate { frac: 64 },
+            // Regrows to the committed bytes: the second round of this step is `Unchanged`.
+            Step::LateWrite { seed: 67, n: 3 },
+            Step::Append { seed: 0, n: 1 },
+            Step::Settle,
+        ] {
+            world.run(step);
+        }
+        let store = world.sut.daemon()?.store_mut();
+        assert_eq!(store.late_landed, 1);
+        assert_eq!(store.refused_current, 1);
     }
     Ok(())
 }
