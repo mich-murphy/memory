@@ -1,0 +1,65 @@
+info: cargo-llvm-cov currently setting cfg(coverage); you can opt-out it by passing --no-cfg-coverage
+   Compiling memory-core v0.1.0 (<repo>/rust/artifacts/scaffold-baseline/crates/memory-core)
+   Compiling memory v0.1.0 (<repo>/rust/artifacts/scaffold-baseline/crates/memory)
+   Compiling xtask v0.1.0 (<repo>/rust/artifacts/scaffold-baseline/crates/xtask)
+   Compiling memory-reader v0.1.0 (<repo>/rust/artifacts/scaffold-baseline/crates/memory-reader)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.83s
+     Running unittests src/lib.rs (target/llvm-cov-target/debug/deps/memory-879687f3ca580e8b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/llvm-cov-target/debug/deps/memory-47284eacf1ca82c3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/harness.rs (target/llvm-cov-target/debug/deps/harness-8cf2bd50bdfe4d45)
+
+running 3 tests
+test lost_reply_is_visible_and_duplicate_create_preserves_first_body ... ok
+test counters_detect_each_wrapped_operation ... ok
+test scaffold_binary_refuses_capture_instead_of_success ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+
+     Running unittests src/lib.rs (target/llvm-cov-target/debug/deps/memory_core-5300ee50d173aab5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/scaffold.rs (target/llvm-cov-target/debug/deps/scaffold-3913683786be9b61)
+
+running 4 tests
+test checked_ranges_cover_edges ... ok
+test error_schema_roundtrip_rejects_unknown_fields ... ok
+test hegel_checked_ranges_match_independent_iterator_oracle ... ok
+test proptest_checked_ranges_match_independent_iterator_oracle ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running unittests src/lib.rs (target/llvm-cov-target/debug/deps/memory_reader-730e16c72e45844b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/llvm-cov-target/debug/deps/xtask-98fc8c56085463ef)
+
+running 1 test
+test tests::schemas_detect_missing_drift_and_roundtrip ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (target/llvm-cov-target/debug/deps/cli-31ade4d28d89a9cc)
+
+running 1 test
+test schema_cli_dispatches_and_rejects_unknown_commands ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+
+
+    Finished report saved to artifacts/coverage.json

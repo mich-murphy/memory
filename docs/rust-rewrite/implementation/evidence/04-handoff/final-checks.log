@@ -1,0 +1,8 @@
+PASS: 00-scaffold, 33 artifact checksums
+PASS: 01-integrated, 22 artifact checksums
+PASS: 02-corrected, 21 artifact checksums
+PASS: 03-bc-recheck, 27 artifact checksums
+PASS: all 45 integrated source files unchanged
+PASS: 109 local link targets
+PASS: 29 unchanged baseline identities, 4 exact authorized documentation revisions, and source-bound deterministic prototype outcomes
+Not a Rust implementation, native footprint, R2 or release acceptance gate

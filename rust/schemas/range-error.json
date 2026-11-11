@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RangeError",
+  "description": "A byte range outside the supplied buffer (including inverted ranges).",
+  "type": "null"
+}

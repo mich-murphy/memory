@@ -1,0 +1,31 @@
+[package]
+name = "memory"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+memory-core.workspace = true
+notify.workspace = true
+rustix.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+
+[features]
+# Simulation only: SyncPolicy::None and the APIs that select it, Published::sim.
+# Never enabled for the release binary; tests enable it via the self dev-dependency.
+sim = []
+
+[dev-dependencies]
+memory = { path = ".", features = ["sim"] }
+hegel.workspace = true
+proptest.workspace = true
+proptest-state-machine.workspace = true

@@ -1,0 +1,9 @@
+COMPILE_EXIT=0
+bash: line 1: 43647 Segmentation fault: 11     LLVM_PROFILE_FILE="$PWD/rust/artifacts/coverage-probe/main.profraw" rust/artifacts/coverage-probe/main
+RUN_EXIT=139
+warning: rust/artifacts/coverage-probe/main.profraw: raw profile version mismatch: Profile uses raw profile format version = 11; expected version = 10
+PLEASE update this tool to version in the raw profile, or regenerate raw profile with expected version.
+error: no profile can be merged
+PROFILE_EXIT=1
+error: rust/artifacts/coverage-probe/main.profdata: could not read profile data!No such file or directory
+REPORT_EXIT=1

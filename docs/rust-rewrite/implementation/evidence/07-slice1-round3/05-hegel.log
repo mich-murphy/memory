@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running tests/scaffold.rs (target/debug/deps/scaffold-2245b7fd8a85ab4e)
+
+running 1 test
+test hegel_checked_ranges_match_independent_iterator_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.12s
+

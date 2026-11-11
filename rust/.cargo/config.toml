@@ -1,0 +1,8 @@
+[alias]
+xtask = "run --package xtask --"
+
+[build]
+jobs = 2
+
+[env]
+RUST_TEST_THREADS = "2"

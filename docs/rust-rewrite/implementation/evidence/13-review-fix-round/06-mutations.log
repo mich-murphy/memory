@@ -1,0 +1,123 @@
+Hegel seed=730213 cases=2000; proptest seed=730213 cases=2000
+baseline: cargo test --locked -p memory --test mutation_daemon stale_if_match -- --test-threads=2 --nocapture
+   Compiling same-file v1.0.6
+   Compiling notify-types v2.2.0
+   Compiling walkdir v2.5.0
+   Compiling fsevent-sys v4.1.0
+   Compiling log v0.4.35
+   Compiling notify v8.2.0
+   Compiling memory v0.1.0 (/private/tmp/nix-shell.GVTUB8/memory-mutations-s82k5ri6/rust/crates/memory)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.73s
+     Running tests/mutation_daemon.rs (/tmp/nix-shell.GVTUB8/memory-mutation-target.0VC7BP/debug/deps/mutation_daemon-58a891fa745d138f)
+
+running 1 test
+test stale_if_match_is_refused_by_the_store_before_the_rebase ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.01s
+
+baseline: exit=0
+baseline: cargo test --locked -p memory --test mutation_daemon failed_commit_does_not_advance -- --test-threads=2 --nocapture
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running tests/mutation_daemon.rs (/tmp/nix-shell.GVTUB8/memory-mutation-target.0VC7BP/debug/deps/mutation_daemon-58a891fa745d138f)
+
+running 1 test
+test failed_commit_does_not_advance_the_local_index ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.01s
+
+baseline: exit=0
+baseline: cargo test --locked -p memory-core --test privacy_property -- --test-threads=2 --nocapture
+   Compiling memory-core v0.1.0 (/private/tmp/nix-shell.GVTUB8/memory-mutations-s82k5ri6/rust/crates/memory-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.77s
+     Running tests/privacy_property.rs (/tmp/nix-shell.GVTUB8/memory-mutation-target.0VC7BP/debug/deps/privacy_property-207acae5546b7389)
+
+running 2 tests
+test independent_inventory_exercises_every_family_and_credential_variant ... ok
+test hegel_generated_canaries_do_not_escape_pure_privacy_outputs ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.80s
+
+baseline: exit=0
+baseline: cargo test --locked -p memory-core --test privacy_port denied_identities -- --test-threads=2 --nocapture
+   Compiling memory-core v0.1.0 (/private/tmp/nix-shell.GVTUB8/memory-mutations-s82k5ri6/rust/crates/memory-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.78s
+     Running tests/privacy_port.rs (/tmp/nix-shell.GVTUB8/memory-mutation-target.0VC7BP/debug/deps/privacy_port-d250f811a6f887ca)
+
+running 1 test
+test denied_identities_backups_collector_aliases_and_unknowns ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.05s
+
+baseline: exit=0
+mutant if-match: cargo test --locked -p memory --test mutation_daemon stale_if_match -- --test-threads=2 --nocapture
+   Compiling memory v0.1.0 (/private/tmp/nix-shell.GVTUB8/memory-mutations-s82k5ri6/rust/crates/memory)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.01s
+     Running tests/mutation_daemon.rs (/tmp/nix-shell.GVTUB8/memory-mutation-target.0VC7BP/debug/deps/mutation_daemon-58a891fa745d138f)
+
+running 1 test
+
+thread 'stale_if_match_is_refused_by_the_store_before_the_rebase' (360413491) panicked at crates/memory/tests/mutation_daemon.rs:266:5:
+stale If-Match was not enforced
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test stale_if_match_is_refused_by_the_store_before_the_rebase ... FAILED
+
+failures:
+
+failures:
+    stale_if_match_is_refused_by_the_store_before_the_rebase
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p memory --test mutation_daemon`
+mutant if-match: exit=101
+mutant advance-on-fail: cargo test --locked -p memory --test mutation_daemon failed_commit_does_not_advance -- --test-threads=2 --nocapture
+   Compiling memory v0.1.0 (/private/tmp/nix-shell.GVTUB8/memory-mutations-s82k5ri6/rust/crates/memory)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.30s
+     Running tests/mutation_daemon.rs (/tmp/nix-shell.GVTUB8/memory-mutation-target.0VC7BP/debug/deps/mutation_daemon-58a891fa745d138f)
+
+running 1 test
+
+thread 'failed_commit_does_not_advance_the_local_index' (360413909) panicked at crates/memory/tests/mutation_daemon.rs:298:5:
+local index advanced past a commit that never landed
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test failed_commit_does_not_advance_the_local_index ... FAILED
+
+failures:
+
+failures:
+    failed_commit_does_not_advance_the_local_index
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p memory --test mutation_daemon`
+mutant advance-on-fail: exit=101
+mutant privacy-deny: cargo test --locked -p memory-core --test privacy_property -- --test-threads=2 --nocapture
+thread 'independent_inventory_exercises_every_family_and_credential_variant' (360414349) panicked at crates/memory-core/tests/privacy_property.rs:162:13:
+assertion failed: matches!(privacy::admit(&context(), observed),
+    Admission::Deny(Reason::Credential))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test independent_inventory_exercises_every_family_and_credential_variant ... FAILED
+let selector = 11;
+let nonce = 0;
+let salt = 0;
+thread 'hegel_generated_canaries_do_not_escape_pure_privacy_outputs' (2) panicked at crates/memory-core/tests/privacy_property.rs:162:13:
+assertion failed: matches!(privacy::admit(&context(), observed),
+    Admission::Deny(Reason::Credential))
+
+To reproduce this failure, add the attribute below #[hegel::test]:
+    #[hegel::reproduce_failure("AXicY2YAAi5GIMENoaA8BgACswAw")]
+test hegel_generated_canaries_do_not_escape_pure_privacy_outputs ... FAILED
+
+failures:
+
+failures:
+    hegel_generated_canaries_do_not_escape_pure_privacy_outputs
+    independent_inventory_exercises_every_family_and_credential_variant
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+error: test failed, to rerun pass `-p memory-core --test privacy_property`
+mutant privacy-deny: exit=101
+PASS if-match: killed by mutation_daemon
+PASS advance-on-fail: killed by mutation_daemon
+PASS privacy-deny: killed by privacy_property
