@@ -1683,6 +1683,10 @@ impl Sut {
                 store.stall = false;
                 store.crash_at = None;
                 store.rules.clear();
+                // Liveness is promised only once the longest retry delay has passed: after a
+                // run of failures the owner is deferred for up to 15 min (DESIGN.md 11.2), so
+                // rounds inside that delay rightly do nothing.
+                self.mono += 900_000_000_000;
                 for _ in 0..4 {
                     self.round(shapes)?;
                 }
@@ -3073,5 +3077,22 @@ fn shutdown_flushes_an_index_that_is_dirty_inside_the_interval() -> R {
     );
     d.shutdown().map_err(e)?;
     assert_eq!(captured_to_on_disk(&tmp)?, Some(12), "shutdown flushed it");
+    Ok(())
+}
+
+/// Found by `hegel_daemon_state_machine` at a random seed: after twelve failed rounds while
+/// offline the owner's retry delay is longer than four rounds, so a settle that did not wait
+/// it out saw no commit. The daemon retries within the 15 min cap of DESIGN.md 11.2.
+#[test]
+fn settle_converges_after_a_long_offline_run_once_the_retry_delay_passes() -> R {
+    for model in [EtagModel::PerWrite, EtagModel::Content] {
+        let shapes: &'static Shapes = Box::leak(Box::new(Shapes::new()));
+        let mut world = World::new(shapes, model)?;
+        world.run(Step::Offline);
+        for _ in 0..6 {
+            world.run(Step::LateWrite { seed: 0, n: 1 });
+        }
+        world.run(Step::Settle);
+    }
     Ok(())
 }
