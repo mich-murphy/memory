@@ -28,6 +28,8 @@ nix develop --max-jobs 2 --cores 2 --command sh -c \
   'cd rust && PROPERTY_CASES=2000 bash scripts/gates.sh'
 ```
 
+Hosted CI runs the same command in the Rust-only `.#rust` shell (`flake.nix`), which carries the same pinned Rust tools and environment as the default shell without the Go and release tooling, so the runner downloads less.
+
 The wrapper runs format, strict clippy, dependency/license/security and pure-core
 dependency bans, nextest, compile-fail doctests, Hegel (every `hegel_` test in the workspace), proptest (every `proptest_` test in the workspace), the actual production
 window-comparison mutation, the three-invariant mutation check (`scripts/check-mutations.py`: a blind/latest-ETag `If-Match`, a local index advanced after a commit that did not land, and a skipped credential denylist, each applied once to production source in one private copy and required to fail an independent-oracle test; see `crates/memory/tests/mutation_daemon.rs`), schema drift (the xtask cli test no longer writes schemas, so `cargo xtask schemas --check` can fail), coverage and the deliberate-lint checker. It records seeds and each command's exact status under `rust/artifacts/`;

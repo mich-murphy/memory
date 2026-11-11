@@ -22,6 +22,8 @@ PROPERTY_CASES=2000 bash scripts/gates.sh
 # CI invocation: PROPERTY_CASES=500 bash scripts/gates.sh
 ```
 
+Hosted CI uses the Rust-only `nix develop .#rust` shell: the same pinned Rust tools and environment as the default shell, without the Go and release tooling. Use either locally.
+
 The canonical wrapper also runs workspace doctests (nextest does not), gates `05-hegel` and
 `06-proptest` (every `hegel_` and every `proptest_` test in the workspace), and two
 production-source mutation checkers: `check-window-mutation.py` (planner window comparison)

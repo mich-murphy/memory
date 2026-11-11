@@ -34,7 +34,7 @@ jobs:
             cores = 2
       - name: Run all Rust gates without live access
         run: >-
-          nix develop --max-jobs 2 --cores 2 --command
+          nix develop .#rust --max-jobs 2 --cores 2 --command
           sh -c 'cd rust && PROPERTY_CASES=500 bash scripts/gates.sh'
       - name: Preserve gate statuses, seeds and diagnostics
         if: always()

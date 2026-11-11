@@ -63,7 +63,30 @@
           RUST_TEST_THREADS = "2";
         };
       });
+      # Shared by the default and rust shells so the two cannot drift.
+      rustTools = [
+        # Official toolchain source and tool versions are locked independently.
+        rustToolchain
+        pkgs.cargo-nextest
+        pkgs.cargo-deny
+        coverageTool
+      ];
+      # Tools the Rust gate scripts invoke: bash, mkfifo (coreutils), python3.
+      # The verification helper also uses compression.zstd and sqlite3 (python).
+      gateShellTools = [pkgs.git pkgs.bash pkgs.coreutils pkgs.gnugrep];
+      rustEnv = {
+        CARGO_BUILD_JOBS = "2";
+        RUST_TEST_THREADS = "2";
+        # Use llvm tools from the same locked package set, not rustup downloads.
+        LLVM_COV = "${llvmToolDir}/llvm-cov";
+        LLVM_PROFDATA = "${llvmToolDir}/llvm-profdata";
+      };
     in {
+      # Rust gates only, so hosted CI downloads a fraction of the default shell.
+      rust = pkgs.mkShell ({
+          packages = rustTools ++ gateShellTools ++ [pkgs.python314];
+        }
+        // rustEnv);
       # Explicit alias retained for coverage diagnostics.
       coverage = pkgs.mkShell {
         inputsFrom = [self.devShells.${pkgs.stdenv.hostPlatform.system}.default];
@@ -74,43 +97,35 @@
       default = assert pkgs.lib.assertMsg
       ("v${pkgs.golangci-lint.version}" == pkgs.lib.trim (builtins.readFile ./.golangci-lint-version))
       "Update the nixpkgs lock to match .golangci-lint-version";
-        pkgs.mkShell {
-          packages = [
-            # Official toolchain source and tool versions are locked independently.
-            rustToolchain
-            pkgs.cargo-nextest
-            pkgs.cargo-deny
-            coverageTool
-            pkgs.cargo-mutants
-            pkgs.go_1_27
-            pkgs.golangci-lint
-            pkgs.gnumake
-            pkgs.git
-            pkgs.bash
-            pkgs.coreutils
-            pkgs.gnugrep
-            pkgs.curl
-            pkgs.jq
-            # The verification helper uses compression.zstd and sqlite3.
-            pkgs.python314
-            # Analytics fixture tests invoke the CLI, not Python compression.zstd.
-            pkgs.zstd
-            # Generated producer-handler tests strip types and mock spawn; no SDK is run.
-            pkgs.nodejs_24
-            pkgs.shellcheck
-            pkgs.zizmor
-            pkgs.goreleaser
-            pkgs.syft
-          ];
+        pkgs.mkShell ({
+            packages =
+              rustTools
+              ++ [
+                pkgs.cargo-mutants
+                pkgs.go_1_27
+                pkgs.golangci-lint
+                pkgs.gnumake
+              ]
+              ++ gateShellTools
+              ++ [
+                pkgs.curl
+                pkgs.jq
+                # The verification helper uses compression.zstd and sqlite3.
+                pkgs.python314
+                # Analytics fixture tests invoke the CLI, not Python compression.zstd.
+                pkgs.zstd
+                # Generated producer-handler tests strip types and mock spawn; no SDK is run.
+                pkgs.nodejs_24
+                pkgs.shellcheck
+                pkgs.zizmor
+                pkgs.goreleaser
+                pkgs.syft
+              ];
 
-          # Use the locked compiler, not an implicitly downloaded toolchain.
-          GOTOOLCHAIN = "local";
-          CARGO_BUILD_JOBS = "2";
-          RUST_TEST_THREADS = "2";
-          # Use llvm tools from the same locked package set, not rustup downloads.
-          LLVM_COV = "${llvmToolDir}/llvm-cov";
-          LLVM_PROFDATA = "${llvmToolDir}/llvm-profdata";
-        };
+            # Use the locked compiler, not an implicitly downloaded toolchain.
+            GOTOOLCHAIN = "local";
+          }
+          // rustEnv);
     });
 
     formatter = forAllSystems (pkgs: pkgs.alejandra);
