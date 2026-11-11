@@ -1,0 +1,2 @@
+Command: nix develop .#coverage --max-jobs 2 --cores 2 --command shellcheck rust/scripts/gates.sh rust/scripts/check-lints.sh
+Exit: 0 (after correcting cd failure handling; prior attempt exit1 SC2164)

@@ -1,0 +1,36 @@
+{
+  "utc": "2026-11-07T20:49:11.640082+00:00",
+  "head": "57d8400f632ab47a81e34d060f86d3687123153e",
+  "files": [
+    {
+      "source": "flake.nix",
+      "scratch_path": "flake.nix",
+      "sha256": "48b67b22e317151981e14fc7cbd0bedc9e420efc15e9b52fb485a8d665f6bdde",
+      "bytes": 4555
+    },
+    {
+      "source": "flake.lock",
+      "scratch_path": "flake.lock",
+      "sha256": "ec6aabae0c2ec50a7f01eed74da33d914dab68ae08dbc21e76e323451ef085e1",
+      "bytes": 1169
+    },
+    {
+      "source": ".golangci-lint-version",
+      "scratch_path": ".golangci-lint-version",
+      "sha256": "81febbb051895ef2067b0849dac2095699a1c8c0e114e79b041e25a7015d9c94",
+      "bytes": 8
+    },
+    {
+      "source": "docs/rust-rewrite/experiments/hegel-probe/Cargo.toml",
+      "scratch_path": "Cargo.toml",
+      "sha256": "c29c02bb238c82183f35b733a6a18d56c0e29ba4e67202a6b9670018118c1674",
+      "bytes": 165
+    },
+    {
+      "source": "docs/rust-rewrite/experiments/hegel-probe/tests/coalesce.rs",
+      "scratch_path": "tests/coalesce.rs",
+      "sha256": "27a3ca936627ef8e5111d082478a4543e474c10bba7b2b02212c6e47ffd98e3c",
+      "bytes": 1009
+    }
+  ]
+}

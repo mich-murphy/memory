@@ -1,8 +1,19 @@
 # Capture security boundaries
 
-> **Scope (2026-10-23):** These capture-policy and scrubbing boundaries remain safety requirements for the agreed [session-capture contract](session-capture-contract.md), including spool acceptance, repair and delivery. Unknown exclusion state must fail closed for the affected scope. The authorized rebuild/reset does not revoke opt-outs: preserve and reapply effective exclusions, including remote-only exclusions, and recheck policy before delivering queued work.
+> **Update (2026-11-07):** session opt-out is retired by operator decision (see README
+> safety boundaries and contract section 6 step 2). The Go capture daemons were stopped on
+> 2026-11-09; the installed Go hooks still honor the existing record until cutover. The credential, config-scrubbing and launch-argv
+> boundaries below remain requirements and are ported by DESIGN.md section 8.
 
-The collector applies a known-file policy, not arbitrary transcript DLP. An unrecognised filename
+> **Historical Go scope (2026-10-23; opt-out instructions apply only until cutover):** These capture-policy and scrubbing boundaries remain safety requirements for the agreed [session-capture contract](session-capture-contract.md), including spool acceptance, repair and delivery. Unknown exclusion state must fail closed for the affected scope. The authorized rebuild/reset does not revoke opt-outs: preserve and reapply effective exclusions, including remote-only exclusions, and recheck policy before delivering queued work.
+
+The implementation details below describe the existing Go paths and the protections
+being ported. Rust currently implements pure policy/transform/launch boundaries, not
+the real filesystem observer or upload sink; see the
+[active handoff](session-capture-handoff.md#current-session-checkpoint) for evidence.
+DESIGN.md section 8 governs the Rust pipeline.
+
+The Go collector applies a known-file policy, not arbitrary transcript DLP. An unrecognised filename
 remains byte-for-byte unchanged, even if its contents look like a supported config or contain a
 literal credential. Copies renamed to unrelated filenames with no recognised path identity are
 outside this policy.
@@ -14,7 +25,7 @@ by the Claude adapter's explicit `ExcludesClaudeConfig` export/extraction path; 
 not permit its backups or any other excluded identity, and still requires scrubbing.
 Configured config parents and state-directory ancestors are also compared by filesystem identity:
 case aliases remain excluded without conflating distinct directories on case-sensitive volumes.
-Persistent opt-out checks also compare existing root and recorded source-object identities.
+In the running Go path, persistent opt-out checks also compare existing root and recorded source-object identities.
 These checks do not provide an atomic filesystem snapshot or defend against hostile concurrent
 path replacement.
 
@@ -60,13 +71,17 @@ No default activation or archive deletion follows from them.
 These checks protect new captures. The existing v3 collector does not retroactively scrub or
 delete remote objects: its append-only behavior retains already captured history, including
 legacy namespaces. That describes v3 behavior, not a requirement to retain the old archive
-forever. The operator has authorized a controlled R2 reset after replacement acceptance, with
-a reviewed exact destination/key inventory; this page performs no deletion. New retention
-policy is defined by the agreed contract, not by v3 collector-generation retention.
+forever. On 2026-11-09, by operator instruction, the Go writers were stopped, the bucket was
+inventoried and the old capture prefixes were deleted (handoff brief; DESIGN amendment A2).
+This page performs no deletion. New retention
+policy follows DESIGN.md for Rust and the retained contract goals, not v3 collector-generation retention.
 
 If a credential is known to have been archived, rotate or revoke it and treat remaining remote
 objects and local evidence/backups as sensitive. Updating the collector, deleting the local
-cache or changing a filename does not remove earlier remote bytes. Resetting the archive does
-not revoke opt-outs or authorize deleting local research/classification artifacts, original
-sources or policy state. Preserve effective exclusions before reset, including remote-only
-records; never silently re-enable excluded sessions.
+cache or changing a filename does not remove earlier remote bytes. Resetting the archive never
+authorizes deleting local research/classification artifacts, original sources or secret-policy
+state. While Go remains active, preserve and honor its effective opt-out records; do not remove
+them incidentally. Rust session opt-out is retired: the existing record is removed only at the
+controlled cutover step in [DESIGN.md section 18](../DESIGN.md#18-cutover), after Go is stopped.
+Credential denial, configuration scrubbing and launch-argv protections are not opt-outs and
+remain mandatory. No legacy opt-out migration is a Rust delivery prerequisite.

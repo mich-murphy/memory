@@ -1,0 +1,23 @@
+{
+  "head": "57d8400f632ab47a81e34d060f86d3687123153e",
+  "branch": "rust/scaffold",
+  "note": "Uncommitted documentation/evidence-verifier handoff state. Runtime source remains identical to 02-corrected/source-before.json. Original baseline manifest retained.",
+  "sha256": {
+    "README.md": "774e92665f490067367ce9ecc974072302cf07f16ad802f9e462551db1620304",
+    "docs/README.md": "477fa5bf521a70d6224b63e2b251c334e0d042e6b4b4f1236bc65ad54ed1bae4",
+    "docs/security.md": "2b3f8cb337c408893e67a6473a495666675cc041d9f203d3564d260c675ffbd9",
+    "docs/production-gap-register-20261102.md": "e01c7a41f39ef0edc9363faf221da288be8da9ce94e01432f4bf7fc0bf921ae3",
+    "docs/quality-gates.md": "24f1b41854d3419e7693b96d4690911b1cd55edc300c8089893d956f06d37f3f",
+    "rust/README.md": "8b6ace9fd0353dbe88c19777e647f31739265f217673009f61985973d73a6c78",
+    "docs/rust-rewrite/implementation/00-scaffold.md": "2d3ca408a15b8e8bb54376f0d0f36569447600aa72b8533676dae8306e039cc4",
+    "docs/rust-rewrite/implementation/02-parent-review.md": "b976886fd931af319b87d284cb1957855aeb38a5213bcbbc965d36f60a7e3fcd",
+    "docs/rust-rewrite/implementation/03-privacy-port.md": "0f03499a612302f069320d88b23330bd8e81b8f54e1a433e2c137b7e88916003",
+    "docs/rust-rewrite/implementation/04-core-mechanics.md": "d0f16201521f0f5a2cb805e74c7bf5d92e4f4fe7863a348e7c6c45822711197f",
+    "docs/rust-rewrite/implementation/05-privacy-review.md": "e4e78195b9c61fcb55803ae85cf17f1cdf783e23933b1020a09034b459c0a095",
+    "docs/session-capture-handoff.md": "9f05909601ad23dc78b37cc49ee4d14885f467bb5fe982c3cf070d5b108f89dd",
+    "docs/rust-rewrite/implementation/verify-evidence.py": "747fdba0bc417e4082b48382adf033f021e09a0ad1fae6c88ff8e4e2c0f04c93",
+    "docs/rust-rewrite/implementation/baseline-identities.json": "ec6f5f86b3596381ce2c319c723fb9c041144e1a8c6eee74b2d8eab4a89cd399",
+    "docs/rust-rewrite/implementation/handoff-documentation-identities.json": "746b59ebf8aec18613c376f56fe2e6d62e312819fad1fcdf559647d4cc7e6fa8"
+  },
+  "unchanged_runtime_snapshot_sha256": "89dac9da9562d1383cb322df73ea31ab001a5d63912b5ccc8e767553de78432e"
+}

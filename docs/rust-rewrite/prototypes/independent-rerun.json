@@ -1,0 +1,563 @@
+{
+  "P1": {
+    "by_kind_columns": [
+      "cases",
+      "detected",
+      "unsafe"
+    ],
+    "cases": 420,
+    "results": {
+      "16+16": {
+        "audit_failures": 0,
+        "by_kind": {
+          "append": [
+            60,
+            0,
+            0
+          ],
+          "head": [
+            60,
+            60,
+            0
+          ],
+          "middle": [
+            60,
+            24,
+            36
+          ],
+          "rename": [
+            60,
+            60,
+            0
+          ],
+          "same_size": [
+            60,
+            29,
+            31
+          ],
+          "tail": [
+            60,
+            60,
+            0
+          ],
+          "truncate_regrow": [
+            60,
+            60,
+            0
+          ]
+        },
+        "detected": 293,
+        "rewrites": 360,
+        "scoped_unsafe_commits": 16,
+        "unsafe_commits": 67
+      },
+      "256+256": {
+        "audit_failures": 0,
+        "by_kind": {
+          "append": [
+            60,
+            0,
+            0
+          ],
+          "head": [
+            60,
+            60,
+            0
+          ],
+          "middle": [
+            60,
+            36,
+            24
+          ],
+          "rename": [
+            60,
+            60,
+            0
+          ],
+          "same_size": [
+            60,
+            40,
+            20
+          ],
+          "tail": [
+            60,
+            60,
+            0
+          ],
+          "truncate_regrow": [
+            60,
+            60,
+            0
+          ]
+        },
+        "detected": 316,
+        "rewrites": 360,
+        "scoped_unsafe_commits": 0,
+        "unsafe_commits": 44
+      },
+      "4+16": {
+        "audit_failures": 0,
+        "by_kind": {
+          "append": [
+            60,
+            0,
+            0
+          ],
+          "head": [
+            60,
+            60,
+            0
+          ],
+          "middle": [
+            60,
+            24,
+            36
+          ],
+          "rename": [
+            60,
+            60,
+            0
+          ],
+          "same_size": [
+            60,
+            21,
+            39
+          ],
+          "tail": [
+            60,
+            60,
+            0
+          ],
+          "truncate_regrow": [
+            60,
+            60,
+            0
+          ]
+        },
+        "detected": 285,
+        "rewrites": 360,
+        "scoped_unsafe_commits": 22,
+        "unsafe_commits": 75
+      },
+      "4+256": {
+        "audit_failures": 0,
+        "by_kind": {
+          "append": [
+            60,
+            0,
+            0
+          ],
+          "head": [
+            60,
+            60,
+            0
+          ],
+          "middle": [
+            60,
+            36,
+            24
+          ],
+          "rename": [
+            60,
+            60,
+            0
+          ],
+          "same_size": [
+            60,
+            38,
+            22
+          ],
+          "tail": [
+            60,
+            60,
+            0
+          ],
+          "truncate_regrow": [
+            60,
+            60,
+            0
+          ]
+        },
+        "detected": 314,
+        "rewrites": 360,
+        "scoped_unsafe_commits": 0,
+        "unsafe_commits": 46
+      },
+      "4+64": {
+        "audit_failures": 0,
+        "by_kind": {
+          "append": [
+            60,
+            0,
+            0
+          ],
+          "head": [
+            60,
+            60,
+            0
+          ],
+          "middle": [
+            60,
+            36,
+            24
+          ],
+          "rename": [
+            60,
+            60,
+            0
+          ],
+          "same_size": [
+            60,
+            31,
+            29
+          ],
+          "tail": [
+            60,
+            60,
+            0
+          ],
+          "truncate_regrow": [
+            60,
+            60,
+            0
+          ]
+        },
+        "detected": 307,
+        "rewrites": 360,
+        "scoped_unsafe_commits": 0,
+        "unsafe_commits": 53
+      },
+      "disabled": {
+        "audit_failures": 0,
+        "by_kind": {
+          "append": [
+            60,
+            0,
+            0
+          ],
+          "head": [
+            60,
+            0,
+            60
+          ],
+          "middle": [
+            60,
+            0,
+            60
+          ],
+          "rename": [
+            60,
+            60,
+            0
+          ],
+          "same_size": [
+            60,
+            0,
+            60
+          ],
+          "tail": [
+            60,
+            0,
+            60
+          ],
+          "truncate_regrow": [
+            60,
+            0,
+            60
+          ]
+        },
+        "detected": 60,
+        "rewrites": 360,
+        "scoped_unsafe_commits": 247,
+        "unsafe_commits": 300
+      },
+      "full": {
+        "audit_failures": 0,
+        "by_kind": {
+          "append": [
+            60,
+            0,
+            0
+          ],
+          "head": [
+            60,
+            60,
+            0
+          ],
+          "middle": [
+            60,
+            60,
+            0
+          ],
+          "rename": [
+            60,
+            60,
+            0
+          ],
+          "same_size": [
+            60,
+            60,
+            0
+          ],
+          "tail": [
+            60,
+            60,
+            0
+          ],
+          "truncate_regrow": [
+            60,
+            60,
+            0
+          ]
+        },
+        "detected": 360,
+        "rewrites": 360,
+        "scoped_unsafe_commits": 0,
+        "unsafe_commits": 0
+      }
+    },
+    "seed": 1601,
+    "warm_file_check": {
+      "16+16": {
+        "bytes_read": 32768,
+        "n": 15,
+        "p50_ms": 0.034458,
+        "p99_ms": 0.039833
+      },
+      "256+256": {
+        "bytes_read": 524288,
+        "n": 15,
+        "p50_ms": 0.24275,
+        "p99_ms": 0.25825
+      },
+      "4+16": {
+        "bytes_read": 20480,
+        "n": 15,
+        "p50_ms": 0.030125,
+        "p99_ms": 0.993042
+      },
+      "4+256": {
+        "bytes_read": 266240,
+        "n": 15,
+        "p50_ms": 0.130083,
+        "p99_ms": 0.135875
+      },
+      "4+64": {
+        "bytes_read": 69632,
+        "n": 15,
+        "p50_ms": 0.048959,
+        "p99_ms": 0.057708
+      },
+      "disabled": {
+        "bytes_read": 0,
+        "n": 15,
+        "p50_ms": 0.017875,
+        "p99_ms": 0.020208
+      },
+      "full": {
+        "bytes_read": 4194304,
+        "n": 15,
+        "p50_ms": 1.772959,
+        "p99_ms": 2.177333
+      }
+    }
+  },
+  "P3": {
+    "per_day": {
+      "late_writes": 100,
+      "successful_but_unreachable": 0
+    },
+    "rename_unlink": {
+      "late_writes": 100,
+      "successful_but_unreachable": 100
+    }
+  },
+  "P4": {
+    "synthetic_C_hook": {
+      "missing_parent": {
+        "in_process_p50_ms": 0.004,
+        "in_process_p99_ms": 0.008,
+        "n": 300,
+        "spawn_p99_ms": 3.154791
+      },
+      "success": {
+        "in_process_p50_ms": 0.04,
+        "in_process_p99_ms": 1.311,
+        "n": 300,
+        "spawn_p99_ms": 4.457
+      }
+    },
+    "synthetic_Python_memory": [
+      {
+        "encoded_buffers": 4,
+        "pattern": "random",
+        "piece_MiB": 4,
+        "retained_payload_bytes": 25166248,
+        "rss_peak_bytes": 64929792
+      },
+      {
+        "encoded_buffers": 4,
+        "pattern": "compressible",
+        "piece_MiB": 4,
+        "retained_payload_bytes": 8389196,
+        "rss_peak_bytes": 44482560
+      },
+      {
+        "encoded_buffers": 8,
+        "pattern": "random",
+        "piece_MiB": 4,
+        "retained_payload_bytes": 41943888,
+        "rss_peak_bytes": 82051072
+      },
+      {
+        "encoded_buffers": 8,
+        "pattern": "compressible",
+        "piece_MiB": 4,
+        "retained_payload_bytes": 8389784,
+        "rss_peak_bytes": 44449792
+      },
+      {
+        "encoded_buffers": 4,
+        "pattern": "random",
+        "piece_MiB": 8,
+        "retained_payload_bytes": 50332456,
+        "rss_peak_bytes": 100352000
+      },
+      {
+        "encoded_buffers": 4,
+        "pattern": "compressible",
+        "piece_MiB": 8,
+        "retained_payload_bytes": 16778316,
+        "rss_peak_bytes": 56983552
+      },
+      {
+        "encoded_buffers": 8,
+        "pattern": "random",
+        "piece_MiB": 8,
+        "retained_payload_bytes": 83887696,
+        "rss_peak_bytes": 135741440
+      },
+      {
+        "encoded_buffers": 8,
+        "pattern": "compressible",
+        "piece_MiB": 8,
+        "retained_payload_bytes": 16779416,
+        "rss_peak_bytes": 57065472
+      }
+    ]
+  },
+  "P6": {
+    "natural_sleep": "pending; host never suspended",
+    "simulated": [
+      {
+        "case": "awake",
+        "continuous_deadline_remaining_s": 240,
+        "continuous_elapsed_s": 60,
+        "deadline_remaining_s": 240,
+        "jitter_bounds_s": null,
+        "monotonic_elapsed_s": 60,
+        "reconcile": false,
+        "wall_elapsed_s": 60
+      },
+      {
+        "case": "sleep_600",
+        "continuous_deadline_remaining_s": 0,
+        "continuous_elapsed_s": 660,
+        "deadline_remaining_s": 240,
+        "jitter_bounds_s": [
+          0,
+          30
+        ],
+        "monotonic_elapsed_s": 60,
+        "reconcile": true,
+        "wall_elapsed_s": 660
+      },
+      {
+        "case": "forward_step",
+        "continuous_deadline_remaining_s": 240,
+        "continuous_elapsed_s": 60,
+        "deadline_remaining_s": 240,
+        "jitter_bounds_s": [
+          0,
+          30
+        ],
+        "monotonic_elapsed_s": 60,
+        "reconcile": true,
+        "wall_elapsed_s": 660
+      },
+      {
+        "case": "backward_step",
+        "continuous_deadline_remaining_s": 240,
+        "continuous_elapsed_s": 60,
+        "deadline_remaining_s": 240,
+        "jitter_bounds_s": null,
+        "monotonic_elapsed_s": 60,
+        "reconcile": false,
+        "wall_elapsed_s": -540
+      },
+      {
+        "case": "threshold_120",
+        "continuous_deadline_remaining_s": 120,
+        "continuous_elapsed_s": 180,
+        "deadline_remaining_s": 240,
+        "jitter_bounds_s": null,
+        "monotonic_elapsed_s": 60,
+        "reconcile": false,
+        "wall_elapsed_s": 180
+      },
+      {
+        "case": "threshold_121",
+        "continuous_deadline_remaining_s": 119,
+        "continuous_elapsed_s": 181,
+        "deadline_remaining_s": 240,
+        "jitter_bounds_s": [
+          0,
+          30
+        ],
+        "monotonic_elapsed_s": 60,
+        "reconcile": true,
+        "wall_elapsed_s": 181
+      }
+    ]
+  },
+  "P7": {
+    "body_bytes": 20000000,
+    "durability": "not tested: no power loss, F_FULLFSYNC or directory fsync acceptance",
+    "results": {
+      "crc32c_scalar_table": {
+        "checksum_only": {
+          "n": 15,
+          "p50_ms": 46.420625,
+          "p99_ms": 46.776083
+        },
+        "injected_invalid": 8,
+        "read_validate": {
+          "n": 15,
+          "p50_ms": 50.535334,
+          "p99_ms": 51.810417
+        },
+        "rejected": 8
+      },
+      "sha256": {
+        "checksum_only": {
+          "n": 15,
+          "p50_ms": 7.679958,
+          "p99_ms": 7.873625
+        },
+        "injected_invalid": 8,
+        "read_validate": {
+          "n": 15,
+          "p50_ms": 11.055334,
+          "p99_ms": 13.558792
+        },
+        "rejected": 8
+      }
+    }
+  },
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "python": "3.14.8 (main, Sep 30 2026, 17:55:09) [Clang 21.1.8 ]",
+  "source_sha256": {
+    "native_probe.c": "b2aa8ff965806af9d3e1d7758dcad3eea123fbf64288254f1bd8ef09a06c4e5b",
+    "run.py": "fb11a8cb34976568737c8215195648bd457d549bcc6c768169df687ec87e593c"
+  }
+}

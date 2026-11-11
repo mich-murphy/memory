@@ -1,0 +1,317 @@
+path "/Users/mm/dev/memory/docs/rust-rewrite/prototypes/p2-s3-client/os-probe" does not contain a 'flake.nix', searching up
+error[rejected]: failed to satisfy license requirements
+   ┌─ /Users/mm/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/webpki-root-certs-1.0.11/Cargo.toml:26:12
+   │
+26 │ license = "CDLA-Permissive-2.0"
+   │            ━━━━━━━━━━━━━━━━━━━
+   │            │
+   │            rejected: license is not explicitly allowed
+   │
+   ├ CDLA-Permissive-2.0 - Community Data License Agreement Permissive 2.0:
+   ├   - No additional metadata available for license
+   ├ webpki-root-certs v1.0.11
+     └── rustls-platform-verifier v0.7.1
+         └── reqwest v0.13.5
+             └── object_store v0.14.2
+                 └── p2-os-probe v0.0.0
+
+warning[license-not-encountered]: license was not encountered
+  ┌─ /Users/mm/dev/memory/rust/deny.toml:9:32
+  │
+9 │ allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "CC0-1.0", "Zlib"]
+  │                                ━━━━━━━━━━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+  ┌─ /Users/mm/dev/memory/rust/deny.toml:9:97
+  │
+9 │ allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "CC0-1.0", "Zlib"]
+  │                                                                                                 ━━━━ unmatched license allowance
+
+warning[duplicate]: found 2 duplicate entries for crate 'base64'
+  ┌─ /Users/mm/dev/memory/docs/rust-rewrite/prototypes/p2-s3-client/os-probe/Cargo.lock:7:1
+  │  
+7 │ ╭ base64 0.22.1 registry+https://github.com/rust-lang/crates.io-index
+8 │ │ base64 0.23.1 registry+https://github.com/rust-lang/crates.io-index
+  │ ╰───────────────────────────────────────────────────────────────────┘ lock entries
+  │  
+  ├ base64 v0.22.1
+    └── p2-os-probe v0.0.0
+  ├ base64 v0.23.1
+    ├── hyper-util v0.1.21
+    │   ├── hyper-rustls v0.27.10
+    │   │   └── reqwest v0.13.5
+    │   │       └── object_store v0.14.2
+    │   │           └── p2-os-probe v0.0.0
+    │   └── reqwest v0.13.5 (*)
+    ├── object_store v0.14.2 (*)
+    └── reqwest v0.13.5 (*)
+
+warning[duplicate]: found 2 duplicate entries for crate 'block-buffer'
+   ┌─ /Users/mm/dev/memory/docs/rust-rewrite/prototypes/p2-s3-client/os-probe/Cargo.lock:10:1
+   │  
+10 │ ╭ block-buffer 0.10.4 registry+https://github.com/rust-lang/crates.io-index
+11 │ │ block-buffer 0.12.1 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ block-buffer v0.10.4
+     └── digest v0.10.7
+         ├── crc-fast v1.10.0
+         │   └── object_store v0.14.2
+         │       └── p2-os-probe v0.0.0
+         ├── md-5 v0.10.6
+         │   └── p2-os-probe v0.0.0 (*)
+         └── sha2 v0.10.9
+             └── p2-os-probe v0.0.0 (*)
+   ├ block-buffer v0.12.1
+     └── digest v0.11.3
+         └── md-5 v0.11.0
+             └── object_store v0.14.2
+                 └── p2-os-probe v0.0.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'cpufeatures'
+   ┌─ /Users/mm/dev/memory/docs/rust-rewrite/prototypes/p2-s3-client/os-probe/Cargo.lock:22:1
+   │  
+22 │ ╭ cpufeatures 0.2.17 registry+https://github.com/rust-lang/crates.io-index
+23 │ │ cpufeatures 0.3.1 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰───────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ cpufeatures v0.2.17
+     └── sha2 v0.10.9
+         └── p2-os-probe v0.0.0
+   ├ cpufeatures v0.3.1
+     └── chacha20 v0.10.2
+         └── rand v0.10.3
+             └── object_store v0.14.2
+                 └── p2-os-probe v0.0.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'crypto-common'
+   ┌─ /Users/mm/dev/memory/docs/rust-rewrite/prototypes/p2-s3-client/os-probe/Cargo.lock:25:1
+   │  
+25 │ ╭ crypto-common 0.1.7 registry+https://github.com/rust-lang/crates.io-index
+26 │ │ crypto-common 0.2.2 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ crypto-common v0.1.7
+     └── digest v0.10.7
+         ├── crc-fast v1.10.0
+         │   └── object_store v0.14.2
+         │       └── p2-os-probe v0.0.0
+         ├── md-5 v0.10.6
+         │   └── p2-os-probe v0.0.0 (*)
+         └── sha2 v0.10.9
+             └── p2-os-probe v0.0.0 (*)
+   ├ crypto-common v0.2.2
+     └── digest v0.11.3
+         └── md-5 v0.11.0
+             └── object_store v0.14.2
+                 └── p2-os-probe v0.0.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'digest'
+   ┌─ /Users/mm/dev/memory/docs/rust-rewrite/prototypes/p2-s3-client/os-probe/Cargo.lock:27:1
+   │  
+27 │ ╭ digest 0.10.7 registry+https://github.com/rust-lang/crates.io-index
+28 │ │ digest 0.11.3 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰───────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ digest v0.10.7
+     ├── crc-fast v1.10.0
+     │   └── object_store v0.14.2
+     │       └── p2-os-probe v0.0.0
+     ├── md-5 v0.10.6
+     │   └── p2-os-probe v0.0.0 (*)
+     └── sha2 v0.10.9
+         └── p2-os-probe v0.0.0 (*)
+   ├ digest v0.11.3
+     └── md-5 v0.11.0
+         └── object_store v0.14.2
+             └── p2-os-probe v0.0.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'md-5'
+   ┌─ /Users/mm/dev/memory/docs/rust-rewrite/prototypes/p2-s3-client/os-probe/Cargo.lock:84:1
+   │  
+84 │ ╭ md-5 0.10.6 registry+https://github.com/rust-lang/crates.io-index
+85 │ │ md-5 0.11.0 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰─────────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ md-5 v0.10.6
+     └── p2-os-probe v0.0.0
+   ├ md-5 v0.11.0
+     └── object_store v0.14.2
+         └── p2-os-probe v0.0.0
+
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+    ┌─ /Users/mm/dev/memory/docs/rust-rewrite/prototypes/p2-s3-client/os-probe/Cargo.lock:137:1
+    │  
+137 │ ╭ syn 2.0.119 registry+https://github.com/rust-lang/crates.io-index
+138 │ │ syn 3.0.9 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰───────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ syn v2.0.119
+      ├── jni-macros v0.22.4
+      │   └── jni v0.22.4
+      │       └── rustls-platform-verifier v0.7.1
+      │           └── reqwest v0.13.5
+      │               └── object_store v0.14.2
+      │                   └── p2-os-probe v0.0.0
+      ├── jni-sys-macros v0.4.1
+      │   └── jni-sys v0.4.1
+      │       └── jni v0.22.4 (*)
+      ├── tokio-macros v2.6.1
+      │   └── tokio v1.48.0
+      │       ├── h2 v0.4.20
+      │       │   ├── hyper v1.12.0
+      │       │   │   ├── hyper-rustls v0.27.10
+      │       │   │   │   └── reqwest v0.13.5 (*)
+      │       │   │   ├── hyper-util v0.1.21
+      │       │   │   │   ├── hyper-rustls v0.27.10 (*)
+      │       │   │   │   └── reqwest v0.13.5 (*)
+      │       │   │   ├── object_store v0.14.2 (*)
+      │       │   │   └── reqwest v0.13.5 (*)
+      │       │   └── reqwest v0.13.5 (*)
+      │       ├── hyper v1.12.0 (*)
+      │       ├── hyper-rustls v0.27.10 (*)
+      │       ├── hyper-util v0.1.21 (*)
+      │       ├── object_store v0.14.2 (*)
+      │       ├── p2-os-probe v0.0.0 (*)
+      │       ├── reqwest v0.13.5 (*)
+      │       ├── tokio-rustls v0.26.6
+      │       │   ├── hyper-rustls v0.27.10 (*)
+      │       │   └── reqwest v0.13.5 (*)
+      │       ├── tokio-util v0.7.19
+      │       │   ├── h2 v0.4.20 (*)
+      │       │   └── reqwest v0.13.5 (*)
+      │       ├── tower v0.5.3
+      │       │   ├── reqwest v0.13.5 (*)
+      │       │   └── tower-http v0.6.11
+      │       │       └── reqwest v0.13.5 (*)
+      │       └── wasm-bindgen-futures v0.4.80
+      │           ├── object_store v0.14.2 (*)
+      │           ├── reqwest v0.13.5 (*)
+      │           └── wasm-streams v0.5.0
+      │               └── reqwest v0.13.5 (*)
+      ├── tracing-attributes v0.1.31
+      │   └── tracing v0.1.44
+      │       ├── h2 v0.4.20 (*)
+      │       ├── hyper-util v0.1.21 (*)
+      │       └── object_store v0.14.2 (*)
+      ├── windows-implement v0.60.2
+      │   └── windows-core v0.62.2
+      │       └── iana-time-zone v0.1.65
+      │           └── chrono v0.4.45
+      │               └── object_store v0.14.2 (*)
+      └── windows-interface v0.59.3
+          └── windows-core v0.62.2 (*)
+    ├ syn v3.0.9
+      ├── async-trait v0.1.92
+      │   └── object_store v0.14.2
+      │       └── p2-os-probe v0.0.0
+      ├── displaydoc v0.2.7
+      │   ├── icu_collections v2.4.0
+      │   │   ├── icu_normalizer v2.4.0
+      │   │   │   └── idna_adapter v1.2.2
+      │   │   │       └── idna v1.1.0
+      │   │   │           └── url v2.5.8
+      │   │   │               ├── object_store v0.14.2 (*)
+      │   │   │               ├── reqwest v0.13.5
+      │   │   │               │   └── object_store v0.14.2 (*)
+      │   │   │               └── tower-http v0.6.11
+      │   │   │                   └── reqwest v0.13.5 (*)
+      │   │   └── icu_properties v2.4.0
+      │   │       └── idna_adapter v1.2.2 (*)
+      │   ├── icu_locale_core v2.4.0
+      │   │   ├── icu_properties v2.4.0 (*)
+      │   │   └── icu_provider v2.4.0
+      │   │       ├── icu_normalizer v2.4.0 (*)
+      │   │       └── icu_properties v2.4.0 (*)
+      │   ├── icu_properties v2.4.0 (*)
+      │   ├── icu_provider v2.4.0 (*)
+      │   ├── tinystr v0.8.5
+      │   │   └── icu_locale_core v2.4.0 (*)
+      │   └── zerotrie v0.2.5
+      │       ├── icu_properties v2.4.0 (*)
+      │       └── icu_provider v2.4.0 (*)
+      ├── futures-macro v0.3.34
+      │   └── futures-util v0.3.34
+      │       ├── futures v0.3.31
+      │       │   └── p2-os-probe v0.0.0 (*)
+      │       ├── futures-executor v0.3.34
+      │       │   └── futures v0.3.31 (*)
+      │       ├── hyper-util v0.1.21
+      │       │   ├── hyper-rustls v0.27.10
+      │       │   │   └── reqwest v0.13.5 (*)
+      │       │   └── reqwest v0.13.5 (*)
+      │       ├── js-sys v0.3.107
+      │       │   ├── iana-time-zone v0.1.65
+      │       │   │   └── chrono v0.4.45
+      │       │   │       └── object_store v0.14.2 (*)
+      │       │   ├── reqwest v0.13.5 (*)
+      │       │   ├── wasm-bindgen-futures v0.4.80
+      │       │   │   ├── object_store v0.14.2 (*)
+      │       │   │   ├── reqwest v0.13.5 (*)
+      │       │   │   └── wasm-streams v0.5.0
+      │       │   │       └── reqwest v0.13.5 (*)
+      │       │   ├── wasm-streams v0.5.0 (*)
+      │       │   ├── web-sys v0.3.107
+      │       │   │   ├── reqwest v0.13.5 (*)
+      │       │   │   └── wasm-streams v0.5.0 (*)
+      │       │   └── web-time v1.1.0
+      │       │       └── object_store v0.14.2 (*)
+      │       ├── object_store v0.14.2 (*)
+      │       ├── reqwest v0.13.5 (*)
+      │       ├── tower v0.5.3
+      │       │   ├── reqwest v0.13.5 (*)
+      │       │   └── tower-http v0.6.11 (*)
+      │       ├── tower-http v0.6.11 (*)
+      │       └── wasm-streams v0.5.0 (*)
+      ├── serde_derive v1.0.229
+      │   └── serde v1.0.229
+      │       ├── chrono v0.4.45 (*)
+      │       ├── object_store v0.14.2 (*)
+      │       ├── quick-xml v0.41.0
+      │       │   └── object_store v0.14.2 (*)
+      │       └── serde_urlencoded v0.7.1
+      │           └── object_store v0.14.2 (*)
+      ├── synstructure v0.14.0
+      │   ├── yoke-derive v0.8.4
+      │   │   └── yoke v0.8.4
+      │   │       ├── icu_collections v2.4.0 (*)
+      │   │       ├── icu_provider v2.4.0 (*)
+      │   │       ├── zerotrie v0.2.5 (*)
+      │   │       └── zerovec v0.11.9
+      │   │           ├── icu_collections v2.4.0 (*)
+      │   │           ├── icu_locale_core v2.4.0 (*)
+      │   │           ├── icu_normalizer v2.4.0 (*)
+      │   │           ├── icu_properties v2.4.0 (*)
+      │   │           ├── icu_provider v2.4.0 (*)
+      │   │           ├── potential_utf v0.1.6
+      │   │           │   └── icu_collections v2.4.0 (*)
+      │   │           └── tinystr v0.8.5 (*)
+      │   └── zerofrom-derive v0.1.8
+      │       └── zerofrom v0.1.8
+      │           ├── icu_collections v2.4.0 (*)
+      │           ├── icu_provider v2.4.0 (*)
+      │           ├── yoke v0.8.4 (*)
+      │           ├── zerotrie v0.2.5 (*)
+      │           └── zerovec v0.11.9 (*)
+      ├── thiserror-impl v2.0.21
+      │   └── thiserror v2.0.21
+      │       ├── jni v0.22.4
+      │       │   └── rustls-platform-verifier v0.7.1
+      │       │       └── reqwest v0.13.5 (*)
+      │       └── object_store v0.14.2 (*)
+      ├── wasm-bindgen-macro-support v0.2.130
+      │   └── wasm-bindgen-macro v0.2.130
+      │       └── wasm-bindgen v0.2.130
+      │           ├── iana-time-zone v0.1.65 (*)
+      │           ├── js-sys v0.3.107 (*)
+      │           ├── reqwest v0.13.5 (*)
+      │           ├── wasm-bindgen-futures v0.4.80 (*)
+      │           ├── wasm-streams v0.5.0 (*)
+      │           ├── web-sys v0.3.107 (*)
+      │           └── web-time v1.1.0 (*)
+      ├── yoke-derive v0.8.4 (*)
+      ├── zerofrom-derive v0.1.8 (*)
+      └── zerovec-derive v0.11.7
+          └── zerovec v0.11.9 (*)
+
+bans ok, licenses FAILED, sources ok

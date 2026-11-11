@@ -1,0 +1,462 @@
+info: cargo-llvm-cov currently setting cfg(coverage); you can opt-out it by passing --no-cfg-coverage
+   Compiling memory-core v0.1.0 (/Users/mm/dev/memory/rust/crates/memory-core)
+   Compiling memory v0.1.0 (/Users/mm/dev/memory/rust/crates/memory)
+   Compiling xtask v0.1.0 (/Users/mm/dev/memory/rust/crates/xtask)
+   Compiling memory-reader v0.1.0 (/Users/mm/dev/memory/rust/crates/memory-reader)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.67s
+     Running unittests src/lib.rs (target/llvm-cov-target/debug/deps/memory-1f5e10e5129254c0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/llvm-cov-target/debug/deps/memory-a92c91a71c5fd079)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/capture.rs (target/llvm-cov-target/debug/deps/capture-96319bf55ad2226f)
+
+running 12 tests
+test append_extends_then_unchanged_uploads_nothing ... ok
+test failure_branches_have_literal_outcomes_and_store_nothing ... ok
+test launch_canaries_never_reach_any_stored_object ... ok
+test local_default_is_empty ... ok
+test attach_launches_deduplicates_by_digest ... ok
+test only_published_bodies_reach_the_store ... ok
+test need_windows_reads_head_and_tail_through_the_seam ... ok
+test removed_source_is_deleted_only_after_two_observations ... ok
+test snapshot_change_is_replaced ... ok
+test rewrite_and_truncate_start_a_new_epoch ... ok
+test withheld_source_is_never_read_or_stored ... ok
+test snapshot_replaces_and_protected_config_never_stores_the_canary ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/capture_property.rs (target/llvm-cov-target/debug/deps/capture_property-ca34f1499727414c)
+
+running 6 tests
+test guard_has_negative_controls ... ok
+test guard_shapes_arise_from_a_scripted_run_with_the_real_capture ... ok
+test oracle_detects_tampered_store_contents ... ok
+test proptest_property4_capture_state_machine ... ok
+test removed_source_needs_two_observations_then_is_deleted ... ok
+test hegel_property4_capture_state_machine ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 26.02s
+
+     Running tests/commit_protocol.rs (target/llvm-cov-target/debug/deps/commit_protocol-f8b72151e77bcf7f)
+
+running 46 tests
+test a_404_under_a_fence_is_landing_unknown ... ok
+test a_failed_readback_after_412_lands_nothing ... ok
+test a_persistent_404_on_the_first_write_gives_up_without_claiming_a_landing ... ok
+test a_404_on_the_first_write_is_not_final_and_retries_if_none_match ... ok
+test an_invalid_manifest_is_deterministic_and_never_reaches_the_store ... ok
+test auth_loss_during_verification_pauses_the_host ... ok
+test ambiguous_piece_put_is_retried_as_412_success ... ok
+test base_unchanged_retries_exactly_four_times_then_retries_the_capture ... ok
+test committed_then_5xx_is_already_ours_and_never_a_spurious_412 ... ok
+test directed_crash_after_manifest_then_new_writer_version_adopts_winner_encoding ... ok
+test directed_foreign_writer_parks_without_merging_and_settle_is_exempt ... ok
+test directed_lost_reply_is_already_ours_and_next_commit_uses_the_verified_etag ... ok
+test directed_delete_index_and_removed_source_recover_from_the_store ... ok
+test directed_lost_reply_then_offline_recovers_after_settle ... ok
+test disposition_maps_every_commit_result ... ok
+test directed_offline_and_revoked_commit_nothing_until_settle ... ok
+test fake_store_semantics_match_conditional_writes ... ok
+test first_write_uses_if_none_match_and_returns_committed ... ok
+test foreign_first_write_is_detected_through_if_none_match ... ok
+test etag_churn_is_base_unchanged_then_committed_with_the_fresh_etag ... ok
+test foreign_manifest_with_a_missing_body_is_still_foreign ... ok
+test guard_has_negative_controls ... ok
+test foreign_writer_parks_the_owner_with_both_hashes ... ok
+test guard_shapes_arise_from_scripted_runs ... ok
+test invariant_6_fence_check ... ok
+test later_write_is_fenced_by_the_etag_and_chains_previous ... ok
+test lost_reply_after_landing_is_already_ours ... ok
+test manifest_put_failure_lands_nothing_and_a_repeat_412_is_success ... ok
+test newer_current_schema_parks ... ok
+test newer_manifest_schema_parks_instead_of_looping ... ok
+test offline_store_lands_nothing_and_retries_as_offline ... ok
+test oracle_detects_tampered_store_contents ... ok
+test parse_current_roundtrips_what_the_driver_writes ... ok
+test proptest_property4_commit_state_machine ... ok
+test r2_a_412_dedup_adopts_the_encoding_that_actually_won ... ok
+test r2_without_adoption_the_descriptor_would_not_verify ... ok
+test recover_base_failures_are_classified ... ok
+test recover_base_reproduces_the_committed_base ... ok
+test revocation_before_the_pointer_write_leaves_only_unreferenced_objects_then_recovers ... ok
+test revoked_token_pauses_the_host_and_lands_nothing ... ok
+test seventy_commits_cross_a_checkpoint_and_still_recover ... ok
+test store_errors_classify_and_display ... ok
+test unlanded_5xx_reads_base_unchanged_and_retries_from_step_three ... ok
+test unreadable_current_is_corrupt_and_deterministic ... ok
+test verification_that_cannot_read_is_landing_unknown_with_its_class ... ok
+test hegel_property4_commit_state_machine ... ok
+
+test result: ok. 46 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 24.45s
+
+     Running tests/harness.rs (target/llvm-cov-target/debug/deps/harness-97bf6eac7f814ef6)
+
+running 3 tests
+test lost_reply_is_visible_and_duplicate_create_preserves_first_body ... ok
+test counters_detect_each_wrapped_operation ... ok
+test scaffold_binary_refuses_capture_instead_of_success ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+
+     Running tests/hook.rs (target/llvm-cov-target/debug/deps/hook-abb4bea9ff675484)
+
+running 28 tests
+test binary_appends_for_each_agent_with_modes ... ok
+test binary_refuses_writable_dir_without_file ... ok
+test canaries_never_reach_the_file ... ok
+test complete_object_with_stdin_open_does_not_wait ... ok
+test binary_failure_paths_exit_zero_silently ... ok
+test core_creates_missing_dirs_0700_and_file_0600 ... ok
+test concurrent_hooks_append_whole_lines ... ok
+test core_refuses_non_directory_and_symlink ... ok
+test core_refuses_group_or_world_writable_dir ... ok
+test core_rejects_bad_agent_date_and_input ... ok
+test core_unreadable_parent_and_readonly_dir ... ok
+test golden_line_per_agent ... ok
+test launch_evidence_only_on_session_start ... ok
+test missing_state_dir_environment_exits_zero ... ok
+test other_subcommands_keep_explicit_failure ... ok
+test oversize_launch_is_reduced_within_bound ... ok
+test p4_core_latency ... ignored, measurement: run with --release -- --ignored --nocapture
+test p4_spawn_latency ... ignored, measurement: run with --release -- --ignored --nocapture
+test hegel_core_never_panics_and_writes_at_most_one_whole_line ... ok
+test read_bounded_caps_at_limit_plus_one_and_survives_errors ... ok
+test read_bounded_stops_at_end_of_value ... ok
+test result_codes_are_fixed_and_distinct ... ok
+test second_hook_appends_second_line ... ok
+test session_start_without_launch_evidence_has_none ... ok
+test stdin_left_open_exits_within_bound ... ok
+test utc_day_known_values ... ok
+test write_line_short_and_failed_writes_are_failures_without_retry ... ok
+test proptest_core_never_panics_and_writes_at_most_one_whole_line ... ok
+
+test result: ok. 26 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 8.68s
+
+     Running tests/state.rs (target/llvm-cov-target/debug/deps/state-001b6430faaef8d5)
+
+running 22 tests
+test config_errors_never_echo_values ... ok
+test config_accept_reject_table ... ok
+test config_load_and_token_checks ... ok
+test error_text_is_closed ... ok
+test every_corruption_reads_as_missing_with_its_reason ... ok
+test crash_before_rename_leaves_old_file_readable_and_start_sweeps ... ok
+test hegel_single_byte_mutation_never_yields_a_different_body ... ok
+test hint_dir_refusals ... ok
+test invalid_names_and_sizes_are_refused ... ok
+test lock_refusals ... ok
+test machine_id_is_created_once_and_never_overwritten ... ok
+test machine_id_race_has_one_winner ... ok
+test older_schema_version_is_readable ... ok
+test prepare_refuses_bad_tmp ... ok
+test proptest_single_byte_mutation_never_yields_a_different_body ... ok
+test hegel_write_read_is_identity ... ok
+test publish_failures_are_closed_errors_and_clean_up ... ok
+test read_failures_are_missing ... ok
+test round_trip_and_modes ... ok
+test second_lock_is_held_in_process_and_on_a_second_description ... ok
+test state_root_rule_matches_the_hook ... ok
+test proptest_write_read_is_identity ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 24.63s
+
+     Running unittests src/lib.rs (target/llvm-cov-target/debug/deps/memory_core-4b0db060d0bd9b68)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/core_boundaries.rs (target/llvm-cov-target/debug/deps/core_boundaries-bdf191981dadb40f)
+
+running 5 tests
+test changed_protected_rules_replay_remote_epoch_before_adopt_digest_is_requested ... ok
+test every_coordinate_brand_validates_its_own_boundary_and_preserves_valid_spelling ... ok
+test opaque_fence_and_canonical_digest_serde_schemas_describe_their_distinct_domains ... ok
+test unmatched_completion_does_not_consume_pending_signal_or_advance_owner_clock ... ok
+test valid_nondefault_window_roundtrips_and_controls_both_deadlines ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/core_coordinates.rs (target/llvm-cov-target/debug/deps/core_coordinates-57cab176af0db9e8)
+
+running 14 tests
+test case_insensitive_alias_needs_proof_and_distinct_dirs_stay_distinct ... ok
+test default_and_custom_roots_need_no_filesystem ... ok
+test explicit_alias_pair_is_accepted ... ok
+test bounds_and_alias_depth ... ok
+test nested_projection_keeps_nested_identity_and_ignores_order ... ok
+test parent_alias_owns_nested_without_explicit_route ... ok
+test proptest_coordinates_order_proof_and_retention ... ok
+test rejected_declarations ... ok
+test stats_guard_bites ... ok
+test unproven_physical_aliases_are_never_authorized ... ok
+test unproven_siblings_are_not_authorized ... ok
+test unrelated_observations_are_ignored_and_chain_is_kept_verbatim ... ok
+test var_alias_resolves_to_one_namespace ... ok
+test hegel_coordinates_order_proof_and_retention ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.91s
+
+     Running tests/core_f2_gaps.rs (target/llvm-cov-target/debug/deps/core_f2_gaps-a1ff7717509627fc)
+
+running 12 tests
+test row10b_transcript_bytes_with_invalid_utf8_and_lone_surrogates_are_byte_exact ... ok
+test row10b_protected_config_with_lone_surrogates_or_invalid_utf8_is_malformed ... ok
+test row12_three_hundred_epoch_rewrite_history_retains_appends_and_latest_snapshot ... ok
+test row1a_non_protected_alias_is_untouched_control ... ok
+test row1b_argv_bound_is_thirty_two ... ok
+test row1b_env_bound_is_eight_accepted_entries_in_input_order ... ok
+test row1b_env_value_grammar_accept_and_reject_vectors ... ok
+test row5a_db_only_wal_only_and_unchanged_fingerprints ... ok
+test row5a_wal_identity_is_covered_by_admission_when_supplied_as_facts ... ok
+test row5b_changed_and_failed_are_closed_local_retries_never_done ... ok
+test row7c_codex_sessions_archive_and_zst_share_one_owner_session_and_id ... ok
+test row1a_backup_aliased_spellings_of_all_eleven_names_select_structural_rules ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.38s
+
+     Running tests/core_hint.rs (target/llvm-cov-target/debug/deps/core_hint-787cb1d52f559622)
+
+running 22 tests
+test bad_paths_degrade_to_absent_and_unknown_keys_are_tolerated ... ok
+test errors_never_echo_input ... ok
+test event_tables ... ok
+test flush_events_are_session_end_only ... ok
+test golden_launch_line_carries_digest_and_allowlisted_values ... ok
+test golden_lines_per_agent ... ok
+test canaries_fixed_seed ... ok
+test hegel_interleavings_and_truncations ... ok
+test hegel_reader_never_panics_on_arbitrary_bytes ... ok
+test hegel_no_canary_in_any_line ... ok
+test hook_input_negative_fixtures ... ok
+test hegel_size_bound_and_roundtrip ... ok
+test proptest_interleavings_and_truncations ... ok
+test proptest_reader_never_panics_on_arbitrary_bytes ... ok
+test proptest_no_canary_in_any_line ... ok
+test reader_handles_overlong_fragments_and_lines ... ok
+test reader_pending_tail_resume_and_midfile_fragment ... ok
+test reader_rejects_and_counts_bad_own_lines ... ok
+test reductions_are_deterministic_and_ordered ... ok
+test schema_is_generated_and_strict ... ok
+test subagent_transcript_is_a_separate_hint ... ok
+test proptest_size_bound_and_roundtrip has been running for over 60 seconds
+test proptest_size_bound_and_roundtrip ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 132.56s
+
+     Running tests/core_limits.rs (target/llvm-cov-target/debug/deps/core_limits-f59bfc520cec9311)
+
+running 26 tests
+test agent_wire_matches_serde ... ok
+test auth_pauses_host_without_touching_streak ... ok
+test backoff_bounds ... ok
+test budget_boundaries ... ok
+test cancel_swallows_only_retryable ... ok
+test cancelled_keeps_streak_and_never_parks ... ok
+test different_fault_or_success_resets_streak ... ok
+test every_deterministic_fault_parks_with_its_own_reason ... ok
+test hegel_budget ... ok
+test hegel_cancel ... ok
+test hegel_key_monotonic ... ok
+test key_boundary_session_1024_ok_1025_denied ... ok
+test key_boundary_shared ... ok
+test key_exact_spelling ... ok
+test key_len_measures_utf8_bytes_not_chars ... ok
+test key_len_saturates ... ok
+test owner_fault_is_distinct_from_source_park ... ok
+test parks_after_three_failures_spanning_three_hours ... ok
+test hegel_admission ... ok
+test proptest_budget ... ok
+test proptest_cancel ... ok
+test proptest_key_monotonic ... ok
+test rewrites_of_one_source_use_one_slot ... ok
+test sources_cap_and_never_evict ... ok
+test timeout_and_offline_retry_not_cancelled ... ok
+test proptest_admission ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.32s
+
+     Running tests/core_locator.rs (target/llvm-cov-target/debug/deps/core_locator-31d60ab090147c35)
+
+running 15 tests
+test ambiguity_is_absorbing_and_order_independent ... ok
+test every_kind_but_generated_snapshot_and_every_asset_is_reachable ... ok
+test hegel_property7_result_stable_under_unrelated_facts ... ok
+test hegel_property7_locate_total_and_countable ... ok
+test matrix_rows_match_independent_expectations ... ok
+test namespace_and_index_validation ... ok
+test namespaces_separate_roots_with_equal_names ... ok
+test non_claude_roots_ignore_claude_facts_and_foreign_layouts_map_nothing ... ok
+test oversized_ids_become_stable_valid_hashes ... ok
+test path_validation_rejects_without_echo ... ok
+test proptest_property7_locate_total_and_countable ... ok
+test proptest_property7_result_stable_under_unrelated_facts ... ok
+test hegel_property7_unmapped_paths_are_withheld ... ok
+test withhold_reasons_are_fixed_and_countable ... ok
+test proptest_property7_unmapped_paths_are_withheld ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+
+     Running tests/core_manifest.rs (target/llvm-cov-target/debug/deps/core_manifest-a68ff98fe4d6d064)
+
+running 23 tests
+test build_errors ... ok
+test apply_transition_rules ... ok
+test checkpoint_negative_fixtures ... ok
+test duplicate_key_scanner_covers_all_value_kinds ... ok
+test fold_rejects_broken_chains ... ok
+test delta_negative_fixtures ... ok
+test golden_checkpoint_delta_and_current ... ok
+test hegel_r2_dedup_winner_descriptor ... ok
+test hegel_roundtrip_of_arbitrary_valid_manifests ... ok
+test history_smoke_and_r3_checkpoint_sizes ... ok
+test projection_reads_positions_and_tolerates_other_fields ... ok
+test projection_rejects_inconsistent_envelopes ... ok
+test property6_coverage_guard_negative_controls_bite ... ok
+test hegel_deltas_from_checkpoint_equal_next_checkpoint has been running for over 60 seconds
+test proptest_deltas_from_checkpoint_equal_next_checkpoint has been running for over 60 seconds
+test hegel_deltas_from_checkpoint_equal_next_checkpoint ... ok
+test proptest_r2_dedup_winner_descriptor ... ok
+test proptest_roundtrip_of_arbitrary_valid_manifests ... ok
+test r2_both_orders ... ok
+test raw_document_rejections ... ok
+test schema_dispatch_is_typed ... ok
+test schemas_are_derivable_and_object_key_is_canonical ... ok
+test timestamp_validation ... ok
+test verify_encodings_reports_missing_and_mismatched ... ok
+test proptest_deltas_from_checkpoint_equal_next_checkpoint ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 210.79s
+
+     Running tests/core_mechanics.rs (target/llvm-cov-target/debug/deps/core_mechanics-39d8faf57e4977d5)
+
+running 11 tests
+test coalescer_config_wake_and_backwards_are_explicit ... ok
+test boundaries_strict_deserialization_and_dotted_wire_tags ... ok
+test hegel_property2_monotonic_quiet_cap_end ... ok
+test immediate_session_end_and_independent_owner_monotonic_clocks ... ok
+test owner_wire_goldens_and_schema_use_session_id_and_distinct_shared_coordinates ... ok
+test property1_coverage_guard_negative_controls_bite ... ok
+test property1_negative_control_disabled_window_check_must_fail - should panic ... ok
+test property3_repeat_has_zero_planned_capture_work_even_when_writer_version_changes ... ok
+test hegel_property1_independent_capture_and_eligible_audit has been running for over 60 seconds
+test proptest_property1_independent_capture_and_eligible_audit has been running for over 60 seconds
+test hegel_property1_independent_capture_and_eligible_audit ... ok
+test proptest_property1_independent_capture_and_eligible_audit ... ok
+test proptest_property2_monotonic_quiet_cap_end ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 129.83s
+
+     Running tests/core_planner.rs (target/llvm-cov-target/debug/deps/core_planner-1e5d737e4f1abc65)
+
+running 8 tests
+test adoption_requires_full_digest_then_can_extend_without_new_epoch ... ok
+test committed_deletion_repeat_and_snapshot_repeat_have_no_capture_work ... ok
+test every_append_table_branch_and_independent_evidence_request ... ok
+test full_audit_is_explicit_and_pinned_and_rules_are_not_writer_version ... ok
+test settled_same_size_changed_mtime_requires_windows_and_refreshes_stat ... ok
+test snapshot_audit_compares_transformed_bytes_even_when_fingerprint_is_stable ... ok
+test sqlite_db_and_wal_and_absence_are_each_part_of_snapshot_fingerprint ... ok
+test window_ranges_clamp_at_zero_and_old_committed_endpoint_without_overflow ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/parent_privacy_review.rs (target/llvm-cov-target/debug/deps/parent_privacy_review-c4b9088478482f73)
+
+running 6 tests
+test intermediate_credential_and_unknown_root_are_not_admitted ... ok
+test escaped_duplicate_config_keys_fail_closed_and_launch_prompt_is_dropped ... ok
+test malformed_selected_url_does_not_preserve_invalid_escape_literal ... ok
+test malformed_selected_url_does_not_preserve_invalid_port_literal ... ok
+test transformed_capability_cannot_be_rebound_to_a_protected_source ... ok
+test scrubbed_toml_retains_unrelated_datetime_type ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/privacy_coverage.rs (target/llvm-cov-target/debug/deps/privacy_coverage-cf0d9e10bfe0d404)
+
+running 12 tests
+test absent_rules_only_withhold_protected_profiles ... ok
+test collector_ancestor_alias_and_other_known_profile ... ok
+test fish_nonassignments_preserve_exact_bytes_as_in_go_text_fixtures ... ok
+test fish_unfinished_values_and_non_utf8_text_match_go_boundary ... ok
+test args_odd_shapes_and_header_references_keep_go_known_file_semantics ... ok
+test launch_empty_unknown_missing_and_duplicate_metadata ... ok
+test missing_observations_have_distinct_closed_outcomes ... ok
+test malformed_url_forms_never_escape_as_literals ... ok
+test selected_nested_shapes_redact_strings_not_json_primitives ... ok
+test toml_nested_arrays_preserve_native_values_when_strings_change ... ok
+test url_scrubbing_preserves_safe_spelling_and_reference_query_components ... ok
+test protected_depth_and_conservative_expansion_fail_closed ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/privacy_port.rs (target/llvm-cov-target/debug/deps/privacy_port-d250f811a6f887ca)
+
+running 14 tests
+test capability_binding_rejects_cross_source_cross_profile_and_changed_policy ... ok
+test codex_and_claude_all_rule_families_including_args_and_urls ... ok
+test all_eleven_names_all_agents_aliases_and_whole_document_digest ... ok
+test escaped_copies_nested_arrays_and_keys_are_not_lost ... ok
+test denied_identities_backups_collector_aliases_and_unknowns ... ok
+test native_launch_drops_prompt_secret_flags_and_nonexact_env ... ok
+test rejects_malformed_duplicates_unicode_trailing_and_nonobjects ... ok
+test rule_digest_golden_requires_explicit_semantic_review ... ok
+test rules_union_only_encountered_identities_and_supported_reference_syntax ... ok
+test text_guard_shell_fish_quotes_separators_and_negative_controls ... ok
+test toml_datetime_types_and_url_parser_parity ... ok
+test unrelated_json_numeric_lexemes_survive_rewrite ... ok
+test url_rewrite_preserves_safe_spelling_not_whatwg_normalization ... ok
+test generated_equivalent_copies_and_safe_negative_values ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.34s
+
+     Running tests/privacy_property.rs (target/llvm-cov-target/debug/deps/privacy_property-207acae5546b7389)
+
+running 2 tests
+test independent_inventory_exercises_every_family_and_credential_variant ... ok
+test hegel_generated_canaries_do_not_escape_pure_privacy_outputs ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.78s
+
+     Running tests/scaffold.rs (target/llvm-cov-target/debug/deps/scaffold-2245b7fd8a85ab4e)
+
+running 4 tests
+test checked_ranges_cover_edges ... ok
+test error_schema_roundtrip_rejects_unknown_fields ... ok
+test hegel_checked_ranges_match_independent_iterator_oracle ... ok
+test proptest_checked_ranges_match_independent_iterator_oracle ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running unittests src/lib.rs (target/llvm-cov-target/debug/deps/memory_reader-6c043ae5c90a1f2c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/llvm-cov-target/debug/deps/xtask-2ba62dc2237b25e3)
+
+running 1 test
+test tests::schemas_detect_missing_drift_and_roundtrip ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/cli.rs (target/llvm-cov-target/debug/deps/cli-ac1c2a8c7b2dd587)
+
+running 1 test
+test schema_cli_dispatches_and_rejects_unknown_commands ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+
+    Finished report saved to artifacts/coverage.json

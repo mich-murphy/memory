@@ -1,0 +1,25 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+   Doc-tests memory
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests memory_core
+
+running 6 tests
+test crates/memory-core/src/privacy/mod.rs - privacy (line 13) - compile fail ... ok
+test crates/memory-core/src/manifest.rs - manifest::LaunchRecord (line 486) - compile fail ... ok
+test crates/memory-core/src/privacy/mod.rs - privacy (line 19) - compile fail ... ok
+test crates/memory-core/src/privacy/mod.rs - privacy (line 22) - compile fail ... ok
+test crates/memory-core/src/privacy/mod.rs - privacy (line 5) - compile fail ... ok
+test crates/memory-core/src/privacy/mod.rs - privacy (line 9) - compile fail ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+
+   Doc-tests memory_reader
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

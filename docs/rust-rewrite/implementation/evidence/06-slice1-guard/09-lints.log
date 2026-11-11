@@ -1,0 +1,15 @@
+    Checking lint-check v0.0.0 (/Users/mm/dev/memory/rust/artifacts/lint-check)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+proved clippy::unwrap_used: compiler exit 101, matching diagnostic
+proved clippy::expect_used: compiler exit 101, matching diagnostic
+proved clippy::panic: compiler exit 101, matching diagnostic
+proved clippy::indexing_slicing: compiler exit 101, matching diagnostic
+proved clippy::todo: compiler exit 101, matching diagnostic
+proved clippy::dbg_macro: compiler exit 101, matching diagnostic
+proved clippy::print_stdout: compiler exit 101, matching diagnostic
+proved clippy::allow_attributes: compiler exit 101, matching diagnostic
+proved unsafe_code: compiler exit 101, matching diagnostic
+proved missing_docs: compiler exit 101, matching diagnostic
+proved clippy::missing_errors_doc: compiler exit 101, matching diagnostic
+proved unfulfilled_lint_expectations: compiler exit 101, matching diagnostic
+safe control: exit 0

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Current",
+  "description": "The commit pointer `current.json`.",
+  "type": "object",
+  "properties": {
+    "manifest": {
+      "description": "Hash of the current manifest.",
+      "$ref": "#/$defs/Sha256"
+    },
+    "schema": {
+      "description": "Schema tag.",
+      "$ref": "#/$defs/CurrentSchema"
+    },
+    "seq": {
+      "description": "Its sequence number.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "updated_at": {
+      "description": "Update time.",
+      "$ref": "#/$defs/Timestamp"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "manifest",
+    "seq",
+    "updated_at"
+  ],
+  "$defs": {
+    "CurrentSchema": {
+      "description": "Schema tag of `memory.current/1`.",
+      "oneOf": [
+        {
+          "description": "Version 1.",
+          "type": "string",
+          "const": "memory.current/1"
+        }
+      ]
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "Timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    }
+  }
+}

@@ -1,0 +1,4 @@
+   Compiling memory-core v0.1.0 (/Users/mm/dev/memory/rust/crates/memory-core)
+   Compiling xtask v0.1.0 (/Users/mm/dev/memory/rust/crates/xtask)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.99s
+     Running `target/debug/xtask schemas --check`

@@ -1,5 +1,11 @@
 # Session capture: implementation direction
 
+> **Status (2026-11-07):** the goals below remain authoritative. The mechanism sections
+> (spool, work queue, per-source job state, whole source-epoch snapshots as the upload
+> unit, walk-driven discovery) are superseded for the Rust rewrite by
+> [DESIGN.md](../DESIGN.md), which was chosen by measurement over this Mac's session
+> history. The Go candidate that implements this contract keeps running until cutover.
+
 **Status:** authoritative replacement requirements, not implementation or release
 evidence. For current deployment, qualification and next action, see the
 [current-session checkpoint](session-capture-handoff.md#current-session-checkpoint);
@@ -21,7 +27,7 @@ replacement requirements. Do not resume the old cold-recovery patch stack as the
 
 This permission is scoped to the archive replacement. It does not authorize deleting
 original sources, local research/classification evidence, credentials, identities, or
-privacy opt-outs. The permission itself is not evidence of a reset or deployment. Subsequent controlled
+privacy opt-outs, except as section 6 step 2 records for the retired session opt-out. The permission itself is not evidence of a reset or deployment. Subsequent controlled
 experimental installations are recorded in the handoff; documenting this direction does
 not authorize additional rollout, reset or deletion.
 
@@ -173,9 +179,10 @@ adding this document alone would not have added such a gate.
 
 1. Inventory eligible sources on this Mac and BC-01, including learned nondefault
    roots. Report skipped, excluded, unreadable, and unavailable content separately.
-2. Preserve distinct machine identities, effective local/remote exclusions and opt-outs,
-   learned roots, credentials, original sources, and local research evidence. An archive
-   reset must not silently re-enable excluded sessions.
+2. Preserve distinct machine identities, learned roots, credentials, original sources,
+   and local research evidence. Session opt-out is retired (operator decision
+   2026-11-07): the replacement does not implement it, and the existing opt-out record is
+   removed at cutover. Secret protections are not opt-outs and stay.
 3. Prove the new writer/reader/importer journey in an isolated namespace with a fresh
    archive identity/state binding. New roots must not depend on old shared blobs.
 4. Rebuild and reconcile both machines' available sources, then catch up ongoing work.
