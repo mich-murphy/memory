@@ -1,0 +1,4 @@
+    Checking memory-core v0.1.0 (/Users/mm/dev/memory/rust/crates/memory-core)
+    Checking xtask v0.1.0 (/Users/mm/dev/memory/rust/crates/xtask)
+    Checking memory-reader v0.1.0 (/Users/mm/dev/memory/rust/crates/memory-reader)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.73s

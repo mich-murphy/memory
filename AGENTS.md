@@ -2,9 +2,19 @@
 
 ## Start with the agreed direction
 
-Read [docs/session-capture-contract.md](docs/session-capture-contract.md) before capture,
-recovery, storage, reader, analytics, or rollout work. It is the authoritative replacement
-direction, not implementation or release evidence by itself. [docs/README.md](docs/README.md)
+For the Rust rewrite of session capture, read [DESIGN.md](DESIGN.md) first. It is the
+authoritative design, approved 2026-11-07, and its section 0 says what to read next and
+what not to take direction from. Its evidence is under
+[docs/rust-rewrite/](docs/rust-rewrite/). Where the contract, the handoff or Go code
+describe a mechanism that DESIGN.md replaces (spool, work queue, SQLite job tables,
+periodic walk as driver, whole-object upload), DESIGN.md wins. The contract's goals
+(session-local publication, immutable evidence, fail-closed privacy, idempotent
+at-least-once writes, one authoritative reader) still hold.
+
+For work on the running Go paths, read
+[docs/session-capture-contract.md](docs/session-capture-contract.md) before capture,
+recovery, storage, reader, analytics, or rollout work. It is the authoritative statement
+of goals, not implementation or release evidence by itself. [docs/README.md](docs/README.md)
 separates current implementation references from historical evidence. The opt-in offline
 candidate and passing development gates are recorded in the current handoff and
 [docs/session-capture-offline-evidence.md](docs/session-capture-offline-evidence.md);
@@ -12,10 +22,13 @@ legacy defaults remain until controlled acceptance/cutover.
 For continuation, read [docs/session-capture-handoff.md](docs/session-capture-handoff.md)
 and update its progress ledger with implemented work, exact checks, and the next action.
 
-- Build independent session capture with a durable spool/work queue, per-source progress,
-  autonomous bounded retries, and explicit quarantine/coverage/freshness.
-- Start with complete source-epoch snapshots and complete manifests. Chunking is an
-  optional measured optimization, not a requirement to replay collector history.
+- Go candidate (frozen, running until cutover): independent session capture with a durable
+  spool/work queue, per-source progress, bounded retries, explicit quarantine.
+- Rust rewrite (DESIGN.md, final 2026-11-07): append pieces per session window, delta
+  manifests with checkpoints, no spool or job tables, hooks and filesystem notifications
+  with a slow safety reconcile, strict schemas, small classified local state (section 9),
+  plaintext storage in a fresh shared bucket, no migration of existing R2 data. Measured,
+  not assumed; rerun the experiment scripts before changing a number.
 - Use one authoritative storage reader for restore and analytics. Release acceptance
   includes actual writer output -> reader -> importer -> event index -> report.
 - Do not resume the old concurrent-cold-recovery/pruned-piece patch stack or add retired
@@ -25,8 +38,10 @@ and update its progress ledger with implemented work, exact checks, and the next
 - The operator permits replacing R2 from sources on this Mac and BC-01. Follow the
   controlled inventory/validation/cutover/deletion sequence; permission is not evidence
   that local sources contain every old byte, or that any reset has happened.
-- Preserve identities, effective privacy exclusions, learned custom roots, original
-  sources, and local research evidence. Never print credentials or private transcripts.
+- Preserve identities, learned custom roots, original sources, local research evidence,
+  and the secret protections (credential denylist, config scrubbing, argv allowlist).
+  Session opt-out is retired (operator decision 2026-11-07, see README). Never print
+  credentials or private transcripts.
 
 ## Delivery ownership
 

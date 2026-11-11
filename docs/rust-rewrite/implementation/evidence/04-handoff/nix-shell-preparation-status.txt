@@ -1,0 +1,1 @@
+tool timeout after 60s while preparing Nix dependencies; verification commands not reached

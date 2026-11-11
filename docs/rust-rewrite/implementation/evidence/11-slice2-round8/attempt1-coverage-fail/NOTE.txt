@@ -1,0 +1,1 @@
+Attempt 1 (seed 730208): only 08-coverage failed, 4873/4988 = 97.6945% (floor 98%, 16 lines short). New gaps: capture.rs 25, daemon.rs 25, realfs.rs 7 uncovered lines. Floor unchanged; test-only workers dispatched.

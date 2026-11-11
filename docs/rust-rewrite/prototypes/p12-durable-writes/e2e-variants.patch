@@ -1,0 +1,65 @@
+--- /Users/mm/dev/memory/rust/crates/memory/src/state.rs	2026-11-09 03:22:19.295559394 +1100
++++ /private/tmp/claude-501/-Users-mm-dev-memory/3f584787-501e-4ec6-ad81-408fa14b5f75/scratchpad/rust-p10v/crates/memory/src/state.rs	2026-11-09 12:50:03.287941268 +1100
+@@ -407,8 +407,21 @@
+ 
+ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+ 
++unsafe extern "C" {
++    fn fcntl(fd: i32, cmd: i32, ...) -> i32;
++}
++fn p10_sync(f: &File) -> std::io::Result<()> {
++    use std::os::unix::io::AsRawFd;
++    match std::env::var("P10_SYNC").as_deref() {
++        Ok("none") => Ok(()),
++        Ok("plain") => { if unsafe { libc_fsync(f.as_raw_fd()) } == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) } }
++        Ok("barrier") => { if unsafe { fcntl(f.as_raw_fd(), 85) } == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) } }
++        _ => f.sync_all(),
++    }
++}
++unsafe extern "C" { #[link_name = "fsync"] pub safe fn libc_fsync(fd: i32) -> i32; }
+ fn fsync_dir(dir: &Path) -> Result<(), StateError> {
+-    File::open(dir).and_then(|d| d.sync_all()).map_err(io)
++    File::open(dir).and_then(|d| p10_sync(&d)).map_err(io)
+ }
+ 
+ fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+@@ -418,7 +431,7 @@
+         .mode(0o600)
+         .open(path)?;
+     file.write_all(bytes)?;
+-    file.sync_all()
++    p10_sync(&file)
+ }
+ 
+ /// A temporary file written and fsynced but not yet published (steps 1 and 2). Dropping it
+@@ -497,6 +510,19 @@
+     schema: Schema,
+     body: &[u8],
+ ) -> Result<(), StateError> {
++    if std::env::var("P10_SKIP").is_ok() {
++        use std::collections::HashMap;
++        use std::sync::Mutex;
++        static LAST: Mutex<Option<HashMap<PathBuf, Vec<u8>>>> = Mutex::new(None);
++        let key = dir.join(name);
++        let digest = Sha256::digest(body).to_vec();
++        let mut g = LAST.lock().unwrap();
++        let m = g.get_or_insert_with(HashMap::new);
++        if m.get(&key) == Some(&digest) && key.exists() { return Ok(()); }
++        stage(dir, name, schema, body)?.publish()?;
++        m.insert(key, digest);
++        return Ok(());
++    }
+     stage(dir, name, schema, body)?.publish()
+ }
+ 
+--- /Users/mm/dev/memory/rust/Cargo.toml	2026-11-08 00:25:35.112965608 +1100
++++ /private/tmp/claude-501/-Users-mm-dev-memory/3f584787-501e-4ec6-ad81-408fa14b5f75/scratchpad/rust-p10v/Cargo.toml	2026-11-09 12:42:35.092560970 +1100
+@@ -27,7 +27,7 @@
+ notify = "=8.2.0"
+ 
+ [workspace.lints.rust]
+-unsafe_code = "forbid"
++unsafe_code = "allow"
+ missing_docs = "warn"
+ unfulfilled_lint_expectations = "deny"
+ 

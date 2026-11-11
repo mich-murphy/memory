@@ -1,0 +1,6 @@
+ssh-probe	127
+scratch-create	0
+transfer	0
+remote-input-hashes	0
+native-nix-hegel	0
+collect	0

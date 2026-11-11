@@ -1,0 +1,11 @@
+HEGEL_SEED=730052 PROPTEST_RNG_SEED=730052 CASES=2000
+01-fmt	0
+02-clippy	0
+03-deny	0
+03-core-bans	0
+04-nextest	0
+05-hegel	0
+06-proptest	0
+07-schema	0
+08-coverage	0
+09-lints	0

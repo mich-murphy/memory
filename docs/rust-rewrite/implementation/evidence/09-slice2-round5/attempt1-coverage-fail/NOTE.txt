@@ -1,0 +1,1 @@
+Attempt 1 (seed 730205): 08-coverage failed at 3515/3624 = 96.9923% (floor 98%). Cause: tests/hook.rs spawned the binary with env_clear(), dropping LLVM_PROFILE_FILE, so subprocess coverage was lost. Parent fix: pass LLVM_PROFILE_FILE only. Floor unchanged.

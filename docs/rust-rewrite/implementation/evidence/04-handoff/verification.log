@@ -1,0 +1,10 @@
+Python 3.14.8
+PASS: 29 unchanged baseline identities, 4 exact authorized documentation revisions, and source-bound deterministic prototype outcomes
+Not a Rust implementation, native footprint, R2 or release acceptance gate
+PASS: recorded current docs and frozen evidence; verifier exit 0
+PASS: reject unrecorded change to DESIGN.md; verifier exit 1
+PASS: reject unrecorded change to README.md; verifier exit 1
+PASS: reject design exception in documentation ledger; verifier exit 1
+PASS: reject unrelated original-document baseline; verifier exit 1
+PASS: restored scratch fixture; verifier exit 0
+All six checks passed; repository inputs were never modified.

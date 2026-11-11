@@ -1,0 +1,282 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HintRecord",
+  "description": "One owned hint line. Strict: unknown fields and other versions are rejected.",
+  "type": "object",
+  "properties": {
+    "agent": {
+      "description": "Agent.",
+      "$ref": "#/$defs/Agent"
+    },
+    "agent_transcript": {
+      "description": "Subagent transcript path hint.",
+      "$ref": "#/$defs/PathHint"
+    },
+    "cwd": {
+      "description": "Working directory hint.",
+      "$ref": "#/$defs/PathHint"
+    },
+    "event": {
+      "description": "Event.",
+      "$ref": "#/$defs/HintEvent"
+    },
+    "launch": {
+      "description": "Launch evidence.",
+      "$ref": "#/$defs/LaunchHint"
+    },
+    "reduction": {
+      "description": "What was dropped to fit the size bound.",
+      "$ref": "#/$defs/Reduction"
+    },
+    "schema": {
+      "description": "Schema tag; keep this the first field so [`scan`] can resynchronise.",
+      "$ref": "#/$defs/HintSchema"
+    },
+    "session": {
+      "description": "Session.",
+      "$ref": "#/$defs/SessionId"
+    },
+    "transcript": {
+      "description": "Transcript path hint.",
+      "$ref": "#/$defs/PathHint"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "agent",
+    "event",
+    "session",
+    "cwd",
+    "transcript",
+    "agent_transcript",
+    "launch",
+    "reduction"
+  ],
+  "$defs": {
+    "Agent": {
+      "description": "Agent namespace.",
+      "oneOf": [
+        {
+          "description": "Claude agent.",
+          "type": "string",
+          "const": "claude"
+        },
+        {
+          "description": "Codex agent.",
+          "type": "string",
+          "const": "codex"
+        },
+        {
+          "description": "Pi agent.",
+          "type": "string",
+          "const": "pi"
+        }
+      ]
+    },
+    "HintEvent": {
+      "description": "Closed set of hook events, normalised across agents.",
+      "oneOf": [
+        {
+          "description": "Session started (launch evidence).",
+          "type": "string",
+          "const": "session_start"
+        },
+        {
+          "description": "A turn ended (Claude/Codex `Stop`, Pi `agent_settled`); debounced.",
+          "type": "string",
+          "const": "turn_end"
+        },
+        {
+          "description": "A turn ended on an API error (Claude `StopFailure`).",
+          "type": "string",
+          "const": "turn_failed"
+        },
+        {
+          "description": "A subagent stopped.",
+          "type": "string",
+          "const": "subagent_stop"
+        },
+        {
+          "description": "Before compaction rewrites the context.",
+          "type": "string",
+          "const": "pre_compact"
+        },
+        {
+          "description": "An agent-team task completed.",
+          "type": "string",
+          "const": "task_completed"
+        },
+        {
+          "description": "An agent-team teammate went idle.",
+          "type": "string",
+          "const": "teammate_idle"
+        },
+        {
+          "description": "Session ended (Claude `SessionEnd`, Codex `session_end`, Pi `session_shutdown`).",
+          "type": "string",
+          "const": "session_end"
+        },
+        {
+          "description": "The user interrupted a turn (Codex `Interrupt`). The session may continue.",
+          "type": "string",
+          "const": "interrupted"
+        }
+      ]
+    },
+    "HintPath": {
+      "type": "string",
+      "maxLength": 1024,
+      "minLength": 1,
+      "pattern": "^/"
+    },
+    "HintSchema": {
+      "description": "The only schema tag we write; any other value is not this schema.",
+      "oneOf": [
+        {
+          "description": "`memory.hint/1`.",
+          "type": "string",
+          "const": "memory.hint/1"
+        }
+      ]
+    },
+    "LaunchHint": {
+      "description": "Launch evidence carried by a hint line.",
+      "oneOf": [
+        {
+          "description": "The hook carried no launch evidence.",
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "none"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "state"
+          ]
+        },
+        {
+          "description": "Content dropped to fit the size bound; the digest still names it.",
+          "type": "object",
+          "properties": {
+            "digest": {
+              "description": "Digest of the dropped launch record.",
+              "$ref": "#/$defs/Sha256"
+            },
+            "state": {
+              "type": "string",
+              "const": "digest_only"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "digest"
+          ]
+        },
+        {
+          "description": "Full sanitized launch evidence.",
+          "type": "object",
+          "properties": {
+            "argv": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "digest": {
+              "$ref": "#/$defs/Sha256"
+            },
+            "env": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "state": {
+              "type": "string",
+              "const": "full"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "digest",
+            "argv",
+            "env"
+          ]
+        }
+      ]
+    },
+    "PathHint": {
+      "description": "A path coordinate that may be absent (sum type instead of `Option`).",
+      "oneOf": [
+        {
+          "description": "The hook did not name a usable path.",
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "absent"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "state"
+          ]
+        },
+        {
+          "description": "A validated path coordinate.",
+          "type": "object",
+          "properties": {
+            "path": {
+              "description": "The coordinate.",
+              "$ref": "#/$defs/HintPath"
+            },
+            "state": {
+              "type": "string",
+              "const": "present"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "path"
+          ]
+        }
+      ]
+    },
+    "Reduction": {
+      "description": "What the builder dropped to respect the size bound.",
+      "oneOf": [
+        {
+          "description": "Nothing dropped.",
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "description": "Launch argv/env dropped, digest kept.",
+          "type": "string",
+          "const": "launch_dropped"
+        },
+        {
+          "description": "Launch argv/env and all path hints dropped.",
+          "type": "string",
+          "const": "paths_dropped"
+        }
+      ]
+    },
+    "SessionId": {
+      "type": "string",
+      "maxLength": 1024,
+      "minLength": 1,
+      "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._:-]+$"
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

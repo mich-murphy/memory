@@ -2,16 +2,76 @@
 
 > **Scope (2026-10-23):** The development gates below remain applicable, but passing them is not end-to-end publication acceptance. The agreed [session-capture contract](session-capture-contract.md) also requires writer-generated fixtures through one authoritative reader shared by restore and analytics, exact source/epoch/body coverage, idempotent import and report freshness. Unsupported formats must fail explicitly rather than produce a successful-empty refresh. Existing all-generation recovery fixtures describe v3, not a legacy-compatibility requirement for the replacement.
 
-The CI workflow configures development gates on each push and pull request; local `make` targets are listed below. Mutation testing and repeated benchmarks are opt-in diagnostics, not CI gates. Workflow configuration is not evidence that hosted CI ran successfully. The rule behind the settings: **a check is a hard gate only if fixing what it flags always makes the code better.** Bug, safety and error-handling checks pass that test. Size and style metrics don't, because the cheapest way to satisfy them is often an arbitrary split or rename, so they are either off or set high enough to act as backstops.
+The CI workflow configures development gates on each push and pull request; local `make` targets are listed below. Go mutation campaigns and repeated benchmarks are opt-in diagnostics, not CI gates; the Rust actual-window-mutation check below is mandatory. Workflow configuration is not evidence that hosted CI ran successfully. The rule behind the settings: **a check is a hard gate only if fixing what it flags always makes the code better.** Bug, safety and error-handling checks pass that test. Size and style metrics don't, because the cheapest way to satisfy them is often an arbitrary split or rename, so they are either off or set high enough to act as backstops.
 
-The mandatory opt-in v2 writer → shared reader → importer → event index → report
-gate is part of development checks, not native/R2/two-machine acceptance. See
+The mandatory Go opt-in v2 writer → shared reader → importer → event index → report
+gate is part of Go development checks, not native/R2/two-machine or Rust acceptance. See
 [dated offline evidence](session-capture-offline-evidence.md) for historical results
 and the [current handoff](session-capture-handoff.md#current-session-checkpoint) for
 checkout qualification, deployment and next action. Defaults remain legacy; do not
 weaken release gates.
 
 The research behind these choices (tool versions, the configs of 13 well-regarded Go projects, and each tool's docs) is in the project's `research/collector-language/go-tooling.md`.
+
+## Rust rewrite gates (implementation in progress)
+
+The Rust workspace is under `rust/`; [DESIGN.md](../DESIGN.md) sections 14–17
+specify its additional gates. These do not replace any Go or release acceptance
+checks below. Current evidence and ownership are in the
+[active handoff](session-capture-handoff.md#rust-implementation-delivery--active-coordinator-brief)
+and [`rust-rewrite/implementation/`](rust-rewrite/implementation/).
+
+Run the Rust gate wrapper in the pinned Nix shell, with bounded native parallelism:
+
+```sh
+nix develop --max-jobs 2 --cores 2 --command sh -c \
+  'cd rust && PROPERTY_CASES=2000 bash scripts/gates.sh'
+```
+
+Hosted CI runs the same command in the Rust-only `.#rust` shell (`flake.nix`), which carries the same pinned Rust tools and environment as the default shell without the Go and release tooling, so the runner downloads less.
+
+The wrapper runs format, strict clippy, dependency/license/security and pure-core
+dependency bans, nextest, compile-fail doctests, Hegel (every `hegel_` test in the workspace), proptest (every `proptest_` test in the workspace), the actual production
+window-comparison mutation, the three-invariant mutation check (`scripts/check-mutations.py`: a blind/latest-ETag `If-Match`, a local index advanced after a commit that did not land, and a skipped credential denylist, each applied once to production source in one private copy and required to fail an independent-oracle test; see `crates/memory/tests/mutation_daemon.rs`), schema drift (the xtask cli test no longer writes schemas, so `cargo xtask schemas --check` can fail), coverage and the deliberate-lint checker. It records seeds and each command's exact status under `rust/artifacts/`;
+a failed or unavailable gate makes the aggregate fail. CI uses at least 500 cases,
+local slice acceptance requires 2,000. A scaffold/property pass is not proof of
+the daemon, real R2 semantics, privacy at the actual store sink, restore/import,
+footprint, or the two seven-day native shadows. The line-coverage floor is a fixed
+**80%** backstop ([amendment A9](rust-rewrite/design-amendments-20261109.md), 2026-11-09),
+not a ratchet of the latest measurement; evidence for invariants comes from the
+independent-oracle properties, their coverage guards and the production mutation checks.
+It is never lowered to make a run pass. The earlier 98% floor was the scaffold's first
+measurement. The latest source-bound integrated run (review and fix round, 2026-11-10,
+`d8e80a6`) passed all 13 subgates at **97.03%** (5,595/5,766 lines), 391/391 nextest (before the 2026-11-10 test review removed 24 tests and merged 9; not re-counted), 12
+compile-fail doctests, 2,000 cases, seed 730213; see
+[its evidence](rust-rewrite/implementation/evidence/13-review-fix-round/). Gate 8
+(98.3173%, seed 730210, [round 10](rust-rewrite/implementation/evidence/12-slice2-round10/))
+is superseded. Under `gates.sh` the two mutation scripts share one temporary target
+directory (`MEMORY_MUTATION_TARGET`), so the second does not rebuild dependencies; this kept
+the macOS job inside its unchanged 30-minute limit.
+At 2,000 cases the two daemon state-machine properties took about 6 minutes because every
+simulated round did real `F_FULLFSYNC` writes. Amendment A7 is implemented on
+`rust/sync-policy`: only those two properties select `SyncPolicy::None` and now take about
+14–20 s; every other test and the binary keep `Full`. Hosted CI (`.github/workflows/rust.yml`,
+500 cases, random seed) runs `scripts/gates.sh` on every branch of stack #56. Ad-hoc coverage runs at low case counts fail the property coverage guards by
+design; use 2,000 cases or `--ignore-run-fail` and say so.
+The [final-toolchain BC probe](rust-rewrite/implementation/evidence/03-bc-recheck/README.md)
+also passed, on native x86_64. Neither result proves hosted CI or full release
+acceptance; changed source requires relevant revalidation.
+
+Focused examples (also run inside the Nix shell):
+
+```sh
+cd rust
+cargo test --locked -p memory-core --test parent_privacy_review -- --test-threads=2
+cargo test --locked -p memory-core --doc
+cargo xtask schemas --check
+```
+
+The official Rust toolchain is separately pinned through `rust-overlay`; the
+existing nixpkgs/Go dependency pin is preserved. This avoids the independently
+reproduced profiling-runtime failure of the original locked nixpkgs Rust build;
+it is not permission to skip coverage or use an unpinned host compiler.
 
 ## Commands
 

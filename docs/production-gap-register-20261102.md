@@ -1,5 +1,12 @@
 # Production gap register — November 2
 
+> **Historical Go evidence, not current instructions.** The dated source/deployment
+> statements and links below describe their original checkpoints. Current ownership,
+> authority, verification and next actions are in the
+> [active handoff](session-capture-handoff.md#current-session-checkpoint).
+> [DESIGN.md section 0](../DESIGN.md#0-start-here-in-a-fresh-session) governs Rust work;
+> do not resume the old gap stack or infer current host health from this register.
+
 **Source:** `main` = `2deac62` (PR31 merged). **Status:** offline source analysis and
 experiments only. No production code was changed, nothing was deployed, and no live R2,
 BC-01, installed host or original session was touched. This register records confirmed
@@ -14,6 +21,12 @@ gap GAP-01…GAP-11 has resolving commits on the unpublished branch `gap/integra
 per-gap commit table, the evidence and the items not run or not proven are in the
 [handoff](session-capture-handoff.md#gap-resolution-delivery--november-2). Nothing has
 been pushed, deployed or run against live R2.
+
+**Update (2026-11-05):** the gap work merged as stack #39 (`d975961`), followed by the
+step-3 fixes (#46 `f94670a`) and the live-operation fixes #47–#53 (`main` = `57d8400`).
+That source ran on the Mac and BC-01 until 2026-11-09, when its capture daemons were
+stopped and its R2 prefixes deleted by operator instruction. For operating status, use the
+handoff's [resume-here checkpoint](session-capture-handoff.md#november-6-2057z-nov-5-resume-here).
 
 Private evidence root (not in the repository):
 `~/.local/state/machines-validation-pilot/memory-analysis-20261102/`. It contains the

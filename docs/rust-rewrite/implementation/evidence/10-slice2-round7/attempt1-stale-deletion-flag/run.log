@@ -1,0 +1,74 @@
+HEGEL_SEED=730207 PROPTEST_RNG_SEED=730207 CASES=2000
+01-fmt	0
+02-clippy	0
+03-deny	0
+03-core-bans	0
+04-nextest	100
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1168:13:
+    final settle: Err("liveness: removed source not recorded deleted")
+
+    thread 'proptest_property4_capture_state_machine' (352407043) panicked at crates/memory/tests/capture_property.rs:1184:5:
+    Err(Fail(Reason("final settle: Err(\"liveness: removed source not recorded deleted\")"), (Reference { files: {}, history: {}, foreign_seen: false }, [Append { src: 0, seed: 0, n: 1 }, Reconcile, RemoveSource { src: 0 }, Settle, Append { src: 0, seed: 0, n: 1 }, CommittedReplyLost { then_offline: true }, RemoveSource { src: 0 }], None)))
+
+warning: 274/291 tests were not run due to test failure (run with --no-fail-fast to run all tests, or run with --max-fail)
+error: test run failed
+04-doctests	0
+05-hegel	0
+06-proptest	0
+06-window-mutation	0
+07-schema	0
+08-coverage	101
+
+thread 'proptest_property4_capture_state_machine' (352451417) panicked at crates/memory/tests/capture_property.rs:1168:13:
+final settle: Err("liveness: removed source not recorded deleted")
+
+thread 'proptest_property4_capture_state_machine' (352451417) panicked at crates/memory/tests/capture_property.rs:1168:13:
+final settle: Err("liveness: removed source not recorded deleted")
+
+thread 'proptest_property4_capture_state_machine' (352451417) panicked at crates/memory/tests/capture_property.rs:1168:13:
+final settle: Err("liveness: removed source not recorded deleted")
+
+thread 'proptest_property4_capture_state_machine' (352451417) panicked at crates/memory/tests/capture_property.rs:1168:13:
+final settle: Err("liveness: removed source not recorded deleted")
+
+thread 'proptest_property4_capture_state_machine' (352451417) panicked at crates/memory/tests/capture_property.rs:1168:13:
+final settle: Err("liveness: removed source not recorded deleted")
+
+thread 'proptest_property4_capture_state_machine' (352451417) panicked at crates/memory/tests/capture_property.rs:1168:13:
+final settle: Err("liveness: removed source not recorded deleted")
+
+thread 'proptest_property4_capture_state_machine' (352451417) panicked at crates/memory/tests/capture_property.rs:1184:5:
+Err(Fail(Reason("final settle: Err(\"liveness: removed source not recorded deleted\")"), (Reference { files: {}, history: {}, foreign_seen: false }, [Append { src: 0, seed: 0, n: 1 }, Reconcile, RemoveSource { src: 0 }, Settle, Append { src: 0, seed: 0, n: 1 }, CommittedReplyLost { then_offline: true }, RemoveSource { src: 0 }], None)))
+
+
+failures:
+    proptest_property4_capture_state_machine
+
+test result: FAILED. 5 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 25.81s
+
+error: test failed, to rerun pass `-p memory --test capture_property`
+error: process didn't exit successfully: `/nix/store/4vyfjnmkfbm74z7751smnsxgyqiqqqvl-cargo-1.99.0-aarch64-apple-darwin/bin/cargo test --tests --manifest-path /Users/mm/dev/memory/rust/Cargo.toml --target-dir /Users/mm/dev/memory/rust/target/llvm-cov-target --workspace --locked -- --test-threads=2` (exit status: 101)
+09-lints	0
+exit=1
