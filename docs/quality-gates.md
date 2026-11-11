@@ -46,7 +46,8 @@ measurement. The latest source-bound integrated run (review and fix round, 2026-
 compile-fail doctests, 2,000 cases, seed 730213; see
 [its evidence](rust-rewrite/implementation/evidence/13-review-fix-round/). Gate 8
 (98.3173%, seed 730210, [round 10](rust-rewrite/implementation/evidence/12-slice2-round10/))
-is superseded. Under `gates.sh` the two mutation scripts share one temporary target
+is superseded. After the design and test review (2026-11-11, `main` at `c239d1b`,
+[report 24](rust-rewrite/implementation/24-design-and-test-review.md)) the gates passed at 500 cases, seed 3481505894, 431 tests, **97.72%** (5,840/5,976 lines); that run was not repeated at 2,000 cases. Under `gates.sh` the two mutation scripts share one temporary target
 directory (`MEMORY_MUTATION_TARGET`), so the second does not rebuild dependencies; this kept
 the macOS job inside its unchanged 30-minute limit.
 At 2,000 cases the two daemon state-machine properties took about 6 minutes because every

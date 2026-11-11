@@ -1,0 +1,374 @@
+crates/memory/src/main.rs:6:5: replace main -> ExitCode with Default::default()
+crates/memory/src/main.rs:15:23: replace match guard word == "daemon" with true in main
+crates/memory/src/main.rs:8:23: replace match guard word == "hook" with true in main
+crates/memory/src/main.rs:8:23: replace match guard word == "hook" with false in main
+crates/memory/src/main.rs:15:23: replace match guard word == "daemon" with false in main
+crates/memory/src/main.rs:8:28: replace == with != in main
+crates/memory/src/capture.rs:47:45: replace * with +
+crates/memory/src/main.rs:15:28: replace == with != in main
+crates/memory/src/capture.rs:47:45: replace * with /
+crates/memory/src/capture.rs:47:38: replace * with +
+crates/memory/src/capture.rs:47:38: replace * with /
+crates/memory/src/capture.rs:100:9: replace Update::apply with ()
+crates/memory/src/capture.rs:184:19: delete ! in capture
+crates/memory/src/capture.rs:209:5: replace attach_launches -> Result<(), ManifestError> with Ok(())
+crates/memory/src/capture.rs:217:33: replace == with != in attach_launches
+crates/memory/src/capture.rs:218:12: delete ! in attach_launches
+crates/memory/src/capture.rs:240:5: replace hash_span -> Option<Sha256> with None
+crates/memory/src/capture.rs:246:5: replace windows_of -> Option<WindowEvidence> with None
+crates/memory/src/capture.rs:261:5: replace read_checked -> Result<Vec<u8>, SourceOutcome> with Ok(vec![])
+crates/memory/src/capture.rs:261:5: replace read_checked -> Result<Vec<u8>, SourceOutcome> with Ok(vec![0])
+crates/memory/src/capture.rs:265:35: replace == with != in read_checked
+crates/memory/src/capture.rs:261:5: replace read_checked -> Result<Vec<u8>, SourceOutcome> with Ok(vec![1])
+crates/memory/src/capture.rs:282:5: replace stream_span -> Result<Vec<u8>, SourceOutcome> with Ok(vec![])
+crates/memory/src/capture.rs:282:5: replace stream_span -> Result<Vec<u8>, SourceOutcome> with Ok(vec![0])
+crates/memory/src/capture.rs:282:5: replace stream_span -> Result<Vec<u8>, SourceOutcome> with Ok(vec![1])
+crates/memory/src/capture.rs:284:28: replace < with == in stream_span
+crates/memory/src/capture.rs:284:28: replace < with > in stream_span
+crates/memory/src/capture.rs:297:12: replace > with == in stream_span
+crates/memory/src/capture.rs:297:12: replace > with < in stream_span
+crates/memory/src/capture.rs:298:50: replace - with + in stream_span
+crates/memory/src/capture.rs:298:50: replace - with / in stream_span
+crates/memory/src/capture.rs:299:38: replace - with + in stream_span
+crates/memory/src/capture.rs:299:38: replace - with / in stream_span
+crates/memory/src/capture.rs:519:22: replace == with != in Job<'_>::write
+crates/memory/src/capture.rs:479:9: replace Job<'_>::write -> Result<(), SourceOutcome> with Ok(())
+crates/memory/src/capture.rs:541:9: replace Job<'_>::resume_state -> Option<Sha256State> with None
+crates/memory/src/capture.rs:542:48: replace match guard self.admitted.prefix_stable() && from <= to with false in Job<'_>::resume_state
+crates/memory/src/capture.rs:542:48: replace match guard self.admitted.prefix_stable() && from <= to with true in Job<'_>::resume_state
+crates/memory/src/capture.rs:542:78: replace && with || in Job<'_>::resume_state
+crates/memory/src/capture.rs:542:86: replace <= with > in Job<'_>::resume_state
+crates/memory/src/capture.rs:570:18: replace < with == in Job<'_>::slice
+crates/memory/src/capture.rs:567:9: replace Job<'_>::slice -> Result<Vec<Piece>, SourceOutcome> with Ok(vec![])
+crates/memory/src/capture.rs:570:18: replace < with > in Job<'_>::slice
+crates/memory/src/capture.rs:570:18: replace < with <= in Job<'_>::slice
+crates/memory/src/capture.rs:601:9: replace Job<'_>::whole_state_of -> Option<Sha256State> with None
+crates/memory/src/capture.rs:777:41: replace == with != in append
+crates/memory/src/capture.rs:791:9: delete match arm Plan::Append{from, ..} in append
+crates/memory/src/capture.rs:804:9: delete match arm Plan::Replay{..} in append
+crates/memory/src/capture.rs:795:60: replace == with != in append
+crates/memory/src/capture.rs:800:50: replace == with != in append
+crates/memory/src/commit.rs:124:9: replace Failure::commit_outcome -> Option<CommitOutcome> with None
+crates/memory/src/commit.rs:125:13: delete match arm Self::BaseUnchanged in Failure::commit_outcome
+crates/memory/src/commit.rs:126:13: delete match arm Self::Foreign{theirs, ..} in Failure::commit_outcome
+crates/memory/src/commit.rs:127:13: delete match arm Self::NewerSchema in Failure::commit_outcome
+crates/memory/src/commit.rs:149:9: replace Failure::retry_after -> Option<Duration> with None
+crates/memory/src/commit.rs:150:13: delete match arm Self::Throttled{retry_after} in Failure::retry_after
+crates/memory/src/commit.rs:156:9: replace Failure::base_may_be_stale -> bool with true
+crates/memory/src/commit.rs:156:9: replace Failure::base_may_be_stale -> bool with false
+crates/memory/src/commit.rs:200:5: replace check_fence -> Result<(), Failure> with Ok(())
+crates/memory/src/commit.rs:204:17: replace == with != in check_fence
+crates/memory/src/commit.rs:227:27: replace == with != in newer_or_corrupt
+crates/memory/src/commit.rs:235:5: replace length -> u64 with 0
+crates/memory/src/commit.rs:235:5: replace length -> u64 with 1
+crates/memory/src/commit.rs:239:5: replace adopt_winner with ()
+crates/memory/src/commit.rs:257:5: replace upload_pieces -> Result<(), Failure> with Ok(())
+crates/memory/src/commit.rs:289:5: replace verify -> Result<Option<Verdict>, Failure> with Ok(None)
+crates/memory/src/commit.rs:305:33: replace == with != in verify
+crates/memory/src/commit.rs:316:24: replace < with == in verify
+crates/memory/src/commit.rs:316:24: replace < with > in verify
+crates/memory/src/commit.rs:316:24: replace < with <= in verify
+crates/memory/src/commit.rs:316:20: replace + with - in verify
+crates/memory/src/commit.rs:316:20: replace + with * in verify
+crates/memory/src/commit.rs:320:13: replace == with != in verify
+crates/memory/src/commit.rs:328:5: replace put_document -> Result<(), Failure> with Ok(())
+crates/memory/src/commit.rs:440:17: replace += with -= in commit_known
+crates/memory/src/commit.rs:440:17: replace += with *= in commit_known
+crates/memory/src/commit.rs:441:20: replace > with == in commit_known
+crates/memory/src/commit.rs:441:20: replace > with < in commit_known
+crates/memory/src/commit.rs:441:20: replace > with >= in commit_known
+crates/memory/src/commit.rs:459:5: replace recover_base -> Result<Option<Base>, Failure> with Ok(None)
+crates/memory/src/commit.rs:478:34: replace != with == in recover_base
+crates/memory/src/commit.rs:491:31: replace || with && in recover_base
+crates/memory/src/commit.rs:491:21: replace != with == in recover_base
+crates/memory/src/commit.rs:491:59: replace != with == in recover_base
+crates/memory/src/config.rs:12:37: replace << with >>
+crates/memory/src/config.rs:62:9: replace ConfigError::code -> &'static str with ""
+crates/memory/src/config.rs:62:9: replace ConfigError::code -> &'static str with "xyzzy"
+crates/memory/src/config.rs:99:5: replace default_quiet -> u64 with 0
+crates/memory/src/config.rs:99:5: replace default_quiet -> u64 with 1
+crates/memory/src/config.rs:102:5: replace default_cap -> u64 with 0
+crates/memory/src/config.rs:102:5: replace default_cap -> u64 with 1
+crates/memory/src/config.rs:154:5: replace valid_bucket -> bool with false
+crates/memory/src/config.rs:155:48: replace || with && in valid_bucket
+crates/memory/src/config.rs:154:5: replace valid_bucket -> bool with true
+crates/memory/src/config.rs:159:9: replace && with || in valid_bucket
+crates/memory/src/config.rs:158:9: replace && with || in valid_bucket
+crates/memory/src/config.rs:159:41: replace || with && in valid_bucket
+crates/memory/src/config.rs:159:47: replace == with != in valid_bucket
+crates/memory/src/config.rs:157:9: replace && with || in valid_bucket
+crates/memory/src/config.rs:171:12: delete ! in Config::parse
+crates/memory/src/config.rs:175:18: replace == with != in Config::parse
+crates/memory/src/config.rs:175:38: replace || with && in Config::parse
+crates/memory/src/config.rs:175:23: replace || with && in Config::parse
+crates/memory/src/config.rs:175:30: replace < with > in Config::parse
+crates/memory/src/config.rs:175:30: replace < with == in Config::parse
+crates/memory/src/config.rs:175:45: replace > with < in Config::parse
+crates/memory/src/config.rs:175:45: replace > with == in Config::parse
+crates/memory/src/config.rs:181:12: delete ! in Config::parse
+crates/memory/src/config.rs:178:40: delete ! in Config::parse
+crates/memory/src/config.rs:206:12: delete ! in Config::check_token
+crates/memory/src/config.rs:209:32: replace != with == in Config::check_token
+crates/memory/src/config.rs:204:9: replace Config::check_token -> Result<(), ConfigError> with Ok(())
+crates/memory/src/config.rs:209:24: replace & with | in Config::check_token
+crates/memory/src/config.rs:209:24: replace & with ^ in Config::check_token
+crates/memory/src/daemon.rs:53:31: replace << with >>
+crates/memory/src/daemon.rs:68:9: replace StartError::code -> &'static str with ""
+crates/memory/src/daemon.rs:68:9: replace StartError::code -> &'static str with "xyzzy"
+crates/memory/src/daemon.rs:76:9: replace StartError::exit_code -> u8 with 0
+crates/memory/src/daemon.rs:76:9: replace StartError::exit_code -> u8 with 1
+crates/memory/src/daemon.rs:210:9: replace FailureCounts::bump with ()
+crates/memory/src/daemon.rs:257:9: replace <impl Sources for T>::enumerate -> Vec<(Owner, Source)> with vec![]
+crates/memory/src/daemon.rs:221:9: replace FailureCounts::add with ()
+crates/memory/src/daemon.rs:309:5: replace count_load with ()
+crates/memory/src/daemon.rs:350:5: replace main_entry -> ExitCode with Default::default()
+crates/memory/src/daemon.rs:401:38: replace / with * in stamp_of
+crates/memory/src/daemon.rs:427:5: replace note_attach -> bool with true
+crates/memory/src/daemon.rs:401:38: replace / with % in stamp_of
+crates/memory/src/daemon.rs:427:5: replace note_attach -> bool with false
+crates/memory/src/daemon.rs:428:30: replace += with -= in note_attach
+crates/memory/src/daemon.rs:428:30: replace += with *= in note_attach
+crates/memory/src/daemon.rs:428:45: delete ! in note_attach
+crates/memory/src/daemon.rs:532:9: replace Daemon<F, S, C, E>::rebuilt -> bool with false
+crates/memory/src/daemon.rs:532:9: delete ! in Daemon<F, S, C, E>::rebuilt
+crates/memory/src/daemon.rs:571:9: replace Daemon<F, S, C, E>::apply with ()
+crates/memory/src/daemon.rs:571:20: replace |= with &= in Daemon<F, S, C, E>::apply
+crates/memory/src/daemon.rs:571:23: delete ! in Daemon<F, S, C, E>::apply
+crates/memory/src/daemon.rs:587:9: replace Daemon<F, S, C, E>::scan_hints -> Vec<ScannedFile> with vec![]
+crates/memory/src/daemon.rs:648:9: replace Daemon<F, S, C, E>::settle -> bool with true
+crates/memory/src/daemon.rs:648:9: replace Daemon<F, S, C, E>::settle -> bool with false
+crates/memory/src/daemon.rs:658:31: replace += with -= in Daemon<F, S, C, E>::settle
+crates/memory/src/daemon.rs:651:45: replace || with && in Daemon<F, S, C, E>::settle
+crates/memory/src/daemon.rs:658:31: replace += with *= in Daemon<F, S, C, E>::settle
+crates/memory/src/daemon.rs:663:31: replace += with -= in Daemon<F, S, C, E>::settle
+crates/memory/src/daemon.rs:663:31: replace += with *= in Daemon<F, S, C, E>::settle
+crates/memory/src/daemon.rs:673:31: replace += with -= in Daemon<F, S, C, E>::settle
+crates/memory/src/daemon.rs:673:31: replace += with *= in Daemon<F, S, C, E>::settle
+crates/memory/src/daemon.rs:679:31: replace += with -= in Daemon<F, S, C, E>::settle
+crates/memory/src/daemon.rs:679:31: replace += with *= in Daemon<F, S, C, E>::settle
+crates/memory/src/daemon.rs:693:9: replace Daemon<F, S, C, E>::due -> Option<Duration> with None
+crates/memory/src/daemon.rs:684:31: replace += with -= in Daemon<F, S, C, E>::settle
+crates/memory/src/daemon.rs:684:31: replace += with *= in Daemon<F, S, C, E>::settle
+crates/memory/src/daemon.rs:693:9: replace Daemon<F, S, C, E>::due -> Option<Duration> with Some(Default::default())
+crates/memory/src/daemon.rs:694:28: replace += with -= in Daemon<F, S, C, E>::due
+crates/memory/src/daemon.rs:694:28: replace += with *= in Daemon<F, S, C, E>::due
+crates/memory/src/daemon.rs:698:45: replace < with == in Daemon<F, S, C, E>::due
+crates/memory/src/daemon.rs:698:45: replace < with > in Daemon<F, S, C, E>::due
+crates/memory/src/daemon.rs:699:29: replace += with -= in Daemon<F, S, C, E>::due
+crates/memory/src/daemon.rs:699:29: replace += with *= in Daemon<F, S, C, E>::due
+crates/memory/src/daemon.rs:714:12: delete ! in Daemon<F, S, C, E>::recover
+crates/memory/src/daemon.rs:760:9: replace Daemon<F, S, C, E>::attach_pending -> bool with true
+crates/memory/src/daemon.rs:760:9: replace Daemon<F, S, C, E>::attach_pending -> bool with false
+crates/memory/src/daemon.rs:763:25: delete ! in Daemon<F, S, C, E>::attach_pending
+crates/memory/src/daemon.rs:763:44: replace == with != in Daemon<F, S, C, E>::attach_pending
+crates/memory/src/daemon.rs:792:16: delete ! in Daemon<F, S, C, E>::land
+crates/memory/src/daemon.rs:795:28: delete ! in Daemon<F, S, C, E>::land
+crates/memory/src/daemon.rs:815:9: replace Daemon<F, S, C, E>::run_owner -> bool with true
+crates/memory/src/daemon.rs:797:33: replace |= with &= in Daemon<F, S, C, E>::land
+crates/memory/src/daemon.rs:797:49: replace == with != in Daemon<F, S, C, E>::land
+crates/memory/src/daemon.rs:815:9: replace Daemon<F, S, C, E>::run_owner -> bool with false
+crates/memory/src/daemon.rs:833:9: replace Daemon<F, S, C, E>::advance_hints with ()
+crates/memory/src/daemon.rs:835:34: replace == with != in Daemon<F, S, C, E>::advance_hints
+crates/memory/src/daemon.rs:837:28: replace == with != in Daemon<F, S, C, E>::advance_hints
+crates/memory/src/daemon.rs:840:39: replace - with + in Daemon<F, S, C, E>::advance_hints
+crates/memory/src/daemon.rs:840:39: replace - with / in Daemon<F, S, C, E>::advance_hints
+crates/memory/src/daemon.rs:842:43: replace != with == in Daemon<F, S, C, E>::advance_hints
+crates/memory/src/daemon.rs:850:9: replace Daemon<F, S, C, E>::index_body -> IndexBody with Default::default()
+crates/memory/src/daemon.rs:869:9: replace Daemon<F, S, C, E>::write_index -> Result<(), StateError> with Ok(())
+crates/memory/src/daemon.rs:872:57: replace >= with < in Daemon<F, S, C, E>::write_index
+crates/memory/src/daemon.rs:873:23: replace && with || in Daemon<F, S, C, E>::write_index
+crates/memory/src/daemon.rs:873:33: replace || with && in Daemon<F, S, C, E>::write_index
+crates/memory/src/daemon.rs:888:9: replace Daemon<F, S, C, E>::reconcile_once -> Result<RoundReport, RoundError> with Ok(Default::default())
+crates/memory/src/daemon.rs:919:28: replace += with -= in Daemon<F, S, C, E>::reconcile_once
+crates/memory/src/daemon.rs:919:28: replace += with *= in Daemon<F, S, C, E>::reconcile_once
+crates/memory/src/daemon.rs:935:36: replace != with == in Daemon<F, S, C, E>::reconcile_once
+crates/memory/src/daemon.rs:943:9: replace Daemon<F, S, C, E>::write_status -> Result<(), StateError> with Ok(())
+crates/memory/src/daemon.rs:946:57: replace >= with < in Daemon<F, S, C, E>::write_status
+crates/memory/src/daemon.rs:947:18: replace || with && in Daemon<F, S, C, E>::write_status
+crates/memory/src/daemon.rs:962:9: replace Daemon<F, S, C, E>::shutdown -> Result<(), StateError> with Ok(())
+crates/memory/src/daemon.rs:970:9: replace Daemon<F, S, C, E>::root -> PathBuf with Default::default()
+crates/memory/src/environment.rs:88:9: replace StoreError::retry_after -> Option<std::time::Duration> with None
+crates/memory/src/environment.rs:88:9: replace StoreError::retry_after -> Option<std::time::Duration> with Some(Default::default())
+crates/memory/src/environment.rs:89:13: delete match arm Self::Throttled(Some(secs)) in StoreError::retry_after
+crates/memory/src/environment.rs:151:9: replace Published::piece -> Option<Self> with None
+crates/memory/src/environment.rs:166:9: replace <impl AsRef<[u8]> for Published>::as_ref -> &[u8] with Vec::leak(Vec::new())
+crates/memory/src/environment.rs:166:9: replace <impl AsRef<[u8]> for Published>::as_ref -> &[u8] with Vec::leak(vec![0])
+crates/memory/src/environment.rs:166:9: replace <impl AsRef<[u8]> for Published>::as_ref -> &[u8] with Vec::leak(vec![1])
+crates/memory/src/environment.rs:248:9: replace <impl FileSystem for Counting<T>>::stat -> Result<Option<Stat>, Self::Error> with Ok(None)
+crates/memory/src/environment.rs:256:9: replace <impl FileSystem for Counting<T>>::read -> Result<Vec<u8>, Self::Error> with Ok(vec![])
+crates/memory/src/environment.rs:256:9: replace <impl FileSystem for Counting<T>>::read -> Result<Vec<u8>, Self::Error> with Ok(vec![0])
+crates/memory/src/environment.rs:256:9: replace <impl FileSystem for Counting<T>>::read -> Result<Vec<u8>, Self::Error> with Ok(vec![1])
+crates/memory/src/hook.rs:70:5: replace parse_agent -> Option<Agent> with None
+crates/memory/src/hook.rs:71:9: delete match arm "claude" in parse_agent
+crates/memory/src/hook.rs:72:9: delete match arm "codex" in parse_agent
+crates/memory/src/hook.rs:73:9: delete match arm "pi" in parse_agent
+crates/memory/src/hook.rs:82:5: replace is_day_name -> bool with true
+crates/memory/src/hook.rs:83:9: replace && with || in is_day_name
+crates/memory/src/hook.rs:82:5: replace is_day_name -> bool with false
+crates/memory/src/hook.rs:82:15: replace == with != in is_day_name
+crates/memory/src/hook.rs:84:19: replace == with != in is_day_name
+crates/memory/src/hook.rs:84:24: replace || with && in is_day_name
+crates/memory/src/hook.rs:95:5: replace utc_day -> String with String::new()
+crates/memory/src/hook.rs:84:30: replace == with != in is_day_name
+crates/memory/src/hook.rs:85:22: replace == with != in is_day_name
+crates/memory/src/hook.rs:95:5: replace utc_day -> String with "xyzzy".into()
+crates/memory/src/hook.rs:95:60: replace + with - in utc_day
+crates/memory/src/hook.rs:95:60: replace + with * in utc_day
+crates/memory/src/hook.rs:95:37: replace / with * in utc_day
+crates/memory/src/hook.rs:98:65: replace / with % in utc_day
+crates/memory/src/hook.rs:95:37: replace / with % in utc_day
+crates/memory/src/hook.rs:98:65: replace / with * in utc_day
+crates/memory/src/hook.rs:98:48: replace - with + in utc_day
+crates/memory/src/hook.rs:98:48: replace - with / in utc_day
+crates/memory/src/hook.rs:98:33: replace + with - in utc_day
+crates/memory/src/hook.rs:98:20: replace - with / in utc_day
+crates/memory/src/hook.rs:98:33: replace + with * in utc_day
+crates/memory/src/hook.rs:98:20: replace - with + in utc_day
+crates/memory/src/hook.rs:98:26: replace / with % in utc_day
+crates/memory/src/hook.rs:98:26: replace / with * in utc_day
+crates/memory/src/hook.rs:98:39: replace / with % in utc_day
+crates/memory/src/hook.rs:98:39: replace / with * in utc_day
+crates/memory/src/hook.rs:98:54: replace / with % in utc_day
+crates/memory/src/hook.rs:98:54: replace / with * in utc_day
+crates/memory/src/hook.rs:99:19: replace - with + in utc_day
+crates/memory/src/hook.rs:99:19: replace - with / in utc_day
+crates/memory/src/hook.rs:99:42: replace - with + in utc_day
+crates/memory/src/hook.rs:99:42: replace - with / in utc_day
+crates/memory/src/hook.rs:99:32: replace + with * in utc_day
+crates/memory/src/hook.rs:99:26: replace * with + in utc_day
+crates/memory/src/hook.rs:99:32: replace + with - in utc_day
+crates/memory/src/hook.rs:99:26: replace * with / in utc_day
+crates/memory/src/hook.rs:99:38: replace / with % in utc_day
+crates/memory/src/hook.rs:99:38: replace / with * in utc_day
+crates/memory/src/hook.rs:99:48: replace / with % in utc_day
+crates/memory/src/hook.rs:99:48: replace / with * in utc_day
+crates/memory/src/hook.rs:100:28: replace / with % in utc_day
+crates/memory/src/hook.rs:100:28: replace / with * in utc_day
+crates/memory/src/hook.rs:100:23: replace + with * in utc_day
+crates/memory/src/hook.rs:100:17: replace * with + in utc_day
+crates/memory/src/hook.rs:100:23: replace + with - in utc_day
+crates/memory/src/hook.rs:100:17: replace * with / in utc_day
+crates/memory/src/hook.rs:101:19: replace - with + in utc_day
+crates/memory/src/hook.rs:101:40: replace + with - in utc_day
+crates/memory/src/hook.rs:101:40: replace + with * in utc_day
+crates/memory/src/hook.rs:101:36: replace / with % in utc_day
+crates/memory/src/hook.rs:101:36: replace / with * in utc_day
+crates/memory/src/hook.rs:101:31: replace + with * in utc_day
+crates/memory/src/hook.rs:101:26: replace * with + in utc_day
+crates/memory/src/hook.rs:101:26: replace * with / in utc_day
+crates/memory/src/hook.rs:102:23: replace < with == in utc_day
+crates/memory/src/hook.rs:102:23: replace < with > in utc_day
+crates/memory/src/hook.rs:102:33: replace + with * in utc_day
+crates/memory/src/hook.rs:102:33: replace + with - in utc_day
+crates/memory/src/hook.rs:102:49: replace - with + in utc_day
+crates/memory/src/hook.rs:102:49: replace - with / in utc_day
+crates/memory/src/hook.rs:103:32: replace + with - in utc_day
+crates/memory/src/hook.rs:103:20: replace + with - in utc_day
+crates/memory/src/hook.rs:103:20: replace + with * in utc_day
+crates/memory/src/hook.rs:103:32: replace + with * in utc_day
+crates/memory/src/hook.rs:103:26: replace * with + in utc_day
+crates/memory/src/hook.rs:103:26: replace * with / in utc_day
+crates/memory/src/hook.rs:103:50: replace <= with > in utc_day
+crates/memory/src/hook.rs:126:12: delete ! in ValueEnd::feed
+crates/memory/src/hook.rs:128:17: delete match arm b' ' | b'\t' | b'\n' | b'\r' in ValueEnd::feed
+crates/memory/src/hook.rs:129:17: delete match arm b'{' in ValueEnd::feed
+crates/memory/src/hook.rs:148:13: delete match arm b'"' in ValueEnd::feed
+crates/memory/src/hook.rs:149:13: delete match arm b'{' | b'[' in ValueEnd::feed
+crates/memory/src/hook.rs:152:31: replace == with != in ValueEnd::feed
+crates/memory/src/hook.rs:166:5: replace read_bounded -> Vec<u8> with vec![]
+crates/memory/src/hook.rs:166:5: replace read_bounded -> Vec<u8> with vec![0]
+crates/memory/src/hook.rs:166:5: replace read_bounded -> Vec<u8> with vec![1]
+crates/memory/src/hook.rs:176:78: replace > with == in read_bounded
+crates/memory/src/hook.rs:176:78: replace > with < in read_bounded
+crates/memory/src/hook.rs:176:78: replace > with >= in read_bounded
+crates/memory/src/hook.rs:188:5: replace vet_dir -> Result<u32, HookResult> with Ok(0)
+crates/memory/src/hook.rs:188:5: replace vet_dir -> Result<u32, HookResult> with Ok(1)
+crates/memory/src/hook.rs:213:21: replace match guard meta.uid() == dir_uid with false in append
+crates/memory/src/hook.rs:213:32: replace == with != in append
+crates/memory/src/hook.rs:222:18: replace match guard n == line.len() with true in write_line
+crates/memory/src/hook.rs:222:18: replace match guard n == line.len() with false in write_line
+crates/memory/src/hook.rs:222:20: replace == with != in write_line
+crates/memory/src/hook.rs:241:33: replace == with != in run
+crates/memory/src/hook.rs:235:8: delete ! in run
+crates/memory/src/hook.rs:260:5: replace read_with_deadline -> Vec<u8> with vec![]
+crates/memory/src/hook.rs:260:5: replace read_with_deadline -> Vec<u8> with vec![0]
+crates/memory/src/hook.rs:260:5: replace read_with_deadline -> Vec<u8> with vec![1]
+crates/memory/src/hook.rs:271:5: replace read_stdin_with_deadline -> Vec<u8> with vec![]
+crates/memory/src/hook.rs:271:5: replace read_stdin_with_deadline -> Vec<u8> with vec![0]
+crates/memory/src/hook.rs:271:5: replace read_stdin_with_deadline -> Vec<u8> with vec![1]
+crates/memory/src/realfs.rs:69:9: replace RealFs::register -> u64 with 0
+crates/memory/src/realfs.rs:69:9: replace RealFs::register -> u64 with 1
+crates/memory/src/realfs.rs:71:27: replace - with + in RealFs::register
+crates/memory/src/realfs.rs:71:27: replace - with / in RealFs::register
+crates/memory/src/realfs.rs:109:9: replace <impl FileSystem for RealFs>::stat -> Result<Option<Stat>, RealFsError> with Ok(None)
+crates/memory/src/realfs.rs:109:29: replace += with -= in <impl FileSystem for RealFs>::stat
+crates/memory/src/realfs.rs:109:29: replace += with *= in <impl FileSystem for RealFs>::stat
+crates/memory/src/realfs.rs:127:23: replace match guard e.kind() == ErrorKind::NotFound with true in <impl FileSystem for RealFs>::stat
+crates/memory/src/realfs.rs:127:23: replace match guard e.kind() == ErrorKind::NotFound with false in <impl FileSystem for RealFs>::stat
+crates/memory/src/realfs.rs:127:32: replace == with != in <impl FileSystem for RealFs>::stat
+crates/memory/src/realfs.rs:133:9: replace <impl FileSystem for RealFs>::stat_len -> Result<u64, RealFsError> with Ok(0)
+crates/memory/src/realfs.rs:133:9: replace <impl FileSystem for RealFs>::stat_len -> Result<u64, RealFsError> with Ok(1)
+crates/memory/src/realfs.rs:139:9: replace <impl FileSystem for RealFs>::read -> Result<Vec<u8>, RealFsError> with Ok(vec![])
+crates/memory/src/realfs.rs:139:9: replace <impl FileSystem for RealFs>::read -> Result<Vec<u8>, RealFsError> with Ok(vec![0])
+crates/memory/src/realfs.rs:139:9: replace <impl FileSystem for RealFs>::read -> Result<Vec<u8>, RealFsError> with Ok(vec![1])
+crates/memory/src/realfs.rs:152:28: replace | with & in <impl FileSystem for RealFs>::read
+crates/memory/src/realfs.rs:157:18: replace == with != in <impl FileSystem for RealFs>::read
+crates/memory/src/realfs.rs:168:28: replace || with && in <impl FileSystem for RealFs>::read
+crates/memory/src/realfs.rs:168:12: delete ! in <impl FileSystem for RealFs>::read
+crates/memory/src/realfs.rs:168:61: replace != with == in <impl FileSystem for RealFs>::read
+crates/memory/src/realfs.rs:174:29: replace += with -= in <impl FileSystem for RealFs>::read
+crates/memory/src/realfs.rs:174:29: replace += with *= in <impl FileSystem for RealFs>::read
+crates/memory/src/realfs.rs:175:34: replace += with *= in <impl FileSystem for RealFs>::read
+crates/memory/src/realfs.rs:224:5: replace walk -> Walk with Default::default()
+crates/memory/src/realfs.rs:237:5: replace walk_root with ()
+crates/memory/src/realfs.rs:240:28: replace += with -= in walk_root
+crates/memory/src/realfs.rs:240:28: replace += with *= in walk_root
+crates/memory/src/realfs.rs:254:28: replace >= with < in walk_root
+crates/memory/src/realfs.rs:258:25: replace += with -= in walk_root
+crates/memory/src/realfs.rs:258:25: replace += with *= in walk_root
+crates/memory/src/realfs.rs:270:30: replace += with -= in walk_root
+crates/memory/src/realfs.rs:270:30: replace += with *= in walk_root
+crates/memory/src/realfs.rs:272:32: replace > with == in walk_root
+crates/memory/src/realfs.rs:272:32: replace > with < in walk_root
+crates/memory/src/realfs.rs:272:32: replace > with >= in walk_root
+crates/memory/src/realfs.rs:273:34: replace += with -= in walk_root
+crates/memory/src/realfs.rs:273:34: replace += with *= in walk_root
+crates/memory/src/resolve.rs:36:5: replace pack -> u128 with 0
+crates/memory/src/resolve.rs:36:5: replace pack -> u128 with 1
+crates/memory/src/resolve.rs:36:36: replace | with & in pack
+crates/memory/src/resolve.rs:36:29: replace << with >> in pack
+crates/memory/src/resolve.rs:40:5: replace spelling -> String with String::new()
+crates/memory/src/resolve.rs:40:5: replace spelling -> String with "xyzzy".into()
+crates/memory/src/resolve.rs:45:5: replace chain -> (Vec<String>, bool) with (vec![], true)
+crates/memory/src/resolve.rs:45:5: replace chain -> (Vec<String>, bool) with (vec![], false)
+crates/memory/src/resolve.rs:45:5: replace chain -> (Vec<String>, bool) with (vec![String::new()], true)
+crates/memory/src/resolve.rs:45:5: replace chain -> (Vec<String>, bool) with (vec![String::new()], false)
+crates/memory/src/resolve.rs:45:5: replace chain -> (Vec<String>, bool) with (vec!["xyzzy".into()], true)
+crates/memory/src/resolve.rs:45:5: replace chain -> (Vec<String>, bool) with (vec!["xyzzy".into()], false)
+crates/memory/src/resolve.rs:51:12: delete ! in chain
+crates/memory/src/resolve.rs:66:5: replace owner_string -> String with String::new()
+crates/memory/src/resolve.rs:66:5: replace owner_string -> String with "xyzzy".into()
+crates/memory/src/resolve.rs:89:9: delete match arm SourceKind::ClaudeConfig | SourceKind::CodexConfig | SourceKind::PiConfig | SourceKind::PiSettings | SourceKind::PiModels in profile_of
+crates/memory/src/resolve.rs:94:9: delete match arm SourceKind::ClaudeMemory | SourceKind::CodexMemory | SourceKind::ClaudePlan in profile_of
+crates/memory/src/resolve.rs:104:9: delete match arm Located::Source{owner, kind, ..} in resolve
+crates/memory/src/resolve.rs:120:30: replace match guard m.is_file() with true in resolve
+crates/memory/src/resolve.rs:120:30: replace match guard m.is_file() with false in resolve
+crates/memory/src/resolve.rs:139:8: delete ! in resolve
+crates/memory/src/resolve.rs:172:5: replace to_source -> Option<(Owner, Source)> with None
+crates/memory/src/resolve.rs:211:9: replace SharedFs::cell -> Rc<RefCell<RealFs>> with Rc::new(RefCell::new(Default::default()))
+crates/memory/src/resolve.rs:218:9: replace <impl FileSystem for SharedFs>::stat -> Result<Option<Stat>, RealFsError> with Ok(None)
+crates/memory/src/resolve.rs:224:9: replace <impl FileSystem for SharedFs>::stat_len -> Result<u64, RealFsError> with Ok(0)
+crates/memory/src/resolve.rs:224:9: replace <impl FileSystem for SharedFs>::stat_len -> Result<u64, RealFsError> with Ok(1)
+crates/memory/src/resolve.rs:230:9: replace <impl FileSystem for SharedFs>::read -> Result<Vec<u8>, RealFsError> with Ok(vec![])
+crates/memory/src/resolve.rs:230:9: replace <impl FileSystem for SharedFs>::read -> Result<Vec<u8>, RealFsError> with Ok(vec![0])
+crates/memory/src/resolve.rs:230:9: replace <impl FileSystem for SharedFs>::read -> Result<Vec<u8>, RealFsError> with Ok(vec![1])
+crates/memory/src/resolve.rs:289:9: replace <impl crate::daemon::Sources for WalkSources>::enumerate -> Vec<(Owner, Source)> with vec![]
+crates/memory/src/resolve.rs:303:65: replace += with -= in <impl crate::daemon::Sources for WalkSources>::enumerate
+crates/memory/src/resolve.rs:303:65: replace += with *= in <impl crate::daemon::Sources for WalkSources>::enumerate
+crates/memory/src/resolve.rs:304:67: replace += with -= in <impl crate::daemon::Sources for WalkSources>::enumerate
+crates/memory/src/resolve.rs:304:67: replace += with *= in <impl crate::daemon::Sources for WalkSources>::enumerate
+crates/memory/src/resolve.rs:310:36: replace += with -= in <impl crate::daemon::Sources for WalkSources>::enumerate
+crates/memory/src/resolve.rs:310:36: replace += with *= in <impl crate::daemon::Sources for WalkSources>::enumerate
+crates/memory/src/resolve.rs:311:52: delete ! in <impl crate::daemon::Sources for WalkSources>::enumerate
+crates/memory/src/state.rs:19:38: replace << with >>
+crates/memory/src/state.rs:22:65: replace + with -

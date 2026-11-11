@@ -1,0 +1,23 @@
+crates/memory-core/src/locator.rs:81:9: replace RootRelativePath::parse -> Result<Self, InputError> with Ok(Default::default())
+crates/memory-core/src/locator.rs:226:9: replace Roots::with_claude_sessions -> Self with Default::default()
+crates/memory-core/src/locator.rs:336:9: replace Located::withhold_reason -> Option<WithholdReason> with Some(Default::default())
+crates/memory-core/src/locator.rs:420:5: replace dir_asset -> Option<ConfigAsset> with Some(Default::default())
+crates/memory-core/src/locator.rs:483:5: replace shared -> Res<'a> with Default::default()
+crates/memory-core/src/locator.rs:493:5: replace asset -> Res<'a> with Default::default()
+crates/memory-core/src/locator.rs:503:5: replace session -> Res<'a> with Default::default()
+crates/memory-core/src/locator.rs:564:9: replace && with || in claude
+crates/memory-core/src/locator.rs:562:5: replace claude -> Res<'a> with Default::default()
+crates/memory-core/src/locator.rs:592:5: replace claude_top -> Res<'a> with Default::default()
+crates/memory-core/src/locator.rs:619:5: replace claude_external -> Res<'a> with Default::default()
+crates/memory-core/src/locator.rs:625:5: replace claude_project -> Res<'a> with Default::default()
+crates/memory-core/src/locator.rs:660:5: replace claude_transcript -> Res<'a> with Default::default()
+crates/memory-core/src/locator.rs:670:9: replace && with || in claude_transcript
+crates/memory-core/src/locator.rs:688:5: replace codex -> Res<'a> with Default::default()
+crates/memory-core/src/locator.rs:690:9: replace && with || in codex
+crates/memory-core/src/locator.rs:707:5: replace codex_top -> Res<'a> with Default::default()
+crates/memory-core/src/locator.rs:733:5: replace codex_rollout -> Res<'a> with Default::default()
+crates/memory-core/src/locator.rs:756:5: replace pi -> Res<'a> with Default::default()
+crates/memory-core/src/locator.rs:766:5: replace pi_asset -> Option<Res<'a>> with Some(Default::default())
+crates/memory-core/src/locator.rs:796:5: replace pi_session -> Res<'a> with Default::default()
+crates/memory-core/src/locator.rs:864:5: replace locate -> Located with Default::default()
+crates/memory-core/src/locator.rs:895:5: replace finish -> Located with Default::default()

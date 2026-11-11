@@ -18,20 +18,60 @@ history, not current execution instructions or renewed operating authority.
 `gpt-6.1-sol` workers at medium effort, parent-owned quality and verification.
 This is the single active task brief; dated operating records below remain history.
 
-> **Resume here (updated 2026-11-10, after the review and fix round).** Read DESIGN.md, then
-> [design-amendments-20261109.md](rust-rewrite/design-amendments-20261109.md) (A0–A9, wins
-> where they conflict), then the "Session 2026-11-09, review and fix round" block directly
-> below, which is the current state: draft stack #56, top branch `rust/coverage-floor-80`
-> (PR #60), integrated gate green on `d8e80a6`
-> ([evidence 13](rust-rewrite/implementation/evidence/13-review-fix-round/),
-> [report 23](rust-rewrite/implementation/23-review-fix-round.md)), hosted CI green. Its
-> "Next" line is the next action. The "Handover 2026-11-09" and "Progress 2026-11-09,
-> continued session" blocks further down are history; their next-action lists are done
-> except step 4 (S3 adapter, zstd, run loop) and step 5. Earlier blocker lists in this brief
-> (P5 authorization, acceptance bucket/token, hook argv, symlinks, state root) are resolved
-> by the amendments and kept only as history.
+> **Resume here (updated 2026-11-11, after the design and test review).** Read DESIGN.md, then
+> [design-amendments-20261109.md](rust-rewrite/design-amendments-20261109.md) (A0–A13, wins
+> where they conflict), then the "Session 2026-11-10/11" block directly below, which is the
+> current state: stack #56 (PRs #54–#81) is merged, `main` is `c239d1b`, there is no open
+> Rust branch. [Report 24](rust-rewrite/implementation/24-design-and-test-review.md) is the
+> full record and [evidence 14](rust-rewrite/implementation/evidence/14-design-test-review/)
+> its raw material. The "Session 2026-11-09, review and fix round" block is now history; its
+> "Next" line (slice 2) still stands, with the additions below. The "Handover 2026-11-09" and
+> "Progress 2026-11-09, continued session" blocks further down are history; their next-action
+> lists are done except step 4 (S3 adapter, zstd, run loop) and step 5. Earlier blocker lists
+> in this brief (P5 authorization, acceptance bucket/token, hook argv, symlinks, state root)
+> are resolved by the amendments and kept only as history.
 
-**Session 2026-11-09, review and fix round (current).** Branch `rust/coverage-floor-80` on
+**Session 2026-11-10/11, design and test review (current).** Operator-directed review of the
+design, tests, complexity and Hegel properties by Sonnet workers with parent acceptance;
+record in report 24. Result on `main` (`c239d1b`):
+- Design: amendments A10 (corrections of fact and evidence labels), A11 (hook failure, hint
+  retention, state-load events, state size bounds, changed source file), A12 (launch value
+  shapes, audit before the first production write, 64-manifest recovery cap, `rustix`, gates
+  04–06 run each test once), A13 (shadow-run exit is 2 consecutive days, Go cross-check
+  dropped, first-write prerequisites, env cap removed, R2 probe results, 4 verification GETs,
+  missing watch root skipped). DESIGN.md and AGENTS.md are unchanged.
+- Code: source read opens `O_NOFOLLOW` and rechecks identity; watcher handles moved-in
+  directories, never treats a symlink as a directory, has a bounded inbox; secret-shaped
+  launch values are redacted; damaged state is classified and counted; `run_owner` and the
+  capture job are split into named steps; pure-core bans enforced by `clippy.toml`.
+- Tests: 24 removed and 9 merged in the cut; durable-write ordering, mutant-killing and
+  generated privacy tests added; one shared in-memory store, filesystem and clock; the store
+  fake models R2's measured content ETag; coverage guards read only random cases; the schema
+  gate can fail again. Two daemon state-machine failures found after that were test-model
+  faults, fixed with regression tests.
+- Gates on the final tree: local `PROPERTY_CASES=500`, seed 3481505894, all 13 sub-gates 0,
+  431 tests, coverage 5840/5976 = 97.72 %, `verify-evidence.py` PASS; 0 failures in 160
+  random-seed runs of the four daemon and commit state machines. Hosted "Rust rewrite gates"
+  on `main`, run 42990315805: all three runners success (macOS 23m47s, 30 minute limit not
+  raised; hosted runs use the `.#rust` Nix shell and cache the built `cargo-llvm-cov`).
+- Hosted "CI" on `main` is red in the two jobs that run `make vuln`: GO-2026-6859 (Go
+  standard library, fixed in go1.27.4). Operator decision 2026-11-11: no Go toolchain bump;
+  replacing the Go code is the fix. Until then the `check` targets after `vuln` do not run
+  in hosted CI; run `make crap bench-smoke actionlint capture-acceptance` locally for changes
+  that touch Go or workflows.
+- Dependabot PRs #32 (Actions pins) and #33 (Go modules) are separate from this work. On
+  2026-11-11 Dependabot did not act on a rebase request, so their branches were updated from
+  `main` by hand; see GitHub for their state.
+- Open operator decisions: minimum startup delay before a restarted daemon's first commit
+  (A13.4, 5 s suggested); whether 2 days also replaces the 7-day shadow runs of DESIGN 17
+  slices 2b and 3 (A13.1 says it does).
+- Next: slice 2 as in the block below (license decision, S3 adapter, zstd, run loop), with
+  the A13.2 prerequisites (zstd, audit, hint retention, `tracing`) before any production
+  write. Independent of it, from report 24: triage the missed mutants, the canonical-path
+  type (A12.4), finish `cargo mutants` for `state.rs` and `watch.rs`, remove
+  `FileSystem::stat_len` if unused.
+
+**Session 2026-11-09, review and fix round (history).** Branch `rust/coverage-floor-80` on
 stack #56 (9206235: A9, coverage floor 80 %). Baseline gate at 0f726a6, seed 730212, 2,000
 cases: all 12 subgates 0, 378/378 nextest, 98.17 %. Plan, sequential Sonnet workers (medium),
 one owner at a time because core type changes ripple into the shell and every test `Store`:

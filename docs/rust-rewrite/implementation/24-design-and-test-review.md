@@ -1,7 +1,8 @@
 # 24. Design, test and complexity review (2026-11-10)
 
-Coordinator brief. The parent session owns this file and acceptance. Status: rounds 1 to 5
-complete; mutant triage and two operator decisions open (see Round 5).
+Coordinator brief. The parent session owns this file and acceptance. Status: complete and
+merged to `main` (`c239d1b`, 2026-11-11). Open items are listed under "Close-out".
+Raw reports and results: [evidence 14](evidence/14-design-test-review/).
 
 ## Checkout
 
@@ -21,8 +22,7 @@ complete; mutant triage and two operator decisions open (see Round 5).
 
 ## Phase 1 (complete): eight read-only Sonnet reviews
 
-Reports are outside the repo, in the session scratchpad `review/01` to `08` (not yet copied
-into the repo; the parent decides what is preserved as evidence once phase 2 lands).
+Reports: [evidence 14](evidence/14-design-test-review/) `reports/01` to `08`.
 
 Parent spot-checks that confirmed a worker claim against the code:
 
@@ -172,11 +172,11 @@ reason); verification GET is 4 attempts; the watcher skips and counts a missing 
 
 Findings of this round:
 
-- Independent read-only review of rounds 3 and 4 (scratchpad `review/R5-B-stack-review.md`)
+- Independent read-only review of rounds 3 and 4 (evidence 14, `reports/R5-B-stack-review.md`)
   found the round 3 coverage guards could not fail: a scripted prologue bumped the counters
   the guard read. Fixed in all three files. Parent check: with the `late-write` or
   `lost-reply` step disabled in the generator, the guard fails and names the shape.
-- Live R2 probes (operator-approved, `review/R5-E-r2-probes.md`, A13.4): the ETag is the MD5
+- Live R2 probes (operator-approved, evidence 14 `reports/R5-E-r2-probes.md`, A13.4): the ETag is the MD5
   of the body; a PUT from a killed process landed in 15 of 20 trials, up to 0.5 s later.
   39 keys created, 39 deleted, prefixes verified empty. The probe used several thousand list
   requests against about 200 planned.
@@ -216,6 +216,67 @@ Open (operator): minimum startup delay before a restarted daemon's first commit 
 5 s suggested); whether the 2-day criterion also replaces the 7-day shadow runs of DESIGN 17
 slices 2b and 3 (A13.1 currently says it does).
 
+## Close-out (2026-11-11): merge, CI and what is left
+
+Merged: stack #56, PRs #54 to #81 (26 PRs), one atomic merge into `main` as `c239d1b`. The
+stack branches were deleted after checking each tip is contained in `main`.
+
+Two PRs were added on top during the merge:
+
+- #80 `rust/review-round5-brief`: this report's round 5 section and the A12.1 note.
+- #81 `rust/ci-rust-shell`: hosted Rust gates run in a Rust-only Nix shell (`.#rust`, same
+  pinned tools; the default shell's derivation is unchanged) and restore the built
+  `cargo-llvm-cov` from the Actions cache, keyed on `flake.nix` and `flake.lock` with no
+  fallback key. Cause, measured from job logs: the flake builds `cargo-llvm-cov` with the
+  pinned toolchain (report 00), so it is never in the public cache and took 8m49s to build on
+  macos-26 in every run. With that, macOS ran 22 to 30 minutes against the 30 minute limit
+  (#79 cancelled during `08-coverage` with every earlier gate passed; #80 passed in 29m43s).
+  With a cache hit the macOS setup is 1m30s instead of 11m00s. The Rust-only shell alone
+  saved 17 s; the coordinator's first diagnosis (download size) was wrong. The limit was not
+  raised.
+
+Hosted results:
+
+- `main` at `c239d1b`, "Rust rewrite gates" run 42990315805 (cache miss, first run): all
+  three runners success; macos-26 23m47s, ubuntu-24.04 23m21s, ubuntu-24.04-arm 22m46s.
+- Gate time itself varies by several minutes between identical runs on the same runner
+  (macos-26 gates step 12m48s to 19m42s), so the headroom is real but not large.
+- `main` "CI" run 42990315981 fails in two jobs, "Format, lint and static checks" and
+  "Tests (macos-26)", on `make vuln` only: GO-2026-6859 (net/http, found in go1.27.3, fixed
+  in go1.27.4) is the one advisory in both logs. Operator decision 2026-11-11: no Go toolchain
+  bump; the advisory goes away when the Go code is replaced. nixpkgs did not ship Go 1.27.4 on
+  that day in any case. Consequences: every PR shows those two jobs red until cutover, and the
+  `check` targets after `vuln` (`crap`, `bench-smoke`, `actionlint`, `capture-acceptance`) do
+  not run in hosted CI; run them locally for changes that touch Go or workflows. Production
+  Go code runs no HTTP server and does not call `MaxBytesReader` (the advisory is a server
+  crash); this was checked by search, not by analysis of the advisory.
+
+Red checks that were accepted on merged PRs, each fixed by a PR higher in the same merge:
+"Rust rewrite gates" cancelled at 30 minutes on #62 to #72 (properties ran twice, fixed by
+#73) and on #79 macos-26 (fixed by #81); the `rewrite-mid-file` guard miss on #63 (seed
+1781712999; the flaky guard W2 measured, fixed by #66 and #79); GO-2026-6859 on #74 to #81.
+The Go "Fuzz" job on #68 was cancelled once and passed on its one rerun.
+
+`cargo mutants` finished for `memory-core` after round 5 was written (evidence 14,
+`mutants/`): privacy 268 caught and 22 missed, hint/planner/limits/manifest 271 and 26,
+locator 147 and 1. Not triaged.
+
+Not done, in priority order:
+
+1. Triage of the missed mutants (lists in evidence 14); tests only for real gaps.
+2. Canonical-path type to close the parent-directory race in the source read (A12.4).
+3. Complete `cargo mutants` for `state.rs` and `watch.rs`; rerun the `GET_ATTEMPTS` mutants
+   (3 and 5), which a worker reported caught and the parent did not rerun.
+4. Remove `FileSystem::stat_len` if it has no production caller.
+5. Prerequisites of the first production write (A13.2): zstd encoding, the audit, hint
+   retention, `tracing`.
+
+Open operator decisions: the minimum startup delay before a restarted daemon's first commit
+(A13.4; 5 s suggested; a dead process's write was seen to land up to 0.5 s later); whether
+the 2-day criterion also replaces the 7-day shadow runs of DESIGN 17 slices 2b and 3 (A13.1
+says it does).
+
 ## Next action
 
-Push the stack and watch hosted CI; operator decisions on the two open items.
+Slice 2 as listed in the handoff (license decision, S3 adapter, zstd, run loop), with the
+A13.2 prerequisites before any production write. Items 1 to 4 above are independent of it.

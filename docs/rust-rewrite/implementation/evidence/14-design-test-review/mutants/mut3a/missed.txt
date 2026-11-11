@@ -1,0 +1,22 @@
+crates/memory-core/src/privacy/document.rs:180:14: replace > with == in parse
+crates/memory-core/src/privacy/document.rs:180:14: replace > with >= in parse
+crates/memory-core/src/privacy/document.rs:226:9: delete match arm Some(b'n') in parse
+crates/memory-core/src/privacy/document.rs:227:9: delete match arm Some(b't' | b'f') in parse
+crates/memory-core/src/privacy/document.rs:190:21: replace parse::<impl Visitor<'de> for ObjectVisitor>::expecting -> fmt::Result with Ok(Default::default())
+crates/memory-core/src/privacy/document.rs:196:64: replace + with * in parse::<impl Visitor<'de> for ObjectVisitor>::visit_map
+crates/memory-core/src/privacy/document.rs:211:21: replace parse::<impl Visitor<'de> for ArrayVisitor>::expecting -> fmt::Result with Ok(Default::default())
+crates/memory-core/src/privacy/document.rs:232:14: replace > with == in from_toml
+crates/memory-core/src/privacy/document.rs:232:14: replace > with >= in from_toml
+crates/memory-core/src/privacy/document.rs:239:65: replace + with * in from_toml
+crates/memory-core/src/privacy/document.rs:245:45: replace + with * in from_toml
+crates/memory-core/src/privacy/document.rs:279:50: replace > with >= in scrub
+crates/memory-core/src/privacy/document.rs:291:21: replace > with == in scrub
+crates/memory-core/src/privacy/document.rs:291:21: replace > with >= in scrub
+crates/memory-core/src/privacy/launch.rs:127:21: replace && with || in secret_shaped
+crates/memory-core/src/privacy/text.rs:43:17: delete match arm '\\' in words
+crates/memory-core/src/privacy/text.rs:55:25: replace match guard !quoted with true in words
+crates/memory-core/src/privacy/text.rs:44:35: replace match guard !quoted || "\\\"$`".contains(next) with true in words
+crates/memory-core/src/privacy/text.rs:44:35: replace match guard !quoted || "\\\"$`".contains(next) with false in words
+crates/memory-core/src/privacy/text.rs:44:43: replace || with && in words
+crates/memory-core/src/privacy/text.rs:44:35: delete ! in words
+crates/memory-core/src/privacy/text.rs:107:22: replace match guard !s.starts_with('-') with true in literal

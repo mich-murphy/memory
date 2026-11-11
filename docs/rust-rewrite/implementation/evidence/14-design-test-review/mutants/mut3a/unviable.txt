@@ -1,0 +1,26 @@
+crates/memory-core/src/privacy/mod.rs:265:5: replace admit -> Admission with Default::default()
+crates/memory-core/src/privacy/mod.rs:316:5: replace transform -> Result<RedactedBytes, Reason> with Ok(Default::default())
+crates/memory-core/src/privacy/mod.rs:345:5: replace authorize -> Authorization with Default::default()
+crates/memory-core/src/privacy/document.rs:86:5: replace kind -> Option<Family> with Some(Default::default())
+crates/memory-core/src/privacy/document.rs:95:5: replace rules -> Vec<(Vec<String>, Mode)> with vec![(vec![], Default::default())]
+crates/memory-core/src/privacy/document.rs:95:5: replace rules -> Vec<(Vec<String>, Mode)> with vec![(vec![String::new()], Default::default())]
+crates/memory-core/src/privacy/document.rs:95:5: replace rules -> Vec<(Vec<String>, Mode)> with vec![(vec!["xyzzy".into()], Default::default())]
+crates/memory-core/src/privacy/document.rs:160:9: replace Value::as_array -> Option<&Vec<Self>> with Some(Box::leak(Box::new(vec![Default::default()])))
+crates/memory-core/src/privacy/document.rs:167:9: replace Value::get -> Option<&Self> with Some(Box::leak(Box::new(Default::default())))
+crates/memory-core/src/privacy/document.rs:176:9: replace <impl From<String> for Value>::from -> Self with Default::default()
+crates/memory-core/src/privacy/document.rs:180:5: replace parse -> Result<Value, serde_json::Error> with Ok(Default::default())
+crates/memory-core/src/privacy/document.rs:193:21: replace parse::<impl Visitor<'de> for ObjectVisitor>::visit_map -> Result<Value, A::Error> with Ok(Default::default())
+crates/memory-core/src/privacy/document.rs:214:21: replace parse::<impl Visitor<'de> for ArrayVisitor>::visit_seq -> Result<Value, A::Error> with Ok(Default::default())
+crates/memory-core/src/privacy/document.rs:232:5: replace from_toml -> Result<Value, Reason> with Ok(Default::default())
+crates/memory-core/src/privacy/document.rs:389:9: replace && with || in redact_all
+crates/memory-core/src/privacy/document.rs:397:17: replace && with || in redact_all
+crates/memory-core/src/privacy/document.rs:585:17: replace && with || in args_scrub
+crates/memory-core/src/privacy/document.rs:592:13: replace && with || in args_scrub
+crates/memory-core/src/privacy/document.rs:591:13: replace && with || in args_scrub
+crates/memory-core/src/privacy/document.rs:590:13: replace && with || in args_scrub
+crates/memory-core/src/privacy/document.rs:602:13: replace && with || in flag
+crates/memory-core/src/privacy/launch.rs:99:5: replace flag_slot -> Slot with Default::default()
+crates/memory-core/src/privacy/launch.rs:108:5: replace env_slot -> Slot with Default::default()
+crates/memory-core/src/privacy/launch.rs:164:5: replace sanitize_launch -> SanitizedLaunch with Default::default()
+crates/memory-core/src/privacy/names.rs:8:5: replace suffix -> Option<&'static Regex> with Some(Box::leak(Box::new(Default::default())))
+crates/memory-core/src/privacy/text.rs:12:5: replace words -> Vec<Vec<Word>> with vec![vec![Default::default()]]

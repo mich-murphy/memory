@@ -1,0 +1,16 @@
+crates/memory-core/src/coalescer.rs:50:9: replace <impl From<Window> for WindowSeconds>::from -> Self with Default::default()
+crates/memory-core/src/coalescer.rs:186:29: replace + with * in Coalescer::next_due
+crates/memory-core/src/coalescer.rs:186:62: replace + with * in Coalescer::next_due
+crates/memory-core/src/coalescer.rs:218:5: replace wake_action -> WakeAction with Default::default()
+crates/memory-core/src/coordinates.rs:147:9: replace Inventory::compile -> Result<Self, CoordError> with Ok(Default::default())
+crates/memory-core/src/coordinates.rs:261:9: replace Inventory::resolve -> Result<Coordinate, CoordError> with Ok(Default::default())
+crates/memory-core/src/disposition.rs:66:5: replace park_reason -> ParkReason with Default::default()
+crates/memory-core/src/disposition.rs:91:25: replace - with / in jittered
+crates/memory-core/src/disposition.rs:94:18: replace + with * in jittered
+crates/memory-core/src/disposition.rs:98:5: replace retry -> Disposition with Default::default()
+crates/memory-core/src/disposition.rs:127:5: replace transition_paced -> (Disposition, Streak) with (Default::default(), Default::default())
+crates/memory-core/src/domain.rs:88:9: replace <impl TryFrom<String> for ETag>::try_from -> Result<Self, Self::Error> with Ok(Default::default())
+crates/memory-core/src/domain.rs:126:9: replace Offset::checked_add -> Result<Self, ValidationError> with Ok(Default::default())
+crates/memory-core/src/domain.rs:139:9: replace Sha256::from_bytes -> Self with Default::default()
+crates/memory-core/src/domain.rs:145:9: replace <impl TryFrom<String> for Sha256>::try_from -> Result<Self, Self::Error> with Ok(Default::default())
+crates/memory-core/src/domain.rs:148:49: replace + with * in <impl TryFrom<String> for Sha256>::try_from::nibble
