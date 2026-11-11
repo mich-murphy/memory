@@ -32,6 +32,26 @@ jobs:
           extra_nix_config: |
             max-jobs = 2
             cores = 2
+      # The flake's cargo-llvm-cov override is never in cache.nixos.org and took
+      # about 9 minutes to build on macos-26. Cache it as a local Nix binary
+      # cache; the exact key covers both pin files, so a tool built from
+      # different pins is never restored.
+      - name: Restore the built cargo-llvm-cov
+        id: llvm-cov-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/nix-llvm-cov-cache
+          key: nix-llvm-cov-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+      - name: Import the cached cargo-llvm-cov
+        if: steps.llvm-cov-cache.outputs.cache-hit == 'true'
+        run: >-
+          nix copy --no-check-sigs --from "file://$HOME/nix-llvm-cov-cache"
+          "$(nix eval --raw .#cargo-llvm-cov.outPath)"
+      - name: Build and export cargo-llvm-cov
+        if: steps.llvm-cov-cache.outputs.cache-hit != 'true'
+        run: |
+          nix build .#cargo-llvm-cov --no-link --max-jobs 2 --cores 2
+          nix copy --to "file://$HOME/nix-llvm-cov-cache" "$(nix eval --raw .#cargo-llvm-cov.outPath)"
       - name: Run all Rust gates without live access
         run: >-
           nix develop .#rust --max-jobs 2 --cores 2 --command

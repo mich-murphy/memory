@@ -18,8 +18,32 @@
     forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     # A build from uncommitted changes says so, as goreleaser's would.
     version = self.shortRev or self.dirtyShortRev or "dev";
+    # The pinned official toolchain and the coverage tool built with it.
+    rustParts = pkgs: let
+        rustPkgs = pkgs.extend (import rust-overlay);
+        rustToolchain = rustPkgs.rust-bin.stable."1.99.0".minimal.override {
+          extensions = ["clippy" "rustfmt" "llvm-tools-preview"];
+        };
+        llvmToolDir = "${rustToolchain}/lib/rustlib/${pkgs.stdenv.hostPlatform.rust.rustcTarget}/bin";
+        coverageTool = (pkgs.cargo-llvm-cov.override {
+          rustPlatform = pkgs.makeRustPlatform {
+            cargo = rustToolchain;
+            rustc = rustToolchain;
+          };
+        }).overrideAttrs (old: {
+          # Keep upstream tests enabled, using this compiler's own profile format.
+          env = old.env // {
+            LLVM_COV = "${llvmToolDir}/llvm-cov";
+            LLVM_PROFDATA = "${llvmToolDir}/llvm-profdata";
+            CARGO_BUILD_JOBS = "2";
+            RUST_TEST_THREADS = "2";
+          };
+        });
+    in {inherit rustToolchain llvmToolDir coverageTool;};
   in {
     packages = forAllSystems (pkgs: {
+      # The overridden coverage tool is never in cache.nixos.org; CI caches its build.
+      cargo-llvm-cov = (rustParts pkgs).coverageTool;
       default = pkgs.buildGo127Module {
         pname = "agent-sessions";
         inherit version;
@@ -44,25 +68,7 @@
     });
 
     devShells = forAllSystems (pkgs: let
-      rustPkgs = pkgs.extend (import rust-overlay);
-      rustToolchain = rustPkgs.rust-bin.stable."1.99.0".minimal.override {
-        extensions = ["clippy" "rustfmt" "llvm-tools-preview"];
-      };
-      llvmToolDir = "${rustToolchain}/lib/rustlib/${pkgs.stdenv.hostPlatform.rust.rustcTarget}/bin";
-      coverageTool = (pkgs.cargo-llvm-cov.override {
-        rustPlatform = pkgs.makeRustPlatform {
-          cargo = rustToolchain;
-          rustc = rustToolchain;
-        };
-      }).overrideAttrs (old: {
-        # Keep upstream tests enabled, using this compiler's own profile format.
-        env = old.env // {
-          LLVM_COV = "${llvmToolDir}/llvm-cov";
-          LLVM_PROFDATA = "${llvmToolDir}/llvm-profdata";
-          CARGO_BUILD_JOBS = "2";
-          RUST_TEST_THREADS = "2";
-        };
-      });
+      inherit (rustParts pkgs) rustToolchain llvmToolDir coverageTool;
       # Shared by the default and rust shells so the two cannot drift.
       rustTools = [
         # Official toolchain source and tool versions are locked independently.
@@ -82,7 +88,7 @@
         LLVM_PROFDATA = "${llvmToolDir}/llvm-profdata";
       };
     in {
-      # Rust gates only, so hosted CI downloads a fraction of the default shell.
+      # Rust gates only: 148 store paths against 205 in the default shell.
       rust = pkgs.mkShell ({
           packages = rustTools ++ gateShellTools ++ [pkgs.python314];
         }
