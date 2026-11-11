@@ -9,8 +9,8 @@
 use hegel::{TestCase, generators as gs};
 use memory::capture::Published;
 use memory::commit::{
-    Base, Commit, Failure, GET_ATTEMPTS, KnownOurs, Landed, Upload, check_fence, commit,
-    commit_known, disposition, manifest_key, recover_base,
+    Base, Commit, Failure, KnownOurs, Landed, Upload, check_fence, commit, commit_known,
+    disposition, manifest_key, recover_base,
 };
 use memory::environment::{Store, StoreError, Stored};
 use memory_core::disposition::Streak;
@@ -2010,10 +2010,8 @@ fn a_404_on_the_first_write_is_not_final_and_retries_if_none_match() -> R {
     );
     let landed = rig.landed()?;
     assert!(matches!(landed.outcome, CommitOutcome::Committed { .. }));
-    assert_eq!(
-        rig.store.count(Op::Get(Kind::Current)),
-        GET_ATTEMPTS as usize
-    );
+    // Amendment A13.5: the verification GET is attempted 4 times (the literal, not the constant).
+    assert_eq!(rig.store.count(Op::Get(Kind::Current)), 4);
     assert_eq!(rig.store.count(Op::Put(Kind::Current)), 2);
     rig.assert_safe()
 }
@@ -2029,7 +2027,7 @@ fn a_404_under_a_fence_is_landing_unknown() -> R {
     assert_eq!(failure, Failure::LandingUnknown(ErrorClass::Offline));
     assert!(failure.base_may_be_stale());
     // Only a first write may retry step 3: under a fence there is exactly one PUT, then the
-    // verification GETs (4 attempts, 3 pauses) and no second PUT.
+    // verification GETs (4 attempts, 3 pauses; amendment A13.5) and no second PUT.
     assert_eq!(rig.store.count(Op::Put(Kind::Current)) - before, 1);
     assert_eq!(rig.store.count(Op::Get(Kind::Current)), 4);
     assert_eq!(pauses.len(), 3);
@@ -2066,7 +2064,8 @@ fn verification_that_cannot_read_is_landing_unknown_with_its_class() -> R {
     );
     let (failure, pauses) = rig.failed()?;
     assert_eq!(failure, Failure::LandingUnknown(ErrorClass::Offline));
-    assert_eq!(pauses.len(), GET_ATTEMPTS as usize - 1);
+    // Amendment A13.5: 4 attempts leave 3 pauses between them.
+    assert_eq!(pauses.len(), 3);
     let (d, _) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
     assert!(matches!(
         d,
@@ -2677,7 +2676,7 @@ fn late_write(
     rig.store.arm_n(
         Op::Get(Kind::Current),
         0,
-        GET_ATTEMPTS,
+        4, // amendment A13.5: every one of the 4 verification GET attempts fails
         Effect::FailBefore(StoreError::Offline),
     );
     let request = rig.request()?;
@@ -2750,7 +2749,7 @@ fn known_ours_is_cleared_whenever_a_commit_lands() -> R {
         rig.store.arm_n(
             Op::Get(Kind::Current),
             0,
-            GET_ATTEMPTS,
+            4, // amendment A13.5: every one of the 4 verification GET attempts fails
             Effect::FailBefore(StoreError::Offline),
         );
         let request = rig.request()?;
