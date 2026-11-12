@@ -141,14 +141,35 @@ pub struct Stored {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Published(Vec<u8>);
 
+/// zstd level of stored pieces (the `zstd-3` encoding).
+const PIECE_ZSTD_LEVEL: i32 = 3;
+
+/// Why a piece body could not be built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PieceError {
+    /// The range is outside the authorized body.
+    Range,
+    /// Compression failed.
+    Encode,
+}
+
 impl Published {
-    /// One piece: a byte range of an authorized body.
+    /// One piece: a byte range of an authorized body, compressed with zstd level 3. Returns
+    /// the upload body and the length and digest of the stored (compressed) bytes.
     pub(crate) fn piece(
         body: &memory_core::privacy::AuthorizedBody,
         start: usize,
         end: usize,
-    ) -> Option<Self> {
-        body.bytes().get(start..end).map(|b| Self(b.to_vec()))
+    ) -> Result<(Self, memory_core::manifest::StoredEncoding), PieceError> {
+        let raw = body.bytes().get(start..end).ok_or(PieceError::Range)?;
+        let encoded =
+            zstd::bulk::compress(raw, PIECE_ZSTD_LEVEL).map_err(|_| PieceError::Encode)?;
+        let encoded_len = u64::try_from(encoded.len()).map_err(|_| PieceError::Encode)?;
+        let stored = memory_core::manifest::StoredEncoding {
+            encoded_len,
+            encoded_sha256: memory_core::manifest::manifest_hash(&encoded),
+        };
+        Ok((Self(encoded), stored))
     }
     /// The writer's own serialized metadata (manifest build output, `current.json`).
     pub(crate) const fn metadata(bytes: Vec<u8>) -> Self {

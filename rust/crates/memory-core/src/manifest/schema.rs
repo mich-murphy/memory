@@ -312,8 +312,9 @@ pub struct Piece {
 impl Piece {
     /// Describe `body[start..end]` of an authorized body whose first byte sits at stream offset
     /// `base`; the piece offset is `base + start`. The digests and length are computed
-    /// here from the authorized bytes; the caller supplies no digest. Encoding is the identity
-    /// until zstd lands, so the encoded fields equal the raw ones (see [`Piece::adopt_stored`]).
+    /// here from the authorized bytes; the caller supplies no raw digest. The caller states what
+    /// was stored in `stored` (length and digest of the encoded bytes), so a descriptor cannot
+    /// be built without it (see also [`Piece::adopt_stored`]).
     ///
     /// # Errors
     /// [`ManifestError::BadPiece`] for an empty or out-of-range slice,
@@ -323,6 +324,7 @@ impl Piece {
         base: Offset,
         start: usize,
         end: usize,
+        stored: &StoredEncoding,
     ) -> Result<Self, ManifestError> {
         let chunk = body
             .bytes()
@@ -341,8 +343,8 @@ impl Piece {
             sha256,
             object: object_key(&sha256),
             encoding: Encoding::Zstd3,
-            encoded_len: len,
-            encoded_sha256: sha256,
+            encoded_len: stored.encoded_len,
+            encoded_sha256: stored.encoded_sha256,
         })
     }
     /// Start offset in the transformed stream.

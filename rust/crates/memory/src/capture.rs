@@ -19,12 +19,15 @@
 //! let _ = memory::capture::Published(vec![1, 2, 3]);
 //! ```
 //!
-//! Limitations: piece encoding is the identity (no zstd yet; `encoded_*` equal the raw
-//! fields), the whole-stream digest resumes from the index's `Sha256State` for prefix-stable sources
+//! Pieces are stored zstd-3 encoded: `Published::piece` compresses the authorized slice and
+//! the descriptor records the length and digest of the stored bytes; a compression failure is
+//! [`SourceOutcome::Unavailable`].
+//!
+//! Limitations: the whole-stream digest resumes from the index's `Sha256State` for prefix-stable sources
 //! (otherwise it is recomputed from a fresh read of `[0, to)`), `Refresh` of a racy stat is not persisted, and audit evidence is always
 //! `NotDue`.
 use crate::commit::{Commit, Upload};
-use crate::environment::FileSystem;
+use crate::environment::{FileSystem, PieceError};
 use memory_core::domain::{
     AuditState, EpochPosition, Fingerprint, Observed, Offset, Plan, RulesDigest, Sha256,
     Sha256State, SnapshotFingerprint, SourceClass, SourceId, SourceKind, SourceState,
@@ -570,9 +573,12 @@ impl Job<'_> {
         let mut pieces = Vec::new();
         while at < body_len {
             let end = at.saturating_add(step).min(body_len);
-            let piece = Published::piece(body, at, end).ok_or(SourceOutcome::Raced)?;
-            let described =
-                Piece::from_authorized(body, base, at, end).map_err(|_| SourceOutcome::Raced)?;
+            let (piece, stored) = Published::piece(body, at, end).map_err(|e| match e {
+                PieceError::Range => SourceOutcome::Raced,
+                PieceError::Encode => SourceOutcome::Unavailable,
+            })?;
+            let described = Piece::from_authorized(body, base, at, end, &stored)
+                .map_err(|_| SourceOutcome::Raced)?;
             pieces.push(described.clone());
             acc.uploads.push(Upload {
                 key: described.object().to_owned(),

@@ -118,12 +118,19 @@ impl Rig {
         }
         Ok((got.outcomes.into_iter().map(|(_, o)| o).collect(), changes))
     }
-    fn bodies(&self) -> Vec<&[u8]> {
-        self.store
-            .objects
-            .values()
-            .map(|(b, _)| b.as_slice())
-            .collect()
+    /// Every stored body, plus the decoded form of each piece object (pieces are zstd frames,
+    /// so a plaintext search must look inside them as well as at the stored bytes).
+    fn bodies(&self) -> Vec<Vec<u8>> {
+        let mut out = Vec::new();
+        for (key, (body, _)) in &self.store.objects {
+            out.push(body.clone());
+            if key.starts_with("objects/")
+                && let Ok(raw) = zstd::decode_all(body.as_slice())
+            {
+                out.push(raw);
+            }
+        }
+        out
     }
     fn find(&self, needle: &[u8]) -> bool {
         self.bodies()
@@ -737,7 +744,7 @@ fn extend_records_exact_windows(
             .objects
             .get(piece.object())
             .ok_or("piece object")?;
-        uploaded.extend_from_slice(body);
+        uploaded.extend(memory_reader::decode_piece(piece, body).map_err(e)?);
     }
     assert_eq!(uploaded, span(&data, old..new)?);
     let state = index_of(&rig)?;
@@ -837,5 +844,44 @@ fn non_prefix_stable_source_with_an_index_is_read_whole_not_as_a_delta() -> R {
     );
     assert_eq!(kinds_of(&got), ["extend"]);
     assert_eq!(spy.reads.last(), Some(&(0..9)), "whole stream, not 8..9");
+    Ok(())
+}
+
+#[test]
+fn stored_pieces_are_zstd_frames_that_match_their_descriptors() -> R {
+    let mut rig = rig()?;
+    rig.piece_len = 400;
+    let data = b"compressible line of transcript text\n".repeat(40);
+    transcript(&mut rig, &data);
+    let (outcomes, changes) = rig.cycle()?;
+    assert_eq!(outcomes, [SourceOutcome::Planned]);
+    let [Change::Epoch(write)] = changes.as_slice() else {
+        return Err(format!("expected one epoch, got {:?}", kinds(&changes)));
+    };
+    assert!(write.pieces.len() > 1);
+    let mut restored = Vec::new();
+    for piece in &write.pieces {
+        let (body, _) = rig
+            .store
+            .objects
+            .get(piece.object())
+            .ok_or("piece object")?;
+        assert_eq!(
+            body.get(..4),
+            Some(&[0x28, 0xb5, 0x2f, 0xfd][..]),
+            "zstd magic"
+        );
+        let start = usize::try_from(piece.offset().get()).map_err(e)?;
+        let len = usize::try_from(piece.len()).map_err(e)?;
+        let raw = span(&data, start..start + len)?;
+        assert_ne!(body.as_slice(), raw, "stored bytes differ from raw");
+        assert!(body.len() < raw.len(), "compressible input shrinks");
+        assert_eq!(piece.encoded_len(), u64::try_from(body.len()).map_err(e)?);
+        assert_eq!(piece.encoded_sha256(), manifest_hash(body));
+        let decoded = memory_reader::decode_piece(piece, body).map_err(e)?;
+        assert_eq!(manifest_hash(&decoded), piece.sha256());
+        restored.extend(decoded);
+    }
+    assert_eq!(restored, data);
     Ok(())
 }

@@ -42,7 +42,8 @@ pub struct Base {
     pub etag: ETag,
 }
 
-/// One piece object to PUT. The key is `objects/<raw sha256>.zst`.
+/// One piece object to PUT. The key is `objects/<sha256 of the transformed piece bytes>.zst`;
+/// the body is those bytes zstd-compressed.
 #[derive(Debug)]
 pub struct Upload {
     /// Object key.

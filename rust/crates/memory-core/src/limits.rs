@@ -49,7 +49,8 @@ pub fn manifest_key(hash: &Sha256) -> String {
     format!("manifests/{}.json", String::from(*hash))
 }
 
-/// Object key `objects/<sha256 of raw piece bytes>.zst`.
+/// Object key `objects/<sha256 of the transformed piece bytes>.zst`: the digest is taken after
+/// the privacy transform and before compression.
 pub fn object_key(raw: &Sha256) -> String {
     format!("objects/{}.zst", String::from(*raw))
 }
