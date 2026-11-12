@@ -19,7 +19,8 @@ use crate::capture::{
     Captured, Env, Local, Locals, MAX_PIECE_BYTES, Source, Update, attach_launches, capture,
 };
 use crate::commit::{
-    Base, Commit, Failure, KnownOurs, Landed, commit_known, disposition_paced, recover_base,
+    Base, Commit, CommitEnd, Failure, KnownOurs, Landed, commit_known, disposition_paced,
+    recover_base,
 };
 use crate::config::{Config, ConfigError};
 use crate::environment::{Clock, FileSystem, Store};
@@ -655,7 +656,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
 
     fn settle(
         rt: &mut OwnerRt,
-        result: &Result<Landed, Failure>,
+        result: &Result<CommitEnd, Failure>,
         at: Duration,
         draw: u64,
         report: &mut RoundReport,
@@ -794,7 +795,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         got: Captured,
         hints: &mut [ScannedFile],
         attached_for: Option<&Owner>,
-    ) -> Result<Landed, Failure> {
+    ) -> Result<CommitEnd, Failure> {
         let result = commit_known(
             &mut self.store,
             base,
@@ -802,23 +803,33 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             &mut rt.known_ours,
             &mut |_| {},
         );
-        if let Ok(landed) = &result {
+        if let Ok(end) = &result {
             // Remote is authoritative: updates apply only once the commit is durable.
-            // An adopted earlier manifest (A6 `follow_up`) did not carry this capture's
-            // bytes: keep the base, apply nothing, and the next round captures again.
-            rt.base = RemoteBase::Known(landed.base());
-            if !landed.follow_up {
-                self.apply(got.updates);
-            }
-            if let Some(owner) = attached_for
-                && !landed.follow_up
-            {
-                for record in hints.iter_mut().flat_map(|f| f.records.iter_mut()) {
-                    record.done |= record.owner == *owner;
-                }
+            // An adopted earlier manifest (A6) did not carry this capture's bytes: keep the
+            // base, apply nothing, and the next round captures again.
+            rt.base = RemoteBase::Known(end.base());
+            if let CommitEnd::Landed(landed) = end {
+                self.apply_landed(landed, got.updates, hints, attached_for);
             }
         }
         result
+    }
+
+    /// The local effects of a commit that landed. Taking `&Landed` is the proof that this
+    /// capture's bytes are durable; `hint_owner` is `Some` when launch hints were attached.
+    fn apply_landed(
+        &mut self,
+        _landed: &Landed,
+        updates: Vec<Update>,
+        hints: &mut [ScannedFile],
+        hint_owner: Option<&Owner>,
+    ) {
+        self.apply(updates);
+        if let Some(owner) = hint_owner {
+            for record in hints.iter_mut().flat_map(|f| f.records.iter_mut()) {
+                record.done |= record.owner == *owner;
+            }
+        }
     }
 
     /// One owner's turn: gate, recover, capture, attach launches, commit, settle. Returns true

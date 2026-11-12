@@ -9,8 +9,8 @@
 use hegel::{TestCase, generators as gs};
 use memory::capture::Published;
 use memory::commit::{
-    Base, Commit, Failure, KnownOurs, Landed, Upload, check_fence, commit, commit_known,
-    disposition, manifest_key, recover_base,
+    Base, Commit, CommitEnd, Failure, KnownOurs, Landed, LandedHow, Upload, check_fence, commit,
+    commit_known, disposition, manifest_key, recover_base,
 };
 use memory::environment::{Store, StoreError, Stored};
 use memory_core::disposition::Streak;
@@ -588,7 +588,7 @@ enum Report {
     Parked,
     Failed,
     Idle,
-    Landed(CommitOutcome),
+    Landed(LandedHow),
     Crashed { manifest: bool },
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -697,11 +697,14 @@ impl Sut {
     fn restart(&mut self) {
         self.variant = self.variant.wrapping_add(1);
     }
-    fn absorb(&mut self, result: Result<Landed, Failure>) -> R<Report> {
+    fn absorb(&mut self, result: Result<CommitEnd, Failure>) -> R<Report> {
         match result {
-            Ok(landed) => {
-                self.base = Some(landed.base());
-                Ok(Report::Landed(landed.outcome))
+            Ok(end) => {
+                self.base = Some(end.base());
+                match end {
+                    CommitEnd::Landed(landed) => Ok(Report::Landed(landed.how())),
+                    CommitEnd::Adopted(a) => Err(format!("unexpected adoption {a:?}")),
+                }
             }
             Err(Failure::NotLanded(_)) => Ok(Report::Failed),
             Err(Failure::LandingUnknown(_) | Failure::BaseUnchanged) => {
@@ -816,7 +819,7 @@ impl Sut {
                 );
                 let report = self.reconcile(disk)?;
                 self.store.clear_transient();
-                if matches!(report, Report::Landed(CommitOutcome::AlreadyOurs { .. })) {
+                if matches!(report, Report::Landed(LandedHow::AlreadyOurs)) {
                     bump(&shapes.lost_reply);
                 }
             }
@@ -1641,7 +1644,7 @@ struct Rig {
     variant: u8,
     base: Option<Base>,
 }
-type Run = (Result<Landed, Failure>, Vec<u32>);
+type Run = (Result<CommitEnd, Failure>, Vec<u32>);
 
 impl Rig {
     fn new() -> R<Self> {
@@ -1683,7 +1686,10 @@ impl Rig {
         Ok(self.go_with(request))
     }
     fn landed(&mut self) -> R<Landed> {
-        self.go()?.0.map_err(e)
+        match self.go()?.0.map_err(e)? {
+            CommitEnd::Landed(landed) => Ok(landed),
+            CommitEnd::Adopted(a) => Err(format!("expected landed, adopted {a:?}")),
+        }
     }
     fn failed(&mut self) -> R<(Failure, Vec<u32>)> {
         let (result, pauses) = self.go()?;
@@ -1720,12 +1726,9 @@ fn first_write_uses_if_none_match_and_returns_committed() -> R {
     let mut rig = Rig::seeded(&[1, 2, 3, 4, 5])?;
     let landed = rig.landed()?;
     let etag = rig.current_etag()?;
-    assert_eq!(
-        landed.outcome,
-        CommitOutcome::Committed { etag: etag.clone() }
-    );
-    assert_eq!(landed.etag, etag);
-    assert_eq!(landed.built.position.seq, 0);
+    assert_eq!(landed.how(), LandedHow::Committed);
+    assert_eq!(landed.etag(), &etag);
+    assert_eq!(landed.built().position.seq, 0);
     assert_eq!(rig.store.count(Op::Put(Kind::Object)), 2);
     assert_eq!(rig.store.count(Op::Put(Kind::Manifest)), 1);
     assert_eq!(rig.store.count(Op::Put(Kind::Current)), 1);
@@ -1776,18 +1779,13 @@ fn lost_reply_after_landing_is_already_ours() -> R {
     );
     let landed = rig.landed()?;
     let etag = rig.current_etag()?;
-    assert_eq!(
-        landed.outcome,
-        CommitOutcome::AlreadyOurs { etag: etag.clone() }
-    );
+    assert_eq!(landed.how(), LandedHow::AlreadyOurs);
+    assert_eq!(landed.etag(), &etag);
     assert_eq!(rig.store.count(Op::Get(Kind::Current)), 1);
     assert_eq!(rig.store.count(Op::Put(Kind::Current)), 1);
     // The verified ETag fences the next commit.
     rig.put_file(0, &[1, 2, 3, 4, 5, 9]);
-    assert!(matches!(
-        rig.landed()?.outcome,
-        CommitOutcome::Committed { .. }
-    ));
+    assert_eq!(rig.landed()?.how(), LandedHow::Committed);
     rig.assert_safe()
 }
 
@@ -1803,7 +1801,7 @@ fn committed_then_5xx_is_already_ours_and_never_a_spurious_412() -> R {
         },
     );
     let landed = rig.landed()?;
-    assert!(matches!(landed.outcome, CommitOutcome::AlreadyOurs { .. }));
+    assert_eq!(landed.how(), LandedHow::AlreadyOurs);
     assert_eq!(rig.store.count(Op::Put(Kind::Current)), 3);
     rig.assert_safe()
 }
@@ -1818,10 +1816,10 @@ fn unlanded_5xx_reads_base_unchanged_and_retries_from_step_three() -> R {
         Effect::FailBefore(StoreError::Server),
     );
     let (result, pauses) = rig.go()?;
-    assert!(matches!(
-        result.map_err(e)?.outcome,
-        CommitOutcome::Committed { .. }
-    ));
+    let CommitEnd::Landed(landed) = result.map_err(e)? else {
+        return Err("adopted".to_owned());
+    };
+    assert_eq!(landed.how(), LandedHow::Committed);
     assert_eq!(rig.store.count(Op::Put(Kind::Current)) - before, 2);
     assert_eq!(pauses, vec![1]);
     rig.assert_safe()
@@ -1836,7 +1834,7 @@ fn etag_churn_is_base_unchanged_then_committed_with_the_fresh_etag() -> R {
     rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
     rig.store.arm(Op::Put(Kind::Current), Effect::Churn);
     let landed = rig.landed()?;
-    assert_eq!(landed.etag, rig.current_etag()?);
+    assert_eq!(landed.etag(), &rig.current_etag()?);
     assert_eq!(rig.store.count(Op::Get(Kind::Current)), 1);
     rig.assert_safe()
 }
@@ -2009,7 +2007,7 @@ fn a_404_on_the_first_write_is_not_final_and_retries_if_none_match() -> R {
         Effect::FailBefore(StoreError::Server),
     );
     let landed = rig.landed()?;
-    assert!(matches!(landed.outcome, CommitOutcome::Committed { .. }));
+    assert_eq!(landed.how(), LandedHow::Committed);
     // Amendment A13.5: the verification GET is attempted 4 times (the literal, not the constant).
     assert_eq!(rig.store.count(Op::Get(Kind::Current)), 4);
     assert_eq!(rig.store.count(Op::Put(Kind::Current)), 2);
@@ -2143,7 +2141,7 @@ fn revocation_before_the_pointer_write_leaves_only_unreferenced_objects_then_rec
     rig.store.revoked = false;
     // Same inputs again: pieces and the manifest are 412 = success, the pointer lands.
     let landed = rig.landed()?;
-    assert_eq!(landed.built.position.seq, 2);
+    assert_eq!(landed.built().position.seq, 2);
     rig.assert_safe()
 }
 
@@ -2160,10 +2158,7 @@ fn ambiguous_piece_put_is_retried_as_412_success() -> R {
     let (failure, _) = rig.failed()?;
     assert_eq!(failure, Failure::NotLanded(ErrorClass::Offline));
     assert!(rig.store.peek(&rig.current_key()).is_none());
-    assert!(matches!(
-        rig.landed()?.outcome,
-        CommitOutcome::Committed { .. }
-    ));
+    assert_eq!(rig.landed()?.how(), LandedHow::Committed);
     rig.assert_safe()
 }
 
@@ -2194,7 +2189,7 @@ fn r2_a_412_dedup_adopts_the_encoding_that_actually_won() -> R {
     let ours = encode(&raw, 0);
     assert_ne!(sha(&ours), sha(&winner));
     let landed = rig.landed()?;
-    let Manifest::Checkpoint(checkpoint) = &landed.built.manifest else {
+    let Manifest::Checkpoint(checkpoint) = &landed.built().manifest else {
         return Err("first manifest is a checkpoint".to_owned());
     };
     let piece = need(
@@ -2285,7 +2280,7 @@ fn disposition_maps_every_commit_result() -> R {
     let mut rig = Rig::seeded(&[1, 2, 3])?;
     let landed = rig.landed()?;
     let (d, streak) = disposition(
-        &Ok(landed),
+        &Ok(CommitEnd::Landed(landed)),
         false,
         Duration::ZERO,
         &Streak {
@@ -2529,10 +2524,10 @@ fn recover_base_failures_are_classified() -> R {
 #[test]
 fn recover_base_stops_at_the_first_manifest_that_does_not_match_its_key() -> R {
     let mut rig = Rig::seeded(&[1, 2, 3])?;
-    let mut hashes = vec![rig.landed()?.built.hash];
+    let mut hashes = vec![rig.landed()?.built().hash];
     for k in 4..=6_u8 {
         rig.put_file(0, &(1..=k).collect::<Vec<u8>>());
-        hashes.push(rig.landed()?.built.hash);
+        hashes.push(rig.landed()?.built().hash);
     }
     // Seq 0..3. Under the key of seq 2 sit the bytes of seq 1: a valid delta that links on to
     // seq 0, so a walk that does not check the hash would carry on fetching.
@@ -2648,9 +2643,9 @@ fn seventy_commits_cross_a_checkpoint_and_still_recover() -> R {
         content.push(u8::try_from(n % 3).map_err(e)?);
         rig.put_file(0, &content.clone());
         let landed = rig.landed()?;
-        assert_eq!(landed.built.position.seq, n);
+        assert_eq!(landed.built().position.seq, n);
         assert_eq!(
-            matches!(landed.built.manifest, Manifest::Checkpoint(_)),
+            matches!(landed.built().manifest, Manifest::Checkpoint(_)),
             n % 64 == 0
         );
     }
@@ -2665,7 +2660,7 @@ fn seventy_commits_cross_a_checkpoint_and_still_recover() -> R {
 /// refused). Capture B builds M2. M1's delayed write then lands just before B's PUT.
 fn late_write(
     known_for_b: Option<KnownOurs>,
-) -> R<(Rig, Result<Landed, Failure>, Sha256, KnownOurs)> {
+) -> R<(Rig, Result<CommitEnd, Failure>, Sha256, KnownOurs)> {
     let mut rig = Rig::two_commits()?;
     let mut known = KnownOurs::new();
     rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
@@ -2714,21 +2709,21 @@ fn late_write(
 #[test]
 fn late_write_of_an_earlier_failed_capture_is_adopted_and_followed_up() -> R {
     let (mut rig, b, m1, known) = late_write(None)?;
-    let landed = b.map_err(e)?;
+    let end = b.map_err(e)?;
     // Adopting the earlier attempt's manifest is a landing: the set is cleared (A6).
     assert!(
         known.is_empty(),
         "known_ours kept {} manifests",
         known.len()
     );
-    assert!(matches!(landed.outcome, CommitOutcome::AlreadyOurs { .. }));
-    assert!(landed.follow_up);
-    assert_eq!(landed.built.hash, m1);
-    rig.base = Some(landed.base());
+    let CommitEnd::Adopted(adopted) = &end else {
+        return Err(format!("expected adoption, got {end:?}"));
+    };
+    assert_eq!(adopted.built().hash, m1);
+    rig.base = Some(end.base());
     // Follow-up capture uploads the newer bytes on top of the adopted manifest.
     let again = rig.landed()?;
-    assert!(matches!(again.outcome, CommitOutcome::Committed { .. }));
-    assert!(!again.follow_up);
+    assert_eq!(again.how(), LandedHow::Committed);
     rig.assert_safe()
 }
 
@@ -2779,7 +2774,7 @@ fn known_ours_is_cleared_whenever_a_commit_lands() -> R {
             );
         }
         let request = rig.request()?;
-        let landed = commit_known(
+        let end = commit_known(
             &mut rig.store,
             rig.base.as_ref(),
             request,
@@ -2787,12 +2782,15 @@ fn known_ours_is_cleared_whenever_a_commit_lands() -> R {
             &mut |_| {},
         )
         .map_err(e)?;
-        let kind_ok = if lost_reply {
-            matches!(landed.outcome, CommitOutcome::AlreadyOurs { .. })
-        } else {
-            matches!(landed.outcome, CommitOutcome::Committed { .. })
+        let CommitEnd::Landed(landed) = end else {
+            return Err(format!("unexpected adoption {end:?}"));
         };
-        assert!(kind_ok, "{:?}", landed.outcome);
+        let want = if lost_reply {
+            LandedHow::AlreadyOurs
+        } else {
+            LandedHow::Committed
+        };
+        assert_eq!(landed.how(), want);
         assert!(known.is_empty(), "lost_reply={lost_reply}: set not cleared");
     }
     Ok(())

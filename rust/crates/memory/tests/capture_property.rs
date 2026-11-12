@@ -7,11 +7,11 @@
 //! the stand-in planner of `commit_protocol.rs`; the store faults are the same scripted ones.
 use hegel::{TestCase, generators as gs};
 use memory::capture::{Captured, Env, Local, Locals, Published, Source, capture};
-use memory::commit::{Base, Failure, Landed, commit, manifest_key, recover_base};
+use memory::commit::{Base, CommitEnd, Failure, LandedHow, commit, manifest_key, recover_base};
 use memory::environment::{Store, StoreError, Stored};
 use memory_core::domain::{
-    Agent, ArchiveId, CommitOutcome, ETag, MachineId, Owner, SessionId, SessionKey, Sha256,
-    SourceClass, SourceId, SourceKind,
+    Agent, ArchiveId, ETag, MachineId, Owner, SessionId, SessionKey, Sha256, SourceClass, SourceId,
+    SourceKind,
 };
 use memory_core::limits::current_key;
 use memory_core::manifest::{
@@ -564,7 +564,7 @@ enum Report {
     Parked,
     Failed,
     Idle,
-    Landed(CommitOutcome),
+    Landed(LandedHow),
     Crashed { manifest: bool },
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -661,11 +661,14 @@ impl Sut {
         }
         Ok(None)
     }
-    fn absorb(&mut self, result: Result<Landed, Failure>) -> R<Report> {
+    fn absorb(&mut self, result: Result<CommitEnd, Failure>) -> R<Report> {
         match result {
-            Ok(landed) => {
-                self.base = Some(landed.base());
-                Ok(Report::Landed(landed.outcome))
+            Ok(end) => {
+                self.base = Some(end.base());
+                match end {
+                    CommitEnd::Landed(landed) => Ok(Report::Landed(landed.how())),
+                    CommitEnd::Adopted(a) => Err(format!("unexpected adoption {a:?}")),
+                }
             }
             Err(Failure::NotLanded(_)) => Ok(Report::Failed),
             Err(Failure::LandingUnknown(_) | Failure::BaseUnchanged) => {
@@ -815,7 +818,7 @@ impl Sut {
                 );
                 let report = self.reconcile()?;
                 self.store.clear_transient();
-                if matches!(report, Report::Landed(CommitOutcome::AlreadyOurs { .. })) {
+                if matches!(report, Report::Landed(LandedHow::AlreadyOurs)) {
                     bump(&shapes.lost_reply);
                 }
             }
