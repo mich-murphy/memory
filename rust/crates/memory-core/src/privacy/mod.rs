@@ -145,6 +145,8 @@ pub enum Admission {
 /// Opaque admitted source; only admission can construct it.
 pub struct AdmittedSource {
     facts: ResolvedSourceFacts,
+    /// Validated non-empty owner, proven present by admission.
+    owner: String,
     binding: [u8; 32],
 }
 
@@ -316,11 +318,12 @@ pub fn admit(context: &PolicyContext, facts: ResolvedSourceFacts) -> Admission {
     if facts.profile == Profile::Unknown {
         return Admission::Deny(Reason::UnknownKind);
     }
-    if facts.owner.as_ref().is_none_or(String::is_empty) {
+    let Some(owner) = facts.owner.clone().filter(|o| !o.is_empty()) else {
         return Admission::Deny(Reason::UnknownOwner);
-    }
+    };
     Admission::Allow(AdmittedSource {
         binding: binding(context, &facts),
+        owner,
         facts,
     })
 }
@@ -363,14 +366,11 @@ pub fn authorize(
         return Authorization::Deny(Reason::ContextChanged);
     }
     match admit(context, source.facts.clone()) {
-        Admission::Allow(admitted) => match admitted.facts.owner {
-            Some(owner) => Authorization::Allow(AuthorizedBody {
-                digest: Sha256::digest(&redacted.bytes).into(),
-                bytes: redacted.bytes,
-                owner,
-            }),
-            None => Authorization::Deny(Reason::UnknownOwner),
-        },
+        Admission::Allow(_) => Authorization::Allow(AuthorizedBody {
+            digest: Sha256::digest(&redacted.bytes).into(),
+            bytes: redacted.bytes,
+            owner: source.owner.clone(),
+        }),
         Admission::Deny(reason) => Authorization::Deny(reason),
         Admission::Unknown(reason) => Authorization::Unknown(reason),
     }
