@@ -543,11 +543,15 @@ fn missing_state_dir_environment_exits_zero() -> R {
 #[test]
 fn other_subcommands_keep_explicit_failure() -> R {
     let tmp = Tmp::new("other")?;
-    for args in [&[][..], &["sync"], &["restore", "x"], &["hooks"]] {
+    for args in [&[][..], &["sync"], &["hooks"]] {
         let out = spawn(args, tmp.p(), &[], b"")?;
         assert_eq!(out.status.code(), Some(78), "{args:?}");
         assert!(out.stdout.is_empty());
     }
+    // `restore` is wired (R3): a malformed call is a usage error, never a silent success.
+    let out = spawn(&["restore", "x"], tmp.p(), &[], b"")?;
+    assert_eq!(out.status.code(), Some(64));
+    assert!(out.stdout.is_empty());
     assert!(!tmp.p().join("hints").exists());
     Ok(())
 }

@@ -1,0 +1,148 @@
+# Teeth checks for the run-loop stack (brief 27). Each block is the FAIL and Summary lines of one
+# parent run with the named change applied to the source; every change was reverted afterwards
+# and the tree confirmed clean. Mutant names are the keys of the parent's mutation scripts.
+
+## R1 on ef206af (rust/run-config)
+
+### collectors-empty
+FAIL memory::s3_store assemble::a_token_file_under_a_root_is_withheld_and_never_uploaded
+Summary 2/3 tests run: 1 passed, 1 failed, 21 skipped
+left: (1, 0, 0)
+right: (0, 0, 0)
+
+### prefix-guard
+FAIL memory::s3_store assemble::refusals_are_closed_codes_and_leave_no_lock
+Summary 3 tests run: 2 passed, 1 failed, 21 skipped
+
+### overlap
+FAIL memory::roots overlapping_roots_are_refused_and_siblings_accepted
+Summary 4/5 tests run: 3 passed, 1 failed, 0 skipped
+left: Ok(())
+right: Err(Overlap)
+
+### token-mode
+FAIL memory::token refusals_are_closed_codes_without_text
+Summary 3 tests run: 2 passed, 1 failed, 0 skipped
+
+### token-unknown-field
+FAIL memory::token refusals_are_closed_codes_without_text
+Summary 3 tests run: 2 passed, 1 failed, 0 skipped
+
+### http-remote
+FAIL memory::state config_accept_reject_table
+Summary 3/4 tests run: 2 passed, 1 failed, 30 skipped
+left: Ok(Config { archive_id: ArchiveId("arch-1"), machine_id: MachineId("bc-01"), roots: [Root { agent: Claude, path: "/home/u/.claude/projects" }], window: Window { quiet: 30s...
+right: Err(Endpoint)
+
+## R2 on 9c8355b (rust/run-loop), tests run and harness
+
+### floor
+FAIL memory::run startup_delay_spans_five_to_sixty_seconds_inclusive
+Summary 18 tests run: 17 passed, 1 failed, 0 skipped
+left: 0ns
+right: 5s
+
+### stop-ignored
+FAIL memory::harness a_new_daemon_starts_after_a_clean_stop
+FAIL memory::harness a_second_daemon_on_the_same_root_exits_75_and_the_first_is_unaffected
+FAIL memory::harness sigint_after_a_round_exits_zero_and_flushes_status
+FAIL memory::harness sigterm_after_a_round_exits_zero_and_flushes_status
+FAIL memory::harness sigterm_interrupts_the_production_startup_delay
+FAIL memory::run elapsed_elapsed_stop_runs_two_rounds_then_shuts_down
+FAIL memory::run failed_shutdown_after_stop_exits_one
+FAIL memory::run stop_during_startup_wait_runs_no_round
+Summary 18 tests run: 10 passed, 8 failed, 0 skipped
+left: WaitFailed
+right: ShutdownFailed
+right: Stopped
+
+### round-error-zero
+FAIL memory::run round_error_exits_one_after_shutdown
+Summary 18 tests run: 17 passed, 1 failed, 0 skipped
+left: Stopped
+right: RoundFailed
+
+### no-shutdown
+FAIL memory::harness sigint_after_a_round_exits_zero_and_flushes_status
+FAIL memory::harness sigterm_after_a_round_exits_zero_and_flushes_status
+Summary 18 tests run: 16 passed, 2 failed, 0 skipped
+left: 354343725
+left: 354343726
+right: 354343725
+right: 354343726
+
+### wait-failed-zero
+FAIL memory::run failed_wait_exits_one_and_never_zero
+FAIL memory::run only_a_stop_gives_exit_zero
+Summary 18 tests run: 16 passed, 2 failed, 0 skipped
+left: 0
+right: 1
+
+### sim-interval-zero
+FAIL memory::run sim_timing_parses_two_millisecond_values_and_refuses_the_rest
+Summary 18 tests run: 17 passed, 1 failed, 0 skipped
+left: Some(Timing { startup: 10ms, interval: 0ns })
+right: None
+
+## R3 on 0a91639 (rust/restore-cmd before the rebase onto R2)
+
+### deleted-not-skipped
+FAIL memory::s3_store restore::deleted_sources_are_skipped_and_the_latest_epoch_is_written
+Summary 7/10 tests run: 6 passed, 1 failed, 24 skipped
+
+### dir-prefix-collision
+FAIL memory::s3_store restore::colliding_paths_are_refused_and_leave_nothing
+Summary 5/10 tests run: 4 passed, 1 failed, 24 skipped
+left: Err(SourceCorrupt)
+right: Err(PathCollision)
+
+### nonempty-dir
+FAIL memory::s3_store restore::a_non_empty_output_is_refused_before_any_fetch
+Summary 2/10 tests run: 1 passed, 1 failed, 24 skipped
+left: Ok(Absent)
+right: Err(OutputNotEmpty)
+
+### no-cleanup
+FAIL memory::s3_store restore::a_failure_while_writing_removes_what_the_run_created
+Summary 3/10 tests run: 2 passed, 1 failed, 24 skipped
+
+### absent-exit
+FAIL memory::s3_store restore::the_binary_refusals_have_their_codes
+Summary 9/10 tests run: 8 passed, 1 failed, 24 skipped
+left: Some(1)
+right: Some(66)
+
+### extra-segment
+FAIL memory-core::core_limits owner_text_refusals
+Summary 4 tests run: 3 passed, 1 failed, 29 skipped
+left: Ok(Session(SessionKey { archive: ArchiveId("a"), machine: MachineId("m"), agent: Claude, session: SessionId("extra") }))
+right: Err(Segments)
+
+### length-bound
+FAIL memory-core::core_limits owner_text_length_bound_is_the_key_bound
+Summary 2/4 tests run: 1 passed, 1 failed, 29 skipped
+left: Ok(Shared { archive: ArchiveId("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...
+right: Err(TooLong)
+
+## R4 on 2c10eb0 (rust/daemon-restore-e2e), module daemon_restore
+
+### extend-from-zero
+Error: "no committed round within 20s; requests so far: 13"
+Error: "no committed round within 20s; requests so far: 15"
+FAIL memory::s3_store daemon_restore::a_restarted_daemon_continues_and_restore_returns_everything
+FAIL memory::s3_store daemon_restore::daemon_captures_then_restore_returns_the_bytes
+Summary 2 tests run: 0 passed, 2 failed, 34 skipped
+
+### round-noop
+Error: "no committed round within 20s; requests so far: 0"
+FAIL memory::s3_store daemon_restore::a_restarted_daemon_continues_and_restore_returns_everything
+FAIL memory::s3_store daemon_restore::daemon_captures_then_restore_returns_the_bytes
+Summary 2 tests run: 0 passed, 2 failed, 34 skipped
+
+### append-as-epoch
+FAIL memory::s3_store daemon_restore::a_restarted_daemon_continues_and_restore_returns_everything
+Summary 2 tests run: 1 passed, 1 failed, 34 skipped
+assertion `left == right` failed: session bytes were uploaded more or less than once
+left: 10712
+right: 6700
+

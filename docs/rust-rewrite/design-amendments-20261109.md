@@ -1,9 +1,8 @@
 # DESIGN.md amendments, 2026-11-09
 
-**Status: authoritative where it conflicts with DESIGN.md or AGENTS.md.** Both of those files are
-hash-pinned by `implementation/verify-evidence.py`, which forbids admitting them as revisions,
-so they are not edited. Read DESIGN.md, then this file. Each amendment names the operator decision
-or measured evidence it rests on. The handoff brief records the operations themselves.
+**Status: folded into DESIGN.md on 2026-11-12. DESIGN.md is the current design and wins; this file is kept as the dated record of why each change was made.**
+Each amendment names the operator decision or measured evidence it rests on. The handoff brief
+records the operations themselves.
 
 ## A0. Go writers are stopped (AGENTS.md "Go candidate (frozen, running until cutover)"; contract status note)
 
@@ -448,3 +447,19 @@ once it exists. A root that exists but is not a directory, or cannot be inspecte
 error. Also fixed: a symlink to a directory is never treated as a directory by the watcher
 (DESIGN 7.1, 8.2).
 
+## A14. Operator decisions (2026-11-12)
+
+### A14.1 Startup delay (DESIGN 11.2; resolves the open point of A13.4)
+
+The minimum safe delay before a restarted daemon's first commit is 5 seconds.
+
+### A14.2 Shadow-run length (DESIGN 17 slices 2b and 3)
+
+The exit criterion of A13.1 (2 consecutive days with zero restore mismatches, zero parked owners
+and zero local session files without a captured owner) also replaces the 7-day shadow runs of
+slices 2b and 3. Confirmed.
+
+### A14.3 Hash pin removed, amendments folded
+
+The baseline hash pin is removed from `verify-evidence.py`, which now checks only the prototype
+results. A0 to A13 are folded into DESIGN.md. DESIGN.md and AGENTS.md are edited directly from now on.

@@ -42,15 +42,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
 use std::time::Duration;
 
 /// The derived index is written at most this often while dirty (DESIGN.md 9.2).
 pub const INDEX_INTERVAL: Duration = Duration::from_secs(60);
 /// Exit code of `memory daemon` for a config refusal.
 pub const EXIT_CONFIG: u8 = 2;
-/// Exit code of `memory daemon` while no real adapters exist.
-pub const EXIT_NO_ADAPTERS: u8 = 78;
 const MAX_HINT_FILE: u64 = 64 << 20;
 
 /// Why startup refused. Closed; no paths or values.
@@ -79,6 +76,15 @@ impl StartError {
             Self::Config(_) => EXIT_CONFIG,
         }
     }
+}
+
+/// Why [`Daemon::start_built`] refused.
+#[derive(Debug)]
+pub enum BuildError<B> {
+    /// Startup itself refused.
+    Start(StartError),
+    /// The caller's builder refused.
+    Build(B),
 }
 
 /// Failure of one round.
@@ -338,22 +344,6 @@ fn open(root: &Path, config_path: &Path, sync: SyncPolicy) -> Result<Opened, Sta
     })
 }
 
-/// Entry of `memory daemon`: startup, then an explicit refusal because the real filesystem
-/// and store adapters do not exist yet. Prints nothing and never captures.
-#[must_use]
-pub fn main_entry() -> ExitCode {
-    let Some(root) = crate::state::default_root() else {
-        return ExitCode::from(1);
-    };
-    match open(&root, &root.join("config.toml"), SyncPolicy::Full) {
-        Err(error) => ExitCode::from(error.exit_code()),
-        Ok(opened) => {
-            drop(opened);
-            ExitCode::from(EXIT_NO_ADAPTERS)
-        }
-    }
-}
-
 /// What the owner knows of the remote commit base.
 enum RemoteBase {
     /// Not read, or possibly stale: recover before the next commit.
@@ -487,7 +477,39 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         parts: Parts<F, S, C, E>,
         sync: SyncPolicy,
     ) -> Result<Self, StartError> {
-        let opened = open(root, config_path, sync)?;
+        Self::start_built_inner(root, config_path, sync, |_| {
+            Ok::<_, std::convert::Infallible>(parts)
+        })
+        .map_err(|error| match error {
+            BuildError::Start(start) => start,
+            BuildError::Build(never) => match never {},
+        })
+    }
+
+    /// As [`Daemon::start`], but the [`Parts`] are built by `build` from the validated
+    /// [`Config`] once the lock is held and the config is read (once). The closure runs after
+    /// the lock, the state directory, the config and the two state loads (`index.json`,
+    /// `status.json`); nothing is written and no network call is made before it. If it fails,
+    /// the lock is released on return.
+    ///
+    /// # Errors
+    /// [`BuildError::Start`] as [`Daemon::start`]; [`BuildError::Build`] carries `build`'s error.
+    pub fn start_built<B>(
+        root: &Path,
+        config_path: &Path,
+        build: impl FnOnce(&Config) -> Result<Parts<F, S, C, E>, B>,
+    ) -> Result<Self, BuildError<B>> {
+        Self::start_built_inner(root, config_path, SyncPolicy::Full, build)
+    }
+
+    fn start_built_inner<B>(
+        root: &Path,
+        config_path: &Path,
+        sync: SyncPolicy,
+        build: impl FnOnce(&Config) -> Result<Parts<F, S, C, E>, B>,
+    ) -> Result<Self, BuildError<B>> {
+        let opened = open(root, config_path, sync).map_err(BuildError::Start)?;
+        let parts = build(&opened.config).map_err(BuildError::Build)?;
         let locals = opened
             .index
             .sources

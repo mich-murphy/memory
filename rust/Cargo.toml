@@ -37,6 +37,9 @@ md-5 = { version = "=0.11.0", default-features = false }
 base64 = { version = "0.23", default-features = false, features = ["alloc"] }
 # Piece encoding, level 3 (DESIGN.md 7.3 step 4, amendment A13.2). No legacy formats or dictionaries.
 zstd = { version = "=0.14.3", default-features = false }
+# Signal delivery for the run loop (R2). Source read before pinning: signal-hook-0.4.6 src/iterator/mod.rs
+# (Signals::new, forever, Handle::close) and Cargo.toml. `iterator` is the only feature used; no unsafe in our code.
+signal-hook = { version = "=0.4.6", default-features = false, features = ["iterator"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

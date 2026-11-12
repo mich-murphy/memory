@@ -740,3 +740,133 @@ fn current_key_len_matches_current_key_over_generated_inputs() -> R {
     }
     Ok(())
 }
+
+// ---------- owner text form ----------
+
+fn check_owner_text(owner: &Owner) -> Result<(), String> {
+    let p = owner_prefix(owner);
+    if parse_owner_prefix(&p).as_ref() != Ok(owner) {
+        return Err("parse(prefix(owner)) != owner".into());
+    }
+    if current_key(owner) != format!("{p}/current.json") {
+        return Err("current_key != prefix + suffix".into());
+    }
+    Ok(())
+}
+
+const ID_CHARS: &[u8] = b"abcXYZ019._:-";
+
+fn id_from(bytes: &[u8]) -> String {
+    let mut s: String = bytes
+        .iter()
+        .map(|b| {
+            ID_CHARS
+                .get(usize::from(*b) % ID_CHARS.len())
+                .map_or('a', |c| char::from(*c))
+        })
+        .collect();
+    if s.is_empty() || s == "." || s == ".." {
+        s = "a".into();
+    }
+    s
+}
+
+fn owner_from(
+    kind: bool,
+    a: &[u8],
+    m: &[u8],
+    s: &[u8],
+    agent: u8,
+) -> Result<Owner, ValidationError> {
+    let agent = match agent % 3 {
+        0 => Agent::Claude,
+        1 => Agent::Codex,
+        _ => Agent::Pi,
+    };
+    if kind {
+        owner_session(&id_from(a), &id_from(m), &id_from(s), agent)
+    } else {
+        owner_shared(&id_from(a), &id_from(m), agent)
+    }
+}
+
+#[hegel::test]
+fn hegel_owner_text_roundtrip(tc: TestCase) {
+    let kind = tc.draw(gs::booleans());
+    let a: Vec<u8> = tc.draw(gs::vecs(gs::integers::<u8>()).max_size(40));
+    let m: Vec<u8> = tc.draw(gs::vecs(gs::integers::<u8>()).max_size(40));
+    let s: Vec<u8> = tc.draw(gs::vecs(gs::integers::<u8>()).max_size(40));
+    let agent = tc.draw(gs::integers::<u8>());
+    let owner = owner_from(kind, &a, &m, &s, agent);
+    assert!(owner.is_ok());
+    if let Ok(o) = owner {
+        assert_eq!(check_owner_text(&o), Ok(()));
+    }
+}
+
+proptest! {
+    #[test]
+    fn proptest_owner_text_roundtrip(
+        kind in any::<bool>(),
+        a in prop::collection::vec(any::<u8>(), 0..40),
+        m in prop::collection::vec(any::<u8>(), 0..40),
+        s in prop::collection::vec(any::<u8>(), 0..40),
+        agent in any::<u8>()
+    ) {
+        let owner = owner_from(kind, &a, &m, &s, agent);
+        prop_assert!(owner.is_ok());
+        if let Ok(o) = owner {
+            prop_assert_eq!(check_owner_text(&o), Ok(()));
+        }
+    }
+}
+
+#[test]
+fn owner_text_refusals() {
+    let long = "a".repeat(1100);
+    let table: [(&str, OwnerTextError); 14] = [
+        ("session/a/m/claude/s", OwnerTextError::Prefix),
+        ("", OwnerTextError::Prefix),
+        ("sessions/a/m/claude", OwnerTextError::Segments),
+        ("shared/a/m", OwnerTextError::Segments),
+        ("sessions/a/m/claude/s/extra", OwnerTextError::Segments),
+        ("shared/a/m/claude/extra", OwnerTextError::Segments),
+        ("sessions/a/m/claude/s/", OwnerTextError::Segments),
+        ("shared/a/m/claude/", OwnerTextError::Segments),
+        ("shared/a/m/", OwnerTextError::EmptySegment),
+        ("sessions/a//claude/s", OwnerTextError::EmptySegment),
+        ("shared/a/m/claude/current.json", OwnerTextError::Segments),
+        (
+            "sessions/a/m/claude/s/current.json",
+            OwnerTextError::Segments,
+        ),
+        ("shared/a/m/gemini", OwnerTextError::Agent),
+        ("shared/a/../claude", OwnerTextError::Identifier),
+    ];
+    for (text, want) in table {
+        assert_eq!(parse_owner_prefix(text), Err(want), "{text}");
+    }
+    assert_eq!(
+        parse_owner_prefix(&format!("shared/{long}/m/claude")),
+        Err(OwnerTextError::TooLong)
+    );
+    assert_eq!(
+        parse_owner_prefix("shared/a b/m/claude"),
+        Err(OwnerTextError::Identifier)
+    );
+}
+
+#[test]
+fn owner_text_length_bound_is_the_key_bound() -> R {
+    // 1,024-byte key: prefix may be 1,024 - 13 bytes.
+    let fixed = "shared///claude".len();
+    let room = MAX_KEY_BYTES - 13 - fixed;
+    let ok = format!("shared/{}/{}/claude", "a".repeat(room - 1), "b");
+    assert_eq!(ok.len() + 13, MAX_KEY_BYTES);
+    // ids are capped at 1,024 each, so this is the key bound, not the id bound
+    let owner = parse_owner_prefix(&ok)?;
+    assert_eq!(current_key(&owner).len(), MAX_KEY_BYTES);
+    let over = format!("shared/{}/{}/claude", "a".repeat(room), "b");
+    assert_eq!(parse_owner_prefix(&over), Err(OwnerTextError::TooLong));
+    Ok(())
+}

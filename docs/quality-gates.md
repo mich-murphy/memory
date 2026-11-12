@@ -36,7 +36,8 @@ window-comparison mutation, the three-invariant mutation check (`scripts/check-m
 a failed or unavailable gate makes the aggregate fail. CI uses at least 500 cases,
 local slice acceptance requires 2,000. A scaffold/property pass is not proof of
 the daemon, real R2 semantics, privacy at the actual store sink, restore/import,
-footprint, or the two seven-day native shadows. The line-coverage floor is a fixed
+footprint, or the two native shadow runs (seven days each until A14.2 of 2026-11-12 put the
+2-day criterion of A13.1 in their place). The line-coverage floor is a fixed
 **80%** backstop ([amendment A9](rust-rewrite/design-amendments-20261109.md), 2026-11-09),
 not a ratchet of the latest measurement; evidence for invariants comes from the
 independent-oracle properties, their coverage guards and the production mutation checks.
@@ -47,8 +48,8 @@ compile-fail doctests, 2,000 cases, seed 730213; see
 [its evidence](rust-rewrite/implementation/evidence/13-review-fix-round/). Gate 8
 (98.3173%, seed 730210, [round 10](rust-rewrite/implementation/evidence/12-slice2-round10/))
 is superseded. After the design and test review (2026-11-11, `main` at `c239d1b`,
-[report 24](rust-rewrite/implementation/24-design-and-test-review.md)) the gates passed at 500 cases, seed 3481505894, 431 tests, **97.72%** (5,840/5,976 lines); that run was not repeated at 2,000 cases. On the data-structure stack (2026-11-12, `0f3cb7d`, not yet on `main`,
-[report 25](rust-rewrite/implementation/25-engineering-practice-review.md)) they passed at 500 cases, seed 374449330, 431 tests, **97.72%** (5,869/6,006 lines). On the walking-skeleton stack (2026-11-12, `8f10261`, not yet on `main`, [report 26](rust-rewrite/implementation/26-walking-skeleton.md)) they passed at 500 cases, seed 335062796, 471 tests, **97.62%** (6,140/6,290 lines). After the structural fixes on the same stack (2026-11-12, `6fd536a`, [evidence 17](rust-rewrite/implementation/evidence/17-structural-fixes/)) they passed at 500 cases, seed 3194196348, 472 tests, **97.75%** (6,031/6,170 lines). Under `gates.sh` the two mutation scripts share one temporary target
+[report 24](rust-rewrite/implementation/24-design-and-test-review.md)) the gates passed at 500 cases, seed 3481505894, 431 tests, **97.72%** (5,840/5,976 lines); that run was not repeated at 2,000 cases. On the data-structure stack (2026-11-12, `0f3cb7d`,
+[report 25](rust-rewrite/implementation/25-engineering-practice-review.md)) they passed at 500 cases, seed 374449330, 431 tests, **97.72%** (5,869/6,006 lines). On the walking-skeleton stack (2026-11-12, `8f10261`, [report 26](rust-rewrite/implementation/26-walking-skeleton.md)) they passed at 500 cases, seed 335062796, 471 tests, **97.62%** (6,140/6,290 lines). After the structural fixes on the same stack (2026-11-12, `6fd536a`, [evidence 17](rust-rewrite/implementation/evidence/17-structural-fixes/)) they passed at 500 cases, seed 3194196348, 472 tests, **97.75%** (6,031/6,170 lines). On the run-loop branches above that stack (2026-11-12, `2c10eb0`, local run, [evidence 18](rust-rewrite/implementation/evidence/18-run-loop/)) they passed at 500 cases, seed 2202692434, 519 tests, **97.36%** (6,596/6,775 lines). Under `gates.sh` the two mutation scripts share one temporary target
 directory (`MEMORY_MUTATION_TARGET`), so the second does not rebuild dependencies; this kept
 the macOS job inside its unchanged 30-minute limit.
 At 2,000 cases the two daemon state-machine properties took about 6 minutes because every

@@ -622,6 +622,7 @@ fn machine_id_race_has_one_winner() -> R {
 const VALID: &str = r#"
 archive_id = "arch-1"
 machine_id = "bc-01"
+endpoint = "https://s3.example.com"
 bucket = "memory-acceptance"
 token_path = "/tokens/r2"
 [[roots]]
@@ -636,6 +637,10 @@ fn with_line(extra: &str) -> String {
     format!("{VALID}\n{extra}\n")
 }
 
+fn with_top(extra: &str) -> String {
+    VALID.replace("[[roots]]", &format!("{extra}\n[[roots]]"))
+}
+
 #[test]
 fn config_accept_reject_table() -> R {
     let ok = Config::parse(VALID).map_err(e)?;
@@ -646,13 +651,33 @@ fn config_accept_reject_table() -> R {
     assert_eq!(ok.window.cap.as_secs(), 120);
     // Minimal with defaults.
     let min =
-        Config::parse("archive_id=\"a\"\nmachine_id=\"m\"\nbucket=\"abc\"\ntoken_path=\"/t\"\n")
+        Config::parse("archive_id=\"a\"\nmachine_id=\"m\"\nendpoint=\"https://e.example\"\nbucket=\"abc\"\ntoken_path=\"/t\"\n")
             .map_err(e)?;
     assert_eq!(
         (min.window.quiet.as_secs(), min.window.cap.as_secs()),
         (60, 300)
     );
     assert!(min.roots.is_empty());
+    assert_eq!((min.region.as_str(), min.prefix.as_str()), ("auto", ""));
+    for url in [
+        "https://s3.example.com/base",
+        "http://127.0.0.1:9000",
+        "http://localhost:9000",
+        "http://[::1]:9000",
+    ] {
+        let cfg = Config::parse(&VALID.replace("https://s3.example.com", url)).map_err(e)?;
+        assert_eq!(cfg.endpoint, url);
+    }
+    for prefix in [
+        "a/",
+        "rust-acceptance/r1/",
+        &format!("{}/", "a".repeat(255)),
+    ] {
+        let cfg = Config::parse(&with_top(&format!("prefix = \"{prefix}\""))).map_err(e)?;
+        assert_eq!(cfg.prefix, *prefix);
+    }
+    let cfg = Config::parse(&with_top("region = \"us-east-1\"")).map_err(e)?;
+    assert_eq!(cfg.region, "us-east-1");
     let partial = Config::parse(&VALID.replace("quiet = 30\n", "")).map_err(e)?;
     assert_eq!(partial.window.quiet.as_secs(), 60);
 
@@ -748,8 +773,56 @@ fn config_accept_reject_table() -> R {
             ConfigError::TokenPathNotAbsolute,
         ),
     ];
+    let ep = |to: &str| rep("https://s3.example.com", to);
+    let mut table = table;
+    for (label, url) in [
+        ("http remote", "http://s3.example.com"),
+        ("http lan", "http://10.0.0.5:9000"),
+        ("ftp", "ftp://s3.example.com"),
+        ("not a url", "s3.example.com"),
+        ("empty endpoint", ""),
+        ("userinfo", "https://u:p@s3.example.com"),
+        ("user only", "https://u@s3.example.com"),
+        ("query", "https://s3.example.com/?a=b"),
+        ("fragment", "https://s3.example.com/#f"),
+        ("http no host", "http://"),
+    ] {
+        table.push((label, ep(url), ConfigError::Endpoint));
+    }
+    table.push((
+        "empty region",
+        with_top("region = \"\""),
+        ConfigError::Region,
+    ));
+    for (label, prefix) in [
+        ("no trailing slash", "a/b"),
+        ("leading slash", "/a/"),
+        ("empty segment", "a//b/"),
+        ("dot segment", "a/./b/"),
+        ("dotdot segment", "a/../b/"),
+        ("only slash", "/"),
+        ("long", &format!("{}/", "a".repeat(256))),
+    ] {
+        table.push((
+            label,
+            with_top(&format!("prefix = \"{prefix}\"")),
+            ConfigError::Prefix,
+        ));
+    }
     for (label, text, want) in table {
         assert_eq!(Config::parse(&text), Err(want), "{label}");
+    }
+    Ok(())
+}
+
+#[test]
+fn config_debug_omits_the_endpoint() -> R {
+    let host = "endpoint-marker.example.net";
+    let cfg = Config::parse(&VALID.replace("s3.example.com", host)).map_err(e)?;
+    assert_eq!(cfg.endpoint, format!("https://{host}"));
+    for text in [format!("{cfg:?}"), format!("{cfg:#?}")] {
+        assert!(!text.contains(host), "{text}");
+        assert!(text.contains("memory-acceptance"), "{text}");
     }
     Ok(())
 }

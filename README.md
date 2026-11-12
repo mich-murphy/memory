@@ -4,8 +4,8 @@ Capture and analyze Claude Code, Codex, and Pi session evidence across machines.
 
 ## Direction and implementation status
 
-**For the Rust rewrite, start with [DESIGN.md](DESIGN.md) and its
-[2026-11-09 amendments](docs/rust-rewrite/design-amendments-20261109.md), then the
+**For the Rust rewrite, start with [DESIGN.md](DESIGN.md) (amendments folded in;
+[why each change was made](docs/rust-rewrite/design-amendments-20261109.md)), then the
 [active delivery handoff](docs/session-capture-handoff.md#current-session-checkpoint).**
 DESIGN.md is authoritative: append pieces, delta/checkpoint manifests, no spool or
 job tables, hooks/notifications with safety reconciliation, and one shared reader.
@@ -24,6 +24,16 @@ functioning Rust collector or release acceptance**: `memory daemon` exits 78 aft
 and there is no R2 client, zstd, run loop or reader yet. See
 [report 23](docs/rust-rewrite/implementation/23-review-fix-round.md) for progress against
 DESIGN sections 15 and 17.
+
+**Update 2026-11-12 (run-loop stack, brief 27):** the S3
+adapter, zstd piece encoding and the reader exist. `memory daemon` starts from `config.toml`,
+runs a safety reconcile every 15 minutes and stops on SIGTERM or SIGINT; `memory restore
+<owner> --out DIR` reads an owner back. A test runs both on the real binary against a local
+S3 server and compares bytes. It is still not a collector: the daemon refuses to write
+outside an acceptance key prefix until `tracing`, hint retention and the audit exist, and the
+file watcher is not connected. See
+[brief 27](docs/rust-rewrite/implementation/27-run-loop.md) and
+[evidence 18](docs/rust-rewrite/implementation/evidence/18-run-loop/).
 
 The work is committed as draft gh stack #56 (PRs #54, #55, #57, #58, #59, #60, top branch
 `rust/coverage-floor-80`), green on hosted CI. No Rust deployment or cutover occurred.

@@ -52,7 +52,7 @@ impl Tmp {
         fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).map_err(e)?;
         let text = if valid {
             format!(
-                "archive_id = \"a\"\nmachine_id = \"m\"\nbucket = \"bucket-1\"\ntoken_path = \"{}\"\n",
+                "archive_id = \"a\"\nmachine_id = \"m\"\nendpoint = \"http://127.0.0.1:9\"\nbucket = \"bucket-1\"\ntoken_path = \"{}\"\n",
                 token.display()
             )
         } else {
@@ -2379,8 +2379,7 @@ fn start_error_code_table() -> R {
 
 #[test]
 fn window_defaults_fill_the_missing_half() -> R {
-    let base =
-        "archive_id = \"a\"\nmachine_id = \"m\"\nbucket = \"bucket-1\"\ntoken_path = \"/t\"\n";
+    let base = "archive_id = \"a\"\nmachine_id = \"m\"\nendpoint = \"http://127.0.0.1:9\"\nbucket = \"bucket-1\"\ntoken_path = \"/t\"\n";
     let q = MemConfig::parse(&format!("{base}window = {{ quiet = 10 }}\n")).map_err(e)?;
     assert_eq!(
         (q.window.quiet, q.window.cap),
