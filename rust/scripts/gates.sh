@@ -38,6 +38,10 @@ run 06-mutations python3 scripts/check-mutations.py
 rm -rf "$MEMORY_MUTATION_TARGET"
 unset MEMORY_MUTATION_TARGET
 run 07-schema cargo xtask schemas --check
-run 08-coverage cargo llvm-cov --workspace --locked --fail-under-lines "$(< coverage-floor.txt)" --json --output-path artifacts/coverage.json -- --test-threads=2
+# Through nextest, like 04 to 06: one process per test. Under `cargo test` every test of a binary
+# shares one process, and a child spawned by one test (second_process_exits_lock_held) holds a
+# copy of every open descriptor between fork and exec, so another test that releases and
+# re-takes its daemon lock in that window gets lock_held (hosted runs 42565602976, 43193745120).
+run 08-coverage cargo llvm-cov nextest --workspace --locked --fail-under-lines "$(< coverage-floor.txt)" --json --output-path artifacts/coverage.json
 run 09-lints bash scripts/check-lints.sh
 exit "$failed"
