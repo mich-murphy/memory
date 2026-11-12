@@ -33,7 +33,7 @@ use memory_core::domain::{
     SnapshotFingerprint, SourceId, SourceState,
 };
 use memory_core::hint::{HintScan, LaunchHint, scan};
-use memory_core::manifest::{Header, ManifestError, Timestamp, Writer};
+use memory_core::manifest::{Header, ManifestError, OwnerState, Timestamp, Writer};
 use memory_core::privacy::{PolicyContext, SanitizedLaunch, sanitize_launch};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -359,9 +359,28 @@ pub fn main_entry() -> ExitCode {
     }
 }
 
+/// What the owner knows of the remote commit base.
+enum RemoteBase {
+    /// Not read, or possibly stale: recover before the next commit.
+    Unknown,
+    /// Recovered: the owner has no `current.json` yet.
+    Absent,
+    /// Recovered or landed: the fence for the next commit.
+    Known(Base),
+}
+
+impl RemoteBase {
+    /// The fence for `commit_known`; `None` for the first write.
+    const fn fence(&self) -> Option<&Base> {
+        match self {
+            Self::Known(base) => Some(base),
+            Self::Unknown | Self::Absent => None,
+        }
+    }
+}
+
 struct OwnerRt {
-    base: Option<Base>,
-    needs_recover: bool,
+    base: RemoteBase,
     streak: Streak,
     parked: Option<ParkedReason>,
     /// Manifests built since the last landed commit (A6); memory only.
@@ -373,8 +392,7 @@ struct OwnerRt {
 impl OwnerRt {
     fn new(parked: Option<ParkedReason>) -> Self {
         Self {
-            base: None,
-            needs_recover: true,
+            base: RemoteBase::Unknown,
             streak: Streak::default(),
             parked,
             known_ours: KnownOurs::new(),
@@ -650,8 +668,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         if let Err(failure) = result
             && (failure.base_may_be_stale() || matches!(failure, Failure::BaseUnchanged))
         {
-            rt.base = None;
-            rt.needs_recover = true;
+            rt.base = RemoteBase::Unknown;
         }
         match disp {
             Disposition::Done => {
@@ -711,13 +728,12 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         at: Duration,
         report: &mut RoundReport,
     ) -> ControlFlow<bool> {
-        if !rt.needs_recover {
+        if !matches!(rt.base, RemoteBase::Unknown) {
             return ControlFlow::Continue(());
         }
         match recover_base(&mut self.store, owner) {
             Ok(base) => {
-                rt.base = base;
-                rt.needs_recover = false;
+                rt.base = base.map_or(RemoteBase::Absent, RemoteBase::Known);
                 ControlFlow::Continue(())
             }
             Err(failure) => {
@@ -741,11 +757,11 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             now_ns: i64::try_from(self.clock.wall_ns()).unwrap_or(i64::MAX),
             piece_len: MAX_PIECE_BYTES,
         };
-        let remote = rt
-            .base
-            .as_ref()
-            .map(|b| b.state.clone())
-            .unwrap_or_default();
+        let remote = match &rt.base {
+            RemoteBase::Known(base) => base.state.clone(),
+            // `recover` runs first, so `Unknown` does not reach a capture.
+            RemoteBase::Absent | RemoteBase::Unknown => OwnerState::default(),
+        };
         capture(&mut self.fs, sources, &self.locals, &remote, &env)
     }
 
@@ -779,7 +795,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     ) -> Result<Landed, Failure> {
         let result = commit_known(
             &mut self.store,
-            rt.base.as_ref(),
+            rt.base.fence(),
             request,
             &mut rt.known_ours,
             &mut |_| {},
@@ -788,7 +804,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             // Remote is authoritative: updates apply only once the commit is durable.
             // An adopted earlier manifest (A6 `follow_up`) did not carry this capture's
             // bytes: keep the base, apply nothing, and the next round captures again.
-            rt.base = Some(landed.base());
+            rt.base = RemoteBase::Known(landed.base());
             if !landed.follow_up {
                 self.apply(got.updates);
             }
