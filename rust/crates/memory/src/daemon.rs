@@ -704,17 +704,21 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     /// The owner's turn: `Some(at)` when it should run now, else it is counted as skipped
     /// (parked) or deferred (retry delay not elapsed).
     fn due(&self, rt: &OwnerRt, report: &mut RoundReport) -> Option<Duration> {
-        let at = Duration::from_nanos(self.clock.monotonic_ns());
         match &rt.turn {
             Turn::Parked(_) => {
                 report.skipped += 1;
                 None
             }
-            Turn::RetryAt(t) if at < *t => {
-                report.deferred += 1;
-                None
+            Turn::Ready => Some(Duration::from_nanos(self.clock.monotonic_ns())),
+            Turn::RetryAt(t) => {
+                let at = Duration::from_nanos(self.clock.monotonic_ns());
+                if at < *t {
+                    report.deferred += 1;
+                    None
+                } else {
+                    Some(at)
+                }
             }
-            Turn::RetryAt(_) | Turn::Ready => Some(at),
         }
     }
 
