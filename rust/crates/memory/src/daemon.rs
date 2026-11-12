@@ -888,8 +888,10 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         let (when, text) = stamp_of(self.clock.wall_ns()).map_err(|_| RoundError::Clock)?;
         let before = (self.status.host_paused, self.status.parked.clone());
         let mut groups: Vec<(Owner, Vec<Source>)> = Vec::new();
+        let mut group_of: HashMap<Owner, usize> = HashMap::new();
         for (owner, source) in self.sources.enumerate() {
-            match groups.iter_mut().find(|(o, _)| *o == owner) {
+            let index = *group_of.entry(owner.clone()).or_insert(groups.len());
+            match groups.get_mut(index) {
                 Some((_, list)) => list.push(source),
                 None => groups.push((owner, vec![source])),
             }
