@@ -28,6 +28,7 @@ mod launch;
 mod names;
 mod text;
 
+pub(crate) use launch::{LAUNCH_ARGV_MAX, LAUNCH_ENV_MAX};
 pub use launch::{SanitizedLaunch, sanitize_launch};
 pub use names::{basename, is_credential, is_secret_name};
 

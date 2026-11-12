@@ -3,7 +3,7 @@ use super::{CHECKPOINT_INTERVAL, ManifestError};
 use crate::domain::{Offset, Owner, RulesDigest, Sha256, SourceClass, SourceId, SourceKind};
 use crate::launch::LaunchRecord;
 use crate::limits::object_key;
-use crate::privacy::AuthorizedBody;
+use crate::privacy::{AuthorizedBody, LAUNCH_ARGV_MAX, LAUNCH_ENV_MAX};
 use schemars::JsonSchema;
 use serde::de::{self, DeserializeOwned, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -419,9 +419,12 @@ fn check_run(pieces: &[Piece], from_zero: bool) -> Result<u64, ManifestError> {
     Ok(end.unwrap_or(0))
 }
 
-/// A header's launch record is within bounds and its digest matches its content.
+/// A header's launch record is within the sanitizer's bounds and its digest matches its content.
 fn check_launch(record: &LaunchRecord) -> Result<(), ManifestError> {
-    if record.argv().len() > 32 || record.env().len() > 8 || !record.digest_matches() {
+    if record.argv().len() > LAUNCH_ARGV_MAX
+        || record.env().len() > LAUNCH_ENV_MAX
+        || !record.digest_matches()
+    {
         return Err(ManifestError::BadLaunch);
     }
     Ok(())

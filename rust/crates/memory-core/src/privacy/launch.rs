@@ -49,6 +49,11 @@ const ENV_ALLOWLIST: [&str; 9] = [
     "MAX_MCP_OUTPUT_TOKENS",
     "DISABLE_PROMPT_CACHING",
 ];
+/// Most argv entries a sanitized launch keeps.
+pub(crate) const LAUNCH_ARGV_MAX: usize = 32;
+/// Most environment entries a sanitized launch can hold: the closed allowlist is the bound
+/// (amendment A13.3), so every allowlisted name fits one record.
+pub(crate) const LAUNCH_ENV_MAX: usize = ENV_ALLOWLIST.len();
 
 /// What a legitimate value of an allowlisted flag or environment name looks like.
 #[derive(Clone, Copy)]
@@ -161,7 +166,7 @@ fn safe(slot: Slot, value: &str) -> bool {
 
 /// Apply legacy secret-argument scrub then native metadata allowlist before hints.
 pub fn sanitize_launch(argv: &[String], environ: &[String]) -> SanitizedLaunch {
-    let bounded: Vec<String> = argv.iter().take(32).cloned().collect();
+    let bounded: Vec<String> = argv.iter().take(LAUNCH_ARGV_MAX).cloned().collect();
     let argv = document::args_scrub(&bounded);
     let mut out = Vec::new();
     let mut input = argv.iter();
@@ -197,7 +202,7 @@ pub fn sanitize_launch(argv: &[String], environ: &[String]) -> SanitizedLaunch {
             out.push("[redacted]".to_owned());
         }
     }
-    out.truncate(32);
+    out.truncate(LAUNCH_ARGV_MAX);
     let mut env = BTreeMap::new();
     for entry in environ {
         let Some((key, value)) = entry.split_once('=') else {
