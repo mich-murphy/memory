@@ -451,8 +451,8 @@ fn idle_rounds_by_owner_phase() -> R {
             s.sort_unstable();
             eprintln!(
                 "IDLE owners={owners} phase={phase} median_us={} min_us={}",
-                s[s.len() / 2],
-                s[0]
+                s.get(s.len() / 2).copied().unwrap_or(0),
+                s.first().copied().unwrap_or(0)
             );
         }
     }
