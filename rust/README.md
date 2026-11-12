@@ -8,9 +8,12 @@ and kept as the dated record of why each change was made.
 `memory-core` holds the pure slice-1 core: domain types, locator, manifests, hint lines,
 planner, coalescer and privacy admission/transform/authorization. `memory` holds slice-2
 work against fakes and temp directories: hook, commit protocol, daemon state, capture
-wiring, real filesystem adapter, source resolver, notify watcher/scheduler and a daemon
-skeleton. There is no R2 client, zstd, daemon loop or reader yet. No slice or release
-acceptance is claimed.
+wiring, real filesystem adapter, source resolver, notify watcher/scheduler, the S3 adapter
+(`rusty-s3` + `ureq`), zstd piece encoding, and a daemon that one function starts from
+`config.toml` and the token file (`assemble::start_from_config`). `memory-reader` decodes
+pieces, restores a source and reads an owner's manifest chain. There is no daemon loop and
+no `restore` command yet ([report 27](../docs/rust-rewrite/implementation/27-run-loop.md)).
+No slice or release acceptance is claimed.
 
 All commands use the repository's **locked Nix shell**, Rust/cargo 1.99.0.
 No rustup/global installs. From repository root:
@@ -44,8 +47,8 @@ gate must never silently lower the floor; raising it is a recorded decision.
 
 `memory hook <agent>` appends one hint line and always exits 0. `memory daemon` runs its
 startup (lock, state directory, recovery) and then exits 78; every other command exits 78,
-so the binary cannot silently simulate capture or restore. The reader crate is a
-placeholder. Tests must never resolve the real state root: set `MEMORY_STATE_DIR` to a
+so the binary cannot silently simulate capture or restore. Tests must never resolve the
+real state root: set `MEMORY_STATE_DIR` to a
 temp directory and `env_clear()` (only `LLVM_PROFILE_FILE` passes through).
 
 The latest integrated local wrapper (review and fix round, 2026-11-10) passed on
