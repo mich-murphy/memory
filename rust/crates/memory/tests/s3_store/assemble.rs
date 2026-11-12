@@ -15,21 +15,21 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
-const PREFIX: &str = "rust-acceptance/r1-test/";
-const MARKER: &str = "R1-MARKER-51c2";
-const SESSION: &str = "projects/-p/0f0e0d0c-0b0a-4908-8706-050403020100.jsonl";
+pub(super) const PREFIX: &str = "rust-acceptance/r1-test/";
+pub(super) const MARKER: &str = "R1-MARKER-51c2";
+pub(super) const SESSION: &str = "projects/-p/0f0e0d0c-0b0a-4908-8706-050403020100.jsonl";
 const TOKEN_IN_ROOT: &str = "projects/-p/1f0e0d0c-0b0a-4908-8706-050403020101.jsonl";
 
-struct Rig {
-    dir: PathBuf,
-    root: PathBuf,
-    state: PathBuf,
-    cfg: PathBuf,
-    token: PathBuf,
+pub(super) struct Rig {
+    pub(super) dir: PathBuf,
+    pub(super) root: PathBuf,
+    pub(super) state: PathBuf,
+    pub(super) cfg: PathBuf,
+    pub(super) token: PathBuf,
 }
 
 impl Rig {
-    fn new(label: &str, url: &str, prefix: &str, token_in_root: bool) -> R<Self> {
+    pub(super) fn new(label: &str, url: &str, prefix: &str, token_in_root: bool) -> R<Self> {
         let dir = std::env::temp_dir().join(format!("r1-assemble-{}-{label}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).map_err(e)?;
@@ -75,7 +75,7 @@ fn good_token() -> String {
     format!("access_key_id = \"{KEY_ID}\"\nsecret_access_key = \"{SECRET}\"\n")
 }
 
-fn lines(range: std::ops::Range<u32>) -> String {
+pub(super) fn lines(range: std::ops::Range<u32>) -> String {
     range
         .map(|i| {
             format!(

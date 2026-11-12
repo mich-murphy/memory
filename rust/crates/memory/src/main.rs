@@ -1,5 +1,5 @@
-//! Command entry point. `memory hook <agent>` and `memory daemon` (the run loop) are wired;
-//! everything else exits 78.
+//! Command entry point. `memory hook <agent>`, `memory restore <owner> --out DIR` and
+//! `memory daemon` (the run loop) are wired; everything else exits 78.
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -13,6 +13,7 @@ fn main() -> ExitCode {
             memory::hook::main_entry(&agent)
         }
         Some(word) if word == "daemon" => memory::run::main_entry(),
+        Some(word) if word == "restore" => memory::restore::main_entry(args),
         // Fail explicitly rather than simulate successful capture or restore.
         _ => ExitCode::from(78),
     }

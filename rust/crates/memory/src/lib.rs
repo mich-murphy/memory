@@ -11,6 +11,7 @@ pub mod environment;
 pub mod hook;
 pub mod realfs;
 pub mod resolve;
+pub mod restore;
 pub mod roots;
 pub mod run;
 pub mod s3;

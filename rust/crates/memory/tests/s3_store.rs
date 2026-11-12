@@ -28,6 +28,8 @@ mod assemble;
 mod clock;
 #[path = "common/s3_fake.rs"]
 mod fake;
+#[path = "s3_store/restore.rs"]
+mod restore;
 #[path = "s3_store/skeleton.rs"]
 mod skeleton;
 use fake::{Fake, Fault, content_md5_of, etag_of};
