@@ -296,3 +296,159 @@ fn a_refusal_with_a_closed_stderr_still_exits_2() -> std::io::Result<()> {
     assert_eq!(done.code, Some(2));
     Ok(())
 }
+
+/// The ino of `path`, or `None` when it does not exist.
+fn ino_of(path: &Path) -> Option<u64> {
+    std::fs::metadata(path).ok().map(|m| m.ino())
+}
+
+/// Start a daemon, wait until a round replaced the status file, stop it; the log lines without
+/// their timestamps.
+fn run_once(setup: &Setup) -> std::io::Result<Vec<String>> {
+    let before = ino_of(&setup.status());
+    let mut daemon = setup.spawn(&["daemon"], FAST)?;
+    let start = Instant::now();
+    while ino_of(&setup.status()) == before {
+        assert!(start.elapsed() < BOUND, "no round ran");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    daemon.signal("-TERM")?;
+    let done = daemon.finish(Duration::from_secs(5))?;
+    clean_stop(&done, setup, 1);
+    Ok(done
+        .stderr
+        .lines()
+        .map(|l| {
+            l.split_once(' ')
+                .map(|(_, r)| r.to_owned())
+                .unwrap_or_default()
+        })
+        .collect())
+}
+
+fn state_loads(lines: &[String]) -> Vec<&str> {
+    lines
+        .iter()
+        .filter(|l| l.starts_with("INFO state_load"))
+        .map(String::as_str)
+        .collect()
+}
+
+fn assert_started_then(lines: &[String], loads: &[&str]) {
+    assert!(
+        lines
+            .first()
+            .is_some_and(|l| l.starts_with("INFO started ")),
+        "{lines:?}"
+    );
+    let got: Vec<&str> = lines
+        .iter()
+        .skip(1)
+        .take(loads.len())
+        .map(String::as_str)
+        .collect();
+    assert_eq!(got, loads, "{lines:?}");
+    assert_eq!(state_loads(lines), loads, "{lines:?}");
+}
+
+/// Start over `damage(setup)`, check the loads, then check the second start's loads.
+fn damaged_start(
+    name: &str,
+    damage: impl FnOnce(&Setup) -> std::io::Result<()>,
+    loads: &[&str],
+    second: &[&str],
+) -> std::io::Result<()> {
+    let setup = Setup::new(name, "rust-acceptance/t/", true)?;
+    damage(&setup)?;
+    assert_started_then(&run_once(&setup)?, loads);
+    assert_started_then(&run_once(&setup)?, second);
+    Ok(())
+}
+
+#[test]
+fn a_damaged_status_is_logged_once() -> std::io::Result<()> {
+    damaged_start(
+        "dmgstatus",
+        |s| std::fs::write(s.status(), b"garbage"),
+        &["INFO state_load file=status result=damaged"],
+        &[],
+    )
+}
+
+#[test]
+fn a_damaged_index_is_logged_once() -> std::io::Result<()> {
+    damaged_start(
+        "dmgindex",
+        |s| std::fs::write(s.root.join("index.json"), b"garbage"),
+        &["INFO state_load file=index result=damaged"],
+        // A daemon with no sources never dirties the index, so it is not rewritten and the
+        // next start finds it damaged again. The replacement status is always written.
+        &["INFO state_load file=index result=damaged"],
+    )
+}
+
+#[test]
+fn both_damaged_log_status_before_index() -> std::io::Result<()> {
+    damaged_start(
+        "dmgboth",
+        |s| {
+            std::fs::write(s.status(), b"garbage")?;
+            std::fs::write(s.root.join("index.json"), b"garbage")
+        },
+        &[
+            "INFO state_load file=status result=damaged",
+            "INFO state_load file=index result=damaged",
+        ],
+        &["INFO state_load file=index result=damaged"],
+    )
+}
+
+#[test]
+fn a_clean_first_start_logs_no_state_load() -> std::io::Result<()> {
+    let setup = Setup::new("firststart", "rust-acceptance/t/", true)?;
+    assert_started_then(&run_once(&setup)?, &[]);
+    Ok(())
+}
+
+/// Replace the schema name in the first line of a state file written by a first run.
+fn newer_schema(setup: &Setup, file: &str, from: &str, to: &str) -> std::io::Result<()> {
+    let path = setup.root.join(file);
+    let bytes = std::fs::read(&path)?;
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    assert!(text.contains(from), "header lacks {from}");
+    std::fs::write(&path, text.replacen(from, to, 1))
+}
+
+#[test]
+fn a_newer_schema_is_logged_once_per_file() -> std::io::Result<()> {
+    let setup = Setup::new("newer", "rust-acceptance/t/", true)?;
+    assert_started_then(&run_once(&setup)?, &[]);
+    // A daemon with no sources never writes the index, so write an empty one with the state API.
+    {
+        let lock = memory::state::DaemonLock::acquire(&setup.root)
+            .map_err(|e| std::io::Error::other(format!("{e:?}")))?;
+        let state = memory::state::StateDir::prepare(&lock)
+            .map_err(|e| std::io::Error::other(format!("{e:?}")))?;
+        state
+            .write(
+                memory::state::StateFile::Index,
+                br#"{"sources":{},"hints":{}}"#,
+            )
+            .map_err(|e| std::io::Error::other(format!("{e:?}")))?;
+    }
+    newer_schema(&setup, "status.json", "memory.status/1", "memory.status/2")?;
+    newer_schema(&setup, "index.json", "memory.index/1", "memory.index/2")?;
+    assert_started_then(
+        &run_once(&setup)?,
+        &[
+            "INFO state_load file=status result=newer_schema",
+            "INFO state_load file=index result=newer_schema",
+        ],
+    );
+    // The status is replaced by the round; the index is not rewritten without sources.
+    assert_started_then(
+        &run_once(&setup)?,
+        &["INFO state_load file=index result=newer_schema"],
+    );
+    Ok(())
+}
