@@ -615,3 +615,41 @@ fn audit_reads_the_stream_once_per_turn_and_nothing_otherwise() -> R {
     );
     Ok(())
 }
+
+/// A source parked by repeated audit mismatches costs no stat and no read in later rounds,
+/// and the round that parks it uploads nothing for it.
+#[test]
+fn a_parked_source_costs_zero_reads_and_zero_stats_per_round() -> R {
+    const SECOND: i128 = 1_000_000_000;
+    const H3: i128 = 3 * 3_600 * SECOND;
+    let data = lines(10_000);
+    let mut r = rig(1, 1, &data)?;
+    // Same size, same mtime, one byte changed: the next audit is a stable mismatch.
+    let tamper = |r: &mut Rig| -> R {
+        let fs = &mut r.d()?.fs_mut().inner;
+        let mtime = need(fs.mtimes.get(&1).copied(), "mtime")?;
+        let mut bytes = need(fs.files.get(&1).cloned(), "file")?;
+        *need(bytes.get_mut(10), "byte")? ^= 0xff;
+        fs.set(1, &bytes);
+        fs.mtimes.insert(1, mtime);
+        Ok(())
+    };
+    r.wall(0)?;
+    r.round()?;
+    for at in [SECOND, 2 * SECOND, 3 * SECOND, SECOND + H3] {
+        tamper(&mut r)?;
+        r.wall(at)?;
+        r.round()?;
+    }
+    let (fs0, st0) = r.counts()?;
+    for n in 1..4 {
+        tamper(&mut r)?;
+        r.wall(SECOND + H3 + n * SECOND)?;
+        let (stats, bytes, puts) = r.measure()?;
+        assert_eq!((stats, bytes, puts), (0, 0, 0), "round {n}");
+    }
+    let (fs1, st1) = r.counts()?;
+    assert_eq!((fs1.stats, fs1.bytes_read), (fs0.stats, fs0.bytes_read));
+    assert_eq!(st1.puts, st0.puts);
+    Ok(())
+}
