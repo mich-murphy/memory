@@ -94,7 +94,24 @@ fn profile_of(kind: &SourceKind) -> Profile {
         SourceKind::ClaudeMemory | SourceKind::CodexMemory | SourceKind::ClaudePlan => {
             Profile::TextAsset
         }
-        _ => Profile::OtherKnown,
+        SourceKind::ClaudeToolResults
+        | SourceKind::ClaudeTodos
+        | SourceKind::ClaudeTasks
+        | SourceKind::ClaudeTeams
+        | SourceKind::ClaudeFileHistory
+        | SourceKind::ClaudeDebug
+        | SourceKind::ClaudeHistory
+        | SourceKind::CodexCompressed
+        | SourceKind::CodexStore
+        | SourceKind::CodexHistory
+        | SourceKind::PiSnapshot
+        | SourceKind::ClaudeSessionEnv
+        | SourceKind::ClaudePaste
+        | SourceKind::ClaudeUsage
+        | SourceKind::ClaudeAux
+        | SourceKind::CodexLog
+        | SourceKind::PiLog
+        | SourceKind::PiAux => Profile::OtherKnown,
     }
 }
 
