@@ -1,0 +1,268 @@
+crates/memory-core/src/privacy/mod.rs:39:49: replace * with +
+crates/memory-core/src/privacy/mod.rs:39:42: replace * with /
+crates/memory-core/src/privacy/mod.rs:39:42: replace * with +
+crates/memory-core/src/privacy/mod.rs:39:49: replace * with /
+crates/memory-core/src/privacy/mod.rs:156:9: replace AdmittedSource::prefix_stable -> bool with true
+crates/memory-core/src/privacy/mod.rs:156:9: replace AdmittedSource::prefix_stable -> bool with false
+crates/memory-core/src/privacy/mod.rs:161:13: replace && with || in AdmittedSource::prefix_stable
+crates/memory-core/src/privacy/mod.rs:156:9: delete ! in AdmittedSource::prefix_stable
+crates/memory-core/src/privacy/mod.rs:181:9: replace AuthorizedBody::bytes -> &[u8] with Vec::leak(Vec::new())
+crates/memory-core/src/privacy/mod.rs:181:9: replace AuthorizedBody::bytes -> &[u8] with Vec::leak(vec![0])
+crates/memory-core/src/privacy/mod.rs:181:9: replace AuthorizedBody::bytes -> &[u8] with Vec::leak(vec![1])
+crates/memory-core/src/privacy/mod.rs:161:16: delete ! in AdmittedSource::prefix_stable
+crates/memory-core/src/privacy/mod.rs:185:9: replace AuthorizedBody::digest -> [u8; 32] with [0; 32]
+crates/memory-core/src/privacy/mod.rs:185:9: replace AuthorizedBody::digest -> [u8; 32] with [1; 32]
+crates/memory-core/src/privacy/mod.rs:205:5: replace rules_digest -> [u8; 32] with [0; 32]
+crates/memory-core/src/privacy/mod.rs:189:9: replace AuthorizedBody::owner -> &str with ""
+crates/memory-core/src/privacy/mod.rs:189:9: replace AuthorizedBody::owner -> &str with "xyzzy"
+crates/memory-core/src/privacy/mod.rs:205:5: replace rules_digest -> [u8; 32] with [1; 32]
+crates/memory-core/src/privacy/mod.rs:212:5: replace binding -> [u8; 32] with [0; 32]
+crates/memory-core/src/privacy/mod.rs:212:5: replace binding -> [u8; 32] with [1; 32]
+crates/memory-core/src/privacy/mod.rs:265:8: delete ! in admit
+crates/memory-core/src/privacy/mod.rs:268:8: delete ! in admit
+crates/memory-core/src/privacy/mod.rs:213:9: replace binding::field with ()
+crates/memory-core/src/privacy/mod.rs:271:8: delete ! in admit
+crates/memory-core/src/privacy/mod.rs:271:60: replace || with && in admit
+crates/memory-core/src/privacy/mod.rs:271:29: replace || with && in admit
+crates/memory-core/src/privacy/mod.rs:276:9: replace && with || in admit
+crates/memory-core/src/privacy/mod.rs:276:26: replace != with == in admit
+crates/memory-core/src/privacy/mod.rs:275:9: replace || with && in admit
+crates/memory-core/src/privacy/mod.rs:295:39: replace == with != in admit
+crates/memory-core/src/privacy/mod.rs:295:52: replace || with && in admit
+crates/memory-core/src/privacy/mod.rs:299:22: replace == with != in admit
+crates/memory-core/src/privacy/mod.rs:321:18: replace && with || in transform
+crates/memory-core/src/privacy/mod.rs:321:33: replace > with < in transform
+crates/memory-core/src/privacy/mod.rs:321:33: replace > with == in transform
+crates/memory-core/src/privacy/mod.rs:321:33: replace > with >= in transform
+crates/memory-core/src/privacy/mod.rs:345:25: replace != with == in authorize
+crates/memory-core/src/privacy/mod.rs:345:43: replace || with && in authorize
+crates/memory-core/src/privacy/mod.rs:345:61: replace != with == in authorize
+crates/memory-core/src/privacy/document.rs:86:5: replace kind -> Option<Family> with None
+crates/memory-core/src/privacy/document.rs:30:9: replace Mode::code -> u8 with 0
+crates/memory-core/src/privacy/document.rs:30:9: replace Mode::code -> u8 with 1
+crates/memory-core/src/privacy/document.rs:92:5: replace recognizes -> bool with true
+crates/memory-core/src/privacy/document.rs:92:5: replace recognizes -> bool with false
+crates/memory-core/src/privacy/document.rs:95:5: replace rules -> Vec<(Vec<String>, Mode)> with vec![]
+crates/memory-core/src/privacy/document.rs:122:5: replace digest_rules with ()
+crates/memory-core/src/privacy/document.rs:150:9: replace Value::is_object -> bool with true
+crates/memory-core/src/privacy/document.rs:150:9: replace Value::is_object -> bool with false
+crates/memory-core/src/privacy/document.rs:153:9: replace Value::as_str -> Option<&str> with None
+crates/memory-core/src/privacy/document.rs:153:9: replace Value::as_str -> Option<&str> with Some("")
+crates/memory-core/src/privacy/document.rs:153:9: replace Value::as_str -> Option<&str> with Some("xyzzy")
+crates/memory-core/src/privacy/document.rs:160:9: replace Value::as_array -> Option<&Vec<Self>> with None
+crates/memory-core/src/privacy/document.rs:167:9: replace Value::get -> Option<&Self> with None
+crates/memory-core/src/privacy/document.rs:160:9: replace Value::as_array -> Option<&Vec<Self>> with Some(Box::leak(Box::new(vec![])))
+crates/memory-core/src/privacy/document.rs:180:14: replace > with < in parse
+crates/memory-core/src/privacy/document.rs:185:9: delete match arm Some(b'{') in parse
+crates/memory-core/src/privacy/document.rs:225:9: delete match arm Some(b'"') in parse
+crates/memory-core/src/privacy/document.rs:206:9: delete match arm Some(b'[') in parse
+crates/memory-core/src/privacy/document.rs:196:64: replace + with - in parse::<impl Visitor<'de> for ObjectVisitor>::visit_map
+crates/memory-core/src/privacy/document.rs:217:64: replace + with - in parse::<impl Visitor<'de> for ArrayVisitor>::visit_seq
+crates/memory-core/src/privacy/document.rs:232:14: replace > with < in from_toml
+crates/memory-core/src/privacy/document.rs:217:64: replace + with * in parse::<impl Visitor<'de> for ArrayVisitor>::visit_seq
+crates/memory-core/src/privacy/document.rs:239:65: replace + with - in from_toml
+crates/memory-core/src/privacy/document.rs:245:45: replace + with - in from_toml
+crates/memory-core/src/privacy/document.rs:257:5: replace scrub -> Result<Vec<u8>, Reason> with Ok(vec![])
+crates/memory-core/src/privacy/document.rs:257:5: replace scrub -> Result<Vec<u8>, Reason> with Ok(vec![0])
+crates/memory-core/src/privacy/document.rs:257:5: replace scrub -> Result<Vec<u8>, Reason> with Ok(vec![1])
+crates/memory-core/src/privacy/document.rs:261:24: replace == with != in scrub
+crates/memory-core/src/privacy/document.rs:270:8: delete ! in scrub
+crates/memory-core/src/privacy/document.rs:279:50: replace > with < in scrub
+crates/memory-core/src/privacy/document.rs:279:50: replace > with == in scrub
+crates/memory-core/src/privacy/document.rs:282:23: replace == with != in scrub
+crates/memory-core/src/privacy/document.rs:291:21: replace > with < in scrub
+crates/memory-core/src/privacy/document.rs:298:5: replace expansion_bound -> Option<usize> with None
+crates/memory-core/src/privacy/document.rs:298:5: replace expansion_bound -> Option<usize> with Some(0)
+crates/memory-core/src/privacy/document.rs:325:5: replace restore_toml_strings with ()
+crates/memory-core/src/privacy/document.rs:298:5: replace expansion_bound -> Option<usize> with Some(1)
+crates/memory-core/src/privacy/document.rs:358:5: replace walk with ()
+crates/memory-core/src/privacy/document.rs:363:40: replace || with && in walk
+crates/memory-core/src/privacy/document.rs:359:23: replace == with != in walk
+crates/memory-core/src/privacy/document.rs:360:13: replace && with || in walk
+crates/memory-core/src/privacy/document.rs:363:33: replace == with != in walk
+crates/memory-core/src/privacy/document.rs:363:45: replace == with != in walk
+crates/memory-core/src/privacy/document.rs:388:5: replace redact_all with ()
+crates/memory-core/src/privacy/document.rs:408:21: replace != with == in redact_all
+crates/memory-core/src/privacy/document.rs:427:5: replace copies with ()
+crates/memory-core/src/privacy/document.rs:397:24: replace != with == in redact_all
+crates/memory-core/src/privacy/document.rs:447:5: replace redact -> String with String::new()
+crates/memory-core/src/privacy/document.rs:447:5: replace redact -> String with "xyzzy".into()
+crates/memory-core/src/privacy/document.rs:453:17: replace || with && in redact
+crates/memory-core/src/privacy/document.rs:452:17: replace || with && in redact
+crates/memory-core/src/privacy/document.rs:455:51: replace || with && in redact
+crates/memory-core/src/privacy/document.rs:469:5: replace percent_decode -> Option<String> with None
+crates/memory-core/src/privacy/document.rs:469:5: replace percent_decode -> Option<String> with Some(String::new())
+crates/memory-core/src/privacy/document.rs:469:5: replace percent_decode -> Option<String> with Some("xyzzy".into())
+crates/memory-core/src/privacy/document.rs:472:17: replace == with != in percent_decode
+crates/memory-core/src/privacy/document.rs:475:47: replace + with - in percent_decode
+crates/memory-core/src/privacy/document.rs:475:47: replace + with * in percent_decode
+crates/memory-core/src/privacy/document.rs:475:42: replace * with + in percent_decode
+crates/memory-core/src/privacy/document.rs:475:42: replace * with / in percent_decode
+crates/memory-core/src/privacy/document.rs:477:32: replace == with != in percent_decode
+crates/memory-core/src/privacy/document.rs:483:5: replace valid_escapes -> bool with true
+crates/memory-core/src/privacy/document.rs:483:5: replace valid_escapes -> bool with false
+crates/memory-core/src/privacy/document.rs:486:13: replace && with || in valid_escapes
+crates/memory-core/src/privacy/document.rs:485:14: replace == with != in valid_escapes
+crates/memory-core/src/privacy/document.rs:486:16: delete ! in valid_escapes
+crates/memory-core/src/privacy/document.rs:487:17: replace && with || in valid_escapes
+crates/memory-core/src/privacy/document.rs:495:5: replace url -> String with String::new()
+crates/memory-core/src/privacy/document.rs:495:5: replace url -> String with "xyzzy".into()
+crates/memory-core/src/privacy/document.rs:498:30: replace || with && in url
+crates/memory-core/src/privacy/document.rs:498:21: replace != with == in url
+crates/memory-core/src/privacy/document.rs:525:54: delete ! in url
+crates/memory-core/src/privacy/document.rs:537:58: replace || with && in url
+crates/memory-core/src/privacy/document.rs:537:34: replace || with && in url
+crates/memory-core/src/privacy/document.rs:537:8: delete ! in url
+crates/memory-core/src/privacy/document.rs:537:37: delete ! in url
+crates/memory-core/src/privacy/document.rs:537:61: delete ! in url
+crates/memory-core/src/privacy/document.rs:572:5: replace args_scrub -> Vec<String> with vec![]
+crates/memory-core/src/privacy/document.rs:572:5: replace args_scrub -> Vec<String> with vec![String::new()]
+crates/memory-core/src/privacy/document.rs:572:5: replace args_scrub -> Vec<String> with vec!["xyzzy".into()]
+crates/memory-core/src/privacy/document.rs:591:45: replace + with - in args_scrub
+crates/memory-core/src/privacy/document.rs:591:45: replace + with * in args_scrub
+crates/memory-core/src/privacy/document.rs:591:61: delete ! in args_scrub
+crates/memory-core/src/privacy/document.rs:592:47: replace + with - in args_scrub
+crates/memory-core/src/privacy/document.rs:592:47: replace + with * in args_scrub
+crates/memory-core/src/privacy/document.rs:600:5: replace flag -> String with String::new()
+crates/memory-core/src/privacy/document.rs:600:5: replace flag -> String with "xyzzy".into()
+crates/memory-core/src/privacy/document.rs:600:21: replace || with && in flag
+crates/memory-core/src/privacy/document.rs:600:13: replace == with != in flag
+crates/memory-core/src/privacy/document.rs:600:29: replace == with != in flag
+crates/memory-core/src/privacy/document.rs:602:16: delete ! in flag
+crates/memory-core/src/privacy/launch.rs:13:9: replace SanitizedLaunch::argv -> &[String] with Vec::leak(Vec::new())
+crates/memory-core/src/privacy/launch.rs:13:9: replace SanitizedLaunch::argv -> &[String] with Vec::leak(vec![String::new()])
+crates/memory-core/src/privacy/launch.rs:13:9: replace SanitizedLaunch::argv -> &[String] with Vec::leak(vec!["xyzzy".into()])
+crates/memory-core/src/privacy/launch.rs:17:9: replace SanitizedLaunch::env -> &BTreeMap<String, String> with Box::leak(Box::new(BTreeMap::new()))
+crates/memory-core/src/privacy/launch.rs:17:9: replace SanitizedLaunch::env -> &BTreeMap<String, String> with Box::leak(Box::new(BTreeMap::from_iter([(String::new(), String::new())])))
+crates/memory-core/src/privacy/launch.rs:17:9: replace SanitizedLaunch::env -> &BTreeMap<String, String> with Box::leak(Box::new(BTreeMap::from_iter([(String::new(), "xyzzy".into())])))
+crates/memory-core/src/privacy/launch.rs:17:9: replace SanitizedLaunch::env -> &BTreeMap<String, String> with Box::leak(Box::new(BTreeMap::from_iter([("xyzzy".into(), String::new())])))
+crates/memory-core/src/privacy/launch.rs:17:9: replace SanitizedLaunch::env -> &BTreeMap<String, String> with Box::leak(Box::new(BTreeMap::from_iter([("xyzzy".into(), "xyzzy".into())])))
+crates/memory-core/src/privacy/launch.rs:100:9: delete match arm "--model" | "-m" in flag_slot
+crates/memory-core/src/privacy/launch.rs:101:9: delete match arm "--provider" in flag_slot
+crates/memory-core/src/privacy/launch.rs:102:9: delete match arm "--permission-mode" in flag_slot
+crates/memory-core/src/privacy/launch.rs:109:9: delete match arm "MAX_THINKING_TOKENS" | "MAX_MCP_OUTPUT_TOKENS" in env_slot
+crates/memory-core/src/privacy/launch.rs:110:9: delete match arm "DISABLE_PROMPT_CACHING" in env_slot
+crates/memory-core/src/privacy/launch.rs:111:9: delete match arm "CLAUDE_CONFIG_DIR" in env_slot
+crates/memory-core/src/privacy/launch.rs:118:5: replace secret_shaped -> bool with true
+crates/memory-core/src/privacy/launch.rs:118:5: replace secret_shaped -> bool with false
+crates/memory-core/src/privacy/launch.rs:126:17: replace || with && in secret_shaped
+crates/memory-core/src/privacy/launch.rs:125:17: replace || with && in secret_shaped
+crates/memory-core/src/privacy/launch.rs:124:17: replace || with && in secret_shaped
+crates/memory-core/src/privacy/launch.rs:125:44: replace && with || in secret_shaped
+crates/memory-core/src/privacy/launch.rs:125:57: replace >= with < in secret_shaped
+crates/memory-core/src/privacy/launch.rs:128:21: replace && with || in secret_shaped
+crates/memory-core/src/privacy/launch.rs:126:45: replace || with && in secret_shaped
+crates/memory-core/src/privacy/launch.rs:127:34: replace >= with < in secret_shaped
+crates/memory-core/src/privacy/launch.rs:130:57: replace || with && in secret_shaped
+crates/memory-core/src/privacy/launch.rs:133:9: replace || with && in secret_shaped
+crates/memory-core/src/privacy/launch.rs:135:56: replace && with || in secret_shaped
+crates/memory-core/src/privacy/launch.rs:135:42: replace >= with < in secret_shaped
+crates/memory-core/src/privacy/launch.rs:140:5: replace opaque -> bool with true
+crates/memory-core/src/privacy/launch.rs:140:5: replace opaque -> bool with false
+crates/memory-core/src/privacy/launch.rs:147:42: replace || with && in opaque
+crates/memory-core/src/privacy/launch.rs:147:21: replace && with || in opaque
+crates/memory-core/src/privacy/launch.rs:147:12: replace && with || in opaque
+crates/memory-core/src/privacy/launch.rs:147:31: replace || with && in opaque
+crates/memory-core/src/privacy/launch.rs:147:61: replace && with || in opaque
+crates/memory-core/src/privacy/launch.rs:147:52: replace && with || in opaque
+crates/memory-core/src/privacy/launch.rs:151:5: replace safe -> bool with true
+crates/memory-core/src/privacy/launch.rs:151:5: replace safe -> bool with false
+crates/memory-core/src/privacy/launch.rs:159:67: replace && with || in safe
+crates/memory-core/src/privacy/launch.rs:159:34: replace && with || in safe
+crates/memory-core/src/privacy/launch.rs:159:37: delete ! in safe
+crates/memory-core/src/privacy/launch.rs:159:70: delete ! in safe
+crates/memory-core/src/privacy/launch.rs:203:22: replace == with != in sanitize_launch
+crates/memory-core/src/privacy/launch.rs:209:72: replace && with || in sanitize_launch
+crates/memory-core/src/privacy/launch.rs:209:41: replace && with || in sanitize_launch
+crates/memory-core/src/privacy/launch.rs:209:44: delete ! in sanitize_launch
+crates/memory-core/src/privacy/names.rs:8:5: replace suffix -> Option<&'static Regex> with None
+crates/memory-core/src/privacy/names.rs:14:5: replace basename -> String with String::new()
+crates/memory-core/src/privacy/names.rs:14:5: replace basename -> String with "xyzzy".into()
+crates/memory-core/src/privacy/names.rs:30:5: replace is_credential -> bool with true
+crates/memory-core/src/privacy/names.rs:30:5: replace is_credential -> bool with false
+crates/memory-core/src/privacy/names.rs:34:43: replace == with != in is_credential
+crates/memory-core/src/privacy/names.rs:58:9: replace || with && in is_credential
+crates/memory-core/src/privacy/names.rs:57:9: replace || with && in is_credential
+crates/memory-core/src/privacy/names.rs:56:9: replace || with && in is_credential
+crates/memory-core/src/privacy/names.rs:55:9: replace || with && in is_credential
+crates/memory-core/src/privacy/names.rs:54:9: replace || with && in is_credential
+crates/memory-core/src/privacy/names.rs:53:9: replace || with && in is_credential
+crates/memory-core/src/privacy/names.rs:55:17: replace == with != in is_credential
+crates/memory-core/src/privacy/names.rs:57:45: replace && with || in is_credential
+crates/memory-core/src/privacy/names.rs:57:48: delete ! in is_credential
+crates/memory-core/src/privacy/names.rs:71:5: replace collector_match -> bool with true
+crates/memory-core/src/privacy/names.rs:67:40: replace || with && in is_credential
+crates/memory-core/src/privacy/names.rs:71:5: replace collector_match -> bool with false
+crates/memory-core/src/privacy/names.rs:73:9: replace || with && in collector_match
+crates/memory-core/src/privacy/names.rs:72:9: replace || with && in collector_match
+crates/memory-core/src/privacy/names.rs:71:10: replace == with != in collector_match
+crates/memory-core/src/privacy/names.rs:77:40: replace && with || in collector_match
+crates/memory-core/src/privacy/names.rs:77:24: replace == with != in collector_match
+crates/memory-core/src/privacy/names.rs:77:58: replace == with != in collector_match
+crates/memory-core/src/privacy/names.rs:83:5: replace is_secret_name -> bool with true
+crates/memory-core/src/privacy/names.rs:83:5: replace is_secret_name -> bool with false
+crates/memory-core/src/privacy/names.rs:86:9: replace || with && in is_secret_name
+crates/memory-core/src/privacy/names.rs:100:5: replace matches -> bool with true
+crates/memory-core/src/privacy/names.rs:100:5: replace matches -> bool with false
+crates/memory-core/src/privacy/names.rs:104:5: replace reference -> bool with true
+crates/memory-core/src/privacy/names.rs:104:5: replace reference -> bool with false
+crates/memory-core/src/privacy/names.rs:106:9: replace || with && in reference
+crates/memory-core/src/privacy/names.rs:114:9: replace && with || in reference
+crates/memory-core/src/privacy/text.rs:12:5: replace words -> Vec<Vec<Word>> with vec![]
+crates/memory-core/src/privacy/text.rs:12:5: replace words -> Vec<Vec<Word>> with vec![vec![]]
+crates/memory-core/src/privacy/text.rs:16:60: replace == with != in words
+crates/memory-core/src/privacy/text.rs:22:18: replace == with != in words
+crates/memory-core/src/privacy/text.rs:36:16: delete ! in words
+crates/memory-core/src/privacy/text.rs:42:17: delete match arm '"' in words
+crates/memory-core/src/privacy/text.rs:55:25: replace match guard !quoted with false in words
+crates/memory-core/src/privacy/text.rs:42:33: delete ! in words
+crates/memory-core/src/privacy/text.rs:47:44: replace == with != in words
+crates/memory-core/src/privacy/text.rs:55:25: delete ! in words
+crates/memory-core/src/privacy/text.rs:59:33: replace == with != in words
+crates/memory-core/src/privacy/text.rs:63:44: replace == with != in words
+crates/memory-core/src/privacy/text.rs:65:24: delete ! in words
+crates/memory-core/src/privacy/text.rs:75:32: replace && with || in words
+crates/memory-core/src/privacy/text.rs:75:35: delete ! in words
+crates/memory-core/src/privacy/text.rs:82:5: replace literal -> bool with true
+crates/memory-core/src/privacy/text.rs:82:5: replace literal -> bool with false
+crates/memory-core/src/privacy/text.rs:85:41: replace || with && in literal
+crates/memory-core/src/privacy/text.rs:85:32: replace == with != in literal
+crates/memory-core/src/privacy/text.rs:85:50: replace == with != in literal
+crates/memory-core/src/privacy/text.rs:89:59: replace == with != in literal
+crates/memory-core/src/privacy/text.rs:89:48: replace && with || in literal
+crates/memory-core/src/privacy/text.rs:93:16: delete ! in literal
+crates/memory-core/src/privacy/text.rs:98:17: delete match arm "-x" | "--export" in literal
+crates/memory-core/src/privacy/text.rs:97:17: delete match arm "-g" | "--global" in literal
+crates/memory-core/src/privacy/text.rs:99:17: delete match arm "-gx" | "-xg" in literal
+crates/memory-core/src/privacy/text.rs:103:17: delete match arm "--" in literal
+crates/memory-core/src/privacy/text.rs:107:22: replace match guard !s.starts_with('-') with false in literal
+crates/memory-core/src/privacy/text.rs:107:22: delete ! in literal
+crates/memory-core/src/privacy/text.rs:112:20: replace || with && in literal
+crates/memory-core/src/privacy/text.rs:112:12: delete ! in literal
+crates/memory-core/src/privacy/text.rs:112:23: delete ! in literal
+crates/memory-core/src/privacy/text.rs:120:13: replace || with && in literal
+crates/memory-core/src/privacy/text.rs:119:13: replace || with && in literal
+crates/memory-core/src/privacy/text.rs:118:12: delete ! in literal
+crates/memory-core/src/privacy/text.rs:120:16: delete ! in literal
+crates/memory-core/src/privacy/text.rs:119:16: delete ! in literal
+crates/memory-core/src/privacy/text.rs:126:13: replace && with || in literal
+crates/memory-core/src/privacy/text.rs:125:16: delete ! in literal
+crates/memory-core/src/privacy/text.rs:127:17: replace || with && in literal
+crates/memory-core/src/privacy/text.rs:126:39: delete ! in literal
+crates/memory-core/src/privacy/text.rs:127:20: delete ! in literal
+crates/memory-core/src/privacy/text.rs:137:37: replace && with || in literal
+crates/memory-core/src/privacy/text.rs:137:48: replace == with != in literal
+crates/memory-core/src/privacy/text.rs:145:12: delete ! in literal
+crates/memory-core/src/privacy/text.rs:149:40: replace && with || in literal
+crates/memory-core/src/privacy/text.rs:149:59: replace || with && in literal
+crates/memory-core/src/privacy/text.rs:149:44: delete ! in literal
+crates/memory-core/src/privacy/text.rs:149:62: delete ! in literal
+crates/memory-core/src/privacy/text.rs:157:5: replace check -> Result<(), Reason> with Ok(())
+crates/memory-core/src/privacy/text.rs:157:34: replace || with && in check
+crates/memory-core/src/privacy/text.rs:157:20: replace > with == in check
+crates/memory-core/src/privacy/text.rs:157:20: replace > with < in check
+crates/memory-core/src/privacy/text.rs:157:20: replace > with >= in check
+crates/memory-core/src/privacy/text.rs:157:27: replace * with + in check
+crates/memory-core/src/privacy/text.rs:157:27: replace * with / in check
+crates/memory-core/src/privacy/text.rs:169:9: replace && with || in check
+crates/memory-core/src/privacy/text.rs:168:8: delete ! in check

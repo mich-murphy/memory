@@ -1,0 +1,19 @@
+crates/memory/src/daemon.rs:892:54: replace == with != in Daemon<F, S, C, E>::reconcile_once
+crates/memory/src/hook.rs:101:19: replace - with / in utc_day
+crates/memory/src/hook.rs:101:31: replace + with - in utc_day
+crates/memory/src/hook.rs:102:23: replace < with <= in utc_day
+crates/memory/src/hook.rs:140:28: replace == with != in ValueEnd::feed
+crates/memory/src/hook.rs:142:28: replace == with != in ValueEnd::feed
+crates/memory/src/hook.rs:150:13: delete match arm b'}' | b']' in ValueEnd::feed
+crates/memory/src/hook.rs:176:65: replace || with && in read_bounded
+crates/memory/src/hook.rs:309:5: replace main_entry -> ExitCode with Default::default()
+crates/memory/src/realfs.rs:152:66: replace | with & in <impl FileSystem for RealFs>::read
+crates/memory/src/realfs.rs:152:66: replace | with ^ in <impl FileSystem for RealFs>::read
+crates/memory/src/realfs.rs:152:47: replace | with & in <impl FileSystem for RealFs>::read
+crates/memory/src/realfs.rs:152:47: replace | with ^ in <impl FileSystem for RealFs>::read
+crates/memory/src/realfs.rs:152:28: replace | with ^ in <impl FileSystem for RealFs>::read
+crates/memory/src/realfs.rs:175:34: replace += with -= in <impl FileSystem for RealFs>::read
+crates/memory/src/realfs.rs:247:42: replace += with -= in walk_root
+crates/memory/src/realfs.rs:247:42: replace += with *= in walk_root
+crates/memory/src/realfs.rs:283:49: replace += with -= in walk_root
+crates/memory/src/resolve.rs:36:36: replace | with ^ in pack

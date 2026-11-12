@@ -1,0 +1,43 @@
+crates/memory/src/capture.rs:284:28: replace < with <= in stream_span
+crates/memory/src/capture.rs:297:12: replace > with >= in stream_span
+crates/memory/src/capture.rs:805:9: delete match arm Plan::Withheld{reason} in append
+crates/memory/src/config.rs:175:30: replace < with <= in Config::parse
+crates/memory/src/config.rs:175:45: replace > with >= in Config::parse
+crates/memory/src/daemon.rs:532:9: replace Daemon<F, S, C, E>::rebuilt -> bool with true
+crates/memory/src/daemon.rs:562:9: replace Daemon<F, S, C, E>::next_draw -> u64 with 0
+crates/memory/src/daemon.rs:562:9: replace Daemon<F, S, C, E>::next_draw -> u64 with 1
+crates/memory/src/daemon.rs:563:59: replace ^ with | in Daemon<F, S, C, E>::next_draw
+crates/memory/src/daemon.rs:563:59: replace ^ with & in Daemon<F, S, C, E>::next_draw
+crates/memory/src/daemon.rs:563:31: replace ^ with | in Daemon<F, S, C, E>::next_draw
+crates/memory/src/daemon.rs:563:31: replace ^ with & in Daemon<F, S, C, E>::next_draw
+crates/memory/src/daemon.rs:565:16: replace ^ with | in Daemon<F, S, C, E>::next_draw
+crates/memory/src/daemon.rs:565:16: replace ^ with & in Daemon<F, S, C, E>::next_draw
+crates/memory/src/daemon.rs:565:21: replace >> with << in Daemon<F, S, C, E>::next_draw
+crates/memory/src/daemon.rs:566:16: replace ^ with | in Daemon<F, S, C, E>::next_draw
+crates/memory/src/daemon.rs:566:16: replace ^ with & in Daemon<F, S, C, E>::next_draw
+crates/memory/src/daemon.rs:566:21: replace >> with << in Daemon<F, S, C, E>::next_draw
+crates/memory/src/daemon.rs:567:11: replace ^ with | in Daemon<F, S, C, E>::next_draw
+crates/memory/src/daemon.rs:567:11: replace ^ with & in Daemon<F, S, C, E>::next_draw
+crates/memory/src/daemon.rs:567:16: replace >> with << in Daemon<F, S, C, E>::next_draw
+crates/memory/src/daemon.rs:669:31: replace += with -= in Daemon<F, S, C, E>::settle
+crates/memory/src/daemon.rs:669:31: replace += with *= in Daemon<F, S, C, E>::settle
+crates/memory/src/daemon.rs:698:45: replace < with <= in Daemon<F, S, C, E>::due
+crates/memory/src/daemon.rs:763:33: replace && with || in Daemon<F, S, C, E>::attach_pending
+crates/memory/src/daemon.rs:795:25: replace && with || in Daemon<F, S, C, E>::land
+crates/memory/src/environment.rs:252:9: replace <impl FileSystem for Counting<T>>::stat_len -> Result<u64, Self::Error> with Ok(0)
+crates/memory/src/environment.rs:252:9: replace <impl FileSystem for Counting<T>>::stat_len -> Result<u64, Self::Error> with Ok(1)
+crates/memory/src/environment.rs:288:9: replace <impl Clock for Counting<T>>::monotonic_ns -> u64 with 0
+crates/memory/src/environment.rs:288:9: replace <impl Clock for Counting<T>>::monotonic_ns -> u64 with 1
+crates/memory/src/environment.rs:291:9: replace <impl Clock for Counting<T>>::wall_ns -> i128 with 0
+crates/memory/src/environment.rs:291:9: replace <impl Clock for Counting<T>>::wall_ns -> i128 with 1
+crates/memory/src/environment.rs:291:9: replace <impl Clock for Counting<T>>::wall_ns -> i128 with -1
+crates/memory/src/hook.rs:213:21: replace match guard meta.uid() == dir_uid with true in append
+crates/memory/src/hook.rs:243:37: replace && with || in run
+crates/memory/src/realfs.rs:260:35: replace += with -= in walk_root
+crates/memory/src/realfs.rs:260:35: replace += with *= in walk_root
+crates/memory/src/realfs.rs:264:32: replace += with -= in walk_root
+crates/memory/src/realfs.rs:264:32: replace += with *= in walk_root
+crates/memory/src/realfs.rs:283:49: replace += with *= in walk_root
+crates/memory/src/resolve.rs:85:9: delete match arm SourceKind::ClaudeTranscript | SourceKind::ClaudeSubagent | SourceKind::CodexRollout | SourceKind::PiSession in profile_of
+crates/memory/src/resolve.rs:311:39: replace += with -= in <impl crate::daemon::Sources for WalkSources>::enumerate
+crates/memory/src/resolve.rs:311:39: replace += with *= in <impl crate::daemon::Sources for WalkSources>::enumerate

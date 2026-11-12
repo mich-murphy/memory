@@ -1,0 +1,142 @@
+crates/memory-core/src/coalescer.rs:39:9: replace <impl TryFrom<WindowSeconds> for Window>::try_from -> Result<Self, Self::Error> with Ok(Default::default())
+crates/memory-core/src/coalescer.rs:39:42: replace < with == in <impl TryFrom<WindowSeconds> for Window>::try_from
+crates/memory-core/src/coalescer.rs:39:42: replace < with > in <impl TryFrom<WindowSeconds> for Window>::try_from
+crates/memory-core/src/coalescer.rs:39:42: replace < with <= in <impl TryFrom<WindowSeconds> for Window>::try_from
+crates/memory-core/src/coalescer.rs:39:29: replace || with && in <impl TryFrom<WindowSeconds> for Window>::try_from
+crates/memory-core/src/coalescer.rs:39:24: replace == with != in <impl TryFrom<WindowSeconds> for Window>::try_from
+crates/memory-core/src/coalescer.rs:110:9: replace Coalescer::signal -> Result<(), CoalescerError> with Ok(())
+crates/memory-core/src/coalescer.rs:119:31: replace |= with &= in Coalescer::signal
+crates/memory-core/src/coalescer.rs:119:41: replace == with != in Coalescer::signal
+crates/memory-core/src/coalescer.rs:125:35: replace == with != in Coalescer::signal
+crates/memory-core/src/coalescer.rs:136:9: replace Coalescer::poll -> Result<bool, CoalescerError> with Ok(true)
+crates/memory-core/src/coalescer.rs:136:9: replace Coalescer::poll -> Result<bool, CoalescerError> with Ok(false)
+crates/memory-core/src/coalescer.rs:146:17: replace || with && in Coalescer::poll
+crates/memory-core/src/coalescer.rs:145:17: replace || with && in Coalescer::poll
+crates/memory-core/src/coalescer.rs:145:47: replace >= with < in Coalescer::poll
+crates/memory-core/src/coalescer.rs:146:48: replace >= with < in Coalescer::poll
+crates/memory-core/src/coalescer.rs:159:9: replace Coalescer::complete -> Result<(), CoalescerError> with Ok(())
+crates/memory-core/src/coalescer.rs:163:12: delete ! in Coalescer::complete
+crates/memory-core/src/coalescer.rs:178:9: replace Coalescer::next_due -> Option<Duration> with None
+crates/memory-core/src/coalescer.rs:178:9: replace Coalescer::next_due -> Option<Duration> with Some(Default::default())
+crates/memory-core/src/coalescer.rs:180:28: delete ! in Coalescer::next_due
+crates/memory-core/src/coalescer.rs:186:29: replace + with - in Coalescer::next_due
+crates/memory-core/src/coalescer.rs:186:62: replace + with - in Coalescer::next_due
+crates/memory-core/src/coalescer.rs:193:12: replace < with == in advance
+crates/memory-core/src/coalescer.rs:193:12: replace < with > in advance
+crates/memory-core/src/coalescer.rs:193:12: replace < with <= in advance
+crates/memory-core/src/coalescer.rs:193:5: replace advance -> Result<(), CoalescerError> with Ok(())
+crates/memory-core/src/coalescer.rs:218:55: replace > with == in wake_action
+crates/memory-core/src/coalescer.rs:218:55: replace > with < in wake_action
+crates/memory-core/src/coordinates.rs:105:5: replace agent_rank -> u8 with 0
+crates/memory-core/src/coalescer.rs:218:55: replace > with >= in wake_action
+crates/memory-core/src/coordinates.rs:105:5: replace agent_rank -> u8 with 1
+crates/memory-core/src/coordinates.rs:113:5: replace valid_path -> bool with true
+crates/memory-core/src/coordinates.rs:113:5: replace valid_path -> bool with false
+crates/memory-core/src/coordinates.rs:115:9: replace && with || in valid_path
+crates/memory-core/src/coordinates.rs:114:9: replace && with || in valid_path
+crates/memory-core/src/coordinates.rs:114:12: delete ! in valid_path
+crates/memory-core/src/coordinates.rs:116:13: replace || with && in valid_path
+crates/memory-core/src/coordinates.rs:115:15: replace == with != in valid_path
+crates/memory-core/src/coordinates.rs:118:52: replace && with || in valid_path
+crates/memory-core/src/coordinates.rs:118:40: replace && with || in valid_path
+crates/memory-core/src/coordinates.rs:118:26: delete ! in valid_path
+crates/memory-core/src/coordinates.rs:118:45: replace != with == in valid_path
+crates/memory-core/src/coordinates.rs:118:57: replace != with == in valid_path
+crates/memory-core/src/coordinates.rs:122:5: replace beneath -> bool with true
+crates/memory-core/src/coordinates.rs:122:5: replace beneath -> bool with false
+crates/memory-core/src/coordinates.rs:122:18: replace || with && in beneath
+crates/memory-core/src/coordinates.rs:122:10: replace == with != in beneath
+crates/memory-core/src/coordinates.rs:126:5: replace project -> String with String::new()
+crates/memory-core/src/coordinates.rs:126:5: replace project -> String with "xyzzy".into()
+crates/memory-core/src/coordinates.rs:147:61: replace > with == in Inventory::compile
+crates/memory-core/src/coordinates.rs:147:61: replace > with < in Inventory::compile
+crates/memory-core/src/coordinates.rs:147:61: replace > with >= in Inventory::compile
+crates/memory-core/src/coordinates.rs:147:40: replace + with - in Inventory::compile
+crates/memory-core/src/coordinates.rs:147:40: replace + with * in Inventory::compile
+crates/memory-core/src/coordinates.rs:147:24: replace + with - in Inventory::compile
+crates/memory-core/src/coordinates.rs:147:24: replace + with * in Inventory::compile
+crates/memory-core/src/coordinates.rs:155:16: delete ! in Inventory::compile
+crates/memory-core/src/coordinates.rs:163:37: replace || with && in Inventory::compile
+crates/memory-core/src/coordinates.rs:163:16: delete ! in Inventory::compile
+crates/memory-core/src/coordinates.rs:163:40: delete ! in Inventory::compile
+crates/memory-core/src/coordinates.rs:167:16: delete ! in Inventory::compile
+crates/memory-core/src/coordinates.rs:179:9: replace Inventory::add_proven -> Result<(), CoordError> with Ok(())
+crates/memory-core/src/coordinates.rs:181:16: delete ! in Inventory::add_proven
+crates/memory-core/src/coordinates.rs:187:36: replace != with == in Inventory::add_proven
+crates/memory-core/src/coordinates.rs:211:9: replace Inventory::validate_routes -> Result<(), CoordError> with Ok(())
+crates/memory-core/src/coordinates.rs:214:31: replace || with && in Inventory::validate_routes
+crates/memory-core/src/coordinates.rs:214:24: replace != with == in Inventory::validate_routes
+crates/memory-core/src/coordinates.rs:214:34: delete ! in Inventory::validate_routes
+crates/memory-core/src/coordinates.rs:217:24: replace != with == in Inventory::validate_routes
+crates/memory-core/src/coordinates.rs:218:27: replace += with -= in Inventory::validate_routes
+crates/memory-core/src/coordinates.rs:218:27: replace += with *= in Inventory::validate_routes
+crates/memory-core/src/coordinates.rs:220:46: replace != with == in Inventory::validate_routes
+crates/memory-core/src/coordinates.rs:224:22: replace > with == in Inventory::validate_routes
+crates/memory-core/src/coordinates.rs:224:22: replace > with < in Inventory::validate_routes
+crates/memory-core/src/coordinates.rs:224:22: replace > with >= in Inventory::validate_routes
+crates/memory-core/src/coordinates.rs:233:9: replace Inventory::locate -> Option<(String, String)> with None
+crates/memory-core/src/coordinates.rs:233:9: replace Inventory::locate -> Option<(String, String)> with Some((String::new(), String::new()))
+crates/memory-core/src/coordinates.rs:233:9: replace Inventory::locate -> Option<(String, String)> with Some((String::new(), "xyzzy".into()))
+crates/memory-core/src/coordinates.rs:233:9: replace Inventory::locate -> Option<(String, String)> with Some(("xyzzy".into(), String::new()))
+crates/memory-core/src/coordinates.rs:233:9: replace Inventory::locate -> Option<(String, String)> with Some(("xyzzy".into(), "xyzzy".into()))
+crates/memory-core/src/coordinates.rs:236:42: replace && with || in Inventory::locate
+crates/memory-core/src/coordinates.rs:236:34: replace == with != in Inventory::locate
+crates/memory-core/src/coordinates.rs:241:41: replace && with || in Inventory::locate
+crates/memory-core/src/coordinates.rs:241:33: replace == with != in Inventory::locate
+crates/memory-core/src/coordinates.rs:261:12: delete ! in Inventory::resolve
+crates/memory-core/src/coordinates.rs:268:19: replace == with != in Inventory::resolve
+crates/memory-core/src/coordinates.rs:272:45: replace == with != in Inventory::resolve
+crates/memory-core/src/coordinates.rs:272:66: replace == with != in Inventory::resolve
+crates/memory-core/src/coordinates.rs:281:23: replace == with != in Inventory::resolve
+crates/memory-core/src/coordinates.rs:309:9: replace Inventory::verified -> bool with true
+crates/memory-core/src/coordinates.rs:309:9: replace Inventory::verified -> bool with false
+crates/memory-core/src/coordinates.rs:310:66: replace && with || in Inventory::verified
+crates/memory-core/src/coordinates.rs:310:30: replace && with || in Inventory::verified
+crates/memory-core/src/coordinates.rs:310:20: replace == with != in Inventory::verified
+crates/memory-core/src/coordinates.rs:310:48: replace == with != in Inventory::verified
+crates/memory-core/src/coordinates.rs:310:81: replace == with != in Inventory::verified
+crates/memory-core/src/disposition.rs:9:64: replace * with +
+crates/memory-core/src/disposition.rs:9:64: replace * with /
+crates/memory-core/src/disposition.rs:9:59: replace * with +
+crates/memory-core/src/disposition.rs:9:59: replace * with /
+crates/memory-core/src/disposition.rs:13:58: replace * with +
+crates/memory-core/src/disposition.rs:13:58: replace * with /
+crates/memory-core/src/disposition.rs:78:5: replace backoff -> Duration with Default::default()
+crates/memory-core/src/disposition.rs:78:22: replace << with >> in backoff
+crates/memory-core/src/disposition.rs:84:5: replace transient_ceiling -> Duration with Default::default()
+crates/memory-core/src/disposition.rs:84:22: replace << with >> in transient_ceiling
+crates/memory-core/src/disposition.rs:90:5: replace jittered -> Duration with Default::default()
+crates/memory-core/src/disposition.rs:92:36: replace * with + in jittered
+crates/memory-core/src/disposition.rs:92:36: replace * with / in jittered
+crates/memory-core/src/disposition.rs:92:44: replace + with - in jittered
+crates/memory-core/src/disposition.rs:92:44: replace + with * in jittered
+crates/memory-core/src/disposition.rs:94:18: replace + with - in jittered
+crates/memory-core/src/disposition.rs:135:30: replace match guard cancel_requested with true in transition_paced
+crates/memory-core/src/disposition.rs:128:9: delete field retries from struct Streak expression in transition_paced
+crates/memory-core/src/disposition.rs:135:30: replace match guard cancel_requested with false in transition_paced
+crates/memory-core/src/disposition.rs:157:43: replace match guard f == fault with true in transition_paced
+crates/memory-core/src/disposition.rs:157:43: replace match guard f == fault with false in transition_paced
+crates/memory-core/src/disposition.rs:157:45: replace == with != in transition_paced
+crates/memory-core/src/disposition.rs:166:56: replace >= with < in transition_paced
+crates/memory-core/src/disposition.rs:167:62: replace && with || in transition_paced
+crates/memory-core/src/disposition.rs:167:44: replace >= with < in transition_paced
+crates/memory-core/src/domain.rs:88:29: replace || with && in <impl TryFrom<String> for ETag>::try_from
+crates/memory-core/src/domain.rs:96:9: replace <impl From<ETag> for String>::from -> Self with Default::default()
+crates/memory-core/src/domain.rs:102:9: replace ETag::as_str -> &str with ""
+crates/memory-core/src/domain.rs:102:9: replace ETag::as_str -> &str with "xyzzy"
+crates/memory-core/src/domain.rs:119:9: replace Offset::get -> u64 with 0
+crates/memory-core/src/domain.rs:119:9: replace Offset::get -> u64 with 1
+crates/memory-core/src/domain.rs:146:13: replace <impl TryFrom<String> for Sha256>::try_from::nibble -> Option<u8> with None
+crates/memory-core/src/domain.rs:146:13: replace <impl TryFrom<String> for Sha256>::try_from::nibble -> Option<u8> with Some(0)
+crates/memory-core/src/domain.rs:146:13: replace <impl TryFrom<String> for Sha256>::try_from::nibble -> Option<u8> with Some(1)
+crates/memory-core/src/domain.rs:147:17: delete match arm b'0'..= b'9' in <impl TryFrom<String> for Sha256>::try_from::nibble
+crates/memory-core/src/domain.rs:148:17: delete match arm b'a'..= b'f' in <impl TryFrom<String> for Sha256>::try_from::nibble
+crates/memory-core/src/domain.rs:147:42: replace - with + in <impl TryFrom<String> for Sha256>::try_from::nibble
+crates/memory-core/src/domain.rs:147:42: replace - with / in <impl TryFrom<String> for Sha256>::try_from::nibble
+crates/memory-core/src/domain.rs:148:49: replace + with - in <impl TryFrom<String> for Sha256>::try_from::nibble
+crates/memory-core/src/domain.rs:148:42: replace - with + in <impl TryFrom<String> for Sha256>::try_from::nibble
+crates/memory-core/src/domain.rs:148:42: replace - with / in <impl TryFrom<String> for Sha256>::try_from::nibble
+crates/memory-core/src/domain.rs:153:30: replace || with && in <impl TryFrom<String> for Sha256>::try_from
+crates/memory-core/src/domain.rs:153:24: replace != with == in <impl TryFrom<String> for Sha256>::try_from
+crates/memory-core/src/domain.rs:153:33: delete ! in <impl TryFrom<String> for Sha256>::try_from
+crates/memory-core/src/domain.rs:161:29: replace | with & in <impl TryFrom<String> for Sha256>::try_from

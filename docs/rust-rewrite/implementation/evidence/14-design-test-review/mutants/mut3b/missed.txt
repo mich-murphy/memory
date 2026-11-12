@@ -1,0 +1,26 @@
+crates/memory-core/src/hint.rs:106:9: replace <impl JsonSchema for HintPath>::json_schema -> schemars::Schema with Default::default()
+crates/memory-core/src/hint.rs:523:58: replace - with + in scan_line
+crates/memory-core/src/hint.rs:523:58: replace - with / in scan_line
+crates/memory-core/src/hint.rs:525:19: replace < with <= in scan_line
+crates/memory-core/src/hint.rs:531:60: replace && with || in scan_line
+crates/memory-core/src/hint.rs:531:44: replace && with || in scan_line
+crates/memory-core/src/hint.rs:531:40: replace > with >= in scan_line
+crates/memory-core/src/hint.rs:545:29: replace += with -= in scan_line
+crates/memory-core/src/hint.rs:545:29: replace += with *= in scan_line
+crates/memory-core/src/hint.rs:545:50: replace > with < in scan_line
+crates/memory-core/src/manifest/schema.rs:31:9: replace <impl Visitor<'de> for NoDupVisitor>::expecting -> std::fmt::Result with Ok(Default::default())
+crates/memory-core/src/manifest/schema.rs:194:9: replace <impl JsonSchema for Timestamp>::json_schema -> schemars::Schema with Default::default()
+crates/memory-core/src/manifest/schema.rs:199:40: replace > with >= in token
+crates/memory-core/src/manifest/schema.rs:460:9: replace LaunchRecord::env -> &BTreeMap<String, String> with Box::leak(Box::new(BTreeMap::new()))
+crates/memory-core/src/manifest/schema.rs:463:28: replace > with == in LaunchRecord::validate
+crates/memory-core/src/manifest/schema.rs:463:28: replace > with >= in LaunchRecord::validate
+crates/memory-core/src/manifest/schema.rs:464:31: replace > with == in LaunchRecord::validate
+crates/memory-core/src/manifest/schema.rs:464:31: replace > with >= in LaunchRecord::validate
+crates/memory-core/src/manifest/schema.rs:744:9: replace Delta::launch -> &[LaunchRecord] with Vec::leak(Vec::new())
+crates/memory-core/src/manifest/schema.rs:819:9: replace Checkpoint::previous -> Option<Sha256> with None
+crates/memory-core/src/manifest/schema.rs:831:9: replace Checkpoint::launch -> &[LaunchRecord] with Vec::leak(Vec::new())
+crates/memory-core/src/manifest/schema.rs:869:9: replace Manifest::seq -> u64 with 0
+crates/memory-core/src/manifest/schema.rs:869:9: replace Manifest::seq -> u64 with 1
+crates/memory-core/src/manifest/schema.rs:926:17: replace || with && in Manifest::verify_encodings
+crates/memory-core/src/manifest/schema.rs:925:35: replace != with == in Manifest::verify_encodings
+crates/memory-core/src/manifest/schema.rs:926:42: replace != with == in Manifest::verify_encodings

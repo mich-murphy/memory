@@ -1,0 +1,23 @@
+crates/memory-core/src/manifest/schema.rs:208:23: replace > with == in check_path
+crates/memory-core/src/manifest/schema.rs:208:23: replace > with < in check_path
+crates/memory-core/src/manifest/schema.rs:208:23: replace > with >= in check_path
+crates/memory-core/src/manifest/schema.rs:214:47: replace || with && in check_path
+crates/memory-core/src/manifest/schema.rs:214:35: replace || with && in check_path
+crates/memory-core/src/manifest/schema.rs:214:40: replace == with != in check_path
+crates/memory-core/src/manifest/schema.rs:214:52: replace == with != in check_path
+crates/memory-core/src/manifest/schema.rs:235:9: replace Writer::validate -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/schema.rs:265:9: replace EpochStamp::validate -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/schema.rs:330:25: delete ! in Piece::from_authorized
+crates/memory-core/src/manifest/schema.rs:354:9: replace Piece::len -> u64 with 0
+crates/memory-core/src/manifest/schema.rs:358:9: replace Piece::is_empty -> bool with true
+crates/memory-core/src/manifest/schema.rs:358:9: replace Piece::is_empty -> bool with false
+crates/memory-core/src/manifest/schema.rs:358:18: replace == with != in Piece::is_empty
+crates/memory-core/src/manifest/schema.rs:366:9: replace Piece::object -> &str with ""
+crates/memory-core/src/manifest/schema.rs:366:9: replace Piece::object -> &str with "xyzzy"
+crates/memory-core/src/manifest/schema.rs:374:9: replace Piece::encoded_len -> u64 with 0
+crates/memory-core/src/manifest/schema.rs:374:9: replace Piece::encoded_len -> u64 with 1
+crates/memory-core/src/manifest/schema.rs:388:26: replace || with && in Piece::validate
+crates/memory-core/src/manifest/schema.rs:388:46: replace == with != in Piece::validate
+crates/memory-core/src/manifest/schema.rs:402:5: replace check_run -> Result<u64, ManifestError> with Ok(0)
+crates/memory-core/src/manifest/schema.rs:406:21: replace match guard from_zero && piece.offset.get() != 0 with false in check_run
+crates/memory-core/src/manifest/schema.rs:464:13: replace || with && in LaunchRecord::validate

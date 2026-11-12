@@ -1,0 +1,271 @@
+crates/memory-core/src/hint.rs:20:43: replace << with >>
+crates/memory-core/src/hint.rs:81:13: replace && with || in <impl TryFrom<String> for HintPath>::try_from
+crates/memory-core/src/hint.rs:82:13: replace && with || in <impl TryFrom<String> for HintPath>::try_from
+crates/memory-core/src/hint.rs:81:28: replace <= with > in <impl TryFrom<String> for HintPath>::try_from
+crates/memory-core/src/hint.rs:82:16: delete ! in <impl TryFrom<String> for HintPath>::try_from
+crates/memory-core/src/hint.rs:92:9: replace <impl From<HintPath> for String>::from -> Self with Default::default()
+crates/memory-core/src/hint.rs:98:9: replace HintPath::as_str -> &str with ""
+crates/memory-core/src/hint.rs:98:9: replace HintPath::as_str -> &str with "xyzzy"
+crates/memory-core/src/hint.rs:151:9: replace HintEvent::flushes -> bool with true
+crates/memory-core/src/hint.rs:151:9: replace HintEvent::flushes -> bool with false
+crates/memory-core/src/hint.rs:180:5: replace event_kind -> Option<HintEvent> with None
+crates/memory-core/src/hint.rs:180:19: replace > with == in event_kind
+crates/memory-core/src/hint.rs:180:19: replace > with < in event_kind
+crates/memory-core/src/hint.rs:180:19: replace > with >= in event_kind
+crates/memory-core/src/hint.rs:185:24: replace != with == in event_kind
+crates/memory-core/src/hint.rs:191:13: delete match arm "sessionstart" in event_kind
+crates/memory-core/src/hint.rs:192:13: delete match arm "stop" in event_kind
+crates/memory-core/src/hint.rs:193:13: delete match arm "stopfailure" in event_kind
+crates/memory-core/src/hint.rs:194:13: delete match arm "subagentstop" in event_kind
+crates/memory-core/src/hint.rs:195:13: delete match arm "precompact" in event_kind
+crates/memory-core/src/hint.rs:196:13: delete match arm "taskcompleted" in event_kind
+crates/memory-core/src/hint.rs:197:13: delete match arm "teammateidle" in event_kind
+crates/memory-core/src/hint.rs:198:13: delete match arm "sessionend" in event_kind
+crates/memory-core/src/hint.rs:202:13: delete match arm "sessionstart" in event_kind
+crates/memory-core/src/hint.rs:203:13: delete match arm "stop" in event_kind
+crates/memory-core/src/hint.rs:204:13: delete match arm "subagentstop" in event_kind
+crates/memory-core/src/hint.rs:205:13: delete match arm "precompact" in event_kind
+crates/memory-core/src/hint.rs:206:13: delete match arm "interrupt" in event_kind
+crates/memory-core/src/hint.rs:207:13: delete match arm "sessionend" in event_kind
+crates/memory-core/src/hint.rs:211:13: delete match arm "sessionstart" in event_kind
+crates/memory-core/src/hint.rs:212:13: delete match arm "agentsettled" in event_kind
+crates/memory-core/src/hint.rs:213:13: delete match arm "sessionshutdown" in event_kind
+crates/memory-core/src/hint.rs:228:20: replace > with == in parse_hook_input
+crates/memory-core/src/hint.rs:228:20: replace > with < in parse_hook_input
+crates/memory-core/src/hint.rs:228:20: replace > with >= in parse_hook_input
+crates/memory-core/src/hint.rs:271:5: replace put with ()
+crates/memory-core/src/hint.rs:306:9: replace LaunchRecord::argv -> &[String] with Vec::leak(Vec::new())
+crates/memory-core/src/hint.rs:306:9: replace LaunchRecord::argv -> &[String] with Vec::leak(vec![String::new()])
+crates/memory-core/src/hint.rs:306:9: replace LaunchRecord::argv -> &[String] with Vec::leak(vec!["xyzzy".into()])
+crates/memory-core/src/hint.rs:310:9: replace LaunchRecord::env -> &BTreeMap<String, String> with Box::leak(Box::new(BTreeMap::new()))
+crates/memory-core/src/hint.rs:310:9: replace LaunchRecord::env -> &BTreeMap<String, String> with Box::leak(Box::new(BTreeMap::from_iter([(String::new(), String::new())])))
+crates/memory-core/src/hint.rs:310:9: replace LaunchRecord::env -> &BTreeMap<String, String> with Box::leak(Box::new(BTreeMap::from_iter([(String::new(), "xyzzy".into())])))
+crates/memory-core/src/hint.rs:310:9: replace LaunchRecord::env -> &BTreeMap<String, String> with Box::leak(Box::new(BTreeMap::from_iter([("xyzzy".into(), String::new())])))
+crates/memory-core/src/hint.rs:310:9: replace LaunchRecord::env -> &BTreeMap<String, String> with Box::leak(Box::new(BTreeMap::from_iter([("xyzzy".into(), "xyzzy".into())])))
+crates/memory-core/src/hint.rs:314:9: replace LaunchRecord::digest_matches -> bool with true
+crates/memory-core/src/hint.rs:314:9: replace LaunchRecord::digest_matches -> bool with false
+crates/memory-core/src/hint.rs:314:46: replace == with != in LaunchRecord::digest_matches
+crates/memory-core/src/hint.rs:378:5: replace encode -> Result<Vec<u8>, BuildError> with Ok(vec![])
+crates/memory-core/src/hint.rs:378:5: replace encode -> Result<Vec<u8>, BuildError> with Ok(vec![0])
+crates/memory-core/src/hint.rs:378:5: replace encode -> Result<Vec<u8>, BuildError> with Ok(vec![1])
+crates/memory-core/src/hint.rs:391:5: replace build_line -> Result<Vec<u8>, BuildError> with Ok(vec![])
+crates/memory-core/src/hint.rs:391:5: replace build_line -> Result<Vec<u8>, BuildError> with Ok(vec![0])
+crates/memory-core/src/hint.rs:391:5: replace build_line -> Result<Vec<u8>, BuildError> with Ok(vec![1])
+crates/memory-core/src/hint.rs:406:5: replace build_line_with_limit -> Result<Vec<u8>, BuildError> with Ok(vec![])
+crates/memory-core/src/hint.rs:406:5: replace build_line_with_limit -> Result<Vec<u8>, BuildError> with Ok(vec![0])
+crates/memory-core/src/hint.rs:406:5: replace build_line_with_limit -> Result<Vec<u8>, BuildError> with Ok(vec![1])
+crates/memory-core/src/hint.rs:453:23: replace <= with > in build_line_with_limit
+crates/memory-core/src/hint.rs:509:25: replace match guard peek.schema.starts_with(SCHEMA_PREFIX) && peek.schema != SCHEMA with true in classify
+crates/memory-core/src/hint.rs:509:25: replace match guard peek.schema.starts_with(SCHEMA_PREFIX) && peek.schema != SCHEMA with false in classify
+crates/memory-core/src/hint.rs:509:64: replace && with || in classify
+crates/memory-core/src/hint.rs:509:79: replace != with == in classify
+crates/memory-core/src/hint.rs:518:5: replace scan_line with ()
+crates/memory-core/src/hint.rs:525:19: replace < with == in scan_line
+crates/memory-core/src/hint.rs:525:19: replace < with > in scan_line
+crates/memory-core/src/hint.rs:531:40: replace > with == in scan_line
+crates/memory-core/src/hint.rs:531:40: replace > with < in scan_line
+crates/memory-core/src/hint.rs:531:51: replace >= with < in scan_line
+crates/memory-core/src/hint.rs:531:71: replace == with != in scan_line
+crates/memory-core/src/hint.rs:540:29: replace += with -= in scan_line
+crates/memory-core/src/hint.rs:540:29: replace += with *= in scan_line
+crates/memory-core/src/hint.rs:540:50: replace > with == in scan_line
+crates/memory-core/src/hint.rs:540:50: replace > with < in scan_line
+crates/memory-core/src/hint.rs:540:50: replace > with >= in scan_line
+crates/memory-core/src/hint.rs:545:50: replace > with == in scan_line
+crates/memory-core/src/hint.rs:545:50: replace > with >= in scan_line
+crates/memory-core/src/hint.rs:546:38: replace += with -= in scan_line
+crates/memory-core/src/hint.rs:546:38: replace += with *= in scan_line
+crates/memory-core/src/hint.rs:552:17: replace += with -= in scan_line
+crates/memory-core/src/hint.rs:552:17: replace += with *= in scan_line
+crates/memory-core/src/hint.rs:569:54: replace == with != in scan
+crates/memory-core/src/limits.rs:16:44: replace * with +
+crates/memory-core/src/limits.rs:16:44: replace * with /
+crates/memory-core/src/limits.rs:26:5: replace current_key -> String with String::new()
+crates/memory-core/src/limits.rs:26:5: replace current_key -> String with "xyzzy".into()
+crates/memory-core/src/limits.rs:49:5: replace manifest_key -> String with String::new()
+crates/memory-core/src/limits.rs:49:5: replace manifest_key -> String with "xyzzy".into()
+crates/memory-core/src/limits.rs:54:5: replace object_key -> String with String::new()
+crates/memory-core/src/limits.rs:54:5: replace object_key -> String with "xyzzy".into()
+crates/memory-core/src/limits.rs:61:5: replace current_key_len -> usize with 0
+crates/memory-core/src/limits.rs:61:5: replace current_key_len -> usize with 1
+crates/memory-core/src/limits.rs:62:46: replace + with - in current_key_len
+crates/memory-core/src/limits.rs:62:46: replace + with * in current_key_len
+crates/memory-core/src/limits.rs:62:42: replace + with - in current_key_len
+crates/memory-core/src/limits.rs:62:42: replace + with * in current_key_len
+crates/memory-core/src/limits.rs:63:42: replace + with - in current_key_len
+crates/memory-core/src/limits.rs:63:42: replace + with * in current_key_len
+crates/memory-core/src/limits.rs:63:38: replace + with - in current_key_len
+crates/memory-core/src/limits.rs:63:38: replace + with * in current_key_len
+crates/memory-core/src/limits.rs:77:5: replace check_key_len -> Result<(), WithholdReason> with Ok(())
+crates/memory-core/src/limits.rs:77:12: replace > with == in check_key_len
+crates/memory-core/src/limits.rs:77:12: replace > with < in check_key_len
+crates/memory-core/src/limits.rs:77:12: replace > with >= in check_key_len
+crates/memory-core/src/limits.rs:89:5: replace check_owner_key -> Result<(), WithholdReason> with Ok(())
+crates/memory-core/src/limits.rs:105:9: replace SourceSet::len -> usize with 0
+crates/memory-core/src/limits.rs:105:9: replace SourceSet::len -> usize with 1
+crates/memory-core/src/limits.rs:109:9: replace SourceSet::is_empty -> bool with true
+crates/memory-core/src/limits.rs:109:9: replace SourceSet::is_empty -> bool with false
+crates/memory-core/src/limits.rs:113:9: replace SourceSet::contains -> bool with true
+crates/memory-core/src/limits.rs:113:9: replace SourceSet::contains -> bool with false
+crates/memory-core/src/limits.rs:121:9: replace SourceSet::admit -> Result<(), WithholdReason> with Ok(())
+crates/memory-core/src/limits.rs:124:29: replace >= with < in SourceSet::admit
+crates/memory-core/src/limits.rs:134:5: replace request_budget -> Duration with Default::default()
+crates/memory-core/src/limits.rs:134:27: replace / with % in request_budget
+crates/memory-core/src/limits.rs:134:27: replace / with * in request_budget
+crates/memory-core/src/limits.rs:135:26: replace % with / in request_budget
+crates/memory-core/src/limits.rs:135:26: replace % with + in request_budget
+crates/memory-core/src/limits.rs:137:51: replace / with % in request_budget
+crates/memory-core/src/limits.rs:137:51: replace / with * in request_budget
+crates/memory-core/src/planner.rs:45:5: replace audit_eligible -> bool with true
+crates/memory-core/src/planner.rs:45:5: replace audit_eligible -> bool with false
+crates/memory-core/src/planner.rs:50:9: replace && with || in audit_eligible
+crates/memory-core/src/planner.rs:49:9: replace && with || in audit_eligible
+crates/memory-core/src/planner.rs:48:9: replace && with || in audit_eligible
+crates/memory-core/src/planner.rs:47:9: replace && with || in audit_eligible
+crates/memory-core/src/planner.rs:46:9: replace && with || in audit_eligible
+crates/memory-core/src/planner.rs:45:17: replace == with != in audit_eligible
+crates/memory-core/src/planner.rs:46:22: replace == with != in audit_eligible
+crates/memory-core/src/planner.rs:47:26: replace == with != in audit_eligible
+crates/memory-core/src/planner.rs:48:24: replace == with != in audit_eligible
+crates/memory-core/src/planner.rs:49:30: replace == with != in audit_eligible
+crates/memory-core/src/planner.rs:50:28: replace == with != in audit_eligible
+crates/memory-core/src/planner.rs:68:24: replace >= with < in Observation::missing
+crates/memory-core/src/planner.rs:177:35: replace && with || in plan
+crates/memory-core/src/planner.rs:177:53: replace != with == in plan
+crates/memory-core/src/planner.rs:200:30: replace < with == in plan
+crates/memory-core/src/planner.rs:186:38: replace == with != in plan
+crates/memory-core/src/planner.rs:200:30: replace < with <= in plan
+crates/memory-core/src/planner.rs:203:29: replace != with == in plan
+crates/memory-core/src/planner.rs:200:30: replace < with > in plan
+crates/memory-core/src/planner.rs:215:23: replace != with == in plan
+crates/memory-core/src/planner.rs:225:28: replace != with == in plan
+crates/memory-core/src/planner.rs:228:30: replace < with == in plan
+crates/memory-core/src/planner.rs:228:30: replace < with > in plan
+crates/memory-core/src/planner.rs:228:30: replace < with <= in plan
+crates/memory-core/src/planner.rs:231:28: replace != with == in plan
+crates/memory-core/src/planner.rs:239:44: replace == with != in plan
+crates/memory-core/src/planner.rs:242:17: replace && with || in plan
+crates/memory-core/src/planner.rs:241:17: replace && with || in plan
+crates/memory-core/src/planner.rs:241:38: replace == with != in plan
+crates/memory-core/src/planner.rs:242:43: replace == with != in plan
+crates/memory-core/src/planner.rs:249:43: replace || with && in plan
+crates/memory-core/src/planner.rs:249:29: replace != with == in plan
+crates/memory-core/src/planner.rs:249:59: replace != with == in plan
+crates/memory-core/src/planner.rs:261:19: replace == with != in extension
+crates/memory-core/src/manifest/build.rs:105:9: delete match arm (false, Some((_, cp))) in build
+crates/memory-core/src/manifest/build.rs:140:27: replace > with == in fold
+crates/memory-core/src/manifest/build.rs:140:27: replace > with >= in fold
+crates/memory-core/src/manifest/build.rs:159:26: replace != with == in fold
+crates/memory-core/src/manifest/build.rs:162:40: replace != with == in fold
+crates/memory-core/src/manifest/build.rs:165:50: replace || with && in fold
+crates/memory-core/src/manifest/build.rs:165:29: replace != with == in fold
+crates/memory-core/src/manifest/build.rs:165:72: replace != with == in fold
+crates/memory-core/src/manifest/error.rs:95:9: replace ManifestError::park_reason -> Option<OwnerParkReason> with None
+crates/memory-core/src/manifest/error.rs:99:9: replace ManifestError::commit_outcome -> Option<CommitOutcome> with None
+crates/memory-core/src/manifest/recovery.rs:149:16: delete ! in recover_projection
+crates/memory-core/src/manifest/recovery.rs:152:29: replace != with == in recover_projection
+crates/memory-core/src/manifest/recovery.rs:152:23: replace == with != in recover_projection
+crates/memory-core/src/manifest/recovery.rs:182:37: replace || with && in recover_projection
+crates/memory-core/src/manifest/recovery.rs:190:25: delete match arm (RawOp::Deleted, _, _, _) in recover_projection
+crates/memory-core/src/manifest/recovery.rs:191:25: delete match arm (_, Some(e), Some(size), Some(whole)) in recover_projection
+crates/memory-core/src/manifest/schema.rs:58:16: delete ! in <impl Visitor<'de> for NoDupVisitor>::visit_map
+crates/memory-core/src/manifest/schema.rs:72:5: replace check_no_duplicate_keys -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/schema.rs:107:9: replace || with && in classify_schema
+crates/memory-core/src/manifest/schema.rs:106:9: replace || with && in classify_schema
+crates/memory-core/src/manifest/schema.rs:107:12: delete ! in classify_schema
+crates/memory-core/src/manifest/schema.rs:110:23: replace == with != in classify_schema
+crates/memory-core/src/manifest/schema.rs:123:5: replace preflight -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/schema.rs:169:51: replace + with * in <impl TryFrom<String> for Timestamp>::try_from
+crates/memory-core/src/manifest/schema.rs:169:51: replace + with - in <impl TryFrom<String> for Timestamp>::try_from
+crates/memory-core/src/manifest/schema.rs:169:46: replace * with + in <impl TryFrom<String> for Timestamp>::try_from
+crates/memory-core/src/manifest/schema.rs:169:46: replace * with / in <impl TryFrom<String> for Timestamp>::try_from
+crates/memory-core/src/manifest/schema.rs:176:13: replace && with || in <impl TryFrom<String> for Timestamp>::try_from
+crates/memory-core/src/manifest/schema.rs:175:13: replace && with || in <impl TryFrom<String> for Timestamp>::try_from
+crates/memory-core/src/manifest/schema.rs:174:13: replace && with || in <impl TryFrom<String> for Timestamp>::try_from
+crates/memory-core/src/manifest/schema.rs:173:13: replace && with || in <impl TryFrom<String> for Timestamp>::try_from
+crates/memory-core/src/manifest/schema.rs:172:13: replace && with || in <impl TryFrom<String> for Timestamp>::try_from
+crates/memory-core/src/manifest/schema.rs:186:9: replace <impl From<Timestamp> for String>::from -> Self with Default::default()
+crates/memory-core/src/manifest/schema.rs:199:46: replace || with && in token
+crates/memory-core/src/manifest/schema.rs:199:5: replace token -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/schema.rs:199:40: replace > with < in token
+crates/memory-core/src/manifest/schema.rs:199:25: replace || with && in token
+crates/memory-core/src/manifest/schema.rs:199:40: replace > with == in token
+crates/memory-core/src/manifest/schema.rs:199:49: delete ! in token
+crates/memory-core/src/manifest/schema.rs:207:5: replace check_path -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/schema.rs:212:9: replace || with && in check_path
+crates/memory-core/src/manifest/schema.rs:211:9: replace || with && in check_path
+crates/memory-core/src/manifest/schema.rs:210:9: replace || with && in check_path
+crates/memory-core/src/manifest/schema.rs:209:9: replace || with && in check_path
+crates/memory-core/src/manifest/schema.rs:208:9: replace || with && in check_path
+crates/memory-core/src/manifest/schema.rs:354:9: replace Piece::len -> u64 with 1
+crates/memory-core/src/manifest/schema.rs:388:21: replace == with != in Piece::validate
+crates/memory-core/src/manifest/schema.rs:391:24: replace != with == in Piece::validate
+crates/memory-core/src/manifest/schema.rs:402:5: replace check_run -> Result<u64, ManifestError> with Ok(1)
+crates/memory-core/src/manifest/schema.rs:406:21: replace match guard from_zero && piece.offset.get() != 0 with true in check_run
+crates/memory-core/src/manifest/schema.rs:406:31: replace && with || in check_run
+crates/memory-core/src/manifest/schema.rs:406:53: replace != with == in check_run
+crates/memory-core/src/manifest/schema.rs:456:9: replace LaunchRecord::argv -> &[String] with Vec::leak(Vec::new())
+crates/memory-core/src/manifest/schema.rs:456:9: replace LaunchRecord::argv -> &[String] with Vec::leak(vec![String::new()])
+crates/memory-core/src/manifest/schema.rs:456:9: replace LaunchRecord::argv -> &[String] with Vec::leak(vec!["xyzzy".into()])
+crates/memory-core/src/manifest/schema.rs:460:9: replace LaunchRecord::env -> &BTreeMap<String, String> with Box::leak(Box::new(BTreeMap::from_iter([(String::new(), String::new())])))
+crates/memory-core/src/manifest/schema.rs:460:9: replace LaunchRecord::env -> &BTreeMap<String, String> with Box::leak(Box::new(BTreeMap::from_iter([(String::new(), "xyzzy".into())])))
+crates/memory-core/src/manifest/schema.rs:460:9: replace LaunchRecord::env -> &BTreeMap<String, String> with Box::leak(Box::new(BTreeMap::from_iter([("xyzzy".into(), String::new())])))
+crates/memory-core/src/manifest/schema.rs:460:9: replace LaunchRecord::env -> &BTreeMap<String, String> with Box::leak(Box::new(BTreeMap::from_iter([("xyzzy".into(), "xyzzy".into())])))
+crates/memory-core/src/manifest/schema.rs:463:9: replace LaunchRecord::validate -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/schema.rs:465:13: replace || with && in LaunchRecord::validate
+crates/memory-core/src/manifest/schema.rs:463:28: replace > with < in LaunchRecord::validate
+crates/memory-core/src/manifest/schema.rs:464:31: replace > with < in LaunchRecord::validate
+crates/memory-core/src/manifest/schema.rs:465:54: replace != with == in LaunchRecord::validate
+crates/memory-core/src/manifest/schema.rs:478:5: replace check_header -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/schema.rs:482:12: delete ! in check_header
+crates/memory-core/src/manifest/schema.rs:522:9: replace SourceWrite::check -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/schema.rs:525:13: delete match arm (Op::Replace, SourceClass::Snapshot) |(Op::Extend | Op::Epoch, SourceClass::Append) in SourceWrite::check
+crates/memory-core/src/manifest/schema.rs:529:29: replace && with || in SourceWrite::check
+crates/memory-core/src/manifest/schema.rs:529:15: replace == with != in SourceWrite::check
+crates/memory-core/src/manifest/schema.rs:532:55: replace != with == in SourceWrite::check
+crates/memory-core/src/manifest/schema.rs:532:39: replace != with == in SourceWrite::check
+crates/memory-core/src/manifest/schema.rs:585:9: replace Change::validate -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/schema.rs:610:43: replace != with == in EpochRecord::validate
+crates/memory-core/src/manifest/schema.rs:609:9: replace EpochRecord::validate -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/schema.rs:637:9: replace CheckpointSource::validate -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/schema.rs:638:75: replace && with || in CheckpointSource::validate
+crates/memory-core/src/manifest/schema.rs:638:35: replace || with && in CheckpointSource::validate
+crates/memory-core/src/manifest/schema.rs:638:50: replace == with != in CheckpointSource::validate
+crates/memory-core/src/manifest/schema.rs:638:96: replace != with == in CheckpointSource::validate
+crates/memory-core/src/manifest/schema.rs:646:37: replace != with == in CheckpointSource::validate
+crates/memory-core/src/manifest/schema.rs:724:9: replace Delta::seq -> u64 with 0
+crates/memory-core/src/manifest/schema.rs:724:9: replace Delta::seq -> u64 with 1
+crates/memory-core/src/manifest/schema.rs:748:9: replace Delta::changes -> &[Change] with Vec::leak(Vec::new())
+crates/memory-core/src/manifest/schema.rs:751:9: replace Delta::validate -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/schema.rs:758:16: delete ! in Delta::validate
+crates/memory-core/src/manifest/schema.rs:815:9: replace Checkpoint::seq -> u64 with 0
+crates/memory-core/src/manifest/schema.rs:815:9: replace Checkpoint::seq -> u64 with 1
+crates/memory-core/src/manifest/schema.rs:835:9: replace Checkpoint::sources -> &[CheckpointSource] with Vec::leak(Vec::new())
+crates/memory-core/src/manifest/schema.rs:838:9: replace Checkpoint::validate -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/schema.rs:838:12: delete ! in Checkpoint::validate
+crates/memory-core/src/manifest/schema.rs:841:28: replace != with == in Checkpoint::validate
+crates/memory-core/src/manifest/schema.rs:841:22: replace == with != in Checkpoint::validate
+crates/memory-core/src/manifest/schema.rs:847:40: replace >= with < in Checkpoint::validate
+crates/memory-core/src/manifest/schema.rs:886:9: replace Manifest::validate -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/schema.rs:896:9: replace Manifest::to_bytes -> Result<Vec<u8>, ManifestError> with Ok(vec![])
+crates/memory-core/src/manifest/schema.rs:896:9: replace Manifest::to_bytes -> Result<Vec<u8>, ManifestError> with Ok(vec![1])
+crates/memory-core/src/manifest/schema.rs:896:9: replace Manifest::to_bytes -> Result<Vec<u8>, ManifestError> with Ok(vec![0])
+crates/memory-core/src/manifest/schema.rs:899:9: replace Manifest::pieces -> Vec<&Piece> with vec![]
+crates/memory-core/src/manifest/schema.rs:923:9: replace Manifest::verify_encodings -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/schema.rs:986:9: replace Current::to_bytes -> Result<Vec<u8>, ManifestError> with Ok(vec![])
+crates/memory-core/src/manifest/schema.rs:986:9: replace Current::to_bytes -> Result<Vec<u8>, ManifestError> with Ok(vec![0])
+crates/memory-core/src/manifest/schema.rs:986:9: replace Current::to_bytes -> Result<Vec<u8>, ManifestError> with Ok(vec![1])
+crates/memory-core/src/manifest/state.rs:24:55: replace && with || in SourceEntry::same_identity
+crates/memory-core/src/manifest/state.rs:24:9: replace SourceEntry::same_identity -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/state.rs:24:32: replace && with || in SourceEntry::same_identity
+crates/memory-core/src/manifest/state.rs:24:22: replace == with != in SourceEntry::same_identity
+crates/memory-core/src/manifest/state.rs:24:45: replace == with != in SourceEntry::same_identity
+crates/memory-core/src/manifest/state.rs:24:69: replace == with != in SourceEntry::same_identity
+crates/memory-core/src/manifest/state.rs:41:9: replace OwnerState::from_checkpoint -> Self with Default::default()
+crates/memory-core/src/manifest/state.rs:62:9: replace OwnerState::to_checkpoint_sources -> Vec<CheckpointSource> with vec![]
+crates/memory-core/src/manifest/state.rs:79:9: replace OwnerState::apply_changes -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/state.rs:82:16: delete ! in OwnerState::apply_changes
+crates/memory-core/src/manifest/state.rs:105:31: replace != with == in OwnerState::apply_one
+crates/memory-core/src/manifest/state.rs:94:9: replace OwnerState::apply_one -> Result<(), ManifestError> with Ok(())
+crates/memory-core/src/manifest/state.rs:132:38: replace != with == in OwnerState::apply_one
+crates/memory-core/src/manifest/state.rs:153:31: replace != with == in OwnerState::apply_one

@@ -1,0 +1,5 @@
+crates/memory-core/src/privacy/document.rs:106:15: replace == with != in rules
+crates/memory-core/src/privacy/names.rs:18:21: replace == with != in basename
+crates/memory-core/src/privacy/text.rs:16:54: replace || with && in words
+crates/memory-core/src/privacy/text.rs:16:47: replace == with != in words
+crates/memory-core/src/privacy/text.rs:36:24: replace && with || in words

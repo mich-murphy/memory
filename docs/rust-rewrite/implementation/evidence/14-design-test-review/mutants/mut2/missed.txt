@@ -1,0 +1,5 @@
+crates/memory-core/src/coordinates.rs:268:27: replace && with || in Inventory::resolve
+crates/memory-core/src/coordinates.rs:272:61: replace && with || in Inventory::resolve
+crates/memory-core/src/coordinates.rs:281:31: replace && with || in Inventory::resolve
+crates/memory-core/src/disposition.rs:91:25: replace - with + in jittered
+crates/memory-core/src/disposition.rs:92:50: replace >> with << in jittered
