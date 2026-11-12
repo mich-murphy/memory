@@ -18,9 +18,14 @@ history, not current execution instructions or renewed operating authority.
 `gpt-6.1-sol` workers at medium effort, parent-owned quality and verification.
 This is the single active task brief; dated operating records below remain history.
 
-> **Resume here (updated 2026-11-12, after the structural fixes).** Read DESIGN.md, then
-> [design-amendments-20261109.md](rust-rewrite/design-amendments-20261109.md) (A0–A13, wins
-> where they conflict), then the "Session 2026-11-12, structural fixes" block directly below
+> **Resume here (updated 2026-11-12, after the design fold).** Read DESIGN.md. Amendments
+> A0–A14 are folded into it (2026-11-12) and it wins;
+> [design-amendments-20261109.md](rust-rewrite/design-amendments-20261109.md) is kept only
+> as the dated record of why each change was made. The baseline hash pin is removed (A14.3):
+> `verify-evidence.py` now checks only the prototype results, and DESIGN.md and AGENTS.md
+> are edited directly. Lines further down that call those files hash-pinned, or cite
+> `baseline-identities.json`, are history. Then read the "Session 2026-11-12, structural
+> fixes" block directly below
 > and the "walking skeleton" block after it, which together are the current state, and
 > [report 26](rust-rewrite/implementation/26-walking-skeleton.md), the active coordinator
 > brief, with [evidence 16](rust-rewrite/implementation/evidence/16-walking-skeleton/).

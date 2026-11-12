@@ -26,12 +26,13 @@ and update its progress ledger with implemented work, exact checks, and the next
 - Go candidate (frozen; its capture daemons and refresh job are stopped since 2026-11-09, and
   its hooks still write to a local spool until cutover): independent session capture with a
   durable spool/work queue, per-source progress, bounded retries, explicit quarantine.
-- Rust rewrite (DESIGN.md, final 2026-11-07, amendments A0 to A14 folded in 2026-11-12): append pieces per session window, delta
-  manifests with checkpoints, no spool or job tables, hooks and filesystem notifications
-  with a slow safety reconcile, strict schemas, small classified local state (section 9),
-  plaintext storage in the one existing `agent-sessions` bucket (acceptance writes only under
-  `rust-acceptance/<run-id>/`), no migration of existing R2 data. Measured,
-  not assumed; rerun the experiment scripts before changing a number.
+- Rust rewrite (DESIGN.md, final 2026-11-07, amendments A0 to A14 folded in 2026-11-12):
+  append pieces per session window, delta manifests with checkpoints, no spool or job
+  tables, hooks and filesystem notifications with a slow safety reconcile, strict schemas,
+  small classified local state (section 9), plaintext storage in the one existing
+  `agent-sessions` bucket (acceptance writes only under `rust-acceptance/<run-id>/`), no
+  migration of existing R2 data. Measured, not assumed; rerun the experiment scripts before
+  changing a number.
 - Use one authoritative storage reader for restore and analytics. Release acceptance
   includes actual writer output -> reader -> importer -> event index -> report.
 - Do not resume the old concurrent-cold-recovery/pruned-piece patch stack or add retired

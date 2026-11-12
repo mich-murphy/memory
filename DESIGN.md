@@ -1082,11 +1082,11 @@ R2's conditional writes are atomic as documented.
 The 3 h park span is `[default, unmeasured]`.
 
 Retry only transient errors, and back off. [DDIA ch. 8, Handling errors and aborts] A daemon
-restart starts each source's backoff again after a startup delay of 0 to 60 s jitter, so a
-crash loop does not hammer R2. [review, 04 m2] The first commit of a restarted daemon is never
-earlier than 5 s after start (A14.1). A killed predecessor's fully sent PUT can still land up
-to about 0.5 s after its death (3.8), and the daemon must not verify `current.json` before it
-lands.
+restart starts each source's backoff again after a startup delay drawn uniformly from 5 s to
+60 s, so a crash loop does not hammer R2. [review, 04 m2] The 5 s floor is the minimum before
+a restarted daemon's first commit (A14.1): a killed predecessor's fully sent PUT can still
+land up to about 0.5 s after its death (3.8), and the daemon must not verify `current.json`
+before it lands.
 
 ### 11.3 Status
 
