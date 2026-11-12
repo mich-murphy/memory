@@ -407,3 +407,54 @@ fn hegel_delta_capture_matches_independent_whole_digest() {
     })
     .run();
 }
+
+/// Idle-round cost by owner phase: `reconcile_once` wall time with N owners that are all
+/// unchanged, all deferred by a retry delay, or all parked. Same source for every option.
+fn idle_phase_round(owners: u64, phase: &str) -> R<Vec<u128>> {
+    let mut r = rig(owners, 1, b"hello\n")?;
+    match phase {
+        "unchanged" => r.converge()?,
+        "deferred" | "parked" => {
+            let body: &[u8] = if phase == "parked" {
+                b"{\"schema\":\"memory.current/2\"}"
+            } else {
+                b"{not json"
+            };
+            let keys: Vec<String> = r
+                .list
+                .iter()
+                .map(|(o, _)| memory_core::limits::current_key(o))
+                .collect();
+            for key in keys {
+                r.d()?.store_mut().inner.write(&key, body.to_vec());
+            }
+            // Round 1 settles every owner (deferred or parked); the clock then stands still.
+            r.round()?;
+        }
+        other => return Err(format!("unknown phase {other}")),
+    }
+    let mut samples = Vec::new();
+    for _ in 0..5 {
+        let start = std::time::Instant::now();
+        std::hint::black_box(r.d()?.reconcile_once().map_err(e)?);
+        samples.push(start.elapsed().as_micros());
+    }
+    Ok(samples)
+}
+
+#[test]
+#[ignore = "measurement: run with --release -- --ignored --nocapture"]
+fn idle_rounds_by_owner_phase() -> R {
+    for owners in [1_000_u64, 30_000] {
+        for phase in ["unchanged", "deferred", "parked"] {
+            let mut s = idle_phase_round(owners, phase)?;
+            s.sort_unstable();
+            eprintln!(
+                "IDLE owners={owners} phase={phase} median_us={} min_us={}",
+                s[s.len() / 2],
+                s[0]
+            );
+        }
+    }
+    Ok(())
+}
