@@ -9,6 +9,7 @@ pub mod config;
 pub mod daemon;
 pub mod environment;
 pub mod hook;
+pub mod log;
 pub mod realfs;
 pub mod resolve;
 pub mod restore;

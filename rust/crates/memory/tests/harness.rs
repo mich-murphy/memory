@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[path = "common/log_lines.rs"]
+mod log_lines;
+
 const BOUND: Duration = Duration::from_secs(15);
 
 /// A temp state root with a token file; removed on drop.
@@ -129,10 +132,23 @@ fn wait_for(path: &Path) {
     }
 }
 
-fn clean_stop(done: &Done) {
+fn clean_stop(done: &Done, setup: &Setup, min_rounds: usize) {
     assert_eq!(done.code, Some(0));
     assert!(done.stdout.is_empty());
-    assert!(done.stderr.is_empty());
+    let base = setup.base.display().to_string();
+    let root = setup.root.display().to_string();
+    log_lines::assert_clean_log(
+        &done.stderr,
+        min_rounds,
+        &[
+            &base,
+            &root,
+            "bucket-1",
+            "127.0.0.1",
+            "rust-acceptance",
+            "token",
+        ],
+    );
 }
 
 const FAST: Option<&str> = Some("0,200");
@@ -146,7 +162,7 @@ fn sigterm_interrupts_the_production_startup_delay() -> std::io::Result<()> {
     daemon.signal("-TERM")?;
     let done = daemon.finish(Duration::from_secs(2))?;
     assert!(sent.elapsed() < Duration::from_secs(2));
-    clean_stop(&done);
+    clean_stop(&done, &setup, 0);
     assert!(!setup.status().exists(), "no round ran during the delay");
     Ok(())
 }
@@ -158,7 +174,7 @@ fn round_then_stop(name: &str, signal: &str) -> std::io::Result<()> {
     let before = std::fs::metadata(setup.status())?.ino();
     daemon.signal(signal)?;
     let done = daemon.finish(Duration::from_secs(5))?;
-    clean_stop(&done);
+    clean_stop(&done, &setup, 1);
     // Shutdown force-flushes the status: a new file replaces the one the round wrote.
     assert_ne!(std::fs::metadata(setup.status())?.ino(), before);
     Ok(())
@@ -186,7 +202,7 @@ fn a_second_daemon_on_the_same_root_exits_75_and_the_first_is_unaffected() -> st
     assert!(done.stdout.is_empty());
     assert!(first.running()?);
     first.signal("-TERM")?;
-    clean_stop(&first.finish(Duration::from_secs(5))?);
+    clean_stop(&first.finish(Duration::from_secs(5))?, &setup, 1);
     Ok(())
 }
 
@@ -225,7 +241,7 @@ fn a_new_daemon_starts_after_a_clean_stop() -> std::io::Result<()> {
     let mut first = setup.spawn(&["daemon"], FAST)?;
     wait_for(&setup.status());
     first.signal("-TERM")?;
-    clean_stop(&first.finish(Duration::from_secs(5))?);
+    clean_stop(&first.finish(Duration::from_secs(5))?, &setup, 1);
     let before = std::fs::metadata(setup.status())?.ino();
     let mut second = setup.spawn(&["daemon"], FAST)?;
     let start = Instant::now();
@@ -234,7 +250,7 @@ fn a_new_daemon_starts_after_a_clean_stop() -> std::io::Result<()> {
         std::thread::sleep(Duration::from_millis(10));
     }
     second.signal("-TERM")?;
-    clean_stop(&second.finish(Duration::from_secs(5))?);
+    clean_stop(&second.finish(Duration::from_secs(5))?, &setup, 1);
     Ok(())
 }
 

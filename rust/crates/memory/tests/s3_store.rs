@@ -30,6 +30,8 @@ mod clock;
 mod daemon_restore;
 #[path = "common/s3_fake.rs"]
 mod fake;
+#[path = "common/log_lines.rs"]
+mod log_lines;
 #[path = "s3_store/restore.rs"]
 mod restore;
 #[path = "s3_store/skeleton.rs"]
