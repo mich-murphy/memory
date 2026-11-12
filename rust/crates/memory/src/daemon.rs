@@ -369,16 +369,6 @@ enum RemoteBase {
     Known(Base),
 }
 
-impl RemoteBase {
-    /// The fence for `commit_known`; `None` for the first write.
-    const fn fence(&self) -> Option<&Base> {
-        match self {
-            Self::Known(base) => Some(base),
-            Self::Unknown | Self::Absent => None,
-        }
-    }
-}
-
 /// Whether the owner takes a turn.
 enum Turn {
     /// Runs at the next round.
@@ -736,14 +726,16 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         rt: &mut OwnerRt,
         at: Duration,
         report: &mut RoundReport,
-    ) -> ControlFlow<bool> {
-        if !matches!(rt.base, RemoteBase::Unknown) {
-            return ControlFlow::Continue(());
-        }
-        match recover_base(&mut self.store, owner) {
+    ) -> ControlFlow<bool, Option<Base>> {
+        let recovered = match &rt.base {
+            RemoteBase::Known(base) => return ControlFlow::Continue(Some(base.clone())),
+            RemoteBase::Absent => return ControlFlow::Continue(None),
+            RemoteBase::Unknown => recover_base(&mut self.store, owner),
+        };
+        match recovered {
             Ok(base) => {
-                rt.base = base.map_or(RemoteBase::Absent, RemoteBase::Known);
-                ControlFlow::Continue(())
+                rt.base = base.clone().map_or(RemoteBase::Absent, RemoteBase::Known);
+                ControlFlow::Continue(base)
             }
             Err(failure) => {
                 let draw = self.next_draw();
@@ -757,7 +749,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         &mut self,
         owner: &Owner,
         sources: &[Source],
-        rt: &OwnerRt,
+        base: Option<&Base>,
         when: &Timestamp,
     ) -> Captured {
         let env = Env {
@@ -766,12 +758,9 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             now_ns: i64::try_from(self.clock.wall_ns()).unwrap_or(i64::MAX),
             piece_len: MAX_PIECE_BYTES,
         };
-        let remote = match &rt.base {
-            RemoteBase::Known(base) => base.state.clone(),
-            // `recover` runs first, so `Unknown` does not reach a capture.
-            RemoteBase::Absent | RemoteBase::Unknown => OwnerState::default(),
-        };
-        capture(&mut self.fs, sources, &self.locals, &remote, &env)
+        let empty = OwnerState::default();
+        let remote = base.map_or(&empty, |b| &b.state);
+        capture(&mut self.fs, sources, &self.locals, remote, &env)
     }
 
     /// Attach the owner's pending launch records (DESIGN.md 7.6). False when that failed: the
@@ -795,16 +784,16 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     /// the commit has landed.
     fn land(
         &mut self,
-        owner: &Owner,
         rt: &mut OwnerRt,
+        base: Option<&Base>,
         request: Commit,
         got: Captured,
         hints: &mut [ScannedFile],
-        attached: bool,
+        attached_for: Option<&Owner>,
     ) -> Result<Landed, Failure> {
         let result = commit_known(
             &mut self.store,
-            rt.base.fence(),
+            base,
             request,
             &mut rt.known_ours,
             &mut |_| {},
@@ -817,7 +806,9 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             if !landed.follow_up {
                 self.apply(got.updates);
             }
-            if attached && !landed.follow_up {
+            if let Some(owner) = attached_for
+                && !landed.follow_up
+            {
                 for record in hints.iter_mut().flat_map(|f| f.records.iter_mut()) {
                     record.done |= record.owner == *owner;
                 }
@@ -840,16 +831,24 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         let Some(at) = self.due(rt, report) else {
             return false;
         };
-        if let ControlFlow::Break(pause) = self.recover(owner, rt, at, report) {
-            return pause;
-        }
-        let mut got = self.capture_owner(owner, sources, rt, when);
+        let base = match self.recover(owner, rt, at, report) {
+            ControlFlow::Break(pause) => return pause,
+            ControlFlow::Continue(base) => base,
+        };
+        let mut got = self.capture_owner(owner, sources, base.as_ref(), when);
         let Some(mut request) = got.commit.take() else {
             self.apply(got.updates);
             return false;
         };
         let attached = Self::attach_pending(&mut request, hints, owner, report);
-        let result = self.land(owner, rt, request, got, hints, attached);
+        let result = self.land(
+            rt,
+            base.as_ref(),
+            request,
+            got,
+            hints,
+            attached.then_some(owner),
+        );
         let draw = self.next_draw();
         Self::settle(rt, &result, at, draw, report)
     }
