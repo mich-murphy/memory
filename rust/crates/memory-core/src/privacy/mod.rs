@@ -213,44 +213,61 @@ fn binding(context: &PolicyContext, facts: &ResolvedSourceFacts) -> [u8; 32] {
         h.update(value.len().to_le_bytes());
         h.update(value);
     }
+    // Exhaustive on purpose: a new field is a compile error until it is bound here.
+    let PolicyContext {
+        valid,
+        revision,
+        rules,
+        collector_paths,
+        collector_identities,
+    } = context;
+    let ResolvedSourceFacts {
+        identities,
+        file_identity,
+        ancestor_identities,
+        path_resolved,
+        root_resolved,
+        owner,
+        profile,
+    } = facts;
     let mut h = Sha256::new();
-    h.update([u8::from(context.valid)]);
-    field(&mut h, context.revision.as_bytes());
-    match context.rules {
+    h.update([u8::from(*valid)]);
+    field(&mut h, revision.as_bytes());
+    match rules {
         Some(rules) => {
             h.update([1]);
             h.update(rules);
         }
         None => h.update([0]),
     }
-    for paths in [&context.collector_paths, &facts.identities] {
+    for paths in [collector_paths, identities] {
         h.update(paths.len().to_le_bytes());
         for path in paths {
             field(&mut h, path.as_bytes());
         }
     }
-    for ids in [&context.collector_identities, &facts.ancestor_identities] {
+    for ids in [collector_identities, ancestor_identities] {
         h.update(ids.len().to_le_bytes());
         for id in ids {
             h.update(id.to_le_bytes());
         }
     }
-    match facts.file_identity {
+    match file_identity {
         Some(id) => {
             h.update([1]);
             h.update(id.to_le_bytes());
         }
         None => h.update([0]),
     }
-    h.update([u8::from(facts.path_resolved), u8::from(facts.root_resolved)]);
-    match &facts.owner {
+    h.update([u8::from(*path_resolved), u8::from(*root_resolved)]);
+    match owner {
         Some(owner) => {
             h.update([1]);
             field(&mut h, owner.as_bytes());
         }
         None => h.update([0]),
     }
-    h.update([match facts.profile {
+    h.update([match profile {
         Profile::Transcript => 0,
         Profile::Config => 1,
         Profile::TextAsset => 2,
