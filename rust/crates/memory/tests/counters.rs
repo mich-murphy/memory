@@ -5,10 +5,11 @@
 use hegel::{TestCase, generators as gs};
 use memory::capture::Source;
 use memory::daemon::{Daemon, Parts, StartOptions};
-use memory::environment::{Counters, Counting};
+use memory::environment::{Clock, FileSystem, Published, Stat, Store, StoreError, Stored};
 use memory::state::SyncPolicy;
 use memory_core::domain::{
-    Agent, ArchiveId, MachineId, Owner, SessionId, SessionKey, SourceClass, SourceId, SourceKind,
+    Agent, ArchiveId, ETag, MachineId, Owner, SessionId, SessionKey, SourceClass, SourceId,
+    SourceKind,
 };
 use memory_core::privacy::{PolicyContext, Profile, ResolvedSourceFacts, rules_digest};
 use std::fs;
@@ -102,6 +103,90 @@ fn src_with(owner_n: u64, handle: u64, profile: Profile) -> R<(Owner, Source)> {
             },
         },
     ))
+}
+
+/// Per-wrapper observations, never a claim about unwrapped system calls.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct Counters {
+    /// Stat calls through the filesystem seam.
+    stats: u64,
+    /// Bytes returned through the filesystem seam.
+    bytes_read: u64,
+    /// Store calls, including failed/lost-reply attempts.
+    puts: u64,
+    /// Explicit simulator timer wakeups.
+    wakeups: u64,
+}
+
+/// Wraps a seam implementation and counts calls through it into [`Counters`].
+///
+/// `FileSystem` calls count stats (`stat`) and the length of every byte vector
+/// `read` returns; `Store` calls count every `put_*` attempt (including failed or lost-reply
+/// ones). `Clock` is delegated untouched (its methods take `&self`), so `wakeups` stays 0.
+/// Counters describe calls through this wrapper only, never unwrapped system calls.
+#[derive(Debug, Default, Clone)]
+struct Counting<T> {
+    /// The wrapped implementation.
+    inner: T,
+    /// Observations so far.
+    counters: Counters,
+}
+
+impl<T> Counting<T> {
+    /// Wrap `inner` with zeroed counters.
+    const fn new(inner: T) -> Self {
+        Self {
+            inner,
+            counters: Counters {
+                stats: 0,
+                bytes_read: 0,
+                puts: 0,
+                wakeups: 0,
+            },
+        }
+    }
+}
+
+impl<T: FileSystem> FileSystem for Counting<T> {
+    type Error = T::Error;
+    fn stat(&mut self, source: u64) -> Result<Option<Stat>, Self::Error> {
+        self.counters.stats = self.counters.stats.saturating_add(1);
+        self.inner.stat(source)
+    }
+    fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, Self::Error> {
+        let bytes = self.inner.read(source, range)?;
+        let got = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        self.counters.bytes_read = self.counters.bytes_read.saturating_add(got);
+        Ok(bytes)
+    }
+}
+
+impl<T: Store> Store for Counting<T> {
+    fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
+        self.counters.puts = self.counters.puts.saturating_add(1);
+        self.inner.put_if_absent(key, body)
+    }
+    fn put_if_match(
+        &mut self,
+        key: &str,
+        etag: &ETag,
+        body: Published,
+    ) -> Result<ETag, StoreError> {
+        self.counters.puts = self.counters.puts.saturating_add(1);
+        self.inner.put_if_match(key, etag, body)
+    }
+    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
+        self.inner.get(key)
+    }
+}
+
+impl<T: Clock> Clock for Counting<T> {
+    fn monotonic_ns(&self) -> u64 {
+        self.inner.monotonic_ns()
+    }
+    fn wall_ns(&self) -> i128 {
+        self.inner.wall_ns()
+    }
 }
 
 type Fs = Counting<MemFs>;
