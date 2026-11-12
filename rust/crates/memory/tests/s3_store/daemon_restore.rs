@@ -290,6 +290,24 @@ fn a_restarted_daemon_continues_and_restore_returns_everything() -> R {
         "an object was uploaded twice: {puts:?}"
     );
     assert!(s.server.requests().len() > before);
+    // Nor were its bytes sent again inside a differently cut object: every object upload,
+    // decoded, adds up to the file's length exactly once.
+    let uploaded = s
+        .server
+        .requests()
+        .iter()
+        .filter(|r| r.method == "PUT" && r.path.contains("/objects/"))
+        .map(|r| {
+            zstd::decode_all(&r.body[..])
+                .map(|raw| raw.len())
+                .map_err(e)
+        })
+        .sum::<R<usize>>()?;
+    assert_eq!(
+        uploaded,
+        fs::read(&s.file).map_err(e)?.len(),
+        "session bytes were uploaded more or less than once"
+    );
 
     restore(&s, "b")?;
     assert_hygiene(&s, &s.server.requests());
