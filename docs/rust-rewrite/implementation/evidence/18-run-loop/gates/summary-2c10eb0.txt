@@ -1,0 +1,11 @@
+04-nextest: Summary [  26.234s] 459 tests run: 459 passed, 64 skipped
+05-hegel: Summary [ 130.910s] 31 tests run: 31 passed, 492 skipped
+06-proptest: Summary [ 106.507s] 29 tests run: 29 passed, 494 skipped
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.67s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.70s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+PASS if-match: killed by mutation_daemon
+PASS advance-on-fail: killed by mutation_daemon
+PASS privacy-deny: killed by privacy_property
+PASS: unchanged baseline passed; actual window-check mutant compiled and failed the independent property1 runtime byte oracle
+coverage lines 6596/6775 = 97.3579% (floor 80)

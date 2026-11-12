@@ -24,11 +24,13 @@ This is the single active task brief; dated operating records below remain histo
 > as the dated record of why each change was made. The baseline hash pin is removed (A14.3):
 > `verify-evidence.py` now checks only the prototype results, and DESIGN.md and AGENTS.md
 > are edited directly. Lines further down that call those files hash-pinned, or cite
-> `baseline-identities.json`, are history. Then read the "Session 2026-11-12, structural
-> fixes" block directly below
-> and the "walking skeleton" block after it, which together are the current state, and
-> [report 26](rust-rewrite/implementation/26-walking-skeleton.md), the active coordinator
-> brief, with [evidence 16](rust-rewrite/implementation/evidence/16-walking-skeleton/).
+> `baseline-identities.json`, are history. Then read the "Session 2026-11-12, run
+> loop" block directly below, which is the current state, with
+> [brief 27](rust-rewrite/implementation/27-run-loop.md), the active coordinator brief, and
+> [evidence 18](rust-rewrite/implementation/evidence/18-run-loop/). The "structural fixes" and
+> "walking skeleton" blocks after it, with
+> [report 26](rust-rewrite/implementation/26-walking-skeleton.md) and
+> [evidence 16](rust-rewrite/implementation/evidence/16-walking-skeleton/), are the steps before it.
 > [Report 25](rust-rewrite/implementation/25-engineering-practice-review.md) and
 > [evidence 15](rust-rewrite/implementation/evidence/15-engineering-practice-review/) are the
 > review that led to it. The
@@ -42,9 +44,48 @@ This is the single active task brief; dated operating records below remain histo
 > in this brief (P5 authorization, acceptance bucket/token, hook argv, symlinks, state root)
 > are resolved by the amendments and kept only as history.
 
-**Session 2026-11-12, structural fixes (current).** Plan step 3 of report 25, first batch;
-record in [evidence 17](rust-rewrite/implementation/evidence/17-structural-fixes/). Local
-only, nothing pushed.
+**Session 2026-11-12, run loop (current).** Brief 27, increments R1 to R4; record in
+[evidence 18](rust-rewrite/implementation/evidence/18-run-loop/).
+- `memory daemon` starts from `config.toml` and the token file, waits 5 s to 60 s, runs the
+  safety reconcile and repeats it every 15 minutes, and exits 0 only on SIGTERM or SIGINT
+  after `Daemon::shutdown`. `memory restore <owner> --out DIR` reads an owner back through
+  `memory-reader` with GET requests only. A test on the real binary against the local S3
+  server captures, appends, stops, restarts, restores and compares bytes.
+- Operator decisions of 2026-11-12, all applied: push and merge the stack; annotation 3
+  dropped; amendments folded into DESIGN.md and the hash pin removed (A14.3); 5 s startup
+  floor (A14.1); the 2-day criterion also replaces the 7-day shadow runs (A14.2).
+- Pushed: the stack of the blocks below is stack #95, PRs #83 to #94, base `main` at
+  `41a07ff`, top `docs/structural-fixes` (`30f02f6`). A Sonnet worker watches hosted CI and
+  merges with `gh stack merge --yes --merge` when "Rust rewrite gates" succeeds on every
+  branch and "CI" fails only in the two `govulncheck` jobs already red on `main`
+  (GO-2026-6859). At the time of writing all 12 "Rust rewrite gates" runs had succeeded; PR
+  #90's macOS job had timed out once in the Go `internal/syncer` tests (the stack changes no
+  Go file), and the one allowed rerun was in progress.
+- Local only, on top of `30f02f6`, in order: `docs/design-fold` (`dc3833f`),
+  `docs/run-loop-brief` (`c25df8a`), `rust/run-config` (`bd25c4e`, R1), `rust/run-loop`
+  (`9c8355b`, R2), `rust/restore-cmd` (`038c714`, R3), `rust/daemon-restore-e2e` (`2c10eb0`,
+  R4), `docs/run-loop` (this entry). They are pushed after stack #95 merges.
+- Gates on `2c10eb0`: local, 500 cases, seed 2202692434, all 13 sub-gates 0, 519 tests, 12
+  doctests, coverage 6596/6775 = 97.36 %. Also passed on `bd25c4e` and `038c714`. Not run:
+  2,000 cases, hosted CI on these branches, `cargo mutants`, anything against R2.
+- Not yet: the daemon refuses an empty key prefix, so no production write is possible, and
+  A13.2 still requires `tracing`, hint retention and the audit first (R5). The watcher and
+  scheduler are not connected to the loop. There is no wake-gap detection, and a stop is seen
+  only between rounds. No launchd or systemd unit exists and nothing is installed.
+- Capture is still off (A0): the Go daemons are stopped, the Go hooks fill a local spool, and
+  session files stay on disk for the Rust daemon's first reconcile.
+- Operator confirmations still open: the removal of the `launch_attach_failed` counter that
+  A11.3 named in `status.json`, and the dated 2026-11-12 notes under A11.3 and A13.3 in the
+  amendments file.
+- Next: verify `main` after stack #95 merges and push the local branches as a new stack; R5
+  (`tracing`, hint retention, the audit); then connect the watcher and scheduler through a
+  per-owner capture entry, with wake-gap detection; then the acceptance runs of DESIGN 17.
+  Left from plan step 3 of report 25: the parked-owner sort, the daemon's direct `std::fs`
+  hint reads, `recover_base` delegating to `read_owner`, rustdoc in a gate.
+
+**Session 2026-11-12, structural fixes (before the run loop).** Plan step 3 of report 25,
+first batch; record in [evidence 17](rust-rewrite/implementation/evidence/17-structural-fixes/).
+Local only when written; since pushed as part of stack #95.
 - `rust/structural-fixes` (`6fd536a`, four worker and three parent commits) and
   `docs/structural-fixes` (this entry) sit on top of the stack of the block below.
 - Removed or narrowed: the `profile_of` wildcard arm, `FileSystem::stat_len`, the `Counting`

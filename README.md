@@ -25,6 +25,16 @@ and there is no R2 client, zstd, run loop or reader yet. See
 [report 23](docs/rust-rewrite/implementation/23-review-fix-round.md) for progress against
 DESIGN sections 15 and 17.
 
+**Update 2026-11-12 (stack #95 and local branches above it, not yet on `main`):** the S3
+adapter, zstd piece encoding and the reader exist. `memory daemon` starts from `config.toml`,
+runs a safety reconcile every 15 minutes and stops on SIGTERM or SIGINT; `memory restore
+<owner> --out DIR` reads an owner back. A test runs both on the real binary against a local
+S3 server and compares bytes. It is still not a collector: the daemon refuses to write
+outside an acceptance key prefix until `tracing`, hint retention and the audit exist, and the
+file watcher is not connected. See
+[brief 27](docs/rust-rewrite/implementation/27-run-loop.md) and
+[evidence 18](docs/rust-rewrite/implementation/evidence/18-run-loop/).
+
 The work is committed as draft gh stack #56 (PRs #54, #55, #57, #58, #59, #60, top branch
 `rust/coverage-floor-80`), green on hosted CI. No Rust deployment or cutover occurred.
 On 2026-11-09, by operator instruction, the Go capture daemons (Mac and BC-01) and the Mac

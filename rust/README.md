@@ -11,9 +11,13 @@ work against fakes and temp directories: hook, commit protocol, daemon state, ca
 wiring, real filesystem adapter, source resolver, notify watcher/scheduler, the S3 adapter
 (`rusty-s3` + `ureq`), zstd piece encoding, and a daemon that one function starts from
 `config.toml` and the token file (`assemble::start_from_config`). `memory-reader` decodes
-pieces, restores a source and reads an owner's manifest chain. There is no daemon loop and
-no `restore` command yet ([report 27](../docs/rust-rewrite/implementation/27-run-loop.md)).
-No slice or release acceptance is claimed.
+pieces, restores a source and reads an owner's manifest chain. `run` is the daemon's loop (a
+safety reconcile after a 5 s to 60 s startup delay, then every 15 minutes, stop on SIGTERM or
+SIGINT) and `restore` is the `memory restore` command
+([brief 27](../docs/rust-rewrite/implementation/27-run-loop.md),
+[evidence 18](../docs/rust-rewrite/implementation/evidence/18-run-loop/)). The watcher and
+scheduler are not connected to the loop, and the daemon refuses an empty key prefix, so it
+writes only under an acceptance prefix. No slice or release acceptance is claimed.
 
 All commands use the repository's **locked Nix shell**, Rust/cargo 1.99.0.
 No rustup/global installs. From repository root:
@@ -45,11 +49,15 @@ backstop (amendment A9, 2026-11-09), not a ratchet from the latest measurement. 
 98% value was the scaffold's first measurement (49/50 lines, evidence/00-scaffold). A failed
 gate must never silently lower the floor; raising it is a recorded decision.
 
-`memory hook <agent>` appends one hint line and always exits 0. `memory daemon` runs its
-startup (lock, state directory, recovery) and then exits 78; every other command exits 78,
-so the binary cannot silently simulate capture or restore. Tests must never resolve the
-real state root: set `MEMORY_STATE_DIR` to a
-temp directory and `env_clear()` (only `LLVM_PROFILE_FILE` passes through).
+`memory hook <agent>` appends one hint line and always exits 0. `memory daemon` runs the loop
+and exits 0 only on a requested stop (2 for a config refusal, 75 for a held lock, 1
+otherwise). `memory restore <owner> --out DIR` exits 0, 64 (usage), 66 (owner absent), 2
+(config or token) or 1. On failure both write one line, `memory: <closed code>`, to stderr;
+restore also writes one summary line there on success. Every other command exits 78, so the
+binary cannot silently simulate a command that does not exist. Tests must never resolve the
+real state root: set `MEMORY_STATE_DIR` to a temp directory and `env_clear()` (only
+`LLVM_PROFILE_FILE` passes through; `MEMORY_SIM_TIMING` shortens the loop's two durations and
+exists only with the `sim` feature, which the release binary does not have).
 
 The latest integrated local wrapper (review and fix round, 2026-11-10) passed on
 `d8e80a6` at 2,000 cases, seed 730213: all 13 subgates, 391/391 nextest tests (2 ignored
