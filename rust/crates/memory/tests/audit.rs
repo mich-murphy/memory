@@ -549,11 +549,13 @@ fn due_rule_table() {
     let audited = |last| AuditState {
         last_checked_at_ns: Some(last),
         consecutive_failures: 0,
+        first_failure_at_ns: None,
     };
     let day = AUDIT_INTERVAL_NS;
     let never = AuditState {
         last_checked_at_ns: None,
         consecutive_failures: 0,
+        first_failure_at_ns: None,
     };
     assert!(due(&never, 0, 0), "never audited");
     assert!(due(&never, 5, 1), "never audited, whatever the clock");

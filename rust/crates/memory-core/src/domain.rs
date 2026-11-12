@@ -559,6 +559,11 @@ pub struct AuditState {
     pub last_checked_at_ns: Option<i64>,
     /// Failures on successive epochs.
     pub consecutive_failures: u32,
+    /// Wall time of the first failure of the current streak. Set at the first failure, kept by
+    /// later failures and by extensions, cleared with `consecutive_failures` by a match and by
+    /// any epoch not started by an audit mismatch.
+    #[serde(default)]
+    pub first_failure_at_ns: Option<i64>,
 }
 
 /// Derived index position. Resumable hasher bytes belong to shell cache, not proof.

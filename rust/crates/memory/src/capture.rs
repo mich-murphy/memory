@@ -45,9 +45,9 @@ use crate::audit::{self, AuditCounts};
 use crate::commit::{Commit, Upload};
 use crate::environment::{FileSystem, PieceError};
 use memory_core::domain::{
-    AuditState, EpochPosition, Fingerprint, Observed, Offset, Plan, ReplayReason, RulesDigest,
-    Sha256, Sha256State, SnapshotFingerprint, SourceClass, SourceId, SourceKind, SourceState,
-    WithholdReason,
+    AuditState, EpochPosition, Fingerprint, Observed, Offset, ParkReason, Plan, ReplayReason,
+    RulesDigest, Sha256, Sha256State, SnapshotFingerprint, SourceClass, SourceId, SourceKind,
+    SourceState, WithholdReason,
 };
 use memory_core::manifest::{
     Change, EpochStamp, EpochWriter, Header, LaunchRecord, OwnerState, Piece, SourceWrite,
@@ -153,6 +153,9 @@ pub enum SourceOutcome {
     Unavailable,
     /// A change and its pieces are in the commit.
     Planned,
+    /// The audit keeps failing: nothing was uploaded and the index entry is unchanged. The
+    /// shell leaves the source out of later captures.
+    Parked(ParkReason),
 }
 
 /// Inputs shared by every source of one step.
@@ -484,8 +487,9 @@ enum Mode {
     /// state, when present, is the resumable digest of `[0, from)`.
     /// `Known` are on-disk segments `(start, bytes)` already read and verified by the planner.
     Extend(Offset, Sha256, Option<Sha256State>, Known),
-    /// A new epoch; true when an audit mismatch started it.
-    Epoch(bool),
+    /// A new epoch, storing this audit bookkeeping ([`audit::mismatch`] when an audit mismatch
+    /// started it, [`audit::never`] otherwise).
+    Epoch(AuditState),
     Replace,
 }
 
@@ -524,8 +528,18 @@ impl Job<'_> {
         if let (Mode::Extend(_, committed, ..), None) = (&mode, &resume) {
             let prefix = Offset::new(0)..Offset::new(from);
             if hash_span(body.bytes(), &prefix) != Some(*committed) {
-                acc.audit.mismatch();
-                return self.write(fs, Mode::Epoch(true), acc);
+                // A source that is not prefix-stable is expected to differ here: its transform
+                // depends on the whole text. It restarts but is no audit failure.
+                if !self.admitted.prefix_stable() {
+                    return self.write(fs, Mode::Epoch(audit::never()), acc);
+                }
+                return match audit::mismatch(&self.previous, self.env.now_ns) {
+                    audit::Mismatch::Park(reason) => Err(SourceOutcome::Parked(reason)),
+                    audit::Mismatch::Epoch(state) => {
+                        acc.audit.mismatch();
+                        self.write(fs, Mode::Epoch(state), acc)
+                    }
+                };
             }
         }
         let (base, first) = if resume.is_some() {
@@ -554,7 +568,7 @@ impl Job<'_> {
         };
         let audit = match &mode {
             Mode::Extend(..) => self.previous.clone(),
-            Mode::Epoch(mismatch) => audit::new_epoch(&self.previous, *mismatch),
+            Mode::Epoch(state) => state.clone(),
             Mode::Replace => audit::never(),
         };
         acc.changes.push(match mode {
@@ -915,11 +929,17 @@ fn append<F: FileSystem>(
             resolved.known,
         ),
         Plan::Replay { reason } => {
-            let mismatch = reason == ReplayReason::AuditMismatch;
-            if mismatch {
-                acc.audit.mismatch();
+            if reason == ReplayReason::AuditMismatch {
+                match audit::mismatch(&job.previous, job.env.now_ns) {
+                    audit::Mismatch::Park(reason) => return SourceOutcome::Parked(reason),
+                    audit::Mismatch::Epoch(state) => {
+                        acc.audit.mismatch();
+                        Mode::Epoch(state)
+                    }
+                }
+            } else {
+                Mode::Epoch(audit::never())
             }
-            Mode::Epoch(mismatch)
         }
         Plan::Withheld { reason } => return SourceOutcome::Withheld(reason),
         _ => return SourceOutcome::Unchanged,

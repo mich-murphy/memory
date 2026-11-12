@@ -4,9 +4,13 @@
 //! `FileSystem` seam, transformed as capture transforms a whole stream, hashed with a fresh
 //! hasher. This module decides when an audit is due, how two reads and the committed digest
 //! become [`AuditEvidence`], and how a capture carries the per-source [`AuditState`].
-use memory_core::domain::{AuditState, Observed, Sha256, SourceState};
+use memory_core::disposition::{Outcome, Pacing, Streak, transition_paced};
+use memory_core::domain::{
+    AuditState, Disposition, ErrorClass, Fault, Observed, ParkReason, Sha256, SourceState,
+};
 use memory_core::planner::AuditEvidence;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// Audit verdicts of a capture step, a round or (in `status.json`) since the status file was
 /// created. A count is of verdicts reached, whether or not the owner's commit then lands (as
@@ -58,6 +62,7 @@ pub const fn never() -> AuditState {
     AuditState {
         last_checked_at_ns: None,
         consecutive_failures: 0,
+        first_failure_at_ns: None,
     }
 }
 
@@ -98,20 +103,57 @@ pub const fn matched(now_ns: i64) -> AuditState {
     AuditState {
         last_checked_at_ns: Some(now_ns),
         consecutive_failures: 0,
+        first_failure_at_ns: None,
     }
 }
 
-/// The state stored with a new epoch: the last audit is cleared, and a failure is counted only
-/// when an audit mismatch started the epoch. An extension keeps the previous state unchanged.
-pub fn new_epoch(previous: &AuditState, mismatch: bool) -> AuditState {
-    AuditState {
-        last_checked_at_ns: None,
-        consecutive_failures: if mismatch {
-            previous.consecutive_failures.saturating_add(1)
-        } else {
-            0
-        },
+/// What an audit mismatch leads to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Mismatch {
+    /// Start a new epoch, storing this bookkeeping with it.
+    Epoch(AuditState),
+    /// The streak is long enough: park the source and start nothing.
+    Park(ParkReason),
+}
+
+/// The decision at an audit mismatch, by the core's park rule: [`transition_paced`] with a
+/// deterministic [`Fault::AuditMismatch`] and a [`Streak`] built from `previous` (its failure
+/// count and the wall time of its first failure, which stand for the streak's offsets). A wall
+/// clock behind the first failure gives a span of zero, so no park. An entry that counts
+/// failures but has no first-failure time starts its span now.
+pub fn mismatch(previous: &AuditState, now_ns: i64) -> Mismatch {
+    let offset = |ns: i64| Duration::from_nanos(u64::try_from(ns).unwrap_or(0));
+    let live = previous.consecutive_failures > 0;
+    let first_ns = if live {
+        previous.first_failure_at_ns.unwrap_or(now_ns).min(now_ns)
+    } else {
+        now_ns
+    };
+    let prior = if live {
+        Streak {
+            deterministic: previous.consecutive_failures,
+            fault: Some(Fault::AuditMismatch),
+            first_at: Some(offset(first_ns)),
+            retries: 0,
+        }
+    } else {
+        Streak::default()
+    };
+    let outcome = Outcome::Failed(ErrorClass::Deterministic(Fault::AuditMismatch));
+    let (disposition, next) =
+        transition_paced(&outcome, false, offset(now_ns), &prior, Pacing::FLOOR);
+    if let Disposition::Park { reason } = disposition {
+        return Mismatch::Park(reason);
     }
+    Mismatch::Epoch(AuditState {
+        last_checked_at_ns: None,
+        consecutive_failures: next.deterministic,
+        first_failure_at_ns: Some(if live {
+            previous.first_failure_at_ns.unwrap_or(now_ns)
+        } else {
+            now_ns
+        }),
+    })
 }
 
 /// The index entry after a round that publishes nothing: the audit bookkeeping, and the fresh
