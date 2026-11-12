@@ -17,7 +17,8 @@
 //! digits and dots), `file`, `result` and `reason` (closed lower-case identifiers) and `owner`.
 //! `owner` is the only open value: the owner's stored key prefix, charset `[A-Za-z0-9._:/-]`,
 //! never empty, no space. It is safe to write because identifiers are validated on construction
-//! to ASCII alphanumerics and `._:-` and joined with `/`; it holds no path, secret or content. There is no ANSI escape, target, thread id, span, file or line.
+//! to ASCII alphanumerics and `._:-` and joined with `/`; it holds no path, secret or content.
+//! There is no ANSI escape, target, thread id, span, file or line.
 //!
 //! | event | keys |
 //! |---|---|
