@@ -9,8 +9,9 @@
 //! [`Commit`] and [`Upload`] are generic over the body. This module only ever builds
 //! `Commit`. [`Published`] has a private field and its only piece constructor is a
 //! private function that slices a `memory_core::privacy::AuthorizedBody`, a value only
-//! `privacy::authorize` can produce (it consumes an `AdmittedSource` and a `RedactedBytes`,
-//! neither of which has a public constructor, see the compile-fail tests in memory-core).
+//! `privacy::authorize` can produce (from a borrowed `AdmittedSource` and a consumed
+//! `RedactedBytes`, neither of which has a public constructor, see the compile-fail tests in
+//! memory-core).
 //! `Store` uploads take [`Published`] (defined in `environment`), whose only constructors are
 //! crate-private: a slice of an `AuthorizedBody` and the writer's own metadata.
 //!
