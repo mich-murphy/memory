@@ -89,6 +89,11 @@ where
         mut writer: Writer<'_>,
         event: &Event<'_>,
     ) -> fmt::Result {
+        // Only this module's events are written: foreign text never reaches a line. Nothing is
+        // written here, so the layer writes zero bytes (`write_all` of an empty buffer).
+        if event.metadata().target() != module_path!() {
+            return Ok(());
+        }
         let secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
@@ -104,6 +109,9 @@ where
 {
     tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
+        // The builder default prints failures to stderr with `eprintln!`, which panics when
+        // stderr itself is unwritable. A failed log write is dropped silently.
+        .log_internal_errors(false)
         .event_format(Grammar)
         .with_writer(writer)
         .finish()

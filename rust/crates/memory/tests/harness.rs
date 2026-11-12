@@ -61,6 +61,13 @@ impl Setup {
         }
         Ok(Guard(cmd.spawn()?))
     }
+
+    /// Like `spawn`, but the read end of the child's stderr pipe is closed at once.
+    fn spawn_stderr_closed(&self, args: &[&str], timing: Option<&str>) -> std::io::Result<Guard> {
+        let mut guard = self.spawn(args, timing)?;
+        drop(guard.0.stderr.take());
+        Ok(guard)
+    }
 }
 
 impl Drop for Setup {
@@ -261,5 +268,31 @@ fn an_unimplemented_command_still_exits_78() -> std::io::Result<()> {
     assert_eq!(done.code, Some(78));
     assert!(done.stdout.is_empty());
     assert!(done.stderr.is_empty());
+    Ok(())
+}
+
+#[test]
+fn a_closed_stderr_does_not_stop_the_daemon() -> std::io::Result<()> {
+    let setup = Setup::new("closed", "rust-acceptance/t/", true)?;
+    // The startup delay outlasts the parent closing the pipe, so the round line is written to a
+    // pipe with no reader.
+    let mut daemon = setup.spawn_stderr_closed(&["daemon"], Some("300,200"))?;
+    wait_for(&setup.status());
+    let before = std::fs::metadata(setup.status())?.ino();
+    daemon.signal("-TERM")?;
+    let done = daemon.finish(Duration::from_secs(5))?;
+    assert_eq!(done.code, Some(0));
+    assert!(done.stdout.is_empty());
+    assert_ne!(std::fs::metadata(setup.status())?.ino(), before);
+    Ok(())
+}
+
+#[test]
+fn a_refusal_with_a_closed_stderr_still_exits_2() -> std::io::Result<()> {
+    let setup = Setup::new("prefixclosed", "", true)?;
+    let done = setup
+        .spawn_stderr_closed(&["daemon"], None)?
+        .finish(BOUND)?;
+    assert_eq!(done.code, Some(2));
     Ok(())
 }

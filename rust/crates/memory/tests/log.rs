@@ -64,3 +64,9 @@ fn the_timestamp_is_rfc3339_utc() {
     assert_eq!(format_utc(951_782_400), "2000-02-29T00:00:00Z");
     assert_eq!(format_utc(1_794_483_045), "2026-11-12T11:30:45Z");
 }
+
+#[test]
+fn an_event_from_another_module_writes_nothing() {
+    let text = render(|| tracing::info!(note = "foreign text", count = 7_u64, "a message"));
+    assert_eq!(text, "");
+}
