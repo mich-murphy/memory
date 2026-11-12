@@ -1,8 +1,13 @@
 //! Authoritative restore library: decodes stored pieces and restores one source's bytes.
 //!
-//! Walking `current.json` and the manifest chain is not implemented here yet; callers pass the
-//! retained epoch (from `memory-core`) and a fetch function for object keys.
-use memory_core::manifest::{EpochRecord, Piece, SourceEntry, manifest_hash};
+//! [`read_owner`] walks `current.json` and the manifest chain; [`restore_source`] then restores
+//! one source from the folded state. Callers pass a fetch function over object keys.
+use memory_core::domain::{CommitOutcome, Owner};
+use memory_core::limits::{current_key, manifest_key};
+use memory_core::manifest::{
+    CHECKPOINT_INTERVAL, EpochRecord, Folded, ManifestError, Piece, ProjectedKind, SourceEntry,
+    fold, manifest_hash, parse_current, recover_projection,
+};
 use std::io::Read;
 
 /// Why a stored piece did not decode to the bytes its descriptor promises.
@@ -122,4 +127,101 @@ pub fn restore_source<E>(
 ) -> Result<Vec<u8>, RestoreError<E>> {
     let record = entry.epochs.last().ok_or(RestoreError::NoEpoch)?;
     restore_epoch(record, fetch)
+}
+
+/// What is wrong with an owner's stored chain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ChainFault {
+    /// `current.json` or a delta names a manifest that is not stored.
+    #[error("a named manifest is not stored")]
+    MissingManifest,
+    /// A manifest's bytes do not hash to the key it was fetched under.
+    #[error("a manifest does not hash to its key")]
+    HashMismatch,
+    /// No checkpoint within the most manifests a valid chain holds.
+    #[error("no checkpoint within the chain bound")]
+    TooLong,
+    /// A document did not parse, or the chain does not fold.
+    #[error("a document is invalid or the chain does not fold")]
+    Invalid,
+    /// The chain belongs to a different owner.
+    #[error("the chain belongs to a different owner")]
+    WrongOwner,
+    /// The folded head is not the manifest `current.json` names.
+    #[error("the folded head is not the manifest current.json names")]
+    WrongHead,
+}
+
+/// Why an owner's state could not be read.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum OwnerError<E> {
+    /// Fetching an object failed; the fetch error is passed through.
+    #[error("fetching an object failed")]
+    Fetch(E),
+    /// A stored document has a newer schema than this reader understands.
+    #[error("a stored document has a newer schema")]
+    NewerSchema,
+    /// The stored chain is corrupt or inconsistent.
+    #[error("the stored chain is corrupt")]
+    Corrupt(ChainFault),
+}
+
+fn newer_or_invalid<E>(e: &ManifestError) -> OwnerError<E> {
+    if e.commit_outcome() == Some(CommitOutcome::NewerSchema) {
+        OwnerError::NewerSchema
+    } else {
+        OwnerError::Corrupt(ChainFault::Invalid)
+    }
+}
+
+/// Read an owner's folded state: GET `current.json`, walk `previous` back to the checkpoint
+/// (at most [`CHECKPOINT_INTERVAL`] manifest fetches, each verified against its key) and fold.
+///
+/// `fetch` returns `Ok(None)` for an absent key. An absent `current.json` is `Ok(None)`; an
+/// absent manifest that `current.json` or a delta names is corruption.
+///
+/// # Errors
+/// [`OwnerError`]; a fetch error is returned unchanged in [`OwnerError::Fetch`].
+pub fn read_owner<E>(
+    owner: &Owner,
+    mut fetch: impl FnMut(&str) -> Result<Option<Vec<u8>>, E>,
+) -> Result<Option<Folded>, OwnerError<E>> {
+    let Some(pointer) = fetch(&current_key(owner)).map_err(OwnerError::Fetch)? else {
+        return Ok(None);
+    };
+    let current = parse_current(&pointer).map_err(|e| newer_or_invalid(&e))?;
+    let mut hash = current.manifest;
+    let mut chain: Vec<Vec<u8>> = Vec::new();
+    loop {
+        // A valid chain is a checkpoint plus at most 63 deltas; a 65th fetch cannot be valid.
+        if chain.len() as u64 >= CHECKPOINT_INTERVAL {
+            return Err(OwnerError::Corrupt(ChainFault::TooLong));
+        }
+        let bytes = fetch(&manifest_key(&hash))
+            .map_err(OwnerError::Fetch)?
+            .ok_or(OwnerError::Corrupt(ChainFault::MissingManifest))?;
+        if manifest_hash(&bytes) != hash {
+            return Err(OwnerError::Corrupt(ChainFault::HashMismatch));
+        }
+        let projection = recover_projection(&bytes).map_err(|e| newer_or_invalid(&e))?;
+        chain.push(bytes);
+        match projection.kind {
+            ProjectedKind::Checkpoint => break,
+            ProjectedKind::Delta => {
+                hash = projection
+                    .previous
+                    .ok_or(OwnerError::Corrupt(ChainFault::Invalid))?;
+            }
+        }
+    }
+    chain.reverse();
+    let refs: Vec<&[u8]> = chain.iter().map(Vec::as_slice).collect();
+    let folded = fold(&refs).map_err(|e| newer_or_invalid(&e))?;
+    if folded.owner != *owner {
+        return Err(OwnerError::Corrupt(ChainFault::WrongOwner));
+    }
+    if folded.position.manifest != current.manifest {
+        return Err(OwnerError::Corrupt(ChainFault::WrongHead));
+    }
+    Ok(Some(folded))
 }

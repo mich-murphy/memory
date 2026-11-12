@@ -1,35 +1,9 @@
 //! Piece decoding and single-epoch restore, against descriptors built from JSON (the remote
 //! manifest path) and an independent SHA-256.
 use memory_reader::{DecodeError, RestoreError, decode_piece, restore_epoch};
-use sha2::{Digest, Sha256};
+mod common;
+use common::{R, enc, hex, piece, piece_json};
 
-type R<T = ()> = Result<T, String>;
-
-fn hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
-fn enc(raw: &[u8]) -> R<Vec<u8>> {
-    zstd::bulk::compress(raw, 3).map_err(|e| e.to_string())
-}
-
-/// A descriptor of `raw` at `offset` whose stored bytes are `stored`.
-fn piece_json(raw: &[u8], offset: u64, stored: &[u8]) -> serde_json::Value {
-    serde_json::json!({
-        "offset": offset,
-        "len": raw.len(),
-        "sha256": hex(raw),
-        "object": format!("objects/{}.zst", hex(raw)),
-        "encoding": "zstd-3",
-        "encoded_len": stored.len(),
-        "encoded_sha256": hex(stored),
-    })
-}
-fn piece(raw: &[u8], offset: u64, stored: &[u8]) -> R<memory_core::manifest::Piece> {
-    serde_json::from_value(piece_json(raw, offset, stored)).map_err(|e| e.to_string())
-}
 fn epoch(whole: &[u8], pieces: &[serde_json::Value]) -> R<memory_core::manifest::EpochRecord> {
     serde_json::from_value(serde_json::json!({
         "epoch": {"n": 1, "writer": {"version": "v", "commit": "c"}},
