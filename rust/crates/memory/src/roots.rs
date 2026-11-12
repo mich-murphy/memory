@@ -4,10 +4,12 @@
 //! `sha256` over the UTF-8 bytes of the declared root path, as
 //! [`memory_core::coordinates::Inventory::resolve`] computes it. No aliases or identity
 //! observations are declared yet, and every root uses [`RootLayout::AgentDir`].
+//!
+//! Overlapping roots (equal, or one beneath another, whatever the agent) are refused: the walker
+//! pairs files with roots by path prefix, so a file under two roots would be captured under both.
 use crate::config::Config;
 use memory_core::coordinates::{Inventory, Root as CoordRoot};
 use memory_core::locator::{RootLayout, RootNamespace, Roots};
-use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 /// Closed set of root failures (config class). No variant carries a path.
@@ -16,9 +18,12 @@ pub enum RootsError {
     /// A root path is not valid UTF-8.
     #[error("config_root_not_utf8")]
     NotUtf8,
-    /// A root path is not clean, or the same agent declares the same root twice.
+    /// A root path is not clean.
     #[error("config_root_invalid")]
     Invalid,
+    /// Two roots are equal or one is beneath the other.
+    #[error("config_root_overlap")]
+    Overlap,
     /// The coordinates inventory refused the declarations (for example too many roots).
     #[error("config_root_inventory")]
     Inventory,
@@ -31,6 +36,7 @@ impl RootsError {
         match self {
             Self::NotUtf8 => "config_root_not_utf8",
             Self::Invalid => "config_root_invalid",
+            Self::Overlap => "config_root_overlap",
             Self::Inventory => "config_root_inventory",
         }
     }
@@ -39,15 +45,11 @@ impl RootsError {
 /// Build the walker's root list from the configuration, in configured order.
 ///
 /// # Errors
-/// A [`RootsError`] for a non-UTF-8, unclean or duplicate root, or an inventory refusal.
+/// A [`RootsError`] for a non-UTF-8, unclean or overlapping root, or an inventory refusal.
 pub fn locator_roots(config: &Config) -> Result<Vec<(PathBuf, Roots)>, RootsError> {
     let mut declared = Vec::with_capacity(config.roots.len());
-    let mut seen = BTreeSet::new();
     for root in &config.roots {
         let path = root.path.to_str().ok_or(RootsError::NotUtf8)?;
-        if !seen.insert((root.agent.as_str().to_owned(), path.to_owned())) {
-            return Err(RootsError::Invalid);
-        }
         declared.push(CoordRoot {
             agent: root.agent.clone(),
             path: path.to_owned(),
@@ -57,6 +59,13 @@ pub fn locator_roots(config: &Config) -> Result<Vec<(PathBuf, Roots)>, RootsErro
         memory_core::coordinates::CoordError::InvalidPath => RootsError::Invalid,
         _ => RootsError::Inventory,
     })?;
+    for (i, a) in config.roots.iter().enumerate() {
+        for b in config.roots.iter().skip(i + 1) {
+            if a.path.starts_with(&b.path) || b.path.starts_with(&a.path) {
+                return Err(RootsError::Overlap);
+            }
+        }
+    }
     let mut out = Vec::with_capacity(declared.len());
     for (root, decl) in config.roots.iter().zip(&declared) {
         let coordinate = inventory

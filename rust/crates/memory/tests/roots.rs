@@ -1,6 +1,7 @@
 //! Configured roots become locator roots with the coordinates namespace.
 use memory::config::Config;
 use memory::roots::{RootsError, locator_roots};
+use memory_core::locator::{Located, RootRelativePath, locate};
 use sha2::{Digest, Sha256};
 use std::fmt::Debug;
 
@@ -28,49 +29,80 @@ fn expected(agent: &str, path: &str) -> String {
     format!("{agent}-{hex}")
 }
 
+const CLAUDE_FILE: &str = "projects/-p/0f0e0d0c-0b0a-4908-8706-050403020100.jsonl";
+const CODEX_FILE: &str =
+    "sessions/2026/01/01/rollout-2026-01-01T00-00-00-0f0e0d0c-0b0a-4908-8706-050403020100.jsonl";
+
+fn source_id(roots: &memory_core::locator::Roots, rel: &str) -> Result<String, String> {
+    let path = RootRelativePath::parse(rel).map_err(e)?;
+    match locate(&path, roots) {
+        Located::Source { id, .. } => Ok(id.as_str().to_owned()),
+        _ => Err("not a source".to_owned()),
+    }
+}
+
 #[test]
 fn namespace_is_agent_and_sha256_of_the_root_path() -> R {
-    let cfg = config(&[("claude", "/h/.claude"), ("pi", "/h/.pi/agent")])?;
+    let cfg = config(&[("claude", "/h/.claude"), ("codex", "/h/.codex")])?;
     let roots = locator_roots(&cfg).map_err(e)?;
     assert_eq!(roots.len(), 2);
-    for ((path, roots), (agent, want)) in roots
-        .iter()
-        .zip([("claude", "/h/.claude"), ("pi", "/h/.pi/agent")])
-    {
+    for ((path, roots), (agent, want, file)) in roots.iter().zip([
+        ("claude", "/h/.claude", CLAUDE_FILE),
+        ("codex", "/h/.codex", CODEX_FILE),
+    ]) {
         assert_eq!(path.to_str(), Some(want));
         let namespace = expected(agent, want);
         assert_eq!(namespace.len(), agent.len() + 1 + 32);
-        assert!(
-            format!("{roots:?}").contains(&format!("\"{namespace}\"")),
-            "{roots:?}"
-        );
+        let id = source_id(roots, file)?;
+        assert!(id.starts_with(&format!("{namespace}:")), "{id}");
     }
     Ok(())
 }
 
 #[test]
-fn same_path_under_two_agents_differs() -> R {
-    let cfg = config(&[("claude", "/h/x"), ("codex", "/h/x")])?;
-    let roots = locator_roots(&cfg).map_err(e)?;
-    let texts: Vec<String> = roots.iter().map(|(_, r)| format!("{r:?}")).collect();
-    assert!(
-        texts
-            .first()
-            .is_some_and(|t| t.contains(&expected("claude", "/h/x")))
-    );
-    assert!(
-        texts
-            .get(1)
-            .is_some_and(|t| t.contains(&expected("codex", "/h/x")))
-    );
+fn the_agent_is_part_of_the_namespace() -> R {
+    // Separate configurations: overlapping roots in one are refused.
+    let a = locator_roots(&config(&[("claude", "/h/x")])?).map_err(e)?;
+    let b = locator_roots(&config(&[("codex", "/h/x")])?).map_err(e)?;
+    let id_a = source_id(&a.first().ok_or("root")?.1, CLAUDE_FILE)?;
+    let id_b = source_id(&b.first().ok_or("root")?.1, CODEX_FILE)?;
+    assert!(id_a.starts_with(&expected("claude", "/h/x")));
+    assert!(id_b.starts_with(&expected("codex", "/h/x")));
     assert_ne!(expected("claude", "/h/x"), expected("codex", "/h/x"));
     Ok(())
 }
 
 #[test]
+fn overlapping_roots_are_refused_and_siblings_accepted() -> R {
+    for (label, roots) in [
+        ("equal", vec![("claude", "/h/x"), ("claude", "/h/x")]),
+        (
+            "equal two agents",
+            vec![("claude", "/h/x"), ("codex", "/h/x")],
+        ),
+        (
+            "parent then child",
+            vec![("claude", "/h/x"), ("codex", "/h/x/y")],
+        ),
+        (
+            "child then parent",
+            vec![("claude", "/h/x/y"), ("claude", "/h/x")],
+        ),
+    ] {
+        let cfg = config(&roots)?;
+        assert_eq!(
+            locator_roots(&cfg).map(|_| ()),
+            Err(RootsError::Overlap),
+            "{label}"
+        );
+    }
+    let cfg = config(&[("claude", "/h/x"), ("claude", "/h/xy")])?;
+    assert_eq!(locator_roots(&cfg).map_err(e)?.len(), 2);
+    Ok(())
+}
+
+#[test]
 fn refusals_are_closed() -> R {
-    let dup = config(&[("claude", "/h/a"), ("claude", "/h/a")])?;
-    assert_eq!(locator_roots(&dup).map(|_| ()), Err(RootsError::Invalid));
     for bad in ["/h/a/", "/h//a", "/h/./a", "/h/../a"] {
         let cfg = config(&[("claude", bad)])?;
         assert_eq!(
