@@ -293,6 +293,10 @@ that counts damaged and newer-schema loads and failed launch attachments. "Treat
 unchanged. Open, tied to the logging decision: the log line itself, keeping the damaged file,
 and whether an older build may overwrite a newer-schema `status.json`.
 
+Note, 2026-11-12: the count of failed launch attachments is gone (`baf8b1a`). Attaching a
+launch record could only fail while its digest was computed through a JSON encoding; with the
+one length-prefixed digest (`d877196`) it cannot fail, so nothing could increment the counter.
+
 ### A11.4 State file size bounds (DESIGN 9)
 
 DESIGN states no number. The code bounds a state file body at 64 MiB (67,108,864 bytes) and its
@@ -402,6 +406,10 @@ Operator decision. 8.4 says "at most 8 exact names" and lists nine. The cap came
 code (`internal/launch/native.go:58`, `len(out) == 8`) with no stated reason, and which name was
 dropped depended on the order of the process environment. The closed allowlist of nine names is
 the bound; every allowlisted name whose value passes A12.1 is published.
+
+Note, 2026-11-12: the manifest check still carried the cap of 8 and rejected a record with
+nine names as `BadLaunch`, failing the owner's commit. Fixed in `4eea7ab`; the manifest now
+takes its bound from the allowlist.
 
 ### A13.4 Measured on R2, 2026-11-11: ETags and writes from a dead process (DESIGN 7.4, 15)
 

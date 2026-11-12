@@ -18,10 +18,10 @@ history, not current execution instructions or renewed operating authority.
 `gpt-6.1-sol` workers at medium effort, parent-owned quality and verification.
 This is the single active task brief; dated operating records below remain history.
 
-> **Resume here (updated 2026-11-12, after the walking skeleton).** Read DESIGN.md, then
+> **Resume here (updated 2026-11-12, after the structural fixes).** Read DESIGN.md, then
 > [design-amendments-20261109.md](rust-rewrite/design-amendments-20261109.md) (A0–A13, wins
-> where they conflict), then the "Session 2026-11-12, walking skeleton" block directly below,
-> which is the current state, and
+> where they conflict), then the "Session 2026-11-12, structural fixes" block directly below
+> and the "walking skeleton" block after it, which together are the current state, and
 > [report 26](rust-rewrite/implementation/26-walking-skeleton.md), the active coordinator
 > brief, with [evidence 16](rust-rewrite/implementation/evidence/16-walking-skeleton/).
 > [Report 25](rust-rewrite/implementation/25-engineering-practice-review.md) and
@@ -37,7 +37,33 @@ This is the single active task brief; dated operating records below remain histo
 > in this brief (P5 authorization, acceptance bucket/token, hook argv, symlinks, state root)
 > are resolved by the amendments and kept only as history.
 
-**Session 2026-11-12, walking skeleton (current).** Plan step 1 of report 25; record in
+**Session 2026-11-12, structural fixes (current).** Plan step 3 of report 25, first batch;
+record in [evidence 17](rust-rewrite/implementation/evidence/17-structural-fixes/). Local
+only, nothing pushed.
+- `rust/structural-fixes` (`6fd536a`, four worker and three parent commits) and
+  `docs/structural-fixes` (this entry) sit on top of the stack of the block below.
+- Removed or narrowed: the `profile_of` wildcard arm, `FileSystem::stat_len`, the `Counting`
+  wrapper in `src` (now in `tests/counters.rs`), the second `LaunchRecord` and its second
+  digest (one type and one digest in `memory-core/src/launch.rs`), the `Option` on the owner
+  `Daemon::land` passes on, and the `launch_attach_failed` counter that could no longer count.
+- Bug fixed (`4eea7ab`), also present on `main`: the manifest rejected a launch record with
+  more than 8 environment names although A13.3 lets all nine through, so such a launch
+  failed its owner's commit with `BadLaunch`. The old bound tests passed on a stale digest
+  and never reached the bound; the new ones use a matching digest.
+- Gates on `6fd536a`: local, 500 cases, seed 3194196348, all 13 sub-gates 0, 472 tests, 12
+  doctests, coverage 6031/6170 = 97.75 %, `verify-evidence.py` PASS. Not run: 2,000 cases,
+  hosted CI, `cargo mutants`.
+- Left from step 3: `coordinates.rs` (wire or delete), the parked-owner sort, the daemon's
+  direct `std::fs` hint reads, `recover_base` delegating to `read_owner`, rustdoc in a gate.
+- Next: unchanged from the block below, starting with the coordinator brief for the run loop
+  (report 27, not yet written). A read-only scoping pass found these to settle in that brief:
+  `Config` has no endpoint, region, access key id or key prefix field; the token file format
+  is unspecified (the Go file is `R2_*=value` lines); nothing maps a configured root to a
+  `RootLayout` and `RootNamespace`; there is no production `Clock` and no signal handling;
+  the watcher and the scheduler exist but nothing connects them to `reconcile_once`; the
+  binary's own end-to-end test needs a way to point at the local server.
+
+**Session 2026-11-12, walking skeleton (before the structural fixes).** Plan step 1 of report 25; record in
 report 26. Local only, nothing pushed.
 - A real file now goes through the real `Daemon`, zstd piece encoding and the S3 adapter, and
   comes back through `memory-reader` with equal bytes. This runs as a test against a local

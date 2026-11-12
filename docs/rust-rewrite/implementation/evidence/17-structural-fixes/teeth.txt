@@ -1,0 +1,46 @@
+# Teeth checks for rust/structural-fixes. Each block is the FAIL and Summary lines of one run
+# with the named change applied to the source; every change was reverted afterwards.
+
+## Before the fix (on 4e86987): nine allowlisted environment names through build()
+TMP env names 8: build ok
+TMP env names 9: build failed BadLaunch
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.04s
+
+## LAUNCH_ENV_MAX = 8 (the old cap) on 4eea7ab's tree
+FAIL [   0.049s] ( 6/22) memory-core::core_manifest delta_negative_fixtures
+FAIL [   0.074s] ( 2/22) memory-core::core_manifest a_launch_with_every_allowlisted_environment_name_builds_a_manifest
+Summary [  28.459s] 22 tests run: 20 passed, 2 failed, 0 skipped
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.01s
+
+## LAUNCH_ENV_MAX = 10
+FAIL [   0.051s] ( 6/22) memory-core::core_manifest delta_negative_fixtures
+Summary [  29.293s] 22 tests run: 21 passed, 1 failed, 0 skipped
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.01s
+
+## manifest argv bound LAUNCH_ARGV_MAX + 1
+FAIL [   0.051s] ( 6/22) memory-core::core_manifest delta_negative_fixtures
+Summary [  30.776s] 22 tests run: 21 passed, 1 failed, 0 skipped
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.01s
+
+## sanitize_launch maps an already redacted argv entry to a different string (on 6fd536a)
+FAIL [   0.305s] (1/3) memory-core::core_hint generated_launch_fixed_shapes
+FAIL [   1.543s] (2/3) memory-core::core_hint hegel_generated_launch_records_publish_no_canary
+FAIL [   2.628s] (3/3) memory-core::core_hint proptest_generated_launch_records_publish_no_canary
+Summary [   2.936s] 3 tests run: 0 passed, 3 failed, 28 skipped
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 30 filtered out; finished in 0.26s
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 30 filtered out; finished in 1.50s
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 30 filtered out; finished in 2.59s
+
+## compile_fail removed from the LaunchRecord doctest (on 4e86987)
+error[E0451]: fields `digest`, `argv` and `env` of struct `LaunchRecord` are private
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.16s
+
+## worker run: teeth-digest-ignores-env
+PASS [   0.081s] (1/1) memory-core::core_manifest hint_and_manifest_carry_one_launch_digest
+Summary [   0.082s] 1 test run: 1 passed, 20 skipped
+
+## worker run: teeth-envless-from-sanitized
+Error: "record"
+
+## worker run: teeth-manifest-old-json-digest
+Error: BadLaunch

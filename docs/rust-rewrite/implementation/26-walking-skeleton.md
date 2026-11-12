@@ -150,3 +150,7 @@ credential files by the parent or workers, no R2 before increment 4.
   Mutants M1 to M4 killed. Full gates pass on `8f10261`.
 - 2026-11-12: increment 4. One run on R2 under `rust-acceptance/skeleton-20261112-8f10261/`
   between 05:29:37Z and 05:30:00Z; prefix deleted and listed empty.
+- 2026-11-12: after the skeleton, plan step 3 first batch on `rust/structural-fixes`
+  (`6fd536a`): four structural fixes, and a fix for a manifest bound that rejected a launch
+  with all nine allowlisted environment names. Full gates pass; record in
+  [evidence 17](evidence/17-structural-fixes/).
