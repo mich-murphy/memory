@@ -34,8 +34,8 @@ use memory_core::domain::{
     WithholdReason,
 };
 use memory_core::manifest::{
-    Change, EpochStamp, EpochWriter, Header, LaunchRecord, ManifestError, OwnerState, Piece,
-    SourceWrite, manifest_hash,
+    Change, EpochStamp, EpochWriter, Header, LaunchRecord, OwnerState, Piece, SourceWrite,
+    manifest_hash,
 };
 use memory_core::planner::{
     AppendBasis, AuditEvidence, Observation, PlanInput, Planning, Strategy, WindowEvidence, plan,
@@ -202,17 +202,10 @@ pub fn capture<F: FileSystem>(
 /// Only a [`SanitizedLaunch`] can become a `LaunchRecord` (`from_sanitized`), so raw argv or
 /// environment cannot reach the manifest through this function. Records are de-duplicated by
 /// digest, both against the header's existing records and within `launches`.
-///
-/// # Errors
-/// [`ManifestError`] if a record's digest input cannot be encoded; the header is then left
-/// unchanged.
-pub fn attach_launches(
-    commit: &mut Commit,
-    launches: &[SanitizedLaunch],
-) -> Result<(), ManifestError> {
+pub fn attach_launches(commit: &mut Commit, launches: &[SanitizedLaunch]) {
     let mut added: Vec<LaunchRecord> = Vec::new();
     for launch in launches {
-        let record = LaunchRecord::from_sanitized(launch)?;
+        let record = LaunchRecord::from_sanitized(launch);
         let seen = commit
             .header
             .launch
@@ -224,7 +217,6 @@ pub fn attach_launches(
         }
     }
     commit.header.launch.extend(added);
-    Ok(())
 }
 
 fn withhold_of(reason: Reason) -> WithholdReason {

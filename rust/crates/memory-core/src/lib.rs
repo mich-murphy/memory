@@ -6,6 +6,7 @@ pub mod coordinates;
 pub mod disposition;
 pub mod domain;
 pub mod hint;
+mod launch;
 pub mod limits;
 pub mod locator;
 pub mod manifest;

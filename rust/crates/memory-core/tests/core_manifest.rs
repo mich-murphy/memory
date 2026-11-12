@@ -67,7 +67,7 @@ fn writer() -> Writer {
         commit: "abc123".to_owned(),
     }
 }
-fn launch_record() -> Result<LaunchRecord, ManifestError> {
+fn launch_record() -> LaunchRecord {
     let argv = ["claude", "--model", "x"].map(str::to_owned);
     LaunchRecord::from_sanitized(&sanitize_launch(&argv, &[]))
 }
@@ -77,7 +77,7 @@ fn header_for(owner: Owner, with_launch: bool) -> Result<Header, Box<dyn std::er
         captured_at: ts()?,
         writer: writer(),
         launch: if with_launch {
-            vec![launch_record()?]
+            vec![launch_record()]
         } else {
             vec![]
         },
@@ -179,7 +179,7 @@ fn rejects(base: &[u8], f: impl FnOnce(&mut Value), want: ManifestError) -> R {
 #[test]
 fn golden_checkpoint_delta_and_current() -> R {
     let (b0, b1) = fixture()?;
-    let rec = launch_record()?;
+    let rec = launch_record();
     let wr = json!({"name": "memory", "version": "0.1.0", "commit": "abc123"});
     let ew = json!({"version": "0.1.0", "commit": "abc123"});
     let owner =
@@ -1637,4 +1637,49 @@ fn raw_piece(
         Ok(p) => p,
         Err(_) => panic!("piece"),
     }
+}
+
+#[test]
+fn hint_and_manifest_carry_one_launch_digest() -> Result<(), Box<dyn std::error::Error>> {
+    use memory_core::hint::{HintEvent, HookInput, LaunchHint, PathHint, build_line, scan};
+    let argv = ["/usr/bin/claude", "--model", "opus", "hello prompt"].map(str::to_owned);
+    let launch = sanitize_launch(&argv, &["ANTHROPIC_MODEL=opus".to_owned()]);
+    // The daemon re-sanitises a hint's record; that must not move the digest.
+    let environ: Vec<String> = launch
+        .env()
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect();
+    let again = sanitize_launch(launch.argv(), &environ);
+    assert_eq!(launch, again, "re-sanitising must be idempotent");
+    let input = HookInput {
+        agent: Agent::Claude,
+        event: HintEvent::SessionStart,
+        session: SessionId::try_from("s1".to_owned())?,
+        cwd: PathHint::Absent,
+        transcript: PathHint::Absent,
+        agent_transcript: PathHint::Absent,
+    };
+    let line = build_line(&input, Some(&launch))?;
+    let out = scan(&line, 0)?;
+    let LaunchHint::Full(from_hint) = &out.records.first().ok_or("record")?.record.launch else {
+        return Err("expected full launch".into());
+    };
+    assert_eq!(
+        from_hint.digest(),
+        LaunchRecord::from_sanitized(&again).digest()
+    );
+    let header = Header {
+        owner: session_owner()?,
+        captured_at: ts()?,
+        writer: writer(),
+        launch: vec![LaunchRecord::from_sanitized(&again)],
+    };
+    let w = swrite("t", true, stamp(1, None), 10, h(1), vec![piece(1, 0, 10)])?;
+    let built = build(None, header, vec![Change::Epoch(w)])?;
+    parse_manifest(&built.bytes)?;
+    let json: Value = serde_json::from_slice(&built.bytes)?;
+    let in_manifest = json.pointer("/launch/0/digest").and_then(Value::as_str);
+    assert_eq!(in_manifest, Some(String::from(from_hint.digest()).as_str()));
+    Ok(())
 }

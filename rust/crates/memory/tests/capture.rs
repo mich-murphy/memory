@@ -107,7 +107,7 @@ impl Rig {
         let got = capture(&mut self.fs, &self.sources, &self.locals, state, &env);
         let mut changes = Vec::new();
         if let Some(mut request) = got.commit {
-            attach_launches(&mut request, &self.launches).map_err(e)?;
+            attach_launches(&mut request, &self.launches);
             changes = request.changes.clone();
             let landed =
                 commit(&mut self.store, self.base.as_ref(), request, &mut |_| {}).map_err(e)?;
@@ -343,12 +343,11 @@ fn attach_launches_deduplicates_by_digest() -> R {
     attach_launches(
         &mut commit,
         &[canary_launch(), other.clone(), canary_launch()],
-    )
-    .map_err(e)?;
+    );
     assert_eq!(commit.header.launch.len(), 2);
-    attach_launches(&mut commit, &[other, canary_launch()]).map_err(e)?;
+    attach_launches(&mut commit, &[other, canary_launch()]);
     assert_eq!(commit.header.launch.len(), 2);
-    attach_launches(&mut commit, &[]).map_err(e)?;
+    attach_launches(&mut commit, &[]);
     assert_eq!(commit.header.launch.len(), 2);
     Ok(())
 }

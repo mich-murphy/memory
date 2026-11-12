@@ -182,8 +182,8 @@ pub struct EventCounts {
     pub index_damaged: u64,
     /// `index.json` had a newer schema at startup and was rebuilt.
     pub index_newer_schema: u64,
-    /// Owner commits that proceeded without their pending launch records (the digest input
-    /// could not be encoded); the records stay pending in the hint files.
+    /// Owner commits that proceeded without their pending launch records. Attaching can no
+    /// longer fail, so nothing increments this; the field stays so `status.json` keeps its shape.
     pub launch_attach_failed: u64,
 }
 
@@ -243,9 +243,6 @@ pub struct RoundReport {
     pub deferred: usize,
     /// Failures of this round by class.
     pub failures: FailureCounts,
-    /// Owners whose commit went ahead without their pending launch records because attaching
-    /// them failed (DESIGN.md 7.6: the records stay pending in the hint files).
-    pub launch_unattached: usize,
 }
 
 /// Source enumeration, supplied by the shell.
@@ -436,13 +433,6 @@ fn header_of(owner: &Owner, when: &Timestamp) -> Header {
         },
         launch: Vec::new(),
     }
-}
-
-/// Whether attaching launch records worked; a failure is counted, never silent.
-fn note_attach(result: Result<(), ManifestError>, report: &mut RoundReport) -> bool {
-    let attached = result.is_ok();
-    report.launch_unattached += usize::from(!attached);
-    attached
 }
 
 /// The daemon: locked, prepared and loaded.
@@ -768,21 +758,15 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         capture(&mut self.fs, sources, &self.locals, remote, &env)
     }
 
-    /// Attach the owner's pending launch records (DESIGN.md 7.6). False when that failed: the
-    /// commit still goes ahead without them, they stay pending, and the report counts it.
-    fn attach_pending(
-        request: &mut Commit,
-        hints: &[ScannedFile],
-        owner: &Owner,
-        report: &mut RoundReport,
-    ) -> bool {
+    /// Attach the owner's pending launch records (DESIGN.md 7.6).
+    fn attach_pending(request: &mut Commit, hints: &[ScannedFile], owner: &Owner) {
         let launches: Vec<SanitizedLaunch> = hints
             .iter()
             .flat_map(|f| f.records.iter())
             .filter(|r| !r.done && r.owner == *owner)
             .filter_map(|r| r.launch.clone())
             .collect();
-        note_attach(attach_launches(request, &launches), report)
+        attach_launches(request, &launches);
     }
 
     /// Commit, then make the capture durable locally: updates and hint progress apply only once
@@ -855,15 +839,8 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             self.apply(got.updates);
             return false;
         };
-        let attached = Self::attach_pending(&mut request, hints, owner, report);
-        let result = self.land(
-            rt,
-            base.as_ref(),
-            request,
-            got,
-            hints,
-            attached.then_some(owner),
-        );
+        Self::attach_pending(&mut request, hints, owner);
+        let result = self.land(rt, base.as_ref(), request, got, hints, Some(owner));
         let draw = self.next_draw();
         Self::settle(rt, &result, at, draw, report)
     }
@@ -952,11 +929,6 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         }
         self.advance_hints(&files);
         self.status.failures.add(&report.failures);
-        self.status.events.launch_attach_failed = self
-            .status
-            .events
-            .launch_attach_failed
-            .saturating_add(report.launch_unattached as u64);
         self.status.rounds += 1;
         self.status.updated_at = text;
         let mut parked: Vec<ParkedEntry> = self
@@ -1010,20 +982,5 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     /// Path of the state root.
     pub fn root(&self) -> PathBuf {
         self.state.root().to_path_buf()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_failed_launch_attachment_is_counted_and_reported_unattached() {
-        let mut report = RoundReport::default();
-        assert!(note_attach(Ok(()), &mut report));
-        assert_eq!(report.launch_unattached, 0);
-        assert!(!note_attach(Err(ManifestError::Encode), &mut report));
-        assert!(!note_attach(Err(ManifestError::Encode), &mut report));
-        assert_eq!(report.launch_unattached, 2);
     }
 }

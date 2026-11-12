@@ -1,13 +1,14 @@
 use super::state::SourceEntry;
 use super::{CHECKPOINT_INTERVAL, ManifestError};
 use crate::domain::{Offset, Owner, RulesDigest, Sha256, SourceClass, SourceId, SourceKind};
+use crate::launch::LaunchRecord;
 use crate::limits::object_key;
-use crate::privacy::{AuthorizedBody, SanitizedLaunch};
+use crate::privacy::AuthorizedBody;
 use schemars::JsonSchema;
 use serde::de::{self, DeserializeOwned, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256 as Hasher};
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashSet};
 
 const DUPLICATE: &str = "duplicate key";
 
@@ -418,70 +419,19 @@ fn check_run(pieces: &[Piece], from_zero: bool) -> Result<u64, ManifestError> {
     Ok(end.unwrap_or(0))
 }
 
-/// Sanitized launch evidence attached once per distinct digest.
-///
-/// Constructible only from [`SanitizedLaunch`]; fields are private.
-/// ```compile_fail
-/// let _ = memory_core::manifest::LaunchRecord {
-///     digest: memory_core::domain::Sha256::from_bytes([0; 32]),
-///     argv: vec![],
-///     env: Default::default(),
-/// };
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct LaunchRecord {
-    digest: Sha256,
-    argv: Vec<String>,
-    env: BTreeMap<String, String>,
-}
-impl LaunchRecord {
-    /// Record sanitized evidence with its content digest.
-    ///
-    /// # Errors
-    /// [`ManifestError::Encode`] if the digest input cannot be serialized.
-    pub fn from_sanitized(launch: &SanitizedLaunch) -> Result<Self, ManifestError> {
-        let argv = launch.argv().to_vec();
-        let env = launch.env().clone();
-        Ok(Self {
-            digest: launch_digest(&argv, &env)?,
-            argv,
-            env,
-        })
+/// A header's launch record is within bounds and its digest matches its content.
+fn check_launch(record: &LaunchRecord) -> Result<(), ManifestError> {
+    if record.argv().len() > 32 || record.env().len() > 8 || !record.digest_matches() {
+        return Err(ManifestError::BadLaunch);
     }
-    /// Content digest.
-    pub fn digest(&self) -> Sha256 {
-        self.digest
-    }
-    /// Sanitized argv.
-    pub fn argv(&self) -> &[String] {
-        &self.argv
-    }
-    /// Allowlisted environment.
-    pub fn env(&self) -> &BTreeMap<String, String> {
-        &self.env
-    }
-    pub(super) fn validate(&self) -> Result<(), ManifestError> {
-        if self.argv.len() > 32
-            || self.env.len() > 8
-            || launch_digest(&self.argv, &self.env)? != self.digest
-        {
-            return Err(ManifestError::BadLaunch);
-        }
-        Ok(())
-    }
-}
-fn launch_digest(argv: &[String], env: &BTreeMap<String, String>) -> Result<Sha256, ManifestError> {
-    serde_json::to_vec(&(argv, env))
-        .map(|bytes| manifest_hash(&bytes))
-        .map_err(|_| ManifestError::Encode)
+    Ok(())
 }
 fn check_header(writer: &Writer, launch: &[LaunchRecord]) -> Result<(), ManifestError> {
     writer.validate()?;
     let mut seen = HashSet::new();
     for record in launch {
-        record.validate()?;
-        if !seen.insert(record.digest) {
+        check_launch(record)?;
+        if !seen.insert(record.digest()) {
             return Err(ManifestError::BadLaunch);
         }
     }

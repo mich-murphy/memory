@@ -521,7 +521,7 @@
       ]
     },
     "LaunchRecord": {
-      "description": "Sanitized launch evidence attached once per distinct digest.\n\nConstructible only from [`SanitizedLaunch`]; fields are private.\n```compile_fail\nlet _ = memory_core::manifest::LaunchRecord {\n    digest: memory_core::domain::Sha256::from_bytes([0; 32]),\n    argv: vec![],\n    env: Default::default(),\n};\n```",
+      "description": "Sanitized launch evidence: allowlisted argv and environment with a content digest.\n\nConstructible only from [`SanitizedLaunch`]; fields are private. Deserialisation of our\nown files is digest-checked by the readers (`digest_matches`).\n```compile_fail\nlet _ = memory_core::manifest::LaunchRecord {\n    digest: memory_core::domain::Sha256::from_bytes([0; 32]),\n    argv: vec![],\n    env: Default::default(),\n};\n```",
       "type": "object",
       "properties": {
         "argv": {
