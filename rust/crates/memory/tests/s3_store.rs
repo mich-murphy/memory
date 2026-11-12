@@ -1,6 +1,10 @@
 //! The S3 adapter against a local std-only HTTP server (no remote host is contacted): R2
 //! conditional conformance, one HTTP exchange per call, request shape, the reply mapping,
 //! secret hygiene, and the commit protocol (DESIGN.md 7.4, amendment A6) through the adapter.
+//!
+//! `s3_store/skeleton.rs` is a module of this test binary because it shares the fake server
+//! (`common/store.rs` explains why a helper file has one set of users). Its ignored test is the
+//! only one here that contacts a remote host.
 use memory::commit::{
     Commit, CommitEnd, Failure, KnownOurs, LandedHow, Upload, commit, commit_known,
 };
@@ -18,8 +22,12 @@ use memory_core::manifest::{
 use std::net::TcpListener;
 use std::time::Duration;
 
+#[path = "common/clock.rs"]
+mod clock;
 #[path = "common/s3_fake.rs"]
 mod fake;
+#[path = "s3_store/skeleton.rs"]
+mod skeleton;
 use fake::{Fake, Fault, content_md5_of, etag_of};
 
 type R<T = ()> = Result<T, String>;
