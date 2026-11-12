@@ -42,7 +42,7 @@ fn body(
 ) -> Result<AuthorizedBody, Box<dyn std::error::Error>> {
     let source = admitted(paths, profile)?;
     let redacted = privacy::transform(&source, input)?;
-    match privacy::authorize(source, redacted, &context()) {
+    match privacy::authorize(&source, redacted, &context()) {
         Authorization::Allow(value) => Ok(value),
         _ => Err("fixture authorization failed".into()),
     }
@@ -367,7 +367,7 @@ fn capability_binding_rejects_cross_source_cross_profile_and_changed_policy()
         let original = admitted(&["transcript.jsonl"], Profile::Transcript)?;
         let raw = privacy::transform(&original, b"unsafe config-shaped transcript")?;
         assert!(matches!(
-            privacy::authorize(target, raw, &context()),
+            privacy::authorize(&target, raw, &context()),
             Authorization::Deny(Reason::ContextChanged)
         ));
     }
@@ -376,7 +376,7 @@ fn capability_binding_rejects_cross_source_cross_profile_and_changed_policy()
     let mut ctx = context();
     ctx.revision = "changed".into();
     assert!(matches!(
-        privacy::authorize(source, redacted, &ctx),
+        privacy::authorize(&source, redacted, &ctx),
         Authorization::Deny(Reason::ContextChanged)
     ));
     let raw = b"not json\xff\nAPI_KEY=CANARY\n";

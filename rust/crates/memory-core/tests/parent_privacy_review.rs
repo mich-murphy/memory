@@ -32,7 +32,7 @@ fn publish(path: &str, bytes: &[u8]) -> Result<AuthorizedBody, &'static str> {
         return Err("fixture admission failed");
     };
     let redacted = transform(&source, bytes).map_err(|_| "fixture transform failed")?;
-    match authorize(source, redacted, &policy) {
+    match authorize(&source, redacted, &policy) {
         Authorization::Allow(body) => Ok(body),
         Authorization::Deny(_) | Authorization::Unknown(_) => Err("fixture authorization failed"),
     }
@@ -56,7 +56,7 @@ fn transformed_capability_cannot_be_rebound_to_a_protected_source() -> Result<()
         return Err("fixture admission failed");
     };
     assert!(matches!(
-        authorize(config, raw, &policy),
+        authorize(&config, raw, &policy),
         Authorization::Deny(_)
     ));
     Ok(())

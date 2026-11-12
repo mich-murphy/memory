@@ -32,7 +32,7 @@ fn transformed(path: &str, profile: Profile, bytes: &[u8]) -> Result<Vec<u8>, Re
         return Err(Reason::UnknownKind);
     };
     let redacted = privacy::transform(&source, bytes)?;
-    match privacy::authorize(source, redacted, &context) {
+    match privacy::authorize(&source, redacted, &context) {
         Authorization::Allow(body) => Ok(body.bytes().to_vec()),
         Authorization::Deny(reason) => Err(reason),
         Authorization::Unknown(_) => Err(Reason::ContextChanged),

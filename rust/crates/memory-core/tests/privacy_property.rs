@@ -51,7 +51,7 @@ fn publish(facts: ResolvedSourceFacts, bytes: &[u8]) -> Result<privacy::Authoriz
         return Err(Withheld::Admission);
     };
     let transformed = privacy::transform(&source, bytes).map_err(Withheld::Transform)?;
-    match privacy::authorize(source, transformed, &policy) {
+    match privacy::authorize(&source, transformed, &policy) {
         Authorization::Allow(body) => Ok(body),
         Authorization::Deny(_) | Authorization::Unknown(_) => Err(Withheld::Authorization),
     }

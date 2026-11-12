@@ -338,14 +338,14 @@ pub fn transform(source: &AdmittedSource, bytes: &[u8]) -> Result<RedactedBytes,
 
 /// Recheck policy and bind the exact transformed bytes to their source.
 pub fn authorize(
-    source: AdmittedSource,
+    source: &AdmittedSource,
     redacted: RedactedBytes,
     context: &PolicyContext,
 ) -> Authorization {
     if redacted.binding != source.binding || source.binding != binding(context, &source.facts) {
         return Authorization::Deny(Reason::ContextChanged);
     }
-    match admit(context, source.facts) {
+    match admit(context, source.facts.clone()) {
         Admission::Allow(admitted) => match admitted.facts.owner {
             Some(owner) => Authorization::Allow(AuthorizedBody {
                 digest: Sha256::digest(&redacted.bytes).into(),

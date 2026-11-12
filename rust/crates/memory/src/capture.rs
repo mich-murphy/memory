@@ -549,7 +549,7 @@ impl Job<'_> {
     fn authorized_body(&self, raw: &[u8]) -> Result<AuthorizedBody, SourceOutcome> {
         let redacted =
             transform(&self.admitted, raw).map_err(|r| SourceOutcome::Withheld(withhold_of(r)))?;
-        match authorize(self.admitted_clone()?, redacted, self.env.context) {
+        match authorize(&self.admitted, redacted, self.env.context) {
             Authorization::Allow(body) => Ok(body),
             Authorization::Deny(r) => Err(SourceOutcome::Withheld(withhold_of(r))),
             Authorization::Unknown(u) => Err(SourceOutcome::Blocked(u)),
@@ -653,14 +653,6 @@ impl Job<'_> {
                 commit: self.env.header.writer.commit.clone(),
             },
             rules: self.rules,
-        }
-    }
-    /// `authorize` consumes the admission, so re-admit from the same facts and context.
-    fn admitted_clone(&self) -> Result<AdmittedSource, SourceOutcome> {
-        match admit(self.env.context, self.src.facts.clone()) {
-            Admission::Allow(a) => Ok(a),
-            Admission::Deny(r) => Err(SourceOutcome::Withheld(withhold_of(r))),
-            Admission::Unknown(u) => Err(SourceOutcome::Blocked(u)),
         }
     }
 }
