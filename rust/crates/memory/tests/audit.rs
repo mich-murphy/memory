@@ -1,14 +1,15 @@
 //! The bounded audit (DESIGN.md 11.4, measure 2) through the real `Daemon`, with a spying
 //! fake filesystem (byte counts, corrupted reads, a source that moves between two stats), the
 //! fake store and a settable wall clock. Restores go through `memory-reader`.
-use memory::audit::{AUDIT_INTERVAL_NS, AuditCounts, due};
-use memory::capture::Source;
+use memory::audit::{AUDIT_INTERVAL_NS, AuditCounts, Mismatch, due, matched, mismatch};
+use memory::capture::{Published, Source};
+use memory::daemon::ParkedReason;
 use memory::daemon::{Daemon, IndexBody, Parts, RoundReport, StartOptions, StatusBody};
-use memory::environment::{FileSystem, Stat};
+use memory::environment::{FileSystem, Stat, Store, StoreError, Stored};
 use memory::state::{Loaded, StateFile, SyncPolicy, read_durable};
 use memory_core::domain::{
-    Agent, ArchiveId, AuditState, MachineId, Owner, SessionId, SessionKey, SourceClass, SourceId,
-    SourceKind, SourceState,
+    Agent, ArchiveId, AuditState, ETag, MachineId, Owner, ParkReason, SessionId, SessionKey,
+    SourceClass, SourceId, SourceKind, SourceState,
 };
 use memory_core::privacy::{PolicyContext, Profile, ResolvedSourceFacts, rules_digest};
 use std::collections::VecDeque;
@@ -126,8 +127,37 @@ impl FileSystem for Spy {
     }
 }
 
+/// A store whose puts can be made to fail.
+#[derive(Default)]
+struct Flaky {
+    inner: MemStore,
+    fail_puts: bool,
+}
+impl Store for Flaky {
+    fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
+        if self.fail_puts {
+            return Err(StoreError::Server);
+        }
+        self.inner.put_if_absent(key, body)
+    }
+    fn put_if_match(
+        &mut self,
+        key: &str,
+        etag: &ETag,
+        body: Published,
+    ) -> Result<ETag, StoreError> {
+        if self.fail_puts {
+            return Err(StoreError::Server);
+        }
+        self.inner.put_if_match(key, etag, body)
+    }
+    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
+        self.inner.get(key)
+    }
+}
+
 type Srcs = Box<dyn FnMut() -> Vec<(Owner, Source)>>;
-type D = Daemon<Spy, MemStore, TestClock, Srcs>;
+type D = Daemon<Spy, Flaky, TestClock, Srcs>;
 
 struct Rig {
     tmp: Tmp,
@@ -138,15 +168,12 @@ struct Rig {
     id: SourceId,
     mono: u64,
     last: RoundReport,
+    /// Log lines (without the timestamp) and stats of the last round.
+    log: Vec<String>,
+    stats: u64,
 }
 
-fn boot(
-    tmp: &Tmp,
-    cfg: &std::path::Path,
-    fs: Spy,
-    store: MemStore,
-    list: &[(Owner, Source)],
-) -> R<D> {
+fn boot(tmp: &Tmp, cfg: &std::path::Path, fs: Spy, store: Flaky, list: &[(Owner, Source)]) -> R<D> {
     let list = list.to_vec();
     let sources: Srcs = Box::new(move || list.clone());
     let parts = Parts {
@@ -204,7 +231,7 @@ impl Rig {
         let list = vec![(owner.clone(), source)];
         let mut spy = Spy::default();
         spy.inner.set(1, bytes);
-        let d = boot(&tmp, &cfg, spy, MemStore::default(), &list)?;
+        let d = boot(&tmp, &cfg, spy, Flaky::default(), &list)?;
         Ok(Self {
             tmp,
             cfg,
@@ -214,6 +241,8 @@ impl Rig {
             id,
             mono: 0,
             last: RoundReport::default(),
+            log: Vec::new(),
+            stats: 0,
         })
     }
     fn d(&mut self) -> R<&mut D> {
@@ -248,9 +277,16 @@ impl Rig {
         let d = self.d()?;
         d.clock_mut().mono = mono;
         d.clock_mut().wall = now;
-        let before = d.fs_mut().bytes_read;
-        let report = d.reconcile_once().map_err(e)?;
+        let (before, stats) = (d.fs_mut().bytes_read, d.fs_mut().stats);
+        let mut report = None;
+        let text = memory::log::render(|| report = Some(d.reconcile_once()));
+        let report = report.ok_or("no round")?.map_err(e)?;
         let read = d.fs_mut().bytes_read - before;
+        self.stats = d.fs_mut().stats - stats;
+        self.log = text
+            .lines()
+            .map(|l| l.split_once(' ').unwrap_or_default().1.to_owned())
+            .collect();
         self.last = report;
         Ok(read)
     }
@@ -276,12 +312,16 @@ impl Rig {
     }
     /// The latest epoch restored through `memory-reader`, and the number of epochs.
     fn restore(&mut self) -> R<(Vec<u8>, usize)> {
-        let store = self.d.as_mut().ok_or("no daemon")?.store_mut();
+        let id = self.id.clone();
+        self.restore_of(&id)
+    }
+    fn restore_of(&mut self, id: &SourceId) -> R<(Vec<u8>, usize)> {
+        let store = &mut self.d.as_mut().ok_or("no daemon")?.store_mut().inner;
         let fetch = |key: &str| store.objects.get(key).map(|(body, _)| body.clone());
         let folded = memory_reader::read_owner(&self.owner, |key| Ok::<_, ()>(fetch(key)))
             .map_err(e)?
             .ok_or("no chain")?;
-        let entry = folded.state.sources.get(&self.id).ok_or("no entry")?;
+        let entry = folded.state.sources.get(id).ok_or("no entry")?;
         let bytes =
             memory_reader::restore_source(entry, |key| fetch(key).ok_or("missing")).map_err(e)?;
         Ok((bytes, entry.epochs.len()))
@@ -691,5 +731,308 @@ fn an_old_status_without_audit_loads() -> R {
     let status: StatusBody = serde_json::from_str(body).map_err(e)?;
     assert_eq!(status.audit, AuditCounts::default());
     assert_eq!(status.rounds, 3);
+    Ok(())
+}
+
+// ---- Parking a source at repeated audit mismatches (DESIGN.md 11.2, 11.4) ----
+
+const H3: i128 = 3 * HOUR;
+
+impl Rig {
+    /// Corrupt both reads of the next audit (a stable mismatch), then run a round.
+    fn mismatch_round(&mut self, wall: i128) -> R<u64> {
+        self.d()?.fs_mut().flips.extend([10, 10]);
+        self.round(wall)
+    }
+    fn disk_status(&self) -> R<StatusBody> {
+        let loaded = read_durable(
+            &self.tmp.root().join(StateFile::Status.name()),
+            StateFile::Status.schema(),
+        );
+        let Loaded::Present(stored) = loaded else {
+            return Err("status missing".to_owned());
+        };
+        serde_json::from_slice(&stored.body).map_err(e)
+    }
+    fn prefix(&self) -> String {
+        memory_core::limits::owner_prefix(&self.owner)
+    }
+    fn version(&mut self) -> R<u64> {
+        Ok(self.d()?.store_mut().inner.version)
+    }
+    /// A second source under the same owner, present from the first round.
+    fn add_second(&mut self, bytes: &[u8]) -> R<SourceId> {
+        let id = SourceId::try_from("src2".to_owned()).map_err(e)?;
+        let path = "projects/p/s1b.jsonl".to_owned();
+        let (owner, mut source) = self.list.first().cloned().ok_or("no source")?;
+        source.handle = 2;
+        source.id = id.clone();
+        source.path = path.clone();
+        source.facts.identities = vec![path];
+        source.facts.file_identity = Some(2);
+        self.list.push((owner, source));
+        self.file()?.set(2, bytes);
+        self.restart()?;
+        Ok(id)
+    }
+    /// The park line this rig's owner logs for a source park.
+    fn park_line(&self) -> String {
+        format!(
+            "INFO parked owner={} reason=repeated_audit_mismatch scope=source",
+            self.prefix()
+        )
+    }
+    /// Three stable mismatches one second apart, then the one exactly 3 h after the first.
+    fn park(&mut self) -> R {
+        self.round(0)?;
+        for n in 1..=3 {
+            self.mismatch_round(n * SECOND)?;
+        }
+        self.mismatch_round(SECOND + H3)?;
+        Ok(())
+    }
+}
+
+fn state_of(count: u32, first: Option<i64>) -> AuditState {
+    AuditState {
+        last_checked_at_ns: None,
+        consecutive_failures: count,
+        first_failure_at_ns: first,
+    }
+}
+
+/// Guarantee: the park rule is the core's: three failures spanning at least 3 h.
+#[test]
+fn the_park_rule_table() {
+    let first = 1_000_000_000_000_i64;
+    let h3 = i64::try_from(H3).unwrap_or(0);
+    let hours = |h: i64| first + h * 3_600 * 1_000_000_000;
+    let park = Mismatch::Park(ParkReason::RepeatedAuditMismatch);
+    let table = [
+        // third failure one nanosecond short of 3 h: an epoch, count 3
+        (
+            state_of(2, Some(first)),
+            first + h3 - 1,
+            Mismatch::Epoch(state_of(3, Some(first))),
+        ),
+        // exactly 3 h parks
+        (state_of(2, Some(first)), first + h3, park.clone()),
+        (state_of(3, Some(first)), first + h3, park),
+        // two failures 50 h apart never park
+        (
+            state_of(1, Some(first)),
+            hours(50),
+            Mismatch::Epoch(state_of(2, Some(first))),
+        ),
+        // the first failure time is set once, and kept
+        (
+            state_of(0, None),
+            first,
+            Mismatch::Epoch(state_of(1, Some(first))),
+        ),
+        (
+            state_of(1, Some(first)),
+            first + 7,
+            Mismatch::Epoch(state_of(2, Some(first))),
+        ),
+        // a wall clock behind the first failure gives a span of zero
+        (
+            state_of(2, Some(first)),
+            first - 1,
+            Mismatch::Epoch(state_of(3, Some(first))),
+        ),
+        (
+            state_of(2, Some(first)),
+            first - h3,
+            Mismatch::Epoch(state_of(3, Some(first))),
+        ),
+    ];
+    for (previous, now, want) in table {
+        assert_eq!(mismatch(&previous, now), want, "{previous:?} at {now}");
+    }
+    assert_eq!(matched(5).first_failure_at_ns, None);
+    assert_eq!(matched(5).consecutive_failures, 0);
+}
+
+/// Guarantee: three mismatches with the third before 3 h start three epochs; the next one at
+/// 3 h parks the source alone: no epoch, no PUT, a status entry and one log line.
+#[test]
+fn a_source_parks_at_the_next_mismatch_after_3_h() -> R {
+    let data = pattern(SIZE);
+    let mut r = Rig::new(&data)?;
+    r.round(0)?;
+    for n in 1..=3 {
+        r.mismatch_round(n * SECOND)?;
+        assert_eq!((r.counts(), r.last.parked), ((0, 1, 0), 0));
+    }
+    let a = r.audit()?;
+    assert_eq!(
+        (a.consecutive_failures, a.first_failure_at_ns),
+        (3, at(SECOND)?)
+    );
+    assert_eq!(r.restore()?.1, 4);
+    let version = r.version()?;
+    r.mismatch_round(SECOND + H3)?;
+    assert_eq!(r.last.parked, 1);
+    assert_eq!(
+        r.counts(),
+        (0, 0, 0),
+        "a park is not a new epoch started by a mismatch"
+    );
+    assert_eq!(r.restore()?, (data.clone(), 4), "no new epoch");
+    assert_eq!(r.version()?, version, "no PUT");
+    assert_eq!(r.audit()?, a, "the index entry is unchanged");
+    assert_eq!(r.log, [r.park_line()]);
+    let status = r.disk_status()?;
+    assert_eq!(status.parked.len(), 1);
+    let entry = status.parked.first().ok_or("entry")?;
+    assert_eq!(entry.source.as_ref(), Some(&r.id));
+    assert_eq!(entry.owner, r.owner);
+    assert_eq!(
+        entry.reason,
+        ParkedReason::Source(ParkReason::RepeatedAuditMismatch)
+    );
+    // Later rounds, even with a changed file: nothing logged, read or stat-ed.
+    let mut grown = data;
+    grown.extend_from_slice(&pattern(500));
+    r.file()?.set(1, &grown);
+    for n in 2..4 {
+        assert_eq!(r.round(SECOND + H3 + n * SECOND)?, 0);
+        assert_eq!((r.stats, r.log.len()), (0, 0));
+        assert_eq!(r.last.parked, 0);
+    }
+    assert_eq!(r.restore()?.1, 4);
+    Ok(())
+}
+
+/// Guarantee: the owner's other source keeps flowing after the first is parked.
+#[test]
+fn the_other_source_of_the_owner_keeps_flowing() -> R {
+    let data = pattern(SIZE);
+    let mut r = Rig::new(&data)?;
+    let other = r.add_second(&pattern(1000))?;
+    r.park()?;
+    assert_eq!(r.last.parked, 1);
+    let mut grown = pattern(1000);
+    grown.extend_from_slice(b"more\n");
+    r.file()?.set(2, &grown);
+    r.round(SECOND + H3 + SECOND)?;
+    assert_eq!(r.last.landed, 1);
+    assert_eq!(r.restore_of(&other)?.0, grown);
+    assert_eq!(r.restore()?, (data, 4), "the parked source is frozen");
+    Ok(())
+}
+
+/// Guarantee: a match between failures resets the streak; an extension keeps it; an epoch not
+/// started by a mismatch clears it.
+#[test]
+fn a_match_resets_the_streak_and_an_extension_keeps_it() -> R {
+    let data = pattern(SIZE);
+    let mut r = Rig::new(&data)?;
+    r.round(0)?;
+    r.mismatch_round(SECOND)?;
+    r.mismatch_round(2 * SECOND)?;
+    let kept = state_of(2, at(SECOND)?);
+    assert_eq!(r.audit()?, kept);
+    let mut grown = data;
+    grown.extend_from_slice(&pattern(1000));
+    r.file()?.set(1, &grown);
+    r.round(3 * SECOND)?;
+    assert_eq!(
+        r.audit()?.consecutive_failures,
+        2,
+        "an extension keeps the streak"
+    );
+    assert_eq!(r.audit()?.first_failure_at_ns, at(SECOND)?);
+    r.round(4 * SECOND)?;
+    assert_eq!(
+        (r.counts(), r.audit()?.consecutive_failures),
+        ((1, 0, 0), 0)
+    );
+    assert_eq!(r.audit()?.first_failure_at_ns, None);
+    grown.extend_from_slice(&pattern(1000));
+    r.file()?.set(1, &grown);
+    r.round(5 * SECOND)?;
+    r.mismatch_round(5 * SECOND + 25 * HOUR)?;
+    let a = r.audit()?;
+    assert_eq!(
+        (a.consecutive_failures, a.first_failure_at_ns),
+        (1, at(5 * SECOND + 25 * HOUR)?)
+    );
+    assert_eq!(r.last.parked, 0);
+    // A truncation starts an epoch that is not a mismatch: the streak is cleared.
+    r.file()?.set(1, &pattern(SIZE / 2));
+    r.round(5 * SECOND + 26 * HOUR)?;
+    assert_eq!(r.audit()?, state_of(0, None));
+    assert_eq!(r.restore()?.0, pattern(SIZE / 2));
+    Ok(())
+}
+
+/// Guarantee: a park survives a restart with `status.json`; without it the index entry's streak
+/// parks the source again at the next due audit, and a match clears the streak.
+#[test]
+fn a_park_survives_a_restart_and_a_lost_status_heals() -> R {
+    let later = SECOND + H3 + 5 * SECOND;
+    // status.json intact: still parked, nothing read.
+    let mut r = Rig::new(&pattern(SIZE))?;
+    r.park()?;
+    r.restart()?;
+    assert_eq!(r.round(later)?, 0);
+    assert_eq!((r.stats, r.log.len(), r.last.parked), (0, 0, 0));
+    assert_eq!(r.disk_status()?.parked.len(), 1);
+    // status.json lost, corruption present: parked again by the next due audit.
+    let mut r = Rig::new(&pattern(SIZE))?;
+    r.park()?;
+    fs::remove_file(r.tmp.root().join(StateFile::Status.name())).map_err(e)?;
+    r.restart()?;
+    r.mismatch_round(later)?;
+    assert_eq!((r.last.parked, r.log.clone()), (1, vec![r.park_line()]));
+    assert_eq!(r.restore()?.1, 4);
+    assert_eq!(r.disk_status()?.parked.len(), 1);
+    // status.json lost, no corruption: the audit matches and the streak is cleared.
+    let mut r = Rig::new(&pattern(SIZE))?;
+    r.park()?;
+    fs::remove_file(r.tmp.root().join(StateFile::Status.name())).map_err(e)?;
+    r.restart()?;
+    r.round(later)?;
+    assert_eq!((r.counts(), r.last.parked, r.log.len()), ((1, 0, 0), 0, 0));
+    assert_eq!(r.audit()?, state_of(0, None).with_checked(at(later)?));
+    assert!(r.disk_status()?.parked.is_empty());
+    Ok(())
+}
+
+trait WithChecked {
+    fn with_checked(self, at: Option<i64>) -> Self;
+}
+impl WithChecked for AuditState {
+    fn with_checked(mut self, at: Option<i64>) -> Self {
+        self.last_checked_at_ns = at;
+        self
+    }
+}
+
+/// Guarantee: a source park is recorded in the round whose owner commit fails.
+#[test]
+fn a_park_is_recorded_when_the_owners_commit_fails() -> R {
+    let data = pattern(SIZE);
+    let mut r = Rig::new(&data)?;
+    let other = r.add_second(&pattern(1000))?;
+    r.round(0)?;
+    for n in 1..=3 {
+        r.mismatch_round(n * SECOND)?;
+    }
+    let mut grown = pattern(1000);
+    grown.extend_from_slice(b"more\n");
+    r.file()?.set(2, &grown);
+    r.d()?.store_mut().fail_puts = true;
+    r.mismatch_round(SECOND + H3)?;
+    assert_eq!((r.last.parked, r.last.landed, r.last.failed), (1, 0, 1));
+    assert_eq!(r.disk_status()?.parked.len(), 1);
+    assert_eq!(r.log, [r.park_line()]);
+    r.d()?.store_mut().fail_puts = false;
+    r.round(SECOND + H3 + 120 * SECOND)?;
+    assert_eq!(r.last.landed, 1);
+    assert_eq!(r.restore_of(&other)?.0, grown);
+    assert_eq!(r.restore()?, (data, 4));
     Ok(())
 }
