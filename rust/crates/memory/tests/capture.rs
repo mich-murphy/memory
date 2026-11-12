@@ -1043,3 +1043,48 @@ fn a_source_that_is_not_prefix_stable_never_parks_at_the_prefix_site() -> R {
     assert!(epochs >= 2, "extensions restarted the epoch: {epochs}");
     Ok(())
 }
+
+/// Guarantee: the prefix site is reached by a source that is not prefix-stable (the windows
+/// accept the extension, the transformed prefix differs) and restarts the epoch without counting
+/// a failure or a mismatch.
+#[test]
+fn a_non_prefix_stable_prefix_difference_restarts_without_a_failure() -> R {
+    let mut rig = Rig::new(vec![source(
+        1,
+        "projects/p/settings.json",
+        SourceClass::Append,
+        Profile::Transcript,
+    )?]);
+    rig.piece_len = 1 << 20;
+    let doc = |value: u32| {
+        let keys: Vec<String> = (0..8000_u32)
+            .map(|k| format!("\"k{k:05}\":{}", if k == 3000 { value } else { k }))
+            .collect();
+        format!("{{{}}}", keys.join(",")).into_bytes()
+    };
+    let old = doc(3000);
+    assert!(old.len() > 110_000);
+    transcript(&mut rig, &old);
+    rig.cycle()?;
+    for n in 1..=4_i64 {
+        let mut new = doc(u32::try_from(3000 + n).map_err(e)?);
+        new.extend_from_slice(&b" ".repeat(usize::try_from(3 * n).map_err(e)?));
+        rig.now_ns = 10_000_000_000 + n * 50 * HOUR_NS;
+        transcript(&mut rig, &new);
+        let (outcomes, changes) = rig.cycle()?;
+        assert_eq!(outcomes, [SourceOutcome::Planned], "step {n}");
+        assert_eq!(
+            kinds(&changes),
+            ["epoch"],
+            "step {n}: the prefix site restarts"
+        );
+        assert_eq!(rig.audit.mismatched, 0, "step {n}");
+        assert_eq!(audit_of(&rig)?.consecutive_failures, 0, "step {n}");
+        let restored: serde_json::Value =
+            serde_json::from_slice(&restore_latest(&rig)?).map_err(e)?;
+        let want: serde_json::Value =
+            serde_json::from_slice(&doc(u32::try_from(3000 + n).map_err(e)?)).map_err(e)?;
+        assert_eq!(restored, want, "step {n}");
+    }
+    Ok(())
+}
