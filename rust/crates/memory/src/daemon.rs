@@ -379,14 +379,22 @@ impl RemoteBase {
     }
 }
 
+/// Whether the owner takes a turn.
+enum Turn {
+    /// Runs at the next round.
+    Ready,
+    /// Monotonic time before which the owner is not retried (from `Disposition::Retry`).
+    RetryAt(Duration),
+    /// Skipped until unparked.
+    Parked(ParkedReason),
+}
+
 struct OwnerRt {
     base: RemoteBase,
     streak: Streak,
-    parked: Option<ParkedReason>,
+    turn: Turn,
     /// Manifests built since the last landed commit (A6); memory only.
     known_ours: KnownOurs,
-    /// Monotonic time before which the owner is not retried (from `Disposition::Retry`).
-    not_before: Option<Duration>,
 }
 
 impl OwnerRt {
@@ -394,9 +402,8 @@ impl OwnerRt {
         Self {
             base: RemoteBase::Unknown,
             streak: Streak::default(),
-            parked,
+            turn: parked.map_or(Turn::Ready, Turn::Parked),
             known_ours: KnownOurs::new(),
-            not_before: None,
         }
     }
 }
@@ -673,13 +680,13 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         match disp {
             Disposition::Done => {
                 report.landed += 1;
-                rt.not_before = None;
+                rt.turn = Turn::Ready;
                 false
             }
             Disposition::Retry { after, class } => {
                 report.failed += 1;
                 report.failures.bump(&class);
-                rt.not_before = Some(at.saturating_add(after));
+                rt.turn = Turn::RetryAt(at.saturating_add(after));
                 false
             }
             Disposition::Cancelled => {
@@ -692,12 +699,12 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 true
             }
             Disposition::Park { reason } => {
-                rt.parked = Some(ParkedReason::Source(reason));
+                rt.turn = Turn::Parked(ParkedReason::Source(reason));
                 report.parked += 1;
                 false
             }
             Disposition::ParkOwner { reason } => {
-                rt.parked = Some(ParkedReason::Owner(reason));
+                rt.turn = Turn::Parked(ParkedReason::Owner(reason));
                 report.parked += 1;
                 false
             }
@@ -707,16 +714,18 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     /// The owner's turn: `Some(at)` when it should run now, else it is counted as skipped
     /// (parked) or deferred (retry delay not elapsed).
     fn due(&self, rt: &OwnerRt, report: &mut RoundReport) -> Option<Duration> {
-        if rt.parked.is_some() {
-            report.skipped += 1;
-            return None;
-        }
         let at = Duration::from_nanos(self.clock.monotonic_ns());
-        if rt.not_before.is_some_and(|t| at < t) {
-            report.deferred += 1;
-            return None;
+        match &rt.turn {
+            Turn::Parked(_) => {
+                report.skipped += 1;
+                None
+            }
+            Turn::RetryAt(t) if at < *t => {
+                report.deferred += 1;
+                None
+            }
+            Turn::RetryAt(_) | Turn::Ready => Some(at),
         }
-        Some(at)
     }
 
     /// Rebuild the commit base from the store when it is unknown. `Break(pause)` ends the turn
@@ -939,11 +948,12 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         let mut parked: Vec<ParkedEntry> = self
             .owners
             .iter()
-            .filter_map(|(owner, rt)| {
-                rt.parked.clone().map(|reason| ParkedEntry {
+            .filter_map(|(owner, rt)| match &rt.turn {
+                Turn::Parked(reason) => Some(ParkedEntry {
                     owner: owner.clone(),
-                    reason,
-                })
+                    reason: reason.clone(),
+                }),
+                Turn::Ready | Turn::RetryAt(_) => None,
             })
             .collect();
         parked.sort_by_key(|p| format!("{:?}", p.owner));
