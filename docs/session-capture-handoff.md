@@ -18,11 +18,14 @@ history, not current execution instructions or renewed operating authority.
 `gpt-6.1-sol` workers at medium effort, parent-owned quality and verification.
 This is the single active task brief; dated operating records below remain history.
 
-> **Resume here (updated 2026-11-11, after the design and test review).** Read DESIGN.md, then
+> **Resume here (updated 2026-11-12, after the engineering-practice review).** Read DESIGN.md, then
 > [design-amendments-20261109.md](rust-rewrite/design-amendments-20261109.md) (A0–A13, wins
-> where they conflict), then the "Session 2026-11-10/11" block directly below, which is the
-> current state: stack #56 (PRs #54–#81) is merged, `main` is `c239d1b`, there is no open
-> Rust branch. [Report 24](rust-rewrite/implementation/24-design-and-test-review.md) is the
+> where they conflict), then the "Session 2026-11-12" block directly below, which is the
+> current state, and [report 25](rust-rewrite/implementation/25-engineering-practice-review.md),
+> the active coordinator brief, with
+> [evidence 15](rust-rewrite/implementation/evidence/15-engineering-practice-review/). The
+> "Session 2026-11-10/11" block after it is history: stack #56 (PRs #54–#81) is merged.
+> [Report 24](rust-rewrite/implementation/24-design-and-test-review.md) is the
 > full record and [evidence 14](rust-rewrite/implementation/evidence/14-design-test-review/)
 > its raw material. The "Session 2026-11-09, review and fix round" block is now history; its
 > "Next" line (slice 2) still stands, with the additions below. The "Handover 2026-11-09" and
@@ -31,7 +34,37 @@ This is the single active task brief; dated operating records below remain histo
 > in this brief (P5 authorization, acceptance bucket/token, hook argv, symlinks, state root)
 > are resolved by the amendments and kept only as history.
 
-**Session 2026-11-10/11, design and test review (current).** Operator-directed review of the
+**Session 2026-11-12, engineering-practice review and data-structure stack (current).**
+Operator-directed read-only review of the Rust code at `41a07ff` by eight Sonnet workers with
+parent acceptance, then prototypes of three data structures; record in report 25.
+- Review: the code is mostly sound in the small. Delivery has been horizontal: 17 of 25
+  implementation reports are components, 7 are review rounds, 1 is a thin end-to-end step.
+  Nothing runs end to end (`memory daemon` exits 78, no S3 client, zstd, run loop or reader).
+- Operator-approved plan: (1) walking skeleton: zstd, the S3 adapter, a one-file capture
+  under `rust-acceptance/`, a minimal restore; (2) hold further review rounds and mutant
+  triage until the run loop is wired, taking only the audit, hint retention, `tracing` and
+  the startup delay; (3) structural fixes as the skeleton touches the code; (4) fold the
+  amendments into DESIGN.md and fix the stale AGENTS.md lines.
+- Prototypes, measured against a decision rule fixed in advance: `OwnerRt` becomes
+  `RemoteBase` + `Turn` with `recover` returning the base; the commit result becomes
+  `CommitEnd { Landed, Adopted }` with local effects behind `apply_landed(&Landed, ..)`;
+  `authorize` borrows the admitted source, keeps its re-admit, and `binding()` destructures
+  exhaustively. The idle-round benchmark also found `reconcile_once` quadratic in owners
+  (30,000 owners: 3.24 s a round); an index map brings that to 72 ms.
+- Stack, local only, nothing pushed, in the worktree `/Users/mm/dev/memory-wt/ds-integrate`
+  on `41a07ff`: `rust/round-grouping` (`f9d8b50`), `rust/owner-turn-base` (`d60ec49`),
+  `rust/commit-end` (`b1e45f6`), `rust/authorize-borrow` (`0f3cb7d`),
+  `docs/engineering-practice-review` (this entry, report 25, evidence 15).
+- Gates on `0f3cb7d`: local, 500 cases, seed 374449330, all 13 sub-gates 0, 431 tests, 12
+  doctests, coverage 5869/6006 = 97.72 %, `verify-evidence.py` PASS. Not run: 2,000 cases,
+  hosted CI, `cargo mutants`.
+- Open operator decisions: push the stack and open its PRs; a bound on how long capture stays
+  off (Go writers stopped 2026-11-09, A0); how to fold the amendments into DESIGN.md, which
+  `verify-evidence.py` hash-pins; plus the two still open in the block below.
+- Next: plan step 1 on a branch above the stack, starting with the part that needs no R2
+  (zstd piece encoding, the S3 adapter behind `Store` against a local HTTP server).
+
+**Session 2026-11-10/11, design and test review (history).** Operator-directed review of the
 design, tests, complexity and Hegel properties by Sonnet workers with parent acceptance;
 record in report 24. Result on `main` (`c239d1b`):
 - Design: amendments A10 (corrections of fact and evidence labels), A11 (hook failure, hint
