@@ -182,9 +182,6 @@ pub struct EventCounts {
     pub index_damaged: u64,
     /// `index.json` had a newer schema at startup and was rebuilt.
     pub index_newer_schema: u64,
-    /// Owner commits that proceeded without their pending launch records. Attaching can no
-    /// longer fail, so nothing increments this; the field stays so `status.json` keeps its shape.
-    pub launch_attach_failed: u64,
 }
 
 /// Failed attempts by [`ErrorClass`] (DESIGN.md 11.2, 11.3): `transient` is distinct from
@@ -778,7 +775,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         request: Commit,
         got: Captured,
         hints: &mut [ScannedFile],
-        attached_for: Option<&Owner>,
+        owner: &Owner,
     ) -> Result<CommitEnd, Failure> {
         let result = commit_known(
             &mut self.store,
@@ -793,26 +790,24 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             // base, apply nothing, and the next round captures again.
             rt.base = RemoteBase::Known(end.base());
             if let CommitEnd::Landed(landed) = end {
-                self.apply_landed(landed, got.updates, hints, attached_for);
+                self.apply_landed(landed, got.updates, hints, owner);
             }
         }
         result
     }
 
     /// The local effects of a commit that landed. Taking `&Landed` is the proof that this
-    /// capture's bytes are durable; `hint_owner` is `Some` when launch hints were attached.
+    /// capture's bytes are durable, and with them the owner's pending launch records.
     fn apply_landed(
         &mut self,
         _landed: &Landed,
         updates: Vec<Update>,
         hints: &mut [ScannedFile],
-        hint_owner: Option<&Owner>,
+        owner: &Owner,
     ) {
         self.apply(updates);
-        if let Some(owner) = hint_owner {
-            for record in hints.iter_mut().flat_map(|f| f.records.iter_mut()) {
-                record.done |= record.owner == *owner;
-            }
+        for record in hints.iter_mut().flat_map(|f| f.records.iter_mut()) {
+            record.done |= record.owner == *owner;
         }
     }
 
@@ -840,7 +835,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             return false;
         };
         Self::attach_pending(&mut request, hints, owner);
-        let result = self.land(rt, base.as_ref(), request, got, hints, Some(owner));
+        let result = self.land(rt, base.as_ref(), request, got, hints, owner);
         let draw = self.next_draw();
         Self::settle(rt, &result, at, draw, report)
     }
