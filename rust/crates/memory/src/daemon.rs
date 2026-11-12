@@ -238,7 +238,7 @@ pub struct RoundReport {
     pub skipped: usize,
     /// Owners parked by this round.
     pub parked: usize,
-    /// Owners skipped because a retry delay (`not_before`) has not elapsed.
+    /// Owners skipped because their retry delay has not elapsed.
     pub deferred: usize,
     /// Failures of this round by class.
     pub failures: FailureCounts,
