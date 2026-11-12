@@ -17,7 +17,8 @@
 //! recovers it from the store on its first round after a start (`recover_base`).
 use crate::audit::AuditCounts;
 use crate::capture::{
-    Captured, Env, Local, Locals, MAX_PIECE_BYTES, Source, Update, attach_launches, capture,
+    Captured, Env, Local, Locals, MAX_PIECE_BYTES, Source, SourceOutcome, Update, attach_launches,
+    capture,
 };
 use crate::commit::{
     Base, Commit, CommitEnd, Failure, KnownOurs, Landed, commit_known, disposition_paced,
@@ -138,6 +139,9 @@ pub struct ParkedEntry {
     pub owner: Owner,
     /// Why.
     pub reason: ParkedReason,
+    /// The parked source; absent when the whole owner is parked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceId>,
 }
 
 /// `status.json` body (schema `memory.status/1`). A file written by an earlier build, which had
@@ -225,7 +229,7 @@ pub struct RoundReport {
     pub failed: usize,
     /// Owners skipped because they are parked.
     pub skipped: usize,
-    /// Owners parked by this round.
+    /// Owners or sources parked by this round.
     pub parked: usize,
     /// Owners skipped because their retry delay has not elapsed.
     pub deferred: usize,
@@ -341,11 +345,14 @@ struct OwnerRt {
     turn: Turn,
     /// Manifests built since the last landed commit (A6); memory only.
     known_ours: KnownOurs,
+    /// Sources parked alone; the owner's other sources keep flowing.
+    parked_sources: BTreeMap<SourceId, ParkReason>,
 }
 
 impl OwnerRt {
     fn new(parked: Option<ParkedReason>) -> Self {
         Self {
+            parked_sources: BTreeMap::new(),
             base: RemoteBase::Unknown,
             streak: Streak::default(),
             turn: parked.map_or(Turn::Ready, Turn::Parked),
@@ -497,12 +504,18 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 (id, local)
             })
             .collect();
-        let owners = opened
-            .status
-            .parked
-            .iter()
-            .map(|p| (p.owner.clone(), OwnerRt::new(Some(p.reason.clone()))))
-            .collect();
+        let mut owners: HashMap<Owner, OwnerRt> = HashMap::new();
+        for p in &opened.status.parked {
+            let rt = owners
+                .entry(p.owner.clone())
+                .or_insert_with(|| OwnerRt::new(None));
+            match (&p.source, &p.reason) {
+                (Some(id), ParkedReason::Source(reason)) => {
+                    rt.parked_sources.insert(id.clone(), reason.clone());
+                }
+                _ => rt.turn = Turn::Parked(p.reason.clone()),
+            }
+        }
         Ok(Self {
             _lock: opened.lock,
             state: opened.state,
@@ -819,8 +832,20 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             ControlFlow::Break(pause) => return pause,
             ControlFlow::Continue(base) => base,
         };
-        let mut got = self.capture_owner(owner, sources, base.as_ref(), when);
+        let live: Vec<Source> = sources
+            .iter()
+            .filter(|s| !rt.parked_sources.contains_key(&s.id))
+            .cloned()
+            .collect();
+        let mut got = self.capture_owner(owner, &live, base.as_ref(), when);
         report.audit.add(&got.audit);
+        // A source park takes effect whether or not the owner's commit lands.
+        for (id, outcome) in &got.outcomes {
+            if let SourceOutcome::Parked(reason) = outcome {
+                rt.parked_sources.insert(id.clone(), reason.clone());
+                report.parked += 1;
+            }
+        }
         let Some(mut request) = got.commit.take() else {
             self.apply(got.updates);
             return false;
@@ -938,9 +963,16 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 .remove(owner)
                 .unwrap_or_else(|| OwnerRt::new(None));
             let was_parked = matches!(rt.turn, Turn::Parked(_));
+            let known: Vec<SourceId> = rt.parked_sources.keys().cloned().collect();
             let pause = self.run_owner(owner, sources, &mut rt, &mut files, &when, &mut report);
             if !was_parked && let Turn::Parked(reason) = &rt.turn {
-                crate::log::parked(owner, reason);
+                crate::log::parked(owner, reason, crate::log::Scope::Owner);
+            }
+            for (id, reason) in &rt.parked_sources {
+                if !known.contains(id) {
+                    let reason = ParkedReason::Source(reason.clone());
+                    crate::log::parked(owner, &reason, crate::log::Scope::Source);
+                }
             }
             self.owners.insert(owner.clone(), rt);
             if pause {
@@ -961,18 +993,24 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         self.status.audit.add(&report.audit);
         self.status.rounds += 1;
         self.status.updated_at = text;
-        let mut parked: Vec<ParkedEntry> = self
-            .owners
-            .iter()
-            .filter_map(|(owner, rt)| match &rt.turn {
-                Turn::Parked(reason) => Some(ParkedEntry {
+        let mut parked: Vec<ParkedEntry> = Vec::new();
+        for (owner, rt) in &self.owners {
+            if let Turn::Parked(reason) = &rt.turn {
+                parked.push(ParkedEntry {
                     owner: owner.clone(),
                     reason: reason.clone(),
-                }),
-                Turn::Ready | Turn::RetryAt(_) => None,
-            })
-            .collect();
-        parked.sort_by_key(|p| format!("{:?}", p.owner));
+                    source: None,
+                });
+            }
+            for (id, reason) in &rt.parked_sources {
+                parked.push(ParkedEntry {
+                    owner: owner.clone(),
+                    reason: ParkedReason::Source(reason.clone()),
+                    source: Some(id.clone()),
+                });
+            }
+        }
+        parked.sort_by_key(|p| (format!("{:?}", p.owner), p.source.clone()));
         self.status.parked = parked;
         // The parked list and host pause are authoritative (DESIGN.md 11.3): a change is made
         // durable at once. Counters and `updated_at` follow the 60 s rule of 9.2.

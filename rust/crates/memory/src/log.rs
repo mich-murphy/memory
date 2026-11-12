@@ -26,12 +26,12 @@
 //! | `round` | `landed failed skipped parked deferred offline throttled transient destination_auth local deterministic hints_removed hints_kept_old audit_matched audit_mismatched audit_ineligible` |
 //! | `stopped` | none |
 //! | `state_load` | `file` (`index` or `status`) `result` (`damaged` or `newer_schema`) |
-//! | `parked` | `owner` `reason` (`foreign_writer`, `newer_remote_schema`, `repeated_audit_mismatch`, `repeated_readback_mismatch`, `source_unstable`, `repeated_non_json_response`, `repeated_schema_error`) |
+//! | `parked` | `owner` `reason` `scope` (`owner` or `source`; reasons: `foreign_writer`, `newer_remote_schema`, `repeated_audit_mismatch`, `repeated_readback_mismatch`, `source_unstable`, `repeated_non_json_response`, `repeated_schema_error`) |
 //! | `host_paused` | none |
 //! | `host_resumed` | none |
 //!
 //! `state_load` follows `started`, `status` before `index`, only for a damaged or newer-schema
-//! startup load. `parked` is logged once, in the round an owner becomes parked. `host_paused`
+//! startup load. `parked` is logged once, in the round an owner or one of its sources becomes parked; a source id is never logged. `host_paused`
 //! and `host_resumed` are logged in the round the pause starts and ends. All come before that
 //! round's `round` line.
 //!
@@ -233,13 +233,27 @@ const fn reason_id(reason: &ParkedReason) -> &'static str {
     }
 }
 
-/// An owner's turn became parked in this round.
-pub fn parked(owner: &Owner, reason: &ParkedReason) {
+/// What a `parked` event parks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// The whole owner.
+    Owner,
+    /// One source of the owner; its id is never logged.
+    Source,
+}
+
+/// An owner or one of its sources became parked in this round.
+pub fn parked(owner: &Owner, reason: &ParkedReason, scope: Scope) {
     let prefix = owner_prefix(owner);
+    let scope = match scope {
+        Scope::Owner => "owner",
+        Scope::Source => "source",
+    };
     tracing::info!(
         event = "parked",
         owner = prefix.as_str(),
-        reason = reason_id(reason)
+        reason = reason_id(reason),
+        scope = scope
     );
 }
 

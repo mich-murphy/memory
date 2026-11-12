@@ -3,7 +3,8 @@ use memory::audit::AuditCounts;
 use memory::daemon::{FailureCounts, RoundReport};
 use memory::daemon::{ParkedReason, StateLoad};
 use memory::log::{
-    format_utc, host_paused, host_resumed, parked, render, round, started, state_loads, stopped,
+    Scope, format_utc, host_paused, host_resumed, parked, render, round, started, state_loads,
+    stopped,
 };
 use memory_core::domain::{
     Agent, ArchiveId, MachineId, Owner, OwnerParkReason, ParkReason, SessionId, SessionKey, Sha256,
@@ -167,10 +168,19 @@ fn parked_names_the_owner_prefix_and_a_closed_reason() -> Result<(), String> {
         ),
     ];
     for (reason, id) in cases {
-        let text = render(|| parked(&owner, &reason));
+        let text = render(|| parked(&owner, &reason, Scope::Owner));
         let (_, rest) = split(only_line(&text)).unwrap_or_default();
-        assert_eq!(rest, format!("INFO parked owner={prefix} reason={id}"));
+        assert_eq!(
+            rest,
+            format!("INFO parked owner={prefix} reason={id} scope=owner")
+        );
         assert!(!text.contains("abab"), "no digest in the line");
+        let text = render(|| parked(&owner, &reason, Scope::Source));
+        let (_, rest) = split(only_line(&text)).unwrap_or_default();
+        assert_eq!(
+            rest,
+            format!("INFO parked owner={prefix} reason={id} scope=source")
+        );
     }
     Ok(())
 }

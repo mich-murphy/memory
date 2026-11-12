@@ -70,7 +70,7 @@ fn parse(line: &str) -> Result<&str, String> {
         "round" => &ROUND_KEYS,
         "stopped" | "host_paused" | "host_resumed" => &[],
         "state_load" => &["file", "result"],
-        "parked" => &["owner", "reason"],
+        "parked" => &["owner", "reason", "scope"],
         other => return Err(format!("unknown event {other:?}")),
     };
     if keys != want {
@@ -93,6 +93,7 @@ fn parse(line: &str) -> Result<&str, String> {
                 "repeated_schema_error",
             ]
             .contains(&value),
+            "scope" => ["owner", "source"].contains(&value),
             "owner" => {
                 !value.is_empty()
                     && value

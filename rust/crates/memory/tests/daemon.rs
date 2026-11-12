@@ -1159,7 +1159,7 @@ fn an_owner_is_logged_once_when_it_becomes_parked() -> R {
     assert_eq!(
         lines,
         [format!(
-            "INFO parked owner={} reason=foreign_writer",
+            "INFO parked owner={} reason=foreign_writer scope=owner",
             memory_core::limits::owner_prefix(&a)
         )]
     );
@@ -1196,7 +1196,7 @@ fn a_source_park_is_logged_with_its_reason() -> R {
         seen.push(logged_round!(d).1);
     }
     let want = format!(
-        "INFO parked owner={} reason=repeated_schema_error",
+        "INFO parked owner={} reason=repeated_schema_error scope=owner",
         memory_core::limits::owner_prefix(&o)
     );
     assert_eq!(seen, [vec![], vec![], vec![want]]);
@@ -2638,6 +2638,7 @@ fn authoritative_park_is_written_inside_the_interval() -> R {
         vec![memory::daemon::ParkedEntry {
             owner: o2,
             reason: ParkedReason::Owner(OwnerParkReason::NewerRemoteSchema),
+            source: None,
         }]
     );
     d.clock_mut().mono = 20_000_000_000;
