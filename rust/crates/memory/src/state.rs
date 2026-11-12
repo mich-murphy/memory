@@ -620,6 +620,20 @@ pub fn write_durable(
     stage(dir, name, schema, body)?.publish()
 }
 
+/// One bounded read of a hint day file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HintRead {
+    /// The bytes read, at most the bound.
+    pub bytes: Vec<u8>,
+    /// True when the file held more than the bound.
+    pub cut: bool,
+}
+
+fn hint_day_name(name: &str) -> bool {
+    name.strip_suffix(".jsonl")
+        .is_some_and(crate::hook::is_day_name)
+}
+
 /// The prepared state directory. Constructing it needs the [`DaemonLock`], so a second
 /// daemon cannot sweep `tmp/` under a running one.
 #[derive(Debug, Clone)]
@@ -765,6 +779,79 @@ impl StateDir {
         vet(&dir, true)?;
         self.vet_dir(&dir)?;
         Ok(dir)
+    }
+
+    /// Names of the day files in `state/hints`, sorted. Only regular files (a symlink or a
+    /// directory is not followed and not listed) named `YYYY-MM-DD.jsonl` appear.
+    ///
+    /// # Errors
+    /// [`StateError::Io`] when the directory cannot be read (including "not found").
+    pub fn list_hint_days(&self) -> Result<Vec<String>, StateError> {
+        let mut names: Vec<String> = fs::read_dir(self.hints_dir())
+            .map_err(io)?
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                if !entry.file_type().ok()?.is_file() {
+                    return None;
+                }
+                let name = entry.file_name().into_string().ok()?;
+                hint_day_name(&name).then_some(name)
+            })
+            .collect();
+        names.sort();
+        Ok(names)
+    }
+
+    /// Read one hint day file, at most `bound` bytes. [`HintRead::cut`] says the file held more.
+    ///
+    /// # Errors
+    /// [`StateError::InvalidName`] for a name [`StateDir::list_hint_days`] would not list,
+    /// [`StateError::Symlink`] or [`StateError::Io`] for a non-regular entry or a failed read.
+    pub fn read_hint_day(&self, name: &str, bound: u64) -> Result<HintRead, StateError> {
+        let path = self.hint_day_path(name)?;
+        let file = File::open(&path).map_err(io)?;
+        if !file.metadata().map_err(io)?.is_file() {
+            return Err(StateError::Io(ErrorKind::InvalidInput));
+        }
+        let mut bytes = Vec::new();
+        file.take(bound.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(io)?;
+        let cut = u64::try_from(bytes.len()).map_or(true, |len| len > bound);
+        if cut {
+            bytes.truncate(usize::try_from(bound).unwrap_or(usize::MAX));
+        }
+        Ok(HintRead { bytes, cut })
+    }
+
+    /// Remove one hint day file; one already gone counts as removed. The directory is synced
+    /// under this directory's [`SyncPolicy`].
+    ///
+    /// # Errors
+    /// [`StateError::InvalidName`], [`StateError::Symlink`] or [`StateError::Io`] (a
+    /// non-regular entry is never removed).
+    pub fn remove_hint_day(&self, name: &str) -> Result<(), StateError> {
+        let path = self.hint_day_path(name)?;
+        match fs::remove_file(&path) {
+            Ok(()) => fsync_dir(&self.hints_dir(), self.sync),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(io(error)),
+        }
+    }
+
+    /// Path of a hint day file, refusing a bad name or a symlink in its place.
+    fn hint_day_path(&self, name: &str) -> Result<PathBuf, StateError> {
+        if !hint_day_name(name) {
+            return Err(StateError::InvalidName);
+        }
+        let path = self.hints_dir().join(name);
+        match fs::symlink_metadata(&path) {
+            Ok(meta) if meta.file_type().is_symlink() => Err(StateError::Symlink),
+            Ok(meta) if !meta.is_file() => Err(StateError::Io(ErrorKind::InvalidInput)),
+            Ok(_) => Ok(path),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(path),
+            Err(error) => Err(io(error)),
+        }
     }
 
     /// Durably write a state file.

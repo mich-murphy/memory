@@ -24,7 +24,7 @@ use crate::commit::{
 };
 use crate::config::{Config, ConfigError};
 use crate::environment::{Clock, FileSystem, Store};
-use crate::hook::{is_day_name, utc_day};
+use crate::hook::utc_day;
 use crate::state::{
     DaemonLock, Loaded, MissingReason, StateDir, StateError, StateFile, SyncPolicy, WRITER_VERSION,
 };
@@ -39,7 +39,6 @@ use memory_core::privacy::{PolicyContext, SanitizedLaunch, sanitize_launch};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
-use std::io::Read;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -609,22 +608,15 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     }
 
     fn scan_hints(&self) -> Vec<ScannedFile> {
-        let Ok(dir) = std::fs::read_dir(self.state.hints_dir()) else {
+        let Ok(names) = self.state.list_hint_days() else {
             return Vec::new();
         };
-        let mut names: Vec<String> = dir
-            .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
-            .filter(|name| name.strip_suffix(".jsonl").is_some_and(is_day_name))
-            .collect();
-        names.sort();
         let mut out = Vec::new();
         for name in names {
-            let mut bytes = Vec::new();
-            let read = std::fs::File::open(self.state.hints_dir().join(&name))
-                .and_then(|file| file.take(MAX_HINT_FILE).read_to_end(&mut bytes));
-            if read.is_err() {
+            let Ok(read) = self.state.read_hint_day(&name, MAX_HINT_FILE) else {
                 continue;
-            }
+            };
+            let bytes = read.bytes;
             let start = self.hints.get(&name).copied().unwrap_or(0);
             // An offset past the end means the file was replaced: start over.
             let Ok((start, found)) = scan(&bytes, start)
