@@ -90,12 +90,14 @@ fn pattern(len: usize) -> Vec<u8> {
 struct Spy {
     inner: MemFs,
     bytes_read: u64,
+    stats: u64,
     flips: VecDeque<usize>,
     touch: bool,
 }
 impl FileSystem for Spy {
     type Error = ();
     fn stat(&mut self, source: u64) -> Result<Option<Stat>, ()> {
+        self.stats += 1;
         self.inner.stat(source)
     }
     fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, ()> {
@@ -281,6 +283,25 @@ fn append_after_an_audit_reads_no_full_stream_and_keeps_the_audit_time() -> R {
     );
     assert_eq!(audit.consecutive_failures, 0);
     assert_eq!(r.round(3 * SECOND)?, 0, "no re-hash after the append");
+    assert_eq!(r.restore()?, (grown, 1));
+    Ok(())
+}
+
+/// Guarantee: the cheap pre-check. A due audit of a source whose stat already differs from the
+/// stored one is ineligible without another stat or any read: the round's own stat is the only
+/// one, and the append proceeds through the window check.
+#[test]
+fn a_changed_stat_is_ineligible_before_any_audit_stat_or_read() -> R {
+    let data = pattern(SIZE);
+    let mut r = Rig::new(&data)?;
+    r.round(0)?;
+    let mut grown = data;
+    grown.extend_from_slice(&pattern(1_000));
+    r.file().set(1, &grown);
+    let stats = r.d.fs_mut().stats;
+    assert_eq!(r.round(SECOND)?, WINDOWS + 1_000, "windows and delta only");
+    assert_eq!(r.d.fs_mut().stats - stats, 1, "no audit stat");
+    assert_eq!(r.audit()?.last_checked_at_ns, None);
     assert_eq!(r.restore()?, (grown, 1));
     Ok(())
 }
