@@ -7,7 +7,7 @@
 //! the stand-in planner of `commit_protocol.rs`; the store faults are the same scripted ones.
 use hegel::{TestCase, generators as gs};
 use memory::audit::{AUDIT_INTERVAL_NS, due};
-use memory::capture::{Captured, Env, Local, Locals, Published, Source, capture};
+use memory::capture::{Captured, Env, Local, Locals, Published, Source, SourceOutcome, capture};
 use memory::commit::{Base, CommitEnd, Failure, LandedHow, commit, manifest_key, recover_base};
 use memory::environment::{Store, StoreError, Stored};
 use memory_core::domain::{
@@ -503,6 +503,8 @@ struct Shapes {
     mid_rewrite_grow: AtomicU64,
     /// The same at an unchanged size.
     mid_rewrite_same: AtomicU64,
+    /// A source was parked by repeated audit mismatches and its epoch stayed frozen.
+    source_park: AtomicU64,
 }
 impl Shapes {
     const fn new() -> Self {
@@ -517,6 +519,7 @@ impl Shapes {
             past_tail_window: AtomicU64::new(0),
             mid_rewrite_grow: AtomicU64::new(0),
             mid_rewrite_same: AtomicU64::new(0),
+            source_park: AtomicU64::new(0),
         }
     }
     fn counts(&self) -> Vec<(&'static str, u64)> {
@@ -532,6 +535,7 @@ impl Shapes {
             ("past-tail-window", load(&self.past_tail_window)),
             ("mid-rewrite-grow-audited", load(&self.mid_rewrite_grow)),
             ("mid-rewrite-same-audited", load(&self.mid_rewrite_same)),
+            ("source-park", load(&self.source_park)),
         ]
     }
 }
@@ -601,6 +605,11 @@ struct Sut {
     base: Option<Base>,
     needs_recover: bool,
     parked: bool,
+    /// Sources the daemon parked alone (mirrors `Daemon`: left out of later captures), by
+    /// model index, with the latest epoch at the park: bytes, digest and epoch count.
+    parked_sources: BTreeMap<u8, (Vec<u8>, Sha256, usize)>,
+    /// Parks not yet counted by `check` as a shape.
+    fresh_parks: Vec<u8>,
     head: Option<(u64, Sha256)>,
     piece_len: usize,
     /// Wall time of the next capture; every capture step moves it one second, and a quiesce
@@ -621,6 +630,8 @@ impl Sut {
             base: None,
             needs_recover: true,
             parked: false,
+            parked_sources: BTreeMap::new(),
+            fresh_parks: Vec::new(),
             head: None,
             wall_ns: 10_000_000_000,
         })
@@ -646,6 +657,33 @@ impl Sut {
                 self.fs.files.remove(&handle(src));
             }
         }
+    }
+    /// The sources a capture covers: those the daemon has not parked.
+    fn live_sources(&self) -> Vec<Source> {
+        self.sources
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| u8::try_from(*i).is_ok_and(|i| !self.parked_sources.contains_key(&i)))
+            .map(|(_, s)| s.clone())
+            .collect()
+    }
+    /// Record the sources a capture reported `Parked`, as the daemon does whether or not the
+    /// owner's commit lands, freezing the epoch the store holds for each.
+    fn note_parks(&mut self, outcomes: &[(SourceId, SourceOutcome)]) -> R {
+        for (id, outcome) in outcomes {
+            if !matches!(outcome, SourceOutcome::Parked(_)) {
+                continue;
+            }
+            for i in 0..SOURCES {
+                if src_id(i)? == *id && !self.parked_sources.contains_key(&i) {
+                    let (bytes, digest) = need(self.latest_epoch(i)?, "a park without an epoch")?;
+                    let epochs = self.epoch_count(i)?;
+                    self.parked_sources.insert(i, (bytes, digest, epochs));
+                    self.fresh_parks.push(i);
+                }
+            }
+        }
+        Ok(())
     }
     /// Recover the base from the store when needed. `Some(report)` means stop.
     fn ensure_base(&mut self) -> R<Option<Report>> {
@@ -700,17 +738,19 @@ impl Sut {
             return Ok(report);
         }
         let now = self.tick();
+        let live = self.live_sources();
         let empty = OwnerState::default();
         let state = self.base.as_ref().map_or(&empty, |b| &b.state);
         let got = run_capture(
             &mut self.fs,
-            &self.sources,
+            &live,
             &self.locals,
             state,
             &self.context,
             &self.owner,
             (now, self.piece_len),
         )?;
+        self.note_parks(&got.outcomes)?;
         let Some(request) = got.commit else {
             for update in got.updates {
                 update.apply(&mut self.locals);
@@ -738,11 +778,12 @@ impl Sut {
             };
             if let Some(base) = base {
                 let now = self.tick();
+                let live = self.live_sources();
                 let empty = OwnerState::default();
                 let state = base.as_ref().map_or(&empty, |b| &b.state);
                 let got = run_capture(
                     &mut self.fs,
-                    &self.sources,
+                    &live,
                     &self.locals,
                     state,
                     &self.context,
@@ -979,6 +1020,9 @@ impl Sut {
         let mut shadow = old.clone();
         shadow.extend_from_slice(new.get(old.len()..).unwrap_or_default());
         self.reconcile()?;
+        if self.parked_sources.contains_key(&src) {
+            return Ok(());
+        }
         self.holds(src, &shadow, epochs)?;
         // The audit of a growing extension is due at the next round when the last audit is
         // already 24 h old (the wall clock jumped at an earlier settle), else after the turn.
@@ -995,10 +1039,16 @@ impl Sut {
                     )
                 });
         self.reconcile()?;
+        if self.parked_sources.contains_key(&src) {
+            return Ok(());
+        }
         if grow && !due_next {
             // Within the 24 h: not due, so still the old prefix.
             self.holds(src, &shadow, epochs)?;
             self.audit_turn()?;
+        }
+        if self.parked_sources.contains_key(&src) {
+            return Ok(());
         }
         self.follows(src, &after.files)?;
         ensure(
@@ -1036,6 +1086,7 @@ impl Sut {
         let epochs = self.epoch_count(src)?;
         let ready = last == Report::Idle
             && !self.parked
+            && !self.parked_sources.contains_key(&src)
             && !self.store.foreign_armed()
             && indexed
             && epochs >= 1
@@ -1047,6 +1098,10 @@ impl Sut {
     fn liveness(&self, disk: &Disk, history: &History) -> R {
         let observed = observe(&self.store, &self.owner, history)?;
         for i in 0..SOURCES {
+            // A parked source is exempt: the daemon leaves it out of every later capture.
+            if self.parked_sources.contains_key(&i) {
+                continue;
+            }
             let entry = observed.as_ref().and_then(|o| o.sources.get(&i));
             match (disk.get(&i), entry) {
                 (Some(bytes), Some(Some(latest))) => {
@@ -1077,6 +1132,29 @@ impl Sut {
             )?;
         }
         self.head = Some((observed.seq, observed.hash));
+        // A parked source: its latest epoch never changes and still hashes to its digest. A
+        // park needs the model to have rewritten that source between the windows at least
+        // PARK_THRESHOLD times (necessary, not sufficient: the failures must also span 3 h).
+        for (src, (bytes, digest, epochs)) in &self.parked_sources {
+            let latest = need(self.latest_epoch(*src)?, "a parked source lost its epoch")?;
+            ensure(
+                latest.0 == *bytes && latest.1 == *digest && sha(&latest.0) == *digest,
+                "a parked source's latest epoch changed",
+            )?;
+            ensure(
+                self.epoch_count(*src)? == *epochs,
+                "a parked source gained an epoch",
+            )?;
+            let rewrites = reference.mid_rewrites.get(src).copied().unwrap_or(0);
+            ensure(
+                u32::try_from(rewrites)
+                    .is_ok_and(|n| n >= memory_core::disposition::PARK_THRESHOLD),
+                "parked with fewer than PARK_THRESHOLD between-windows rewrites",
+            )?;
+        }
+        for _ in self.fresh_parks.drain(..) {
+            bump(&shapes.source_park);
+        }
         // Appends never start an epoch: a source has at most one epoch per destructive change
         // the model made to it (rewrite, truncation, removal, rename-replace) plus the first.
         // A wrongly computed window digest or a lost resume state would replay needlessly.
@@ -1175,6 +1253,8 @@ struct Reference {
     /// accepted a between-windows rewrite (the file before it, plus everything appended since).
     /// Those bytes were never the file, so they are also entered into the history (1a).
     awaiting: BTreeMap<u8, Vec<u8>>,
+    /// Between-windows rewrites applied per source.
+    mid_rewrites: BTreeMap<u8, usize>,
 }
 
 /// Bytes strictly between the windows of a file of `len` bytes (those only an audit certifies);
@@ -1213,6 +1293,7 @@ impl Reference {
             generation: BTreeMap::new(),
             destructive: BTreeMap::new(),
             awaiting: BTreeMap::new(),
+            mid_rewrites: BTreeMap::new(),
         }
     }
     /// Count a change that may start an epoch, when the file exists.
@@ -1251,6 +1332,7 @@ impl Reference {
                     && let Some(span) = mid_span(file.len())
                 {
                     self.destroy(*src);
+                    *self.mid_rewrites.entry(*src).or_default() += 1;
                     let head = usize::try_from(HEAD_WINDOW).unwrap_or(0);
                     let at = head
                         + usize::try_from(*pos)
@@ -1719,7 +1801,14 @@ fn hegel_property4_capture_state_machine() {
     if std::env::var_os("CAPTURE_PROPERTY_STATS").is_some() {
         eprintln!("{}", STATS.report());
     }
-    let guard = require_all(&HEGEL_SHAPES.counts());
+    // `source-park` is reached only by the scripted test: through `exec`, a between-windows
+    // rewrite settles first and the audit of the new epoch matches, which resets the streak.
+    let required: Vec<_> = HEGEL_SHAPES
+        .counts()
+        .into_iter()
+        .filter(|(name, _)| *name != "source-park")
+        .collect();
+    let guard = require_all(&required);
     assert!(guard.is_ok(), "{guard:?} {:?}", HEGEL_SHAPES.counts());
 }
 
@@ -1963,6 +2052,59 @@ fn between_windows_rewrites_are_found_by_the_audit_in_a_scripted_run() -> R {
     )?;
     sut.follows(0, &reference.files)?;
     sut.liveness(&reference.files, &reference.history)
+}
+
+/// Three between-windows rewrites with growth, each followed at once by a capture (so the
+/// audit never gets a read that matches and resets the streak) and without resumable state (so
+/// the extension re-reads and checks its prefix), the third more than 3 h after the first, park
+/// the source alone: its epoch stays frozen, the other source keeps following, and the shape is
+/// counted. `Step::MidRewrite` through `exec` cannot do this: it settles first, and the audit of
+/// the new epoch matches.
+#[test]
+fn repeated_prefix_mismatches_park_the_source_in_a_scripted_run() -> R {
+    let shapes = Shapes::new();
+    let (mut reference, mut sut) = drive(
+        &[app(0, 0, 70_000), app(1, 1, 20), Step::Reconcile],
+        &shapes,
+    )?;
+    let mid = Step::MidRewrite {
+        src: 0,
+        pos: 7,
+        byte: 0,
+        grow: Some((3, 5)),
+    };
+    for n in 0..3 {
+        if n == 2 {
+            sut.wall_ns = sut.wall_ns.saturating_add(4 * 3_600 * 1_000_000_000);
+        }
+        reference.apply(&mid);
+        sut.sync_file(0, &reference);
+        for local in sut.locals.values_mut() {
+            if let Some(index) = local.index.as_mut() {
+                index.whole_state = None;
+            }
+        }
+        sut.reconcile()?;
+        sut.check(&reference, &shapes)?;
+    }
+    ensure(sut.parked_sources.contains_key(&0), "source 0 is parked")?;
+    ensure(!sut.parked_sources.contains_key(&1), "source 1 is not")?;
+    ensure(sut.epoch_count(0)? == 3, "frozen at the third epoch")?;
+    let step = app(1, 2, 10);
+    reference.apply(&step);
+    sut.exec(&step, &reference, &shapes)?;
+    sut.reconcile()?;
+    sut.check(&reference, &shapes)?;
+    sut.follows(1, &reference.files)?;
+    ensure(sut.epoch_count(0)? == 3, "still frozen")?;
+    sut.liveness(&reference.files, &reference.history)?;
+    ensure(
+        shapes
+            .counts()
+            .iter()
+            .any(|(name, n)| *name == "source-park" && *n == 1),
+        "source-park counted once",
+    )
 }
 
 #[test]
