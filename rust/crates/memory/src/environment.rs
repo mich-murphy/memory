@@ -190,8 +190,8 @@ impl AsRef<[u8]> for Published {
 
 /// Typed object store seam for the commit protocol (DESIGN.md 6.2, 7.4).
 ///
-/// There is deliberately no production implementation. Uploads take [`Published`], which only
-/// privacy-authorized piece slices and the writer's own metadata can produce.
+/// The production implementation is [`crate::s3::S3Store`]. Uploads take [`Published`], which
+/// only privacy-authorized piece slices and the writer's own metadata can produce.
 pub trait Store {
     /// Immutable conditional creation (`If-None-Match: *`).
     ///

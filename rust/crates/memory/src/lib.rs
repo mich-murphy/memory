@@ -1,4 +1,5 @@
-//! Runtime boundary scaffold. No production environment exists yet.
+//! Runtime shell: capture, commit, local state and the adapters behind the environment seams
+//! (`realfs`, `s3`). The daemon's run loop is not wired yet.
 pub mod capture;
 pub mod commit;
 pub mod config;
