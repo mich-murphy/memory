@@ -4,8 +4,8 @@ Capture and analyze Claude Code, Codex, and Pi session evidence across machines.
 
 ## Direction and implementation status
 
-**For the Rust rewrite, start with [DESIGN.md](DESIGN.md) and its
-[2026-11-09 amendments](docs/rust-rewrite/design-amendments-20261109.md), then the
+**For the Rust rewrite, start with [DESIGN.md](DESIGN.md) (amendments folded in;
+[why each change was made](docs/rust-rewrite/design-amendments-20261109.md)), then the
 [active delivery handoff](docs/session-capture-handoff.md#current-session-checkpoint).**
 DESIGN.md is authoritative: append pieces, delta/checkpoint manifests, no spool or
 job tables, hooks/notifications with safety reconciliation, and one shared reader.

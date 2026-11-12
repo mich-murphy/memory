@@ -18,16 +18,19 @@ of goals, not implementation or release evidence by itself. [docs/README.md](doc
 separates current implementation references from historical evidence. The opt-in offline
 candidate and passing development gates are recorded in the current handoff and
 [docs/session-capture-offline-evidence.md](docs/session-capture-offline-evidence.md);
-legacy defaults remain until controlled acceptance/cutover.
+legacy defaults remain until controlled acceptance/cutover. The Go capture daemons and the
+publication-refresh job were stopped on 2026-11-09; only the Go hooks remain.
 For continuation, read [docs/session-capture-handoff.md](docs/session-capture-handoff.md)
 and update its progress ledger with implemented work, exact checks, and the next action.
 
-- Go candidate (frozen, running until cutover): independent session capture with a durable
-  spool/work queue, per-source progress, bounded retries, explicit quarantine.
-- Rust rewrite (DESIGN.md, final 2026-11-07): append pieces per session window, delta
+- Go candidate (frozen; its capture daemons and refresh job are stopped since 2026-11-09, and
+  its hooks still write to a local spool until cutover): independent session capture with a
+  durable spool/work queue, per-source progress, bounded retries, explicit quarantine.
+- Rust rewrite (DESIGN.md, final 2026-11-07, amendments A0 to A14 folded in 2026-11-12): append pieces per session window, delta
   manifests with checkpoints, no spool or job tables, hooks and filesystem notifications
   with a slow safety reconcile, strict schemas, small classified local state (section 9),
-  plaintext storage in a fresh shared bucket, no migration of existing R2 data. Measured,
+  plaintext storage in the one existing `agent-sessions` bucket (acceptance writes only under
+  `rust-acceptance/<run-id>/`), no migration of existing R2 data. Measured,
   not assumed; rerun the experiment scripts before changing a number.
 - Use one authoritative storage reader for restore and analytics. Release acceptance
   includes actual writer output -> reader -> importer -> event index -> report.
@@ -35,9 +38,9 @@ and update its progress ledger with implemented work, exact checks, and the next
   schema compatibility as prerequisites. Legacy code/tests describe existing default
   behavior; preserve their working safety coverage until replaced and tested, not as
   future design. Candidate code/tests implement the independent path separately.
-- The operator permits replacing R2 from sources on this Mac and BC-01. Follow the
-  controlled inventory/validation/cutover/deletion sequence; permission is not evidence
-  that local sources contain every old byte, or that any reset has happened.
+- The old R2 archive (`capture-v1/` and `v3/`) was deleted on 2026-11-09 and the Rust writer
+  rebuilds from sources on this Mac and BC-01. Follow DESIGN.md section 18; that the archive
+  is gone is not evidence that local sources contain every old byte.
 - Preserve identities, learned custom roots, original sources, local research evidence,
   and the secret protections (credential denylist, config scrubbing, argv allowlist).
   Session opt-out is retired (operator decision 2026-11-07, see README). Never print

@@ -5,10 +5,9 @@
 0. **[Rust rewrite design](../DESIGN.md)** — approved and revised to final 2026-11-07
    after the [challenge review](rust-rewrite/challenge/00-synthesis.md). The design for the
    replacement writer, with its evidence in [rust-rewrite/](rust-rewrite/). Start here for
-   rewrite work; its section 0 lists what not to take direction from. Read it with the
-   [2026-11-09 amendments](rust-rewrite/design-amendments-20261109.md), which win where
-   they conflict (bucket, P5, hook argv, symlinks, retry class, test sync policy,
-   coverage backstop).
+   rewrite work; its section 0 lists what not to take direction from. The
+   [2026-11-09 amendments](rust-rewrite/design-amendments-20261109.md) are folded into it
+   on 2026-11-12 and kept as the dated record of why each change was made.
 1. **[Session capture contract](session-capture-contract.md)** — retained goals,
    writer/reader/analytics acceptance and running Go-path maintenance contract.
    For Rust, DESIGN.md supersedes its spool/work-queue/whole-object mechanisms.

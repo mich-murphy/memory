@@ -233,7 +233,7 @@ on synthetic manifests: 87 MB of manifests for one 898-piece session. [review, 0
 
 ### 3.8 Commit retries, ETags and writes from a dead process [measured, P11, 2026-11-09; live probes, 2026-11-11]
 
-- P11 ([prototype](prototypes/P11-commit-retry.md)): a real R2 probe (889 requests) and a seeded
+- P11 ([prototype](docs/rust-rewrite/prototypes/P11-commit-retry.md)): a real R2 probe (889 requests) and a seeded
   simulation (100 owners, 12 seeds, 8 approaches plus the parent's hybrid run). The choice in
   7.4 step 5 rests on it. [DDIA ch. 8, Handling errors and aborts; ch. 2, When an overloaded
   system won't recover]
@@ -258,7 +258,7 @@ on synthetic manifests: 87 MB of manifests for one 898-piece session. [review, 0
 
 ### 3.9 Durable writes and the watcher [measured, 2026-11-09 and 2026-11-10]
 
-- P12 ([prototype](prototypes/P12-durable-state-writes.md), APFS microbenchmark; end-to-end
+- P12 ([prototype](docs/rust-rewrite/prototypes/P12-durable-state-writes.md), APFS microbenchmark; end-to-end
   daemon properties at 2,000 cases on patched copies): two state writes a minute cost roughly
   12 ms of flush time. With `SyncPolicy::None` the two daemon simulation properties go from
   421 s to 14 s, all 30 tests passing (section 15). Skipping unchanged bodies was no faster,

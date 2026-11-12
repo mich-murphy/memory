@@ -2,8 +2,9 @@
 
 Read [DESIGN.md](../DESIGN.md) for requirements and the
 [active handoff](../docs/session-capture-handoff.md#current-session-checkpoint) for
-ownership, current results and next actions. Read DESIGN.md with its
-[2026-11-09 amendments](../docs/rust-rewrite/design-amendments-20261109.md).
+ownership, current results and next actions. The
+[amendments](../docs/rust-rewrite/design-amendments-20261109.md) are folded into DESIGN.md
+and kept as the dated record of why each change was made.
 `memory-core` holds the pure slice-1 core: domain types, locator, manifests, hint lines,
 planner, coalescer and privacy admission/transform/authorization. `memory` holds slice-2
 work against fakes and temp directories: hook, commit protocol, daemon state, capture
