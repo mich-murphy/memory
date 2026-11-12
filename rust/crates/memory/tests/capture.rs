@@ -1,5 +1,6 @@
 //! Capture wiring table tests (slice 2). Synthetic in-memory filesystem and fake store only.
 //! Not the real filesystem, not zstd, not R2, not the daemon loop.
+use memory::audit::AuditCounts;
 use memory::capture::{Env, Locals, Source, SourceOutcome, attach_launches, capture};
 use memory::commit::Commit;
 use memory::commit::{Base, commit};
@@ -74,6 +75,8 @@ struct Rig {
     context: PolicyContext,
     piece_len: usize,
     launches: Vec<SanitizedLaunch>,
+    /// Audit verdicts of the last cycle's capture step.
+    audit: AuditCounts,
 }
 impl Rig {
     fn new(sources: Vec<Source>) -> Self {
@@ -85,6 +88,7 @@ impl Rig {
             base: None,
             piece_len: 4,
             launches: vec![],
+            audit: AuditCounts::default(),
             context: PolicyContext {
                 valid: true,
                 revision: "r".to_owned(),
@@ -105,6 +109,7 @@ impl Rig {
             piece_len: self.piece_len,
         };
         let got = capture(&mut self.fs, &self.sources, &self.locals, state, &env);
+        self.audit = got.audit;
         let mut changes = Vec::new();
         if let Some(mut request) = got.commit {
             attach_launches(&mut request, &self.launches);
@@ -926,5 +931,15 @@ fn non_resumed_extension_after_a_between_windows_rewrite_restores_to_the_file() 
         kinds(&changes)
     );
     assert_eq!(restored, Ok(new), "the latest epoch equals the file");
+    // The grown file fails the due audit's stat pre-check (one ineligible); the prefix that no
+    // longer hashes to the committed digest starts the epoch and is counted as a mismatch.
+    assert_eq!(
+        rig.audit,
+        AuditCounts {
+            matched: 0,
+            mismatched: 1,
+            ineligible: 1,
+        }
+    );
     Ok(())
 }
