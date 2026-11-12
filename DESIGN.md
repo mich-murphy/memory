@@ -5,29 +5,36 @@ review in `docs/rust-rewrite/challenge/`. This is the authoritative design for t
 rewrite. For the replacement only, it supersedes the spool and work-queue shape in
 `docs/session-capture-contract.md`. The contract's goals still hold: session-local
 publication, immutable evidence, fail-closed privacy, at-least-once idempotent writes and
-one authoritative reader. The mechanism is replaced by the one below.
+one authoritative reader. The mechanism is replaced by the one below. Operator decisions,
+corrections of fact and measured results of 2026-11-09 to 2026-11-12 (amendment ids A0 to A14)
+are folded into the text below.
 
 ## 0. Start here in a fresh session
 
 1. Read this document in full. Then read `AGENTS.md`, then `docs/session-capture-contract.md`
    for the goals it keeps. Do not take implementation direction from the contract's
    mechanism sections, the handoff's Go operating steps or the Go candidate code. They
-   describe the legacy and candidate Go paths, which keep running until cutover. Two Go
+   describe the legacy and candidate Go paths. The Go capture daemons and the publication-refresh job
+   are stopped (A0). Only the Go hooks remain, writing to a local spool, until cutover (section 18
+   step 2). Two Go
    areas are deliberate exceptions. The secret protections in section 8 are ported from Go
    code and its tests, and the edge cases in section 17's slice 1 table come from the Go
    history.
 2. Why each part is the way it is: `docs/rust-rewrite/challenge/00-synthesis.md` (verdict,
    blockers, majors, operator answers) and `07-ddia-crosscheck.md` (textbook basis). Section
    20 maps every challenge finding to the section that answers it.
+   `docs/rust-rewrite/design-amendments-20261109.md` is the dated record of why each later change
+   (A0 to A14, 2026-11-09 to 2026-11-12) was made. It is folded into this document, which wins.
+   Read it for the reasoning and evidence behind a change, not to learn the design. Amendment ids
+   in parentheses mark the changed places.
 3. The Rust workspace goes in this repository at `rust/`, beside the Go code. The Nix dev
    shell gains a pinned Rust toolchain in slice 0. `rustc` 1.98.0 is on this Mac outside Nix.
 4. The evidence for every number is in `docs/rust-rewrite/`: the nine reviewer reports, the
    six challenge reports, the DDIA cross-check, the experiment scripts and the Hegel probe.
    Rerun a script before changing a number here.
 5. Begin with slice 0 (section 17) and the prototypes in section 16. The first gate task is
-   the Hegel build on BC-01. Prototypes that need R2 wait for the operator to create the
-   acceptance bucket and its token (section 6.1). Until those exist this is an external
-   prerequisite, not a gap.
+   the Hegel build on BC-01. Prototypes that need R2 use the `rust-acceptance/<run-id>/` prefix of
+   the existing bucket (section 6.1).
 6. Two earlier HTML artifacts from the design conversation are superseded by this document
    and must not be used: "Rust Rewrite Design" and "Capture Path Design".
 
@@ -63,8 +70,9 @@ Out of scope:
 
 - Analytics redesign, retention and garbage collection, and enrichment.
 - Any migration, import or compatibility with data or layouts in the existing R2 archive. None
-  of the current R2 data is kept. The Rust writer starts with a fresh bucket and a fresh
-  archive id, and the old archive is deleted after cutover (section 18). [decided 2026-11-07]
+  of the current R2 data is kept. The Rust writer starts with a fresh archive id in the existing
+  bucket, and the old archive was deleted on 2026-11-09, before any Rust write (section 18).
+  [decided 2026-11-07; A2]
 
 Hosts: this Mac (FSEvents) and BC-01 (inotify, kernel 7.0.0-1017-azure). Both write to one
 shared bucket, so every session can be seen in one place. [decided 2026-11-07]
@@ -94,7 +102,7 @@ happen daily, so read cost may be higher.
 
 R6. Bytes uploaded are proportional to bytes appended, for both content and manifests.
 Re-uploading whole objects costs 10.7x on Claude history and 155x on Pi history. [measured,
-`policy_sim.py`] A full manifest rewrite on every capture costs 11.4% of transcript bytes.
+`policy_sim.py`, 30 s window (A10.1)] A full manifest rewrite on every capture costs 11.4% of transcript bytes.
 [measured, `manifest_cost.py`]
 
 R7. Strict, versioned schemas for everything we write. Tolerant key reads of what agents write
@@ -108,7 +116,7 @@ model. [decided 2026-11-07]
 
 ## 3. Evidence
 
-### 3.1 Upload policy, quiet 60 s, cap 300 s unless stated [measured, `policy_sim.py`, 30 s window]
+### 3.1 Upload policy, quiet 30 s, cap 300 s [measured, `policy_sim.py`, 30 s window, not measured at 60 s] (A10.1)
 
 | Policy | Claude 945 sessions 1.90 GB | Pi 3,650 sessions 2.07 GB | Max pieces |
 |---|---:|---:|---:|
@@ -223,6 +231,60 @@ header. Corpus: 4,650 sessions, 27,683 captures, 4.01 GB of transcript.
 This undercounts sessions with several sources. Reviewer B measured the same quadratic growth
 on synthetic manifests: 87 MB of manifests for one 898-piece session. [review, 02 M2]
 
+### 3.8 Commit retries, ETags and writes from a dead process [measured, P11, 2026-11-09; live probes, 2026-11-11]
+
+- P11 ([prototype](prototypes/P11-commit-retry.md)): a real R2 probe (889 requests) and a seeded
+  simulation (100 owners, 12 seeds, 8 approaches plus the parent's hybrid run). The choice in
+  7.4 step 5 rests on it. [DDIA ch. 8, Handling errors and aborts; ch. 2, When an overloaded
+  system won't recover]
+  - Rejected: fail fast with no in-commit retry (p99 325 s against 23 s at 20 % errors); the
+    hybrid that fails fast once a streak exists (p99 40.5 s against 23.2 s at 20 %, no better
+    under bursts).
+  - Unproven, not adopted: a shared retry token bucket (never bound in the simulation).
+  - Unlanded bytes at the end of every simulated run: 0.
+  - Real R2: 28 of 28 stale ETags got 412; 60 of 60 two-writer races had exactly one winner,
+    and the stored body was always the winner's.
+- ETags (operator-approved live probes under `rust-acceptance/<run-id>/`, synthetic bytes,
+  prefixes deleted and verified empty; one client, one network path, one day). For a single-part
+  PUT the ETag is the hex MD5 of the body (50 of 50). Rewriting identical bytes keeps the ETag,
+  so `If-Match` with the earlier ETag still succeeds after another writer's identical rewrite
+  (5 of 5) and fails with 412 after a different rewrite (5 of 5). `x-amz-version-id` changes on
+  every write. Section 7.4 states the consequence.
+- A PUT whose client is killed after the whole request was handed to the kernel still lands:
+  8 of 10 unconditional and 7 of 10 with `If-None-Match: *`, complete bodies only, first visible
+  205 to 507 ms after the kill, nothing later in polls out to 10 minutes. Killed after half the
+  body or before any body byte: 0 of 10 each, which is not proof it cannot happen. Section 11.2
+  states the consequence.
+
+### 3.9 Durable writes and the watcher [measured, 2026-11-09 and 2026-11-10]
+
+- P12 ([prototype](prototypes/P12-durable-state-writes.md), APFS microbenchmark; end-to-end
+  daemon properties at 2,000 cases on patched copies): two state writes a minute cost roughly
+  12 ms of flush time. With `SyncPolicy::None` the two daemon simulation properties go from
+  421 s to 14 s, all 30 tests passing (section 15). Skipping unchanged bodies was no faster,
+  because status carries counters and `updated_at`. Not measured: Linux (ext4) costs.
+  [DDIA ch. 8, Durability]
+- `sync_all` is `F_FULLFSYNC` (2026-11-10, rustc 1.99.0 as pinned in `flake.nix`): std's
+  `os_fsync` is `libc::fcntl(fd, libc::F_FULLFSYNC)` under `target_vendor = "apple"`. A dyld
+  `__interpose` of `fcntl` and `fsync` showed 43 `F_FULLFSYNC` calls for 43
+  `sync_all`/`sync_data` calls, including a directory handle, and no plain `fsync`. Limits: it
+  shows the call is issued and returns 0, not that media is durable; APFS only.
+- `notify` 8.2.0 with `RecursiveMode::Recursive` on FSEvents (2026-11-10, 5 runs per
+  configuration, each file created, appended and renamed). 1k files: no loss. 10k files in about
+  0.8 s: loss in 2 of 5 runs (15 and 309 files, up to 3.09 %). 50k files in about 4.5 s: loss
+  in 3 of 5 runs (up to 0.23 %). Every run with missing files also had at least one rescan flag
+  and vice versa; no silent loss in 50 runs. That supports `Rescan -> ReconcileAll` as the loss
+  cover and makes the 15 min timer a backstop (10.3). Limits: one Mac, FSEvents only, not
+  exercised through the real scheduler; a directory moved in with 1,000 children yielded no
+  child events (found only by a rescan of that directory or the timer).
+
+### 3.10 Mutation baseline [measured, 2026-11-10]
+
+`cargo-mutants` 27.1.0, 500 cases, example tests only (303 tests, `hegel_` and `proptest_`
+excluded), 222 of 223 mutants finished (disk full): `capture.rs` 62.5 % (35 caught, 21 missed,
+14 unviable), `commit.rs` 89.5 %, `state.rs` 91.6 %, total 81.9 %. `memory-core` (1,157 mutants)
+was not run.
+
 ## 4. Architecture
 
 ```
@@ -237,8 +299,8 @@ on synthetic manifests: 87 MB of manifests for one 898-piece session. [review, 0
                        Unchanged | Append | Adopt | Replay | Snapshot | Deleted | Withheld
                                                                                 │
                                                                                 ▼
-                     capture: read ≤ 8 MiB pieces, SHA-256 raw, zstd, Authorized<Redacted<_>>
-                       PUT objects/<raw sha256>.zst        If-None-Match: *
+                     capture: read ≤ 8 MiB pieces, transform, Authorized<Redacted<_>>, SHA-256, zstd
+                       PUT objects/<sha256>.zst            If-None-Match: *
                        PUT manifests/<sha256>.json         If-None-Match: *   (delta or checkpoint)
                        PUT <owner>/current.json            If-Match: <etag>
                        on error or 412: GET current.json and compare (section 7.4)
@@ -324,7 +386,7 @@ pub enum PolicyDecision<T> { Allow(Authorized<Redacted<T>>), Deny(WithholdReason
 pub enum UnknownPolicy { ConfigInvalid, RootUnresolvable, PathUnresolvable, RulesUnavailable }
 
 // Closed error classes (D-B1, DDIA ch. 8 Handling errors and aborts).
-pub enum ErrorClass { Offline, Throttled, DestinationAuth, Local(LocalError), Deterministic(Fault) }
+pub enum ErrorClass { Offline, Throttled, Transient, DestinationAuth, Local(LocalError), Deterministic(Fault) }
 
 // Outcome of one capture attempt.
 pub enum Disposition {
@@ -354,11 +416,18 @@ Rules applied:
 
 ### 6.1 Buckets and credentials
 
-- **Production bucket.** Fresh, created at cutover, shared by both hosts. [decided 2026-11-07]
-- **Acceptance bucket.** Separate, with its own tokens. Used by prototypes and slices 2, 2b and
-  3. Production access begins only at cutover. The acceptance bucket is deleted after
-  cutover. [review, 06 F3]
-- **Credentials.** One long-lived Object Read and Write token per host, scoped to the bucket.
+- **One bucket.** The existing `agent-sessions` bucket, shared by both hosts and used by
+  prototypes, acceptance (P2, P2b, slices 2, 2b and 3) and production. There is no separate
+  acceptance bucket and no fresh production bucket. [decided 2026-11-07; operator decision
+  2026-11-09, confirmed twice (A2)]
+- **Acceptance prefix.** Acceptance runs write only under `rust-acceptance/<run-id>/`, delete
+  that prefix at the end and verify it empty. They never list, read or delete other keys.
+  Before rollout every `rust-acceptance/` prefix is deleted, and the bucket is verified to hold
+  only `delivery-artifacts/` and data written by the accepted Rust writer. (A2)
+- **Credentials.** Prototypes and acceptance use the credentials in the repository's ignored
+  `.env` (mode 0600), loaded into a process environment only and never printed, logged or
+  written (A2). Production: one long-lived Object Read and Write token per host, scoped to the
+  bucket.
   [default] This limits revocation scope and accidents, not a determined attacker. DDIA notes
   that an attacker who compromises one node can probably compromise all of them. [DDIA ch. 9,
   Byzantine Faults]
@@ -368,10 +437,15 @@ Rules applied:
 
 ### 6.2 Keys
 
-- `objects/<sha256 of raw piece bytes>.zst`. Immutable, written with `If-None-Match: *`. A 412
+- `objects/<sha256 of the transformed piece bytes>.zst`, where transformed means after the
+  section 8.3 scrub and before compression. Immutable, written with `If-None-Match: *`. A 412
   means the object is already stored, which is success.
-  - Keying by the raw hash means a zstd upgrade changes no keys, and the key is known before
-    compression. This is how git and restic key objects. [review, 02 M4]
+  - Keying by the hash of the transformed bytes means a zstd upgrade changes no keys, and the
+    key is known before compression. This is how git and restic key objects. [review, 02 M4]
+  - After a scrub-rule fix the same input scrubs differently, so the key and the manifest
+    change. Hashing the raw bytes would give the old key, a 412, and adoption of the old, less
+    scrubbed object. The previously uploaded object stays in the bucket, unreferenced, until
+    the deletion tool of section 19, decision 4 exists. (A10.2)
   - The namespace is global across sessions and hosts. Sessions are never deleted, which
     removes the main argument for per-session keys. [decided 2026-11-07]
 - `manifests/<sha256 of manifest bytes>.json`. Immutable, written with `If-None-Match: *`.
@@ -418,14 +492,14 @@ Object Storage]
   "checkpoint": "<sha256 of manifest seq 0>",
   "captured_at": "2026-11-07T10:30:00Z",
   "writer": {"name": "memory", "version": "0.1.0", "commit": "<git sha>"},
-  "launch": [{"digest": "<sha256>", "argv": ["claude", "--model", "…"], "cwd": "…", "env": {"…": "…"}}],
+  "launch": [{"digest": "<sha256>", "argv": [], "cwd": "…", "env": {"…": "…"}}],
   "changes": [
     {"id": "transcript", "kind": "claude.transcript", "path": "projects/<slug>/<id>.jsonl",
      "class": "append", "op": "extend",
      "epoch": {"n": 1, "writer": {"version": "0.1.0", "commit": "…"}},
      "size": 123456, "sha256": "<whole file [0, size)>",
      "pieces": [
-       {"offset": 100000, "len": 23456, "sha256": "<raw>", "object": "objects/<raw>.zst",
+       {"offset": 100000, "len": 23456, "sha256": "<transformed>", "object": "objects/<transformed>.zst",
         "encoding": "zstd-3", "encoded_len": 5000, "encoded_sha256": "…"}
      ]},
     {"id": "todos", "kind": "claude.todos", "class": "snapshot", "op": "replace",
@@ -446,7 +520,8 @@ Object Storage]
 - **Withheld sources are not recorded in R2.** They are counted locally by reason (section
   11.3). This keeps credential paths and unknown files out of the bucket.
 - **Launch evidence** is attached once per distinct launch digest, after the allowlist in
-  section 8.4.
+  section 8.4. The hook records environment facts only and no argv, so `argv` is empty from the
+  hook and stays in the schema (A3).
 - **Writer stamps.** The manifest records the writer, and so does every epoch. A buggy version's
   output can then be found per epoch, not only per manifest object. [review, 04 M4] Finding them
   needs a LIST of `manifests/` plus a GET of each, not "one list". [review, 02 M5]
@@ -456,7 +531,9 @@ Current, schema `memory.current/1`:
 
 Reader rule: GET `current.json`, then follow `previous` back to the manifest named by
 `checkpoint`, then apply the deltas forward. A reader needs at most 64 manifest GETs plus one
-GET per piece. The mean is about 6 captures per session. [measured, 3.7]
+GET per piece. The mean is about 6 captures per session. [measured, 3.7] Checkpoints sit at `seq % 64 == 0`,
+so the longest valid chain is a checkpoint plus 63 deltas, and base recovery gives up after 64
+manifest GETs (A12.3).
 
 ### 6.4 Epoch rules
 
@@ -506,8 +583,9 @@ Clocks [DDIA ch. 9, Monotonic clocks; prototype P6]:
 ```
 reconcile(owner):
   for path in sources_of(owner):       // index entries for owner, plus readdir of every
-                                       // directory locate() maps to this owner
-    resolved = resolve(path)           // every symlink link and final identity, section 8.2
+                                       // directory locate() maps to this owner; the walk
+                                       // skips symlinks (8.2)
+    resolved = resolve(path)           // link chain and final identity, section 8.2
     match policy.admit(resolved):      // credential, collector state, kind, owner
       Deny(r) | Unknown(_) -> count Withheld, continue
       Admit(kind)          -> {}
@@ -545,7 +623,9 @@ The system model states the guarantee honestly. [DDIA ch. 9, System Model and Re
 - A rewrite strictly between the windows, with the same identity and growing size, is not
   detected at capture. It is detected by the bounded daily audit in section 11.4, which starts
   a new epoch. Until then the latest epoch can reassemble to bytes the file never held.
-  Prototype P5 measures how often agents do this.
+  How often agents do this is measured from the running daemon's own counters
+  (`Replay{WindowMismatch}`, `Replay{AdoptMismatch}`), not by a prototype (A1). No production
+  write happens before the audit exists and a property covers this case (section 18, A12.2).
 - The resumable `Sha256State` saves only the cost of the whole-file digest. It proves nothing.
 
 Class `snapshot` uses a fingerprint, not windows. A plain file's fingerprint is identity, size
@@ -556,16 +636,20 @@ its `-wal`. An unchanged fingerprint is `Unchanged` without opening the store. A
 
 ### 7.3 Capture
 
-Pieces are at most 8 MiB raw. [default, prototype P4] A delta or replay larger than that is
+Pieces are at most 8 MiB. [default, unmeasured; prototype P4 does not justify a change] A delta or replay larger than that is
 split into several pieces in one manifest. This bounds memory and the request timeout, and no
 local staging is needed for append-class sources. [review, 04 M5] For each piece:
 
-1. Read `[from, to)` into a buffer.
-2. Feed the raw bytes to the piece SHA-256 and to the whole-file `Sha256State`.
-3. Pass the bytes through the transform. For non-protected kinds the transform is the identity.
-4. Compress with zstd level 3 and digest the encoded bytes.
-5. Obtain `Authorized<Redacted<Bytes>>` from policy.
-6. PUT `objects/<raw sha256>.zst` with `If-None-Match: *`.
+1. Read `[from, to)` into a buffer. The read opens the file with `O_NOFOLLOW | O_NONBLOCK` and
+   checks on the open handle that it is a regular file and the file the last stat observed.
+   Otherwise nothing is read and the source is retried (A11.5).
+2. Pass the bytes through the transform. For non-protected kinds the transform is the identity.
+3. Obtain `Authorized<Redacted<Bytes>>` from policy.
+4. Feed the transformed bytes to the piece SHA-256 and to the whole-file `Sha256State`.
+5. Compress with zstd level 3 and digest the encoded bytes.
+6. PUT `objects/<sha256 of the transformed bytes>.zst` with `If-None-Match: *`. After a 412 the
+   stored object is read, and the manifest records its encoding (`encoded_len`,
+   `encoded_sha256`), not the writer's (A10.2).
    - If the chosen client can cheaply set `Content-MD5`, send it. [prototype P2]
    - The end-to-end checks are the reader's digest verification and the restore sample (section
      11.4), not a transport checksum. Content-MD5 is therefore not a gate. [DDIA ch. 13, The
@@ -576,6 +660,10 @@ assumption those bytes are stable, and the next reconcile appends the rest. Afte
 piece, the shell stats the file again. If its identity changed, or it shrank below
 `size_at_stat`, the capture is abandoned before the manifest is written. There is no two-pass
 "learn the key" read, so a growing file cannot livelock the replay. [review, 01 M3]
+
+`captured_to` advances only when the commit lands. The bytes of a failed capture are therefore
+re-read by the retry, and bytes that arrive after the stat ride in the next capture. The
+coalescer keeps one capture in flight per owner and queues exactly one follow-up (A6).
 
 A snapshot of a plain file reads its pieces and then compares the fingerprint again. If the
 fingerprint changed, the capture is retried at most 3 times in the window. After that it counts
@@ -592,10 +680,13 @@ SQLite snapshot:
 Request timeout: 30 s plus size at 1 MiB/s, with a floor of 60 s. At the 8 MiB cap this is at
 most 60 s. [review, 05-history L2]
 
-Memory bound. At most 2 hash or compress jobs run at once, and at most 8 uploads. The peak is
-therefore about 2 × 8 MiB raw plus 8 × encoded size, at most 80 MiB for incompressible data.
-[target, prototype P4] The reviewed design's whole-object buffers allowed 368 MB. [review,
-04 M5]
+Memory bound. At most 2 hash or compress jobs run at once, and at most 8 uploads
+[default, unmeasured]. For incompressible data the payload is 2 × 8 MiB raw plus 8 × 8 MiB
+encoded, about 80 MiB (83.89 MB). That is arithmetic, not a measured peak. The target is a peak
+RSS under 128 MB (section 15). Prototype P4's Python process measured 135.12 MB at 8 × 8 MiB
+random buffers, which does not settle it; the settling measurement is the peak RSS of the Rust
+daemon with 8 concurrent 8 MiB incompressible PUTs and a 30k-entry index (A10.4). The reviewed
+design's whole-object buffers allowed 368 MB. [review, 04 M5]
 
 ### 7.4 Commit protocol
 
@@ -611,13 +702,18 @@ therefore about 2 × 8 MiB raw plus 8 × encoded size, at most 80 MiB for incomp
    become a spurious 412. [vendor, 3.5; prototype P2]
 4. On success, record the returned ETag and update the index. Then remove the committed
    launch records from the pending set.
-5. On any error, timeout or 412, GET `current.json` and compare. The content-addressed
-   manifest hash is the request id. [DDIA ch. 9, Figure 9-1; ch. 13, Uniquely identifying
+5. On any error, timeout or 412, GET `current.json` and compare. The GET is attempted 4 times
+   with 3 pauses between them (A13.5). The content-addressed manifest hash is the request id. [DDIA ch. 9, Figure 9-1; ch. 13, Uniquely identifying
    requests]
-   - It names our manifest: `AlreadyOurs`. The commit landed. Record its ETag.
+   - It names our manifest, or any manifest hash this daemon built for the owner since its last
+     landed commit (`known_ours`, held in memory): `AlreadyOurs`. The commit landed. Adopt its
+     ETag and position and queue a follow-up. A late `current.json` write from an earlier failed
+     capture is therefore not a false `Foreign` park. The owner key contains the machine id, so
+     outside a cloned machine id this cannot hide a real foreign writer. (A6)
    - It names our `previous`: `BaseUnchanged`. The commit did not land. Retry from step 3 with
-     the fresh ETag, up to 4 times with jittered backoff. After that, `Retry` the capture.
-     [review, 02 M1]
+     the fresh ETag, up to 4 times with full-jitter pauses. After that the capture ends as
+     `Retry` of class `Transient`, not `Throttled`, with the backoff of section 11.2 and its
+     own counter (A6). [review, 02 M1]
    - It names anything else: `Foreign`. Another writer advanced this owner, which breaks the
      one-writer-per-owner rule. Do not merge: two hosts' piece lists for one source do not
      commute. Park the owner with both hashes and count it. [DDIA ch. 6, Dealing with
@@ -628,6 +724,11 @@ therefore about 2 × 8 MiB raw plus 8 × encoded size, at most 80 MiB for incomp
      key exists.
 6. Invariant: the `previous` of a committed manifest equals the manifest that `current.json`
    named under the ETag we fenced on. [review, 02 M1]
+
+For a single-part PUT the R2 ETag is the MD5 of the body (3.8), so the fence cannot see an
+identical-bytes rewrite of `current.json`. That is harmless only because the bytes of
+`current.json` name a manifest hash that is unique per commit. This must stay true. Test fakes
+treat the content-derived ETag as the real behaviour. (A13.4)
 
 A crash between steps leaves only unreferenced objects and manifests, which is discarded
 output. [DDIA ch. 12, Microbatching and checkpointing]
@@ -642,12 +743,13 @@ rule "withhold the whole store if any session is excluded" no longer applies. Th
 
 ### 7.6 Launch evidence
 
-- `memory hook` applies the allowlist in section 8.4 before it appends the line, so the hint
-  log never holds raw argv.
+- `memory hook` records environment facts only and no launch argv (A3): no process-tree,
+  `kern.procargs2` or `/proc` read, and no `--argv` flag. It applies the allowlist in section
+  8.4 before it appends the line, so the hint log never holds a raw value.
 - The daemon keeps pending launch records by owner. They are attached to the owner's next
   manifest, deduplicated by digest.
 - A hint day file is the system of record for its launch records until a manifest carries
-  them. Hint files are kept for 7 days (section 9.1).
+  them. Hint files are kept for 7 days [default, unmeasured] (section 9.1).
 
 ## 8. Protected sources and privacy
 
@@ -667,8 +769,12 @@ Self-Regulation]
 
 ### 8.2 Admission (from `internal/capturepolicy`)
 
-Path resolution checks every link of a symlink chain and the final identity, not only the
-logical path. A chain of more than 255 links, or a cycle, is `PathUnresolvable`.
+Symlinked files are skipped (A4). The directory walk counts symlinks and never yields them, so
+no file is captured through a link, and the watcher never treats a symlink to a directory as a
+directory (A13.6). Path resolution still checks every link of a symlink chain and the final
+identity, not only the logical path, for paths reached directly (hint paths) and for ancestor
+and root identities. A chain of more than 255 links, or a cycle, is `PathUnresolvable`. A link
+to a credential is denied either way.
 
 The credential denylist is checked against every identity in the chain:
 
@@ -691,6 +797,12 @@ Go's pass-through of unrecognised names is not ported. [review, 05 m2]
 Hint paths are untrusted input. A hint's `transcript_path` or `cwd` is used only if `locate`
 maps it under a configured or learned root. It then passes the same admission check. [review,
 05 M4]
+
+The source read refuses a changed file: see step 1 of section 7.3 (A11.5). A residual race
+remains, an intermediate directory component swapped for a symlink, because source paths are
+not guaranteed canonical (resolution can fall back to the raw path, and legitimate paths have
+symlinked parents such as `/var` on macOS). Closing it needs a rule that the source adapter
+reads only canonical paths, carried by a type that only resolution builds (A12.4).
 
 ### 8.3 Transform (from `internal/scrub`)
 
@@ -716,6 +828,10 @@ DLP (`docs/security.md:5-8`).
 
 ### 8.4 Launch allowlist (from `internal/launch/native.go`)
 
+The Rust hook records environment facts only and reads no process argv (A3). This is an accepted
+regression from the Go hook. `LaunchRecord.argv` stays in the schema and is empty from the hook,
+and the argv rules below stay as a protection for any argv that reaches the allowlist code.
+
 Argv, at most 32 entries after `scrub.Args`:
 
 - `argv[0]` is reduced to its basename if it is one of `claude`, `codex`, `pi`, `node`,
@@ -723,15 +839,39 @@ Argv, at most 32 entries after `scrub.Args`:
 - These flags are kept without a value: `--resume`, `--continue`, `--no-session`,
   `--dangerously-skip-permissions`, `--full-auto` and `--version`.
 - These flags are kept with their value: `--model`, `-m`, `--provider`, `--permission-mode`,
-  `--session-id`, `--session`, `--config`, `--config-dir` and `--cwd`. The value must match
-  `^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$` and must not be a secret name. Otherwise the value
-  becomes `[redacted]`.
+  `--session-id`, `--session`, `--config`, `--config-dir` and `--cwd`. The value must pass the
+  value rule below. Otherwise the value becomes `[redacted]`.
 - Every other argument becomes `[redacted]`, so free-form prompt text is dropped.
 
-Environment: at most 8 exact names from `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`,
+Environment: the closed allowlist of nine exact names `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`,
 `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`,
 `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `CLAUDE_CONFIG_DIR`, `MAX_THINKING_TOKENS`,
-`MAX_MCP_OUTPUT_TOKENS` and `DISABLE_PROMPT_CACHING`. Values follow the same rule.
+`MAX_MCP_OUTPUT_TOKENS` and `DISABLE_PROMPT_CACHING`. The allowlist is the bound, with no
+separate cap: every allowlisted name whose value passes the value rule is published, and any
+other entry is omitted (A13.3).
+
+Value rule (A12.1). A launch value, whether an argv value after a value flag or an allowlisted
+env value, is published only if all of the following hold. Otherwise argv publishes `[redacted]`
+and the env entry is omitted.
+
+1. It matches the shape of its slot. Model (`--model`, `-m`, the five `ANTHROPIC_*_MODEL`
+   names): `^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}(\[[0-9a-z]{1,8}\])?$`. `--provider`:
+   `^[A-Za-z][A-Za-z0-9._-]{0,63}$`. `--permission-mode`: `^[A-Za-z][A-Za-z-]{0,31}$`.
+   `MAX_THINKING_TOKENS`, `MAX_MCP_OUTPUT_TOKENS`: `^[0-9]{1,9}$`. `DISABLE_PROMPT_CACHING`:
+   `0`, `1`, `true` or `false` in any case. Session, config and cwd slots and
+   `CLAUDE_CONFIG_DIR`: the safe-value shape `^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$`.
+2. It is not a secret name.
+3. Split on `/ : @ + .`, no segment starts, ASCII case-folded, with `sk-`, `sk_`, `ghp_`,
+   `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`, `glpat-`, `xoxb-`, `xoxp-`, `xoxa-`, `xoxs-`,
+   `xapp-`, `hf_`, `npm_`, `pypi-` or `eyJ`, or is `AIza` plus 16 or more characters, or
+   `AKIA`/`ASIA` plus 16 or more uppercase letters or digits.
+4. No segment of 32 or more bytes is opaque: all alphanumeric with a letter and a digit, or
+   containing an uppercase letter, a lowercase letter and a digit.
+
+Accepted limits: a key of unknown format shorter than 32 characters passes in a model or path
+slot; a long hyphenated lowercase-and-digit run passes because real model names need it; a
+model name with one segment of 32 or more bytes that mixes upper case, lower case and digits is
+redacted, which fails closed.
 
 ### 8.5 Unknown policy state
 
@@ -783,11 +923,14 @@ dataflows]
 | `config.toml` | System of record | Operator | Holds the archive id, machine id, agent roots, window, bucket and token path. `deny_unknown_fields`. The daemon refuses to start if it is invalid |
 | Token file | System of record | Operator | 0600. Excluded from capture |
 | `state/roots.json` | System of record | Daemon | Learned custom roots. Monotonic union: a root is never removed automatically |
-| `state/hints/YYYY-MM-DD.jsonl` | System of record for launch evidence | `memory hook` | Directory 0700, files 0600. Kept for 7 days and until every launch record in the file is committed |
+| `state/hints/YYYY-MM-DD.jsonl` | System of record for launch evidence | `memory hook` | Directory 0700, files 0600. Kept for 7 days [default, unmeasured] and until every launch record in the file is committed |
 | `state/index.json` | Derived cache | Daemon | Holds `SourceState`, hint offsets, ETags and pending launch digests. May be deleted |
 | `state/status.json` | System of record for the parked list and counters | Daemon | Section 11.3 |
 | `state/daemon.lock` | Lock | Daemon | `flock`, section 12 |
 | `state/tmp/` | Transient | Daemon | SQLite backups only. Emptied at start |
+
+The state root is `$HOME/.local/state/memory` on both hosts. `MEMORY_STATE_DIR` overrides it, and
+tests always set it to a temporary directory with a cleared environment (A5).
 
 Machine ids are created once with `O_EXCL`. [review, 05-history D3] At install, the existing Go
 machine ids are copied into `config.toml`. This keeps identities and is not a data migration.
@@ -806,14 +949,17 @@ DDIA ch. 8, Durability; ch. 4, checksums]
 
 1. Write a temporary file. Its header carries `schema`, `writer_version`, the body length and
    the body's SHA-256.
-2. fsync the file. On macOS, use `F_FULLFSYNC`.
+2. fsync the file. On macOS, use `F_FULLFSYNC`, which `sync_all` issues (3.9).
 3. Rename it into place.
 4. fsync the directory.
 
 A failed checksum, a short body or an unknown version means the file is treated as missing. For
 the index that triggers the rebuild in section 9.3. For `status.json`, the counters restart and
-the event is logged. The index is written at most every 60 s when dirty, and at shutdown.
-Prototype P7 measures the checksum cost.
+the event is logged. `index.json` and `status.json` are written on authoritative change or at
+most every 60 s when dirty, and at shutdown: about two writes a minute, roughly 12 ms of flush
+time (3.9). `F_BARRIERFSYNC` only orders writes and is not adopted. A state file body is at
+most 64 MiB (67,108,864 bytes) and its header line at most 256 bytes. [default, unmeasured]
+Prototype P7 measures the checksum cost. (A7, A11.4)
 
 ### 9.3 Index rebuild
 
@@ -839,7 +985,7 @@ The reviewed design opened a new epoch for every source, which re-uploaded the h
 Hooks are installed per agent as today (`docs/hooks.md`). The hook command is `memory hook`:
 
 - It parses stdin by key.
-- It applies the launch allowlist.
+- It records environment facts under the launch allowlist and no argv (A3).
 - It builds one line of at most 4 KiB in a `Vec<u8>`.
 - It appends the line to today's file with a single `write(2)` on an `O_APPEND` descriptor,
   creating the file 0600 if needed. A short write counts as a failure. [review, 03 m1]
@@ -848,7 +994,8 @@ Hooks are installed per agent as today (`docs/hooks.md`). The hook command is `m
 - It never prints to stdout, never blocks on the daemon and never retries. [review, 03 m2]
 - It does not start `tokio` and does not parse with `clap`. Argv is read by hand.
 
-The reader of the hint files resynchronises on newline. A torn fragment in the middle of a file
+The reader of the hint files bounds one file read at 64 MiB. [default, unmeasured] It
+resynchronises on newline. A torn fragment in the middle of a file
 is dropped. A torn last line waits for its newline. Codex trust and Claude `--bare` can silence
 hooks, and the other two signals cover that.
 
@@ -862,14 +1009,17 @@ hooks, and the other two signals cover that.
 - `need_rescan()` and any watcher error set the reconcile flag.
 - On a directory Create event, that directory is read and its sources reconciled at once,
   because 8.2.0 does not report files already inside a new directory. [review, 03 M3]
+- A configured root that does not exist (an agent that is not installed) is skipped and counted.
+  The other roots are watched, and the safety reconcile finds the directory once it exists. A
+  root that exists but is not a directory, or cannot be inspected, is an error. (A13.6)
 - notify 8.x cannot replay FSEvents history across restarts. Downtime is covered by the start
   reconcile. [vendor, 3.5]
 
 ### 10.3 Safety reconcile
 
 The safety reconcile runs `reconcile` over every owner. It runs at daemon start, when the flag
-is set, after a detected wake gap (section 7.1), and every 15 min. It is trust-but-verify, not
-the driver. Its cost is at most one stat per source plus the 68 KiB window read for each racy
+is set, after a detected wake gap (section 7.1), and every 15 min [default]. It is trust-but-verify,
+not the driver, and the timer is a backstop: `Rescan -> ReconcileAll` is the loss cover (3.9). Its cost is at most one stat per source plus the 68 KiB window read for each racy
 source.
 
 ### 10.4 The two messaging questions
@@ -884,7 +1034,10 @@ consumer is offline. [DDIA ch. 12, Messaging Systems]
 | Safety reconcile | Not applicable, it reads the level | Runs at next start |
 
 A lost hint is a latency bug, not data loss. The reconcile finds the change within 15 min.
-Launch evidence is the exception, and section 7.6 keeps its file.
+Launch evidence is the exception, and section 7.6 keeps its file. That covers the daemon side
+only. When the hook's own write fails (`ENOSPC`, a refused directory), the launch record for
+that session is lost without trace. This is accepted, because launch evidence is reduced to
+environment facts (A3), and no hook failure log is added (A11.1).
 
 ## 11. Failure handling
 
@@ -919,15 +1072,21 @@ R2's conditional writes are atomic as documented.
 
 | Class | Examples | Disposition |
 |---|---|---|
-| `Offline` | DNS or connect error, TLS error, timeout | `Retry`, exponential backoff with jitter, 1 s to 15 min |
-| `Throttled` | 429, 503 | `Retry`, honouring `Retry-After` |
+| `Offline` | DNS or connect error, TLS error, timeout | `Retry`, exponential backoff with full jitter, 1 s to 15 min |
+| `Throttled` | 429, 503 | `Retry`, honouring `Retry-After`, falling back to the `Offline` schedule |
+| `Transient` | `BaseUnchanged` after 4 rebase retries (7.4) | `Retry`, full jitter `uniform(1 s, min(120 s, 2 × 2^n))`, counted separately, no `Retry-After` |
 | `DestinationAuth` | 401, 403 | `PauseHost`; persisted in `status.json` |
 | `Local` | disk full, permission, backup failed | `Retry` and counted; disk full is its own `LocalError` |
 | `Deterministic` | non-JSON 200 (captive portal), schema error, repeated audit mismatch | Counted; `Park` after 3 consecutive failures of one source spanning at least 3 h |
 
+The 3 h park span is `[default, unmeasured]`.
+
 Retry only transient errors, and back off. [DDIA ch. 8, Handling errors and aborts] A daemon
-restart starts each source's backoff again after a startup jitter of 0 to 60 s, so a crash loop
-does not hammer R2. [review, 04 m2]
+restart starts each source's backoff again after a startup delay of 0 to 60 s jitter, so a
+crash loop does not hammer R2. [review, 04 m2] The first commit of a restarted daemon is never
+earlier than 5 s after start (A14.1). A killed predecessor's fully sent PUT can still land up
+to about 0.5 s after its death (3.8), and the daemon must not verify `current.json` before it
+lands.
 
 ### 11.3 Status
 
@@ -1002,9 +1161,11 @@ Neither check trusts the index, the planner or the hasher it is checking.
   releases the lock when the process dies.
 - **Two mechanisms, two scopes.** `flock` protects the local files. The ETag on
   `current.json` fences any PUT a killed daemon left in flight, and content keys make late
-  duplicates harmless. [DDIA ch. 9, Fencing off zombies; review, 03 B1]
+  duplicates harmless. A killed client's fully sent PUT can still land (3.8), which the startup
+  delay of 11.2 covers. [DDIA ch. 9, Fencing off zombies; review, 03 B1]
 - **Ownership and limits.** One task owns the index and status, and they are updated by
-  message. At most 2 hash or compress jobs run at once, and at most 8 uploads host-wide. One
+  message. At most 2 hash or compress jobs run at once, and at most 8 uploads host-wide
+  [default, unmeasured]. One
   capture is in flight per owner.
 - **Core and runtime.** `memory-core` is synchronous and has no I/O or runtime dependency. The
   shell's runtime follows the client chosen in prototype P2.
@@ -1034,6 +1195,7 @@ Workspace:
 | `serde`, `serde_json`, `schemars`, `toml` | Schemas and config | A duplicate-key-rejecting JSON path for scrubbing |
 | `tracing`, `tracing-subscriber`, `clap`, `thiserror` | Logs, CLI, errors | `clap` is not used by `memory hook` |
 | `rusqlite` bundled | SQLite backup API | Slice 3 |
+| `rustix`, direct dependency of `memory`, features `std` and `fs` | Named open flags and errno values in the source read | Pinned to the version in the lockfile (A12.4) |
 | `hegeltest` `=0.52.0`, `static-engine` | Property tests, dev only | 255 releases since 2026-03-16. Pinned exactly [review, 06 F4] |
 | `proptest`, `proptest-state-machine` | Standing cross-check of properties 1 and 4 | |
 | `cargo-nextest`, `cargo-deny`, `cargo-llvm-cov`, `cargo-mutants` | Gates | |
@@ -1078,8 +1240,18 @@ Gates, in order, all required:
 5. Hegel properties at 500 cases in CI, with the seed recorded on failure
 6. The proptest cross-check
 7. Schema drift
-8. `cargo llvm-cov`, with the current percentage as a floor
+8. `cargo llvm-cov`, with a fixed line-coverage floor of 80 % (`rust/coverage-floor.txt`)
 9. The lint-check crate
+
+Each test runs once: gate 4 runs every test that is not a named property, gate 5 the `hegel_`
+tests and gate 6 the `proptest_` tests, all with nextest and at the same case counts (A12.5).
+
+The coverage floor is a backstop, not the latest measurement. It is a hard gate and is not
+lowered to make a run pass. It is raised only by a recorded decision, never automatically from
+a measurement. The evidence comes from independent-oracle properties with their coverage
+guards, production mutation checks and the consumer gate. Tautological tests (an oracle
+re-derived from the code under test, a fake asserted against itself, derive-only) are removed
+rather than kept for line count. [default, unmeasured: no measurement supports 80] (A9, A10.5)
 
 Monthly: `cargo mutants` on `memory-core`.
 
@@ -1111,6 +1283,15 @@ independently of the implementation. [DDIA ch. 9, Defining the correctness of an
    - Removing the source after commit stops a later recapture from masking a loss. [review,
      05-history D9]
    - Written in both Hegel and `proptest-state-machine`.
+   - Crash point, safety: drop the daemon between `stage` and `publish` of a state file, reload,
+     and assert that the previous or the new body is read, never a mix. (A7)
+   - Late write, safety: a late `current.json` write from an earlier failed capture lands
+     before the next verification. The result is `AlreadyOurs`, not a `Foreign` park. (A6)
+   - Durable state writes take a `SyncPolicy { Full, None }` on `StateDir`, `Full` by default.
+     Only the daemon simulation properties select `None`, which keeps temp, write, rename and
+     directory open and skips only the flush calls. `state.rs`'s own tests, the daemon example
+     tests and the binary always use `Full`. A flush cannot change what a live process reads
+     back, so no assertion loses evidence. (A7)
 5. **Privacy.** Safety: for any source set with synthetic canaries planted in protected
    basenames, credential paths, symlink chains, backup suffixes, unknown kinds, argv and env,
    no PUT body and no hint line contains a canary.
@@ -1157,22 +1338,24 @@ Sonnet workers run these once the design is final. Each writes
 `docs/rust-rewrite/prototypes/<id>-<name>.md` with labelled measurements, and the result
 decides between the alternatives. Workers follow the safety rules in
 `docs/rust-rewrite/challenge/README.md`: synthetic data in their own scratchpad, no transcript
-content, no credentials, and no touching installed hooks or services. The acceptance bucket is
-the only R2 they may use.
+content, no credentials, and no touching installed hooks or services. The only R2 they may use
+is the `rust-acceptance/<run-id>/` prefix of the bucket (section 6.1).
 
 | Id | Question | Alternatives | Decides on | Needs | Before |
 |---|---|---|---|---|---|
 | P1 | Change detection | 4 KiB head + 64 KiB tail windows; full re-hash per capture; windows sized 16 or 256 KiB | Detection rate on generated rewrites; bytes read per capture | none | slice 1 |
-| P2 | S3 client | `object_store` + tokio; `rusty-s3` + `ureq` on a 4-thread pool | Conditional PUT correctness including lost reply and committed-then-5xx; disabling retries on `current.json`; deterministic simulation (MadSim against trait-level DST); binary size; RSS under 8 PUTs; maintenance | acceptance bucket | slice 2 |
-| P2b | R2 checksum enforcement | send a wrong Content-MD5 and `x-amz-checksum-sha256` | Information only, not a gate | acceptance bucket | slice 2 |
+| P2 | S3 client | `object_store` + tokio; `rusty-s3` + `ureq` on a 4-thread pool | Conditional PUT correctness including lost reply and committed-then-5xx; disabling retries on `current.json`; deterministic simulation (MadSim against trait-level DST); binary size; RSS under 8 PUTs; maintenance | bucket credentials (A2) | slice 2 |
+| P2b | R2 checksum enforcement | send a wrong Content-MD5 and `x-amz-checksum-sha256` | Information only, not a gate | bucket credentials (A2) | slice 2 |
 | P3 | Hint log | per-day files; rename rotation | Lines lost with writers descheduled across the boundary | none | slice 2 |
 | P4 | Hook timing and memory | `memory hook` with hand-parsed argv; piece cap 4 or 8 MiB; uploads 4 or 8 | In-process p99; RSS peak against the 128 MB target | none | slice 2 |
-| P5 | Prefix rewrite frequency | count only | Share of transcripts whose bytes before `captured_to` change, from offsets and hashes of this Mac's files, no content read | none | slice 1 |
+| P5 | Prefix rewrite frequency | waived (A1) | Correctness never depended on it: a prefix rewrite is detected by the window check (7.2) and becomes `Replay`. The frequency is measured later from the running daemon's counters `Replay{WindowMismatch}` and `Replay{AdoptMismatch}`; no collector reads private sources | none | not a prerequisite |
 | P6 | Clock across sleep | `Instant` (monotonic); `CLOCK_BOOTTIME` / `mach_continuous_time` | Coalescer and backoff behaviour across a natural sleep; wake-gap detection fires | none | slice 2 |
 | P7 | Local file checksums | SHA-256; CRC32C | Cost at a 20 MB index; torn-write injection detected | none | slice 2 |
 | P8 | Cross-session duplicate share | count only | Informational; the namespace is already decided | none | any |
 | P9 | SQLite unchanged test | db + WAL fingerprint; backup and hash | False "unchanged" rate under a concurrent writer; cost | none | slice 3 |
 | P10 | Linux racy mtime | ext4 on BC-01 | Same-size rewrites in one tick leaving equal (size, mtime) | BC-01 scratch dir | slice 3 |
+| P11 | Commit retry after `BaseUnchanged` exhaustion | 8 approaches including fail fast and a hybrid; retry class | p99 latency at 20 % errors; unlanded bytes (3.8) | a `rust-acceptance/` prefix | done 2026-11-09 |
+| P12 | Durable state write cost | `F_FULLFSYNC`, `F_BARRIERFSYNC`, flush skipped in simulation tests | Flush time per minute; simulation test time (3.9) | none | done 2026-11-09 |
 
 ## 17. Delivery slices
 
@@ -1193,7 +1376,7 @@ the only R2 they may use.
 2. **Daemon on the Mac.**
    - Builds: the lock, hint files, watcher, index and status with durable writes, the commit
      protocol, and the client chosen by P2.
-   - Runs against the fake store and the acceptance bucket.
+   - Runs against the fake store and the `rust-acceptance/` prefix of the bucket.
    - Captures append-class sources for all three agents. Snapshot and config kinds stay
      withheld until slice 3.
    - Adds property 4 and the counter tests. Footprint is measured, and remeasured in slice 3.
@@ -1202,15 +1385,20 @@ the only R2 they may use.
    - Builds: `memory-reader`, `memory restore <owner> --out DIR`, the daemon's read-back reusing
      the library, and `memory export` to the `session-reader/v2` envelope.
    - The existing Python importer, event index and report run against the export unchanged.
-   - Shadow run: at least 7 days on the Mac into the acceptance bucket, comparing every
-     restored session with `transform(local)`. Sessions the Go candidate captured and Rust did
-     not are counted as a coverage cross-check. [review, 06 F1, F2]
+   - Shadow run on the Mac into the `rust-acceptance/` prefix, comparing every restored session
+     with `transform(local)`. Local session files that have no captured owner are counted as the
+     coverage cross-check. [review, 06 F1, F2; A13.1]
+   - Exit criterion of the shadow run and of cutover: 2 consecutive days with zero restore
+     mismatches, zero parked owners and zero local session files without a captured owner. It
+     replaces any longer fixed shadow-run length. [A13.1, A14.2]
+   - Abort triggers: any restore mismatch, any owner parked as `Foreign`, or any privacy
+     canary found in an export stops the run until the cause is found. [A13.1]
    - Exit: every captured session restores to its source bytes, and the consumer gate is green.
 3. **Linux and snapshot classes.**
    - Builds: BC-01 inotify, SQLite and config snapshots, shared stores, deletions, launch
      evidence for every agent, the loss-window counter, and reconcile tuning.
    - Prototypes P9 and P10.
-   - A 7-day shadow run on BC-01.
+   - A shadow run on BC-01 with the exit criterion of slice 2b. [A14.2]
    - Exit: both hosts green, and the gap register updated.
 
 ## 18. Cutover
@@ -1218,17 +1406,25 @@ the only R2 they may use.
 Cutover follows the contract's sequence (`docs/session-capture-contract.md` section 6),
 simplified because no R2 data is kept. [decided 2026-11-07]
 
-1. The operator creates the production bucket and one token per host.
-2. Install `memory` and its hooks on one host. Stop that host's Go workers and remove their hook
-   launch paths, then repeat on the other host. One collector runs per host. [review, 04 M4]
+No production write happens before all of these exist (A12.2, A13.2): zstd encoding of pieces,
+so the `zstd-3` label and the `.zst` key suffix are true (the schema gains no `identity`
+encoding); the audit of 11.4, with a property that covers a rewrite between the windows; hint
+retention (7.6, 9.1); and `tracing` to stderr as sections 11.5 and 13 specify.
+
+1. No production bucket is created. Both hosts use the existing `agent-sessions` bucket (A2).
+2. Install `memory` and its hooks on one host. The Go capture daemons and the
+   publication-refresh job are already stopped (A0). Remove the Go hooks' launch paths, then
+   repeat on the other host. One collector runs per host. [review, 04 M4]
 3. Remove the one existing session opt-out record from `~/.local/state/agent-sessions/exclusions`
    once the Go path is stopped. Before that, the Go path still honors it.
 4. Let the safety reconcile capture every available local source into the fresh archive.
    Nothing is imported from the old R2 archive. Sessions that exist only in the old archive are
    not recovered, which the operator accepted.
-5. Verify fresh automatic capture, restart and retry, restore, and analytics on both hosts.
-6. After acceptance, inventory the old bucket. Delete the retired archive once the inventory
-   confirms it holds nothing else. Then delete the acceptance bucket.
+5. Verify fresh automatic capture, restart and retry, restore, and analytics on both hosts,
+   against the exit criterion of slice 2b (A13.1).
+6. The old archive was deleted on 2026-11-09 (A2). Before rollout, delete every
+   `rust-acceptance/` prefix and verify that the bucket holds only `delivery-artifacts/` and
+   data written by the accepted Rust writer.
 
 ## 19. Decisions
 
@@ -1273,15 +1469,36 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D10 | Revised: writer per epoch; bounded, input-pinned audit that replays rather than quarantines; read-back through `memory-reader` | 11.4; 01 B2, 04 B2 |
 | D11 | Verify-by-GET commit protocol; the manifest hash is the request id; a foreign writer parks the owner; no merge | 7.4; 02 B2, M1, DDIA ch. 8, 9, 13 |
 | D12 | Protected-source pipeline ported from Go; `Authorized<Redacted<Bytes>>` is the only PUT body | section 8; 05 B1, M4, M5 |
-| D13 | Objects keyed by the raw content hash in a global namespace | 6.2; 02 M4, M3 |
+| D13 | Objects keyed by the hash of the transformed bytes in a global namespace (A10.2) | 6.2; 02 M4, M3 |
 | D14 | Delta manifests with a checkpoint every 64 | 3.7, 6.3; 02 M2 |
 | D15 | Durable `status.json`, closed error classes, `DestinationAuth` pause, heartbeat with `last_commit_at` | 11.2, 11.3; 04 B1, DDIA ch. 6, 9 |
 | D16 | `flock` single instance; ETag fences R2 | section 12; 03 B1 |
 | D17 | Parked list instead of R2 quarantine markers; DLQ parks one source; `memory unpark` | 11.2, 11.3; 04 B2 |
-| D18 | 8 MiB piece cap, 2 hash jobs, 8 uploads, size-scaled timeouts | 7.3; 04 M5 |
+| D18 | 8 MiB piece cap, 2 hash jobs, 8 uploads `[default, unmeasured]`, size-scaled timeouts | 7.3; 04 M5 |
 | D19 | Plaintext storage with a stated threat model; no bucket lock | 8.6, 19; 05 M1, M2 |
 | D20 | Session opt-out retired; shared stores owned by `Owner::Shared`; withheld sources not recorded in R2 | 7.5, 6.3; operator 2026-11-07 |
-| D21 | Slice 2b reader, 7-day shadow runs, Go fix table, separate acceptance bucket | 17; 06 F1, F2, F3 |
+| D21 | Slice 2b reader, shadow runs, Go fix table, acceptance under `rust-acceptance/` | 17; 06 F1, F2, F3; A2, A13.1 |
+| D22 | 2026-11-09: Go capture daemons and refresh job stopped; Go hooks remain until cutover | A0; 0, 18 |
+| D23 | 2026-11-09: P5 waived; rewrite frequency measured from the daemon's counters | A1; 7.2, 16 |
+| D24 | 2026-11-09: one bucket, the existing `agent-sessions`; acceptance under `rust-acceptance/<run-id>/`; no production or acceptance bucket is created | A2; 6.1, 18 |
+| D25 | 2026-11-09: the hook records no launch argv; 2026-11-10: a failed hook write loses the record, accepted | A3, A11.1; 7.6, 8.4, 10.4 |
+| D26 | 2026-11-09: symlinked files are skipped by the walk | A4; 8.2 |
+| D27 | 2026-11-09: state root `$HOME/.local/state/memory`, `MEMORY_STATE_DIR` override | A5; 9.1 |
+| D28 | 2026-11-09: `BaseUnchanged` exhaustion is class `Transient`; `known_ours`; full jitter | A6; 7.4, 11.2; P11 |
+| D29 | 2026-11-09: durable writes unchanged in production; `SyncPolicy` in tests; crash-point property | A7; 9.2, 15; P12 |
+| D30 | 2026-11-09: prototype ids P11 and P12 | A8; 16 |
+| D31 | 2026-11-09: coverage floor fixed at 80 %, not the latest measurement | A9; 15 |
+| D32 | 2026-11-10: corrections of fact and evidence labels: 3.1 is 30 s data, the object key hashes the transformed bytes, `[default, unmeasured]` constants, watcher loss evidence, `sync_all` is `F_FULLFSYNC` | A10.1 to A10.6; 3.1, 3.9, 6.2, 7.3 |
+| D33 | 2026-11-10: launch values need a safe shape, not only a safe name | A12.1; 8.4 |
+| D34 | 2026-11-10: source read refuses a changed file; state file bounds; base recovery reads at most 64 manifests; `rustix` is a direct dependency; gates 4 to 6 run each test once | A11.4, A11.5, A12.3 to A12.5; 6.3, 7.3, 9.2, 13, 15 |
+| D35 | 2026-11-10 and 2026-11-11: prerequisites of the first production write: zstd pieces, audit, hint retention, `tracing` | A12.2, A13.2; 18 |
+| D36 | 2026-11-11: shadow run and cutover exit criterion, abort triggers; the Go cross-check is dropped | A13.1; 17, 18 |
+| D37 | 2026-11-11: no separate cap on allowlisted environment names | A13.3; 8.4 |
+| D38 | 2026-11-11: ETag and dead-process write behaviour measured on R2; the fence's reliance on unique manifest hashes | A13.4; 3.8, 7.4, 11.2 |
+| D39 | 2026-11-11: the verification GET is attempted 4 times; the watcher skips a missing root | A13.5, A13.6; 7.4, 10.2 |
+| D40 | 2026-11-12: a restarted daemon's first commit is at least 5 s after start | A14.1; 11.2 |
+| D41 | 2026-11-12: the 2-day exit criterion replaces the 7-day shadow runs of slices 2b and 3 | A14.2; 17 |
+| D42 | 2026-11-12: the baseline hash pin is removed; amendments A0 to A13 are folded into this document; DESIGN.md and AGENTS.md are edited directly | A14.3; 0 |
 
 Finding-to-section map for the challenge review:
 
