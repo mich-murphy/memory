@@ -3111,3 +3111,151 @@ fn a_held_write_that_lands_steps_later_is_adopted_and_the_store_converges() -> R
     }
     Ok(())
 }
+
+// ------------------------------------------------------------------ hint retention
+
+const OLD8: &str = "2026-10-29.jsonl";
+const OLD7: &str = "2026-10-30.jsonl";
+
+fn hint_path(tmp: &Tmp, name: &str) -> PathBuf {
+    tmp.root().join("hints").join(name)
+}
+fn hint_boot(tmp: &Tmp, store: FStore) -> R<D> {
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    boot(tmp, &cfg, files_with(b"hello\n"), store, &list, WALL)
+}
+fn index_has(tmp: &Tmp, name: &str) -> R<bool> {
+    Ok(index_of(tmp)?.is_some_and(|i| i.hints.contains_key(name)))
+}
+
+#[test]
+fn old_consumed_hint_file_is_removed_and_stays_gone() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    fs::write(hint_path(&tmp, OLD8), hint_line("s1", &["PATH=/usr/bin"])?).map_err(e)?;
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!((report.landed, report.hints_removed), (1, 1), "{report:?}");
+    assert_eq!(report.hints_kept_old, 0);
+    assert!(!hint_path(&tmp, OLD8).exists());
+    assert!(!index_has(&tmp, OLD8)?, "entry gone from the written index");
+    d.shutdown().map_err(e)?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!(report.hints_removed, 0);
+    assert!(!hint_path(&tmp, OLD8).exists());
+    assert!(!index_has(&tmp, OLD8)?);
+    Ok(())
+}
+
+#[test]
+fn seven_day_yesterday_and_today_files_are_kept() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    let names = [OLD7, "2026-11-05.jsonl", "2026-11-06.jsonl"];
+    for name in names {
+        fs::write(hint_path(&tmp, name), hint_line("s1", &["PATH=/usr/bin"])?).map_err(e)?;
+    }
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!((report.hints_removed, report.hints_kept_old), (0, 0));
+    for name in names {
+        assert!(hint_path(&tmp, name).exists(), "{name}");
+    }
+    Ok(())
+}
+
+#[test]
+fn old_file_with_uncommitted_owner_is_kept_and_counted() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    // Session s2 has no source, so its record can never commit.
+    fs::write(hint_path(&tmp, OLD8), hint_line("s2", &["PATH=/usr/bin"])?).map_err(e)?;
+    for round in 1..=2 {
+        let report = d.reconcile_once().map_err(e)?;
+        assert_eq!(
+            (report.hints_removed, report.hints_kept_old),
+            (0, 1),
+            "{round}"
+        );
+    }
+    assert!(hint_path(&tmp, OLD8).exists());
+    Ok(())
+}
+
+#[test]
+fn old_file_with_torn_tail_is_kept() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    let mut bytes = hint_line("s1", &["PATH=/usr/bin"])?;
+    bytes.extend_from_slice(b"{\"schema\":\"memory.hint/1\",\"ag");
+    fs::write(hint_path(&tmp, OLD8), &bytes).map_err(e)?;
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!((report.hints_removed, report.hints_kept_old), (0, 1));
+    assert!(hint_path(&tmp, OLD8).exists());
+    Ok(())
+}
+
+#[test]
+fn failed_hint_removal_keeps_the_entry_and_is_retried() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    fs::write(hint_path(&tmp, OLD8), hint_line("s1", &["PATH=/usr/bin"])?).map_err(e)?;
+    let dir = tmp.root().join("hints");
+    set_mode(&dir, 0o500)?;
+    let first = d.reconcile_once();
+    set_mode(&dir, 0o700)?;
+    let report = first.map_err(e)?;
+    assert_eq!((report.hints_removed, report.hints_kept_old), (0, 1));
+    assert!(hint_path(&tmp, OLD8).exists());
+    d.clock_mut().mono = 61_000_000_000;
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!(report.hints_removed, 1);
+    assert!(!hint_path(&tmp, OLD8).exists());
+    assert!(!index_has(&tmp, OLD8)?);
+    Ok(())
+}
+
+#[test]
+fn stale_hint_offset_entry_is_dropped() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    let name = "2026-11-06.jsonl";
+    fs::write(hint_path(&tmp, name), hint_line("s1", &["PATH=/usr/bin"])?).map_err(e)?;
+    d.reconcile_once().map_err(e)?;
+    d.shutdown().map_err(e)?;
+    assert!(index_has(&tmp, name)?);
+    fs::remove_file(hint_path(&tmp, name)).map_err(e)?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    d.reconcile_once().map_err(e)?;
+    d.shutdown().map_err(e)?;
+    assert!(!index_has(&tmp, name)?);
+    Ok(())
+}
+
+#[test]
+fn hint_record_in_the_chain_stays_pending_after_index_loss() -> R {
+    let tmp = Tmp::new()?;
+    let name = "2026-11-06.jsonl";
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    fs::write(hint_path(&tmp, name), hint_line("s1", &["PATH=/usr/bin"])?).map_err(e)?;
+    assert_eq!(d.reconcile_once().map_err(e)?.landed, 1);
+    let store = std::mem::take(&mut d.store_mut().store);
+    d.shutdown().map_err(e)?;
+    fs::remove_file(tmp.root().join("index.json")).map_err(e)?;
+    let fstore = FStore {
+        store,
+        ..FStore::default()
+    };
+    let mut d = hint_boot(&tmp, fstore)?;
+    d.reconcile_once().map_err(e)?;
+    d.clock_mut().wall = WALL + 9 * 86_400 * 1_000_000_000;
+    d.clock_mut().mono = 61_000_000_000;
+    let report = d.reconcile_once().map_err(e)?;
+    // Finding (DESIGN 9.3 step 4): the chain carries this record's digest, but the recovered
+    // base (`OwnerState`) holds no launch digests and the owner has no commit, so the record
+    // is never marked done and the old file is kept. Closing it needs commit.rs/manifest code.
+    assert_eq!((report.landed, report.hints_removed), (0, 0), "{report:?}");
+    assert_eq!(report.hints_kept_old, 1);
+    assert!(hint_path(&tmp, name).exists());
+    Ok(())
+}

@@ -407,6 +407,87 @@ pub struct ScannedRecord {
     pub record: HintRecord,
 }
 
+/// A day file is kept at least this many whole days after its day ends (DESIGN.md 9.1).
+pub const RETENTION_DAYS: i64 = 7;
+
+/// What a round knows about one day file, for [`removable`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetentionFacts {
+    /// The read was not cut by the size bound.
+    pub whole: bool,
+    /// The offset stored for the file after this round's advance.
+    pub offset: u64,
+    /// End of the file's last complete line.
+    pub next_offset: u64,
+    /// Length of the file as read.
+    pub len: u64,
+    /// Bytes of an incomplete trailing line.
+    pub pending_bytes: usize,
+}
+
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let y = year - i64::from(month <= 2);
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// Days since the Unix epoch of a real calendar day named `YYYY-MM-DD`; `None` for any other
+/// text, including a well-shaped name that is not a date.
+#[must_use]
+pub fn day_number(day: &str) -> Option<i64> {
+    let bytes = day.as_bytes();
+    if bytes.len() != 10 || bytes.get(4) != Some(&b'-') || bytes.get(7) != Some(&b'-') {
+        return None;
+    }
+    let num = |range: std::ops::Range<usize>| -> Option<i64> {
+        let part = day.get(range)?;
+        if part.bytes().all(|b| b.is_ascii_digit()) {
+            part.parse().ok()
+        } else {
+            None
+        }
+    };
+    let (year, month, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let last = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return None,
+    };
+    (1..=last)
+        .contains(&d)
+        .then(|| days_from_civil(year, month, d))
+}
+
+/// True when `day` is a real calendar day that ended at least [`RETENTION_DAYS`] full days
+/// before the start of the UTC day of `wall_secs` (`T - D >= 8`). A future day, a name that
+/// is not a date and a time before the epoch are never past.
+#[must_use]
+pub fn past_retention(day: &str, wall_secs: i64) -> bool {
+    if wall_secs < 0 {
+        return false;
+    }
+    day_number(day).is_some_and(|d| wall_secs / 86_400 - d > RETENTION_DAYS)
+}
+
+/// The retention rule (DESIGN.md 9.1): the day is past [`past_retention`], the read was whole
+/// and the stored offset is the end of the last complete line and of the file, so no launch
+/// record is pending and no torn tail waits.
+#[must_use]
+pub fn removable(day: &str, wall_secs: i64, facts: &RetentionFacts) -> bool {
+    past_retention(day, wall_secs)
+        && facts.whole
+        && facts.pending_bytes == 0
+        && facts.offset == facts.next_offset
+        && facts.next_offset == facts.len
+}
+
 /// Result of scanning a day file from an offset.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HintScan {

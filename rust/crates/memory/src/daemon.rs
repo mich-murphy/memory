@@ -33,7 +33,7 @@ use memory_core::domain::{
     Disposition, ErrorClass, Owner, OwnerParkReason, ParkReason, RulesDigest, SessionKey,
     SnapshotFingerprint, SourceId, SourceState,
 };
-use memory_core::hint::{HintScan, LaunchHint, scan};
+use memory_core::hint::{HintScan, LaunchHint, RetentionFacts, past_retention, removable, scan};
 use memory_core::manifest::{Header, ManifestError, OwnerState, Timestamp, Writer};
 use memory_core::privacy::{PolicyContext, SanitizedLaunch, sanitize_launch};
 use serde::de::DeserializeOwned;
@@ -245,6 +245,11 @@ pub struct RoundReport {
     pub deferred: usize,
     /// Failures of this round by class.
     pub failures: FailureCounts,
+    /// Hint day files removed by this round's retention sweep.
+    pub hints_removed: usize,
+    /// Hint day files past the 7-day age that were kept (pending records, torn tail, cut
+    /// read or a failed removal).
+    pub hints_kept_old: usize,
 }
 
 /// Source enumeration, supplied by the shell.
@@ -391,6 +396,8 @@ struct PendingHint {
 
 struct ScannedFile {
     name: String,
+    cut: bool,
+    len: u64,
     start: u64,
     scan: HintScan,
     records: Vec<PendingHint>,
@@ -616,7 +623,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             let Ok(read) = self.state.read_hint_day(&name, MAX_HINT_FILE) else {
                 continue;
             };
-            let bytes = read.bytes;
+            let (bytes, cut) = (read.bytes, read.cut);
             let start = self.hints.get(&name).copied().unwrap_or(0);
             // An offset past the end means the file was replaced: start over.
             let Ok((start, found)) = scan(&bytes, start)
@@ -647,6 +654,8 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 .collect();
             out.push(ScannedFile {
                 name,
+                cut,
+                len: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
                 start,
                 scan: found,
                 records,
@@ -871,6 +880,37 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         }
     }
 
+    /// Retention sweep (DESIGN.md 9.1) over this round's scan, then drop offset entries of
+    /// files that no longer exist. A failed removal keeps the entry and is retried next round.
+    fn sweep_hints(&mut self, files: &[ScannedFile], wall_ns: i128, report: &mut RoundReport) {
+        let secs = i64::try_from(wall_ns.div_euclid(1_000_000_000)).unwrap_or(-1);
+        for file in files {
+            let day = file.name.strip_suffix(".jsonl").unwrap_or(&file.name);
+            if !past_retention(day, secs) {
+                continue;
+            }
+            let facts = RetentionFacts {
+                whole: !file.cut,
+                offset: self.hints.get(&file.name).copied().unwrap_or(0),
+                next_offset: file.scan.next_offset,
+                len: file.len,
+                pending_bytes: file.scan.pending_bytes,
+            };
+            if removable(day, secs, &facts) && self.state.remove_hint_day(&file.name).is_ok() {
+                self.hints.remove(&file.name);
+                self.dirty = true;
+                report.hints_removed += 1;
+            } else {
+                report.hints_kept_old += 1;
+            }
+        }
+        if let Ok(listed) = self.state.list_hint_days() {
+            let before = self.hints.len();
+            self.hints.retain(|name, _| listed.contains(name));
+            self.dirty |= self.hints.len() != before;
+        }
+    }
+
     fn index_body(&self) -> IndexBody {
         IndexBody {
             sources: self
@@ -937,6 +977,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             }
         }
         self.advance_hints(&files);
+        self.sweep_hints(&files, self.clock.wall_ns(), &mut report);
         self.status.failures.add(&report.failures);
         self.status.rounds += 1;
         self.status.updated_at = text;
