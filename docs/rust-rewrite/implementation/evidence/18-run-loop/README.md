@@ -1,7 +1,7 @@
 # Evidence 18: run loop, `memory daemon` and `memory restore` (brief 27, R1 to R4)
 
-Date 2026-11-12. Local only, nothing pushed. The branches sit on top of `30f02f6`, the top of
-pushed stack #95, in this order:
+Date 2026-11-12. The branches sit on top of `30f02f6`, the top of stack #95 (merged into
+`main` as `cf99a3d` the same day), in this order:
 
 | Branch | Tip | Content |
 |---|---|---|

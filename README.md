@@ -25,7 +25,7 @@ and there is no R2 client, zstd, run loop or reader yet. See
 [report 23](docs/rust-rewrite/implementation/23-review-fix-round.md) for progress against
 DESIGN sections 15 and 17.
 
-**Update 2026-11-12 (stack #95 and local branches above it, not yet on `main`):** the S3
+**Update 2026-11-12 (run-loop stack, brief 27):** the S3
 adapter, zstd piece encoding and the reader exist. `memory daemon` starts from `config.toml`,
 runs a safety reconcile every 15 minutes and stops on SIGTERM or SIGINT; `memory restore
 <owner> --out DIR` reads an owner back. A test runs both on the real binary against a local

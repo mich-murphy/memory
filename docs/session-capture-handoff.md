@@ -54,17 +54,17 @@ This is the single active task brief; dated operating records below remain histo
 - Operator decisions of 2026-11-12, all applied: push and merge the stack; annotation 3
   dropped; amendments folded into DESIGN.md and the hash pin removed (A14.3); 5 s startup
   floor (A14.1); the 2-day criterion also replaces the 7-day shadow runs (A14.2).
-- Pushed: the stack of the blocks below is stack #95, PRs #83 to #94, base `main` at
-  `41a07ff`, top `docs/structural-fixes` (`30f02f6`). A Sonnet worker watches hosted CI and
-  merges with `gh stack merge --yes --merge` when "Rust rewrite gates" succeeds on every
-  branch and "CI" fails only in the two `govulncheck` jobs already red on `main`
-  (GO-2026-6859). At the time of writing all 12 "Rust rewrite gates" runs had succeeded; PR
-  #90's macOS job had timed out once in the Go `internal/syncer` tests (the stack changes no
-  Go file), and the one allowed rerun was in progress.
-- Local only, on top of `30f02f6`, in order: `docs/design-fold` (`dc3833f`),
+- Merged: the stack of the blocks below was stack #95, PRs #83 to #94. It merged into `main`
+  as `cf99a3d` on 2026-11-12 (merge commits; the merged tree equals `30f02f6`). On every
+  branch "Rust rewrite gates" had succeeded and "CI" failed only in the two `govulncheck`
+  jobs already red on `main` (GO-2026-6859). PR #90's macOS job timed out once in the Go
+  `internal/syncer` tests (the stack changes no Go file) and passed that step on the one
+  rerun; the cause of the timeout was not established. After the merge, "Rust rewrite
+  gates" succeeded on `main` and "CI" failed in the same two jobs only.
+- The next stack, on top of `30f02f6`, in order: `docs/design-fold` (`dc3833f`),
   `docs/run-loop-brief` (`c25df8a`), `rust/run-config` (`bd25c4e`, R1), `rust/run-loop`
   (`9c8355b`, R2), `rust/restore-cmd` (`038c714`, R3), `rust/daemon-restore-e2e` (`2c10eb0`,
-  R4), `docs/run-loop` (this entry). They are pushed after stack #95 merges.
+  R4), `docs/run-loop` (this entry). Hosted CI had not run on them when this was written.
 - Gates on `2c10eb0`: local, 500 cases, seed 2202692434, all 13 sub-gates 0, 519 tests, 12
   doctests, coverage 6596/6775 = 97.36 %. Also passed on `bd25c4e` and `038c714`. Not run:
   2,000 cases, hosted CI on these branches, `cargo mutants`, anything against R2.
@@ -77,7 +77,7 @@ This is the single active task brief; dated operating records below remain histo
 - Operator confirmations still open: the removal of the `launch_attach_failed` counter that
   A11.3 named in `status.json`, and the dated 2026-11-12 notes under A11.3 and A13.3 in the
   amendments file.
-- Next: verify `main` after stack #95 merges and push the local branches as a new stack; R5
+- Next: merge that stack when its hosted CI is ready; R5
   (`tracing`, hint retention, the audit); then connect the watcher and scheduler through a
   per-owner capture entry, with wake-gap detection; then the acceptance runs of DESIGN 17.
   Left from plan step 3 of report 25: the parked-owner sort, the daemon's direct `std::fs`

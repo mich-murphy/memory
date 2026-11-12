@@ -19,9 +19,8 @@ exist no production write is allowed (A13.2), which R1 enforces by refusing an e
 
 ## Checkout
 
-State on 2026-11-12 after R4. Everything up to `30f02f6` is pushed as stack #95 (PRs #83 to
-#94, in hosted CI; a Sonnet worker merges it when the ready rule holds). Everything above it
-is local, in this order, and is pushed after that stack merges.
+State on 2026-11-12 after R4. Everything up to `30f02f6` was stack #95 (PRs #83 to #94) and
+is merged into `main` as `cf99a3d`. Everything above it is the next stack, in this order.
 
 | Branch | Tip | Content |
 |---|---|---|
@@ -32,9 +31,6 @@ is local, in this order, and is pushed after that stack merges.
 | `rust/restore-cmd` | `038c714` | R3, rebased onto R2 |
 | `rust/daemon-restore-e2e` | `2c10eb0` | R4 |
 | `docs/run-loop` | | This update and evidence 18 |
-
-Do not change the checked-out branch of `/Users/mm/dev/memory-wt/ds-integrate` while the
-merge worker is running.
 
 ## Operator decisions, 2026-11-12
 
@@ -122,5 +118,6 @@ credential files, no R2 access in R1 to R4 (local server only).
 - 2026-11-12: R2 (`9c8355b`) and R3 (`0a91639`, `038c714` after the rebase onto R2) built in
   parallel and accepted; full gates pass on `038c714`.
 - 2026-11-12: R4 accepted at `2c10eb0`; the parent added the uploaded-byte count to the
-  restart test. Full gates pass. Record in evidence 18. Next: push these branches once stack
-  #95 merges, then R5.
+  restart test. Full gates pass. Record in evidence 18.
+- 2026-11-12: stack #95 merged into `main` as `cf99a3d`; these branches are submitted as the
+  next stack. Next: R5.
