@@ -40,8 +40,8 @@ MUTANTS = [
     {
         "name": "advance-on-fail",
         "file": "crates/memory/src/daemon.rs",
-        "predicate": "        if let Ok(landed) = &result {\n            // Remote is authoritative",
-        "mutant": "        self.apply(got.updates.clone());\n        if let Ok(landed) = &result {\n            // Remote is authoritative",
+        "predicate": "        if let Ok(end) = &result {\n            // Remote is authoritative",
+        "mutant": "        self.apply(got.updates.clone());\n        if let Ok(end) = &result {\n            // Remote is authoritative",
         "tests": [t(MEMORY, "mutation_daemon", "failed_commit_does_not_advance")],
     },
     {
