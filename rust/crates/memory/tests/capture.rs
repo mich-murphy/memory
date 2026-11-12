@@ -881,3 +881,50 @@ fn stored_pieces_are_zstd_frames_that_match_their_descriptors() -> R {
     assert_eq!(restored, data);
     Ok(())
 }
+
+/// Restore the latest epoch of the first source from the rig's store through `memory_reader`.
+fn restore_latest(rig: &Rig) -> R<Vec<u8>> {
+    let id = &rig.sources.first().ok_or("no source")?.id;
+    let base = rig.base.as_ref().ok_or("no base")?;
+    let entry = base.state.sources.get(id).ok_or("no entry")?;
+    memory_reader::restore_source(entry, |key| {
+        rig.store
+            .objects
+            .get(key)
+            .map(|(body, _)| body.clone())
+            .ok_or_else(|| "piece object missing".to_owned())
+    })
+    .map_err(|err| format!("restore failed: {err:?}"))
+}
+
+/// Facts-table row 7: an extension that cannot resume the digest re-reads `[0, to)`. A byte
+/// rewritten strictly between the windows, with growth, passes the window check; the committed
+/// digest is then of the new bytes while the stored pieces before `from` are the old ones. The
+/// committed epoch must still restore to its own digest and to the file.
+#[test]
+fn non_resumed_extension_after_a_between_windows_rewrite_restores_to_the_file() -> R {
+    let mut rig = rig()?;
+    rig.piece_len = 1 << 20;
+    let old = pattern(200 * 1024);
+    transcript(&mut rig, &old);
+    assert_eq!(kinds(&rig.cycle()?.1), ["epoch"]);
+    // No resumable state: the next extension reads [0, to) again.
+    let id = rig.sources.first().ok_or("no source")?.id.clone();
+    let local = rig.locals.get_mut(&id).ok_or("no local")?;
+    local.index.as_mut().ok_or("no index")?.whole_state = None;
+    let mut new = old.clone();
+    let at = 50_000;
+    *new.get_mut(at).ok_or("byte")? ^= 0xff;
+    new.extend_from_slice(&pattern(1_000));
+    transcript(&mut rig, &new);
+    let (_, changes) = rig.cycle()?;
+    let restored = restore_latest(&rig);
+    assert_eq!(
+        restored.as_ref().map(Vec::len),
+        Ok(new.len()),
+        "kinds {:?}: the latest epoch restores",
+        kinds(&changes)
+    );
+    assert_eq!(restored, Ok(new), "the latest epoch equals the file");
+    Ok(())
+}

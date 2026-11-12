@@ -23,14 +23,30 @@
 //! the descriptor records the length and digest of the stored bytes; a compression failure is
 //! [`SourceOutcome::Unavailable`].
 //!
-//! Limitations: the whole-stream digest resumes from the index's `Sha256State` for prefix-stable sources
-//! (otherwise it is recomputed from a fresh read of `[0, to)`), `Refresh` of a racy stat is not persisted, and audit evidence is always
-//! `NotDue`.
+//! # Audit and stat refresh
+//!
+//! An indexed append source gets [`AuditEvidence`] when [`crate::audit::due`] says so: a fresh
+//! stat-read-stat of `[0, size)` (transformed as a whole-stream capture transforms it) is hashed
+//! and compared with the whole-stream digest of the last remote epoch, never with the index.
+//! A first mismatch is `RecheckRequired`; the planner asks for a second independent read.
+//! A fresh stat the planner asks to refresh is stored in the index, and a match stores the
+//! audit time; both are local updates (they apply once the owner's commit landed, or at once
+//! when it has none).
+//!
+//! An extension that cannot resume the digest re-reads `[0, to)` and first checks that the
+//! re-read prefix `[0, from)` hashes to the committed digest; otherwise the stored pieces
+//! before `from` would not reassemble to the digest the new manifest commits, and a new epoch
+//! starts instead.
+//!
+//! Limitations: the whole-stream digest resumes from the index's `Sha256State` for
+//! prefix-stable sources (otherwise it is recomputed from a fresh read of `[0, to)`). Snapshot
+//! and missing-source planning never carry audit evidence (`NotDue`).
+use crate::audit;
 use crate::commit::{Commit, Upload};
 use crate::environment::{FileSystem, PieceError};
 use memory_core::domain::{
-    AuditState, EpochPosition, Fingerprint, Observed, Offset, Plan, RulesDigest, Sha256,
-    Sha256State, SnapshotFingerprint, SourceClass, SourceId, SourceKind, SourceState,
+    AuditState, EpochPosition, Fingerprint, Observed, Offset, Plan, ReplayReason, RulesDigest,
+    Sha256, Sha256State, SnapshotFingerprint, SourceClass, SourceId, SourceKind, SourceState,
     WithholdReason,
 };
 use memory_core::manifest::{
@@ -38,8 +54,8 @@ use memory_core::manifest::{
     manifest_hash,
 };
 use memory_core::planner::{
-    AppendBasis, AuditEvidence, Observation, PlanInput, Planning, Strategy, WindowEvidence, plan,
-    window_ranges,
+    AppendBasis, AuditEvidence, Observation, PlanInput, Planning, Strategy, WindowEvidence,
+    audit_eligible, plan, window_ranges,
 };
 use memory_core::privacy::{
     Admission, AdmittedSource, Authorization, AuthorizedBody, PolicyContext, Profile, Reason,
@@ -384,6 +400,7 @@ fn step<F: FileSystem>(
         env,
         rules,
         next_epoch,
+        previous: audit::never(),
     };
     match src.class {
         SourceClass::Snapshot => {
@@ -401,7 +418,7 @@ fn step<F: FileSystem>(
                 whole: l.sha256,
                 rules: l.epoch.rules,
             });
-            append(fs, &job, local, remote_pos, acc)
+            append(fs, job, local, remote_pos, acc)
         }
     }
 }
@@ -442,16 +459,29 @@ fn snapshot<F: FileSystem>(
     }
 }
 
+/// A fresh stat as an [`Observed`], or `None` when the source is absent or unreadable.
+fn observe_now<F: FileSystem>(fs: &mut F, handle: u64, at_ns: i64) -> Option<Observed> {
+    let stat = fs.stat(handle).ok()??;
+    Some(Observed {
+        id: stat.id,
+        size: stat.size,
+        mtime_ns: stat.mtime_ns,
+        observed_at_ns: at_ns,
+    })
+}
+
 /// Verified on-disk byte segments `(start, bytes)` that need not be read again.
 type Known = Vec<(u64, Vec<u8>)>;
 /// Borrowed [`Known`] segments.
 type Segments<'a> = &'a [(u64, Vec<u8>)];
 
 enum Mode {
-    /// Extend from the offset; the state, when present, is the resumable digest of `[0, from)`.
+    /// Extend from the offset, whose committed whole-stream digest is the second field; the
+    /// state, when present, is the resumable digest of `[0, from)`.
     /// `Known` are on-disk segments `(start, bytes)` already read and verified by the planner.
-    Extend(Offset, Option<Sha256State>, Known),
-    Epoch,
+    Extend(Offset, Sha256, Option<Sha256State>, Known),
+    /// A new epoch; true when an audit mismatch started it.
+    Epoch(bool),
     Replace,
 }
 
@@ -462,6 +492,8 @@ struct Job<'a> {
     env: &'a Env<'a>,
     rules: Option<RulesDigest>,
     next_epoch: u32,
+    /// Audit bookkeeping of the index this capture continues (append sources).
+    previous: AuditState,
 }
 
 impl Job<'_> {
@@ -475,7 +507,7 @@ impl Job<'_> {
         let src = self.src;
         let (from, to, epoch) = match mode {
             Mode::Extend(from, ..) => (from.get(), from.get().max(self.observed.size), None),
-            Mode::Epoch | Mode::Replace => (0, self.observed.size, Some(self.next_epoch)),
+            Mode::Epoch(_) | Mode::Replace => (0, self.observed.size, Some(self.next_epoch)),
         };
         let resume = self.resume_state(&mode, from, to);
         let raw = match resume {
@@ -483,6 +515,14 @@ impl Job<'_> {
             None => read_checked(fs, src.handle, 0..to)?,
         };
         let body = self.authorized_body(&raw)?;
+        // Re-read prefix: the stored pieces before `from` are the bytes of an earlier read, so
+        // the digest committed here is true of them only if this read reproduces them.
+        if let (Mode::Extend(_, committed, ..), None) = (&mode, &resume) {
+            let prefix = Offset::new(0)..Offset::new(from);
+            if hash_span(body.bytes(), &prefix) != Some(*committed) {
+                return self.write(fs, Mode::Epoch(true), acc);
+            }
+        }
         let (base, first) = if resume.is_some() {
             (Offset::new(from), 0)
         } else {
@@ -507,15 +547,20 @@ impl Job<'_> {
             sha256: whole,
             pieces,
         };
+        let audit = match &mode {
+            Mode::Extend(..) => self.previous.clone(),
+            Mode::Epoch(mismatch) => audit::new_epoch(&self.previous, *mismatch),
+            Mode::Replace => audit::never(),
+        };
         acc.changes.push(match mode {
             Mode::Extend(..) => Change::Extend(write),
-            Mode::Epoch => Change::Epoch(write),
+            Mode::Epoch(_) => Change::Epoch(write),
             Mode::Replace => Change::Replace(write),
         });
         if src.class == SourceClass::Append {
             let known: &[(u64, Vec<u8>)] = match &mode {
-                Mode::Extend(_, _, known) => known,
-                Mode::Epoch | Mode::Replace => &[],
+                Mode::Extend(_, _, _, known) => known,
+                Mode::Epoch(_) | Mode::Replace => &[],
             };
             let resumed = resume.is_some().then_some((from, known));
             let windows = self.windows(fs, resumed, body.bytes(), stream_len)?;
@@ -525,7 +570,7 @@ impl Job<'_> {
                 whole,
                 rules: self.rules,
             };
-            let state = self.state(position, windows, whole_state);
+            let state = self.state(position, windows, whole_state, audit);
             acc.updates
                 .push(Update::Index(src.id.clone(), Box::new(state)));
         }
@@ -535,11 +580,29 @@ impl Job<'_> {
     /// resumable state for `[0, from)` exists; otherwise the whole stream is read again.
     fn resume_state(&self, mode: &Mode, from: u64, to: u64) -> Option<Sha256State> {
         match mode {
-            Mode::Extend(_, Some(state), _) if self.admitted.prefix_stable() && from <= to => {
+            Mode::Extend(_, _, Some(state), _) if self.admitted.prefix_stable() && from <= to => {
                 Some(state.clone())
             }
             _ => None,
         }
+    }
+    /// One independent audit read: stat, read `[0, size)`, stat again, and only when the source
+    /// held still (identity, size and mtime equal to the captured stat throughout) transform it
+    /// as a whole-stream capture does and hash it with a fresh hasher. `None` is "no verdict":
+    /// the source moved, or the seam or the transform failed.
+    fn audit_read<F: FileSystem>(&self, fs: &mut F, state: &SourceState) -> Option<Sha256> {
+        let handle = self.src.handle;
+        let before = observe_now(fs, handle, self.env.now_ns)?;
+        if !audit_eligible(&state.observed, &before, &before) {
+            return None;
+        }
+        let raw = read_checked(fs, handle, 0..before.size).ok()?;
+        let after = observe_now(fs, handle, self.env.now_ns)?;
+        if !audit_eligible(&state.observed, &before, &after) {
+            return None;
+        }
+        let body = self.authorized_body(&raw).ok()?;
+        Some(manifest_hash(body.bytes()))
     }
     /// Privacy transform, then the final authorization of the transformed bytes.
     fn authorized_body(&self, raw: &[u8]) -> Result<AuthorizedBody, SourceOutcome> {
@@ -631,16 +694,14 @@ impl Job<'_> {
         position: EpochPosition,
         windows: WindowEvidence,
         whole_state: Option<Sha256State>,
+        audit: AuditState,
     ) -> SourceState {
         SourceState {
             observed: self.observed.clone(),
             position,
             head: windows.head,
             tail: windows.tail,
-            audit: AuditState {
-                last_checked_at_ns: None,
-                consecutive_failures: 0,
-            },
+            audit,
             whole_state,
         }
     }
@@ -664,6 +725,10 @@ struct Resolved {
     prefix: Option<Vec<u8>>,
     /// Head and tail segments read at the old boundary, reusable by the write.
     known: Known,
+    /// The planner asked for the fresh stat to be stored.
+    refresh_stat: bool,
+    /// The audit compared equal to the committed digest in this round.
+    matched: bool,
 }
 
 /// Head and tail windows at the old committed boundary, and the bytes they were read from.
@@ -688,8 +753,10 @@ fn read_windows<F: FileSystem>(
     ))
 }
 
-/// Planning rounds an append source may need: windows, then an adopted prefix, then the
-/// decision. The planner never asks for more, so a fourth answer is a fault, not work.
+/// Planning rounds an append source may need. An indexed source can ask for the audit recheck,
+/// then the windows, then decide (3); an unindexed one asks for the adopted prefix, then
+/// decides (2), and has no audit. The planner never asks for more than 3, so the fourth round
+/// is slack and a fourth answer is a fault, not work.
 const MAX_ROUNDS: usize = 4;
 
 /// Plan, answering the planner's evidence requests through the seam, until it decides.
@@ -704,6 +771,20 @@ fn resolve<F: FileSystem>(
     let mut windows = None;
     let mut prefix = None;
     let mut known = Known::new();
+    let mut evidence = AuditEvidence::NotDue;
+    let mut first_read = None;
+    if let (Some(state), Some(remote)) = (index, remote)
+        && audit::due(&state.audit, state.observed.observed_at_ns, job.env.now_ns)
+    {
+        // Cheap pre-check: a changed stat means no audit compares the captured input and no
+        // byte is read.
+        if audit_eligible(&state.observed, job.observed, job.observed) {
+            first_read = job.audit_read(fs, state);
+            evidence = audit::first(remote.whole, first_read);
+        } else {
+            evidence = AuditEvidence::Ineligible;
+        }
+    }
     for _ in 0..MAX_ROUNDS {
         let planning = plan(&PlanInput {
             withheld: None,
@@ -720,7 +801,7 @@ fn resolve<F: FileSystem>(
                 (None, None) => AppendBasis::Fresh,
             }),
             rules: job.rules,
-            audit: AuditEvidence::NotDue,
+            audit: evidence,
         });
         match planning {
             Planning::NeedWindows => {
@@ -729,7 +810,12 @@ fn resolve<F: FileSystem>(
                 windows = Some(evidence);
                 known = segments;
             }
-            Planning::NeedAuditRecheck => return Err(SourceOutcome::Unavailable),
+            Planning::NeedAuditRecheck => {
+                let (Some(state), Some(remote), Some(first)) = (index, remote, first_read) else {
+                    return Err(SourceOutcome::Unavailable);
+                };
+                evidence = audit::second(remote.whole, first, job.audit_read(fs, state));
+            }
             Planning::Ready {
                 plan: Plan::Adopt { remote },
                 ..
@@ -738,12 +824,18 @@ fn resolve<F: FileSystem>(
                 adopt = Some(manifest_hash(&bytes));
                 prefix = Some(bytes);
             }
-            Planning::Ready { plan, adopted, .. } => {
+            Planning::Ready {
+                plan,
+                adopted,
+                refresh_stat,
+            } => {
                 return Ok(Resolved {
                     plan,
                     adopted,
                     prefix,
                     known,
+                    refresh_stat,
+                    matched: evidence == AuditEvidence::Matched,
                 });
             }
         }
@@ -753,7 +845,7 @@ fn resolve<F: FileSystem>(
 
 fn append<F: FileSystem>(
     fs: &mut F,
-    job: &Job<'_>,
+    mut job: Job<'_>,
     local: &Local,
     remote: Option<EpochPosition>,
     acc: &mut Acc,
@@ -766,21 +858,43 @@ fn append<F: FileSystem>(
         .index
         .clone()
         .filter(|state| remote.as_ref() == Some(&state.position));
-    let resolved = match resolve(fs, job, index.as_ref(), remote.as_ref()) {
+    job.previous = index
+        .as_ref()
+        .map_or_else(audit::never, |state| state.audit.clone());
+    let resolved = match resolve(fs, &job, index.as_ref(), remote.as_ref()) {
         Ok(resolved) => resolved,
         Err(outcome) => return outcome,
     };
     if let (Some(position), Some(bytes)) = (resolved.adopted, &resolved.prefix)
         && let Some(windows) = windows_of(bytes)
     {
-        let state = job.state(position, windows, job.whole_state_of(bytes));
+        let state = job.state(position, windows, job.whole_state_of(bytes), audit::never());
         acc.updates
             .push(Update::Index(src.id.clone(), Box::new(state)));
+    }
+    if resolved.matched {
+        job.previous = audit::matched(job.env.now_ns);
+    }
+    if let (Plan::Unchanged, Some(state)) = (&resolved.plan, &index)
+        && (resolved.matched || resolved.refresh_stat)
+    {
+        let next = audit::refreshed(
+            state,
+            job.observed,
+            resolved.refresh_stat,
+            job.previous.clone(),
+        );
+        acc.updates
+            .push(Update::Index(src.id.clone(), Box::new(next)));
     }
     // An append plan exists only for a live remote position (indexed or unindexed basis).
     let mode = match resolved.plan {
         Plan::Append { from, .. } => Mode::Extend(
             from,
+            match remote.as_ref() {
+                Some(position) => position.whole,
+                None => return SourceOutcome::Unavailable,
+            },
             index
                 .as_ref()
                 .filter(|state| state.position.captured_to == from)
@@ -792,7 +906,7 @@ fn append<F: FileSystem>(
                 }),
             resolved.known,
         ),
-        Plan::Replay { .. } => Mode::Epoch,
+        Plan::Replay { reason } => Mode::Epoch(reason == ReplayReason::AuditMismatch),
         Plan::Withheld { reason } => return SourceOutcome::Withheld(reason),
         _ => return SourceOutcome::Unchanged,
     };
