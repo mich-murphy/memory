@@ -48,7 +48,7 @@ impl Tmp {
         fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).map_err(e)?;
         let path = self.0.join("config.toml");
         let text = format!(
-            "archive_id = \"a\"\nmachine_id = \"m\"\nbucket = \"bucket-1\"\ntoken_path = \"{}\"\n",
+            "archive_id = \"a\"\nmachine_id = \"m\"\nendpoint = \"http://127.0.0.1:9\"\nbucket = \"bucket-1\"\ntoken_path = \"{}\"\n",
             token.display()
         );
         fs::write(&path, text).map_err(e)?;

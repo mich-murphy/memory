@@ -53,6 +53,16 @@ pub enum ConfigError {
     /// The token file is readable or writable by group or world.
     #[error("config_token_permissions")]
     TokenPermissions,
+    /// `endpoint` is not an `https` URL, or an `http` URL for a non-loopback host, or carries
+    /// userinfo, a query or a fragment.
+    #[error("config_endpoint")]
+    Endpoint,
+    /// `region` is empty.
+    #[error("config_region")]
+    Region,
+    /// `prefix` is not empty or a relative, `/`-terminated path of clean segments.
+    #[error("config_prefix")]
+    Prefix,
 }
 
 impl ConfigError {
@@ -71,6 +81,9 @@ impl ConfigError {
             Self::TokenUnavailable(_) => "config_token_unavailable",
             Self::TokenNotFile => "config_token_not_file",
             Self::TokenPermissions => "config_token_permissions",
+            Self::Endpoint => "config_endpoint",
+            Self::Region => "config_region",
+            Self::Prefix => "config_prefix",
         }
     }
 }
@@ -120,8 +133,54 @@ struct Raw {
     roots: Vec<Root>,
     #[serde(default)]
     window: RawWindow,
+    endpoint: String,
+    #[serde(default = "default_region")]
+    region: String,
+    #[serde(default)]
+    prefix: String,
     bucket: String,
     token_path: PathBuf,
+}
+
+fn default_region() -> String {
+    "auto".to_owned()
+}
+
+/// Longest accepted key prefix in bytes.
+pub const MAX_PREFIX_BYTES: usize = 256;
+
+fn valid_endpoint(text: &str) -> bool {
+    let Ok(url) = text.parse::<url::Url>() else {
+        return false;
+    };
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return false;
+    }
+    match (url.scheme(), url.host()) {
+        ("https", Some(_)) => true,
+        ("http", Some(url::Host::Domain(name))) => name == "localhost",
+        ("http", Some(url::Host::Ipv4(ip))) => ip.is_loopback(),
+        ("http", Some(url::Host::Ipv6(ip))) => ip.is_loopback(),
+        _ => false,
+    }
+}
+
+fn valid_prefix(prefix: &str) -> bool {
+    if prefix.is_empty() {
+        return true;
+    }
+    if prefix.len() > MAX_PREFIX_BYTES || prefix.starts_with('/') {
+        return false;
+    }
+    let Some(body) = prefix.strip_suffix('/') else {
+        return false;
+    };
+    body.split('/')
+        .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
 }
 
 /// Validated coalescer window.
@@ -134,7 +193,7 @@ pub struct Window {
 }
 
 /// A validated configuration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Config {
     /// Archive identity.
     pub archive_id: ArchiveId,
@@ -144,10 +203,33 @@ pub struct Config {
     pub roots: Vec<Root>,
     /// Coalescer window.
     pub window: Window,
+    /// S3 endpoint URL: `https`, or `http` only for a loopback host. No userinfo, query or
+    /// fragment.
+    pub endpoint: String,
+    /// Signing region, `auto` by default.
+    pub region: String,
+    /// Key prefix: empty, or relative and `/`-terminated.
+    pub prefix: String,
     /// Bucket name.
     pub bucket: String,
     /// Absolute path of the token file.
     pub token_path: PathBuf,
+}
+
+impl std::fmt::Debug for Config {
+    /// Omits the endpoint, which can identify the storage account.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("archive_id", &self.archive_id)
+            .field("machine_id", &self.machine_id)
+            .field("roots", &self.roots)
+            .field("window", &self.window)
+            .field("region", &self.region)
+            .field("prefix", &self.prefix)
+            .field("bucket", &self.bucket)
+            .field("token_path", &self.token_path)
+            .finish_non_exhaustive()
+    }
 }
 
 fn valid_bucket(name: &str) -> bool {
@@ -171,6 +253,15 @@ impl Config {
         if !valid_bucket(&raw.bucket) {
             return Err(ConfigError::Bucket);
         }
+        if !valid_endpoint(&raw.endpoint) {
+            return Err(ConfigError::Endpoint);
+        }
+        if raw.region.is_empty() {
+            return Err(ConfigError::Region);
+        }
+        if !valid_prefix(&raw.prefix) {
+            return Err(ConfigError::Prefix);
+        }
         let RawWindow { quiet, cap } = raw.window;
         if quiet == 0 || cap < quiet || cap > MAX_CAP_SECS {
             return Err(ConfigError::Window);
@@ -189,6 +280,9 @@ impl Config {
                 quiet: Duration::from_secs(quiet),
                 cap: Duration::from_secs(cap),
             },
+            endpoint: raw.endpoint,
+            region: raw.region,
+            prefix: raw.prefix,
             bucket: raw.bucket,
             token_path: raw.token_path,
         })
