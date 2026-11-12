@@ -81,6 +81,27 @@ fn collector(paths: [&Path; 3]) -> (Vec<String>, Vec<u128>) {
     (names, identities)
 }
 
+/// Build the S3 store from the config and the token file: the one place both the daemon and
+/// `memory restore` construct it. The token is read here, after the config's own checks.
+/// No network call is made and the prefix is not judged (the daemon refuses an empty one
+/// itself; reading a bucket is not a production write).
+///
+/// # Errors
+/// [`AssembleError::Token`] or [`AssembleError::Store`].
+pub fn build_store(config: &Config) -> Result<S3Store, AssembleError> {
+    let credentials = read_token(&config.token_path).map_err(AssembleError::Token)?;
+    S3Store::new(
+        &config.endpoint,
+        &config.bucket,
+        &config.region,
+        credentials.access_key_id(),
+        credentials.secret_access_key(),
+        &config.prefix,
+        TimeoutPolicy::PRODUCTION,
+    )
+    .map_err(AssembleError::Store)
+}
+
 fn build(
     root: &Path,
     config_path: &Path,
@@ -92,17 +113,7 @@ fn build(
         return Err(AssembleError::PrefixRequired);
     }
     let roots = locator_roots(config).map_err(AssembleError::Roots)?;
-    let credentials = read_token(&config.token_path).map_err(AssembleError::Token)?;
-    let store = S3Store::new(
-        &config.endpoint,
-        &config.bucket,
-        &config.region,
-        credentials.access_key_id(),
-        credentials.secret_access_key(),
-        &config.prefix,
-        TimeoutPolicy::PRODUCTION,
-    )
-    .map_err(AssembleError::Store)?;
+    let store = build_store(config)?;
     let fs = SharedFs::new();
     let sources = WalkSources::new(roots, WalkLimits::default(), fs.clone());
     let (collector_paths, collector_identities) =
