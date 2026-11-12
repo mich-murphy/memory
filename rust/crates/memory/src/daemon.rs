@@ -42,15 +42,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
 use std::time::Duration;
 
 /// The derived index is written at most this often while dirty (DESIGN.md 9.2).
 pub const INDEX_INTERVAL: Duration = Duration::from_secs(60);
 /// Exit code of `memory daemon` for a config refusal.
 pub const EXIT_CONFIG: u8 = 2;
-/// Exit code of `memory daemon` while no real adapters exist.
-pub const EXIT_NO_ADAPTERS: u8 = 78;
 const MAX_HINT_FILE: u64 = 64 << 20;
 
 /// Why startup refused. Closed; no paths or values.
@@ -345,22 +342,6 @@ fn open(root: &Path, config_path: &Path, sync: SyncPolicy) -> Result<Opened, Sta
         status,
         status_load,
     })
-}
-
-/// Entry of `memory daemon`: startup, then an explicit refusal because the real filesystem
-/// and store adapters do not exist yet. Prints nothing and never captures.
-#[must_use]
-pub fn main_entry() -> ExitCode {
-    let Some(root) = crate::state::default_root() else {
-        return ExitCode::from(1);
-    };
-    match open(&root, &root.join("config.toml"), SyncPolicy::Full) {
-        Err(error) => ExitCode::from(error.exit_code()),
-        Ok(opened) => {
-            drop(opened);
-            ExitCode::from(EXIT_NO_ADAPTERS)
-        }
-    }
 }
 
 /// What the owner knows of the remote commit base.
