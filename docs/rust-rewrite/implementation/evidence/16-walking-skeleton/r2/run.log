@@ -1,0 +1,17 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+────────────
+ Nextest run ID fbb4d345-eba8-4576-9843-ec83724f3d50 with nextest profile: default
+    Starting 1 test across 1 binary (20 tests skipped)
+       START [         ] (1/1) memory::s3_store skeleton::skeleton_on_r2
+
+running 1 test
+prefix: rust-acceptance/skeleton-20261112-8f10261/
+requests: {"get": 16, "put_if_absent": 7, "put_if_match": 2}
+keys written: 7
+test skeleton::skeleton_on_r2 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 20 filtered out; finished in 5.04s
+
+        PASS [   5.114s] (1/1) memory::s3_store skeleton::skeleton_on_r2
+────────────
+     Summary [   5.115s] 1 test run: 1 passed, 20 skipped

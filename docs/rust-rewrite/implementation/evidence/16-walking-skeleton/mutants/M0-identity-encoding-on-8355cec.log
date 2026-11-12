@@ -1,0 +1,1375 @@
+   Compiling memory v0.1.0 (/Users/mm/dev/memory-wt/sk-zstd/rust/crates/memory)
+warning: constant `PIECE_ZSTD_LEVEL` is never used
+   --> crates/memory/src/environment.rs:145:7
+    |
+145 | const PIECE_ZSTD_LEVEL: i32 = 3;
+    |       ^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `memory` (lib) generated 1 warning
+warning: `memory` (lib test) generated 1 warning (1 duplicate)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.37s
+────────────
+ Nextest run ID b05e606d-ae39-468b-9cee-12d6c795c73d with nextest profile: default
+    Starting 75 tests across 4 binaries (13 binaries skipped)
+        PASS [   0.075s] ( 1/75) memory::capture admission_denials_map_to_literal_withhold_reasons
+        PASS [   0.075s] ( 2/75) memory::capture adopt_prefix_read_failures_have_literal_outcomes
+        PASS [   0.071s] ( 3/75) memory::capture append_extends_then_unchanged_uploads_nothing
+        PASS [   0.085s] ( 4/75) memory::capture attach_launches_deduplicates_by_digest
+        FAIL [   0.071s] ( 5/75) memory::capture extend_across_the_head_window_publishes_exact_delta_and_window_digests
+  stdout ───
+
+    running 1 test
+    test extend_across_the_head_window_publishes_exact_delta_and_window_digests ... FAILED
+
+    failures:
+
+    failures:
+        extend_across_the_head_window_publishes_exact_delta_and_window_digests
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.00s
+
+  stderr ───
+    Error: "Zstd"
+
+        FAIL [   0.076s] ( 6/75) memory::capture extend_across_the_tail_window_publishes_exact_delta_and_window_digests
+  stdout ───
+
+    running 1 test
+    test extend_across_the_tail_window_publishes_exact_delta_and_window_digests ... FAILED
+
+    failures:
+
+    failures:
+        extend_across_the_tail_window_publishes_exact_delta_and_window_digests
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.01s
+
+  stderr ───
+    Error: "Zstd"
+
+        PASS [   0.069s] ( 7/75) memory::capture extend_from_an_empty_capture_reads_nothing_beyond_the_delta
+        PASS [   0.069s] ( 8/75) memory::capture failure_branches_have_literal_outcomes_and_store_nothing
+        PASS [   0.080s] ( 9/75) memory::capture launch_canaries_never_reach_any_stored_object
+        PASS [   0.070s] (10/75) memory::capture need_windows_reads_head_and_tail_through_the_seam
+        PASS [   0.072s] (11/75) memory::capture non_prefix_stable_source_with_an_index_is_read_whole_not_as_a_delta
+        PASS [   0.069s] (12/75) memory::capture removed_source_is_deleted_only_after_two_observations
+        PASS [   0.071s] (13/75) memory::capture rewrite_and_truncate_start_a_new_epoch
+        PASS [   0.072s] (14/75) memory::capture snapshot_change_is_replaced
+        PASS [   0.070s] (15/75) memory::capture snapshot_read_failures_have_literal_outcomes
+        PASS [   0.070s] (16/75) memory::capture snapshot_replaces_and_protected_config_never_stores_the_canary
+        PASS [   0.071s] (17/75) memory::capture snapshot_unchanged_then_changed_after_commit
+        FAIL [   0.071s] (18/75) memory::capture stored_pieces_are_zstd_frames_that_match_their_descriptors
+  stdout ───
+
+    running 1 test
+    test stored_pieces_are_zstd_frames_that_match_their_descriptors ... FAILED
+
+    failures:
+
+    failures:
+        stored_pieces_are_zstd_frames_that_match_their_descriptors
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'stored_pieces_are_zstd_frames_that_match_their_descriptors' (376500965) panicked at crates/memory/tests/capture.rs:869:9:
+    assertion `left == right` failed: zstd magic
+      left: Some([99, 111, 109, 112])
+     right: Some([40, 181, 47, 253])
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        PASS [   0.612s] (19/75) memory::capture piece_size_is_capped_at_eight_mebibytes_whatever_the_request
+        PASS [   0.096s] (20/75) memory::capture transform_denials_map_to_literal_withhold_reasons
+        PASS [   0.069s] (21/75) memory::capture withheld_source_is_never_read_or_stored
+        PASS [   0.068s] (22/75) memory::capture_property guard_has_negative_controls
+        FAIL [   0.072s] (23/75) memory::capture_property guard_shapes_arise_from_a_scripted_run_with_the_real_capture
+  stdout ───
+
+    running 1 test
+    test guard_shapes_arise_from_a_scripted_run_with_the_real_capture ... FAILED
+
+    failures:
+
+    failures:
+        guard_shapes_arise_from_a_scripted_run_with_the_real_capture
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        FAIL [   0.070s] (24/75) memory::capture_property oracle_detects_tampered_store_contents
+  stdout ───
+
+    running 1 test
+    test oracle_detects_tampered_store_contents ... FAILED
+
+    failures:
+
+    failures:
+        oracle_detects_tampered_store_contents
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        FAIL [   0.161s] (25/75) memory::capture_property proptest_property4_capture_state_machine
+  stdout ───
+
+    running 1 test
+    test proptest_property4_capture_state_machine ... FAILED
+
+    failures:
+
+    failures:
+        proptest_property4_capture_state_machine
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.09s
+
+  stderr ───
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 1, seed: 14, n: 3790, same: false }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 14, n: 3790, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 7, n: 3790, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 3, n: 3790, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 1, n: 3790, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 3790, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 1945, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 1022, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 561, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 330, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 215, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 157, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 128, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 114, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 107, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 103, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 101, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 100, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 6, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 3, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 2, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 1, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 1, len: 4100 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 4100 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 4095 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 4092 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 4091 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 4090 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 14 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 7 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 3 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 1 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 0 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 1, pos: 7, byte: 81 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 7, byte: 81 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 3, byte: 81 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 1, byte: 81 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 0, byte: 81 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 0, byte: 40 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 0, byte: 20 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 0, byte: 10 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 0, byte: 5 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 0, byte: 2 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 0, byte: 1 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 0, byte: 0 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1601:5:
+    Err(Fail(Reason("final settle: Err(\"restore failed: Decode(Zstd)\")"), (Reference { files: {}, history: {}, foreign_seen: false, generation: {}, destructive: {} }, [Append { src: 0, seed: 0, n: 1 }, Append { src: 0, seed: 0, n: 1 }], None)))
+
+        FAIL [   0.075s] (26/75) memory::capture_property removed_source_needs_two_observations_then_is_deleted
+  stdout ───
+
+    running 1 test
+    test removed_source_needs_two_observations_then_is_deleted ... FAILED
+
+    failures:
+
+    failures:
+        removed_source_needs_two_observations_then_is_deleted
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        FAIL [   0.076s] (27/75) memory::capture_property window_and_identity_shapes_arise_from_a_scripted_run
+  stdout ───
+
+    running 1 test
+    test window_and_identity_shapes_arise_from_a_scripted_run ... FAILED
+
+    failures:
+
+    failures:
+        window_and_identity_shapes_arise_from_a_scripted_run
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        FAIL [   0.081s] (28/75) memory::daemon a_follow_up_applies_no_local_updates_for_a_manifest_that_never_landed
+  stdout ───
+
+    running 1 test
+    test a_follow_up_applies_no_local_updates_for_a_manifest_that_never_landed ... FAILED
+
+    failures:
+
+    failures:
+        a_follow_up_applies_no_local_updates_for_a_manifest_that_never_landed
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.01s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        FAIL [   0.078s] (29/75) memory::daemon a_held_write_that_lands_steps_later_is_adopted_and_the_store_converges
+  stdout ───
+
+    running 1 test
+    test a_held_write_that_lands_steps_later_is_adopted_and_the_store_converges ... FAILED
+
+    failures:
+
+    failures:
+        a_held_write_that_lands_steps_later_is_adopted_and_the_store_converges
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'a_held_write_that_lands_steps_later_is_adopted_and_the_store_converges' (376501016) panicked at crates/memory/tests/daemon.rs:1822:9:
+    Round: Err("restore failed: Decode(Zstd)")
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [   0.120s] (30/75) memory::daemon an_unverifiable_landing_resets_the_base_so_the_next_round_writes_nothing
+  stdout ───
+
+    running 1 test
+    test an_unverifiable_landing_resets_the_base_so_the_next_round_writes_nothing ... FAILED
+
+    failures:
+
+    failures:
+        an_unverifiable_landing_resets_the_base_so_the_next_round_writes_nothing
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.05s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        PASS [   0.094s] (31/75) memory::daemon auth_failure_pauses_host_and_recovers
+        PASS [   0.097s] (32/75) memory::daemon authoritative_park_is_written_inside_the_interval
+        PASS [   0.097s] (33/75) memory::daemon corrupt_remote_parks_the_source_after_three_hours
+        PASS [   0.117s] (34/75) memory::daemon damaged_index_and_status_are_treated_as_missing
+        FAIL [   1.182s] (35/75) memory::capture_property hegel_property4_capture_state_machine
+  stdout ───
+
+    running 1 test
+    test hegel_property4_capture_state_machine ... FAILED
+
+    failures:
+
+    failures:
+        hegel_property4_capture_state_machine
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 1.12s
+
+  stderr ───
+    let draw_1 = 0;
+    let draw_2 = 0;
+    let draw_3 = 0;
+    let draw_4 = 0;
+    let draw_5 = 1;
+    Checking invariants on the initial state.
+    Step 1: settle {
+    }
+    Rule settle failed:
+    thread 'hegel_property4_capture_state_machine' (2) panicked at crates/memory/tests/capture_property.rs:1227:9:
+    Settle: Err("restore failed: Decode(Zstd)")
+
+    To reproduce this failure, call this on the Hegel builder before run():
+        .reproduce_failure("AXicfYehAQAACIMgavT/YzUsSwGKo+WXORMjCwvQAG0=")
+
+        FAIL [   0.127s] (36/75) memory::daemon foreign_writer_parks_owner_only
+  stdout ───
+
+    running 1 test
+    test foreign_writer_parks_owner_only ... FAILED
+
+    failures:
+
+    failures:
+        foreign_writer_parks_owner_only
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.05s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        PASS [   0.074s] (37/75) memory::daemon guard_has_negative_controls
+        PASS [   0.074s] (38/75) memory::daemon held_lock_refuses_before_tmp_is_swept
+        FAIL [   0.107s] (39/75) memory::daemon hint_launch_attached_once_and_offset_advances_after_commit
+  stdout ───
+
+    running 1 test
+    test hint_launch_attached_once_and_offset_advances_after_commit ... FAILED
+
+    failures:
+
+    failures:
+        hint_launch_attached_once_and_offset_advances_after_commit
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.03s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        PASS [   0.110s] (40/75) memory::daemon hint_partial_progress_commits_prefix_and_torn_tail_waits
+        PASS [   0.079s] (41/75) memory::daemon hints_dir_symlink_refuses
+        FAIL [   0.093s] (42/75) memory::daemon lost_reply_converges_without_duplicate_epoch
+  stdout ───
+
+    running 1 test
+    test lost_reply_converges_without_duplicate_epoch ... FAILED
+
+    failures:
+
+    failures:
+        lost_reply_converges_without_duplicate_epoch
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.02s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        PASS [   0.098s] (43/75) memory::daemon missing_hints_dir_is_an_empty_scan
+        PASS [   0.085s] (44/75) memory::daemon parked_owners_are_listed_sorted
+        PASS [   0.080s] (45/75) memory::daemon prepare_sweeps_tmp_entries_and_stale_root_temp_files
+        FAIL [   0.127s] (46/75) memory::daemon proptest_daemon_state_machine
+  stdout ───
+
+    running 1 test
+    test proptest_daemon_state_machine ... FAILED
+
+    failures:
+
+    failures:
+        proptest_daemon_state_machine
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.05s
+
+  stderr ───
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 244, n: 7 }: Err("restore failed: Decode(Zstd)")
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 122, n: 7 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 61, n: 7 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 30, n: 7 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 15, n: 7 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 7, n: 7 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 3, n: 7 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 1, n: 7 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 0, n: 7 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 0, n: 4 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 0, n: 2 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 0, n: 1 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 0, n: 1 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 0, n: 1 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2286:5:
+    Err(Fail(Reason("LateWrite { seed: 0, n: 1 }: Err(\"restore failed: Decode(Zstd)\")"), (Reference { file: [], exists: false, history: [], effect: false, mid_pos: None, content_etag: false, masked: {}, dirty: false, synced: false, lost_armed: false, revoked: false }, [LateWrite { seed: 0, n: 1 }], None)))
+
+        FAIL [   0.115s] (47/75) memory::daemon rebase_exhaustion_counts_transient_not_throttled_and_resets_the_base
+  stdout ───
+
+    running 1 test
+    test rebase_exhaustion_counts_transient_not_throttled_and_resets_the_base ... FAILED
+
+    failures:
+
+    failures:
+        rebase_exhaustion_counts_transient_not_throttled_and_resets_the_base
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.04s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        PASS [   0.111s] (48/75) memory::daemon replaced_hint_file_restarts_and_unreadable_entries_are_skipped
+        PASS [   0.102s] (49/75) memory::daemon retry_delay_defers_the_owner_until_the_clock_passes_it
+        FAIL [   0.086s] (50/75) memory::daemon scripted_run_alone_produces_every_guarded_shape
+  stdout ───
+
+    running 1 test
+    test scripted_run_alone_produces_every_guarded_shape ... FAILED
+
+    failures:
+
+    failures:
+        scripted_run_alone_produces_every_guarded_shape
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.01s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        PASS [   0.469s] (51/75) memory::daemon second_process_exits_lock_held
+        FAIL [   0.084s] (52/75) memory::daemon settle_converges_after_a_long_offline_run_once_the_retry_delay_passes
+  stdout ───
+
+    running 1 test
+    test settle_converges_after_a_long_offline_run_once_the_retry_delay_passes ... FAILED
+
+    failures:
+
+    failures:
+        settle_converges_after_a_long_offline_run_once_the_retry_delay_passes
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.01s
+
+  stderr ───
+
+    thread 'settle_converges_after_a_long_offline_run_once_the_retry_delay_passes' (376501135) panicked at crates/memory/tests/daemon.rs:1822:9:
+    Settle: Err("restore failed: Decode(Zstd)")
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        PASS [   0.111s] (53/75) memory::daemon shutdown_flushes_an_index_that_is_dirty_inside_the_interval
+        PASS [   0.098s] (54/75) memory::daemon shutdown_table
+        PASS [   0.080s] (55/75) memory::daemon start_error_code_table
+        PASS [   0.080s] (56/75) memory::daemon state_api_failure_table
+        PASS [   0.436s] (57/75) memory::daemon status_and_index_load_cases_are_distinct_and_counted
+        PASS [   0.121s] (58/75) memory::daemon status_inside_interval_is_deferred_then_flushed_at_shutdown
+        PASS [   0.094s] (59/75) memory::daemon two_sources_of_one_owner_commit_once
+        PASS [   0.113s] (60/75) memory::daemon unlanded_first_write_resets_the_base_and_converges
+        PASS [   0.085s] (61/75) memory::daemon unrenderable_wall_clock_is_a_round_error
+        PASS [   0.093s] (62/75) memory::daemon unwritable_index_is_a_round_error_when_status_is_not_due
+        PASS [   0.107s] (63/75) memory::daemon unwritable_state_dir_is_a_round_error_on_first_status_write
+        PASS [   0.080s] (64/75) memory::daemon window_defaults_fill_the_missing_half
+        PASS [   0.049s] (65/75) memory-reader::restore a_frame_shorter_than_len_is_rejected
+        PASS [   0.121s] (66/75) memory-reader::restore a_frame_that_decodes_past_len_is_rejected_without_allocating_it
+        PASS [   0.043s] (67/75) memory-reader::restore fetch_errors_pass_through
+        PASS [   0.042s] (68/75) memory-reader::restore non_contiguous_pieces_are_rejected
+        PASS [   0.042s] (69/75) memory-reader::restore restore_concatenates_pieces_and_verifies_the_epoch
+        PASS [   0.046s] (70/75) memory-reader::restore round_trip_one_piece
+        PASS [   0.065s] (71/75) memory-reader::restore truncated_stored_bytes_are_rejected
+        PASS [   0.053s] (72/75) memory-reader::restore whole_stream_size_and_digest_are_checked
+        PASS [   0.047s] (73/75) memory-reader::restore wrong_encoded_digest_is_rejected
+        PASS [   0.041s] (74/75) memory-reader::restore wrong_raw_digest_is_rejected
+        FAIL [  10.194s] (75/75) memory::daemon hegel_daemon_state_machine
+  stdout ───
+
+    running 1 test
+    test hegel_daemon_state_machine ... FAILED
+
+    failures:
+
+    failures:
+        hegel_daemon_state_machine
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 10.12s
+
+  stderr ───
+    let draw_1 = false;
+    Step 1: rewrite_mid_file {
+      let draw_1 = 0;
+      let draw_2 = 69;
+    }
+    Rule rewrite_mid_file failed:
+    thread 'hegel_daemon_state_machine' (2) panicked at crates/memory/tests/daemon.rs:1822:9:
+    Round: Err("restore failed: Decode(Zstd)")
+
+    To reproduce this failure, call this on the Hegel builder before run():
+        .reproduce_failure("AXicY2dgYGBkYOACYiCDEcJghotAKFcABR8AgA==")
+
+────────────
+     Summary [  12.518s] 75 tests run: 55 passed, 20 failed, 0 skipped
+        FAIL [   0.071s] ( 5/75) memory::capture extend_across_the_head_window_publishes_exact_delta_and_window_digests
+  stdout ───
+
+    running 1 test
+    test extend_across_the_head_window_publishes_exact_delta_and_window_digests ... FAILED
+
+    failures:
+
+    failures:
+        extend_across_the_head_window_publishes_exact_delta_and_window_digests
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.00s
+
+  stderr ───
+    Error: "Zstd"
+
+        FAIL [   0.076s] ( 6/75) memory::capture extend_across_the_tail_window_publishes_exact_delta_and_window_digests
+  stdout ───
+
+    running 1 test
+    test extend_across_the_tail_window_publishes_exact_delta_and_window_digests ... FAILED
+
+    failures:
+
+    failures:
+        extend_across_the_tail_window_publishes_exact_delta_and_window_digests
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.01s
+
+  stderr ───
+    Error: "Zstd"
+
+        FAIL [   0.071s] (18/75) memory::capture stored_pieces_are_zstd_frames_that_match_their_descriptors
+  stdout ───
+
+    running 1 test
+    test stored_pieces_are_zstd_frames_that_match_their_descriptors ... FAILED
+
+    failures:
+
+    failures:
+        stored_pieces_are_zstd_frames_that_match_their_descriptors
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'stored_pieces_are_zstd_frames_that_match_their_descriptors' (376500965) panicked at crates/memory/tests/capture.rs:869:9:
+    assertion `left == right` failed: zstd magic
+      left: Some([99, 111, 109, 112])
+     right: Some([40, 181, 47, 253])
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [   0.072s] (23/75) memory::capture_property guard_shapes_arise_from_a_scripted_run_with_the_real_capture
+  stdout ───
+
+    running 1 test
+    test guard_shapes_arise_from_a_scripted_run_with_the_real_capture ... FAILED
+
+    failures:
+
+    failures:
+        guard_shapes_arise_from_a_scripted_run_with_the_real_capture
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        FAIL [   0.070s] (24/75) memory::capture_property oracle_detects_tampered_store_contents
+  stdout ───
+
+    running 1 test
+    test oracle_detects_tampered_store_contents ... FAILED
+
+    failures:
+
+    failures:
+        oracle_detects_tampered_store_contents
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        FAIL [   0.161s] (25/75) memory::capture_property proptest_property4_capture_state_machine
+  stdout ───
+
+    running 1 test
+    test proptest_property4_capture_state_machine ... FAILED
+
+    failures:
+
+    failures:
+        proptest_property4_capture_state_machine
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.09s
+
+  stderr ───
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Reconcile: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 1, seed: 14, n: 3790, same: false }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 14, n: 3790, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 7, n: 3790, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 3, n: 3790, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 1, n: 3790, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 3790, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 1945, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 1022, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 561, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 330, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 215, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 157, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 128, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 114, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 107, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 103, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 101, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 100, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 6, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 3, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 2, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    RenameReplace { src: 0, seed: 0, n: 1, same: false }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 1, len: 4100 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 4100 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 4095 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 4092 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 4091 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 4090 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 14 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 7 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 3 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 1 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Truncate { src: 0, len: 0 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 1, pos: 7, byte: 81 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 7, byte: 81 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 3, byte: 81 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 1, byte: 81 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 0, byte: 81 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 0, byte: 40 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 0, byte: 20 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 0, byte: 10 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 0, byte: 5 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 0, byte: 2 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 0, byte: 1 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1568:13:
+    Rewrite { src: 0, pos: 0, byte: 0 }: Err("a settled source did not follow its change after one reconcile")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1585:13:
+    final settle: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_property4_capture_state_machine' (376500988) panicked at crates/memory/tests/capture_property.rs:1601:5:
+    Err(Fail(Reason("final settle: Err(\"restore failed: Decode(Zstd)\")"), (Reference { files: {}, history: {}, foreign_seen: false, generation: {}, destructive: {} }, [Append { src: 0, seed: 0, n: 1 }, Append { src: 0, seed: 0, n: 1 }], None)))
+
+        FAIL [   0.075s] (26/75) memory::capture_property removed_source_needs_two_observations_then_is_deleted
+  stdout ───
+
+    running 1 test
+    test removed_source_needs_two_observations_then_is_deleted ... FAILED
+
+    failures:
+
+    failures:
+        removed_source_needs_two_observations_then_is_deleted
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        FAIL [   0.076s] (27/75) memory::capture_property window_and_identity_shapes_arise_from_a_scripted_run
+  stdout ───
+
+    running 1 test
+    test window_and_identity_shapes_arise_from_a_scripted_run ... FAILED
+
+    failures:
+
+    failures:
+        window_and_identity_shapes_arise_from_a_scripted_run
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        FAIL [   0.081s] (28/75) memory::daemon a_follow_up_applies_no_local_updates_for_a_manifest_that_never_landed
+  stdout ───
+
+    running 1 test
+    test a_follow_up_applies_no_local_updates_for_a_manifest_that_never_landed ... FAILED
+
+    failures:
+
+    failures:
+        a_follow_up_applies_no_local_updates_for_a_manifest_that_never_landed
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.01s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        FAIL [   0.078s] (29/75) memory::daemon a_held_write_that_lands_steps_later_is_adopted_and_the_store_converges
+  stdout ───
+
+    running 1 test
+    test a_held_write_that_lands_steps_later_is_adopted_and_the_store_converges ... FAILED
+
+    failures:
+
+    failures:
+        a_held_write_that_lands_steps_later_is_adopted_and_the_store_converges
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'a_held_write_that_lands_steps_later_is_adopted_and_the_store_converges' (376501016) panicked at crates/memory/tests/daemon.rs:1822:9:
+    Round: Err("restore failed: Decode(Zstd)")
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [   0.120s] (30/75) memory::daemon an_unverifiable_landing_resets_the_base_so_the_next_round_writes_nothing
+  stdout ───
+
+    running 1 test
+    test an_unverifiable_landing_resets_the_base_so_the_next_round_writes_nothing ... FAILED
+
+    failures:
+
+    failures:
+        an_unverifiable_landing_resets_the_base_so_the_next_round_writes_nothing
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.05s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        FAIL [   1.182s] (35/75) memory::capture_property hegel_property4_capture_state_machine
+  stdout ───
+
+    running 1 test
+    test hegel_property4_capture_state_machine ... FAILED
+
+    failures:
+
+    failures:
+        hegel_property4_capture_state_machine
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 1.12s
+
+  stderr ───
+    let draw_1 = 0;
+    let draw_2 = 0;
+    let draw_3 = 0;
+    let draw_4 = 0;
+    let draw_5 = 1;
+    Checking invariants on the initial state.
+    Step 1: settle {
+    }
+    Rule settle failed:
+    thread 'hegel_property4_capture_state_machine' (2) panicked at crates/memory/tests/capture_property.rs:1227:9:
+    Settle: Err("restore failed: Decode(Zstd)")
+
+    To reproduce this failure, call this on the Hegel builder before run():
+        .reproduce_failure("AXicfYehAQAACIMgavT/YzUsSwGKo+WXORMjCwvQAG0=")
+
+        FAIL [   0.127s] (36/75) memory::daemon foreign_writer_parks_owner_only
+  stdout ───
+
+    running 1 test
+    test foreign_writer_parks_owner_only ... FAILED
+
+    failures:
+
+    failures:
+        foreign_writer_parks_owner_only
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.05s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        FAIL [   0.107s] (39/75) memory::daemon hint_launch_attached_once_and_offset_advances_after_commit
+  stdout ───
+
+    running 1 test
+    test hint_launch_attached_once_and_offset_advances_after_commit ... FAILED
+
+    failures:
+
+    failures:
+        hint_launch_attached_once_and_offset_advances_after_commit
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.03s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        FAIL [   0.093s] (42/75) memory::daemon lost_reply_converges_without_duplicate_epoch
+  stdout ───
+
+    running 1 test
+    test lost_reply_converges_without_duplicate_epoch ... FAILED
+
+    failures:
+
+    failures:
+        lost_reply_converges_without_duplicate_epoch
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.02s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        FAIL [   0.127s] (46/75) memory::daemon proptest_daemon_state_machine
+  stdout ───
+
+    running 1 test
+    test proptest_daemon_state_machine ... FAILED
+
+    failures:
+
+    failures:
+        proptest_daemon_state_machine
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.05s
+
+  stderr ───
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 244, n: 7 }: Err("restore failed: Decode(Zstd)")
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 122, n: 7 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 61, n: 7 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 30, n: 7 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 15, n: 7 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 7, n: 7 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 3, n: 7 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 1, n: 7 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 0, n: 7 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 0, n: 4 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 0, n: 2 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 0, n: 1 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 0, n: 1 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2261:13:
+    LateWrite { seed: 0, n: 1 }: Err("restore failed: Decode(Zstd)")
+
+    thread 'proptest_daemon_state_machine' (376501085) panicked at crates/memory/tests/daemon.rs:2286:5:
+    Err(Fail(Reason("LateWrite { seed: 0, n: 1 }: Err(\"restore failed: Decode(Zstd)\")"), (Reference { file: [], exists: false, history: [], effect: false, mid_pos: None, content_etag: false, masked: {}, dirty: false, synced: false, lost_armed: false, revoked: false }, [LateWrite { seed: 0, n: 1 }], None)))
+
+        FAIL [   0.115s] (47/75) memory::daemon rebase_exhaustion_counts_transient_not_throttled_and_resets_the_base
+  stdout ───
+
+    running 1 test
+    test rebase_exhaustion_counts_transient_not_throttled_and_resets_the_base ... FAILED
+
+    failures:
+
+    failures:
+        rebase_exhaustion_counts_transient_not_throttled_and_resets_the_base
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.04s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        FAIL [   0.086s] (50/75) memory::daemon scripted_run_alone_produces_every_guarded_shape
+  stdout ───
+
+    running 1 test
+    test scripted_run_alone_produces_every_guarded_shape ... FAILED
+
+    failures:
+
+    failures:
+        scripted_run_alone_produces_every_guarded_shape
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.01s
+
+  stderr ───
+    Error: "restore failed: Decode(Zstd)"
+
+        FAIL [   0.084s] (52/75) memory::daemon settle_converges_after_a_long_offline_run_once_the_retry_delay_passes
+  stdout ───
+
+    running 1 test
+    test settle_converges_after_a_long_offline_run_once_the_retry_delay_passes ... FAILED
+
+    failures:
+
+    failures:
+        settle_converges_after_a_long_offline_run_once_the_retry_delay_passes
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.01s
+
+  stderr ───
+
+    thread 'settle_converges_after_a_long_offline_run_once_the_retry_delay_passes' (376501135) panicked at crates/memory/tests/daemon.rs:1822:9:
+    Settle: Err("restore failed: Decode(Zstd)")
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [  10.194s] (75/75) memory::daemon hegel_daemon_state_machine
+  stdout ───
+
+    running 1 test
+    test hegel_daemon_state_machine ... FAILED
+
+    failures:
+
+    failures:
+        hegel_daemon_state_machine
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 10.12s
+
+  stderr ───
+    let draw_1 = false;
+    Step 1: rewrite_mid_file {
+      let draw_1 = 0;
+      let draw_2 = 69;
+    }
+    Rule rewrite_mid_file failed:
+    thread 'hegel_daemon_state_machine' (2) panicked at crates/memory/tests/daemon.rs:1822:9:
+    Round: Err("restore failed: Decode(Zstd)")
+
+    To reproduce this failure, call this on the Hegel builder before run():
+        .reproduce_failure("AXicY2dgYGBkYOACYiCDEcJghotAKFcABR8AgA==")
+
+error: test run failed

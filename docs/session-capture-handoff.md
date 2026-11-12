@@ -18,12 +18,15 @@ history, not current execution instructions or renewed operating authority.
 `gpt-6.1-sol` workers at medium effort, parent-owned quality and verification.
 This is the single active task brief; dated operating records below remain history.
 
-> **Resume here (updated 2026-11-12, after the engineering-practice review).** Read DESIGN.md, then
+> **Resume here (updated 2026-11-12, after the walking skeleton).** Read DESIGN.md, then
 > [design-amendments-20261109.md](rust-rewrite/design-amendments-20261109.md) (A0–A13, wins
-> where they conflict), then the "Session 2026-11-12" block directly below, which is the
-> current state, and [report 25](rust-rewrite/implementation/25-engineering-practice-review.md),
-> the active coordinator brief, with
-> [evidence 15](rust-rewrite/implementation/evidence/15-engineering-practice-review/). The
+> where they conflict), then the "Session 2026-11-12, walking skeleton" block directly below,
+> which is the current state, and
+> [report 26](rust-rewrite/implementation/26-walking-skeleton.md), the active coordinator
+> brief, with [evidence 16](rust-rewrite/implementation/evidence/16-walking-skeleton/).
+> [Report 25](rust-rewrite/implementation/25-engineering-practice-review.md) and
+> [evidence 15](rust-rewrite/implementation/evidence/15-engineering-practice-review/) are the
+> review that led to it. The
 > "Session 2026-11-10/11" block after it is history: stack #56 (PRs #54–#81) is merged.
 > [Report 24](rust-rewrite/implementation/24-design-and-test-review.md) is the
 > full record and [evidence 14](rust-rewrite/implementation/evidence/14-design-test-review/)
@@ -34,7 +37,29 @@ This is the single active task brief; dated operating records below remain histo
 > in this brief (P5 authorization, acceptance bucket/token, hook argv, symlinks, state root)
 > are resolved by the amendments and kept only as history.
 
-**Session 2026-11-12, engineering-practice review and data-structure stack (current).**
+**Session 2026-11-12, walking skeleton (current).** Plan step 1 of report 25; record in
+report 26. Local only, nothing pushed.
+- A real file now goes through the real `Daemon`, zstd piece encoding and the S3 adapter, and
+  comes back through `memory-reader` with equal bytes. This runs as a test against a local
+  HTTP server in the normal suite, and ran once on R2 under
+  `rust-acceptance/skeleton-20261112-8f10261/` (16 GET, 9 conditional PUT, 7 keys; prefix
+  deleted and listed empty).
+- Stack in `/Users/mm/dev/memory-wt/ds-integrate`, above the five branches of the block below:
+  `rust/skeleton-deps` (`8b41d04`), `rust/zstd-pieces` (`8355cec`), `rust/s3-store`
+  (`7be1de1`), `rust/skeleton-e2e` (`8f10261`), `docs/walking-skeleton` (this entry, report 26,
+  evidence 16).
+- Gates on `8f10261`: local, 500 cases, seed 335062796, all 13 sub-gates 0, 471 tests, 12
+  doctests, coverage 6140/6290 = 97.62 %, `verify-evidence.py` PASS. Not run: 2,000 cases,
+  hosted CI, `cargo mutants`.
+- Not yet: no command runs the path. `memory daemon` exits 78, `memory restore` is not
+  implemented, there is no run loop or production `Clock`. A13.2 still forbids a production
+  write.
+- Open operator decisions: unchanged from the block below.
+- Next: the run loop with a production clock and the store and sources built from the
+  configuration; then `memory restore` over the reader; then the audit, hint retention,
+  `tracing` and the startup delay before any production write.
+
+**Session 2026-11-12, engineering-practice review and data-structure stack (earlier the same day).**
 Operator-directed read-only review of the Rust code at `41a07ff` by eight Sonnet workers with
 parent acceptance, then prototypes of three data structures; record in report 25.
 - Review: the code is mostly sound in the small. Delivery has been horizontal: 17 of 25

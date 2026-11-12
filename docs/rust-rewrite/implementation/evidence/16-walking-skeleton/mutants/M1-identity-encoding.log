@@ -1,0 +1,50 @@
+   Compiling memory v0.1.0 (/Users/mm/dev/memory-wt/sk-s3/rust/crates/memory)
+warning: constant `PIECE_ZSTD_LEVEL` is never used
+   --> crates/memory/src/environment.rs:145:7
+    |
+145 | const PIECE_ZSTD_LEVEL: i32 = 3;
+    |       ^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `memory` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.21s
+────────────
+ Nextest run ID 0defa3fa-e595-487c-ae8b-789a7bb5ea6c with nextest profile: default
+    Starting 1 test across 1 binary (20 tests skipped)
+        FAIL [   0.142s] (1/1) memory::s3_store skeleton::skeleton_against_the_local_server
+  stdout ───
+
+    running 1 test
+    test skeleton::skeleton_against_the_local_server ... FAILED
+
+    failures:
+
+    failures:
+        skeleton::skeleton_against_the_local_server
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.07s
+
+  stderr ───
+    Error: "Decode(Zstd)"
+
+  Cancelling due to test failure:
+────────────
+     Summary [   0.144s] 1 test run: 0 passed, 1 failed, 20 skipped
+        FAIL [   0.142s] (1/1) memory::s3_store skeleton::skeleton_against_the_local_server
+  stdout ───
+
+    running 1 test
+    test skeleton::skeleton_against_the_local_server ... FAILED
+
+    failures:
+
+    failures:
+        skeleton::skeleton_against_the_local_server
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.07s
+
+  stderr ───
+    Error: "Decode(Zstd)"
+
+error: test run failed

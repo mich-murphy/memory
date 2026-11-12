@@ -1,0 +1,52 @@
+   Compiling memory-reader v0.1.0 (/Users/mm/dev/memory-wt/sk-s3/rust/crates/memory-reader)
+   Compiling memory v0.1.0 (/Users/mm/dev/memory-wt/sk-s3/rust/crates/memory)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.67s
+────────────
+ Nextest run ID 796476ee-cf39-427f-b639-5ce0bac6df0d with nextest profile: default
+    Starting 1 test across 1 binary (20 tests skipped)
+        FAIL [   0.194s] (1/1) memory::s3_store skeleton::skeleton_against_the_local_server
+  stdout ───
+
+    running 1 test
+    test skeleton::skeleton_against_the_local_server ... FAILED
+
+    failures:
+
+    failures:
+        skeleton::skeleton_against_the_local_server
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.12s
+
+  stderr ───
+
+    thread 'skeleton::skeleton_against_the_local_server' (376589814) panicked at crates/memory/tests/s3_store/skeleton.rs:294:5:
+    assertion `left == right` failed
+      left: {"/bkt/manifests/1125eed7c1afca163859c4e59db6a52882d7927f1cebb708f0d56cca9aad1e62.json", "/bkt/manifests/b6e2cdcce70fe3abb67bb5807d9b4d042dc99d29d6a0d34d47ce4b4bc4448291.json", "/bkt/manifests/cdf25d100b610074a8df2c9d02814e5d80df05050590ee6cbc67ea837f31b358.json", "/bkt/objects/06246a268d089a3c494b7b3c8383fc53d39d2d755978232f5aa39ab8b7fd639e.zst", "/bkt/objects/5e06f517f637f75ee172a79525cfc2ab9bab32f8ca7569e3a545d736a7bebeec.zst", "/bkt/objects/baeee6bf789f3f361e816eb7a37a51b9d08dd48a50cab7f1f68acff120176f56.zst", "/bkt/sessions/a/m/claude/r1:-p:0f0e0d0c-0b0a-4908-8706-050403020100/current.json"}
+     right: {"/bkt/rust-acceptance/skeleton-test/manifests/1125eed7c1afca163859c4e59db6a52882d7927f1cebb708f0d56cca9aad1e62.json", "/bkt/rust-acceptance/skeleton-test/manifests/b6e2cdcce70fe3abb67bb5807d9b4d042dc99d29d6a0d34d47ce4b4bc4448291.json", "/bkt/rust-acceptance/skeleton-test/manifests/cdf25d100b610074a8df2c9d02814e5d80df05050590ee6cbc67ea837f31b358.json", "/bkt/rust-acceptance/skeleton-test/objects/06246a268d089a3c494b7b3c8383fc53d39d2d755978232f5aa39ab8b7fd639e.zst", "/bkt/rust-acceptance/skeleton-test/objects/5e06f517f637f75ee172a79525cfc2ab9bab32f8ca7569e3a545d736a7bebeec.zst", "/bkt/rust-acceptance/skeleton-test/objects/baeee6bf789f3f361e816eb7a37a51b9d08dd48a50cab7f1f68acff120176f56.zst", "/bkt/rust-acceptance/skeleton-test/sessions/a/m/claude/r1:-p:0f0e0d0c-0b0a-4908-8706-050403020100/current.json"}
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  Cancelling due to test failure:
+────────────
+     Summary [   0.194s] 1 test run: 0 passed, 1 failed, 20 skipped
+        FAIL [   0.194s] (1/1) memory::s3_store skeleton::skeleton_against_the_local_server
+  stdout ───
+
+    running 1 test
+    test skeleton::skeleton_against_the_local_server ... FAILED
+
+    failures:
+
+    failures:
+        skeleton::skeleton_against_the_local_server
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.12s
+
+  stderr ───
+
+    thread 'skeleton::skeleton_against_the_local_server' (376589814) panicked at crates/memory/tests/s3_store/skeleton.rs:294:5:
+    assertion `left == right` failed
+      left: {"/bkt/manifests/1125eed7c1afca163859c4e59db6a52882d7927f1cebb708f0d56cca9aad1e62.json", "/bkt/manifests/b6e2cdcce70fe3abb67bb5807d9b4d042dc99d29d6a0d34d47ce4b4bc4448291.json", "/bkt/manifests/cdf25d100b610074a8df2c9d02814e5d80df05050590ee6cbc67ea837f31b358.json", "/bkt/objects/06246a268d089a3c494b7b3c8383fc53d39d2d755978232f5aa39ab8b7fd639e.zst", "/bkt/objects/5e06f517f637f75ee172a79525cfc2ab9bab32f8ca7569e3a545d736a7bebeec.zst", "/bkt/objects/baeee6bf789f3f361e816eb7a37a51b9d08dd48a50cab7f1f68acff120176f56.zst", "/bkt/sessions/a/m/claude/r1:-p:0f0e0d0c-0b0a-4908-8706-050403020100/current.json"}
+     right: {"/bkt/rust-acceptance/skeleton-test/manifests/1125eed7c1afca163859c4e59db6a52882d7927f1cebb708f0d56cca9aad1e62.json", "/bkt/rust-acceptance/skeleton-test/manifests/b6e2cdcce70fe3abb67bb5807d9b4d042dc99d29d6a0d34d47ce4b4bc4448291.json", "/bkt/rust-acceptance/skeleton-test/manifests/cdf25d100b610074a8df2c9d02814e5d80df05050590ee6cbc67ea837f31b358.json", "/bkt/rust-acceptance/skeleton-test/objects/06246a268d089a3c494b7b3c8383fc53d39d2d755978232f5aa39ab8b7fd639e.zst", "/bkt/rust-acceptance/skeleton-test/objects/5e06f517f637f75ee172a79525cfc2ab9bab32f8ca7569e3a545d736a7bebeec.zst", "/bkt/rust-acceptance/skeleton-test/objects/baeee6bf789f3f361e816eb7a37a51b9d08dd48a50cab7f1f68acff120176f56.zst", "/bkt/rust-acceptance/skeleton-test/sessions/a/m/claude/r1:-p:0f0e0d0c-0b0a-4908-8706-050403020100/current.json"}
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+error: test run failed
