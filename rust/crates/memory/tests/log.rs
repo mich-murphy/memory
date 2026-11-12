@@ -1,7 +1,13 @@
 //! `memory::log` event lines against a scoped subscriber writing to a buffer.
 use memory::audit::AuditCounts;
 use memory::daemon::{FailureCounts, RoundReport};
-use memory::log::{format_utc, render, round, started, stopped};
+use memory::daemon::{ParkedReason, StateLoad};
+use memory::log::{
+    format_utc, host_paused, host_resumed, parked, render, round, started, state_loads, stopped,
+};
+use memory_core::domain::{
+    Agent, ArchiveId, MachineId, Owner, OwnerParkReason, ParkReason, SessionId, SessionKey, Sha256,
+};
 
 /// Split a line into its timestamp and the rest.
 fn split(line: &str) -> Option<(&str, &str)> {
@@ -75,4 +81,104 @@ fn the_timestamp_is_rfc3339_utc() {
 fn an_event_from_another_module_writes_nothing() {
     let text = render(|| tracing::info!(note = "foreign text", count = 7_u64, "a message"));
     assert_eq!(text, "");
+}
+
+fn lines_of(text: &str) -> Vec<&str> {
+    text.lines()
+        .map(|l| split(l).unwrap_or_default().1)
+        .collect()
+}
+
+#[test]
+fn state_load_lines_are_status_then_index() {
+    let text = render(|| state_loads(StateLoad::NewerSchema, StateLoad::Damaged));
+    assert_eq!(
+        lines_of(&text),
+        [
+            "INFO state_load file=status result=damaged",
+            "INFO state_load file=index result=newer_schema"
+        ]
+    );
+    let text = render(|| state_loads(StateLoad::Damaged, StateLoad::Loaded));
+    assert_eq!(
+        lines_of(&text),
+        ["INFO state_load file=index result=damaged"]
+    );
+    let text = render(|| state_loads(StateLoad::Loaded, StateLoad::NewerSchema));
+    assert_eq!(
+        lines_of(&text),
+        ["INFO state_load file=status result=newer_schema"]
+    );
+}
+
+#[test]
+fn state_load_renders_nothing_for_loaded_and_missing() {
+    for load in [StateLoad::Loaded, StateLoad::Missing] {
+        assert_eq!(render(|| state_loads(load, load)), "");
+    }
+}
+
+fn owner() -> Result<Owner, String> {
+    let bad = |e: memory_core::domain::ValidationError| format!("{e:?}");
+    Ok(Owner::Session(SessionKey {
+        archive: ArchiveId::try_from("a".to_owned()).map_err(bad)?,
+        machine: MachineId::try_from("m".to_owned()).map_err(bad)?,
+        agent: Agent::Claude,
+        session: SessionId::try_from("s1".to_owned()).map_err(bad)?,
+    }))
+}
+
+#[test]
+fn parked_names_the_owner_prefix_and_a_closed_reason() -> Result<(), String> {
+    let owner = owner()?;
+    let prefix = memory_core::limits::owner_prefix(&owner);
+    let digest = Sha256::from_bytes([0xab; 32]);
+    let cases = [
+        (
+            ParkedReason::Owner(OwnerParkReason::ForeignWriter {
+                theirs: digest,
+                ours: digest,
+            }),
+            "foreign_writer",
+        ),
+        (
+            ParkedReason::Owner(OwnerParkReason::NewerRemoteSchema),
+            "newer_remote_schema",
+        ),
+        (
+            ParkedReason::Source(ParkReason::RepeatedAuditMismatch),
+            "repeated_audit_mismatch",
+        ),
+        (
+            ParkedReason::Source(ParkReason::RepeatedReadbackMismatch),
+            "repeated_readback_mismatch",
+        ),
+        (
+            ParkedReason::Source(ParkReason::SourceUnstable),
+            "source_unstable",
+        ),
+        (
+            ParkedReason::Source(ParkReason::RepeatedNonJsonResponse),
+            "repeated_non_json_response",
+        ),
+        (
+            ParkedReason::Source(ParkReason::RepeatedSchemaError),
+            "repeated_schema_error",
+        ),
+    ];
+    for (reason, id) in cases {
+        let text = render(|| parked(&owner, &reason));
+        let (_, rest) = split(only_line(&text)).unwrap_or_default();
+        assert_eq!(rest, format!("INFO parked owner={prefix} reason={id}"));
+        assert!(!text.contains("abab"), "no digest in the line");
+    }
+    Ok(())
+}
+
+#[test]
+fn host_pause_events_have_no_keys() {
+    let text = render(host_paused);
+    assert_eq!(lines_of(&text), ["INFO host_paused"]);
+    let text = render(host_resumed);
+    assert_eq!(lines_of(&text), ["INFO host_resumed"]);
 }

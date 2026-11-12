@@ -68,17 +68,38 @@ fn parse(line: &str) -> Result<&str, String> {
     let want: &[&str] = match event {
         "started" => &["version"],
         "round" => &ROUND_KEYS,
-        "stopped" => &[],
+        "stopped" | "host_paused" | "host_resumed" => &[],
+        "state_load" => &["file", "result"],
+        "parked" => &["owner", "reason"],
         other => return Err(format!("unknown event {other:?}")),
     };
     if keys != want {
         return Err(format!("keys {keys:?}, want {want:?}: {line:?}"));
     }
     for (key, value) in pairs {
-        let ok = if key == "version" {
-            !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit() || b == b'.')
-        } else {
-            !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit())
+        let ok = match key {
+            "version" => {
+                !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+            }
+            "file" => ["index", "status"].contains(&value),
+            "result" => ["damaged", "newer_schema"].contains(&value),
+            "reason" => [
+                "foreign_writer",
+                "newer_remote_schema",
+                "repeated_audit_mismatch",
+                "repeated_readback_mismatch",
+                "source_unstable",
+                "repeated_non_json_response",
+                "repeated_schema_error",
+            ]
+            .contains(&value),
+            "owner" => {
+                !value.is_empty()
+                    && value
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"._:/-".contains(&b))
+            }
+            _ => !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()),
         };
         if !ok {
             return Err(format!("bad value for {key}: {line:?}"));
@@ -88,7 +109,9 @@ fn parse(line: &str) -> Result<&str, String> {
 }
 
 /// Every line of `stderr` is a known event with exactly its keys; the sequence is `started`,
-/// at least `min_rounds` of `round`, then `stopped` last; no line holds a canary.
+/// zero or more `state_load`, then any mix of `round`, `parked`, `host_paused` and
+/// `host_resumed` with at least `min_rounds` of `round`, then `stopped` last; no line holds a
+/// canary.
 pub fn assert_clean_log(stderr: &str, min_rounds: usize, canaries: &[&str]) {
     let mut events = Vec::new();
     for line in stderr.lines() {
@@ -106,6 +129,15 @@ pub fn assert_clean_log(stderr: &str, min_rounds: usize, canaries: &[&str]) {
     assert_eq!(events.first(), Some(&"started"), "{stderr}");
     assert_eq!(events.last(), Some(&"stopped"), "{stderr}");
     let middle = events.get(1..events.len() - 1).unwrap_or_default();
-    assert!(middle.iter().all(|e| *e == "round"), "{stderr}");
-    assert!(middle.len() >= min_rounds, "{stderr}");
+    let loads = middle.iter().take_while(|e| **e == "state_load").count();
+    let rest = middle.get(loads..).unwrap_or_default();
+    assert!(
+        rest.iter()
+            .all(|e| ["round", "parked", "host_paused", "host_resumed"].contains(e)),
+        "{stderr}"
+    );
+    assert!(
+        rest.iter().filter(|e| **e == "round").count() >= min_rounds,
+        "{stderr}"
+    );
 }

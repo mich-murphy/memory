@@ -10,8 +10,8 @@
 //! 5. Read `index.json` (9.2): a missing or damaged index is rebuilt (9.3): locals start
 //!    empty, the commit base is recovered per owner from the store, capture adopts.
 //! 6. Read `status.json`: parked owners stay parked across restarts. A damaged or newer-schema
-//!    file is treated as missing (9.2); the daemon has no logging yet, so the event is kept
-//!    as a [`StateLoad`] on the daemon and counted in [`StatusBody::events`].
+//!    file is treated as missing (9.2); the result is kept as a [`StateLoad`] on the daemon
+//!    and logged by `run.rs` as a `state_load` event.
 //!
 //! The commit base (`current.json` ETag, owner state) is never persisted: every owner
 //! recovers it from the store on its first round after a start (`recover_base`).
@@ -140,7 +140,8 @@ pub struct ParkedEntry {
     pub reason: ParkedReason,
 }
 
-/// `status.json` body (schema `memory.status/1`).
+/// `status.json` body (schema `memory.status/1`). A file written by an earlier build, which had
+/// an `events` object, fails `deny_unknown_fields` and loads as [`StateLoad::Damaged`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StatusBody {
@@ -158,9 +159,6 @@ pub struct StatusBody {
     /// Audit verdicts since the status file was first created.
     #[serde(default)]
     pub audit: AuditCounts,
-    /// Events DESIGN.md would log, counted because the daemon has no logging yet.
-    #[serde(default)]
-    pub events: EventCounts,
 }
 
 /// How a state file read at startup came out (DESIGN.md 9.2). Closed; no content or path.
@@ -175,22 +173,6 @@ pub enum StateLoad {
     Damaged,
     /// Written by a build with a newer schema than this one understands.
     NewerSchema,
-}
-
-/// Counted events that DESIGN.md 9.2 and 7.6 say are logged (the daemon has no logging yet).
-/// A damaged or newer-schema `status.json` restarts every counter, so the event it caused is
-/// recorded in the replacement.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EventCounts {
-    /// `status.json` was present but damaged at startup; parked list and host pause were lost.
-    pub status_damaged: u64,
-    /// `status.json` had a newer schema at startup; parked list and host pause were lost.
-    pub status_newer_schema: u64,
-    /// `index.json` was present but damaged at startup and was rebuilt.
-    pub index_damaged: u64,
-    /// `index.json` had a newer schema at startup and was rebuilt.
-    pub index_newer_schema: u64,
 }
 
 /// Failed attempts by [`ErrorClass`] (DESIGN.md 11.2, 11.3): `transient` is distinct from
@@ -315,15 +297,6 @@ fn load_state<T: DeserializeOwned>(state: &StateDir, file: StateFile) -> (Option
     }
 }
 
-/// Count a startup load that lost state.
-fn count_load(load: StateLoad, damaged: &mut u64, newer: &mut u64) {
-    match load {
-        StateLoad::Damaged => *damaged = damaged.saturating_add(1),
-        StateLoad::NewerSchema => *newer = newer.saturating_add(1),
-        StateLoad::Loaded | StateLoad::Missing => {}
-    }
-}
-
 fn open(root: &Path, config_path: &Path, sync: SyncPolicy) -> Result<Opened, StartError> {
     let lock = DaemonLock::acquire(root).map_err(StartError::State)?;
     let state = StateDir::prepare_inner(&lock, sync).map_err(StartError::State)?;
@@ -331,25 +304,13 @@ fn open(root: &Path, config_path: &Path, sync: SyncPolicy) -> Result<Opened, Sta
     let config = Config::load(config_path).map_err(StartError::Config)?;
     let (index, index_load) = load_state::<IndexBody>(&state, StateFile::Index);
     let (status, status_load) = load_state::<StatusBody>(&state, StateFile::Status);
-    let mut status = status.unwrap_or_default();
-    let events = &mut status.events;
-    count_load(
-        status_load,
-        &mut events.status_damaged,
-        &mut events.status_newer_schema,
-    );
-    count_load(
-        index_load,
-        &mut events.index_damaged,
-        &mut events.index_newer_schema,
-    );
     Ok(Opened {
         lock,
         state,
         config,
         index: index.unwrap_or_default(),
         index_load,
-        status,
+        status: status.unwrap_or_default(),
         status_load,
     })
 }
@@ -573,7 +534,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         self.index_load
     }
     /// How `status.json` loaded at startup. `Damaged` and `NewerSchema` mean the parked list
-    /// and host pause were lost; the counters restarted and [`StatusBody::events`] says why.
+    /// and host pause were lost; the counters restarted and `run.rs` logs a `state_load` event.
     pub const fn status_load(&self) -> StateLoad {
         self.status_load
     }
@@ -976,11 +937,22 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 .owners
                 .remove(owner)
                 .unwrap_or_else(|| OwnerRt::new(None));
+            let was_parked = matches!(rt.turn, Turn::Parked(_));
             let pause = self.run_owner(owner, sources, &mut rt, &mut files, &when, &mut report);
+            if !was_parked && let Turn::Parked(reason) = &rt.turn {
+                crate::log::parked(owner, reason);
+            }
             self.owners.insert(owner.clone(), rt);
             if pause {
                 self.status.host_paused = true;
                 break;
+            }
+        }
+        if self.status.host_paused != before.0 {
+            if before.0 {
+                crate::log::host_resumed();
+            } else {
+                crate::log::host_paused();
             }
         }
         self.advance_hints(&files);

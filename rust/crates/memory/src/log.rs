@@ -13,17 +13,31 @@
 //! ```
 //!
 //! `<timestamp>` is UTC, RFC 3339, whole seconds: `YYYY-MM-DDTHH:MM:SSZ`. Keys are in the fixed
-//! order below. A value is an unsigned decimal integer, except `version`, which is the crate
-//! version (digits and dots). There is no ANSI escape, target, thread id, span, file or line.
+//! order below. A value is an unsigned decimal integer, except `version` (the crate version:
+//! digits and dots), `file`, `result` and `reason` (closed lower-case identifiers) and `owner`.
+//! `owner` is the only open value: the owner's stored key prefix, charset `[A-Za-z0-9._:/-]`,
+//! never empty, no space. It is safe to write because identifiers are validated on construction
+//! to ASCII alphanumerics and `._:-` and joined with `/`; it holds no path, secret or content. There is no ANSI escape, target, thread id, span, file or line.
 //!
 //! | event | keys |
 //! |---|---|
 //! | `started` | `version` |
 //! | `round` | `landed failed skipped parked deferred offline throttled transient destination_auth local deterministic hints_removed hints_kept_old audit_matched audit_mismatched audit_ineligible` |
 //! | `stopped` | none |
+//! | `state_load` | `file` (`index` or `status`) `result` (`damaged` or `newer_schema`) |
+//! | `parked` | `owner` `reason` (`foreign_writer`, `newer_remote_schema`, `repeated_audit_mismatch`, `repeated_readback_mismatch`, `source_unstable`, `repeated_non_json_response`, `repeated_schema_error`) |
+//! | `host_paused` | none |
+//! | `host_resumed` | none |
+//!
+//! `state_load` follows `started`, `status` before `index`, only for a damaged or newer-schema
+//! startup load. `parked` is logged once, in the round an owner becomes parked. `host_paused`
+//! and `host_resumed` are logged in the round the pause starts and ends. All come before that
+//! round's `round` line.
 //!
 //! `memory hook` and `memory restore` never start the subscriber.
-use crate::daemon::RoundReport;
+use crate::daemon::{ParkedReason, RoundReport, StateLoad};
+use memory_core::domain::{Owner, OwnerParkReason, ParkReason};
+use memory_core::limits::owner_prefix;
 use std::fmt;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
@@ -190,4 +204,50 @@ pub fn round(report: &RoundReport) {
 /// A requested stop and a successful shutdown, just before exit 0.
 pub fn stopped() {
     tracing::info!(event = "stopped");
+}
+
+/// The startup load of each state file; logs `status` then `index`, and only for a
+/// [`StateLoad::Damaged`] or [`StateLoad::NewerSchema`] result.
+pub fn state_loads(index: StateLoad, status: StateLoad) {
+    for (file, load) in [("status", status), ("index", index)] {
+        let result = match load {
+            StateLoad::Damaged => "damaged",
+            StateLoad::NewerSchema => "newer_schema",
+            StateLoad::Loaded | StateLoad::Missing => continue,
+        };
+        tracing::info!(event = "state_load", file = file, result = result);
+    }
+}
+
+/// The closed identifier of a parking reason; no digest is included.
+const fn reason_id(reason: &ParkedReason) -> &'static str {
+    match reason {
+        ParkedReason::Owner(OwnerParkReason::ForeignWriter { .. }) => "foreign_writer",
+        ParkedReason::Owner(OwnerParkReason::NewerRemoteSchema) => "newer_remote_schema",
+        ParkedReason::Source(ParkReason::RepeatedAuditMismatch) => "repeated_audit_mismatch",
+        ParkedReason::Source(ParkReason::RepeatedReadbackMismatch) => "repeated_readback_mismatch",
+        ParkedReason::Source(ParkReason::SourceUnstable) => "source_unstable",
+        ParkedReason::Source(ParkReason::RepeatedNonJsonResponse) => "repeated_non_json_response",
+        ParkedReason::Source(ParkReason::RepeatedSchemaError) => "repeated_schema_error",
+    }
+}
+
+/// An owner's turn became parked in this round.
+pub fn parked(owner: &Owner, reason: &ParkedReason) {
+    let prefix = owner_prefix(owner);
+    tracing::info!(
+        event = "parked",
+        owner = prefix.as_str(),
+        reason = reason_id(reason)
+    );
+}
+
+/// Uploads were paused by a host-scoped failure in this round.
+pub fn host_paused() {
+    tracing::info!(event = "host_paused");
+}
+
+/// Uploads resumed in this round.
+pub fn host_resumed() {
+    tracing::info!(event = "host_resumed");
 }

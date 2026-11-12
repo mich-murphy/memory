@@ -252,6 +252,7 @@ pub fn main_entry() -> ExitCode {
         return refuse("log_unavailable", 1);
     }
     crate::log::started();
+    crate::log::state_loads(daemon.index_load(), daemon.status_load());
     let clock = SystemClock::new();
     let draw = draw_from(clock.monotonic_ns(), clock.wall_ns(), std::process::id());
     let timing = timing_override.unwrap_or(Timing {
