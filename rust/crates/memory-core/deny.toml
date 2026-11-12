@@ -15,4 +15,5 @@ deny = [
   { name = "sqlx" }, { name = "diesel" }, { name = "walkdir" },
   { name = "jwalk" }, { name = "cap-std" }, { name = "nix" },
   { name = "rustix" }, { name = "libc", wrappers = ["cpufeatures"] }, { name = "fs2" },
+  { name = "tracing" }, { name = "tracing-subscriber" },
 ]
