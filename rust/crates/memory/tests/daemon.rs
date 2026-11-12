@@ -1529,8 +1529,9 @@ impl Sut {
     fn round(&mut self, shapes: &Shapes) -> R {
         self.round_tracking(shapes, true)
     }
-    /// `track_index` is false for rounds that may land only an adopted earlier manifest (A6
-    /// `follow_up`): that commit applies no local updates, so it need not dirty the index.
+    /// `track_index` is false for rounds that may land only an adopted earlier manifest (A6,
+    /// `CommitEnd::Adopted`): that commit applies no local updates, so it need not dirty the
+    /// index.
     fn round_tracking(&mut self, shapes: &Shapes, track_index: bool) -> R {
         self.mono += 61_000_000_000;
         let mono = self.mono;
