@@ -463,7 +463,8 @@ fn the_binary_refusals_have_their_codes() -> R {
         ],
     )?;
     assert_eq!(r.status.code(), Some(2));
-    assert!(stderr_of(&r).starts_with("memory: config_"));
+    assert!(r.stdout.is_empty());
+    assert_eq!(stderr_of(&r), "memory: config_read\n");
     let _ = fs::remove_dir_all(&empty);
     Ok(())
 }
