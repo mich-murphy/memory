@@ -180,7 +180,7 @@ impl Failure {
             _ => None,
         }
     }
-    /// Attempt outcome for [`transition`] (DESIGN.md 11.2, 11.4).
+    /// Attempt outcome for [`transition_paced`] (DESIGN.md 11.2, 11.4).
     pub fn outcome(&self) -> Outcome {
         match self {
             Self::NotLanded(class) | Self::LandingUnknown(class) => Outcome::Failed(class.clone()),
@@ -209,7 +209,7 @@ impl Failure {
     }
 }
 
-/// Map a commit result onto a [`Disposition`] with [`transition`].
+/// Map a commit result onto a [`Disposition`] with [`transition_paced`].
 ///
 /// Jitter draw 0: every jittered wait is its minimum. See [`disposition_paced`].
 pub fn disposition(

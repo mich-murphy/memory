@@ -136,7 +136,7 @@ fn position(epoch: &RawEpoch, size: u64, whole: Sha256) -> EpochPosition {
 
 /// Recovery projection (R5): strict envelope (duplicate keys, schema dispatch, kind/seq
 /// rule) and only the position fields; every other field, at any depth, is ignored. Strict
-/// validation of everything else belongs to [`parse_manifest`].
+/// validation of everything else belongs to [`super::parse_manifest`].
 ///
 /// # Errors
 /// [`ManifestError::NewerSchema`] / [`ManifestError::UnknownSchema`] before the body is
