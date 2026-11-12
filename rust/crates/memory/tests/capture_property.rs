@@ -6,6 +6,7 @@
 //! encoding is the identity (no zstd yet). There is no real shell, R2 or daemon. This replaces
 //! the stand-in planner of `commit_protocol.rs`; the store faults are the same scripted ones.
 use hegel::{TestCase, generators as gs};
+use memory::audit::{AUDIT_INTERVAL_NS, due};
 use memory::capture::{Captured, Env, Local, Locals, Published, Source, capture};
 use memory::commit::{Base, CommitEnd, Failure, LandedHow, commit, manifest_key, recover_base};
 use memory::environment::{Store, StoreError, Stored};
@@ -497,6 +498,11 @@ struct Shapes {
     past_head_window: AtomicU64,
     /// A committed epoch is longer than the tail window.
     past_tail_window: AtomicU64,
+    /// A rewrite strictly between the windows, with growth, was followed by its audit turn and
+    /// restored to the file.
+    mid_rewrite_grow: AtomicU64,
+    /// The same at an unchanged size.
+    mid_rewrite_same: AtomicU64,
 }
 impl Shapes {
     const fn new() -> Self {
@@ -509,6 +515,8 @@ impl Shapes {
             identity_checked: AtomicU64::new(0),
             past_head_window: AtomicU64::new(0),
             past_tail_window: AtomicU64::new(0),
+            mid_rewrite_grow: AtomicU64::new(0),
+            mid_rewrite_same: AtomicU64::new(0),
         }
     }
     fn counts(&self) -> Vec<(&'static str, u64)> {
@@ -522,6 +530,8 @@ impl Shapes {
             ("identity-checked", load(&self.identity_checked)),
             ("past-head-window", load(&self.past_head_window)),
             ("past-tail-window", load(&self.past_tail_window)),
+            ("mid-rewrite-grow-audited", load(&self.mid_rewrite_grow)),
+            ("mid-rewrite-same-audited", load(&self.mid_rewrite_same)),
         ]
     }
 }
@@ -568,12 +578,13 @@ fn run_capture(
     remote: &OwnerState,
     context: &PolicyContext,
     owner: &Owner,
-    piece_len: usize,
+    timing: (i64, usize),
 ) -> R<Captured> {
+    let (now_ns, piece_len) = timing;
     let env = Env {
         header: header(owner, "memory")?,
         context,
-        now_ns: 10_000_000_000,
+        now_ns,
         piece_len,
     };
     Ok(capture(fs, sources, locals, remote, &env))
@@ -592,6 +603,9 @@ struct Sut {
     parked: bool,
     head: Option<(u64, Sha256)>,
     piece_len: usize,
+    /// Wall time of the next capture; every capture step moves it one second, and a quiesce
+    /// moves it past the audit interval (the audit's turn).
+    wall_ns: i64,
 }
 
 impl Sut {
@@ -608,7 +622,13 @@ impl Sut {
             needs_recover: true,
             parked: false,
             head: None,
+            wall_ns: 10_000_000_000,
         })
+    }
+    /// The wall time of one more capture step.
+    fn tick(&mut self) -> i64 {
+        self.wall_ns = self.wall_ns.saturating_add(1_000_000_000);
+        self.wall_ns
     }
     /// Mirror the model's file for `src` into the synthetic filesystem: its bytes and its
     /// identity generation (a rename-replace is a new file at the same path).
@@ -679,6 +699,7 @@ impl Sut {
         if let Some(report) = self.ensure_base()? {
             return Ok(report);
         }
+        let now = self.tick();
         let empty = OwnerState::default();
         let state = self.base.as_ref().map_or(&empty, |b| &b.state);
         let got = run_capture(
@@ -688,7 +709,7 @@ impl Sut {
             state,
             &self.context,
             &self.owner,
-            self.piece_len,
+            (now, self.piece_len),
         )?;
         let Some(request) = got.commit else {
             for update in got.updates {
@@ -716,6 +737,7 @@ impl Sut {
                 Some(self.base.clone())
             };
             if let Some(base) = base {
+                let now = self.tick();
                 let empty = OwnerState::default();
                 let state = base.as_ref().map_or(&empty, |b| &b.state);
                 let got = run_capture(
@@ -725,7 +747,7 @@ impl Sut {
                     state,
                     &self.context,
                     &self.owner,
-                    self.piece_len,
+                    (now, self.piece_len),
                 )?;
                 if let Some(request) = got.commit {
                     for upload in request.uploads {
@@ -753,8 +775,8 @@ impl Sut {
             Step::Append { src, .. } | Step::RemoveSource { src } => self.sync_file(*src, after),
             Step::Rewrite { src, .. } | Step::Truncate { src, .. } => {
                 // Directed: for a settled, indexed, committed source every change the windows
-                // can see (a rewrite is never placed where only an audit would see it, a
-                // truncation always replays) is followed by the store after one fault-free
+                // can see (`Rewrite` is never placed where only an audit would see it, that
+                // is `MidRewrite`; a truncation always replays) is followed by the store after one fault-free
                 // reconcile.
                 let before = self.settled_epochs(*src)?;
                 self.sync_file(*src, after);
@@ -763,6 +785,7 @@ impl Sut {
                     self.follows(*src, &after.files)?;
                 }
             }
+            Step::MidRewrite { src, .. } => self.mid_rewrite(*src, after, shapes)?,
             Step::RenameReplace { src, same, .. } => {
                 // Directed: for a settled, indexed, committed source a new file at the path
                 // (new bytes or the same bytes) starts a new epoch at once (DESIGN.md 7.2: an
@@ -854,7 +877,7 @@ impl Sut {
                 }
             }
             Step::Settle => {
-                self.quiesce()?;
+                self.audit_turn()?;
                 if !after.foreign_seen {
                     self.liveness(&after.files, &after.history)?;
                 }
@@ -873,12 +896,121 @@ impl Sut {
         }
         Ok(last)
     }
+    /// The audit's turn: a source captured since its last audit is due once 24 h have passed,
+    /// so move the wall clock past that, then quiesce.
+    fn audit_turn(&mut self) -> R<Report> {
+        self.wall_ns = self
+            .wall_ns
+            .saturating_add(AUDIT_INTERVAL_NS + 1_000_000_000);
+        self.quiesce()
+    }
     /// Committed epoch count of `src`, read straight from the store.
     fn epoch_count(&self, src: u8) -> R<usize> {
         let id = src_id(src)?;
         Ok(read_chain(&self.store, &self.owner)?
             .and_then(|c| c.folded.state.sources.get(&id).map(|s| s.epochs.len()))
             .unwrap_or(0))
+    }
+    /// The latest committed epoch of `src`: its restored bytes and its committed digest.
+    fn latest_epoch(&self, src: u8) -> R<Option<(Vec<u8>, Sha256)>> {
+        let id = src_id(src)?;
+        let Some(chain) = read_chain(&self.store, &self.owner)? else {
+            return Ok(None);
+        };
+        let Some(latest) = chain
+            .folded
+            .state
+            .sources
+            .get(&id)
+            .and_then(|s| s.epochs.last())
+        else {
+            return Ok(None);
+        };
+        Ok(Some((reassemble(&self.store, latest)?, latest.sha256)))
+    }
+    /// Before the audit's turn the latest epoch is `expected` (the file as it was before the
+    /// rewrite, plus any appended delta), hashes to its own committed digest, and no epoch
+    /// was added.
+    fn holds(&self, src: u8, expected: &[u8], epochs: usize) -> R {
+        let (bytes, digest) = need(self.latest_epoch(src)?, "no latest epoch")?;
+        let first_diff = bytes.iter().zip(expected).position(|(x, y)| x != y);
+        ensure(
+            bytes == expected,
+            &format!(
+                "before the audit: latest epoch != old file + delta (stored {} B, expected {} B, first difference {first_diff:?}, epochs {})",
+                bytes.len(),
+                expected.len(),
+                self.epoch_count(src)?
+            ),
+        )?;
+        ensure(
+            sha(&bytes) == digest,
+            "before the audit: epoch != its committed digest",
+        )?;
+        ensure(
+            self.epoch_count(src)? == epochs,
+            "an epoch started before the audit",
+        )
+    }
+    /// A rewrite strictly between the windows, at the same size or followed by an append (so
+    /// the stat changes), of a settled, audited source whose latest epoch is the file. The
+    /// windows accept it, so until the audit has had its turn the store lags: a same-size edit
+    /// is stored as a stat refresh by the first round (which clears the audit time) and found
+    /// by the audit of the second; a growing one is an extension of the old prefix that is not
+    /// audited until 24 h pass, then found by the first round after that (a quiesce).
+    fn mid_rewrite(&mut self, src: u8, after: &Reference, shapes: &Shapes) -> R {
+        let settled = self.settled_epochs(src)?;
+        let old = self.fs.files.get(&handle(src)).cloned();
+        self.sync_file(src, after);
+        let new = after.files.get(&src).cloned();
+        let (Some(epochs), Some(old), Some(new)) = (settled, old, new) else {
+            return Ok(());
+        };
+        let audited = self
+            .locals
+            .get(&src_id(src)?)
+            .and_then(|l| l.index.as_ref())
+            .is_some_and(|i| i.audit.last_checked_at_ns.is_some());
+        let at_old = self.latest_epoch(src)?.is_some_and(|(b, _)| b == old);
+        if old == new || !audited || !at_old {
+            return Ok(());
+        }
+        let grow = new.len() > old.len();
+        let mut shadow = old.clone();
+        shadow.extend_from_slice(new.get(old.len()..).unwrap_or_default());
+        self.reconcile()?;
+        self.holds(src, &shadow, epochs)?;
+        // The audit of a growing extension is due at the next round when the last audit is
+        // already 24 h old (the wall clock jumped at an earlier settle), else after the turn.
+        let due_next = grow
+            && self
+                .locals
+                .get(&src_id(src)?)
+                .and_then(|l| l.index.as_ref())
+                .is_some_and(|i| {
+                    due(
+                        &i.audit,
+                        i.observed.observed_at_ns,
+                        self.wall_ns.saturating_add(1_000_000_000),
+                    )
+                });
+        self.reconcile()?;
+        if grow && !due_next {
+            // Within the 24 h: not due, so still the old prefix.
+            self.holds(src, &shadow, epochs)?;
+            self.audit_turn()?;
+        }
+        self.follows(src, &after.files)?;
+        ensure(
+            self.epoch_count(src)? == epochs + 1,
+            "the audit did not start exactly one epoch",
+        )?;
+        bump(if grow {
+            &shapes.mid_rewrite_grow
+        } else {
+            &shapes.mid_rewrite_same
+        });
+        Ok(())
     }
     /// The latest committed epoch of `src` equals the bytes it has on disk.
     fn follows(&self, src: u8, disk: &Disk) -> R {
@@ -983,6 +1115,15 @@ enum Step {
         pos: u64,
         byte: u8,
     },
+    /// Flip a byte strictly between the head and tail windows of a file longer than both
+    /// (`HEAD_WINDOW + pos % (len - HEAD_WINDOW - TAIL_WINDOW)`), then append `grow` bytes
+    /// before the next reconcile. Only an audit can see it; nothing for a shorter file.
+    MidRewrite {
+        src: u8,
+        pos: u64,
+        byte: u8,
+        grow: Option<(u8, u32)>,
+    },
     /// Keep the first `len % file_len + 1` bytes.
     Truncate {
         src: u8,
@@ -1030,11 +1171,23 @@ struct Reference {
     generation: BTreeMap<u8, u32>,
     /// Changes that may legitimately start an epoch, per source (counted on an existing file).
     destructive: BTreeMap<u8, usize>,
+    /// Sources awaiting their audit: what the store holds for them while the windows have
+    /// accepted a between-windows rewrite (the file before it, plus everything appended since).
+    /// Those bytes were never the file, so they are also entered into the history (1a).
+    awaiting: BTreeMap<u8, Vec<u8>>,
+}
+
+/// Bytes strictly between the windows of a file of `len` bytes (those only an audit certifies);
+/// `None` when the file is not longer than both windows.
+fn mid_span(len: usize) -> Option<usize> {
+    let floor = usize::try_from(HEAD_WINDOW + TAIL_WINDOW).unwrap_or(usize::MAX);
+    len.checked_sub(floor).filter(|span| *span > 0)
 }
 
 /// Bytes between the head and tail windows of a file longer than both are certified only by
-/// a full audit (DESIGN.md 7.2; capture runs none), so the model never makes an edit that only
-/// an audit could see: such an index moves to the start of the tail window.
+/// the audit (DESIGN.md 11.4). `Rewrite` never makes an edit that only an audit could see, so
+/// its directed oracle stays "the store follows after one reconcile": such an index moves to
+/// the start of the tail window. `MidRewrite` is the step that makes those edits.
 fn detectable(index: usize, len: usize) -> usize {
     let head = usize::try_from(HEAD_WINDOW).unwrap_or(usize::MAX);
     let tail_start = len.saturating_sub(usize::try_from(TAIL_WINDOW).unwrap_or(usize::MAX));
@@ -1059,6 +1212,7 @@ impl Reference {
             foreign_seen: false,
             generation: BTreeMap::new(),
             destructive: BTreeMap::new(),
+            awaiting: BTreeMap::new(),
         }
     }
     /// Count a change that may start an epoch, when the file exists.
@@ -1078,8 +1232,56 @@ impl Reference {
     fn apply(&mut self, step: &Step) {
         match step {
             Step::Append { src, seed, n } => {
-                self.files.entry(*src).or_default().extend(fill(*seed, *n));
+                let add = fill(*seed, *n);
+                if let Some(shadow) = self.awaiting.get_mut(src) {
+                    shadow.extend_from_slice(&add);
+                    let held = shadow.clone();
+                    self.history.entry(*src).or_default().push(held);
+                }
+                self.files.entry(*src).or_default().extend(add);
                 self.record(*src);
+            }
+            Step::MidRewrite {
+                src,
+                pos,
+                byte,
+                grow,
+            } => {
+                if let Some(file) = self.files.get(src).cloned()
+                    && let Some(span) = mid_span(file.len())
+                {
+                    self.destroy(*src);
+                    let head = usize::try_from(HEAD_WINDOW).unwrap_or(0);
+                    let at = head
+                        + usize::try_from(*pos)
+                            .ok()
+                            .and_then(|p| p.checked_rem(span))
+                            .unwrap_or(0);
+                    // The store holds the file before this edit (its audit already ran) or the
+                    // older awaiting bytes (it has not): either may be the latest epoch.
+                    let mut shadow_file = file.clone();
+                    let mut shadow = self
+                        .awaiting
+                        .get(src)
+                        .cloned()
+                        .unwrap_or_else(|| file.clone());
+                    let mut next = file;
+                    if let Some(b) = next.get_mut(at) {
+                        *b = b.wrapping_add(1 + byte % 2);
+                    }
+                    if let Some((seed, n)) = grow {
+                        let delta = fill(*seed, *n);
+                        shadow.extend_from_slice(&delta);
+                        shadow_file.extend_from_slice(&delta);
+                        next.extend_from_slice(&delta);
+                    }
+                    let versions = self.history.entry(*src).or_default();
+                    versions.push(shadow_file);
+                    versions.push(shadow.clone());
+                    self.awaiting.insert(*src, shadow);
+                    self.files.insert(*src, next);
+                    self.record(*src);
+                }
             }
             Step::Rewrite { src, pos, byte } => {
                 self.destroy(*src);
@@ -1132,8 +1334,8 @@ impl Reference {
             | Step::GoOffline
             | Step::GoOnline
             | Step::RevokeToken
-            | Step::RestoreToken
-            | Step::Settle => {}
+            | Step::RestoreToken => {}
+            Step::Settle => self.awaiting.clear(),
         }
     }
 }
@@ -1364,6 +1566,39 @@ impl World {
         let byte = tc.draw(gs::integers::<u8>());
         self.run(Step::Rewrite { src, pos, byte });
     }
+    /// A rewrite strictly between the windows, at the same size or growing: first make a file
+    /// longer than both windows (only with pieces large enough to keep that cheap).
+    #[rule(weight = 1.5)]
+    fn mid_rewrite(&mut self, tc: TestCase) {
+        let floor = HEAD_WINDOW + TAIL_WINDOW;
+        if self.sut.piece_len < 1024 {
+            return self.draw_append(&tc);
+        }
+        let src = draw_src(&tc);
+        let len = self.len_of(src);
+        if len <= floor {
+            let extra = tc.draw(gs::integers::<u64>().max_value(2_000));
+            let seed = tc.draw(gs::integers::<u8>());
+            let n = u32::try_from(floor + 1 + extra - len).unwrap_or(1);
+            self.run(Step::Append { src, seed, n });
+        }
+        let span = self.len_of(src).saturating_sub(floor).max(1);
+        let pos = match tc.draw(gs::integers::<u8>().max_value(2)) {
+            0 => 0,
+            1 => span - 1,
+            _ => tc.draw(gs::integers::<u64>().max_value(span - 1)),
+        };
+        let byte = tc.draw(gs::integers::<u8>());
+        let seed = tc.draw(gs::integers::<u8>());
+        let n = tc.draw(gs::integers::<u32>().min_value(1).max_value(9));
+        let grow = tc.draw(gs::booleans()).then_some((seed, n));
+        self.run(Step::MidRewrite {
+            src,
+            pos,
+            byte,
+            grow,
+        });
+    }
     #[rule(weight = 2.0)]
     fn truncate(&mut self, tc: TestCase) {
         let Some(src) = self.draw_existing(&tc) else {
@@ -1511,6 +1746,13 @@ fn step_strategy() -> BoxedStrategy<Step> {
         2 => (src.clone(), offset.clone(), any::<u8>())
             .prop_map(|(src, pos, byte)| Step::Rewrite { src, pos, byte }),
         2 => (src.clone(), offset).prop_map(|(src, len)| Step::Truncate { src, len }),
+        1 => (
+            src.clone(),
+            any::<u64>(),
+            any::<u8>(),
+            proptest::option::of((any::<u8>(), 1..=9_u32)),
+        )
+            .prop_map(|(src, pos, byte, grow)| Step::MidRewrite { src, pos, byte, grow }),
         1 => src.clone().prop_map(|src| Step::RemoveSource { src }),
         1 => (src.clone(), any::<u8>(), size, any::<bool>())
             .prop_map(|(src, seed, n, same)| Step::RenameReplace { src, seed, n, same }),
@@ -1599,7 +1841,9 @@ fn proptest_property4_capture_state_machine() {
         Ok(())
     });
     assert!(result.is_ok(), "{result:?}");
-    // The proptest twin is not state-aware, so only the original five shapes are required.
+    // The proptest twin is not state-aware (its 512-byte pieces and short appends rarely
+    // reach a file longer than both windows), so only the original five shapes are required;
+    // the scripted test below and the Hegel guard require the between-windows shapes.
     let counts = PROPTEST_SHAPES.counts();
     let guard = require_all(counts.get(..5).unwrap_or_default());
     assert!(guard.is_ok(), "{guard:?} {counts:?}");
@@ -1683,6 +1927,42 @@ fn window_and_identity_shapes_arise_from_a_scripted_run() -> R {
         sut.epoch_count(0)? == 2,
         "one rename-replace, so two epochs",
     )
+}
+
+/// A rewrite strictly between the windows, at the same size and with growth, is stored as the
+/// old bytes until the audit's turn and then restored as the file; each shape is counted.
+#[test]
+fn between_windows_rewrites_are_found_by_the_audit_in_a_scripted_run() -> R {
+    let shapes = Shapes::new();
+    let mid = |grow| Step::MidRewrite {
+        src: 0,
+        pos: 7,
+        byte: 0,
+        grow,
+    };
+    let (reference, sut) = drive(
+        &[
+            app(0, 0, 70_000),
+            Step::Reconcile,
+            mid(None),
+            mid(Some((3, 5))),
+            Step::Settle,
+        ],
+        &shapes,
+    )?;
+    let counts = shapes.counts();
+    for shape in ["mid-rewrite-grow-audited", "mid-rewrite-same-audited"] {
+        ensure(
+            counts.iter().any(|(name, n)| *name == shape && *n == 1),
+            shape,
+        )?;
+    }
+    ensure(
+        sut.epoch_count(0)? == 3,
+        "two audit mismatches, so three epochs",
+    )?;
+    sut.follows(0, &reference.files)?;
+    sut.liveness(&reference.files, &reference.history)
 }
 
 #[test]
