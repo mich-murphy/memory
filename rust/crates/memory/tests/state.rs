@@ -816,6 +816,18 @@ fn config_accept_reject_table() -> R {
 }
 
 #[test]
+fn config_debug_omits_the_endpoint() -> R {
+    let host = "endpoint-marker.example.net";
+    let cfg = Config::parse(&VALID.replace("s3.example.com", host)).map_err(e)?;
+    assert_eq!(cfg.endpoint, format!("https://{host}"));
+    for text in [format!("{cfg:?}"), format!("{cfg:#?}")] {
+        assert!(!text.contains(host), "{text}");
+        assert!(text.contains("memory-acceptance"), "{text}");
+    }
+    Ok(())
+}
+
+#[test]
 fn config_errors_never_echo_values() {
     let secret = "SECRETVALUE";
     let texts = [

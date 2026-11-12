@@ -507,8 +507,9 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
 
     /// As [`Daemon::start`], but the [`Parts`] are built by `build` from the validated
     /// [`Config`] once the lock is held and the config is read (once). The closure runs after
-    /// the lock, the state directory and the config, and before any index or status read; if it
-    /// fails, the lock is released on return.
+    /// the lock, the state directory, the config and the two state loads (`index.json`,
+    /// `status.json`); nothing is written and no network call is made before it. If it fails,
+    /// the lock is released on return.
     ///
     /// # Errors
     /// [`BuildError::Start`] as [`Daemon::start`]; [`BuildError::Build`] carries `build`'s error.

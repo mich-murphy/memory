@@ -1,7 +1,7 @@
 //! The production clock: monotonic readings never go back, wall time is signed.
 use memory::clock::{SystemClock, wall_ns_of};
 use memory::environment::Clock;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, UNIX_EPOCH};
 
 #[test]
 fn monotonic_never_decreases_and_advances() {
@@ -24,5 +24,4 @@ fn wall_is_relative_to_the_epoch_in_both_directions() {
         -3_000_000_000
     );
     assert!(SystemClock::new().wall_ns() > 1_700_000_000_000_000_000);
-    let _ = SystemTime::now();
 }
