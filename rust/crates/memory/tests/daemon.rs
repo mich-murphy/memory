@@ -3259,3 +3259,55 @@ fn hint_record_in_the_chain_stays_pending_after_index_loss() -> R {
     assert!(hint_path(&tmp, name).exists());
     Ok(())
 }
+
+/// The daemon reads at most 64 MiB of a day file (`MAX_HINT_FILE`).
+const HINT_BOUND: usize = 64 << 20;
+
+/// `lines` junk lines of exactly 1024 bytes each (newline included): cheap to scan, no record.
+fn junk_lines(lines: usize) -> Vec<u8> {
+    let mut line = vec![b'x'; 1023];
+    line.push(b'\n');
+    line.repeat(lines)
+}
+
+#[test]
+fn old_hint_file_longer_than_the_read_bound_is_kept() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    // The first 64 MiB end exactly on a line boundary, so the scan of the bytes read is
+    // fully consumed with no torn tail; only the cut read keeps the file.
+    let lines = HINT_BOUND / 1024 + 1;
+    let bytes = junk_lines(lines);
+    let full = u64::try_from(bytes.len()).map_err(e)?;
+    fs::write(hint_path(&tmp, OLD8), &bytes).map_err(e)?;
+    drop(bytes);
+    for round in 1..=3 {
+        if round > 1 {
+            d.clock_mut().mono = 61_000_000_000 * u64::try_from(round).map_err(e)?;
+        }
+        let report = d.reconcile_once().map_err(e)?;
+        assert_eq!(
+            (report.hints_removed, report.hints_kept_old),
+            (0, 1),
+            "{round}: {report:?}"
+        );
+        let len = fs::metadata(hint_path(&tmp, OLD8)).map_err(e)?.len();
+        assert_eq!(len, full, "{round}: file untouched at its full length");
+    }
+    Ok(())
+}
+
+#[test]
+fn old_hint_file_within_the_read_bound_and_consumed_is_removed() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    fs::write(hint_path(&tmp, OLD8), junk_lines(HINT_BOUND / 1024)).map_err(e)?;
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!(
+        (report.hints_removed, report.hints_kept_old),
+        (1, 0),
+        "{report:?}"
+    );
+    assert!(!hint_path(&tmp, OLD8).exists());
+    Ok(())
+}
