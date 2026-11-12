@@ -6,6 +6,49 @@
 //! become [`AuditEvidence`], and how a capture carries the per-source [`AuditState`].
 use memory_core::domain::{AuditState, Observed, Sha256, SourceState};
 use memory_core::planner::AuditEvidence;
+use serde::{Deserialize, Serialize};
+
+/// Audit verdicts of a capture step, a round or (in `status.json`) since the status file was
+/// created. A count is of verdicts reached, whether or not the owner's commit then lands (as
+/// `FailureCounts` counts attempts).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuditCounts {
+    /// Audits whose read compared equal to the committed digest (first or second read).
+    pub matched: u64,
+    /// New epochs started by an audit mismatch: a stable mismatch, or a non-resumed extension
+    /// whose re-read prefix does not hash to the committed digest.
+    pub mismatched: u64,
+    /// Due audits that reached no verdict: stat pre-check failed, the source moved between the
+    /// stats, two reads differed, or a read or transform failed.
+    pub ineligible: u64,
+}
+
+impl AuditCounts {
+    /// Add `other` to `self`, saturating.
+    pub fn add(&mut self, other: &Self) {
+        self.matched = self.matched.saturating_add(other.matched);
+        self.mismatched = self.mismatched.saturating_add(other.mismatched);
+        self.ineligible = self.ineligible.saturating_add(other.ineligible);
+    }
+
+    /// Count one verdict's evidence: a match or an ineligible audit; a mismatch is counted when
+    /// the epoch it starts is.
+    pub fn verdict(&mut self, evidence: AuditEvidence) {
+        match evidence {
+            AuditEvidence::Matched => self.matched = self.matched.saturating_add(1),
+            AuditEvidence::Ineligible => self.ineligible = self.ineligible.saturating_add(1),
+            AuditEvidence::NotDue
+            | AuditEvidence::RecheckRequired
+            | AuditEvidence::StableMismatch => {}
+        }
+    }
+
+    /// Count one new epoch started by an audit mismatch.
+    pub fn mismatch(&mut self) {
+        self.mismatched = self.mismatched.saturating_add(1);
+    }
+}
 
 /// Time after the last audit at which a source captured since then is audited again.
 pub const AUDIT_INTERVAL_NS: i64 = 24 * 3_600 * 1_000_000_000;

@@ -19,7 +19,7 @@
 //! | event | keys |
 //! |---|---|
 //! | `started` | `version` |
-//! | `round` | `landed failed skipped parked deferred offline throttled transient destination_auth local deterministic hints_removed hints_kept_old` |
+//! | `round` | `landed failed skipped parked deferred offline throttled transient destination_auth local deterministic hints_removed hints_kept_old audit_matched audit_mismatched audit_ineligible` |
 //! | `stopped` | none |
 //!
 //! `memory hook` and `memory restore` never start the subscriber.
@@ -181,6 +181,9 @@ pub fn round(report: &RoundReport) {
         deterministic = f.deterministic,
         hints_removed = count(report.hints_removed),
         hints_kept_old = count(report.hints_kept_old),
+        audit_matched = report.audit.matched,
+        audit_mismatched = report.audit.mismatched,
+        audit_ineligible = report.audit.ineligible,
     );
 }
 

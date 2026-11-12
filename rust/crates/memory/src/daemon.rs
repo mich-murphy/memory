@@ -15,6 +15,7 @@
 //!
 //! The commit base (`current.json` ETag, owner state) is never persisted: every owner
 //! recovers it from the store on its first round after a start (`recover_base`).
+use crate::audit::AuditCounts;
 use crate::capture::{
     Captured, Env, Local, Locals, MAX_PIECE_BYTES, Source, Update, attach_launches, capture,
 };
@@ -154,6 +155,9 @@ pub struct StatusBody {
     /// Failed attempts by error class since the status file was first created.
     #[serde(default)]
     pub failures: FailureCounts,
+    /// Audit verdicts since the status file was first created.
+    #[serde(default)]
+    pub audit: AuditCounts,
     /// Events DESIGN.md would log, counted because the daemon has no logging yet.
     #[serde(default)]
     pub events: EventCounts,
@@ -245,6 +249,8 @@ pub struct RoundReport {
     pub deferred: usize,
     /// Failures of this round by class.
     pub failures: FailureCounts,
+    /// Audit verdicts reached in this round, whether or not the commits landed.
+    pub audit: AuditCounts,
     /// Hint day files removed by this round's retention sweep.
     pub hints_removed: usize,
     /// Hint day files past the 7-day age that were kept (pending records, torn tail, cut
@@ -853,6 +859,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             ControlFlow::Continue(base) => base,
         };
         let mut got = self.capture_owner(owner, sources, base.as_ref(), when);
+        report.audit.add(&got.audit);
         let Some(mut request) = got.commit.take() else {
             self.apply(got.updates);
             return false;
@@ -979,6 +986,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         self.advance_hints(&files);
         self.sweep_hints(&files, self.clock.wall_ns(), &mut report);
         self.status.failures.add(&report.failures);
+        self.status.audit.add(&report.audit);
         self.status.rounds += 1;
         self.status.updated_at = text;
         let mut parked: Vec<ParkedEntry> = self

@@ -1,7 +1,7 @@
 //! The allowlist check on a daemon's stderr after a clean stop, shared by the `harness` and
 //! `s3_store` test binaries. Grammar: the module docs of `memory::log`.
 
-const ROUND_KEYS: [&str; 13] = [
+const ROUND_KEYS: [&str; 16] = [
     "landed",
     "failed",
     "skipped",
@@ -15,6 +15,9 @@ const ROUND_KEYS: [&str; 13] = [
     "deterministic",
     "hints_removed",
     "hints_kept_old",
+    "audit_matched",
+    "audit_mismatched",
+    "audit_ineligible",
 ];
 
 fn digits(text: &str, len: usize) -> bool {

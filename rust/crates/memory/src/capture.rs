@@ -41,7 +41,7 @@
 //! Limitations: the whole-stream digest resumes from the index's `Sha256State` for
 //! prefix-stable sources (otherwise it is recomputed from a fresh read of `[0, to)`). Snapshot
 //! and missing-source planning never carry audit evidence (`NotDue`).
-use crate::audit;
+use crate::audit::{self, AuditCounts};
 use crate::commit::{Commit, Upload};
 use crate::environment::{FileSystem, PieceError};
 use memory_core::domain::{
@@ -176,10 +176,13 @@ pub struct Captured {
     pub updates: Vec<Update>,
     /// Outcome per source, in input order.
     pub outcomes: Vec<(SourceId, SourceOutcome)>,
+    /// Audit verdicts reached in this step, whether or not the commit lands.
+    pub audit: AuditCounts,
 }
 
 #[derive(Default)]
 struct Acc {
+    audit: AuditCounts,
     changes: Vec<Change>,
     uploads: Vec<Upload>,
     updates: Vec<Update>,
@@ -210,6 +213,7 @@ pub fn capture<F: FileSystem>(
         commit,
         updates: acc.updates,
         outcomes,
+        audit: acc.audit,
     }
 }
 
@@ -520,6 +524,7 @@ impl Job<'_> {
         if let (Mode::Extend(_, committed, ..), None) = (&mode, &resume) {
             let prefix = Offset::new(0)..Offset::new(from);
             if hash_span(body.bytes(), &prefix) != Some(*committed) {
+                acc.audit.mismatch();
                 return self.write(fs, Mode::Epoch(true), acc);
             }
         }
@@ -765,6 +770,7 @@ fn resolve<F: FileSystem>(
     job: &Job<'_>,
     index: Option<&SourceState>,
     remote: Option<&EpochPosition>,
+    counts: &mut AuditCounts,
 ) -> Result<Resolved, SourceOutcome> {
     let handle = job.src.handle;
     let mut adopt = None;
@@ -784,6 +790,7 @@ fn resolve<F: FileSystem>(
         } else {
             evidence = AuditEvidence::Ineligible;
         }
+        counts.verdict(evidence);
     }
     for _ in 0..MAX_ROUNDS {
         let planning = plan(&PlanInput {
@@ -815,6 +822,7 @@ fn resolve<F: FileSystem>(
                     return Err(SourceOutcome::Unavailable);
                 };
                 evidence = audit::second(remote.whole, first, job.audit_read(fs, state));
+                counts.verdict(evidence);
             }
             Planning::Ready {
                 plan: Plan::Adopt { remote },
@@ -861,7 +869,7 @@ fn append<F: FileSystem>(
     job.previous = index
         .as_ref()
         .map_or_else(audit::never, |state| state.audit.clone());
-    let resolved = match resolve(fs, &job, index.as_ref(), remote.as_ref()) {
+    let resolved = match resolve(fs, &job, index.as_ref(), remote.as_ref(), &mut acc.audit) {
         Ok(resolved) => resolved,
         Err(outcome) => return outcome,
     };
@@ -906,7 +914,13 @@ fn append<F: FileSystem>(
                 }),
             resolved.known,
         ),
-        Plan::Replay { reason } => Mode::Epoch(reason == ReplayReason::AuditMismatch),
+        Plan::Replay { reason } => {
+            let mismatch = reason == ReplayReason::AuditMismatch;
+            if mismatch {
+                acc.audit.mismatch();
+            }
+            Mode::Epoch(mismatch)
+        }
         Plan::Withheld { reason } => return SourceOutcome::Withheld(reason),
         _ => return SourceOutcome::Unchanged,
     };

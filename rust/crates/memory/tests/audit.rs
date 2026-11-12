@@ -1,9 +1,9 @@
 //! The bounded audit (DESIGN.md 11.4, measure 2) through the real `Daemon`, with a spying
 //! fake filesystem (byte counts, corrupted reads, a source that moves between two stats), the
 //! fake store and a settable wall clock. Restores go through `memory-reader`.
-use memory::audit::{AUDIT_INTERVAL_NS, due};
+use memory::audit::{AUDIT_INTERVAL_NS, AuditCounts, due};
 use memory::capture::Source;
-use memory::daemon::{Daemon, IndexBody, Parts, StartOptions};
+use memory::daemon::{Daemon, IndexBody, Parts, RoundReport, StartOptions, StatusBody};
 use memory::environment::{FileSystem, Stat};
 use memory::state::{Loaded, StateFile, SyncPolicy, read_durable};
 use memory_core::domain::{
@@ -131,10 +131,46 @@ type D = Daemon<Spy, MemStore, TestClock, Srcs>;
 
 struct Rig {
     tmp: Tmp,
-    d: D,
+    cfg: PathBuf,
+    list: Vec<(Owner, Source)>,
+    d: Option<D>,
     owner: Owner,
     id: SourceId,
     mono: u64,
+    last: RoundReport,
+}
+
+fn boot(
+    tmp: &Tmp,
+    cfg: &std::path::Path,
+    fs: Spy,
+    store: MemStore,
+    list: &[(Owner, Source)],
+) -> R<D> {
+    let list = list.to_vec();
+    let sources: Srcs = Box::new(move || list.clone());
+    let parts = Parts {
+        fs,
+        store,
+        clock: TestClock::at(0),
+        sources,
+        context: PolicyContext {
+            valid: true,
+            revision: "r".to_owned(),
+            rules: Some(rules_digest()),
+            collector_paths: vec![],
+            collector_identities: vec![],
+        },
+    };
+    Daemon::start_with(
+        &tmp.root(),
+        cfg,
+        parts,
+        StartOptions {
+            sync: SyncPolicy::None,
+        },
+    )
+    .map_err(|x| x.code().to_owned())
 }
 
 impl Rig {
@@ -166,51 +202,60 @@ impl Rig {
             },
         };
         let list = vec![(owner.clone(), source)];
-        let sources: Srcs = Box::new(move || list.clone());
         let mut spy = Spy::default();
         spy.inner.set(1, bytes);
-        let parts = Parts {
-            fs: spy,
-            store: MemStore::default(),
-            clock: TestClock::at(0),
-            sources,
-            context: PolicyContext {
-                valid: true,
-                revision: "r".to_owned(),
-                rules: Some(rules_digest()),
-                collector_paths: vec![],
-                collector_identities: vec![],
-            },
-        };
-        let d = Daemon::start_with(
-            &tmp.root(),
-            &cfg,
-            parts,
-            StartOptions {
-                sync: SyncPolicy::None,
-            },
-        )
-        .map_err(|x| x.code().to_owned())?;
+        let d = boot(&tmp, &cfg, spy, MemStore::default(), &list)?;
         Ok(Self {
             tmp,
-            d,
+            cfg,
+            list,
+            d: Some(d),
             owner,
             id,
             mono: 0,
+            last: RoundReport::default(),
         })
+    }
+    fn d(&mut self) -> R<&mut D> {
+        self.d.as_mut().ok_or_else(|| "no daemon".to_owned())
+    }
+    /// Stop the daemon without a shutdown flush and start a new one on the same state, files
+    /// and store.
+    fn restart(&mut self) -> R {
+        let mut old = self.d.take().ok_or("no daemon")?;
+        let fs = std::mem::take(old.fs_mut());
+        let store = std::mem::take(old.store_mut());
+        drop(old);
+        self.d = Some(boot(&self.tmp, &self.cfg, fs, store, &self.list)?);
+        self.mono = 0;
+        Ok(())
+    }
+    /// The audit counts of the last round.
+    fn counts(&self) -> (u64, u64, u64) {
+        let a = self.last.audit;
+        (a.matched, a.mismatched, a.ineligible)
+    }
+    /// The cumulative counts in the daemon's status.
+    fn status(&mut self) -> R<(u64, u64, u64)> {
+        let a = self.d()?.status().audit;
+        Ok((a.matched, a.mismatched, a.ineligible))
     }
     /// One round at wall time `WALL + wall`; the monotonic clock moves 61 s, so the index is
     /// written every round. Returns the bytes the round read through the seam.
     fn round(&mut self, wall: i128) -> R<u64> {
         self.mono += 61_000_000_000;
-        self.d.clock_mut().mono = self.mono;
-        self.d.clock_mut().wall = WALL + wall;
-        let before = self.d.fs_mut().bytes_read;
-        self.d.reconcile_once().map_err(e)?;
-        Ok(self.d.fs_mut().bytes_read - before)
+        let (mono, now) = (self.mono, WALL + wall);
+        let d = self.d()?;
+        d.clock_mut().mono = mono;
+        d.clock_mut().wall = now;
+        let before = d.fs_mut().bytes_read;
+        let report = d.reconcile_once().map_err(e)?;
+        let read = d.fs_mut().bytes_read - before;
+        self.last = report;
+        Ok(read)
     }
-    fn file(&mut self) -> &mut MemFs {
-        &mut self.d.fs_mut().inner
+    fn file(&mut self) -> R<&mut MemFs> {
+        Ok(&mut self.d()?.fs_mut().inner)
     }
     fn state(&self) -> R<SourceState> {
         let loaded = read_durable(
@@ -231,7 +276,7 @@ impl Rig {
     }
     /// The latest epoch restored through `memory-reader`, and the number of epochs.
     fn restore(&mut self) -> R<(Vec<u8>, usize)> {
-        let store = self.d.store_mut();
+        let store = self.d.as_mut().ok_or("no daemon")?.store_mut();
         let fetch = |key: &str| store.objects.get(key).map(|(body, _)| body.clone());
         let folded = memory_reader::read_owner(&self.owner, |key| Ok::<_, ()>(fetch(key)))
             .map_err(e)?
@@ -273,7 +318,7 @@ fn append_after_an_audit_reads_no_full_stream_and_keeps_the_audit_time() -> R {
     r.round(SECOND)?;
     let mut grown = data;
     grown.extend_from_slice(&pattern(1_000));
-    r.file().set(1, &grown);
+    r.file()?.set(1, &grown);
     assert_eq!(r.round(2 * SECOND)?, WINDOWS + 1_000);
     let audit = r.audit()?;
     assert_eq!(
@@ -297,10 +342,10 @@ fn a_changed_stat_is_ineligible_before_any_audit_stat_or_read() -> R {
     r.round(0)?;
     let mut grown = data;
     grown.extend_from_slice(&pattern(1_000));
-    r.file().set(1, &grown);
-    let stats = r.d.fs_mut().stats;
+    r.file()?.set(1, &grown);
+    let stats = r.d()?.fs_mut().stats;
     assert_eq!(r.round(SECOND)?, WINDOWS + 1_000, "windows and delta only");
-    assert_eq!(r.d.fs_mut().stats - stats, 1, "no audit stat");
+    assert_eq!(r.d()?.fs_mut().stats - stats, 1, "no audit stat");
     assert_eq!(r.audit()?.last_checked_at_ns, None);
     assert_eq!(r.restore()?, (grown, 1));
     Ok(())
@@ -317,7 +362,7 @@ fn rewrite_between_the_windows_with_growth_is_found_by_the_audit() -> R {
     let mut new = old.clone();
     *new.get_mut(50_000).ok_or("byte")? ^= 0xff;
     new.extend_from_slice(&pattern(1_000));
-    r.file().set(1, &new);
+    r.file()?.set(1, &new);
     r.round(SECOND)?;
     let mut accepted = old;
     accepted.extend_from_slice(&pattern(1_000));
@@ -357,8 +402,8 @@ fn same_size_rewrite_is_refreshed_then_audited() -> R {
     assert_eq!(r.audit()?.last_checked_at_ns, at(SECOND)?);
     let mut new = old;
     *new.get_mut(50_000).ok_or("byte")? ^= 0xff;
-    r.file().set(1, &new);
-    let mtime = r.file().mtimes.get(&1).copied().ok_or("mtime")?;
+    r.file()?.set(1, &new);
+    let mtime = r.file()?.mtimes.get(&1).copied().ok_or("mtime")?;
     assert_eq!(r.round(2 * SECOND)?, WINDOWS, "windows only, not due yet");
     let state = r.state()?;
     assert_eq!(state.observed.mtime_ns, mtime, "the refresh is stored");
@@ -376,7 +421,7 @@ fn settling_a_racy_stat_keeps_the_audit_time() -> R {
     let data = pattern(SIZE);
     let mut r = Rig::new(&data)?;
     let racy = i64::try_from(WALL).map_err(e)?;
-    r.file().mtimes.insert(1, racy);
+    r.file()?.mtimes.insert(1, racy);
     r.round(0)?;
     assert_eq!(
         r.round(SECOND)?,
@@ -396,7 +441,7 @@ fn a_mismatch_the_second_read_clears_is_a_match() -> R {
     let data = pattern(SIZE);
     let mut r = Rig::new(&data)?;
     r.round(0)?;
-    r.d.fs_mut().flips.push_back(10);
+    r.d()?.fs_mut().flips.push_back(10);
     assert_eq!(r.round(SECOND)?, 2 * SIZE as u64, "two audit reads");
     let audit = r.audit()?;
     assert_eq!(audit.last_checked_at_ns, at(SECOND)?);
@@ -411,7 +456,7 @@ fn two_reads_that_differ_are_ineligible() -> R {
     let data = pattern(SIZE);
     let mut r = Rig::new(&data)?;
     r.round(0)?;
-    r.d.fs_mut().flips.extend([10, 20]);
+    r.d()?.fs_mut().flips.extend([10, 20]);
     assert_eq!(r.round(SECOND)?, 2 * SIZE as u64);
     assert_eq!(r.audit()?.last_checked_at_ns, None);
     assert_eq!(r.restore()?, (data, 1), "no new epoch");
@@ -424,7 +469,7 @@ fn two_equal_corrupt_reads_are_a_stable_mismatch() -> R {
     let data = pattern(SIZE);
     let mut r = Rig::new(&data)?;
     r.round(0)?;
-    r.d.fs_mut().flips.extend([10, 10]);
+    r.d()?.fs_mut().flips.extend([10, 10]);
     r.round(SECOND)?;
     let (restored, epochs) = r.restore()?;
     assert_eq!(
@@ -443,7 +488,7 @@ fn a_source_that_moves_between_the_stats_is_ineligible() -> R {
     let data = pattern(SIZE);
     let mut r = Rig::new(&data)?;
     r.round(0)?;
-    r.d.fs_mut().touch = true;
+    r.d()?.fs_mut().touch = true;
     r.round(SECOND)?;
     assert_eq!(r.audit()?.last_checked_at_ns, None, "no verdict");
     assert_eq!(r.restore()?.1, 1, "no epoch");
@@ -475,7 +520,7 @@ fn due_rule_through_the_daemon() -> R {
     );
     let mut grown = data;
     grown.extend_from_slice(&pattern(1_000));
-    r.file().set(1, &grown);
+    r.file()?.set(1, &grown);
     assert_eq!(r.round(27 * HOUR)?, WINDOWS + 1_000);
     let size = grown.len() as u64;
     let last = SECOND;
@@ -488,7 +533,7 @@ fn due_rule_through_the_daemon() -> R {
     assert_eq!(r.audit()?.last_checked_at_ns, at(last + 24 * HOUR)?);
     let mut more = grown;
     more.extend_from_slice(&pattern(10));
-    r.file().set(1, &more);
+    r.file()?.set(1, &more);
     r.round(last + 25 * HOUR)?;
     assert_eq!(
         r.round(last + 23 * HOUR)?,
@@ -530,4 +575,119 @@ fn due_rule_table() {
         !due(&audited(100), 100, 99),
         "behind, but not captured since"
     );
+}
+
+/// Guarantee: a match is counted on the round that reaches it and on no round around it; the
+/// status sums rounds and survives a restart with an intact `status.json`.
+#[test]
+fn a_match_is_counted_once_in_the_round_and_in_the_status() -> R {
+    let data = pattern(SIZE);
+    let mut r = Rig::new(&data)?;
+    r.round(0)?;
+    assert_eq!((r.counts(), r.status()?), ((0, 0, 0), (0, 0, 0)));
+    r.round(SECOND)?;
+    assert_eq!((r.counts(), r.status()?), ((1, 0, 0), (1, 0, 0)));
+    r.round(2 * SECOND)?;
+    assert_eq!((r.counts(), r.status()?), ((0, 0, 0), (1, 0, 0)));
+    r.restart()?;
+    assert_eq!(r.status()?, (1, 0, 0), "intact status.json");
+    r.round(3 * SECOND)?;
+    assert_eq!((r.counts(), r.status()?), ((0, 0, 0), (1, 0, 0)));
+    Ok(())
+}
+
+/// Guarantee: a first mismatch the second read clears counts one match, not a mismatch.
+#[test]
+fn a_cleared_first_mismatch_counts_one_match() -> R {
+    let data = pattern(SIZE);
+    let mut r = Rig::new(&data)?;
+    r.round(0)?;
+    r.d()?.fs_mut().flips.push_back(10);
+    r.round(SECOND)?;
+    assert_eq!((r.counts(), r.status()?), ((1, 0, 0), (1, 0, 0)));
+    Ok(())
+}
+
+/// Guarantee: a stable mismatch counts one mismatch; the audit of the new epoch then matches.
+#[test]
+fn a_stable_mismatch_is_counted_then_the_new_epoch_matches() -> R {
+    let data = pattern(SIZE);
+    let mut r = Rig::new(&data)?;
+    r.round(0)?;
+    r.d()?.fs_mut().flips.extend([10, 10]);
+    r.round(SECOND)?;
+    assert_eq!((r.counts(), r.status()?), ((0, 1, 0), (0, 1, 0)));
+    r.round(2 * SECOND)?;
+    assert_eq!((r.counts(), r.status()?), ((1, 0, 0), (1, 1, 0)));
+    r.round(3 * SECOND)?;
+    assert_eq!((r.counts(), r.status()?), ((0, 0, 0), (1, 1, 0)));
+    Ok(())
+}
+
+/// Guarantee: a rewrite between the windows with growth is counted as a mismatch by the audit.
+#[test]
+fn a_between_windows_rewrite_is_counted_as_a_mismatch() -> R {
+    let old = pattern(SIZE);
+    let mut r = Rig::new(&old)?;
+    r.round(0)?;
+    let mut new = old;
+    *new.get_mut(50_000).ok_or("byte")? ^= 0xff;
+    new.extend_from_slice(&pattern(1_000));
+    r.file()?.set(1, &new);
+    r.round(SECOND)?;
+    assert_eq!(
+        r.counts(),
+        (0, 0, 1),
+        "the windows accept the extension; the due audit sees a changed stat"
+    );
+    r.round(2 * SECOND)?;
+    assert_eq!(
+        (r.counts(), r.status()?),
+        ((0, 1, 0), (0, 1, 1)),
+        "the status also holds the earlier pre-check round"
+    );
+    Ok(())
+}
+
+/// Guarantee: each way a due audit reaches no verdict counts one ineligible audit.
+#[test]
+fn ineligible_audits_are_counted() -> R {
+    let data = pattern(SIZE);
+    // Two reads that differ.
+    let mut r = Rig::new(&data)?;
+    r.round(0)?;
+    r.d()?.fs_mut().flips.extend([10, 20]);
+    r.round(SECOND)?;
+    assert_eq!((r.counts(), r.status()?), ((0, 0, 1), (0, 0, 1)));
+    // The source moves between the stats.
+    r.d()?.fs_mut().touch = true;
+    r.round(2 * SECOND)?;
+    assert_eq!(r.counts(), (0, 0, 1));
+    r.round(3 * SECOND)?;
+    assert_eq!(
+        r.counts(),
+        (0, 0, 1),
+        "stale stat: pre-check, then refreshed"
+    );
+    r.round(4 * SECOND)?;
+    assert_eq!((r.counts(), r.status()?), ((1, 0, 0), (1, 0, 3)));
+    // The stat pre-check.
+    let mut grown = data;
+    grown.extend_from_slice(&pattern(1_000));
+    let mut p = Rig::new(&pattern(SIZE))?;
+    p.round(0)?;
+    p.file()?.set(1, &grown);
+    p.round(SECOND)?;
+    assert_eq!((p.counts(), p.status()?), ((0, 0, 1), (0, 0, 1)));
+    Ok(())
+}
+
+/// An old `status.json` without the `audit` key still loads, with zero counts.
+#[test]
+fn an_old_status_without_audit_loads() -> R {
+    let body = r#"{"updated_at":"t","rounds":3,"host_paused":false,"parked":[]}"#;
+    let status: StatusBody = serde_json::from_str(body).map_err(e)?;
+    assert_eq!(status.audit, AuditCounts::default());
+    assert_eq!(status.rounds, 3);
+    Ok(())
 }

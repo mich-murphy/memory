@@ -1,4 +1,5 @@
 //! `memory::log` event lines against a scoped subscriber writing to a buffer.
+use memory::audit::AuditCounts;
 use memory::daemon::{FailureCounts, RoundReport};
 use memory::log::{format_utc, render, round, started, stopped};
 
@@ -40,6 +41,11 @@ fn round_has_every_count_in_order() {
             local: 10,
             deterministic: 11,
         },
+        audit: AuditCounts {
+            matched: 14,
+            mismatched: 15,
+            ineligible: 16,
+        },
         hints_removed: 12,
         hints_kept_old: 13,
     };
@@ -47,7 +53,7 @@ fn round_has_every_count_in_order() {
     let (_, rest) = split(only_line(&text)).unwrap_or_default();
     assert_eq!(
         rest,
-        "INFO round landed=1 failed=2 skipped=3 parked=4 deferred=5 offline=6 throttled=7 transient=8 destination_auth=9 local=10 deterministic=11 hints_removed=12 hints_kept_old=13"
+        "INFO round landed=1 failed=2 skipped=3 parked=4 deferred=5 offline=6 throttled=7 transient=8 destination_auth=9 local=10 deterministic=11 hints_removed=12 hints_kept_old=13 audit_matched=14 audit_mismatched=15 audit_ineligible=16"
     );
 }
 
