@@ -22,6 +22,8 @@ use memory_core::manifest::{
 use std::net::TcpListener;
 use std::time::Duration;
 
+#[path = "s3_store/assemble.rs"]
+mod assemble;
 #[path = "common/clock.rs"]
 mod clock;
 #[path = "common/s3_fake.rs"]

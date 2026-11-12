@@ -81,6 +81,15 @@ impl StartError {
     }
 }
 
+/// Why [`Daemon::start_built`] refused.
+#[derive(Debug)]
+pub enum BuildError<B> {
+    /// Startup itself refused.
+    Start(StartError),
+    /// The caller's builder refused.
+    Build(B),
+}
+
 /// Failure of one round.
 #[derive(Debug)]
 pub enum RoundError {
@@ -487,7 +496,38 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         parts: Parts<F, S, C, E>,
         sync: SyncPolicy,
     ) -> Result<Self, StartError> {
-        let opened = open(root, config_path, sync)?;
+        Self::start_built_inner(root, config_path, sync, |_| {
+            Ok::<_, std::convert::Infallible>(parts)
+        })
+        .map_err(|error| match error {
+            BuildError::Start(start) => start,
+            BuildError::Build(never) => match never {},
+        })
+    }
+
+    /// As [`Daemon::start`], but the [`Parts`] are built by `build` from the validated
+    /// [`Config`] once the lock is held and the config is read (once). The closure runs after
+    /// the lock, the state directory and the config, and before any index or status read; if it
+    /// fails, the lock is released on return.
+    ///
+    /// # Errors
+    /// [`BuildError::Start`] as [`Daemon::start`]; [`BuildError::Build`] carries `build`'s error.
+    pub fn start_built<B>(
+        root: &Path,
+        config_path: &Path,
+        build: impl FnOnce(&Config) -> Result<Parts<F, S, C, E>, B>,
+    ) -> Result<Self, BuildError<B>> {
+        Self::start_built_inner(root, config_path, SyncPolicy::Full, build)
+    }
+
+    fn start_built_inner<B>(
+        root: &Path,
+        config_path: &Path,
+        sync: SyncPolicy,
+        build: impl FnOnce(&Config) -> Result<Parts<F, S, C, E>, B>,
+    ) -> Result<Self, BuildError<B>> {
+        let opened = open(root, config_path, sync).map_err(BuildError::Start)?;
+        let parts = build(&opened.config).map_err(BuildError::Build)?;
         let locals = opened
             .index
             .sources

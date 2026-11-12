@@ -32,7 +32,8 @@ use std::rc::Rc;
 /// Most symlinks followed on the last path component before the path is unresolved.
 pub const MAX_HOPS: usize = 40;
 
-fn pack(meta: &fs::Metadata) -> u128 {
+/// Opaque identity of a file or directory: `(dev << 64) | ino`.
+pub fn pack(meta: &fs::Metadata) -> u128 {
     (u128::from(meta.dev()) << 64) | u128::from(meta.ino())
 }
 

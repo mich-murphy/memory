@@ -1,5 +1,6 @@
 //! Runtime shell: capture, commit, local state and the adapters behind the environment seams
 //! (`realfs`, `s3`). The daemon's run loop is not wired yet.
+pub mod assemble;
 pub mod capture;
 pub mod clock;
 pub mod commit;
