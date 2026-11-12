@@ -10,4 +10,5 @@ pub mod realfs;
 pub mod resolve;
 pub mod s3;
 pub mod state;
+pub mod token;
 pub mod watch;
