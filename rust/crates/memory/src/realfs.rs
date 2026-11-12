@@ -25,9 +25,6 @@ pub enum RealFsError {
     /// The range ends before it starts.
     #[error("invalid range")]
     InvalidRange,
-    /// The source is absent where presence was required (`stat_len`).
-    #[error("source absent")]
-    Absent,
     /// The opened source is not the file the last `stat` observed (a symlink, another
     /// inode, or not a regular file). Nothing was read. Capture maps every read error to
     /// `Unavailable`, which is retried later (DESIGN.md 7.2, 8.2).
@@ -41,7 +38,7 @@ pub enum RealFsError {
 /// Operation counters, for the cost accounting of DESIGN.md 10.3.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Counters {
-    /// `stat` and `stat_len` calls.
+    /// `stat` calls.
     pub stats: u64,
     /// `read` calls that reached the operating system.
     pub reads: u64,
@@ -127,12 +124,6 @@ impl FileSystem for RealFs {
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
             Err(e) => Err(RealFsError::Io(e.kind())),
         }
-    }
-
-    fn stat_len(&mut self, source: u64) -> Result<u64, RealFsError> {
-        self.stat(source)?
-            .map(|s| s.size)
-            .ok_or(RealFsError::Absent)
     }
 
     fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, RealFsError> {

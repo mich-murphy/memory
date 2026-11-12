@@ -371,9 +371,6 @@ impl FileSystem for Spy {
         }
         self.inner.stat(source)
     }
-    fn stat_len(&mut self, source: u64) -> Result<u64, ()> {
-        self.inner.stat_len(source)
-    }
     fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, ()> {
         self.reads.push(range.clone());
         if self.fail_read {

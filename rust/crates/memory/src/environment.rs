@@ -36,11 +36,6 @@ pub trait FileSystem {
     /// # Errors
     /// Returns the adapter's error when the source cannot be examined.
     fn stat(&mut self, source: u64) -> Result<Option<Stat>, Self::Error>;
-    /// Observe a synthetic/source handle's length without opening content.
-    ///
-    /// # Errors
-    /// Returns the adapter's error on an unavailable source.
-    fn stat_len(&mut self, source: u64) -> Result<u64, Self::Error>;
     /// Read a bounded range through the counter seam. A range that extends past the end of
     /// the source is clipped, so a result shorter than requested is how a racing shrink
     /// shows itself to the caller.
@@ -241,7 +236,7 @@ pub struct Counters {
 
 /// Wraps a seam implementation and counts calls through it into [`Counters`].
 ///
-/// `FileSystem` calls count stats (`stat`, `stat_len`) and the length of every byte vector
+/// `FileSystem` calls count stats (`stat`) and the length of every byte vector
 /// `read` returns; `Store` calls count every `put_*` attempt (including failed or lost-reply
 /// ones). `Clock` is delegated untouched (its methods take `&self`), so `wakeups` stays 0.
 /// Counters describe calls through this wrapper only, never unwrapped system calls.
@@ -273,10 +268,6 @@ impl<T: FileSystem> FileSystem for Counting<T> {
     fn stat(&mut self, source: u64) -> Result<Option<Stat>, Self::Error> {
         self.counters.stats = self.counters.stats.saturating_add(1);
         self.inner.stat(source)
-    }
-    fn stat_len(&mut self, source: u64) -> Result<u64, Self::Error> {
-        self.counters.stats = self.counters.stats.saturating_add(1);
-        self.inner.stat_len(source)
     }
     fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, Self::Error> {
         let bytes = self.inner.read(source, range)?;

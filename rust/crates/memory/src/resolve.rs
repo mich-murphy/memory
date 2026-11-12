@@ -237,12 +237,6 @@ impl FileSystem for SharedFs {
             .map_err(|_| RealFsError::Io(ErrorKind::WouldBlock))?
             .stat(source)
     }
-    fn stat_len(&mut self, source: u64) -> Result<u64, RealFsError> {
-        self.0
-            .try_borrow_mut()
-            .map_err(|_| RealFsError::Io(ErrorKind::WouldBlock))?
-            .stat_len(source)
-    }
     fn read(&mut self, source: u64, range: Range<u64>) -> Result<Vec<u8>, RealFsError> {
         self.0
             .try_borrow_mut()
