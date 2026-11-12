@@ -7,5 +7,6 @@ pub mod environment;
 pub mod hook;
 pub mod realfs;
 pub mod resolve;
+pub mod s3;
 pub mod state;
 pub mod watch;
