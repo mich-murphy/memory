@@ -1,6 +1,8 @@
 //! Std-only fake S3 server on `127.0.0.1:0`: in-memory objects, the R2 conditional rules, a
 //! content-derived ETag (the quoted hex MD5 of the body, amendment A13.4), `content-md5`
-//! enforcement (400 on mismatch) and scripted faults. Every request is recorded.
+//! enforcement (400 on mismatch) and scripted faults. Every request is recorded. The request
+//! path is percent-decoded before it names an object, as an S3 server does: the client encodes
+//! `:` (session ids contain it) as `%3A`.
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use md5::{Digest, Md5};
@@ -144,6 +146,21 @@ fn reply(w: &mut TcpStream, code: u16, extra: &str, body: &[u8]) {
     let _ = w.shutdown(Shutdown::Both);
 }
 
+fn percent_decode(raw: &str) -> Option<String> {
+    let mut out = Vec::with_capacity(raw.len());
+    let mut bytes = raw.bytes();
+    while let Some(byte) = bytes.next() {
+        if byte == b'%' {
+            let high = char::from(bytes.next()?).to_digit(16)?;
+            let low = char::from(bytes.next()?).to_digit(16)?;
+            out.push(u8::try_from(high * 16 + low).ok()?);
+        } else {
+            out.push(byte);
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
 fn handle(stream: TcpStream, state: &Mutex<State>) -> Option<()> {
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
@@ -154,7 +171,7 @@ fn handle(stream: TcpStream, state: &Mutex<State>) -> Option<()> {
     reader.read_line(&mut line).ok().filter(|n| *n > 0)?;
     let mut parts = line.split_whitespace();
     let method = parts.next()?.to_owned();
-    let path = parts.next()?.split('?').next()?.to_owned();
+    let path = percent_decode(parts.next()?.split('?').next()?)?;
     let mut headers: HashMap<String, String> = HashMap::new();
     loop {
         let mut l = String::new();
