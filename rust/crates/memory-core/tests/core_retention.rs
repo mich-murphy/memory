@@ -58,6 +58,12 @@ fn facts_table() {
         ..whole()
     };
     assert!(!removable(old, T, &torn), "torn tail");
+    // Inconsistent facts: a torn tail alone must keep the file, whatever the lengths say.
+    let torn_alone = RetentionFacts {
+        pending_bytes: 3,
+        ..whole()
+    };
+    assert!(!removable(old, T, &torn_alone), "pending bytes alone");
     let behind = RetentionFacts {
         offset: 4,
         ..whole()
