@@ -7,11 +7,11 @@
 //! the stand-in planner of `commit_protocol.rs`; the store faults are the same scripted ones.
 use hegel::{TestCase, generators as gs};
 use memory::capture::{Captured, Env, Local, Locals, Published, Source, capture};
-use memory::commit::{Base, Failure, Landed, commit, manifest_key, recover_base};
+use memory::commit::{Base, CommitEnd, Failure, LandedHow, commit, manifest_key, recover_base};
 use memory::environment::{Store, StoreError, Stored};
 use memory_core::domain::{
-    Agent, ArchiveId, CommitOutcome, ETag, MachineId, Owner, SessionId, SessionKey, Sha256,
-    SourceClass, SourceId, SourceKind,
+    Agent, ArchiveId, ETag, MachineId, Owner, SessionId, SessionKey, Sha256, SourceClass, SourceId,
+    SourceKind,
 };
 use memory_core::limits::current_key;
 use memory_core::manifest::{
@@ -390,29 +390,16 @@ fn read_chain(store: &FakeStore, owner: &Owner) -> R<Option<Chain>> {
     }))
 }
 
-/// Reassemble an epoch from stored objects. The piece encoding is the identity, so the stored
-/// bytes are the raw bytes and both descriptors must match them.
+/// Reassemble an epoch from stored objects, decoding each piece through `memory_reader`
+/// (stored bytes are zstd frames; the reader checks both descriptors and the digests).
 fn reassemble(store: &FakeStore, record: &EpochRecord) -> R<Vec<u8>> {
-    let mut out: Vec<u8> = Vec::new();
-    for piece in &record.pieces {
-        let stored = need(store.peek(piece.object()), "piece object missing")?;
-        let (stored_len, stored_sha) = need(store.digest(piece.object()), "piece digest")?;
-        ensure(
-            stored_sha == piece.encoded_sha256() && stored_len == piece.encoded_len(),
-            "descriptor differs from stored encoding",
-        )?;
-        ensure(
-            stored_sha == piece.sha256() && stored_len == piece.len(),
-            "piece bytes differ from descriptor",
-        )?;
-        ensure(len64(&out) == piece.offset().get(), "piece offset gap")?;
-        out.extend_from_slice(stored);
-    }
-    ensure(
-        sha(&out) == record.sha256 && len64(&out) == record.size,
-        "epoch digest differs",
-    )?;
-    Ok(out)
+    memory_reader::restore_epoch(record, |key| {
+        store
+            .peek(key)
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| "piece object missing".to_owned())
+    })
+    .map_err(|err| format!("restore failed: {err:?}"))
 }
 
 struct Observed {
@@ -564,7 +551,7 @@ enum Report {
     Parked,
     Failed,
     Idle,
-    Landed(CommitOutcome),
+    Landed(LandedHow),
     Crashed { manifest: bool },
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -661,11 +648,14 @@ impl Sut {
         }
         Ok(None)
     }
-    fn absorb(&mut self, result: Result<Landed, Failure>) -> R<Report> {
+    fn absorb(&mut self, result: Result<CommitEnd, Failure>) -> R<Report> {
         match result {
-            Ok(landed) => {
-                self.base = Some(landed.base());
-                Ok(Report::Landed(landed.outcome))
+            Ok(end) => {
+                self.base = Some(end.base());
+                match end {
+                    CommitEnd::Landed(landed) => Ok(Report::Landed(landed.how())),
+                    CommitEnd::Adopted(a) => Err(format!("unexpected adoption {a:?}")),
+                }
             }
             Err(Failure::NotLanded(_)) => Ok(Report::Failed),
             Err(Failure::LandingUnknown(_) | Failure::BaseUnchanged) => {
@@ -815,7 +805,7 @@ impl Sut {
                 );
                 let report = self.reconcile()?;
                 self.store.clear_transient();
-                if matches!(report, Report::Landed(CommitOutcome::AlreadyOurs { .. })) {
+                if matches!(report, Report::Landed(LandedHow::AlreadyOurs)) {
                     bump(&shapes.lost_reply);
                 }
             }

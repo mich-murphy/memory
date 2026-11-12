@@ -1,0 +1,239 @@
+##### M5
+base i compiles
+base ii compiles
+base iii compiles
+a i ERROR: error (ignored): SQLite database '/Users/mm/.cache/nix/eval-cache-v6/b3c3b28b6f3324c5f2d2c91b739be06b37329a737836519e58dddbbaad676fdc.sqlite' is busy
+    Checking memory v0.1.0 (/Users/mm/dev/memory-wt/ds-owner-state/rust/crates/memory)
+error[E0609]: no field `needs_recover` on type `&mut OwnerRt`
+   --> crates/memory/src/daemon.rs:672:16
+    |
+672 |             rt.needs_recover = true;
+    |                ^^^^^^^^^^^^^ unknown field
+b i ERROR: error[E0609]: no field `needs_recover` on type `&mut OwnerRt`
+   --> crates/memory/src/daemon.rs:679:16
+    |
+679 |             rt.needs_recover = true;
+    |                ^^^^^^^^^^^^^ unknown field
+    |
+--
+d i ERROR: error[E0609]: no field `needs_recover` on type `&mut OwnerRt`
+   --> crates/memory/src/daemon.rs:669:16
+    |
+669 |             rt.needs_recover = true;
+    |                ^^^^^^^^^^^^^ unknown field
+    |
+--
+a ii compiles
+b ii ERROR: error[E0609]: no field `not_before` on type `&mut OwnerRt`
+   --> crates/memory/src/daemon.rs:702:74
+    |
+702 |                 rt.turn = Turn::Parked(ParkedReason::Source(reason)); rt.not_before = Some(at);
+    |                                                                          ^^^^^^^^^^ unknown field
+    |
+--
+d ii ERROR: error[E0609]: no field `not_before` on type `&mut OwnerRt`
+   --> crates/memory/src/daemon.rs:692:74
+    |
+692 |                 rt.turn = Turn::Parked(ParkedReason::Source(reason)); rt.not_before = Some(at);
+    |                                                                          ^^^^^^^^^^ unknown field
+    |
+--
+a iii compiles
+b iii compiles
+d iii ERROR: error (ignored): SQLite database '/Users/mm/.cache/nix/eval-cache-v6/b3c3b28b6f3324c5f2d2c91b739be06b37329a737836519e58dddbbaad676fdc.sqlite' is busy
+    Checking memory v0.1.0 (/Users/mm/dev/memory-wt/ds-owner-state/rust/crates/memory)
+error[E0308]: mismatched types
+   --> crates/memory/src/daemon.rs:838:63
+    |
+838 |         let mut got = self.capture_owner(owner, sources, Some(&rt.base), when);
+    |                                                          ---- ^^^^^^^^ expected `&Base`, found `&RemoteBase`
+##### base 182f6b7
+M1 focused:
+     Summary [  45.881s] 78 tests run: 78 passed, 1 skipped
+fmt:
+fmt-ok
+clippy:
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.51s
+M4:
+decision points settle 3 wildcard 0
+decision points due 4 wildcard 0
+decision points recover 2 wildcard 0
+decision points capture_owner 0 wildcard 0
+decision points land 3 wildcard 0
+decision points run_owner 1 wildcard 0
+predicate count 1
+cognitive:
+  2  pub fn code(&self) -> &'static str {
+  2  pub fn exit_code(&self) -> u8 {
+  2  fn bump(&mut self, class: &ErrorClass) {
+  3  fn load_state<T: DeserializeOwned>(state: &StateDi
+  2  fn count_load(load: StateLoad, damaged: &mut u64,
+  2  pub fn main_entry() -> ExitCode {
+  2  pub const fn rebuilt(&self) -> bool {
+  2  fn apply(&mut self, updates: Vec<Update>) {
+  3  fn scan_hints(&self) -> Vec<ScannedFile> {
+  2  .filter_map(|entry| entry.ok()?.file_name().into_s
+  2  .map(|r| {
+  4  fn settle(
+  2  fn due(&self, rt: &OwnerRt, report: &mut RoundRepo
+  3  fn recover(
+  5  fn land(
+  5  fn advance_hints(&mut self, files: &[ScannedFile])
+  2  fn write_index(&mut self, force: bool) -> Result<(
+  5  pub fn reconcile_once(&mut self) -> Result<RoundRe
+  2  fn write_status(&mut self, force: bool) -> Result<
+  2  pub fn shutdown(mut self) -> Result<(), StateError
+SIZE_OF_OWNERRT 288
+  Executable tests/counters.rs (target/release/deps/counters-72b589a2f9097a44)
+##### a 83d8d13
+M1 focused:
+     Summary [  47.170s] 78 tests run: 78 passed, 1 skipped
+fmt:
+fmt-ok
+clippy:
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.43s
+M4:
+33	17	rust/crates/memory/src/daemon.rs
+decision points settle 3 wildcard 0
+decision points due 4 wildcard 0
+decision points recover 4 wildcard 0
+decision points capture_owner 1 wildcard 0
+decision points land 3 wildcard 0
+decision points run_owner 1 wildcard 0
+predicate count 1
+cognitive:
+  2  pub fn code(&self) -> &'static str {
+  2  pub fn exit_code(&self) -> u8 {
+  2  fn bump(&mut self, class: &ErrorClass) {
+  3  fn load_state<T: DeserializeOwned>(state: &StateDi
+  2  fn count_load(load: StateLoad, damaged: &mut u64,
+  2  pub fn main_entry() -> ExitCode {
+  2  const fn fence(&self) -> Option<&Base> {
+  2  pub const fn rebuilt(&self) -> bool {
+  2  fn apply(&mut self, updates: Vec<Update>) {
+  3  fn scan_hints(&self) -> Vec<ScannedFile> {
+  2  .filter_map(|entry| entry.ok()?.file_name().into_s
+  2  .map(|r| {
+  4  fn settle(
+  2  fn due(&self, rt: &OwnerRt, report: &mut RoundRepo
+  4  fn recover(
+  2  fn capture_owner(
+  5  fn land(
+  5  fn advance_hints(&mut self, files: &[ScannedFile])
+  2  fn write_index(&mut self, force: bool) -> Result<(
+  5  pub fn reconcile_once(&mut self) -> Result<RoundRe
+  2  fn write_status(&mut self, force: bool) -> Result<
+  2  pub fn shutdown(mut self) -> Result<(), StateError
+error (ignored): SQLite database '/Users/mm/.cache/nix/eval-cache-v6/b3c3b28b6f3324c5f2d2c91b739be06b37329a737836519e58dddbbaad676fdc.sqlite' is busy
+SIZE_OF_OWNERRT 288
+  Executable tests/counters.rs (target/release/deps/counters-72b589a2f9097a44)
+##### b 341a941
+M1 focused:
+     Summary [  54.471s] 78 tests run: 78 passed, 1 skipped
+fmt:
+fmt-ok
+clippy:
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.01s
+M4:
+64	38	rust/crates/memory/src/daemon.rs
+decision points settle 3 wildcard 0
+decision points due 2 wildcard 0
+decision points recover 4 wildcard 0
+decision points capture_owner 1 wildcard 0
+decision points land 3 wildcard 0
+decision points run_owner 1 wildcard 0
+predicate count 1
+cognitive:
+  2  pub fn code(&self) -> &'static str {
+  2  pub fn exit_code(&self) -> u8 {
+  2  fn bump(&mut self, class: &ErrorClass) {
+  3  fn load_state<T: DeserializeOwned>(state: &StateDi
+  2  fn count_load(load: StateLoad, damaged: &mut u64,
+  2  pub fn main_entry() -> ExitCode {
+  2  const fn fence(&self) -> Option<&Base> {
+  2  pub const fn rebuilt(&self) -> bool {
+  2  fn apply(&mut self, updates: Vec<Update>) {
+  3  fn scan_hints(&self) -> Vec<ScannedFile> {
+  2  .filter_map(|entry| entry.ok()?.file_name().into_s
+  2  .map(|r| {
+  4  fn settle(
+  3  fn due(&self, rt: &OwnerRt, report: &mut RoundRepo
+  4  fn recover(
+  2  fn capture_owner(
+  5  fn land(
+  5  fn advance_hints(&mut self, files: &[ScannedFile])
+  2  fn write_index(&mut self, force: bool) -> Result<(
+  5  pub fn reconcile_once(&mut self) -> Result<RoundRe
+  2  .filter_map(|(owner, rt)| match &rt.turn {
+  2  fn write_status(&mut self, force: bool) -> Result<
+  2  pub fn shutdown(mut self) -> Result<(), StateError
+SIZE_OF_OWNERRT 272
+  Executable tests/counters.rs (target/release/deps/counters-72b589a2f9097a44)
+##### d f7ddbe7
+M1 focused:
+     Summary [  59.960s] 78 tests run: 78 passed, 1 skipped
+fmt:
+fmt-ok
+clippy:
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.24s
+M4:
+78	53	rust/crates/memory/src/daemon.rs
+decision points settle 3 wildcard 0
+decision points due 2 wildcard 0
+decision points recover 3 wildcard 0
+decision points capture_owner 1 wildcard 0
+decision points land 3 wildcard 0
+decision points run_owner 1 wildcard 0
+predicate count 1
+cognitive:
+  2  pub fn code(&self) -> &'static str {
+  2  pub fn exit_code(&self) -> u8 {
+  2  fn bump(&mut self, class: &ErrorClass) {
+  3  fn load_state<T: DeserializeOwned>(state: &StateDi
+  2  fn count_load(load: StateLoad, damaged: &mut u64,
+  2  pub fn main_entry() -> ExitCode {
+  2  pub const fn rebuilt(&self) -> bool {
+  2  fn apply(&mut self, updates: Vec<Update>) {
+  3  fn scan_hints(&self) -> Vec<ScannedFile> {
+  2  .filter_map(|entry| entry.ok()?.file_name().into_s
+  2  .map(|r| {
+  4  fn settle(
+  3  fn due(&self, rt: &OwnerRt, report: &mut RoundRepo
+  2  fn recover(
+  5  fn land(
+  5  fn advance_hints(&mut self, files: &[ScannedFile])
+  2  fn write_index(&mut self, force: bool) -> Result<(
+  5  pub fn reconcile_once(&mut self) -> Result<RoundRe
+  2  .filter_map(|(owner, rt)| match &rt.turn {
+  2  fn write_status(&mut self, force: bool) -> Result<
+  2  pub fn shutdown(mut self) -> Result<(), StateError
+SIZE_OF_OWNERRT 272
+  Executable tests/counters.rs (target/release/deps/counters-72b589a2f9097a44)
+##### M6 (under contention): base a b d base2, 8 rounds, 1,000 owners
+/private/tmp/claude-501/-Users-mm-dev-memory/c32b7bd9-0169-47d4-bf70-da528e7ec2a3/scratchpad/review/proto/p1-scratch/bench1k.txt
+('a', '1000', 'deferred') median 8459.5 min-max 8163 9817 n 8
+('b', '1000', 'deferred') median 8459.0 min-max 8087 9407 n 8
+('base', '1000', 'deferred') median 8700.5 min-max 8300 9588 n 8
+('base2', '1000', 'deferred') median 8290.5 min-max 8098 9960 n 8
+('d', '1000', 'deferred') median 8376.0 min-max 8172 10147 n 8
+('a', '1000', 'parked') median 22012.0 min-max 20740 27036 n 8
+('b', '1000', 'parked') median 21896.0 min-max 21067 25334 n 8
+('base', '1000', 'parked') median 23518.5 min-max 20755 25900 n 8
+('base2', '1000', 'parked') median 22722.5 min-max 21076 26172 n 8
+('d', '1000', 'parked') median 22094.0 min-max 21154 29714 n 8
+('a', '1000', 'unchanged') median 11541.5 min-max 10970 14525 n 8
+('b', '1000', 'unchanged') median 11993.0 min-max 11292 14893 n 8
+('base', '1000', 'unchanged') median 12514.5 min-max 11101 26408 n 8
+('base2', '1000', 'unchanged') median 11487.5 min-max 11200 13991 n 8
+('d', '1000', 'unchanged') median 11833.0 min-max 11417 14755 n 8
+/private/tmp/claude-501/-Users-mm-dev-memory/c32b7bd9-0169-47d4-bf70-da528e7ec2a3/scratchpad/review/proto/p1-scratch/bench30k.txt
+('base', '30000', 'deferred') median 5280274 min-max 5234205 5621783 n 3
+('d', '30000', 'deferred') median 4592808 min-max 4077174 4796651 n 3
+('base', '30000', 'parked') median 5080307 min-max 5016345 6329135 n 3
+('d', '30000', 'parked') median 5548805 min-max 5018841 5581363 n 3
+('base', '30000', 'unchanged') median 5328724 min-max 5276647 6365292 n 3
+('d', '30000', 'unchanged') median 4919287 min-max 4518147 5034726 n 3
+##### whole nextest on d
+────────────
+     Summary [  66.827s] 231 tests run: 231 passed, 3 skipped
+DONE

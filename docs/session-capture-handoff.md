@@ -18,11 +18,17 @@ history, not current execution instructions or renewed operating authority.
 `gpt-6.1-sol` workers at medium effort, parent-owned quality and verification.
 This is the single active task brief; dated operating records below remain history.
 
-> **Resume here (updated 2026-11-11, after the design and test review).** Read DESIGN.md, then
+> **Resume here (updated 2026-11-12, after the structural fixes).** Read DESIGN.md, then
 > [design-amendments-20261109.md](rust-rewrite/design-amendments-20261109.md) (A0–A13, wins
-> where they conflict), then the "Session 2026-11-10/11" block directly below, which is the
-> current state: stack #56 (PRs #54–#81) is merged, `main` is `c239d1b`, there is no open
-> Rust branch. [Report 24](rust-rewrite/implementation/24-design-and-test-review.md) is the
+> where they conflict), then the "Session 2026-11-12, structural fixes" block directly below
+> and the "walking skeleton" block after it, which together are the current state, and
+> [report 26](rust-rewrite/implementation/26-walking-skeleton.md), the active coordinator
+> brief, with [evidence 16](rust-rewrite/implementation/evidence/16-walking-skeleton/).
+> [Report 25](rust-rewrite/implementation/25-engineering-practice-review.md) and
+> [evidence 15](rust-rewrite/implementation/evidence/15-engineering-practice-review/) are the
+> review that led to it. The
+> "Session 2026-11-10/11" block after it is history: stack #56 (PRs #54–#81) is merged.
+> [Report 24](rust-rewrite/implementation/24-design-and-test-review.md) is the
 > full record and [evidence 14](rust-rewrite/implementation/evidence/14-design-test-review/)
 > its raw material. The "Session 2026-11-09, review and fix round" block is now history; its
 > "Next" line (slice 2) still stands, with the additions below. The "Handover 2026-11-09" and
@@ -31,7 +37,85 @@ This is the single active task brief; dated operating records below remain histo
 > in this brief (P5 authorization, acceptance bucket/token, hook argv, symlinks, state root)
 > are resolved by the amendments and kept only as history.
 
-**Session 2026-11-10/11, design and test review (current).** Operator-directed review of the
+**Session 2026-11-12, structural fixes (current).** Plan step 3 of report 25, first batch;
+record in [evidence 17](rust-rewrite/implementation/evidence/17-structural-fixes/). Local
+only, nothing pushed.
+- `rust/structural-fixes` (`6fd536a`, four worker and three parent commits) and
+  `docs/structural-fixes` (this entry) sit on top of the stack of the block below.
+- Removed or narrowed: the `profile_of` wildcard arm, `FileSystem::stat_len`, the `Counting`
+  wrapper in `src` (now in `tests/counters.rs`), the second `LaunchRecord` and its second
+  digest (one type and one digest in `memory-core/src/launch.rs`), the `Option` on the owner
+  `Daemon::land` passes on, and the `launch_attach_failed` counter that could no longer count.
+- Bug fixed (`4eea7ab`), also present on `main`: the manifest rejected a launch record with
+  more than 8 environment names although A13.3 lets all nine through, so such a launch
+  failed its owner's commit with `BadLaunch`. The old bound tests passed on a stale digest
+  and never reached the bound; the new ones use a matching digest.
+- Gates on `6fd536a`: local, 500 cases, seed 3194196348, all 13 sub-gates 0, 472 tests, 12
+  doctests, coverage 6031/6170 = 97.75 %, `verify-evidence.py` PASS. Not run: 2,000 cases,
+  hosted CI, `cargo mutants`.
+- Left from step 3: `coordinates.rs` (wire or delete), the parked-owner sort, the daemon's
+  direct `std::fs` hint reads, `recover_base` delegating to `read_owner`, rustdoc in a gate.
+- Next: unchanged from the block below, starting with the coordinator brief for the run loop
+  (report 27, not yet written). A read-only scoping pass found these to settle in that brief:
+  `Config` has no endpoint, region, access key id or key prefix field; the token file format
+  is unspecified (the Go file is `R2_*=value` lines); nothing maps a configured root to a
+  `RootLayout` and `RootNamespace`; there is no production `Clock` and no signal handling;
+  the watcher and the scheduler exist but nothing connects them to `reconcile_once`; the
+  binary's own end-to-end test needs a way to point at the local server.
+
+**Session 2026-11-12, walking skeleton (before the structural fixes).** Plan step 1 of report 25; record in
+report 26. Local only, nothing pushed.
+- A real file now goes through the real `Daemon`, zstd piece encoding and the S3 adapter, and
+  comes back through `memory-reader` with equal bytes. This runs as a test against a local
+  HTTP server in the normal suite, and ran once on R2 under
+  `rust-acceptance/skeleton-20261112-8f10261/` (16 GET, 9 conditional PUT, 7 keys; prefix
+  deleted and listed empty).
+- Stack in `/Users/mm/dev/memory-wt/ds-integrate`, above the five branches of the block below:
+  `rust/skeleton-deps` (`8b41d04`), `rust/zstd-pieces` (`8355cec`), `rust/s3-store`
+  (`7be1de1`), `rust/skeleton-e2e` (`8f10261`), `docs/walking-skeleton` (this entry, report 26,
+  evidence 16).
+- Gates on `8f10261`: local, 500 cases, seed 335062796, all 13 sub-gates 0, 471 tests, 12
+  doctests, coverage 6140/6290 = 97.62 %, `verify-evidence.py` PASS. Not run: 2,000 cases,
+  hosted CI, `cargo mutants`.
+- Not yet: no command runs the path. `memory daemon` exits 78, `memory restore` is not
+  implemented, there is no run loop or production `Clock`. A13.2 still forbids a production
+  write.
+- Open operator decisions: unchanged from the block below.
+- Next: the run loop with a production clock and the store and sources built from the
+  configuration; then `memory restore` over the reader; then the audit, hint retention,
+  `tracing` and the startup delay before any production write.
+
+**Session 2026-11-12, engineering-practice review and data-structure stack (earlier the same day).**
+Operator-directed read-only review of the Rust code at `41a07ff` by eight Sonnet workers with
+parent acceptance, then prototypes of three data structures; record in report 25.
+- Review: the code is mostly sound in the small. Delivery has been horizontal: 17 of 25
+  implementation reports are components, 7 are review rounds, 1 is a thin end-to-end step.
+  Nothing runs end to end (`memory daemon` exits 78, no S3 client, zstd, run loop or reader).
+- Operator-approved plan: (1) walking skeleton: zstd, the S3 adapter, a one-file capture
+  under `rust-acceptance/`, a minimal restore; (2) hold further review rounds and mutant
+  triage until the run loop is wired, taking only the audit, hint retention, `tracing` and
+  the startup delay; (3) structural fixes as the skeleton touches the code; (4) fold the
+  amendments into DESIGN.md and fix the stale AGENTS.md lines.
+- Prototypes, measured against a decision rule fixed in advance: `OwnerRt` becomes
+  `RemoteBase` + `Turn` with `recover` returning the base; the commit result becomes
+  `CommitEnd { Landed, Adopted }` with local effects behind `apply_landed(&Landed, ..)`;
+  `authorize` borrows the admitted source, keeps its re-admit, and `binding()` destructures
+  exhaustively. The idle-round benchmark also found `reconcile_once` quadratic in owners
+  (30,000 owners: 3.24 s a round); an index map brings that to 72 ms.
+- Stack, local only, nothing pushed, in the worktree `/Users/mm/dev/memory-wt/ds-integrate`
+  on `41a07ff`: `rust/round-grouping` (`f9d8b50`), `rust/owner-turn-base` (`d60ec49`),
+  `rust/commit-end` (`b1e45f6`), `rust/authorize-borrow` (`0f3cb7d`),
+  `docs/engineering-practice-review` (this entry, report 25, evidence 15).
+- Gates on `0f3cb7d`: local, 500 cases, seed 374449330, all 13 sub-gates 0, 431 tests, 12
+  doctests, coverage 5869/6006 = 97.72 %, `verify-evidence.py` PASS. Not run: 2,000 cases,
+  hosted CI, `cargo mutants`.
+- Open operator decisions: push the stack and open its PRs; a bound on how long capture stays
+  off (Go writers stopped 2026-11-09, A0); how to fold the amendments into DESIGN.md, which
+  `verify-evidence.py` hash-pins; plus the two still open in the block below.
+- Next: plan step 1 on a branch above the stack, starting with the part that needs no R2
+  (zstd piece encoding, the S3 adapter behind `Store` against a local HTTP server).
+
+**Session 2026-11-10/11, design and test review (history).** Operator-directed review of the
 design, tests, complexity and Hegel properties by Sonnet workers with parent acceptance;
 record in report 24. Result on `main` (`c239d1b`):
 - Design: amendments A10 (corrections of fact and evidence labels), A11 (hook failure, hint

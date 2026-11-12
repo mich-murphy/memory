@@ -12,6 +12,7 @@ publish = false
 
 [workspace.dependencies]
 memory-core = { version = "=0.1.0", path = "crates/memory-core" }
+memory-reader = { version = "=0.1.0", path = "crates/memory-reader" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 schemars = "1"
@@ -27,6 +28,15 @@ proptest-state-machine = "0.8"
 notify = "=8.2.0"
 # Already in the lockfile via notify; same version, so no new crate enters it. `fs` only.
 rustix = { version = "=1.1.6", default-features = false, features = ["std", "fs"] }
+# S3 client chosen by prototype P2 (docs/rust-rewrite/prototypes/P2-s3-client.md): blocking, and
+# neither crate retries, so a `current.json` write is never resent behind the caller.
+rusty-s3 = { version = "=0.11.0", default-features = false, features = ["rustcrypto"] }
+ureq = { version = "=3.5.1", default-features = false, features = ["rustls"] }
+# Content-MD5 on uploads (DESIGN.md 7.3 step 6; R2 enforces it, P2b).
+md-5 = { version = "=0.11.0", default-features = false }
+base64 = { version = "0.23", default-features = false, features = ["alloc"] }
+# Piece encoding, level 3 (DESIGN.md 7.3 step 4, amendment A13.2). No legacy formats or dictionaries.
+zstd = { version = "=0.14.3", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

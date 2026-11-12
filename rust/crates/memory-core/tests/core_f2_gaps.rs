@@ -67,7 +67,7 @@ fn body(
         return Err("admission failed".into());
     };
     let redacted = privacy::transform(&source, input)?;
-    match privacy::authorize(source, redacted, &context()) {
+    match privacy::authorize(&source, redacted, &context()) {
         Authorization::Allow(value) => Ok(value),
         _ => Err("authorization failed".into()),
     }

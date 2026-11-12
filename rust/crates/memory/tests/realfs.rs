@@ -92,14 +92,9 @@ fn stat_absent_present_and_symlink() -> TestResult {
     std::os::unix::fs::symlink(&f, &link_path)?;
     let link = rfs.register(&link_path);
     ensure!(rfs.stat(absent)?.is_none(), "absent must be Ok(None)");
-    ensure!(
-        matches!(rfs.stat_len(absent), Err(RealFsError::Absent)),
-        "stat_len absent"
-    );
     let s = rfs.stat(present)?.ok_or("present missing")?;
     ensure!(s.size == 5, "size {}", s.size);
     ensure!(s.mtime_ns > 0, "mtime");
-    ensure!(rfs.stat_len(present)? == 5, "stat_len");
     let l = rfs.stat(link)?.ok_or("link missing")?;
     ensure!(
         l.id != s.id,
@@ -110,17 +105,13 @@ fn stat_absent_present_and_symlink() -> TestResult {
         matches!(rfs.stat(99), Err(RealFsError::UnknownHandle)),
         "unknown handle"
     );
-    ensure!(
-        matches!(rfs.stat_len(99), Err(RealFsError::UnknownHandle)),
-        "unknown handle len"
-    );
     // A path through a regular file is not NotFound-by-absence: ENOTDIR is an error.
     let bad = rfs.register(f.join("child"));
     ensure!(
         matches!(rfs.stat(bad), Err(RealFsError::Io(_))),
         "non-NotFound is Err"
     );
-    ensure!(rfs.counters().stats == 8, "stats {}", rfs.counters().stats);
+    ensure!(rfs.counters().stats == 5, "stats {}", rfs.counters().stats);
     Ok(())
 }
 
@@ -207,11 +198,10 @@ fn read_exact_short_and_past_eof() -> TestResult {
 }
 
 /// One value per variant; the exhaustive match fails to compile when a variant is added.
-fn sample(kind: std::io::ErrorKind) -> [RealFsError; 5] {
+fn sample(kind: std::io::ErrorKind) -> [RealFsError; 4] {
     let all = [
         RealFsError::UnknownHandle,
         RealFsError::InvalidRange,
-        RealFsError::Absent,
         RealFsError::Changed,
         RealFsError::Io(kind),
     ];
@@ -219,7 +209,6 @@ fn sample(kind: std::io::ErrorKind) -> [RealFsError; 5] {
         match error {
             RealFsError::UnknownHandle
             | RealFsError::InvalidRange
-            | RealFsError::Absent
             | RealFsError::Changed
             | RealFsError::Io(_) => {}
         }

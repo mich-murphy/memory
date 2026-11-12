@@ -42,7 +42,8 @@ pub struct Base {
     pub etag: ETag,
 }
 
-/// One piece object to PUT. The key is `objects/<raw sha256>.zst`.
+/// One piece object to PUT. The key is `objects/<sha256 of the transformed piece bytes>.zst`;
+/// the body is those bytes zstd-compressed.
 #[derive(Debug)]
 pub struct Upload {
     /// Object key.
@@ -63,27 +64,78 @@ pub struct Commit {
     pub uploads: Vec<Upload>,
 }
 
-/// A commit that is now durable.
+/// How a landed commit became durable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LandedHow {
+    /// Our `current.json` PUT replied.
+    Committed,
+    /// Verification by GET proved our write had landed.
+    AlreadyOurs,
+}
+
+/// This capture's own manifest is durable. Only `commit_known` builds one (fields are private
+/// and there is no constructor), so code that applies local updates can demand it as proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Landed {
-    /// `Committed` (our PUT replied) or `AlreadyOurs` (verified by GET).
-    pub outcome: CommitOutcome,
-    /// ETag of `current.json` after the commit.
-    pub etag: ETag,
-    /// The committed manifest. After an adoption this is the earlier attempt's manifest.
-    pub built: Built,
-    /// True when `current.json` named an earlier attempt's manifest (`known_ours`): this
-    /// commit's own manifest did not land, so the caller must capture again.
-    pub follow_up: bool,
+    how: LandedHow,
+    etag: ETag,
+    built: Built,
 }
 
 impl Landed {
+    /// How the commit became durable.
+    pub const fn how(&self) -> LandedHow {
+        self.how
+    }
+    /// ETag of `current.json` after the commit.
+    pub const fn etag(&self) -> &ETag {
+        &self.etag
+    }
+    /// The committed manifest.
+    pub const fn built(&self) -> &Built {
+        &self.built
+    }
+}
+
+/// `current.json` named an earlier attempt's manifest (`known_ours`): this commit's own
+/// manifest did not land, so the caller must capture again and apply no local update.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Adopted {
+    etag: ETag,
+    built: Built,
+}
+
+impl Adopted {
+    /// ETag of `current.json` after the adoption.
+    pub const fn etag(&self) -> &ETag {
+        &self.etag
+    }
+    /// The earlier attempt's manifest.
+    pub const fn built(&self) -> &Built {
+        &self.built
+    }
+}
+
+/// A commit that ended with a durable `current.json`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommitEnd {
+    /// This capture's bytes landed.
+    Landed(Landed),
+    /// An earlier attempt of ours landed instead.
+    Adopted(Adopted),
+}
+
+impl CommitEnd {
     /// The base for the next commit.
     pub fn base(&self) -> Base {
+        let (built, etag) = match self {
+            Self::Landed(l) => (&l.built, &l.etag),
+            Self::Adopted(a) => (&a.built, &a.etag),
+        };
         Base {
-            position: self.built.position,
-            state: self.built.state.clone(),
-            etag: self.etag.clone(),
+            position: built.position,
+            state: built.state.clone(),
+            etag: etag.clone(),
         }
     }
 }
@@ -128,7 +180,7 @@ impl Failure {
             _ => None,
         }
     }
-    /// Attempt outcome for [`transition`] (DESIGN.md 11.2, 11.4).
+    /// Attempt outcome for [`transition_paced`] (DESIGN.md 11.2, 11.4).
     pub fn outcome(&self) -> Outcome {
         match self {
             Self::NotLanded(class) | Self::LandingUnknown(class) => Outcome::Failed(class.clone()),
@@ -157,11 +209,11 @@ impl Failure {
     }
 }
 
-/// Map a commit result onto a [`Disposition`] with [`transition`].
+/// Map a commit result onto a [`Disposition`] with [`transition_paced`].
 ///
 /// Jitter draw 0: every jittered wait is its minimum. See [`disposition_paced`].
 pub fn disposition(
-    result: &Result<Landed, Failure>,
+    result: &Result<CommitEnd, Failure>,
     cancel_requested: bool,
     at: Duration,
     prior: &Streak,
@@ -172,7 +224,7 @@ pub fn disposition(
 /// As [`disposition`], with the shell's uniform random `draw` for the full-jitter backoff.
 /// A `Retry-After` on the failure is passed through.
 pub fn disposition_paced(
-    result: &Result<Landed, Failure>,
+    result: &Result<CommitEnd, Failure>,
     cancel_requested: bool,
     at: Duration,
     prior: &Streak,
@@ -343,14 +395,14 @@ pub fn commit<S: Store>(
     base: Option<&Base>,
     request: Commit,
     pause: &mut dyn FnMut(u32),
-) -> Result<Landed, Failure> {
+) -> Result<CommitEnd, Failure> {
     commit_known(store, base, request, &mut KnownOurs::new(), pause)
 }
 
 /// As [`commit`], with the owner's `known_ours` (amendment A6): every manifest built since the
 /// last landed commit. The new manifest is added before any request; the set is cleared when
 /// a commit lands. A verification that finds `current.json` naming a known manifest adopts it
-/// ([`Landed::follow_up`]) instead of reporting a foreign writer.
+/// ([`CommitEnd::Adopted`]) instead of reporting a foreign writer.
 ///
 /// # Errors
 /// As [`commit`].
@@ -360,7 +412,7 @@ pub fn commit_known<S: Store>(
     request: Commit,
     known: &mut KnownOurs,
     pause: &mut dyn FnMut(u32),
-) -> Result<Landed, Failure> {
+) -> Result<CommitEnd, Failure> {
     let Commit {
         header,
         mut changes,
@@ -390,12 +442,11 @@ pub fn commit_known<S: Store>(
         match attempt {
             Ok(etag) => {
                 known.clear();
-                return Ok(Landed {
-                    outcome: CommitOutcome::Committed { etag: etag.clone() },
+                return Ok(CommitEnd::Landed(Landed {
+                    how: LandedHow::Committed,
                     etag,
                     built,
-                    follow_up: false,
-                });
+                }));
             }
             Err(StoreError::Auth) => {
                 return Err(Failure::NotLanded(ErrorClass::DestinationAuth));
@@ -406,22 +457,19 @@ pub fn commit_known<S: Store>(
         match verify(store, &key, ours, previous, known, pause)? {
             Some(Verdict::Ours { etag }) => {
                 known.clear();
-                return Ok(Landed {
-                    outcome: CommitOutcome::AlreadyOurs { etag: etag.clone() },
+                return Ok(CommitEnd::Landed(Landed {
+                    how: LandedHow::AlreadyOurs,
                     etag,
                     built,
-                    follow_up: false,
-                });
+                }));
             }
             Some(Verdict::Adopt { etag, manifest }) => {
                 let earlier = known.get(&manifest).cloned().ok_or(Failure::Corrupt)?;
                 known.clear();
-                return Ok(Landed {
-                    outcome: CommitOutcome::AlreadyOurs { etag: etag.clone() },
+                return Ok(CommitEnd::Adopted(Adopted {
                     etag,
                     built: earlier,
-                    follow_up: true,
-                });
+                }));
             }
             Some(Verdict::Base { etag, manifest }) => {
                 fence = Some(etag);

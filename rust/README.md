@@ -67,11 +67,11 @@ What the tests do and do not show:
 - Store uploads take `Published`, whose constructors are crate-private and slice an
   `AuthorizedBody` or the writer's own metadata; compile-fail doctests prove raw bytes cannot
   reach `Store`. This is sink privacy by type at the seam, not a live R2 check.
-- `environment::Counting` counts stats, bytes read and PUTs through production `Daemon` and
-  capture code over fakes: an idle round makes no reads or PUTs, 30,000 unchanged sources
-  take at most one stat each, and a 59 KB append to a 200 kB source reads 128,632 bytes
-  (bound 59 KB + 68 KiB). Timer wakeups are not counted; the 1 s/30k target is measured
-  (1.24 s in a debug build), not asserted.
+- The `Counting` wrapper in `crates/memory/tests/counters.rs` counts stats, bytes read and
+  PUTs through production `Daemon` and capture code over fakes: an idle round makes no reads
+  or PUTs, 30,000 unchanged sources take at most one stat each, and a 59 KB append to a
+  200 kB source reads 128,632 bytes (bound 59 KB + 68 KiB). Timer wakeups are not counted;
+  the 1 s/30k target is measured (1.24 s in a debug build), not asserted.
 - Property 3 (zero PUTs after convergence, restart and index deletion) runs in Hegel only;
   a writer-version change has no seam yet.
 - The daemon state machine (Hegel and proptest) covers append, rewrite, truncate,

@@ -1,0 +1,8 @@
+{"key":"rust-acceptance/skeleton-20261112-8f10261/manifests/1125eed7c1afca163859c4e59db6a52882d7927f1cebb708f0d56cca9aad1e62.json"}
+{"key":"rust-acceptance/skeleton-20261112-8f10261/manifests/b6e2cdcce70fe3abb67bb5807d9b4d042dc99d29d6a0d34d47ce4b4bc4448291.json"}
+{"key":"rust-acceptance/skeleton-20261112-8f10261/manifests/cdf25d100b610074a8df2c9d02814e5d80df05050590ee6cbc67ea837f31b358.json"}
+{"key":"rust-acceptance/skeleton-20261112-8f10261/objects/06246a268d089a3c494b7b3c8383fc53d39d2d755978232f5aa39ab8b7fd639e.zst"}
+{"key":"rust-acceptance/skeleton-20261112-8f10261/objects/5e06f517f637f75ee172a79525cfc2ab9bab32f8ca7569e3a545d736a7bebeec.zst"}
+{"key":"rust-acceptance/skeleton-20261112-8f10261/objects/baeee6bf789f3f361e816eb7a37a51b9d08dd48a50cab7f1f68acff120176f56.zst"}
+{"key":"rust-acceptance/skeleton-20261112-8f10261/sessions/a/m/claude/r1:-p:0f0e0d0c-0b0a-4908-8706-050403020100/current.json"}
+{"mode":"delete","prefix":"rust-acceptance/skeleton-20261112-8f10261/","listed":7,"deleted":7,"list_requests":2,"delete_requests":7,"remaining_after":0}

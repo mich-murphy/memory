@@ -1,0 +1,131 @@
+   Compiling memory-reader v0.1.0 (/Users/mm/dev/memory-wt/sk-s3/rust/crates/memory-reader)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.93s
+────────────
+ Nextest run ID 25122705-1365-4a46-ad96-f8356c809491 with nextest profile: default
+    Starting 19 tests across 3 binaries
+        PASS [   0.043s] ( 1/19) memory-reader::chain a_chain_of_another_owner_is_rejected
+        PASS [   0.044s] ( 2/19) memory-reader::chain a_checkpoint_and_deltas_restore_the_expected_state
+        PASS [   0.041s] ( 3/19) memory-reader::chain a_fetch_error_passes_through
+        FAIL [   0.041s] ( 4/19) memory-reader::chain a_manifest_that_does_not_hash_to_its_key_is_corrupt
+  stdout ───
+
+    running 1 test
+    test a_manifest_that_does_not_hash_to_its_key_is_corrupt ... FAILED
+
+    failures:
+
+    failures:
+        a_manifest_that_does_not_hash_to_its_key_is_corrupt
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'a_manifest_that_does_not_hash_to_its_key_is_corrupt' (376559234) panicked at crates/memory-reader/tests/chain.rs:179:5:
+    assertion `left == right` failed
+      left: Err(Corrupt(Invalid))
+     right: Err(Corrupt(HashMismatch))
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        PASS [   0.040s] ( 5/19) memory-reader::chain a_newer_schema_is_not_corruption
+        PASS [   0.042s] ( 6/19) memory-reader::chain a_missing_manifest_is_corrupt_not_absent
+        PASS [   0.041s] ( 7/19) memory-reader::chain an_absent_current_json_is_no_owner
+        PASS [   0.045s] ( 8/19) memory-reader::chain sixty_five_deltas_without_a_checkpoint_stop_after_64_fetches
+        PASS [   0.040s] ( 9/19) memory-reader::restore a_frame_shorter_than_len_is_rejected
+        PASS [   0.057s] (10/19) memory-reader::chain the_walk_stops_at_the_nearest_checkpoint
+        PASS [   0.039s] (11/19) memory-reader::restore fetch_errors_pass_through
+        PASS [   0.041s] (12/19) memory-reader::restore non_contiguous_pieces_are_rejected
+        PASS [   0.109s] (13/19) memory-reader::restore a_frame_that_decodes_past_len_is_rejected_without_allocating_it
+        PASS [   0.040s] (14/19) memory-reader::restore restore_concatenates_pieces_and_verifies_the_epoch
+        PASS [   0.039s] (15/19) memory-reader::restore round_trip_one_piece
+        PASS [   0.040s] (16/19) memory-reader::restore truncated_stored_bytes_are_rejected
+        PASS [   0.039s] (17/19) memory-reader::restore whole_stream_size_and_digest_are_checked
+        PASS [   0.040s] (18/19) memory-reader::restore wrong_encoded_digest_is_rejected
+        PASS [   0.039s] (19/19) memory-reader::restore wrong_raw_digest_is_rejected
+────────────
+     Summary [   0.439s] 19 tests run: 18 passed, 1 failed, 0 skipped
+        FAIL [   0.041s] ( 4/19) memory-reader::chain a_manifest_that_does_not_hash_to_its_key_is_corrupt
+  stdout ───
+
+    running 1 test
+    test a_manifest_that_does_not_hash_to_its_key_is_corrupt ... FAILED
+
+    failures:
+
+    failures:
+        a_manifest_that_does_not_hash_to_its_key_is_corrupt
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'a_manifest_that_does_not_hash_to_its_key_is_corrupt' (376559234) panicked at crates/memory-reader/tests/chain.rs:179:5:
+    assertion `left == right` failed
+      left: Err(Corrupt(Invalid))
+     right: Err(Corrupt(HashMismatch))
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+error: test run failed
+   Compiling memory-reader v0.1.0 (/Users/mm/dev/memory-wt/sk-s3/rust/crates/memory-reader)
+   Compiling memory v0.1.0 (/Users/mm/dev/memory-wt/sk-s3/rust/crates/memory)
+warning: variants `ApplyThenStatus`, `ApplyThenDrop`, `ApplyThenHang`, `Status`, and `CorruptInFlight` are never constructed
+  --> crates/memory/tests/common/s3_fake.rs:18:5
+   |
+16 | pub enum Fault {
+   |          ----- variants in this enum
+17 |     /// Apply the request, then reply with this status.
+18 |     ApplyThenStatus(u16),
+   |     ^^^^^^^^^^^^^^^
+19 |     /// Apply the request, then close the socket without a reply.
+20 |     ApplyThenDrop,
+   |     ^^^^^^^^^^^^^
+21 |     /// Apply the request, then stay silent for this long and close.
+22 |     ApplyThenHang(Duration),
+   |     ^^^^^^^^^^^^^
+23 |     /// Reply with this status (and optional `Retry-After`) without applying anything.
+24 |     Status(u16, Option<&'static str>),
+   |     ^^^^^^
+25 |     /// Flip a body byte before the `content-md5` check, as a damaged upload would.
+26 |     CorruptInFlight,
+   |     ^^^^^^^^^^^^^^^
+   |
+   = note: `Fault` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: fields `if_match`, `if_none_match`, `content_md5`, and `body` are never read
+  --> crates/memory/tests/common/s3_fake.rs:34:9
+   |
+31 | pub struct Seen {
+   |            ---- fields in this struct
+...
+34 |     pub if_match: Option<String>,
+   |         ^^^^^^^^
+35 |     pub if_none_match: Option<String>,
+   |         ^^^^^^^^^^^^^
+36 |     pub content_md5: Option<String>,
+   |         ^^^^^^^^^^^
+37 |     pub body: Vec<u8>,
+   |         ^^^^
+   |
+   = note: `Seen` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: methods `queue` and `seed` are never used
+   --> crates/memory/tests/common/s3_fake.rs:106:12
+    |
+ 87 | impl Fake {
+    | --------- methods in this implementation
+...
+106 |     pub fn queue(&self, method: &str, suffix: &str, fault: Fault) {
+    |            ^^^^^
+...
+113 |     pub fn seed(&self, path: &str, body: &[u8]) {
+    |            ^^^^
+
+warning: `memory` (test "skeleton") generated 3 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.41s
+────────────
+ Nextest run ID 297a295f-0682-4e7a-9b78-c5e34cfc4936 with nextest profile: default
+    Starting 1 test across 1 binary (1 test skipped)
+        PASS [   0.187s] (1/1) memory::skeleton skeleton_against_the_local_server
+────────────
+     Summary [   0.188s] 1 test run: 1 passed, 1 skipped

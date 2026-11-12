@@ -269,11 +269,9 @@ fn shared_fs_reports_busy_instead_of_panicking() -> R {
     let cell = fs_.cell();
     let h = cell.borrow_mut().register("/nonexistent-resolve-test");
     assert!(fs_.stat(h)?.is_none());
-    assert!(fs_.stat_len(h).is_err());
     assert!(fs_.read(h, 0..1).is_err());
     let _held = cell.borrow_mut();
     assert!(fs_.stat(h).is_err());
-    assert!(fs_.stat_len(h).is_err());
     assert!(fs_.read(h, 0..1).is_err());
     Ok(())
 }

@@ -28,6 +28,7 @@ mod launch;
 mod names;
 mod text;
 
+pub(crate) use launch::{LAUNCH_ARGV_MAX, LAUNCH_ENV_MAX};
 pub use launch::{SanitizedLaunch, sanitize_launch};
 pub use names::{basename, is_credential, is_secret_name};
 
@@ -145,6 +146,8 @@ pub enum Admission {
 /// Opaque admitted source; only admission can construct it.
 pub struct AdmittedSource {
     facts: ResolvedSourceFacts,
+    /// Validated non-empty owner, proven present by admission.
+    owner: String,
     binding: [u8; 32],
 }
 
@@ -213,44 +216,61 @@ fn binding(context: &PolicyContext, facts: &ResolvedSourceFacts) -> [u8; 32] {
         h.update(value.len().to_le_bytes());
         h.update(value);
     }
+    // Exhaustive on purpose: a new field is a compile error until it is bound here.
+    let PolicyContext {
+        valid,
+        revision,
+        rules,
+        collector_paths,
+        collector_identities,
+    } = context;
+    let ResolvedSourceFacts {
+        identities,
+        file_identity,
+        ancestor_identities,
+        path_resolved,
+        root_resolved,
+        owner,
+        profile,
+    } = facts;
     let mut h = Sha256::new();
-    h.update([u8::from(context.valid)]);
-    field(&mut h, context.revision.as_bytes());
-    match context.rules {
+    h.update([u8::from(*valid)]);
+    field(&mut h, revision.as_bytes());
+    match rules {
         Some(rules) => {
             h.update([1]);
             h.update(rules);
         }
         None => h.update([0]),
     }
-    for paths in [&context.collector_paths, &facts.identities] {
+    for paths in [collector_paths, identities] {
         h.update(paths.len().to_le_bytes());
         for path in paths {
             field(&mut h, path.as_bytes());
         }
     }
-    for ids in [&context.collector_identities, &facts.ancestor_identities] {
+    for ids in [collector_identities, ancestor_identities] {
         h.update(ids.len().to_le_bytes());
         for id in ids {
             h.update(id.to_le_bytes());
         }
     }
-    match facts.file_identity {
+    match file_identity {
         Some(id) => {
             h.update([1]);
             h.update(id.to_le_bytes());
         }
         None => h.update([0]),
     }
-    h.update([u8::from(facts.path_resolved), u8::from(facts.root_resolved)]);
-    match &facts.owner {
+    h.update([u8::from(*path_resolved), u8::from(*root_resolved)]);
+    match owner {
         Some(owner) => {
             h.update([1]);
             field(&mut h, owner.as_bytes());
         }
         None => h.update([0]),
     }
-    h.update([match facts.profile {
+    h.update([match profile {
         Profile::Transcript => 0,
         Profile::Config => 1,
         Profile::TextAsset => 2,
@@ -299,11 +319,12 @@ pub fn admit(context: &PolicyContext, facts: ResolvedSourceFacts) -> Admission {
     if facts.profile == Profile::Unknown {
         return Admission::Deny(Reason::UnknownKind);
     }
-    if facts.owner.as_ref().is_none_or(String::is_empty) {
+    let Some(owner) = facts.owner.clone().filter(|o| !o.is_empty()) else {
         return Admission::Deny(Reason::UnknownOwner);
-    }
+    };
     Admission::Allow(AdmittedSource {
         binding: binding(context, &facts),
+        owner,
         facts,
     })
 }
@@ -338,22 +359,19 @@ pub fn transform(source: &AdmittedSource, bytes: &[u8]) -> Result<RedactedBytes,
 
 /// Recheck policy and bind the exact transformed bytes to their source.
 pub fn authorize(
-    source: AdmittedSource,
+    source: &AdmittedSource,
     redacted: RedactedBytes,
     context: &PolicyContext,
 ) -> Authorization {
     if redacted.binding != source.binding || source.binding != binding(context, &source.facts) {
         return Authorization::Deny(Reason::ContextChanged);
     }
-    match admit(context, source.facts) {
-        Admission::Allow(admitted) => match admitted.facts.owner {
-            Some(owner) => Authorization::Allow(AuthorizedBody {
-                digest: Sha256::digest(&redacted.bytes).into(),
-                bytes: redacted.bytes,
-                owner,
-            }),
-            None => Authorization::Deny(Reason::UnknownOwner),
-        },
+    match admit(context, source.facts.clone()) {
+        Admission::Allow(_) => Authorization::Allow(AuthorizedBody {
+            digest: Sha256::digest(&redacted.bytes).into(),
+            bytes: redacted.bytes,
+            owner: source.owner.clone(),
+        }),
         Admission::Deny(reason) => Authorization::Deny(reason),
         Admission::Unknown(reason) => Authorization::Unknown(reason),
     }

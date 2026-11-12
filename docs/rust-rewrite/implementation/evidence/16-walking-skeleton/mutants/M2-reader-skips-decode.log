@@ -1,0 +1,42 @@
+   Compiling memory-reader v0.1.0 (/Users/mm/dev/memory-wt/sk-s3/rust/crates/memory-reader)
+   Compiling memory v0.1.0 (/Users/mm/dev/memory-wt/sk-s3/rust/crates/memory)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.28s
+────────────
+ Nextest run ID 31627138-0596-4f7a-9d13-27480842c75b with nextest profile: default
+    Starting 1 test across 1 binary (20 tests skipped)
+        FAIL [   0.126s] (1/1) memory::s3_store skeleton::skeleton_against_the_local_server
+  stdout ───
+
+    running 1 test
+    test skeleton::skeleton_against_the_local_server ... FAILED
+
+    failures:
+
+    failures:
+        skeleton::skeleton_against_the_local_server
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.06s
+
+  stderr ───
+    Error: "Gap"
+
+  Cancelling due to test failure:
+────────────
+     Summary [   0.126s] 1 test run: 0 passed, 1 failed, 20 skipped
+        FAIL [   0.126s] (1/1) memory::s3_store skeleton::skeleton_against_the_local_server
+  stdout ───
+
+    running 1 test
+    test skeleton::skeleton_against_the_local_server ... FAILED
+
+    failures:
+
+    failures:
+        skeleton::skeleton_against_the_local_server
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.06s
+
+  stderr ───
+    Error: "Gap"
+
+error: test run failed

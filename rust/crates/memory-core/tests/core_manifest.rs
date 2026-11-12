@@ -67,7 +67,7 @@ fn writer() -> Writer {
         commit: "abc123".to_owned(),
     }
 }
-fn launch_record() -> Result<LaunchRecord, ManifestError> {
+fn launch_record() -> LaunchRecord {
     let argv = ["claude", "--model", "x"].map(str::to_owned);
     LaunchRecord::from_sanitized(&sanitize_launch(&argv, &[]))
 }
@@ -77,7 +77,7 @@ fn header_for(owner: Owner, with_launch: bool) -> Result<Header, Box<dyn std::er
         captured_at: ts()?,
         writer: writer(),
         launch: if with_launch {
-            vec![launch_record()?]
+            vec![launch_record()]
         } else {
             vec![]
         },
@@ -168,6 +168,45 @@ fn del(v: &mut Value, parent: &str, key: &str) {
         m.remove(key);
     }
 }
+/// The launch digest written out independently of the crate: tag, then each argv entry and
+/// each sorted environment pair behind a big-endian `u64` length.
+fn launch_digest_of(argv: &[String], env: &BTreeMap<String, String>) -> String {
+    fn framed(bytes: &[u8]) -> Vec<u8> {
+        let mut out = u64::try_from(bytes.len())
+            .unwrap_or(u64::MAX)
+            .to_be_bytes()
+            .to_vec();
+        out.extend_from_slice(bytes);
+        out
+    }
+    let mut hasher = Hasher::new();
+    hasher.update(b"memory.launch/1\0argv");
+    for arg in argv {
+        hasher.update(framed(arg.as_bytes()));
+    }
+    hasher.update(b"env");
+    for (key, value) in env {
+        hasher.update(framed(key.as_bytes()));
+        hasher.update(framed(value.as_bytes()));
+    }
+    String::from(Sha256::from_bytes(hasher.finalize().into()))
+}
+/// Replace the first launch record with one of the given sizes whose digest matches, so only
+/// a size bound can reject it.
+fn set_launch(v: &mut Value, argv: usize, env: usize) {
+    let argv = vec!["claude".to_owned(); argv];
+    let env: BTreeMap<String, String> = (0..env)
+        .map(|i| (format!("N{i}"), "1".to_owned()))
+        .collect();
+    put(
+        v,
+        "/launch/0",
+        "digest",
+        json!(launch_digest_of(&argv, &env)),
+    );
+    put(v, "/launch/0", "argv", json!(argv));
+    put(v, "/launch/0", "env", json!(env));
+}
 fn rejects(base: &[u8], f: impl FnOnce(&mut Value), want: ManifestError) -> R {
     let m = mutate(base, f)?;
     assert_eq!(parse_manifest(&m).err(), Some(want));
@@ -179,7 +218,7 @@ fn rejects(base: &[u8], f: impl FnOnce(&mut Value), want: ManifestError) -> R {
 #[test]
 fn golden_checkpoint_delta_and_current() -> R {
     let (b0, b1) = fixture()?;
-    let rec = launch_record()?;
+    let rec = launch_record();
     let wr = json!({"name": "memory", "version": "0.1.0", "commit": "abc123"});
     let ew = json!({"version": "0.1.0", "commit": "abc123"});
     let owner =
@@ -394,23 +433,11 @@ fn delta_negative_fixtures() -> R {
         |v| put(v, "/launch/0", "digest", json!(hex(99))),
         ManifestError::BadLaunch,
     )?;
-    rejects(
-        d,
-        |v| put(v, "/launch/0", "argv", json!(vec!["claude"; 33])),
-        ManifestError::BadLaunch,
-    )?;
-    rejects(
-        d,
-        |v| {
-            put(
-                v,
-                "/launch/0",
-                "env",
-                json!({"A":"1","B":"1","C":"1","D":"1","E":"1","F":"1","G":"1","H":"1","I":"1"}),
-            )
-        },
-        ManifestError::BadLaunch,
-    )?;
+    // Size bounds, each with a matching digest: 32 argv entries and 9 environment names (the
+    // whole allowlist, A13.3) are the largest record accepted.
+    parse_manifest(&mutate(d, |v| set_launch(v, 32, 9))?)?;
+    rejects(d, |v| set_launch(v, 33, 0), ManifestError::BadLaunch)?;
+    rejects(d, |v| set_launch(v, 0, 10), ManifestError::BadLaunch)?;
     rejects(
         d,
         |v| {
@@ -1637,4 +1664,79 @@ fn raw_piece(
         Ok(p) => p,
         Err(_) => panic!("piece"),
     }
+}
+
+#[test]
+fn hint_and_manifest_carry_one_launch_digest() -> Result<(), Box<dyn std::error::Error>> {
+    use memory_core::hint::{HintEvent, HookInput, LaunchHint, PathHint, build_line, scan};
+    let argv = ["/usr/bin/claude", "--model", "opus", "hello prompt"].map(str::to_owned);
+    let launch = sanitize_launch(&argv, &["ANTHROPIC_MODEL=opus".to_owned()]);
+    // The daemon re-sanitises a hint's record; that must not move the digest.
+    let environ: Vec<String> = launch
+        .env()
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect();
+    let again = sanitize_launch(launch.argv(), &environ);
+    assert_eq!(launch, again, "re-sanitising must be idempotent");
+    let input = HookInput {
+        agent: Agent::Claude,
+        event: HintEvent::SessionStart,
+        session: SessionId::try_from("s1".to_owned())?,
+        cwd: PathHint::Absent,
+        transcript: PathHint::Absent,
+        agent_transcript: PathHint::Absent,
+    };
+    let line = build_line(&input, Some(&launch))?;
+    let out = scan(&line, 0)?;
+    let LaunchHint::Full(from_hint) = &out.records.first().ok_or("record")?.record.launch else {
+        return Err("expected full launch".into());
+    };
+    assert_eq!(
+        from_hint.digest(),
+        LaunchRecord::from_sanitized(&again).digest()
+    );
+    let header = Header {
+        owner: session_owner()?,
+        captured_at: ts()?,
+        writer: writer(),
+        launch: vec![LaunchRecord::from_sanitized(&again)],
+    };
+    let w = swrite("t", true, stamp(1, None), 10, h(1), vec![piece(1, 0, 10)])?;
+    let built = build(None, header, vec![Change::Epoch(w)])?;
+    parse_manifest(&built.bytes)?;
+    let json: Value = serde_json::from_slice(&built.bytes)?;
+    let in_manifest = json.pointer("/launch/0/digest").and_then(Value::as_str);
+    assert_eq!(in_manifest, Some(String::from(from_hint.digest()).as_str()));
+    Ok(())
+}
+
+#[test]
+fn a_launch_with_every_allowlisted_environment_name_builds_a_manifest() -> R {
+    // A13.3: the closed allowlist is the only bound, so a launch that sets all nine names
+    // must not fail its owner's commit.
+    let environ = [
+        "ANTHROPIC_MODEL=opus",
+        "ANTHROPIC_SMALL_FAST_MODEL=haiku",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL=opus",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL=sonnet",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL=haiku",
+        "CLAUDE_CONFIG_DIR=conf",
+        "MAX_THINKING_TOKENS=1000",
+        "MAX_MCP_OUTPUT_TOKENS=1000",
+        "DISABLE_PROMPT_CACHING=1",
+    ]
+    .map(str::to_owned);
+    let launch = sanitize_launch(&["claude".to_owned()], &environ);
+    assert_eq!(launch.env().len(), environ.len());
+    let header = Header {
+        owner: session_owner()?,
+        captured_at: ts()?,
+        writer: writer(),
+        launch: vec![LaunchRecord::from_sanitized(&launch)],
+    };
+    let w = swrite("t", true, stamp(1, None), 10, h(1), vec![piece(1, 0, 10)])?;
+    let built = build(None, header, vec![Change::Epoch(w)])?;
+    parse_manifest(&built.bytes)?;
+    Ok(())
 }

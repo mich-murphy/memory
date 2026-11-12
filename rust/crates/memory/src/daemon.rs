@@ -19,7 +19,8 @@ use crate::capture::{
     Captured, Env, Local, Locals, MAX_PIECE_BYTES, Source, Update, attach_launches, capture,
 };
 use crate::commit::{
-    Base, Commit, Failure, KnownOurs, Landed, commit_known, disposition_paced, recover_base,
+    Base, Commit, CommitEnd, Failure, KnownOurs, Landed, commit_known, disposition_paced,
+    recover_base,
 };
 use crate::config::{Config, ConfigError};
 use crate::environment::{Clock, FileSystem, Store};
@@ -33,7 +34,7 @@ use memory_core::domain::{
     SnapshotFingerprint, SourceId, SourceState,
 };
 use memory_core::hint::{HintScan, LaunchHint, scan};
-use memory_core::manifest::{Header, ManifestError, Timestamp, Writer};
+use memory_core::manifest::{Header, ManifestError, OwnerState, Timestamp, Writer};
 use memory_core::privacy::{PolicyContext, SanitizedLaunch, sanitize_launch};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -181,9 +182,6 @@ pub struct EventCounts {
     pub index_damaged: u64,
     /// `index.json` had a newer schema at startup and was rebuilt.
     pub index_newer_schema: u64,
-    /// Owner commits that proceeded without their pending launch records (the digest input
-    /// could not be encoded); the records stay pending in the hint files.
-    pub launch_attach_failed: u64,
 }
 
 /// Failed attempts by [`ErrorClass`] (DESIGN.md 11.2, 11.3): `transient` is distinct from
@@ -238,13 +236,10 @@ pub struct RoundReport {
     pub skipped: usize,
     /// Owners parked by this round.
     pub parked: usize,
-    /// Owners skipped because a retry delay (`not_before`) has not elapsed.
+    /// Owners skipped because their retry delay has not elapsed.
     pub deferred: usize,
     /// Failures of this round by class.
     pub failures: FailureCounts,
-    /// Owners whose commit went ahead without their pending launch records because attaching
-    /// them failed (DESIGN.md 7.6: the records stay pending in the hint files).
-    pub launch_unattached: usize,
 }
 
 /// Source enumeration, supplied by the shell.
@@ -359,26 +354,41 @@ pub fn main_entry() -> ExitCode {
     }
 }
 
+/// What the owner knows of the remote commit base.
+enum RemoteBase {
+    /// Not read, or possibly stale: recover before the next commit.
+    Unknown,
+    /// Recovered: the owner has no `current.json` yet.
+    Absent,
+    /// Recovered or landed: the fence for the next commit.
+    Known(Base),
+}
+
+/// Whether the owner takes a turn.
+enum Turn {
+    /// Runs at the next round.
+    Ready,
+    /// Monotonic time before which the owner is not retried (from `Disposition::Retry`).
+    RetryAt(Duration),
+    /// Skipped until unparked.
+    Parked(ParkedReason),
+}
+
 struct OwnerRt {
-    base: Option<Base>,
-    needs_recover: bool,
+    base: RemoteBase,
     streak: Streak,
-    parked: Option<ParkedReason>,
+    turn: Turn,
     /// Manifests built since the last landed commit (A6); memory only.
     known_ours: KnownOurs,
-    /// Monotonic time before which the owner is not retried (from `Disposition::Retry`).
-    not_before: Option<Duration>,
 }
 
 impl OwnerRt {
     fn new(parked: Option<ParkedReason>) -> Self {
         Self {
-            base: None,
-            needs_recover: true,
+            base: RemoteBase::Unknown,
             streak: Streak::default(),
-            parked,
+            turn: parked.map_or(Turn::Ready, Turn::Parked),
             known_ours: KnownOurs::new(),
-            not_before: None,
         }
     }
 }
@@ -420,13 +430,6 @@ fn header_of(owner: &Owner, when: &Timestamp) -> Header {
         },
         launch: Vec::new(),
     }
-}
-
-/// Whether attaching launch records worked; a failure is counted, never silent.
-fn note_attach(result: Result<(), ManifestError>, report: &mut RoundReport) -> bool {
-    let attached = result.is_ok();
-    report.launch_unattached += usize::from(!attached);
-    attached
 }
 
 /// The daemon: locked, prepared and loaded.
@@ -640,7 +643,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
 
     fn settle(
         rt: &mut OwnerRt,
-        result: &Result<Landed, Failure>,
+        result: &Result<CommitEnd, Failure>,
         at: Duration,
         draw: u64,
         report: &mut RoundReport,
@@ -650,19 +653,18 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         if let Err(failure) = result
             && (failure.base_may_be_stale() || matches!(failure, Failure::BaseUnchanged))
         {
-            rt.base = None;
-            rt.needs_recover = true;
+            rt.base = RemoteBase::Unknown;
         }
         match disp {
             Disposition::Done => {
                 report.landed += 1;
-                rt.not_before = None;
+                rt.turn = Turn::Ready;
                 false
             }
             Disposition::Retry { after, class } => {
                 report.failed += 1;
                 report.failures.bump(&class);
-                rt.not_before = Some(at.saturating_add(after));
+                rt.turn = Turn::RetryAt(at.saturating_add(after));
                 false
             }
             Disposition::Cancelled => {
@@ -675,12 +677,12 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 true
             }
             Disposition::Park { reason } => {
-                rt.parked = Some(ParkedReason::Source(reason));
+                rt.turn = Turn::Parked(ParkedReason::Source(reason));
                 report.parked += 1;
                 false
             }
             Disposition::ParkOwner { reason } => {
-                rt.parked = Some(ParkedReason::Owner(reason));
+                rt.turn = Turn::Parked(ParkedReason::Owner(reason));
                 report.parked += 1;
                 false
             }
@@ -690,16 +692,22 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     /// The owner's turn: `Some(at)` when it should run now, else it is counted as skipped
     /// (parked) or deferred (retry delay not elapsed).
     fn due(&self, rt: &OwnerRt, report: &mut RoundReport) -> Option<Duration> {
-        if rt.parked.is_some() {
-            report.skipped += 1;
-            return None;
+        match &rt.turn {
+            Turn::Parked(_) => {
+                report.skipped += 1;
+                None
+            }
+            Turn::Ready => Some(Duration::from_nanos(self.clock.monotonic_ns())),
+            Turn::RetryAt(t) => {
+                let at = Duration::from_nanos(self.clock.monotonic_ns());
+                if at < *t {
+                    report.deferred += 1;
+                    None
+                } else {
+                    Some(at)
+                }
+            }
         }
-        let at = Duration::from_nanos(self.clock.monotonic_ns());
-        if rt.not_before.is_some_and(|t| at < t) {
-            report.deferred += 1;
-            return None;
-        }
-        Some(at)
     }
 
     /// Rebuild the commit base from the store when it is unknown. `Break(pause)` ends the turn
@@ -710,15 +718,16 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         rt: &mut OwnerRt,
         at: Duration,
         report: &mut RoundReport,
-    ) -> ControlFlow<bool> {
-        if !rt.needs_recover {
-            return ControlFlow::Continue(());
-        }
-        match recover_base(&mut self.store, owner) {
+    ) -> ControlFlow<bool, Option<Base>> {
+        let recovered = match &rt.base {
+            RemoteBase::Known(base) => return ControlFlow::Continue(Some(base.clone())),
+            RemoteBase::Absent => return ControlFlow::Continue(None),
+            RemoteBase::Unknown => recover_base(&mut self.store, owner),
+        };
+        match recovered {
             Ok(base) => {
-                rt.base = base;
-                rt.needs_recover = false;
-                ControlFlow::Continue(())
+                rt.base = base.clone().map_or(RemoteBase::Absent, RemoteBase::Known);
+                ControlFlow::Continue(base)
             }
             Err(failure) => {
                 let draw = self.next_draw();
@@ -732,7 +741,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         &mut self,
         owner: &Owner,
         sources: &[Source],
-        rt: &OwnerRt,
+        base: Option<&Base>,
         when: &Timestamp,
     ) -> Captured {
         let env = Env {
@@ -741,64 +750,65 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             now_ns: i64::try_from(self.clock.wall_ns()).unwrap_or(i64::MAX),
             piece_len: MAX_PIECE_BYTES,
         };
-        let remote = rt
-            .base
-            .as_ref()
-            .map(|b| b.state.clone())
-            .unwrap_or_default();
-        capture(&mut self.fs, sources, &self.locals, &remote, &env)
+        let empty = OwnerState::default();
+        let remote = base.map_or(&empty, |b| &b.state);
+        capture(&mut self.fs, sources, &self.locals, remote, &env)
     }
 
-    /// Attach the owner's pending launch records (DESIGN.md 7.6). False when that failed: the
-    /// commit still goes ahead without them, they stay pending, and the report counts it.
-    fn attach_pending(
-        request: &mut Commit,
-        hints: &[ScannedFile],
-        owner: &Owner,
-        report: &mut RoundReport,
-    ) -> bool {
+    /// Attach the owner's pending launch records (DESIGN.md 7.6).
+    fn attach_pending(request: &mut Commit, hints: &[ScannedFile], owner: &Owner) {
         let launches: Vec<SanitizedLaunch> = hints
             .iter()
             .flat_map(|f| f.records.iter())
             .filter(|r| !r.done && r.owner == *owner)
             .filter_map(|r| r.launch.clone())
             .collect();
-        note_attach(attach_launches(request, &launches), report)
+        attach_launches(request, &launches);
     }
 
     /// Commit, then make the capture durable locally: updates and hint progress apply only once
     /// the commit has landed.
     fn land(
         &mut self,
-        owner: &Owner,
         rt: &mut OwnerRt,
+        base: Option<&Base>,
         request: Commit,
         got: Captured,
         hints: &mut [ScannedFile],
-        attached: bool,
-    ) -> Result<Landed, Failure> {
+        owner: &Owner,
+    ) -> Result<CommitEnd, Failure> {
         let result = commit_known(
             &mut self.store,
-            rt.base.as_ref(),
+            base,
             request,
             &mut rt.known_ours,
             &mut |_| {},
         );
-        if let Ok(landed) = &result {
+        if let Ok(end) = &result {
             // Remote is authoritative: updates apply only once the commit is durable.
-            // An adopted earlier manifest (A6 `follow_up`) did not carry this capture's
-            // bytes: keep the base, apply nothing, and the next round captures again.
-            rt.base = Some(landed.base());
-            if !landed.follow_up {
-                self.apply(got.updates);
-            }
-            if attached && !landed.follow_up {
-                for record in hints.iter_mut().flat_map(|f| f.records.iter_mut()) {
-                    record.done |= record.owner == *owner;
-                }
+            // An adopted earlier manifest (A6) did not carry this capture's bytes: keep the
+            // base, apply nothing, and the next round captures again.
+            rt.base = RemoteBase::Known(end.base());
+            if let CommitEnd::Landed(landed) = end {
+                self.apply_landed(landed, got.updates, hints, owner);
             }
         }
         result
+    }
+
+    /// The local effects of a commit that landed. Taking `&Landed` is the proof that this
+    /// capture's bytes are durable, and with them the owner's pending launch records.
+    fn apply_landed(
+        &mut self,
+        _landed: &Landed,
+        updates: Vec<Update>,
+        hints: &mut [ScannedFile],
+        owner: &Owner,
+    ) {
+        self.apply(updates);
+        for record in hints.iter_mut().flat_map(|f| f.records.iter_mut()) {
+            record.done |= record.owner == *owner;
+        }
     }
 
     /// One owner's turn: gate, recover, capture, attach launches, commit, settle. Returns true
@@ -815,16 +825,17 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         let Some(at) = self.due(rt, report) else {
             return false;
         };
-        if let ControlFlow::Break(pause) = self.recover(owner, rt, at, report) {
-            return pause;
-        }
-        let mut got = self.capture_owner(owner, sources, rt, when);
+        let base = match self.recover(owner, rt, at, report) {
+            ControlFlow::Break(pause) => return pause,
+            ControlFlow::Continue(base) => base,
+        };
+        let mut got = self.capture_owner(owner, sources, base.as_ref(), when);
         let Some(mut request) = got.commit.take() else {
             self.apply(got.updates);
             return false;
         };
-        let attached = Self::attach_pending(&mut request, hints, owner, report);
-        let result = self.land(owner, rt, request, got, hints, attached);
+        Self::attach_pending(&mut request, hints, owner);
+        let result = self.land(rt, base.as_ref(), request, got, hints, owner);
         let draw = self.next_draw();
         Self::settle(rt, &result, at, draw, report)
     }
@@ -888,8 +899,10 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         let (when, text) = stamp_of(self.clock.wall_ns()).map_err(|_| RoundError::Clock)?;
         let before = (self.status.host_paused, self.status.parked.clone());
         let mut groups: Vec<(Owner, Vec<Source>)> = Vec::new();
+        let mut group_of: HashMap<Owner, usize> = HashMap::new();
         for (owner, source) in self.sources.enumerate() {
-            match groups.iter_mut().find(|(o, _)| *o == owner) {
+            let index = *group_of.entry(owner.clone()).or_insert(groups.len());
+            match groups.get_mut(index) {
                 Some((_, list)) => list.push(source),
                 None => groups.push((owner, vec![source])),
             }
@@ -911,21 +924,17 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         }
         self.advance_hints(&files);
         self.status.failures.add(&report.failures);
-        self.status.events.launch_attach_failed = self
-            .status
-            .events
-            .launch_attach_failed
-            .saturating_add(report.launch_unattached as u64);
         self.status.rounds += 1;
         self.status.updated_at = text;
         let mut parked: Vec<ParkedEntry> = self
             .owners
             .iter()
-            .filter_map(|(owner, rt)| {
-                rt.parked.clone().map(|reason| ParkedEntry {
+            .filter_map(|(owner, rt)| match &rt.turn {
+                Turn::Parked(reason) => Some(ParkedEntry {
                     owner: owner.clone(),
-                    reason,
-                })
+                    reason: reason.clone(),
+                }),
+                Turn::Ready | Turn::RetryAt(_) => None,
             })
             .collect();
         parked.sort_by_key(|p| format!("{:?}", p.owner));
@@ -968,20 +977,5 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     /// Path of the state root.
     pub fn root(&self) -> PathBuf {
         self.state.root().to_path_buf()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_failed_launch_attachment_is_counted_and_reported_unattached() {
-        let mut report = RoundReport::default();
-        assert!(note_attach(Ok(()), &mut report));
-        assert_eq!(report.launch_unattached, 0);
-        assert!(!note_attach(Err(ManifestError::Encode), &mut report));
-        assert!(!note_attach(Err(ManifestError::Encode), &mut report));
-        assert_eq!(report.launch_unattached, 2);
     }
 }

@@ -1,10 +1,10 @@
 use super::schema::{
-    Change, Checkpoint, Delta, LaunchRecord, Manifest, Timestamp, Writer, manifest_hash,
-    parse_manifest,
+    Change, Checkpoint, Delta, Manifest, Timestamp, Writer, manifest_hash, parse_manifest,
 };
 use super::state::OwnerState;
 use super::{CHECKPOINT_INTERVAL, ManifestError};
 use crate::domain::{Owner, Sha256};
+use crate::launch::LaunchRecord;
 
 // ---------------------------------------------------------------- builder
 

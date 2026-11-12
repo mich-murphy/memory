@@ -1,0 +1,48 @@
+   Compiling memory v0.1.0 (/Users/mm/dev/memory-wt/ds-authorize/rust/crates/memory)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.06s
+────────────
+ Nextest run ID 2410f38a-dcef-4c2f-a5b7-94c3814d8f6a with nextest profile: default
+    Starting 41 tests across 4 binaries (12 binaries skipped)
+        PASS [   0.119s] ( 1/41) memory::capture adopt_prefix_read_failures_have_literal_outcomes
+        PASS [   0.120s] ( 2/41) memory::capture admission_denials_map_to_literal_withhold_reasons
+        PASS [   0.114s] ( 3/41) memory::capture append_extends_then_unchanged_uploads_nothing
+        PASS [   0.138s] ( 4/41) memory::capture attach_launches_deduplicates_by_digest
+        PASS [   0.124s] ( 5/41) memory::capture extend_across_the_head_window_publishes_exact_delta_and_window_digests
+        PASS [   0.136s] ( 6/41) memory::capture extend_across_the_tail_window_publishes_exact_delta_and_window_digests
+        PASS [   0.117s] ( 7/41) memory::capture extend_from_an_empty_capture_reads_nothing_beyond_the_delta
+        PASS [   0.116s] ( 8/41) memory::capture failure_branches_have_literal_outcomes_and_store_nothing
+        PASS [   0.138s] ( 9/41) memory::capture launch_canaries_never_reach_any_stored_object
+        PASS [   0.119s] (10/41) memory::capture need_windows_reads_head_and_tail_through_the_seam
+        PASS [   0.110s] (11/41) memory::capture non_prefix_stable_source_with_an_index_is_read_whole_not_as_a_delta
+        PASS [   0.118s] (12/41) memory::capture removed_source_is_deleted_only_after_two_observations
+        PASS [   0.165s] (13/41) memory::capture rewrite_and_truncate_start_a_new_epoch
+        PASS [   0.119s] (14/41) memory::capture snapshot_change_is_replaced
+        PASS [   0.106s] (15/41) memory::capture snapshot_read_failures_have_literal_outcomes
+        PASS [   0.115s] (16/41) memory::capture snapshot_replaces_and_protected_config_never_stores_the_canary
+        PASS [   0.123s] (17/41) memory::capture snapshot_unchanged_then_changed_after_commit
+        PASS [   1.068s] (18/41) memory::capture piece_size_is_capped_at_eight_mebibytes_whatever_the_request
+        PASS [   0.335s] (19/41) memory::capture transform_denials_map_to_literal_withhold_reasons
+        PASS [   0.122s] (20/41) memory::capture withheld_source_is_never_read_or_stored
+        PASS [   0.112s] (21/41) memory::capture_property guard_has_negative_controls
+        PASS [   0.122s] (22/41) memory::capture_property guard_shapes_arise_from_a_scripted_run_with_the_real_capture
+        PASS [   0.136s] (23/41) memory::capture_property oracle_detects_tampered_store_contents
+        PASS [   3.316s] (24/41) memory::capture_property proptest_property4_capture_state_machine
+        PASS [   0.107s] (25/41) memory::capture_property removed_source_needs_two_observations_then_is_deleted
+        PASS [   0.139s] (26/41) memory::capture_property window_and_identity_shapes_arise_from_a_scripted_run
+        PASS [   0.156s] (27/41) memory::mutation_daemon failed_commit_does_not_advance_the_local_index
+        PASS [   0.134s] (28/41) memory::mutation_daemon stale_if_match_is_refused_by_the_store_before_the_rebase
+        PASS [   0.123s] (29/41) memory::resolve ancestors_include_root_and_parents
+        PASS [   0.123s] (30/41) memory::resolve end_to_end_commits_transcript_and_never_a_symlinked_credential
+        PASS [   0.111s] (31/41) memory::resolve file_removed_between_walk_and_resolve_fails_closed
+        PASS [   0.112s] (32/41) memory::resolve handles_are_stable_and_withheld_rows_are_counted
+        PASS [   0.115s] (33/41) memory::resolve loop_dangling_and_hop_overflow_fail_closed
+        PASS [   0.110s] (34/41) memory::resolve missing_root_and_directory_target_fail_closed
+        PASS [   0.112s] (35/41) memory::resolve plain_file_resolves_and_is_admitted
+        PASS [   0.103s] (36/41) memory::resolve shared_fs_reports_busy_instead_of_panicking
+        PASS [   0.108s] (37/41) memory::resolve shared_owner_and_profiles_are_literal
+        PASS [   0.119s] (38/41) memory::resolve symlink_inside_root_and_chain_record_every_spelling
+        PASS [   0.113s] (39/41) memory::resolve symlink_to_credential_is_denied_through_identity_union
+        PASS [   0.107s] (40/41) memory::resolve unknown_owner_rows_are_counted_not_yielded
+        PASS [   7.852s] (41/41) memory::capture_property hegel_property4_capture_state_machine
+────────────
+     Summary [   9.771s] 41 tests run: 41 passed, 0 skipped

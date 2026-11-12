@@ -505,25 +505,13 @@ fn read_chain(store: &FStore, owner: &Owner) -> R<Option<Chain>> {
     }))
 }
 fn reassemble(store: &FStore, record: &EpochRecord) -> R<Vec<u8>> {
-    let mut out: Vec<u8> = Vec::new();
-    for piece in &record.pieces {
-        let stored = need(store.peek(piece.object()), "piece object missing")?;
-        ensure(
-            sha(stored) == piece.encoded_sha256() && len64(stored) == piece.encoded_len(),
-            "descriptor differs from stored encoding",
-        )?;
-        ensure(
-            sha(stored) == piece.sha256() && len64(stored) == piece.len(),
-            "piece bytes differ from descriptor",
-        )?;
-        ensure(len64(&out) == piece.offset().get(), "piece offset gap")?;
-        out.extend_from_slice(stored);
-    }
-    ensure(
-        sha(&out) == record.sha256 && len64(&out) == record.size,
-        "epoch digest differs",
-    )?;
-    Ok(out)
+    memory_reader::restore_epoch(record, |key| {
+        store
+            .peek(key)
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| "piece object missing".to_owned())
+    })
+    .map_err(|err| format!("restore failed: {err:?}"))
 }
 struct Observed {
     latest: Option<Vec<u8>>,
@@ -1529,8 +1517,9 @@ impl Sut {
     fn round(&mut self, shapes: &Shapes) -> R {
         self.round_tracking(shapes, true)
     }
-    /// `track_index` is false for rounds that may land only an adopted earlier manifest (A6
-    /// `follow_up`): that commit applies no local updates, so it need not dirty the index.
+    /// `track_index` is false for rounds that may land only an adopted earlier manifest (A6,
+    /// `CommitEnd::Adopted`): that commit applies no local updates, so it need not dirty the
+    /// index.
     fn round_tracking(&mut self, shapes: &Shapes, track_index: bool) -> R {
         self.mono += 61_000_000_000;
         let mono = self.mono;

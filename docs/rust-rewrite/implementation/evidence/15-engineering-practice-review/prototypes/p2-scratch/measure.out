@@ -1,0 +1,92 @@
+######## base fd3c1fb memory: add landed commit_known micro-benchmark (measurement only)
+FMT-OK
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.01s
+     Summary [  48.128s] 92 tests run: 92 passed, 0 skipped
+     Summary [  41.456s] 28 tests run: 28 passed, 0 skipped
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:123:12
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:132:12
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:148:18
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:155:18
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:174:8
+warning: the function has a cognitive complexity of (3/1)	 --> crates/memory/src/commit.rs:199:8
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:327:4
+warning: the function has a cognitive complexity of (14/1)	 --> crates/memory/src/commit.rs:357:8
+warning: the function has a cognitive complexity of (4/1)	 --> crates/memory/src/daemon.rs:641:8
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/daemon.rs:692:8
+warning: the function has a cognitive complexity of (3/1)	 --> crates/memory/src/daemon.rs:707:8
+warning: the function has a cognitive complexity of (5/1)	 --> crates/memory/src/daemon.rs:771:8
+warning: the function has a cognitive complexity of (5/1)	 --> crates/memory/src/daemon.rs:832:8
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/daemon.rs:868:8
+warning: the function has a cognitive complexity of (5/1)	 --> crates/memory/src/daemon.rs:887:12
+PRED advance-on-fail: 1 | if-match: 1
+CommitOutcome non-test users:
+  rust/crates/memory-core/src/verify.rs:46:                CommitOutcome::AlreadyOurs { etag: etag.clone() }
+  rust/crates/memory/src/commit.rs:394:                    outcome: CommitOutcome::Committed { etag: etag.clone() },
+  rust/crates/memory/src/commit.rs:410:                    outcome: CommitOutcome::AlreadyOurs { etag: etag.clone() },
+  rust/crates/memory/src/commit.rs:420:                    outcome: CommitOutcome::AlreadyOurs { etag: etag.clone() },
+######## a 505ebf4 memory: Landed as a three-variant enum (Committed, AlreadyOurs, AdoptedEarlier)
+FMT-OK
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.39s
+     Summary [  26.701s] 92 tests run: 92 passed, 0 skipped
+     Summary [  37.601s] 28 tests run: 28 passed, 0 skipped
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:153:12
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:162:12
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:178:18
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:185:18
+warning: the function has a cognitive complexity of (3/1)	 --> crates/memory/src/commit.rs:311:4
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:357:4
+warning: the function has a cognitive complexity of (14/1)	 --> crates/memory/src/commit.rs:387:8
+warning: the function has a cognitive complexity of (4/1)	 --> crates/memory/src/daemon.rs:641:8
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/daemon.rs:692:8
+warning: the function has a cognitive complexity of (3/1)	 --> crates/memory/src/daemon.rs:707:8
+warning: the function has a cognitive complexity of (7/1)	 --> crates/memory/src/daemon.rs:771:8
+warning: the function has a cognitive complexity of (5/1)	 --> crates/memory/src/daemon.rs:832:8
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/daemon.rs:868:8
+warning: the function has a cognitive complexity of (5/1)	 --> crates/memory/src/daemon.rs:887:12
+PRED advance-on-fail: 1 | if-match: 1
+CommitOutcome non-test users:
+  rust/crates/memory-core/src/verify.rs:46:                CommitOutcome::AlreadyOurs { etag: etag.clone() }
+######## b dff9f7a memory: Landed as a struct with a closed LandedHow
+FMT-OK
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.08s
+     Summary [  41.878s] 92 tests run: 92 passed, 0 skipped
+     Summary [  73.598s] 28 tests run: 28 passed (1 slow), 0 skipped
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:132:12
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:141:12
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:157:18
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:164:18
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:183:8
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:336:4
+warning: the function has a cognitive complexity of (14/1)	 --> crates/memory/src/commit.rs:366:8
+warning: the function has a cognitive complexity of (4/1)	 --> crates/memory/src/daemon.rs:642:8
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/daemon.rs:693:8
+warning: the function has a cognitive complexity of (3/1)	 --> crates/memory/src/daemon.rs:708:8
+warning: the function has a cognitive complexity of (5/1)	 --> crates/memory/src/daemon.rs:772:8
+warning: the function has a cognitive complexity of (5/1)	 --> crates/memory/src/daemon.rs:833:8
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/daemon.rs:869:8
+warning: the function has a cognitive complexity of (5/1)	 --> crates/memory/src/daemon.rs:888:12
+PRED advance-on-fail: 1 | if-match: 1
+CommitOutcome non-test users:
+  rust/crates/memory-core/src/verify.rs:46:                CommitOutcome::AlreadyOurs { etag: etag.clone() }
+######## c 637f3a5 memory: split commit end into Landed and Adopted types
+FMT-OK
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 9.08s
+     Summary [  62.604s] 92 tests run: 92 passed, 0 skipped
+     Summary [  58.808s] 28 tests run: 28 passed, 0 skipped
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:129:12
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:174:12
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:183:12
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:199:18
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:303:4
+warning: the function has a cognitive complexity of (3/1)	 --> crates/memory/src/commit.rs:332:4
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/commit.rs:378:4
+warning: the function has a cognitive complexity of (4/1)	 --> crates/memory/src/daemon.rs:642:8
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/daemon.rs:693:8
+warning: the function has a cognitive complexity of (3/1)	 --> crates/memory/src/daemon.rs:708:8
+warning: the function has a cognitive complexity of (3/1)	 --> crates/memory/src/daemon.rs:772:8
+warning: the function has a cognitive complexity of (3/1)	 --> crates/memory/src/daemon.rs:802:8
+warning: the function has a cognitive complexity of (5/1)	 --> crates/memory/src/daemon.rs:845:8
+warning: the function has a cognitive complexity of (2/1)	 --> crates/memory/src/daemon.rs:881:8
+PRED advance-on-fail: 0 | if-match: 1
+CommitOutcome non-test users:
+  rust/crates/memory-core/src/verify.rs:46:                CommitOutcome::AlreadyOurs { etag: etag.clone() }

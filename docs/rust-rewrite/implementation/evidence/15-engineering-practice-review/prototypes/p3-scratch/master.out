@@ -1,0 +1,323 @@
+AB2 41f6b43
+##### M1 base 7dd3023
+fmt ok
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.17s
+     Summary [ 145.553s] 198 tests run: 198 passed (1 slow), 0 skipped
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.17s
+     Summary [  32.084s] 41 tests run: 41 passed, 0 skipped
+binaries:      11 memory::capture       7 memory::capture_property       2 memory::mutation_daemon      12 memory::resolve
+--- M4 base
+src=0 tests=0
+--- predicate count base
+1 0
+--- cognitive base
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+--- decision points base
+authorize if/else-if: 1 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+admit if/else-if: 1 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+binding if/else-if: 0 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+authorized_body if/else-if: 0 match arms(=>): 3 let-else: 0 matches!/is_*: 0
+admitted_clone if/else-if: 0 match arms(=>): 3 let-else: 0 matches!/is_*: 0
+##### M1 a b9e02a3
+fmt ok
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 13.28s
+     Summary [ 138.335s] 198 tests run: 198 passed, 0 skipped
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.84s
+     Summary [  12.062s] 41 tests run: 41 passed, 0 skipped
+binaries:      11 memory::capture       7 memory::capture_property       2 memory::mutation_daemon      12 memory::resolve
+--- M4 a
+src=14 tests=16
+--- predicate count a
+1 0
+--- cognitive a
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+--- decision points a
+authorize if/else-if: 1 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+admit if/else-if: 1 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+binding if/else-if: 0 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+authorized_body if/else-if: 0 match arms(=>): 3 let-else: 0 matches!/is_*: 0
+##### M1 ab 286b3cc
+fmt ok
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.51s
+     Summary [  97.467s] 198 tests run: 198 passed, 0 skipped
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.84s
+     Summary [   9.771s] 41 tests run: 41 passed, 0 skipped
+binaries:      11 memory::capture       7 memory::capture_property       2 memory::mutation_daemon      12 memory::resolve
+--- M4 ab
+src=49 tests=16
+--- predicate count ab
+1 0
+--- cognitive ab
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+--- decision points ab
+authorize if/else-if: 1 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+admit if/else-if: 1 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+binding if/else-if: 0 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+authorized_body if/else-if: 0 match arms(=>): 3 let-else: 0 matches!/is_*: 0
+##### M1 ab2 41f6b43
+fmt ok
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.70s
+     Summary [  99.174s] 198 tests run: 198 passed, 0 skipped
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.84s
+     Summary [   9.154s] 41 tests run: 41 passed, 0 skipped
+binaries:      11 memory::capture       7 memory::capture_property       2 memory::mutation_daemon      12 memory::resolve
+--- M4 ab2
+src=69 tests=16
+--- predicate count ab2
+1 0
+--- cognitive ab2
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+--- decision points ab2
+authorize if/else-if: 1 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+admit if/else-if: 1 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+binding if/else-if: 0 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+authorized_body if/else-if: 0 match arms(=>): 3 let-else: 0 matches!/is_*: 0
+##### M1 b 723382b
+fmt ok
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.79s
+     Summary [  93.295s] 198 tests run: 198 passed, 0 skipped
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.82s
+     Summary [   8.759s] 41 tests run: 41 passed, 0 skipped
+binaries:      11 memory::capture       7 memory::capture_property       2 memory::mutation_daemon      12 memory::resolve
+--- M4 b
+src=79 tests=16
+--- predicate count b
+0 1
+--- cognitive b
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+--- decision points b
+authorize if/else-if: 1 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+admit if/else-if: 0 match arms(=>): 3 let-else: 0 matches!/is_*: 0
+binding if/else-if: 0 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+decide if/else-if: 1 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+authorized_body if/else-if: 0 match arms(=>): 3 let-else: 0 matches!/is_*: 0
+##### M1 bb c269816
+fmt ok
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.81s
+     Summary [ 105.409s] 198 tests run: 198 passed, 0 skipped
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.91s
+     Summary [   7.987s] 41 tests run: 41 passed, 0 skipped
+binaries:      11 memory::capture       7 memory::capture_property       2 memory::mutation_daemon      12 memory::resolve
+--- M4 bb
+src=114 tests=16
+--- predicate count bb
+0 1
+--- cognitive bb
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+--- decision points bb
+authorize if/else-if: 1 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+admit if/else-if: 0 match arms(=>): 3 let-else: 0 matches!/is_*: 0
+binding if/else-if: 0 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+decide if/else-if: 1 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+authorized_body if/else-if: 0 match arms(=>): 3 let-else: 0 matches!/is_*: 0
+##### M1 c b41c905
+fmt ok
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.51s
+     Summary [  68.010s] 198 tests run: 198 passed, 0 skipped
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.56s
+     Summary [   8.989s] 41 tests run: 41 passed, 0 skipped
+binaries:      11 memory::capture       7 memory::capture_property       2 memory::mutation_daemon      12 memory::resolve
+--- M4 c
+src=67 tests=16
+--- predicate count c
+1 0
+--- cognitive c
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory-core/src/privacy/mod.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+sed: can't read crates/memory/src/capture.rs: No such file or directory
+--- decision points c
+authorize if/else-if: 1 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+admit if/else-if: 1 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+binding if/else-if: 0 match arms(=>): 0 let-else: 0 matches!/is_*: 0
+authorized_body if/else-if: 0 match arms(=>): 3 let-else: 0 matches!/is_*: 0
+##### tests catching credential deny
+rust/crates/memory-core/tests/core_f2_gaps.rs
+rust/crates/memory-core/tests/core_planner.rs
+rust/crates/memory-core/tests/privacy_port.rs
+rust/crates/memory-core/tests/privacy_property.rs
+rust/crates/memory/tests/capture.rs
+rust/crates/memory/tests/resolve.rs
+##### BENCH
+1MiB a     n=8 admit/clone=18[17-21] transform=19474[17953-23895] authorize=483121[473610-513445] total=502793[491745-537628] admit_share=0.0% transform_share=3.9%
+1MiB ab    n=8 admit/clone=19[17-21] transform=19784[18420-25519] authorize=485928[477755-538089] total=505576[496364-563923] admit_share=0.0% transform_share=3.9%
+1MiB ab2   n=8 admit/clone=19[18-21] transform=19184[18313-19906] authorize=485882[474925-488811] total=505266[493426-508291] admit_share=0.0% transform_share=3.8%
+1MiB b     n=8 admit/clone=18[17-21] transform=19119[17401-21909] authorize=479109[475138-496722] total=498155[492719-518286] admit_share=0.0% transform_share=3.8%
+1MiB base  n=16 admit/clone=3789[3540-16108] transform=19046[17580-49787] authorize=483159[471961-789322] total=506442[493235-855626] admit_share=0.7% transform_share=3.8%
+1MiB bb    n=8 admit/clone=18[16-20] transform=19014[18322-21874] authorize=480830[477744-534077] total=499818[496845-556257] admit_share=0.0% transform_share=3.8%
+1MiB c     n=8 admit/clone=18[17-20] transform=19055[18025-21091] authorize=475212[473048-494092] total=494113[491882-513983] admit_share=0.0% transform_share=3.9%
+4KiB a     n=8 admit/clone=18[18-21] transform=793[768-879] authorize=5746[5648-6649] total=6650[6525-7637] admit_share=0.3% transform_share=11.9%
+4KiB ab    n=8 admit/clone=19[18-20] transform=819[793-896] authorize=5785[5701-6434] total=6717[6620-7452] admit_share=0.3% transform_share=12.2%
+4KiB ab2   n=8 admit/clone=19[18-20] transform=818[778-892] authorize=5927[5733-6381] total=6852[6621-7396] admit_share=0.3% transform_share=11.9%
+4KiB b     n=8 admit/clone=18[18-20] transform=793[765-905] authorize=5311[5194-5944] total=6215[6066-6977] admit_share=0.3% transform_share=12.8%
+4KiB base  n=16 admit/clone=3566[3460-3929] transform=820[796-902] authorize=5712[5548-6286] total=10191[9894-11224] admit_share=35.0% transform_share=8.1%
+4KiB bb    n=8 admit/clone=19[18-21] transform=767[759-882] authorize=5266[5223-6008] total=6141[6101-7016] admit_share=0.3% transform_share=12.5%
+4KiB c     n=8 admit/clone=18[18-23] transform=777[765-1044] authorize=2189[2161-2855] total=3078[3033-4044] admit_share=0.6% transform_share=25.2%

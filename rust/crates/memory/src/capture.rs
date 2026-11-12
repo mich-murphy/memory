@@ -9,8 +9,9 @@
 //! [`Commit`] and [`Upload`] are generic over the body. This module only ever builds
 //! `Commit`. [`Published`] has a private field and its only piece constructor is a
 //! private function that slices a `memory_core::privacy::AuthorizedBody`, a value only
-//! `privacy::authorize` can produce (it consumes an `AdmittedSource` and a `RedactedBytes`,
-//! neither of which has a public constructor, see the compile-fail tests in memory-core).
+//! `privacy::authorize` can produce (from a borrowed `AdmittedSource` and a consumed
+//! `RedactedBytes`, neither of which has a public constructor, see the compile-fail tests in
+//! memory-core).
 //! `Store` uploads take [`Published`] (defined in `environment`), whose only constructors are
 //! crate-private: a slice of an `AuthorizedBody` and the writer's own metadata.
 //!
@@ -18,20 +19,23 @@
 //! let _ = memory::capture::Published(vec![1, 2, 3]);
 //! ```
 //!
-//! Limitations: piece encoding is the identity (no zstd yet; `encoded_*` equal the raw
-//! fields), the whole-stream digest resumes from the index's `Sha256State` for prefix-stable sources
+//! Pieces are stored zstd-3 encoded: `Published::piece` compresses the authorized slice and
+//! the descriptor records the length and digest of the stored bytes; a compression failure is
+//! [`SourceOutcome::Unavailable`].
+//!
+//! Limitations: the whole-stream digest resumes from the index's `Sha256State` for prefix-stable sources
 //! (otherwise it is recomputed from a fresh read of `[0, to)`), `Refresh` of a racy stat is not persisted, and audit evidence is always
 //! `NotDue`.
 use crate::commit::{Commit, Upload};
-use crate::environment::FileSystem;
+use crate::environment::{FileSystem, PieceError};
 use memory_core::domain::{
     AuditState, EpochPosition, Fingerprint, Observed, Offset, Plan, RulesDigest, Sha256,
     Sha256State, SnapshotFingerprint, SourceClass, SourceId, SourceKind, SourceState,
     WithholdReason,
 };
 use memory_core::manifest::{
-    Change, EpochStamp, EpochWriter, Header, LaunchRecord, ManifestError, OwnerState, Piece,
-    SourceWrite, manifest_hash,
+    Change, EpochStamp, EpochWriter, Header, LaunchRecord, OwnerState, Piece, SourceWrite,
+    manifest_hash,
 };
 use memory_core::planner::{
     AppendBasis, AuditEvidence, Observation, PlanInput, Planning, Strategy, WindowEvidence, plan,
@@ -198,17 +202,10 @@ pub fn capture<F: FileSystem>(
 /// Only a [`SanitizedLaunch`] can become a `LaunchRecord` (`from_sanitized`), so raw argv or
 /// environment cannot reach the manifest through this function. Records are de-duplicated by
 /// digest, both against the header's existing records and within `launches`.
-///
-/// # Errors
-/// [`ManifestError`] if a record's digest input cannot be encoded; the header is then left
-/// unchanged.
-pub fn attach_launches(
-    commit: &mut Commit,
-    launches: &[SanitizedLaunch],
-) -> Result<(), ManifestError> {
+pub fn attach_launches(commit: &mut Commit, launches: &[SanitizedLaunch]) {
     let mut added: Vec<LaunchRecord> = Vec::new();
     for launch in launches {
-        let record = LaunchRecord::from_sanitized(launch)?;
+        let record = LaunchRecord::from_sanitized(launch);
         let seen = commit
             .header
             .launch
@@ -220,7 +217,6 @@ pub fn attach_launches(
         }
     }
     commit.header.launch.extend(added);
-    Ok(())
 }
 
 fn withhold_of(reason: Reason) -> WithholdReason {
@@ -549,7 +545,7 @@ impl Job<'_> {
     fn authorized_body(&self, raw: &[u8]) -> Result<AuthorizedBody, SourceOutcome> {
         let redacted =
             transform(&self.admitted, raw).map_err(|r| SourceOutcome::Withheld(withhold_of(r)))?;
-        match authorize(self.admitted_clone()?, redacted, self.env.context) {
+        match authorize(&self.admitted, redacted, self.env.context) {
             Authorization::Allow(body) => Ok(body),
             Authorization::Deny(r) => Err(SourceOutcome::Withheld(withhold_of(r))),
             Authorization::Unknown(u) => Err(SourceOutcome::Blocked(u)),
@@ -569,9 +565,12 @@ impl Job<'_> {
         let mut pieces = Vec::new();
         while at < body_len {
             let end = at.saturating_add(step).min(body_len);
-            let piece = Published::piece(body, at, end).ok_or(SourceOutcome::Raced)?;
-            let described =
-                Piece::from_authorized(body, base, at, end).map_err(|_| SourceOutcome::Raced)?;
+            let (piece, stored) = Published::piece(body, at, end).map_err(|e| match e {
+                PieceError::Range => SourceOutcome::Raced,
+                PieceError::Encode => SourceOutcome::Unavailable,
+            })?;
+            let described = Piece::from_authorized(body, base, at, end, &stored)
+                .map_err(|_| SourceOutcome::Raced)?;
             pieces.push(described.clone());
             acc.uploads.push(Upload {
                 key: described.object().to_owned(),
@@ -653,14 +652,6 @@ impl Job<'_> {
                 commit: self.env.header.writer.commit.clone(),
             },
             rules: self.rules,
-        }
-    }
-    /// `authorize` consumes the admission, so re-admit from the same facts and context.
-    fn admitted_clone(&self) -> Result<AdmittedSource, SourceOutcome> {
-        match admit(self.env.context, self.src.facts.clone()) {
-            Admission::Allow(a) => Ok(a),
-            Admission::Deny(r) => Err(SourceOutcome::Withheld(withhold_of(r))),
-            Admission::Unknown(u) => Err(SourceOutcome::Blocked(u)),
         }
     }
 }

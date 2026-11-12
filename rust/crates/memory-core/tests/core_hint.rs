@@ -1199,6 +1199,20 @@ fn check_generated_launch(
             ex.env_out
         ));
     }
+    // The daemon sanitises a hint's record again before it attaches it (DESIGN.md 7.6). That
+    // second pass must change nothing, or the manifest would carry a different launch digest
+    // from the hint's.
+    let environ: Vec<String> = launch
+        .env()
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect();
+    let again = sanitize_launch(launch.argv(), &environ);
+    if again != launch {
+        return Err(format!(
+            "sanitising twice changed the launch: {launch:?} became {again:?}"
+        ));
+    }
     let parsed = input(
         Agent::Claude,
         HintEvent::SessionStart,

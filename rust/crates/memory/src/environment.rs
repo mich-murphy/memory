@@ -36,11 +36,6 @@ pub trait FileSystem {
     /// # Errors
     /// Returns the adapter's error when the source cannot be examined.
     fn stat(&mut self, source: u64) -> Result<Option<Stat>, Self::Error>;
-    /// Observe a synthetic/source handle's length without opening content.
-    ///
-    /// # Errors
-    /// Returns the adapter's error on an unavailable source.
-    fn stat_len(&mut self, source: u64) -> Result<u64, Self::Error>;
     /// Read a bounded range through the counter seam. A range that extends past the end of
     /// the source is clipped, so a result shorter than requested is how a racing shrink
     /// shows itself to the caller.
@@ -141,14 +136,35 @@ pub struct Stored {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Published(Vec<u8>);
 
+/// zstd level of stored pieces (the `zstd-3` encoding).
+const PIECE_ZSTD_LEVEL: i32 = 3;
+
+/// Why a piece body could not be built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PieceError {
+    /// The range is outside the authorized body.
+    Range,
+    /// Compression failed.
+    Encode,
+}
+
 impl Published {
-    /// One piece: a byte range of an authorized body.
+    /// One piece: a byte range of an authorized body, compressed with zstd level 3. Returns
+    /// the upload body and the length and digest of the stored (compressed) bytes.
     pub(crate) fn piece(
         body: &memory_core::privacy::AuthorizedBody,
         start: usize,
         end: usize,
-    ) -> Option<Self> {
-        body.bytes().get(start..end).map(|b| Self(b.to_vec()))
+    ) -> Result<(Self, memory_core::manifest::StoredEncoding), PieceError> {
+        let raw = body.bytes().get(start..end).ok_or(PieceError::Range)?;
+        let encoded =
+            zstd::bulk::compress(raw, PIECE_ZSTD_LEVEL).map_err(|_| PieceError::Encode)?;
+        let encoded_len = u64::try_from(encoded.len()).map_err(|_| PieceError::Encode)?;
+        let stored = memory_core::manifest::StoredEncoding {
+            encoded_len,
+            encoded_sha256: memory_core::manifest::manifest_hash(&encoded),
+        };
+        Ok((Self(encoded), stored))
     }
     /// The writer's own serialized metadata (manifest build output, `current.json`).
     pub(crate) const fn metadata(bytes: Vec<u8>) -> Self {
@@ -169,8 +185,8 @@ impl AsRef<[u8]> for Published {
 
 /// Typed object store seam for the commit protocol (DESIGN.md 6.2, 7.4).
 ///
-/// There is deliberately no production implementation. Uploads take [`Published`], which only
-/// privacy-authorized piece slices and the writer's own metadata can produce.
+/// The production implementation is [`crate::s3::S3Store`]. Uploads take [`Published`], which
+/// only privacy-authorized piece slices and the writer's own metadata can produce.
 pub trait Store {
     /// Immutable conditional creation (`If-None-Match: *`).
     ///
@@ -203,96 +219,4 @@ pub trait Store {
     /// # Errors
     /// [`StoreError::NotFound`] when absent, otherwise a transport or auth error.
     fn get(&mut self, key: &str) -> Result<Stored, StoreError>;
-}
-
-/// Per-wrapper observations, never a claim about unwrapped system calls.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Counters {
-    /// Stat calls through the filesystem seam.
-    pub stats: u64,
-    /// Bytes returned through the filesystem seam.
-    pub bytes_read: u64,
-    /// Store calls, including failed/lost-reply attempts.
-    pub puts: u64,
-    /// Explicit simulator timer wakeups.
-    pub wakeups: u64,
-}
-
-/// Wraps a seam implementation and counts calls through it into [`Counters`].
-///
-/// `FileSystem` calls count stats (`stat`, `stat_len`) and the length of every byte vector
-/// `read` returns; `Store` calls count every `put_*` attempt (including failed or lost-reply
-/// ones). `Clock` is delegated untouched (its methods take `&self`), so `wakeups` stays 0.
-/// Counters describe calls through this wrapper only, never unwrapped system calls.
-#[derive(Debug, Default, Clone)]
-pub struct Counting<T> {
-    /// The wrapped implementation.
-    pub inner: T,
-    /// Observations so far.
-    pub counters: Counters,
-}
-
-impl<T> Counting<T> {
-    /// Wrap `inner` with zeroed counters.
-    pub const fn new(inner: T) -> Self {
-        Self {
-            inner,
-            counters: Counters {
-                stats: 0,
-                bytes_read: 0,
-                puts: 0,
-                wakeups: 0,
-            },
-        }
-    }
-}
-
-impl<T: FileSystem> FileSystem for Counting<T> {
-    type Error = T::Error;
-    fn stat(&mut self, source: u64) -> Result<Option<Stat>, Self::Error> {
-        self.counters.stats = self.counters.stats.saturating_add(1);
-        self.inner.stat(source)
-    }
-    fn stat_len(&mut self, source: u64) -> Result<u64, Self::Error> {
-        self.counters.stats = self.counters.stats.saturating_add(1);
-        self.inner.stat_len(source)
-    }
-    fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, Self::Error> {
-        let bytes = self.inner.read(source, range)?;
-        let got = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-        self.counters.bytes_read = self.counters.bytes_read.saturating_add(got);
-        Ok(bytes)
-    }
-}
-
-impl<T: Store> Store for Counting<T> {
-    fn put_if_absent(
-        &mut self,
-        key: &str,
-        body: Published,
-    ) -> Result<memory_core::domain::ETag, StoreError> {
-        self.counters.puts = self.counters.puts.saturating_add(1);
-        self.inner.put_if_absent(key, body)
-    }
-    fn put_if_match(
-        &mut self,
-        key: &str,
-        etag: &memory_core::domain::ETag,
-        body: Published,
-    ) -> Result<memory_core::domain::ETag, StoreError> {
-        self.counters.puts = self.counters.puts.saturating_add(1);
-        self.inner.put_if_match(key, etag, body)
-    }
-    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
-        self.inner.get(key)
-    }
-}
-
-impl<T: Clock> Clock for Counting<T> {
-    fn monotonic_ns(&self) -> u64 {
-        self.inner.monotonic_ns()
-    }
-    fn wall_ns(&self) -> i128 {
-        self.inner.wall_ns()
-    }
 }

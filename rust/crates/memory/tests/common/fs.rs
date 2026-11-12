@@ -58,9 +58,6 @@ impl FileSystem for MemFs {
             mtime_ns: self.mtimes.get(&source).copied().unwrap_or(1_000),
         }))
     }
-    fn stat_len(&mut self, source: u64) -> Result<u64, ()> {
-        Ok(self.stat(source)?.ok_or(())?.size)
-    }
     fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, ()> {
         let bytes = self.files.get(&source).ok_or(())?;
         let start = usize::try_from(range.start).map_err(|_| ())?;
