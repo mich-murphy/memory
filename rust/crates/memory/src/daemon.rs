@@ -832,12 +832,19 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             ControlFlow::Break(pause) => return pause,
             ControlFlow::Continue(base) => base,
         };
-        let live: Vec<Source> = sources
-            .iter()
-            .filter(|s| !rt.parked_sources.contains_key(&s.id))
-            .cloned()
-            .collect();
-        let mut got = self.capture_owner(owner, &live, base.as_ref(), when);
+        // Only an owner with a parked source pays for a filtered copy of its list.
+        let live: Vec<Source>;
+        let sources = if rt.parked_sources.is_empty() {
+            sources
+        } else {
+            live = sources
+                .iter()
+                .filter(|s| !rt.parked_sources.contains_key(&s.id))
+                .cloned()
+                .collect();
+            &live
+        };
+        let mut got = self.capture_owner(owner, sources, base.as_ref(), when);
         report.audit.add(&got.audit);
         // A source park takes effect whether or not the owner's commit lands.
         for (id, outcome) in &got.outcomes {

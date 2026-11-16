@@ -21,7 +21,8 @@ pub struct AuditCounts {
     /// Audits whose read compared equal to the committed digest (first or second read).
     pub matched: u64,
     /// New epochs started by an audit mismatch: a stable mismatch, or a non-resumed extension
-    /// whose re-read prefix does not hash to the committed digest.
+    /// of a prefix-stable source whose re-read prefix does not hash to the committed digest.
+    /// A mismatch that parks the source starts no epoch and is not counted here.
     pub mismatched: u64,
     /// Due audits that reached no verdict: stat pre-check failed, the source moved between the
     /// stats, two reads differed, or a read or transform failed.

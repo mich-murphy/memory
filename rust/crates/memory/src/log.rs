@@ -31,9 +31,9 @@
 //! | `host_resumed` | none |
 //!
 //! `state_load` follows `started`, `status` before `index`, only for a damaged or newer-schema
-//! startup load. `parked` is logged once, in the round an owner or one of its sources becomes parked; a source id is never logged. `host_paused`
-//! and `host_resumed` are logged in the round the pause starts and ends. All come before that
-//! round's `round` line.
+//! startup load. `parked` is logged once, in the round an owner or one of its sources becomes
+//! parked; a source id is never logged. `host_paused` and `host_resumed` are logged in the
+//! round the pause starts and ends. All come before that round's `round` line.
 //!
 //! `memory hook` and `memory restore` never start the subscriber.
 use crate::daemon::{ParkedReason, RoundReport, StateLoad};
