@@ -730,7 +730,9 @@ fn a_failed_source_ends_with_wait_failed_after_shutdown() -> R {
     let (outcome, log) = go_plain(300, vec![(100, Step::Fail)])?;
     assert_eq!(outcome, Outcome::WaitFailed);
     assert_eq!(outcome.exit_code(), 1);
+    assert_eq!(outcome.code(), Some("wait_failed"));
     assert_eq!(log, vec![start(7), shut(100)]);
+    assert_eq!(log.last().map(|(_, ev)| ev), Some(&Ev::Shutdown));
     Ok(())
 }
 
@@ -746,6 +748,7 @@ fn a_failed_capture_ends_with_round_failed_after_shutdown() -> R {
     })?;
     assert_eq!(outcome, Outcome::RoundFailed);
     assert_eq!(outcome.exit_code(), 1);
+    assert_eq!(outcome.code(), Some("round_failed"));
     assert_eq!(log, vec![start(7), cap(100, 1), shut(100)]);
     Ok(())
 }
@@ -762,6 +765,7 @@ fn a_failed_reconcile_ends_with_round_failed_after_shutdown() -> R {
         })?;
         assert_eq!(outcome, Outcome::RoundFailed);
         assert_eq!(outcome.exit_code(), 1);
+        assert_eq!(outcome.code(), Some("round_failed"));
         assert_eq!(log, want);
     }
     Ok(())
@@ -775,6 +779,7 @@ fn a_failed_shutdown_after_a_stop_is_shutdown_failed_and_after_a_failure_is_igno
     })?;
     assert_eq!(outcome, Outcome::ShutdownFailed);
     assert_eq!(outcome.exit_code(), 1);
+    assert_eq!(outcome.code(), Some("shutdown_failed"));
     assert_eq!(log, vec![start(7), shut(300)]);
     let (outcome, _) = go(cfg(300, vec![(100, Step::Fail)]), |rec| {
         rec.fail_shutdown = true;
@@ -792,8 +797,10 @@ fn only_a_stop_gives_exit_zero() {
         Outcome::WaitFailed,
     ] {
         assert_eq!(outcome.exit_code(), 1);
+        assert!(outcome.code().is_some());
     }
     assert_eq!(Outcome::Stopped.exit_code(), 0);
+    assert_eq!(Outcome::Stopped.code(), None);
 }
 
 // ------------------------------------------------------------------ hints

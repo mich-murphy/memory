@@ -34,8 +34,13 @@
 //! `state_load` follows `started`, `status` before `index`, only for a damaged or newer-schema
 //! startup load. `parked` is logged once, in the round an owner or one of its sources becomes
 //! parked; a source id is never logged. `host_paused` and `host_resumed` are logged in the
-//! round the pause starts and ends. All come before that round's `round` line. `capture` is
-//! logged for the outcomes landed, unchanged, failed and stopped only.
+//! round the pause starts and ends. In a full round all come before that round's `round` line;
+//! in a per-owner capture `parked` and `host_paused` are logged inside `capture_owner`, so they
+//! come before that capture's `capture` line, which is written after it returns (a capture that
+//! parks an owner or source or pauses the host maps to `Failed` unless something landed or
+//! stopped, so the reader sees `parked` or
+//! `host_paused`, then `capture ... result=failed`). `capture` is logged for the outcomes
+//! landed, unchanged, failed and stopped only; `Paused`, `Skipped` and `Deferred` write none.
 //!
 //! `memory hook` and `memory restore` never start the subscriber.
 use crate::daemon::{OwnerOutcome, ParkedReason, RoundReport, StateLoad};
