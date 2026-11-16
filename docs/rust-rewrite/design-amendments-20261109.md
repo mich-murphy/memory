@@ -296,6 +296,9 @@ Note, 2026-11-12: the count of failed launch attachments is gone (`baf8b1a`). At
 launch record could only fail while its digest was computed through a JSON encoding; with the
 one length-prefixed digest (`d877196`) it cannot fail, so nothing could increment the counter.
 
+Note, 2026-11-12: the `events` block was removed from `status.json` when the events became log
+lines (`2acbbd4`), as A13.2 says.
+
 ### A11.4 State file size bounds (DESIGN 9)
 
 DESIGN states no number. The code bounds a state file body at 64 MiB (67,108,864 bytes) and its

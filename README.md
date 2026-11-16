@@ -34,6 +34,11 @@ outside an acceptance key prefix until `tracing`, hint retention and the audit e
 file watcher is not connected. See
 [brief 27](docs/rust-rewrite/implementation/27-run-loop.md) and
 [evidence 18](docs/rust-rewrite/implementation/evidence/18-run-loop/).
+Update 2026-11-16 (brief 28): the daemon now logs to stderr, removes old hint files and audits
+append sources, accepted locally; see
+[brief 28](docs/rust-rewrite/implementation/28-production-prerequisites.md) and
+[evidence 19](docs/rust-rewrite/implementation/evidence/19-production-prerequisites/). The
+empty-prefix refusal and the unconnected watcher remain.
 
 The work is committed as draft gh stack #56 (PRs #54, #55, #57, #58, #59, #60, top branch
 `rust/coverage-floor-80`), green on hosted CI. No Rust deployment or cutover occurred.
