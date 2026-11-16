@@ -1,7 +1,9 @@
 //! Watcher tests: scheduler tables, properties against an independent model, translation
 //! of notify events, and real FsWatcher runs on temp dirs this file creates.
 use hegel::{TestCase, generators as gs};
-use memory::watch::{Action, FsWatcher, Input, Scheduler, inbox, translate, translate_with};
+use memory::watch::{
+    Action, FsWatcher, Input, Received, Scheduler, inbox, translate, translate_with,
+};
 use memory_core::coalescer::{CoalescerError, Signal, Window, WindowSeconds};
 use memory_core::domain::{Agent, ArchiveId, MachineId, Owner, SessionId, SessionKey};
 use notify::event::{AccessKind, CreateKind, Flag, ModifyKind, RemoveKind, RenameMode};
@@ -233,13 +235,102 @@ fn full_inbox_drops_inputs_and_reports_one_rescan() {
     }
     // The overflow is reported first, once; then the queued inputs, then silence.
     let none = Duration::ZERO;
-    assert_eq!(rx.recv_timeout(none), Some(Input::Rescan));
-    assert_eq!(rx.recv_timeout(none), Some(at(0)));
-    assert_eq!(rx.recv_timeout(none), Some(at(1)));
-    assert_eq!(rx.recv_timeout(none), None);
+    assert_eq!(rx.recv_timeout(none), Received::Input(Input::Rescan));
+    assert_eq!(rx.recv_timeout(none), Received::Input(at(0)));
+    assert_eq!(rx.recv_timeout(none), Received::Input(at(1)));
+    assert_eq!(rx.recv_timeout(none), Received::Timeout);
     // After draining, the queue accepts inputs again without a spurious rescan.
     tx.push(at(9));
-    assert_eq!(rx.recv_timeout(none), Some(at(9)));
+    assert_eq!(rx.recv_timeout(none), Received::Input(at(9)));
+}
+
+fn at(n: u32) -> Input {
+    Input::PathChanged {
+        path: PathBuf::from(format!("/r/o1/{n}")),
+    }
+}
+
+#[test]
+fn stop_beats_a_full_queue_and_an_overflow_and_is_sticky() {
+    let (tx, rx) = inbox(1);
+    let stop = rx.stop_handle();
+    tx.push(at(0));
+    tx.push(at(1)); // overflow
+    stop.stop(); // queue full: the wake is not sent, the flag still is
+    let none = Duration::ZERO;
+    for _ in 0..3 {
+        assert_eq!(rx.recv_timeout(none), Received::Stop);
+    }
+    // Pinned rule: after a stop nothing else is delivered by `recv_timeout`; a caller that
+    // ignores the stop still drains the overflow (once) and then the queue.
+    assert_eq!(rx.recv_ignoring_stop(none), Received::Input(Input::Rescan));
+    assert_eq!(rx.recv_ignoring_stop(none), Received::Input(at(0)));
+    assert_eq!(rx.recv_ignoring_stop(none), Received::Timeout);
+    assert_eq!(rx.recv_timeout(none), Received::Stop);
+}
+
+#[test]
+fn stop_before_the_first_receive_and_overflow_after_it() {
+    let (tx, rx) = inbox(1);
+    let stop = rx.stop_handle();
+    stop.stop();
+    tx.push(at(0));
+    tx.push(at(1)); // overflow after the stop
+    assert_eq!(rx.recv_timeout(Duration::ZERO), Received::Stop);
+    assert_eq!(rx.recv_timeout(Duration::from_secs(30)), Received::Stop);
+    assert_eq!(
+        rx.recv_ignoring_stop(Duration::ZERO),
+        Received::Input(Input::Rescan)
+    );
+}
+
+#[test]
+fn stop_from_another_thread_wakes_a_blocked_receiver() {
+    let (_tx, rx) = inbox(4);
+    let stop = rx.stop_handle();
+    let started = Instant::now();
+    let thread = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        stop.stop();
+    });
+    assert_eq!(rx.recv_timeout(Duration::from_secs(30)), Received::Stop);
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(thread.join().is_ok());
+}
+
+#[test]
+fn dropped_handles_without_a_stop_are_a_failed_source() {
+    let (_tx, rx) = inbox(4);
+    let a = rx.stop_handle();
+    let b = a.clone();
+    drop(a);
+    assert_eq!(rx.recv_timeout(Duration::ZERO), Received::Timeout);
+    let started = Instant::now();
+    let thread = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        drop(b);
+    });
+    assert_eq!(rx.recv_timeout(Duration::from_secs(30)), Received::Failed);
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(rx.recv_timeout(Duration::ZERO), Received::Failed);
+    assert!(thread.join().is_ok());
+}
+
+#[test]
+fn a_stop_then_dropped_handles_is_a_stop_not_a_failure() {
+    let (_tx, rx) = inbox(4);
+    let stop = rx.stop_handle();
+    stop.stop();
+    drop(stop);
+    assert_eq!(rx.recv_timeout(Duration::ZERO), Received::Stop);
+}
+
+#[test]
+fn forward_signal_requests_a_stop() {
+    let (_tx, rx) = inbox(4);
+    let stop = rx.stop_handle();
+    memory::run::forward_signal(&stop);
+    assert_eq!(rx.recv_timeout(Duration::ZERO), Received::Stop);
 }
 
 // ------------------------------------------------------------------ properties
@@ -457,7 +548,7 @@ impl Drop for Tmp {
 fn wait_for(w: &FsWatcher, mut want: impl FnMut(&Input) -> bool) -> bool {
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
-        if let Some(input) = w.recv_timeout(Duration::from_millis(200))
+        if let Received::Input(input) = w.recv_timeout(Duration::from_millis(200))
             && want(&input)
         {
             return true;
@@ -537,6 +628,44 @@ fn fs_watcher_skips_a_missing_root_and_counts_it() -> R {
     );
     let none = FsWatcher::new(&[]).map_err(e)?;
     assert_eq!(none.skipped_roots(), 0);
+    Ok(())
+}
+
+#[test]
+fn fs_watcher_watches_an_extra_directory_non_recursively() -> R {
+    let tmp = Tmp::new()?;
+    let hints = tmp.0.join("hints");
+    fs::create_dir_all(hints.join("deep")).map_err(e)?;
+    let w = FsWatcher::with_dir(&[], &hints).map_err(e)?;
+    assert_eq!(w.skipped_roots(), 0);
+    let file = hints.join("day.jsonl");
+    fs::write(&file, "x").map_err(e)?;
+    assert!(
+        wait_for(
+            &w,
+            |i| matches!(i, Input::PathChanged { path } if *path == file)
+        ),
+        "no PathChanged for {}",
+        file.display()
+    );
+    Ok(())
+}
+
+#[test]
+fn fs_watcher_rejects_a_missing_or_non_directory_extra_directory() -> R {
+    let tmp = Tmp::new()?;
+    assert!(FsWatcher::with_dir(&[], &tmp.0.join("missing")).is_err());
+    let file = tmp.0.join("f");
+    fs::write(&file, "x").map_err(e)?;
+    assert!(FsWatcher::with_dir(&[], &file).is_err());
+    Ok(())
+}
+
+#[test]
+fn fs_watcher_exposes_a_stop_handle() -> R {
+    let w = FsWatcher::new(&[]).map_err(e)?;
+    w.stop_handle().stop();
+    assert_eq!(w.recv_timeout(Duration::from_secs(30)), Received::Stop);
     Ok(())
 }
 

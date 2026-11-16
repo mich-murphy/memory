@@ -8,6 +8,7 @@ use crate::assemble::start_from_config;
 use crate::clock::SystemClock;
 use crate::daemon::EXIT_CONFIG;
 use crate::environment::Clock;
+use crate::watch::StopHandle;
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use std::io::Write;
@@ -173,6 +174,25 @@ impl StopSignals {
         Ok(Self { receiver })
     }
 
+    /// Install the handlers and start the forwarding thread, which requests a stop through
+    /// `handle` (flag first, then a wake of the inbox) on SIGTERM or SIGINT. The thread owns
+    /// the handle: if it ends without a signal, the handle drops and the inbox reports a
+    /// failed stop source ([`crate::watch::Received::Failed`]).
+    ///
+    /// # Errors
+    /// The handlers or the thread could not be created.
+    pub fn register_with(handle: StopHandle) -> std::io::Result<()> {
+        let mut signals = Signals::new([SIGTERM, SIGINT])?;
+        std::thread::Builder::new()
+            .name("stop-signals".to_owned())
+            .spawn(move || {
+                for _ in signals.forever() {
+                    forward_signal(&handle);
+                }
+            })?;
+        Ok(())
+    }
+
     /// Wait up to `up_to` for a stop.
     #[must_use]
     pub fn wait(&self, up_to: Duration) -> Waited {
@@ -182,6 +202,12 @@ impl StopSignals {
             Err(RecvTimeoutError::Disconnected) => Waited::Failed,
         }
     }
+}
+
+/// What the signal thread does for each signal: request a stop through the inbox handle.
+/// Separate from the operating-system source so a test can call it without raising a signal.
+pub fn forward_signal(handle: &StopHandle) {
+    handle.stop();
 }
 
 /// Environment variable that replaces the two durations. Exists only with the `sim` feature.
