@@ -1200,7 +1200,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             }
             _ => {}
         }
-        let (when, _) = stamp_of(self.clock.wall_ns()).map_err(|_| RoundError::Clock)?;
+        let (when, text) = stamp_of(self.clock.wall_ns()).map_err(|_| RoundError::Clock)?;
         let sources = self.sources.of(owner);
         if sources.is_empty() {
             return Ok(OwnerOutcome::Unchanged);
@@ -1225,6 +1225,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         self.files = files;
         self.status.failures.add(&report.failures);
         self.status.audit.add(&report.audit);
+        self.status.updated_at = text;
         self.rebuild_parked();
         let authoritative = before != (self.status.host_paused, self.status.parked.clone());
         self.write_status(authoritative)

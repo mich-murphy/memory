@@ -3435,6 +3435,34 @@ fn a_swept_hint_file_does_not_return_through_an_owner_capture() -> R {
     Ok(())
 }
 
+#[test]
+fn owner_capture_refreshes_the_status_stamp_and_early_returns_do_not() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let o = owner_of("s1")?;
+    let mut d = boot(
+        &tmp,
+        &cfg,
+        files_with(b"x\n"),
+        FStore::default(),
+        &list,
+        WALL,
+    )?;
+    d.reconcile_once().map_err(e)?;
+    let t1 = d.status().updated_at.clone();
+    assert_eq!(disk_status(&tmp)?.updated_at, t1);
+    d.clock_mut().wall = WALL + 3_600_000_000_000;
+    d.clock_mut().mono = 61_000_000_000;
+    bytes_in(&mut d, 1, b"x\ny\n");
+    assert_eq!(cap(&mut d, &o)?.0, OwnerOutcome::Landed);
+    let on_disk = disk_status(&tmp)?;
+    assert_ne!(on_disk.updated_at, t1, "status carries the old stamp");
+    assert_eq!(on_disk.updated_at, d.status().updated_at);
+    assert_eq!(on_disk.rounds, 1);
+    Ok(())
+}
+
 // ------------------------------------------------------------------ per-owner capture
 use memory::daemon::OwnerOutcome;
 use memory_core::coalescer::Signal;
@@ -3512,8 +3540,11 @@ fn parked_owner_is_skipped_and_nothing_is_sent() -> R {
     d.store_mut().store.write(&current_key(&o), NEWER.to_vec());
     assert_eq!(d.reconcile_once().map_err(e)?.parked, 1);
     let rounds = d.status().rounds;
+    let stamp = d.status().updated_at.clone();
+    d.clock_mut().wall = WALL + 3_600_000_000_000;
     let (out, lines) = cap(&mut d, &o)?;
     assert_eq!(out, OwnerOutcome::Skipped);
+    assert_eq!(d.status().updated_at, stamp);
     assert!(lines.is_empty(), "{lines:?}");
     assert!(d.store_mut().put_log.is_empty());
     assert_eq!(d.status().rounds, rounds);
@@ -3539,7 +3570,10 @@ fn retry_deadline_defers_then_the_capture_runs() -> R {
     assert!(d.retries_due().is_empty());
     d.store_mut().offline = false;
     d.clock_mut().mono = before;
+    let stamp = d.status().updated_at.clone();
+    d.clock_mut().wall = WALL + 3_600_000_000_000;
     assert_eq!(cap(&mut d, &o)?.0, OwnerOutcome::Deferred);
+    assert_eq!(d.status().updated_at, stamp);
     assert!(d.store_mut().put_log.is_empty());
     assert!(d.store_mut().store.objects.is_empty());
     assert!(d.retries_due().is_empty());
@@ -3596,9 +3630,12 @@ fn a_pause_from_a_round_survives_owner_captures_until_the_next_round() -> R {
     d.reconcile_once().map_err(e)?;
     assert!(d.status().host_paused);
     d.store_mut().revoked = false;
+    let stamp = d.status().updated_at.clone();
+    d.clock_mut().wall = WALL + 3_600_000_000_000;
     for _ in 0..2 {
         let (out, lines) = cap(&mut d, &o)?;
         assert_eq!(out, OwnerOutcome::Paused);
+        assert_eq!(d.status().updated_at, stamp);
         assert!(lines.is_empty(), "{lines:?}");
         assert!(d.status().host_paused, "an owner capture does not resume");
         assert_eq!(d.status().rounds, 1);
