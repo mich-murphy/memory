@@ -826,6 +826,7 @@ fn measure_handle_cost_with_5000_known_owners() -> R {
         runs.push(start.elapsed().as_nanos() / probes);
     }
     runs.sort_unstable();
-    eprintln!("handle ns/input runs sorted: {runs:?} median {}", runs[3]);
+    let median = runs.get(runs.len() / 2).copied().unwrap_or(0);
+    eprintln!("handle ns/input runs sorted: {runs:?} median {median}");
     Ok(())
 }
