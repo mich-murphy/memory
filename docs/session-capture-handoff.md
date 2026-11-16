@@ -69,7 +69,8 @@ This is the single active task brief; dated operating records below remain histo
   30 runs after: 0 failed.
 - Checks: seven checks 0 on every increment tip and on `e6060d5` (674 passed, 5 skipped, 12
   doctests); parent mutants killed on the intended assertion, survivors pinned by parent
-  commits (`7c31f6e`, `d28ca14`, `d187108`). Full gates: see evidence 20.
+  commits (`7c31f6e`, `d28ca14`, `d187108`). Gates on `969d6fc`: 500 cases, seed 1749603793, all 13 sub-gates 0, 676 tests
+  under coverage, 97.40 % (7750/7957).
 - Known limits: deleted files are never recorded as deleted (slice 3); commit pauses are
   zero; a capture holds the whole range in memory; a round does not end early when the
   network is down; no `unpark`; ownerless launch records keep their hint day file; the wake

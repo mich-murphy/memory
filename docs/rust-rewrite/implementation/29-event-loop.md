@@ -324,4 +324,5 @@ units and hook installation; deletions, snapshots and inotify (slice 3).
   (combined: seven checks 0, 648 passed). Hint-owner defect found by a surviving mutant.
 - 2026-11-16: wave 2 accepted locally: STOP-1b `564577b`, hint owner `d187108` (665 passed).
 - 2026-11-16: LOOP-2b accepted locally as `969d6fc` (seven checks 0 on `e6060d5`, 674 passed;
-  11 of 11 mutants killed; stress 30 runs, 0 failed). Full gates: see evidence 20. Not pushed.
+  11 of 11 mutants killed; stress 30 runs, 0 failed). Full gates on `969d6fc`: all 13 sub-gates 0
+  (500 cases, seed 1749603793, 676 tests under coverage, 97.40 %). Not pushed.

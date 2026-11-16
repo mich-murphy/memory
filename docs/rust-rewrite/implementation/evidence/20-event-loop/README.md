@@ -257,6 +257,20 @@ documented it in `log.rs`).
 There is no separate `wake_gap` event. `round cause=wake` is the record of a wake gap; this
 replaces the `wake_gap` line the brief planned.
 
+## Full gates
+
+`scripts/gates.sh` on `969d6fc`, local, finished 2026-11-16 at 19:21 UTC: 500 cases, seed
+1749603793, all 13 sub-gates 0 (`rustdoc -Dwarnings` was run by hand on each increment tip, not
+by this run). Files are in [`gates/`](gates/): `status-969d6fc.tsv`, `seeds-969d6fc.txt` and
+`summary-969d6fc.txt`, built as in [evidence 19](../19-production-prerequisites/README.md).
+
+| Tip | Date | Seed | nextest | Hegel | proptest | Doctests | Gate 08 under coverage | Coverage |
+|---|---|---|---|---|---|---|---|---|
+| `969d6fc` | 2026-11-16 | 1749603793 | 616 | 31 | 29 | 12 | 676 passed, 5 skipped, 290 s | 7750/7957 = 97.40 % (floor 80) |
+
+The `if-match`, `advance-on-fail`, `privacy-deny` and window mutants are killed. Not run: 2,000
+cases, `cargo mutants`.
+
 ## Known limits
 
 - Nothing here is pushed or on hosted CI. The real-binary event-loop tests have run on macOS
