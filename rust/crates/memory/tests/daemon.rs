@@ -835,8 +835,14 @@ fn a_hint_launch_goes_to_the_owner_of_its_path_not_to_the_namesake() -> R {
     fs::write(hint_path(&tmp, "2026-11-09.jsonl"), &line).map_err(e)?;
     assert_eq!(d.reconcile_once().map_err(e)?.landed, 2);
     let hist = vec![b"hello\n".to_vec()];
-    let two = need(observe(d.store_mut(), &owner_of("s2")?, &hist)?, "no chain s2")?;
-    let one = need(observe(d.store_mut(), &owner_of("s1")?, &hist)?, "no chain s1")?;
+    let two = need(
+        observe(d.store_mut(), &owner_of("s2")?, &hist)?,
+        "no chain s2",
+    )?;
+    let one = need(
+        observe(d.store_mut(), &owner_of("s1")?, &hist)?,
+        "no chain s1",
+    )?;
     assert_eq!((one.launches, two.launches), (0, 1));
     Ok(())
 }

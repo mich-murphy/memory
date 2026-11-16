@@ -706,7 +706,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                     let (owner, paths, other) = match (main, sub) {
                         (None, _) => (None, Vec::new(), None),
                         (Some((o, p)), Some((so, sp))) if so == o => (Some(o), vec![p, sp], None),
-                        (Some((o, p)), sub) => (Some(o), vec![p], sub.map(|(so, sp)| (so, sp))),
+                        (Some((o, p)), sub) => (Some(o), vec![p], sub),
                     };
                     PendingHint {
                         end: r.end,

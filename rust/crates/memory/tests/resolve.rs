@@ -659,12 +659,7 @@ fn hint_path_of(p: Option<&Path>) -> R<PathHint> {
 }
 
 /// One hint line; `launch` adds launch evidence.
-fn hint(
-    agent: Agent,
-    transcript: Option<&Path>,
-    sub: Option<&Path>,
-    launch: bool,
-) -> R<Vec<u8>> {
+fn hint(agent: Agent, transcript: Option<&Path>, sub: Option<&Path>, launch: bool) -> R<Vec<u8>> {
     let launch = if launch {
         let s = sanitize_launch(&["claude".to_owned()], &["PATH=/usr/bin".to_owned()]);
         LaunchHint::Full(LaunchRecord::from_sanitized(&s))
