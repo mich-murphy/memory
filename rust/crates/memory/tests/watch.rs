@@ -786,3 +786,46 @@ fn translate_never_treats_a_symlink_as_a_directory() -> R {
     }
     Ok(())
 }
+
+// ------------------------------------------------------------------ measurement
+
+/// `Scheduler::handle` per `PathChanged` with 5,000 owners known, none due. Run with
+/// `cargo nextest run --release -p memory --test watch --run-ignored only measure_handle -- --nocapture`.
+#[test]
+#[ignore = "measurement, prints medians"]
+fn measure_handle_cost_with_5000_known_owners() -> R {
+    let owners: Vec<Owner> = (0..5000).map(owner).collect::<R<_>>()?;
+    let mut map = |p: &Path| -> Option<Owner> {
+        let n: usize = p
+            .to_str()?
+            .strip_prefix("/r/n")?
+            .split('/')
+            .next()?
+            .parse()
+            .ok()?;
+        owners.get(n).cloned()
+    };
+    let mut runs = Vec::new();
+    for _ in 0..7 {
+        let mut sc = Scheduler::new(window()?);
+        for n in 0..5000 {
+            let input = Input::PathChanged {
+                path: PathBuf::from(format!("/r/n{n}/f")),
+            };
+            sc.handle(input, s(0), &mut map);
+        }
+        let probes = 500;
+        let start = Instant::now();
+        for n in 0..probes {
+            let input = Input::PathChanged {
+                path: PathBuf::from(format!("/r/n{}/f", n * 7)),
+            };
+            let actions = sc.handle(input, s(1), &mut map);
+            assert!(actions.is_empty());
+        }
+        runs.push(start.elapsed().as_nanos() / probes);
+    }
+    runs.sort_unstable();
+    eprintln!("handle ns/input runs sorted: {runs:?} median {}", runs[3]);
+    Ok(())
+}
