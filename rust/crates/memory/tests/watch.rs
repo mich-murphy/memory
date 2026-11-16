@@ -682,19 +682,34 @@ fn fs_watcher_skips_a_missing_root_and_counts_it() -> R {
 fn fs_watcher_watches_an_extra_directory_non_recursively() -> R {
     let tmp = Tmp::new()?;
     let hints = tmp.0.join("hints");
-    fs::create_dir_all(hints.join("deep")).map_err(e)?;
+    let deep = hints.join("deep");
+    fs::create_dir_all(&deep).map_err(e)?;
     let w = FsWatcher::with_dir(&[], &hints).map_err(e)?;
     assert_eq!(w.skipped_roots(), 0);
+    // Written first: a recursive watch would report it no later than the file below.
+    fs::write(deep.join("inner.jsonl"), "x").map_err(e)?;
     let file = hints.join("day.jsonl");
     fs::write(&file, "x").map_err(e)?;
+    let mut below = false;
+    let mut seen = |i: &Input| {
+        let (Input::PathChanged { path } | Input::DirCreated { path }) = i else {
+            return false;
+        };
+        below |= path.starts_with(&deep) && *path != deep;
+        matches!(i, Input::PathChanged { .. }) && *path == file
+    };
     assert!(
-        wait_for(
-            &w,
-            |i| matches!(i, Input::PathChanged { path } if *path == file)
-        ),
+        wait_for(&w, &mut seen),
         "no PathChanged for {}",
         file.display()
     );
+    let until = Instant::now() + Duration::from_millis(500);
+    while Instant::now() < until {
+        if let Received::Input(input) = w.recv_timeout(Duration::from_millis(100)) {
+            seen(&input);
+        }
+    }
+    assert!(!below, "an event below the extra directory was reported");
     Ok(())
 }
 
