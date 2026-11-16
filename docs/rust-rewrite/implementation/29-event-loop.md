@@ -3,7 +3,8 @@
 Coordinator brief. The parent session owns this file and acceptance. It follows
 [brief 28](28-production-prerequisites.md) (logs, hint retention, the audit; merged as `d765f9c`)
 and [evidence 19](evidence/19-production-prerequisites/). Status: built and accepted locally on
-2026-11-16 as `969d6fc`; not yet pushed. Results, commits and checks are in
+2026-11-16 as `969d6fc`; merged into `main` the same day as `f15f651` (stack #124). Results,
+commits, checks and the hosted runs are in
 [evidence 20](evidence/20-event-loop/); each increment section below ends with a "Result"
 paragraph. Text that states a plan stays as written; changes are marked.
 
@@ -326,3 +327,6 @@ units and hook installation; deletions, snapshots and inotify (slice 3).
 - 2026-11-16: LOOP-2b accepted locally as `969d6fc` (seven checks 0 on `e6060d5`, 674 passed;
   11 of 11 mutants killed; stress 30 runs, 0 failed). Full gates on `969d6fc`: all 13 sub-gates 0
   (500 cases, seed 1749603793, 676 tests under coverage, 97.40 %). Not pushed.
+- 2026-11-16: pushed as stack #124 (PRs #116 to #123) at 19:27 UTC and merged as `f15f651` at
+  21:20 UTC. Hosted "Rust rewrite gates" succeeded on every branch and on `main`; the
+  real-binary tests passed on Linux at their first run. Details in evidence 20.

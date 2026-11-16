@@ -52,7 +52,8 @@ This is the single active task brief; dated operating records below remain histo
 
 **Session 2026-11-16, event loop (current).** Brief 29; record in
 [evidence 20](rust-rewrite/implementation/evidence/20-event-loop/). Accepted locally as
-`969d6fc` (34 commits over `ef18965`, on `origin/main` `94b8abd`); not pushed, not on hosted CI.
+`969d6fc` (34 commits over `ef18965`, on `94b8abd`) and merged into `main` as `f15f651` on
+2026-11-16 (stack #124, PRs #116 to #123); the hosted runs are in evidence 20.
 - What exists now (implemented, commits in evidence 20): `memory daemon` installs the signal
   handlers, builds the watcher over the roots and `state/hints` (`watch_unavailable` on
   failure), runs the start reconcile after the startup delay, then captures a changed file per
@@ -74,12 +75,13 @@ This is the single active task brief; dated operating records below remain histo
 - Known limits: deleted files are never recorded as deleted (slice 3); commit pauses are
   zero; a capture holds the whole range in memory; a round does not end early when the
   network is down; no `unpark`; ownerless launch records keep their hint day file; the wake
-  gap is tested on the driver only; the real-binary tests ran on macOS only; the wake stagger
-  of DESIGN 7.1 is not built. The daemon still refuses an empty key prefix. Not run: 2,000
-  cases, `cargo mutants`, anything against R2, hosted CI.
-- Next action: push the stack (`gh stack`, one watcher at a time), then decide commit pause
-  lengths and the streaming-capture question, lift the empty-prefix refusal, and start the
-  DESIGN 17 acceptance runs.
+  gap is tested on the driver only; the real-binary tests were stress-run on macOS only (on
+  Linux they passed in the hosted runs); the wake stagger of DESIGN 7.1 is not built. The
+  daemon still refuses an empty key prefix. Not run: 2,000 cases, `cargo mutants`, anything
+  against R2.
+- Next action: decide commit pause lengths and the streaming-capture question (both open for
+  the operator in brief 29), lift the empty-prefix refusal, and start the DESIGN 17
+  acceptance runs.
 
 **Session 2026-11-12 to 2026-11-16, production prerequisites.** Brief 28; record in
 [evidence 19](rust-rewrite/implementation/evidence/19-production-prerequisites/). All

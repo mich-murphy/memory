@@ -24,9 +24,9 @@ sources and parks a source after repeated audit mismatches
 [evidence 19](../docs/rust-rewrite/implementation/evidence/19-production-prerequisites/)).
 The event loop connects the watcher, the scheduler and the hints
 ([brief 29](../docs/rust-rewrite/implementation/29-event-loop.md),
-[evidence 20](../docs/rust-rewrite/implementation/evidence/20-event-loop/); accepted locally
-on 2026-11-16). The daemon refuses an empty key prefix, so it writes only under an acceptance
-prefix. No slice or release acceptance is claimed.
+[evidence 20](../docs/rust-rewrite/implementation/evidence/20-event-loop/); merged into `main`
+on 2026-11-16 as `f15f651`). The daemon refuses an empty key prefix, so it writes only under an
+acceptance prefix. No slice or release acceptance is claimed.
 
 All commands use the repository's **locked Nix shell**, Rust/cargo 1.99.0.
 No rustup/global installs. From repository root:

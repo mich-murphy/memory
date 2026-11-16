@@ -1,8 +1,9 @@
 # Evidence 20: the event loop (brief 29)
 
 Dates are UTC; all work and runs here are from 2026-11-16. Status: accepted locally on
-2026-11-16 as `969d6fc`; not yet pushed, not on hosted CI. No R2 run happened, and the daemon
-still refuses an empty key prefix, so there is still no production write.
+2026-11-16 as `969d6fc` and merged into `main` the same day as `f15f651` (stack #124, see
+"Stack #124 merge"). No R2 run happened, and the daemon still refuses an empty key prefix, so
+there is still no production write.
 
 [Brief 29](../../29-event-loop.md) sits on `ef18965` (the brief, on top of `origin/main`
 `94b8abd`, which is PR #114 on top of stack #111). The code stack `ef18965..969d6fc` is 34
@@ -275,10 +276,47 @@ by this run). Files are in [`gates/`](gates/): `status-969d6fc.tsv`, `seeds-969d
 The `if-match`, `advance-on-fail`, `privacy-deny` and window mutants are killed. Not run: 2,000
 cases, `cargo mutants`.
 
+## Stack #124 merge
+
+Added 2026-11-16 (UTC), after the rest of this record. The eight branches were pushed without a
+rebase as stack #124 at 19:27 UTC (PRs #116 to #123). They merged at 21:19:50Z to 21:19:59Z as
+`f15f651` with `gh stack merge 124 --yes --merge`; the tree of `origin/main` equals the tree of
+`6825695`, the top of the stack. Before the merge every "Rust rewrite gates" run was `success`
+on all six jobs of its latest attempt, and every "CI" run failed only in the two accepted
+`govulncheck` steps, checked job by job and step by step for all eight. No step failed in any
+attempt of any "Rust rewrite gates" run. Five runs needed one rerun of one macOS job each;
+every one was a job cancelled with zero steps because no runner was acquired:
+
+| PR | Workflow | Run | Attempt 1 | Attempt 2 |
+|---|---|---|---|---|
+| #116 | Rust rewrite gates | 43939400459 | `Rust gates (macos-26)` never acquired a runner | success |
+| #117 | Rust rewrite gates | 43939422670 | `Rust gates (macos-26)` never acquired a runner | success |
+| #123 | Rust rewrite gates | 43939538789 | `Rust coverage (macos-26)` never acquired a runner | success |
+| #118 | CI | 43939445992 | `Tests (macos-26)` never acquired a runner | only the two accepted steps |
+| #120 | CI | 43939483281 | `Tests (macos-26)` never acquired a runner | only the two accepted steps |
+
+The run on `rust/loop-wired` (#122, 43939523059) succeeded on all six jobs at attempt 1. It was
+the first run of the real-binary event-loop tests on Linux (inotify), in the gates job and in
+the coverage job on both Linux runners.
+
+| Run | gates ubuntu | gates arm | gates macOS | coverage ubuntu | coverage arm | coverage macOS |
+|---|---|---|---|---|---|---|
+| `rust/loop-wired` 43939523059, minutes | 15.3 | 13.8 | 13.9 | 7.2 | 10.4 | 11.4 |
+| `main` `f15f651` 43959004959, minutes | 14.4 | 13.4 | 17.6 | 7.4 | 10.4 | 10.3 |
+
+Post-merge on `f15f651`: "Rust rewrite gates" run 43959004959 succeeded on all six jobs at
+attempt 1; "CI" run 43959004954 failed only in the two accepted steps. The `govulncheck`
+output was not read again; acceptance of the "CI" runs rests on the job and step names.
+
+One tooling note: `gh run list --branch <branch> --workflow "Rust rewrite gates"` returned
+nothing for `rust/loop-driver` and `docs/event-loop` while their runs (43939467994 and
+43939538789) existed. The run ids came from the check-runs of the two commits.
+
 ## Known limits
 
-- Nothing here is pushed or on hosted CI. The real-binary event-loop tests have run on macOS
-  only; Linux (inotify) runs first on hosted CI.
+- On Linux (inotify) the real-binary event-loop tests have run only in the hosted runs of
+  `rust/loop-wired`, `docs/event-loop` and `main`, all passing. The stress runs (30 and 60
+  repeats) were on macOS only.
 - The daemon still refuses an empty prefix, so there is no production write.
 - A deleted file is never recorded as deleted: `WalkSources::enumerate` yields only files the
   walk finds and the absence rule runs only for sources given. Probe on `2edf2f8` (reverted,
@@ -304,4 +342,5 @@ cases, `cargo mutants`.
 
 ## Not run
 
-2,000 property cases, `cargo mutants`, anything against R2, hosted CI.
+2,000 property cases, `cargo mutants`, anything against R2, a stress run of the real-binary
+tests on Linux.
