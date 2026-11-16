@@ -380,8 +380,11 @@ use memory::environment::Clock;
 use memory::state::{Loaded, StateFile, read_durable};
 use memory_core::domain::SessionId;
 use memory_core::hint::{
-    HintEvent, HintPath, HintRecord, HintSchema, LaunchHint, PathHint, Reduction,
+    HintEvent, HintPath, HintRecord, HintSchema, LaunchHint, LaunchRecord, PathHint, Reduction,
 };
+use memory_core::limits::manifest_key;
+use memory_core::manifest::{Manifest, manifest_hash, parse_manifest};
+use memory_core::privacy::sanitize_launch;
 use std::os::unix::fs::PermissionsExt;
 
 fn walker(root: &Path, limits: WalkLimits) -> R<WalkSources> {
@@ -640,6 +643,156 @@ fn a_hint_names_a_file_no_walk_has_seen_and_its_owner_is_captured() -> R {
         d.capture_owner(&owner).map_err(|x| format!("{x:?}"))?,
         OwnerOutcome::Landed
     );
+    Ok(())
+}
+
+const DAY: &str = "2026-11-07.jsonl";
+
+fn hint_path_of(p: Option<&Path>) -> R<PathHint> {
+    Ok(match p {
+        None => PathHint::Absent,
+        Some(p) => PathHint::Present {
+            path: HintPath::try_from(p.to_str().ok_or("path")?.to_owned())
+                .map_err(|x| format!("{x:?}"))?,
+        },
+    })
+}
+
+/// One hint line; `launch` adds launch evidence.
+fn hint(
+    agent: Agent,
+    transcript: Option<&Path>,
+    sub: Option<&Path>,
+    launch: bool,
+) -> R<Vec<u8>> {
+    let launch = if launch {
+        let s = sanitize_launch(&["claude".to_owned()], &["PATH=/usr/bin".to_owned()]);
+        LaunchHint::Full(LaunchRecord::from_sanitized(&s))
+    } else {
+        LaunchHint::None
+    };
+    let record = HintRecord {
+        schema: HintSchema::V1,
+        agent,
+        event: if matches!(launch, LaunchHint::None) {
+            HintEvent::SessionEnd
+        } else {
+            HintEvent::SessionStart
+        },
+        session: SessionId::try_from("raw".to_owned())?,
+        cwd: PathHint::Absent,
+        transcript: hint_path_of(transcript)?,
+        agent_transcript: hint_path_of(sub)?,
+        launch,
+        reduction: Reduction::None,
+    };
+    let mut line = serde_json::to_vec(&record)?;
+    line.push(b'\n');
+    Ok(line)
+}
+
+fn stored_offset(t: &Tmp) -> R<u64> {
+    let Loaded::Present(stored) = read_durable(
+        &t.0.join("state").join(StateFile::Index.name()),
+        StateFile::Index.schema(),
+    ) else {
+        return Ok(0);
+    };
+    let index: IndexBody = serde_json::from_slice(&stored.body)?;
+    Ok(index.hints.get(DAY).copied().unwrap_or(0))
+}
+
+fn launches(d: &mut RealDaemon) -> R<usize> {
+    let mut n = 0;
+    for (key, (body, _)) in &d.store_mut().objects {
+        if *key == manifest_key(&manifest_hash(body)) {
+            n += match parse_manifest(body).map_err(|x| format!("{x:?}"))? {
+                Manifest::Delta(m) => m.launch().len(),
+                Manifest::Checkpoint(m) => m.launch().len(),
+            };
+        }
+    }
+    Ok(n)
+}
+
+#[test]
+fn a_launch_hint_with_a_transcript_path_is_attached_once_in_a_round_and_per_owner() -> R {
+    for per_owner in [false, true] {
+        let t = Tmp::new()?;
+        fs::set_permissions(&t.0, fs::Permissions::from_mode(0o700))?;
+        let file = t.write("claude/projects/-p/new.jsonl", b"{\"b\":1}\n")?;
+        let mut d = real_daemon(&t)?;
+        let line = hint(Agent::Claude, Some(&file), None, true)?;
+        fs::write(t.0.join("state/hints").join(DAY), &line)?;
+        if per_owner {
+            assert_eq!(d.refresh_hints().len(), 1);
+            let owner = owner_at("projects/-p/new.jsonl")?;
+            assert_eq!(
+                d.capture_owner(&owner).map_err(|x| format!("{x:?}"))?,
+                OwnerOutcome::Landed
+            );
+        } else {
+            assert_eq!(d.reconcile_once().map_err(|x| format!("{x:?}"))?.landed, 1);
+        }
+        assert_eq!(launches(&mut d)?, 1);
+        assert_eq!(stored_offset(&t)?, u64::try_from(line.len())?);
+        fs::write(&file, b"{\"b\":1}\n{\"b\":2}\n")?;
+        assert_eq!(d.reconcile_once().map_err(|x| format!("{x:?}"))?.landed, 1);
+        assert_eq!(launches(&mut d)?, 1, "attached exactly once");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_hint_without_an_owner_signals_nothing_and_stays_pending() -> R {
+    let t = Tmp::new()?;
+    fs::set_permissions(&t.0, fs::Permissions::from_mode(0o700))?;
+    let file = t.write("claude/projects/-p/new.jsonl", b"{\"b\":1}\n")?;
+    let mut d = real_daemon(&t)?;
+    let outside = t.0.join("elsewhere/x.jsonl");
+    let mut lines = hint(Agent::Claude, None, None, true)?;
+    lines.extend(hint(Agent::Claude, Some(&outside), None, true)?);
+    lines.extend(hint(Agent::Codex, Some(&file), None, true)?);
+    fs::write(t.0.join("state/hints").join(DAY), &lines)?;
+    assert!(d.refresh_hints().is_empty());
+    for _ in 0..2 {
+        d.reconcile_once().map_err(|x| format!("{x:?}"))?;
+        assert_eq!(stored_offset(&t)?, 0, "an ownerless launch stays pending");
+        assert_eq!(launches(&mut d)?, 0);
+        assert!(d.refresh_hints().is_empty());
+    }
+    Ok(())
+}
+
+#[test]
+fn a_subagent_path_of_another_owner_signals_it_too() -> R {
+    let t = Tmp::new()?;
+    fs::set_permissions(&t.0, fs::Permissions::from_mode(0o700))?;
+    let main = t.write("claude/projects/-p/main.jsonl", b"{}\n")?;
+    let sub = t.write("claude/projects/-p/sub.jsonl", b"{}\n")?;
+    let mut d = real_daemon(&t)?;
+    let day = t.0.join("state/hints").join(DAY);
+    fs::write(&day, hint(Agent::Claude, Some(&main), Some(&sub), true)?)?;
+    let got = d.refresh_hints();
+    assert_eq!(got.len(), 2);
+    assert_eq!(
+        got.iter().map(|s| s.owner.clone()).collect::<Vec<_>>(),
+        vec![
+            owner_at("projects/-p/main.jsonl")?,
+            owner_at("projects/-p/sub.jsonl")?
+        ]
+    );
+    assert_eq!(got.get(1).map(|s| s.paths.clone()), Some(vec![sub.clone()]));
+    // Launch evidence belongs to the transcript's owner only.
+    d.reconcile_once().map_err(|x| format!("{x:?}"))?;
+    assert_eq!(launches(&mut d)?, 1);
+    // The same owner gives one signal.
+    let mut line = hint(Agent::Claude, Some(&main), Some(&main), false)?;
+    let mut all = fs::read(&day)?;
+    all.append(&mut line);
+    fs::write(&day, all)?;
+    let got = d.refresh_hints();
+    assert_eq!(got.len(), 1);
     Ok(())
 }
 

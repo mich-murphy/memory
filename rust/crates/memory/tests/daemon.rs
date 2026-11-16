@@ -807,6 +807,41 @@ fn hint_line(session: &str, env: &[&str]) -> R<Vec<u8>> {
 }
 
 #[test]
+fn a_hint_launch_goes_to_the_owner_of_its_path_not_to_the_namesake() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?, src_of("s2", 2)?];
+    let mut fs = files_with(b"hello\n");
+    fs.files.insert(2, b"hello\n".to_vec());
+    let mut d = boot(&tmp, &cfg, fs, FStore::default(), &list, WALL)?;
+    let argv = vec!["claude".to_owned()];
+    let launch = sanitize_launch(&argv, &["PATH=/usr/bin".to_owned()]);
+    let record = HintRecord {
+        schema: HintSchema::V1,
+        agent: Agent::Claude,
+        event: HintEvent::SessionStart,
+        // The text of the namesake's session, but the transcript is the other session's.
+        session: SessionId::try_from("s1".to_owned()).map_err(e)?,
+        cwd: PathHint::Absent,
+        transcript: PathHint::Present {
+            path: HintPath::try_from("/r/projects/p/s2.jsonl".to_owned()).map_err(e)?,
+        },
+        agent_transcript: PathHint::Absent,
+        launch: LaunchHint::Full(LaunchRecord::from_sanitized(&launch)),
+        reduction: Reduction::None,
+    };
+    let mut line = serde_json::to_vec(&record).map_err(e)?;
+    line.push(b'\n');
+    fs::write(hint_path(&tmp, "2026-11-09.jsonl"), &line).map_err(e)?;
+    assert_eq!(d.reconcile_once().map_err(e)?.landed, 2);
+    let hist = vec![b"hello\n".to_vec()];
+    let two = need(observe(d.store_mut(), &owner_of("s2")?, &hist)?, "no chain s2")?;
+    let one = need(observe(d.store_mut(), &owner_of("s1")?, &hist)?, "no chain s1")?;
+    assert_eq!((one.launches, two.launches), (0, 1));
+    Ok(())
+}
+
+#[test]
 fn hint_launch_attached_once_and_offset_advances_after_commit() -> R {
     let canary = "zzcanary123";
     let tmp = Tmp::new()?;
