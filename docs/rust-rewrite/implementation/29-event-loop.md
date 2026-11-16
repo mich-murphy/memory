@@ -2,7 +2,9 @@
 
 Coordinator brief. The parent session owns this file and acceptance. It follows
 [brief 28](28-production-prerequisites.md) (logs, hint retention, the audit; merged as `d765f9c`)
-and [evidence 19](evidence/19-production-prerequisites/). Status: written; no increment started.
+and [evidence 19](evidence/19-production-prerequisites/). Status: built and accepted locally on 2026-11-16 as `969d6fc`; not yet pushed. Results,
+commits and checks are in [evidence 20](evidence/20-event-loop/); each increment section below
+ends with a "Result" paragraph. Text that states a plan stays as written; changes are marked.
 
 ## Goal
 
@@ -75,6 +77,29 @@ reports it as a question and does not decide.
 | Log | `capture owner=<prefix> result=<landed\|unchanged\|failed\|deferred\|skipped\|paused>` per event-driven capture; `round` gains a leading `cause=<start\|timer\|rescan\|wake\|dir>`; `wake_gap` once per detected gap. No path in any line | DESIGN 11.5: info logs owner ids |
 | Test timing | `MEMORY_SIM_TIMING` is unchanged. The real-binary test sets `window = { quiet = 1, cap = 2 }` in its config. The wake gap is tested on the driver only | Seconds, not minutes; no test sleeps through a tick |
 
+### Decisions made after the brief was written (2026-11-16)
+
+The parent made these in the worker briefs and at review. Where one replaces a row above, it
+says so; the row above stays as the plan.
+
+| Topic | Decision | Reason |
+|---|---|---|
+| Capture before the start reconcile | None. Until the startup delay has passed and the start reconcile has completed, only it and the tick are wakes (LOOP-2a) | DESIGN 11.2 |
+| Stop flag | `StopFlag` is a read-only view of the inbox and is not counted as a stop source; `recv_ignoring_stop` exists for a watcher whose stop is read elsewhere (STOP-1a) | A live flag must not hide a failed source |
+| A retry left due | A retry the work leaves due is not a wake after it was offered in that turn (LOOP-2a) | The loop would spin while the host is paused |
+| Status stamp | A per-owner capture sets `updated_at` (LOOP-1) | The row above says status is written at once on an authoritative change |
+| A swept hint file | Leaves the in-memory scan and the seen offsets (LOOP-1) | A later per-owner capture re-inserted its offset |
+| Hint owner (replaces the raw `session_id` owner of `main`) | A hint record's owner is `Sources::note` of its transcript path, only an `Owner::Session` of the record's agent; the raw `session_id` never builds an owner; an ownerless record signals nothing and its launch record stays pending; a subagent path gives a second signal when it locates to another session owner | Found by a surviving mutant; see the section below |
+| Stop probe | The daemon holds a boxed probe with a setter (`set_stop`), no dependency on `watch.rs`; asked before each piece, before the manifest and once before the publish part, never inside it (STOP-1b). Replaces "stop argument" wording for `land` | Keeps the daemon independent of the watcher |
+| A stopped round | `RoundReport.stopped` (not logged, not stored); the round's tail runs unchanged but does not resume a paused host (parent fix `564577b`) | The tail cleared `host_paused` and logged a false `host_resumed` |
+| Signals and threads | Signal handlers are installed before the lock; the forwarding thread starts once the watcher exists | A signal raised earlier is forwarded, not lost |
+| Clock | One monotonic origin for the loop and the daemon; `SystemClock: PartialEq` so a test can pin it | A second origin would shift every deadline |
+| `capture` line | Written for `landed`, `unchanged`, `failed` and `stopped` only. A paused host, a parked owner and a deferred retry write none. Replaces the row above, which also listed `deferred`, `skipped`, `paused` | Those cases did no work |
+| Wake gap record | No separate `wake_gap` event; `round cause=wake` is the record. Replaces the `wake_gap` line of the Log row above | The cause key already says it |
+| Watcher failure | `memory: watch_unavailable`, exit 1, lock released | Closed code for a refusal |
+| Directory event in the hint directory | A `DirCreated` that classifies as `Route::Hints` is a hint change and sets no reconcile flag | The platform reports the hint directory's own creation after a zero-delay start round (evidence 20) |
+| Tick and batch | Tick 60 s and batch 256, not overridable | No test needs them |
+
 ## Increments
 
 | # | Increment | Branch | Depends on | Wave |
@@ -83,7 +108,8 @@ reports it as a question and does not decide.
 | 2 | LOOP-1: per-owner capture on the daemon | `rust/owner-capture` | none | 1 |
 | 3 | LOOP-2a: the driver, scripted | `rust/loop-driver` | none (defines its two traits) | 1 |
 | 4 | STOP-1b: stop between owners and pieces | `rust/stop-in-round` | 2 | 2 |
-| 5 | LOOP-2b: the binary runs the loop | `rust/loop-wired` | 1 to 4 | 3 |
+| 4a | Hint owner: a hint's owner from its transcript path (added after the brief) | `rust/hint-owner` | 4 | 2 |
+| 5 | LOOP-2b: the binary runs the loop | `rust/loop-wired` | 1 to 4a | 3 |
 
 Wave 1 runs in parallel. `watch.rs` is shared by 1 (inbox, `FsWatcher`, lines 219 on) and 3
 (`Scheduler`, lines 68 to 167): each edits only its region and its own tests.
@@ -101,6 +127,12 @@ watcher tests), `tests/run.rs`. Must not touch `daemon.rs`, `commit.rs`, `Schedu
   first receive is not lost; an overflow still gives one `Rescan` afterwards.
 - Teeth: stop sent only as a queued input; flag checked after the queue; overflow lost when a
   stop is pending.
+
+**Result (STOP-1a).** Tip `7c31f6e`, accepted locally on 2026-11-16: a stop flag that a full queue
+cannot drop, a read-only view, and a non-recursive extra directory in the watcher. The parent's
+mutants killed 7 of 8 first; `dir-recursive` survived and `7c31f6e` pinned it. Details, mutants
+and
+checks: [evidence 20](evidence/20-event-loop/).
 
 ### LOOP-1
 
@@ -121,6 +153,12 @@ Must not touch `watch.rs`, `commit.rs`, `run.rs`.
   vanishes `of` does not yield it and no absence is counted.
 - Teeth: paused check removed; parked owner captured; `host_paused` reset; `rounds` counted;
   hint offset not advanced; `of` walks; `of` yields a symlink; canonical spelling ignored.
+
+**Result (LOOP-1).** Tip `d28ca14`, accepted locally on 2026-11-16: `note`, `of`, `note_path`,
+`capture_owner`, `refresh_hints`, `next_retry`, `retries_due`. Review found a swept hint file kept
+in the scan, a stale `updated_at` and a one-sided depth pin; a second worker fixed them. Survivor
+`next-retry-latest` was pinned by `d28ca14`. Details, mutants and
+checks: [evidence 20](evidence/20-event-loop/).
 
 ### LOOP-2a
 
@@ -143,6 +181,11 @@ only) and its tests. Must not touch `daemon.rs`, `run.rs`, `commit.rs`.
 - Teeth: tick moved by an input; gap boundary at 120; reconcile counted per cause; stop looked
   at only after the batch; retry run early; capture not marked complete.
 
+**Result (LOOP-2a).** Tip `07821b3`, accepted locally on 2026-11-16: the scripted driver,
+`Coalescer::take_due`, the per-call path map; `Scheduler::handle` at 5,000 owners measured 224,346
+ns to 29,362 ns per input. 10 of 10 parent mutants killed. Details, mutants and
+checks: [evidence 20](evidence/20-event-loop/).
+
 ### STOP-1b
 
 Owns `commit.rs`, `daemon.rs` (stop argument and `land` only), `tests/commit_protocol.rs`,
@@ -158,6 +201,24 @@ Owns `commit.rs`, `daemon.rs` (stop argument and `land` only), `tests/commit_pro
 - Teeth: stop checked between the `current.json` write and the verification; stop not checked
   between pieces; a stopped capture given a retry deadline; index advanced on a stopped
   capture; the round continuing after a stop.
+
+**Result (STOP-1b).** Tip `564577b`, accepted locally on 2026-11-16: `commit_stoppable`,
+`Failure::Stopped`, `Daemon::set_stop`; a stop is honoured between owners, between pieces, before
+the manifest and before the publish part. 11 of 11 parent mutants killed on the first run; the
+parent fixed a false `host_resumed` in `564577b`. Details, mutants and
+checks: [evidence 20](evidence/20-event-loop/).
+
+### Hint owner (added after the brief)
+
+Owns `daemon.rs` (`hint_owner`), `resolve.rs` tests and the daemon's hint fixtures. Found while
+accepting LOOP-1: on `main` a hint record's owner was built from the hook's raw `session_id`,
+which never equals the locator's session owner, so a launch record never attached and a hint
+signalled an owner without sources. The fix is in the decisions table above.
+
+**Result (hint owner).** Tip `d187108`, accepted locally on 2026-11-16: `hint_owner`
+(`daemon.rs:438`); `owner_of` removed; `PendingHint.owner` is optional. 12 parent mutants, 11
+killed on the first run; `sub-without-main` survived and `d187108` pinned it. See
+[evidence 20](evidence/20-event-loop/).
 
 ### LOOP-2b
 
@@ -176,6 +237,12 @@ Owns `run.rs`, `assemble.rs` (building the watcher only; the prefix refusal stay
   its grammar and order rule with the new events.
 - Teeth: watcher not started (the append never arrives); hints directory not watched; stop
   flag not passed to the daemon; `capture` line carrying a path.
+
+**Result (LOOP-2b).** Tip `969d6fc`, accepted locally on 2026-11-16: `src/wired.rs`, the binary
+runs the loop, the `capture` log line, and real-binary tests including a retry without a round and
+an early signal. 11 of 11 parent mutants killed. The hint-directory event (flaky tests, 3 of 30
+runs) was fixed in `aca704a`; 30 runs after: 0 failed. Details, mutants and
+checks: [evidence 20](evidence/20-event-loop/).
 
 ## Rules for workers
 
@@ -217,6 +284,18 @@ on the intended assertion, `scripts/gates.sh` on the combined tip. Evidence goes
    of STOP-1b bounds the stop, not the round. Measure in the acceptance run before choosing a
    rule.
 
+Added since (2026-11-16):
+
+5. **Ownerless launch records** widen item "kept for ever" of brief 28: a record with no
+   transcript path (for example a Codex session that is not persisted) has no owner, so its
+   hint day file is kept and counted in `hints_kept_old`.
+6. **Deletions are not detected until slice 3** (the item 1 probe was repeated on `2edf2f8`
+   with the same result; see evidence 20).
+7. **A round does not end early when the network is down** (item 4 still holds; nothing in
+   the loop changes it).
+8. **`HintSignal.paths` has no production consumer**: paths are noted when the scan is built.
+9. **The wake stagger of DESIGN 7.1 is not built**, and DESIGN.md still describes it.
+
 ## Open for the operator
 
 None blocks wave 1.
@@ -225,7 +304,9 @@ None blocks wave 1.
    first production write or after the peak-RSS measurement.
 2. The wake stagger is dropped (serial captures); confirm, and it is folded into DESIGN 7.1.
 3. One `capture` log line per event-driven capture at info.
-4. Still open from brief 28: no cap on kept hint files; the `events` block removal; the
+4. Added: the `capture` line as built (four results), `round cause=wake` instead of a
+   `wake_gap` line, and the hint-owner rule; confirm.
+5. Still open from brief 28: no cap on kept hint files; the `events` block removal; the
    `launch_attach_failed` removal and the dated notes under A11.3 and A13.3; the AUDIT-3
    choices; no `unpark` yet.
 
@@ -238,4 +319,9 @@ units and hook installation; deletions, snapshots and inotify (slice 3).
 
 ## Progress ledger
 
-- 2026-11-16: brief written on `94b8abd`.
+- 2026-11-16: brief written on `94b8abd` (`ef18965`).
+- 2026-11-16: wave 1 accepted locally: STOP-1a `7c31f6e`, LOOP-1 `d28ca14`, LOOP-2a `07821b3`
+  (combined: seven checks 0, 648 passed). Hint-owner defect found by a surviving mutant.
+- 2026-11-16: wave 2 accepted locally: STOP-1b `564577b`, hint owner `d187108` (665 passed).
+- 2026-11-16: LOOP-2b accepted locally as `969d6fc` (seven checks 0 on `e6060d5`, 674 passed;
+  11 of 11 mutants killed; stress 30 runs, 0 failed). Full gates: see evidence 20. Not pushed.

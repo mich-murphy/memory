@@ -39,6 +39,11 @@ append sources, accepted locally; see
 [brief 28](docs/rust-rewrite/implementation/28-production-prerequisites.md) and
 [evidence 19](docs/rust-rewrite/implementation/evidence/19-production-prerequisites/). The
 empty-prefix refusal and the unconnected watcher remain.
+**Update 2026-11-16 (brief 29):** the daemon now runs an event loop: per-owner capture after the
+coalescer window, hints, a safety reconcile every 15 minutes and a stop honoured inside a
+round; accepted locally, not pushed. The empty-prefix refusal remains. See
+[brief 29](docs/rust-rewrite/implementation/29-event-loop.md) and
+[evidence 20](docs/rust-rewrite/implementation/evidence/20-event-loop/).
 
 The work is committed as draft gh stack #56 (PRs #54, #55, #57, #58, #59, #60, top branch
 `rust/coverage-floor-80`), green on hosted CI. No Rust deployment or cutover occurred.

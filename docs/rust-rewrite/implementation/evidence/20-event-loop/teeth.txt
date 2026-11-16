@@ -1,0 +1,320 @@
+# Teeth checks for the event-loop stack (brief 29). Each block is the FAIL and panic lines of one parent run with
+# the named change applied to the source; every change was reverted afterwards. Durations, test indexes and thread
+# ids are stripped. 'survived' means nextest exited 0. A mutant that survived and was fixed is shown with the run
+# that killed it (stop-flag-3 for dir-recursive, wave2b for sub-without-main). Mutant names are the keys of the
+# parent's mutation scripts.
+
+## STOP-1a on 9dea33d (rust/stop-flag; dir-recursive survived, then killed on 7c31f6e)
+
+### flag-not-set
+FAIL memory::watch a_stop_then_dropped_handles_is_a_stop_not_a_failure
+FAIL memory::watch forward_signal_requests_a_stop
+FAIL memory::watch fs_watcher_exposes_a_stop_handle
+FAIL memory::watch stop_beats_a_full_queue_and_an_overflow_and_is_sticky
+FAIL memory::watch stop_before_the_first_receive_and_overflow_after_it
+FAIL memory::watch stop_flag_reads_without_receiving_and_is_sticky
+panicked at crates/memory/tests/watch.rs:325:5:
+panicked at crates/memory/tests/watch.rs:380:5:
+
+### failed-silent
+FAIL memory::watch a_live_stop_flag_does_not_hide_a_failed_source
+FAIL memory::watch dropped_handles_without_a_stop_are_a_failed_source
+panicked at crates/memory/tests/watch.rs:367:5:
+panicked at crates/memory/tests/watch.rs:313:5:
+
+### flag-counted
+FAIL memory::watch a_live_stop_flag_does_not_hide_a_failed_source
+panicked at crates/memory/tests/watch.rs:367:5:
+
+### overflow-before-stop
+FAIL memory::watch stop_beats_a_full_queue_and_an_overflow_and_is_sticky
+FAIL memory::watch stop_before_the_first_receive_and_overflow_after_it
+FAIL memory::watch stop_flag_reads_without_receiving_and_is_sticky
+panicked at crates/memory/tests/watch.rs:262:9:
+panicked at crates/memory/tests/watch.rs:279:5:
+
+### dir-unwatched
+FAIL memory::watch fs_watcher_watches_an_extra_directory_non_recursively
+panicked at crates/memory/tests/watch.rs:690:5:
+
+### dir-recursive
+survived (nextest exit 0)
+
+### missing-dir-accepted
+FAIL memory::watch fs_watcher_rejects_a_missing_or_non_directory_extra_directory
+panicked at crates/memory/tests/watch.rs:704:5:
+
+### forward-noop
+FAIL memory::watch forward_signal_requests_a_stop
+panicked at crates/memory/tests/watch.rs:380:5:
+
+### dir-recursive (run stop-flag-3)
+FAIL memory::watch fs_watcher_watches_an_extra_directory_non_recursively
+panicked at crates/memory/tests/watch.rs:712:5:
+
+### dir-unwatched (run stop-flag-3)
+FAIL memory::watch fs_watcher_watches_an_extra_directory_non_recursively
+panicked at crates/memory/tests/watch.rs:701:5:
+
+## LOOP-2a on ef15093 (rust/loop-driver, before the rebase)
+
+### retry-always-wake
+FAIL memory::driver a_retry_that_stays_due_is_offered_once_per_turn_and_does_not_spin
+panicked at crates/memory/tests/driver.rs:822:5:
+
+### due-order-reversed
+FAIL memory-core::core_boundaries take_due_returns_due_owners_in_edge_order_and_skips_in_flight
+panicked at crates/memory-core/tests/core_boundaries.rs:257:5:
+
+### hints-every-batch
+FAIL memory::driver a_change_while_the_capture_waits_for_the_start_reconcile_gives_one_follow_up
+FAIL memory::driver a_change_is_captured_once_at_quiet_after_the_last_change
+FAIL memory::driver a_failed_reconcile_ends_with_round_failed_after_shutdown
+FAIL memory::driver a_failed_capture_ends_with_round_failed_after_shutdown
+FAIL memory::driver a_failed_source_ends_with_wait_failed_after_shutdown
+FAIL memory::driver a_failed_shutdown_after_a_stop_is_shutdown_failed_and_after_a_failure_is_ignored
+panicked at crates/memory/tests/driver.rs:440:5:
+panicked at crates/memory/tests/driver.rs:361:5:
+
+### shutdown-failed-always
+FAIL memory::driver a_failed_shutdown_after_a_stop_is_shutdown_failed_and_after_a_failure_is_ignored
+panicked at crates/memory/tests/driver.rs:770:5:
+
+### cause-last
+FAIL memory::driver many_causes_in_one_batch_give_one_reconcile_with_the_first_cause
+panicked at crates/memory/tests/driver.rs:536:5:
+
+### no-poll
+FAIL memory::driver a_change_is_captured_once_at_quiet_after_the_last_change
+FAIL memory::driver a_change_while_the_capture_waits_for_the_start_reconcile_gives_one_follow_up
+FAIL memory::driver a_stop_hint_waits_for_quiet
+FAIL memory::driver an_owner_is_captured_again_after_its_capture
+FAIL memory::driver continuous_changes_are_captured_at_cap
+FAIL memory::driver no_capture_runs_before_the_start_reconcile
+panicked at crates/memory/tests/driver.rs:360:5:
+panicked at crates/memory/tests/driver.rs:440:5:
+
+### quiet-strict
+FAIL memory::driver a_change_is_captured_once_at_quiet_after_the_last_change
+FAIL memory::driver a_change_while_the_capture_waits_for_the_start_reconcile_gives_one_follow_up
+FAIL memory::driver a_stop_hint_waits_for_quiet
+FAIL memory::driver an_owner_is_captured_again_after_its_capture
+FAIL memory::driver no_capture_runs_before_the_start_reconcile
+FAIL memory::driver owners_due_together_run_in_edge_order_and_an_unmapped_path_does_nothing
+panicked at crates/memory/tests/driver.rs:360:5:
+panicked at crates/memory/tests/driver.rs:440:5:
+
+### hints-not-fed
+FAIL memory::driver a_session_end_hint_is_captured_in_the_same_turn
+FAIL memory::driver a_stop_hint_waits_for_quiet
+FAIL memory::driver the_hint_query_is_made_once_per_batch_that_touched_the_hint_directory
+panicked at crates/memory/tests/driver.rs:418:5:
+panicked at crates/memory/tests/driver.rs:426:5:
+
+### dir-as-rescan
+FAIL memory::driver many_causes_in_one_batch_give_one_reconcile_with_the_first_cause
+FAIL memory::driver rescan_error_and_new_directory_each_reconcile_once
+panicked at crates/memory/tests/driver.rs:536:5:
+panicked at crates/memory/tests/driver.rs:519:9:
+
+### wait-failed-as-stop
+FAIL memory::driver a_failed_shutdown_after_a_stop_is_shutdown_failed_and_after_a_failure_is_ignored
+FAIL memory::driver a_failed_source_ends_with_wait_failed_after_shutdown
+panicked at crates/memory/tests/driver.rs:770:5:
+panicked at crates/memory/tests/driver.rs:718:5:
+
+## LOOP-1 on 3b969c9 (rust/owner-capture, before the rebase)
+
+### paused-ignored
+FAIL memory::daemon a_pause_from_a_round_survives_owner_captures_until_the_next_round
+FAIL memory::daemon owner_capture_auth_failure_pauses_and_is_written_at_once
+panicked at crates/memory/tests/daemon.rs:3637:9:
+panicked at crates/memory/tests/daemon.rs:3606:5:
+
+### deferred-ignored
+FAIL memory::daemon retry_deadline_defers_then_the_capture_runs
+panicked at crates/memory/tests/daemon.rs:3575:5:
+
+### seen-not-advanced
+FAIL memory::daemon an_uncommitted_hint_signals_once_more_after_a_restart
+FAIL memory::daemon hint_refresh_returns_each_record_once_with_its_signal
+panicked at crates/memory/tests/daemon.rs:3793:5:
+panicked at crates/memory/tests/daemon.rs:3758:5:
+
+### signal-always-stop
+FAIL memory::daemon hint_refresh_returns_each_record_once_with_its_signal
+panicked at crates/memory/tests/daemon.rs:3764:5:
+
+### hint-paths-not-noted
+survived (nextest exit 0)
+
+### sweep-keeps-scan
+FAIL memory::daemon a_swept_hint_file_does_not_return_through_an_owner_capture
+panicked at crates/memory/tests/daemon.rs:3434:5:
+
+### stamp-not-set
+FAIL memory::daemon owner_capture_refreshes_the_status_stamp_and_early_returns_do_not
+panicked at crates/memory/tests/daemon.rs:3460:5:
+
+### retries-due-all
+FAIL memory::daemon retry_deadline_defers_then_the_capture_runs
+panicked at crates/memory/tests/daemon.rs:3570:5:
+
+### next-retry-latest
+survived (nextest exit 0)
+
+### park-not-logged
+FAIL memory::daemon owner_capture_park_is_written_at_once_and_logged_once
+panicked at crates/memory/tests/daemon.rs:3664:5:
+
+### pause-not-logged
+FAIL memory::daemon owner_capture_auth_failure_pauses_and_is_written_at_once
+panicked at crates/memory/tests/daemon.rs:3601:5:
+
+### symlinked-dir-passes
+FAIL memory::resolve of_yields_exactly_what_enumerate_yields
+panicked at crates/memory/tests/resolve.rs:487:5:
+
+### canon-ignored
+FAIL memory::resolve note_maps_a_path_to_its_owner_in_either_spelling
+panicked at crates/memory/tests/resolve.rs:409:5:
+
+## STOP-1b and hint owner on 4f104db
+
+### stop-outcome-failed
+FAIL memory::commit_protocol a_stop_maps_to_a_cancelled_attempt_that_changes_nothing
+FAIL memory::daemon a_stop_after_piece_one_leaves_one_piece_and_the_next_start_captures_it_all
+FAIL memory::daemon capture_owner_stopped_mid_pieces_is_stopped_and_captures_again_without_a_stop
+panicked at crates/memory/tests/commit_protocol.rs:2988:5:
+panicked at crates/memory/tests/daemon.rs:4032:5:
+
+### no-probe-before-publish
+FAIL memory::commit_protocol a_stop_after_the_manifest_sends_no_current_request
+FAIL memory::commit_protocol a_stop_raised_during_a_verification_get_changes_nothing
+FAIL memory::commit_protocol a_stop_raised_during_the_current_write_changes_nothing
+panicked at crates/memory/tests/commit_protocol.rs:2927:5:
+panicked at crates/memory/tests/commit_protocol.rs:2945:5:
+
+### no-probe-before-manifest
+FAIL memory::commit_protocol a_stop_after_the_last_piece_sends_no_manifest
+FAIL memory::commit_protocol a_stop_after_the_manifest_sends_no_current_request
+FAIL memory::commit_protocol a_stop_raised_during_a_verification_get_changes_nothing
+FAIL memory::commit_protocol a_stop_raised_during_the_current_write_changes_nothing
+panicked at crates/memory/tests/commit_protocol.rs:2920:5:
+panicked at crates/memory/tests/commit_protocol.rs:2928:5:
+
+### piece-probe-once
+FAIL memory::commit_protocol a_stop_after_the_last_piece_sends_no_manifest
+FAIL memory::commit_protocol a_stop_after_piece_one_of_three_leaves_one_piece_and_nothing_else
+FAIL memory::commit_protocol a_stop_after_the_manifest_sends_no_current_request
+FAIL memory::commit_protocol a_stop_raised_during_a_verification_get_changes_nothing
+FAIL memory::commit_protocol a_stop_raised_during_the_current_write_changes_nothing
+FAIL memory::daemon a_stop_after_piece_one_leaves_one_piece_and_the_next_start_captures_it_all
+panicked at crates/memory/tests/commit_protocol.rs:2918:5:
+panicked at crates/memory/tests/commit_protocol.rs:2907:5:
+
+### land-probe-false
+FAIL memory::daemon a_stop_after_piece_one_leaves_one_piece_and_the_next_start_captures_it_all
+FAIL memory::daemon capture_owner_stopped_mid_pieces_is_stopped_and_captures_again_without_a_stop
+panicked at crates/memory/tests/daemon.rs:4032:5:
+panicked at crates/memory/tests/daemon.rs:4126:5:
+
+### outcome-not-stopped
+FAIL memory::daemon capture_owner_stopped_mid_pieces_is_stopped_and_captures_again_without_a_stop
+panicked at crates/memory/tests/daemon.rs:4126:5:
+
+### cancelled-drops-base
+FAIL memory::daemon capture_owner_stopped_mid_pieces_is_stopped_and_captures_again_without_a_stop
+panicked at crates/memory/tests/daemon.rs:4137:5:
+
+### round-stop-ignored
+FAIL memory::daemon a_round_cut_short_by_a_stop_does_not_resume_a_paused_host
+FAIL memory::daemon a_round_stopped_when_owner_two_lands_never_touches_owners_three_to_five
+FAIL memory::daemon a_stop_before_the_round_runs_no_owner_and_sends_no_request
+panicked at crates/memory/tests/daemon.rs:4187:5:
+panicked at crates/memory/tests/daemon.rs:4090:5:
+
+### attach-any-owner
+FAIL memory::daemon a_hint_launch_goes_to_the_owner_of_its_path_not_to_the_namesake
+FAIL memory::resolve a_hint_without_an_owner_signals_nothing_and_stays_pending
+FAIL memory::resolve a_subagent_path_of_another_owner_signals_it_too
+panicked at crates/memory/tests/daemon.rs:846:5:
+panicked at crates/memory/tests/resolve.rs:756:9:
+
+### done-any-owner
+FAIL memory::daemon a_hint_launch_goes_to_the_owner_of_its_path_not_to_the_namesake
+FAIL memory::daemon old_file_with_uncommitted_owner_is_kept_and_counted
+FAIL memory::resolve a_hint_without_an_owner_signals_nothing_and_stays_pending
+FAIL memory::resolve a_subagent_path_of_another_owner_signals_it_too
+panicked at crates/memory/tests/daemon.rs:846:5:
+panicked at crates/memory/tests/daemon.rs:3348:9:
+
+### agent-unchecked
+FAIL memory::resolve a_hint_without_an_owner_signals_nothing_and_stays_pending
+panicked at crates/memory/tests/resolve.rs:752:5:
+
+### sub-without-main
+survived (nextest exit 0)
+
+### sub-without-main (run wave2b)
+FAIL memory::resolve a_hint_without_an_owner_signals_nothing_and_stays_pending
+panicked at crates/memory/tests/resolve.rs:754:5:
+
+## LOOP-2b on 969d6fc (rust/loop-wired)
+
+### inputs-stop-timeout
+FAIL memory::wired inputs_report_timeout_then_the_stop_flag_and_stop
+panicked at crates/memory/tests/wired.rs:75:5:
+
+### inputs-failed-timeout
+FAIL memory::wired inputs_report_a_dead_stop_source_as_failed
+panicked at crates/memory/tests/wired.rs:86:5:
+
+### next-retry-none
+FAIL memory::s3_store event_loop::a_failed_capture_is_retried_at_its_deadline_without_a_round
+Error: "no committed round within 20s; requests so far: 5"
+
+### retries-due-empty
+FAIL memory::s3_store event_loop::a_failed_capture_is_retried_at_its_deadline_without_a_round
+Error: "no committed round within 20s; requests so far: 5"
+
+### hints-dropped
+FAIL memory::s3_store event_loop::a_session_end_hint_flushes_before_the_quiet_window
+Error: "no committed round within 20s; requests so far: 4"
+
+### capture-not-logged
+FAIL memory::s3_store event_loop::a_new_session_file_is_captured_by_the_watcher_alone
+FAIL memory::s3_store event_loop::a_session_end_hint_flushes_before_the_quiet_window
+FAIL memory::s3_store event_loop::a_failed_capture_is_retried_at_its_deadline_without_a_round
+FAIL memory::s3_store event_loop::an_append_is_in_the_store_within_seconds_not_an_hour
+FAIL memory::s3_store event_loop::a_stop_during_a_held_piece_put_ends_the_capture_before_the_manifest
+panicked at crates/memory/tests/s3_store/event_loop.rs:97:5:
+panicked at crates/memory/tests/s3_store/event_loop.rs:180:5:
+
+### cause-fixed
+FAIL memory::s3_store event_loop::an_append_is_in_the_store_within_seconds_not_an_hour
+panicked at crates/memory/tests/s3_store/event_loop.rs:55:5:
+
+### shutdown-skipped
+FAIL memory::harness a_closed_stderr_does_not_stop_the_daemon
+FAIL memory::harness sigint_after_a_round_exits_zero_and_flushes_status
+FAIL memory::harness sigterm_after_a_round_exits_zero_and_flushes_status
+panicked at crates/memory/tests/harness.rs:286:5:
+panicked at crates/memory/tests/harness.rs:186:5:
+
+### hint-dir-not-dirty
+FAIL memory::driver a_directory_created_in_the_hint_directory_is_a_hint_change_and_no_reconcile
+panicked at crates/memory/tests/driver.rs:420:5:
+
+### signal-dropped
+FAIL memory::run a_signal_raised_before_the_forwarding_thread_starts_is_forwarded
+Error: "the signal was never forwarded"
+
+### window-scaled
+FAIL memory::s3_store event_loop::a_failed_capture_is_retried_at_its_deadline_without_a_round
+FAIL memory::s3_store event_loop::a_new_session_file_is_captured_by_the_watcher_alone
+FAIL memory::s3_store event_loop::an_append_is_in_the_store_within_seconds_not_an_hour
+FAIL memory::s3_store event_loop::a_stop_during_a_held_piece_put_ends_the_capture_before_the_manifest
+Error: "no committed round within 20s; requests so far: 4"
+Error: "the new session file was never captured"
+

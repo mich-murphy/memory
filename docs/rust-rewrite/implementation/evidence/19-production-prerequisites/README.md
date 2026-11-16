@@ -447,3 +447,21 @@ job and step names.
 ## Not run
 
 2,000 cases, `cargo mutants`, anything against R2.
+
+## PR #114 and the runs on `94b8abd`
+
+Added 2026-11-16 (UTC). PR #114 (`docs/stack-111-merged`, `2da4750`, the close-out record) ran
+"Rust rewrite gates" 43891615139: success at attempt 1 on all six jobs (macOS gates 17.2
+minutes, macOS coverage 11.0 minutes). "CI" 43891615119 attempt 1 had `Tests (macos-26)`
+cancelled with no steps ("not acquired by Runner"); one rerun failed only in the two accepted
+`govulncheck` steps. `gh stack merge --yes --merge` refused ("this stack has not been submitted
+to GitHub yet": a one-branch stack gets no stack number) and `gh stack merge 114` refused ("not
+a stack number or a stacked pull request"), so the PR was merged with `gh pr merge 114 --merge
+--match-head-commit <sha>` at 2026-11-16T15:39:36Z. `origin/main` is `94b8abd`, tree equal to
+`2da4750`.
+
+Post-merge on `94b8abd`: "CI" 43898746499 failed only in the two accepted steps. "Rust rewrite
+gates" 43898746418 needed three attempts: attempt 1, both macOS jobs never acquired a runner
+(zero steps, 15.0 minutes queued); attempt 2, macOS gates success and macOS coverage again never
+acquired; attempt 3, macOS coverage success (all six jobs success at 16:36 UTC). No step failed
+in any attempt; the parent reran only jobs that never started.

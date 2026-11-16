@@ -24,8 +24,11 @@ This is the single active task brief; dated operating records below remain histo
 > as the dated record of why each change was made. The baseline hash pin is removed (A14.3):
 > `verify-evidence.py` now checks only the prototype results, and DESIGN.md and AGENTS.md
 > are edited directly. Lines further down that call those files hash-pinned, or cite
-> `baseline-identities.json`, are history. Then read the "Session 2026-11-12 to 2026-11-16,
-> production prerequisites (current)" block directly below, with
+> `baseline-identities.json`, are history. Then read the "Session 2026-11-16, event loop
+> (current)" block directly below, with
+> [brief 29](rust-rewrite/implementation/29-event-loop.md) and
+> [evidence 20](rust-rewrite/implementation/evidence/20-event-loop/); the "Session 2026-11-12
+> to 2026-11-16, production prerequisites" block after it is the step before it, with
 > [brief 28](rust-rewrite/implementation/28-production-prerequisites.md) and
 > [evidence 19](rust-rewrite/implementation/evidence/19-production-prerequisites/). The
 > "Session 2026-11-12, run loop" block after it is the step before it, with
@@ -47,7 +50,37 @@ This is the single active task brief; dated operating records below remain histo
 > in this brief (P5 authorization, acceptance bucket/token, hook argv, symlinks, state root)
 > are resolved by the amendments and kept only as history.
 
-**Session 2026-11-12 to 2026-11-16, production prerequisites (current).** Brief 28; record in
+**Session 2026-11-16, event loop (current).** Brief 29; record in
+[evidence 20](rust-rewrite/implementation/evidence/20-event-loop/). Accepted locally as
+`969d6fc` (34 commits over `ef18965`, on `origin/main` `94b8abd`); not pushed, not on hosted CI.
+- What exists now (implemented, commits in evidence 20): `memory daemon` installs the signal
+  handlers, builds the watcher over the roots and `state/hints` (`watch_unavailable` on
+  failure), runs the start reconcile after the startup delay, then captures a changed file per
+  owner after the coalescer window, signals an owner from a hint line (session end flushes at
+  once), runs one full reconcile for lost events, a watcher error, a new directory or a wake
+  gap, and every 15 minutes, and retries a failed capture at its own deadline. A stop is
+  honoured between owners, between pieces, before the manifest and before the publish part,
+  never between the `current.json` write and its verification. The log gains `round cause=`
+  and a `capture` line; there is no `wake_gap` event.
+- Found on the way: on `main` a hint record's owner was built from the raw `session_id` and
+  never matched the locator's owner (found by a surviving mutant); fixed by taking the owner
+  from the transcript path (`d187108`). A hint-directory creation event after a zero-delay
+  start round made the real-binary tests flaky (3 of 30 runs); fixed in the driver (`aca704a`),
+  30 runs after: 0 failed.
+- Checks: seven checks 0 on every increment tip and on `e6060d5` (674 passed, 5 skipped, 12
+  doctests); parent mutants killed on the intended assertion, survivors pinned by parent
+  commits (`7c31f6e`, `d28ca14`, `d187108`). Full gates: see evidence 20.
+- Known limits: deleted files are never recorded as deleted (slice 3); commit pauses are
+  zero; a capture holds the whole range in memory; a round does not end early when the
+  network is down; no `unpark`; ownerless launch records keep their hint day file; the wake
+  gap is tested on the driver only; the real-binary tests ran on macOS only; the wake stagger
+  of DESIGN 7.1 is not built. The daemon still refuses an empty key prefix. Not run: 2,000
+  cases, `cargo mutants`, anything against R2, hosted CI.
+- Next action: push the stack (`gh stack`, one watcher at a time), then decide commit pause
+  lengths and the streaming-capture question, lift the empty-prefix refusal, and start the
+  DESIGN 17 acceptance runs.
+
+**Session 2026-11-12 to 2026-11-16, production prerequisites.** Brief 28; record in
 [evidence 19](rust-rewrite/implementation/evidence/19-production-prerequisites/). All
 increments are accepted and on `main`: stack #111 merged as `d765f9c` on 2026-11-16.
 - What exists now (implemented, commits in evidence 19): `memory daemon` logs `started`,
