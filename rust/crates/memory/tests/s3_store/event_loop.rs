@@ -98,6 +98,40 @@ fn a_new_session_file_is_captured_by_the_watcher_alone() -> R {
     Ok(())
 }
 
+/// The results of the log's `capture` lines, in order.
+fn capture_results(log: &str) -> Vec<&str> {
+    lines_with(log, "capture owner=")
+        .iter()
+        .filter_map(|l| l.rsplit_once(" result=").map(|(_, result)| result))
+        .collect()
+}
+
+#[test]
+fn a_failed_capture_is_retried_at_its_deadline_without_a_round() -> R {
+    let s = setup("loop-retry")?;
+    with_window(&s, 1, 2)?;
+    let mut child = s.spawn_with(HOUR)?;
+    let first = s.wait_commit(&mut child, None)?;
+    // One refused piece PUT: the capture fails and its owner gets a retry deadline one second
+    // later. Nothing changes the file again and the next round is an hour away, so only the
+    // loop's retry wake can upload the bytes.
+    s.server.queue("PUT", ".zst", Fault::Status(503, None));
+    s.append(12..20)?;
+    s.wait_commit(&mut child, Some(&first))?;
+    let log = stop(&s, child)?;
+    let results = capture_results(&log);
+    assert_eq!(results.first(), Some(&"failed"), "{log}");
+    assert_eq!(
+        results.iter().filter(|r| **r == "failed").count(),
+        1,
+        "{log}"
+    );
+    assert!(results.contains(&"landed"), "{log}");
+    assert_eq!(lines_with(&log, "round").len(), 1, "{log}");
+    restore(&s, "a")?;
+    Ok(())
+}
+
 /// Append one session-end hint for the setup's session file, as the hook does.
 fn hint_session_end(s: &Setup) -> R {
     let body = format!(

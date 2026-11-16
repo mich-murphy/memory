@@ -1,8 +1,42 @@
-//! The run loop with a scripted waiting primitive: no time, no signals, no threads.
+//! `memory::run`: exit codes, the startup delay, the simulation timing and the signal source.
 use memory::run::{
-    Outcome, STARTUP_MAX, STARTUP_MIN, Timing, draw_from, parse_sim_timing, startup_delay,
+    Outcome, STARTUP_MAX, STARTUP_MIN, SignalSource, Timing, draw_from, parse_sim_timing,
+    startup_delay,
 };
-use std::time::Duration;
+use memory::watch::{FsWatcher, Received};
+use std::time::{Duration, Instant};
+
+fn e<E: std::fmt::Debug>(err: E) -> String {
+    format!("{err:?}")
+}
+
+/// The daemon installs its handlers before it takes the lock and starts the forwarding thread
+/// only once the watcher exists. A signal raised in between is kept and forwarded.
+#[test]
+fn a_signal_raised_before_the_forwarding_thread_starts_is_forwarded() -> Result<(), String> {
+    let source = SignalSource::install().map_err(e)?;
+    signal_hook::low_level::raise(signal_hook::consts::SIGTERM).map_err(e)?;
+    let watcher = FsWatcher::new(&[]).map_err(e)?;
+    let flag = watcher.stop_flag();
+    assert!(
+        !flag.requested(),
+        "nothing forwards before the thread starts"
+    );
+    source.forward_to(watcher.stop_handle()).map_err(e)?;
+    let start = Instant::now();
+    loop {
+        match watcher.recv_timeout(Duration::from_millis(50)) {
+            Received::Stop => break,
+            Received::Timeout => {}
+            other => return Err(format!("{other:?}")),
+        }
+        if start.elapsed() > Duration::from_secs(20) {
+            return Err("the signal was never forwarded".to_owned());
+        }
+    }
+    assert!(flag.requested());
+    Ok(())
+}
 
 #[test]
 fn only_a_stop_gives_exit_zero() {
