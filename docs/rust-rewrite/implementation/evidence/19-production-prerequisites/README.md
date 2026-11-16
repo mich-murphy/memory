@@ -118,7 +118,7 @@ The seven checks are fmt, clippy `-Dwarnings`, rustdoc `-Dwarnings`, nextest, do
 | LOG-1 | `a204f90` | 0 (`cargo deny` ok) | 526 passed, 4 skipped | 5, all killed |
 | AUDIT-1 | `ab13d1b` | 0 | 532 passed, 4 skipped | 8, all killed |
 | AUDIT-2 | `22af43e` | 0 | 559 passed, 4 skipped | 12; 11 killed on the first run, 1 survivor fixed by `c9941ff` |
-| LOG-2 | `a398d14` | 0 | 551 passed, 4 skipped | 7, all killed |
+| LOG-2 | `a398d14` | 0 | 551 passed, 4 skipped | 8, all killed |
 | AUDIT-3 | `2edf2f8` | 0 | 583 passed, 4 skipped | 15, all killed |
 
 ### HINT-1
