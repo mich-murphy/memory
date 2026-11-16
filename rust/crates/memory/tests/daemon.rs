@@ -3586,6 +3586,28 @@ fn retry_deadline_defers_then_the_capture_runs() -> R {
 }
 
 #[test]
+fn next_retry_is_the_earliest_deadline_among_owners() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?, src_of("s2", 2)?];
+    let (o1, o2) = (owner_of("s1")?, owner_of("s2")?);
+    let store = FStore {
+        offline: true,
+        ..FStore::default()
+    };
+    let mut d = boot(&tmp, &cfg, two_files(), store, &list, WALL)?;
+    assert_eq!(cap(&mut d, &o1)?.0, OwnerOutcome::Failed);
+    let first = need(d.next_retry(), "a retry deadline")?;
+    // The second owner fails after the first deadline has passed, so its own is later.
+    let at = u64::try_from(first.as_nanos()).map_err(e)?;
+    d.clock_mut().mono = at + 1_000_000_000;
+    assert_eq!(cap(&mut d, &o2)?.0, OwnerOutcome::Failed);
+    assert_eq!(d.next_retry(), Some(first), "the earliest, not the latest");
+    assert!(d.retries_due().contains(&o1));
+    Ok(())
+}
+
+#[test]
 fn owner_capture_auth_failure_pauses_and_is_written_at_once() -> R {
     let tmp = Tmp::new()?;
     let cfg = tmp.config(true)?;
