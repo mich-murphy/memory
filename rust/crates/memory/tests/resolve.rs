@@ -748,6 +748,8 @@ fn a_hint_without_an_owner_signals_nothing_and_stays_pending() -> R {
     let mut lines = hint(Agent::Claude, None, None, true)?;
     lines.extend(hint(Agent::Claude, Some(&outside), None, true)?);
     lines.extend(hint(Agent::Codex, Some(&file), None, true)?);
+    // A subagent path alone gives the record no owner, and so no signal, either.
+    lines.extend(hint(Agent::Claude, None, Some(&file), true)?);
     fs::write(t.0.join("state/hints").join(DAY), &lines)?;
     assert!(d.refresh_hints().is_empty());
     for _ in 0..2 {
