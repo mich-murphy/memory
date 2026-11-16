@@ -4097,3 +4097,38 @@ fn a_stop_before_the_round_runs_no_owner_and_sends_no_request() -> R {
     assert!(d.store_mut().log.is_empty());
     Ok(())
 }
+
+#[test]
+fn a_round_cut_short_by_a_stop_does_not_resume_a_paused_host() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let store = Hooked {
+        inner: FStore {
+            revoked: true,
+            ..FStore::default()
+        },
+        ..Hooked::default()
+    };
+    let mut d = boot_h(&tmp, &cfg, files_with(b"x\n"), store, &list)?;
+    d.reconcile_once().map_err(e)?;
+    assert!(d.status().host_paused);
+    d.store_mut().inner.revoked = false;
+    d.store_mut().flag.set(true);
+    let requests = d.store_mut().log.len();
+    let (report, lines) = logged_round!(d);
+    assert_eq!(report.landed, 0);
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(
+        d.status().host_paused,
+        "no owner ran: nothing was re-probed"
+    );
+    assert!(disk_status(&tmp)?.host_paused);
+    assert_eq!(d.store_mut().log.len(), requests);
+    d.store_mut().flag.set(false);
+    let (report, lines) = logged_round!(d);
+    assert_eq!(report.landed, 1);
+    assert_eq!(lines, ["INFO host_resumed"]);
+    assert!(!d.status().host_paused);
+    Ok(())
+}

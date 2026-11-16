@@ -1052,6 +1052,8 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         self.status.host_paused = false;
         for (owner, sources) in &groups {
             if (self.stop)() {
+                // A round cut short re-probed nothing more: it cannot resume a paused host.
+                self.status.host_paused |= before.0;
                 break;
             }
             let mut rt = self
