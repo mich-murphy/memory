@@ -20,7 +20,8 @@ empty-prefix refusal lifted and the acceptance runs of DESIGN 17 started.
 
 Everything sits on `e11db32` (`docs/run-loop`, top of stack #103, PRs #96 to #102). That stack
 was in hosted CI when this was first written; it merged into `main` as `39944d7` on 2026-11-12.
-The branches below were rebased and pushed on 2026-11-16 as stack #111.
+The branches below were put in this order on 2026-11-12 and pushed on 2026-11-16 as stack #111,
+without a rebase onto the merge commit, so the recorded hashes are the pushed ones.
 
 | Branch | PR | Tip | Content |
 |---|---|---|---|
@@ -164,7 +165,9 @@ acceptance; the worker runs them too and reports the failing test.
 
 Decisions taken after the brief was written: `hints_removed` and `hints_kept_old` are keys of
 the `round` line. The events `state_load`, `parked`, `host_paused` and `host_resumed` are
-added; the `events` block leaves `status.json` (A13.2); audit events wait for AUDIT-3. A
+added; the `events` block leaves `status.json` (A13.2); no separate audit event exists (audit
+verdicts are the three audit keys of the `round` line, and AUDIT-3 reports a source park as a
+`parked` line with `scope=source`). A
 `status.json` that still has an `events` object loads as damaged, with no shim. Delivered at
 `7f99613` on `rust/log-events`.
 

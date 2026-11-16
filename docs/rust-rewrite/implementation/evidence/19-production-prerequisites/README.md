@@ -287,7 +287,7 @@ event.
 
 | Event | Keys | When |
 |---|---|---|
-| `started` | `version` | once, after the lock is taken |
+| `started` | `version` | once, after `start_from_config` has succeeded; nothing is logged before that |
 | `state_load` | `file` (`index`, `status`), `result` (`damaged`, `newer_schema`) | at start, after `started`, status before index; nothing for a loaded or missing file |
 | `round` | `landed failed skipped parked deferred offline throttled transient destination_auth local deterministic hints_removed hints_kept_old audit_matched audit_mismatched audit_ineligible` | every round |
 | `parked` | `owner`, `reason`, `scope` | once, in the round an owner or source becomes parked |
@@ -334,9 +334,10 @@ steps.
 ## Known limits
 
 - No `unpark` command and no automatic unpark. A parked source stays parked when its file
-  changes. Clearing it today means removing its entry from `status.json` with the daemon
-  stopped, or deleting `status.json`; the index streak then re-parks it at the next due audit
-  if it still mismatches.
+  changes. Clearing it today means deleting `status.json` with the daemon stopped, which also
+  loses every other park, the host pause and the counters. The file carries a length and
+  SHA-256 header, so an edited one loads as damaged, with the same effect. The index streak
+  then re-parks the source at the next due audit if it still mismatches.
 - A hint day file whose launch record never commits is kept for ever. This includes the
   index-loss case: after `index.json` is lost, a launch record that the owner's manifests
   already carry never becomes done when the owner has nothing else to commit (the recovery

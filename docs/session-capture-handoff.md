@@ -60,8 +60,9 @@ increments are accepted locally. Hosted CI for the stack was running when this w
 - Stack #103 (PRs #96 to #102, the run-loop stack) merged into `main` as `39944d7` on
   2026-11-12. Post-merge "Rust rewrite gates" succeeded; post-merge "CI" failed only in the
   two accepted `govulncheck` steps. Two Go failures outside those steps (PR #96, PR #100)
-  passed on one rerun each; `gh stack merge --yes --merge` refused (`main` belongs to
-  multiple stacks) and `gh stack merge 103` merged it.
+  did not recur on one rerun each: attempt 2 of both runs failed only in the accepted steps,
+  and their causes were not established. `gh stack merge --yes --merge` refused (`main`
+  belongs to multiple stacks) and `gh stack merge 103` merged it.
 - Stack #111 pushed on 2026-11-16: PRs #104 `368bc4a`, #105 `00e91ab`, #106 `8fe5bfa`, #107
   `ec5c0cc`, #108 `c9941ff`, #109 `7f99613`, #110 `2edf2f8`. Hosted CI was running when this
   was written; no hosted result is claimed.
