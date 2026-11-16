@@ -168,6 +168,8 @@ struct Rec<'a> {
     hint_batches: VecDeque<Vec<(Owner, Signal)>>,
     /// Retry deadlines: (seconds since start, owner index).
     retries: Vec<(u64, usize)>,
+    /// Retries the work leaves due after offering them (a paused host does this).
+    sticky_retries: Vec<(u64, usize)>,
     reconcile_cost: u64,
     captures: usize,
     reconciles: usize,
@@ -225,12 +227,26 @@ impl Work for Rec<'_> {
         Ok(())
     }
     fn next_retry(&self) -> Option<Duration> {
-        self.retries.iter().map(|(at, _)| s(BASE + at)).min()
+        self.retries
+            .iter()
+            .chain(&self.sticky_retries)
+            .map(|(at, _)| s(BASE + at))
+            .min()
     }
     fn retries_due(&mut self, now: Duration) -> Vec<Owner> {
-        let (due, later): (Vec<_>, Vec<_>) =
-            self.retries.iter().partition(|(at, _)| s(BASE + at) <= now);
-        let owners = due
+        let (due, later): (Vec<(u64, usize)>, Vec<(u64, usize)>) = self
+            .retries
+            .iter()
+            .copied()
+            .partition(|(at, _)| s(BASE + at) <= now);
+        let mut offered = due;
+        offered.extend(
+            self.sticky_retries
+                .iter()
+                .copied()
+                .filter(|(at, _)| s(BASE + at) <= now),
+        );
+        let owners = offered
             .iter()
             .filter_map(|(_, i)| self.owners.get(*i).cloned())
             .collect();
@@ -263,6 +279,12 @@ fn cfg(until: u64, steps: Vec<(u64, Step)>) -> Cfg {
 }
 
 fn go(cfg: Cfg, setup: impl FnOnce(&mut Rec<'_>) -> R) -> R<(Outcome, Vec<Entry>)> {
+    let (outcome, log, _) = go_calls(cfg, setup)?;
+    Ok((outcome, log))
+}
+
+/// [`go`] that also returns how many times the loop called `Inputs::next`.
+fn go_calls(cfg: Cfg, setup: impl FnOnce(&mut Rec<'_>) -> R) -> R<(Outcome, Vec<Entry>, u32)> {
     let fake = Fake::new();
     let mut owners = Vec::new();
     for i in 0..6 {
@@ -278,6 +300,7 @@ fn go(cfg: Cfg, setup: impl FnOnce(&mut Rec<'_>) -> R) -> R<(Outcome, Vec<Entry>
         stop_after_reconciles: None,
         hint_batches: VecDeque::new(),
         retries: Vec::new(),
+        sticky_retries: Vec::new(),
         reconcile_cost: 0,
         captures: 0,
         reconciles: 0,
@@ -301,7 +324,10 @@ fn go(cfg: Cfg, setup: impl FnOnce(&mut Rec<'_>) -> R) -> R<(Outcome, Vec<Entry>
     })
     .map_err(e)?;
     let outcome = drive(timings, window, &fake, &mut script, &mut rec);
-    Ok((outcome, fake.log.into_inner()))
+    let calls = script.calls;
+    drop(script);
+    drop(rec);
+    Ok((outcome, fake.log.into_inner(), calls))
 }
 fn go_plain(until: u64, steps: Vec<(u64, Step)>) -> R<(Outcome, Vec<Entry>)> {
     go(cfg(until, steps), |_| Ok(()))
@@ -780,6 +806,43 @@ fn the_hint_query_is_made_once_per_batch_that_touched_the_hint_directory() -> R 
             cap(260, 5),
             shut(300)
         ]
+    );
+    Ok(())
+}
+
+#[test]
+fn a_retry_that_stays_due_is_offered_once_per_turn_and_does_not_spin() -> R {
+    let (outcome, log, calls) = go_calls(cfg(300, vec![]), |rec| {
+        rec.sticky_retries.push((100, 1));
+        Ok(())
+    })?;
+    assert_eq!(outcome, Outcome::Stopped);
+    assert_eq!(
+        log,
+        vec![
+            start(7),
+            cap(100, 1),
+            cap(120, 1),
+            cap(180, 1),
+            cap(240, 1),
+            shut(300)
+        ]
+    );
+    // One wait per wake (7, 100, 120, 180, 240, 300), none for the stale deadline.
+    assert!(calls <= 8, "calls {calls}");
+    Ok(())
+}
+
+#[test]
+fn a_retry_that_becomes_due_during_a_reconcile_runs_in_the_next_turn() -> R {
+    let (_, log) = go(cfg(300, vec![(100, rescan())]), |rec| {
+        rec.reconcile_cost = 5;
+        rec.retries.push((102, 3));
+        Ok(())
+    })?;
+    assert_eq!(
+        log,
+        vec![start(7), recon(100, Cause::Rescan), cap(105, 3), shut(300)]
     );
     Ok(())
 }

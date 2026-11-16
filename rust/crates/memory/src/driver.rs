@@ -10,7 +10,7 @@
 //! |---|---|---|
 //! | startup delay | `t0 + startup` | `reconcile(Start)`; no capture runs before it |
 //! | scheduler | [`Scheduler::next_due`] | captures that are due |
-//! | retry | [`Work::next_retry`] | [`Work::retries_due`] owners are captured |
+//! | retry | [`Work::next_retry`], only when later than the instant retries were last offered | [`Work::retries_due`] owners are captured |
 //! | tick | `t0 + k * tick` | [`Input::Tick`] fed to the scheduler (`Wake` on a gap) |
 //! | reconcile | end of the last reconcile + `interval` | `reconcile(Timer)` |
 //!
@@ -133,6 +133,7 @@ pub fn drive<I: Inputs, W: Work>(
         hints_dirty: false,
         tick_at: t0 + timings.tick,
         reconcile_at: None,
+        offered: None,
         startup_at: t0 + timings.startup,
     };
     let (ended, outcome) = match state.run() {
@@ -165,6 +166,9 @@ struct Driver<'a, I, W, C> {
     tick_at: Duration,
     /// `None` until the start reconcile has completed.
     reconcile_at: Option<Duration>,
+    /// The `now` of the last [`Work::retries_due`] call: a deadline at or before it was offered
+    /// this turn and is not a wake, or a deadline the work leaves in the past would spin.
+    offered: Option<Duration>,
     startup_at: Duration,
 }
 
@@ -275,7 +279,9 @@ impl<I: Inputs, W: Work, C: Clock> Driver<'_, I, W, C> {
 
     fn retries(&mut self) -> Result<(), Ended> {
         self.check_stop()?;
-        for owner in self.work.retries_due(self.now()) {
+        let now = self.now();
+        self.offered = Some(now);
+        for owner in self.work.retries_due(now) {
             self.check_stop()?;
             self.work.capture(&owner).map_err(|Failed| Ended::Round)?;
         }
@@ -305,7 +311,14 @@ impl<I: Inputs, W: Work, C: Clock> Driver<'_, I, W, C> {
         // Until the start reconcile has run no capture may, so only it and the tick are wakes.
         let others = match self.reconcile_at {
             None => [None, None, Some(self.startup_at)],
-            Some(at) => [self.sched.next_due(), self.work.next_retry(), Some(at)],
+            Some(at) => {
+                let offered = self.offered;
+                let retry = self
+                    .work
+                    .next_retry()
+                    .filter(|r| offered.is_none_or(|o| *r > o));
+                [self.sched.next_due(), retry, Some(at)]
+            }
         };
         for at in others.into_iter().flatten() {
             wake = wake.min(at);
