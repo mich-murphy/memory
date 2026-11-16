@@ -21,7 +21,7 @@ use crate::capture::{
     capture,
 };
 use crate::commit::{
-    Base, Commit, CommitEnd, Failure, KnownOurs, Landed, commit_known, disposition_paced,
+    Base, Commit, CommitEnd, Failure, KnownOurs, Landed, commit_stoppable, disposition_paced,
     recover_base,
 };
 use crate::config::{Config, ConfigError};
@@ -236,6 +236,9 @@ pub struct RoundReport {
     pub parked: usize,
     /// Owners skipped because their retry delay has not elapsed.
     pub deferred: usize,
+    /// Owners whose capture a stop request ended before `current.json` was touched. Not a
+    /// failure: no retry deadline, no streak change. Not logged and not stored.
+    pub stopped: usize,
     /// Failures of this round by class.
     pub failures: FailureCounts,
     /// Audit verdicts reached in this round, whether or not the commits landed.
@@ -286,6 +289,8 @@ pub enum OwnerOutcome {
     Skipped,
     /// The host is paused; nothing was attempted.
     Paused,
+    /// A stop request ended the capture before `current.json` was touched.
+    Stopped,
 }
 
 /// A hint record not signalled before: its owner, the signal it carries and the paths it names.
@@ -470,6 +475,7 @@ pub struct Daemon<F, S, C, E> {
     last_index: Option<Duration>,
     last_status: Option<Duration>,
     draws: u64,
+    stop: Box<dyn Fn() -> bool>,
 }
 
 impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
@@ -585,7 +591,15 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             last_index: None,
             last_status: None,
             draws: 0,
+            stop: Box::new(|| false),
         })
+    }
+
+    /// Install the stop probe (`true` means a stop was requested). It is asked before each
+    /// owner of a full round and inside each commit before each piece, the manifest and the
+    /// publish part. Default: never stops.
+    pub fn set_stop(&mut self, probe: impl Fn() -> bool + 'static) {
+        self.stop = Box::new(probe);
     }
 
     /// True when the index was missing, damaged or of a newer schema at startup.
@@ -730,7 +744,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 false
             }
             Disposition::Cancelled => {
-                report.failed += 1;
+                report.stopped += 1;
                 false
             }
             Disposition::PauseHost => {
@@ -839,12 +853,14 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         hints: &mut [ScannedFile],
         owner: &Owner,
     ) -> Result<CommitEnd, Failure> {
-        let result = commit_known(
+        let stop = &self.stop;
+        let result = commit_stoppable(
             &mut self.store,
             base,
             request,
             &mut rt.known_ours,
             &mut |_| {},
+            &mut || stop(),
         );
         if let Ok(end) = &result {
             // Remote is authoritative: updates apply only once the commit is durable.
@@ -1035,6 +1051,9 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         let mut report = RoundReport::default();
         self.status.host_paused = false;
         for (owner, sources) in &groups {
+            if (self.stop)() {
+                break;
+            }
             let mut rt = self
                 .owners
                 .remove(owner)
@@ -1231,7 +1250,9 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         self.write_status(authoritative)
             .map_err(RoundError::State)?;
         self.write_index(false).map_err(RoundError::State)?;
-        Ok(if report.landed > 0 {
+        Ok(if report.stopped > 0 {
+            OwnerOutcome::Stopped
+        } else if report.landed > 0 {
             OwnerOutcome::Landed
         } else if report.failed > 0 || report.parked > 0 {
             OwnerOutcome::Failed

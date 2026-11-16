@@ -40,6 +40,7 @@ fn round_has_every_count_in_order() {
         skipped: 3,
         parked: 4,
         deferred: 5,
+        stopped: 0,
         failures: FailureCounts {
             offline: 6,
             throttled: 7,
