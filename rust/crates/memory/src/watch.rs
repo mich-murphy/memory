@@ -66,23 +66,19 @@ pub enum Action {
     ReconcileAll,
 }
 
-/// Pure scheduler over per-owner coalescing. `map` resolves a path to its owner.
-pub struct Scheduler<F: FnMut(&Path) -> Option<Owner>> {
+/// Pure scheduler over per-owner coalescing. The path-to-owner function is passed per call.
+pub struct Scheduler {
     coalescer: Coalescer,
-    map: F,
-    owners: Vec<Owner>,
     last_tick: Option<(Duration, Duration)>,
     unmapped: u64,
     clock_errors: u64,
 }
 
-impl<F: FnMut(&Path) -> Option<Owner>> Scheduler<F> {
+impl Scheduler {
     /// Create a scheduler.
-    pub fn new(window: Window, map: F) -> Self {
+    pub fn new(window: Window) -> Self {
         Self {
             coalescer: Coalescer::new(window),
-            map,
-            owners: Vec::new(),
             last_tick: None,
             unmapped: 0,
             clock_errors: 0,
@@ -99,15 +95,33 @@ impl<F: FnMut(&Path) -> Option<Owner>> Scheduler<F> {
         self.clock_errors
     }
 
+    /// Earliest monotonic instant at which an idle owner becomes due, if any is pending.
+    pub fn next_due(&self) -> Option<Duration> {
+        self.coalescer.next_due()
+    }
+
+    /// Emit the captures that are due at `now` without any input.
+    pub fn poll(&mut self, now: Duration) -> Vec<Action> {
+        let mut actions = Vec::new();
+        self.drain(now, &mut actions);
+        actions
+    }
+
     /// Apply one input at monotonic time `now` (ignored for `Tick`, which carries `mono`).
-    pub fn handle(&mut self, input: Input, now: Duration) -> Vec<Action> {
+    /// `map` resolves a changed path to its owner; it is used for this call only.
+    pub fn handle(
+        &mut self,
+        input: Input,
+        now: Duration,
+        map: &mut dyn FnMut(&Path) -> Option<Owner>,
+    ) -> Vec<Action> {
         let mut actions = Vec::new();
         let now = match input {
             Input::Tick { mono, .. } => mono,
             _ => now,
         };
         match input {
-            Input::PathChanged { path } => match (self.map)(&path) {
+            Input::PathChanged { path } => match map(&path) {
                 Some(owner) => self.signal(owner, now, Signal::Changed),
                 None => self.unmapped += 1,
             },
@@ -146,24 +160,19 @@ impl<F: FnMut(&Path) -> Option<Owner>> Scheduler<F> {
     }
 
     fn signal(&mut self, owner: Owner, now: Duration, signal: Signal) {
-        if !self.owners.contains(&owner) {
-            self.owners.push(owner.clone());
-        }
         if self.coalescer.signal(owner, now, signal).is_err() {
             self.clock_errors += 1;
         }
     }
 
     fn drain(&mut self, now: Duration, actions: &mut Vec<Action>) {
-        for owner in &self.owners {
-            match self.coalescer.poll(owner, now) {
-                Ok(true) => actions.push(Action::Capture {
-                    owner: owner.clone(),
-                }),
-                Ok(false) => {}
-                Err(_) => self.clock_errors += 1,
-            }
-        }
+        let due = self.coalescer.take_due(now);
+        self.clock_errors += due.regressed;
+        actions.extend(
+            due.owners
+                .into_iter()
+                .map(|owner| Action::Capture { owner }),
+        );
     }
 }
 

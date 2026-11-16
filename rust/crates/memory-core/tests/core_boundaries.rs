@@ -232,3 +232,43 @@ fn idle_slots_are_evicted_and_next_due_reports_earliest_deadline()
     assert_eq!(c.next_due(), None);
     Ok(())
 }
+
+#[test]
+fn take_due_returns_due_owners_in_edge_order_and_skips_in_flight()
+-> Result<(), Box<dyn std::error::Error>> {
+    let shared = |name: &str| -> Result<Owner, Box<dyn std::error::Error>> {
+        Ok(Owner::Shared {
+            archive: ArchiveId::try_from(name.to_owned())?,
+            machine: MachineId::try_from("machine".to_owned())?,
+            agent: Agent::Claude,
+        })
+    };
+    let secs = Duration::from_secs;
+    let (a, b, c, d) = (shared("a")?, shared("b")?, shared("c")?, shared("d")?);
+    let mut co = Coalescer::new(Window::try_from(WindowSeconds { quiet: 2, cap: 5 })?);
+    // Signalled in an order unlike the expected one: first edge decides, then last, then name.
+    co.signal(c.clone(), secs(1), Signal::Changed)?;
+    co.signal(b.clone(), secs(0), Signal::Changed)?;
+    co.signal(a.clone(), secs(0), Signal::Changed)?;
+    co.signal(d.clone(), secs(2), Signal::Changed)?;
+    let none = co.take_due(secs(1));
+    assert!(none.owners.is_empty());
+    let due = co.take_due(secs(3));
+    assert_eq!(due.owners, vec![a.clone(), b.clone(), c.clone()]);
+    assert_eq!(due.regressed, 0);
+    // In flight owners are excluded; their new edge is kept for exactly one follow-up.
+    co.signal(a.clone(), secs(3), Signal::Changed)?;
+    co.signal(a.clone(), secs(3), Signal::Changed)?;
+    assert_eq!(co.take_due(secs(10)).owners, vec![d.clone()]);
+    assert!(co.take_due(secs(10)).owners.is_empty());
+    co.complete(&a, secs(10))?;
+    assert_eq!(co.take_due(secs(10)).owners, vec![a.clone()]);
+    assert!(co.take_due(secs(11)).owners.is_empty());
+    // A regressed owner clock is counted and skipped.
+    co.complete(&b, secs(20))?;
+    co.signal(b.clone(), secs(30), Signal::SessionEnd)?;
+    let back = co.take_due(secs(25));
+    assert!(back.owners.is_empty());
+    assert_eq!(back.regressed, 1);
+    Ok(())
+}

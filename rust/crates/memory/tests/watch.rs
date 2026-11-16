@@ -44,12 +44,24 @@ fn map_path(path: &Path) -> Option<Owner> {
     let digit = rest.chars().next()?.to_digit(10)?;
     owner(usize::try_from(digit).ok()?).ok()
 }
-type Sched = Scheduler<fn(&Path) -> Option<Owner>>;
+/// A scheduler plus the per-call map, so tests keep the call shape `handle(input, now)`.
+struct Sched(Scheduler);
+impl Sched {
+    fn handle(&mut self, input: Input, now: Duration) -> Vec<Action> {
+        self.0.handle(input, now, &mut map_path)
+    }
+    fn complete(&mut self, owner: &Owner, now: Duration) -> Result<Vec<Action>, CoalescerError> {
+        self.0.complete(owner, now)
+    }
+    fn unmapped(&self) -> u64 {
+        self.0.unmapped()
+    }
+    fn clock_errors(&self) -> u64 {
+        self.0.clock_errors()
+    }
+}
 fn sched() -> R<Sched> {
-    Ok(Scheduler::new(
-        window()?,
-        map_path as fn(&Path) -> Option<Owner>,
-    ))
+    Ok(Sched(Scheduler::new(window()?)))
 }
 fn changed(i: usize) -> Input {
     Input::PathChanged {
