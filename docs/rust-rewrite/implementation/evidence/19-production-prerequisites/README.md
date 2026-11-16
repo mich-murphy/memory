@@ -106,6 +106,52 @@ Fix: `00e91ab`, gate 08 runs `cargo llvm-cov nextest`, one process per test. The
 43193745120 succeeded on attempt 2 on all three jobs. The first run of gate 08 through nextest
 took 262 s; `hegel_daemon_state_machine` passed in 31.4 s.
 
+## Hosted macOS job time on stack #111
+
+Added on 2026-11-16 after the record above; this section is the only hosted evidence in it.
+
+On stack #111 the `Rust (macos-26)` job of "Rust rewrite gates" reached its 30-minute limit
+twice. No gate failed in either run.
+
+| PR | Head | Run | macOS job | Result |
+|---|---|---|---|---|
+| #104 | `368bc4a` | 43865483154 | 23.8 min | success |
+| #105 | `00e91ab` | 43865501341 | 23.9 min | success |
+| #106 | `8fe5bfa` | 43865523893 | 22.6 min | success |
+| #107 | `ec5c0cc` | 43865542471 | 26.0 min | success |
+| #108 | `c9941ff` | 43865560855 | 26.2 min | success |
+| #109 | `7f99613` | 43865576080, attempt 1 | 30.4 min | cancelled at the limit inside `08-coverage`; the 11 gates before it were 0 |
+| #110 | `2edf2f8` | 43865589662, attempt 1 | 30.0 min | cancelled at the limit after the gates step succeeded; all 13 gates 0 in the uploaded `status.tsv`, seed 1749040497 |
+| #112 | `00af49e` | 43867816396 | 26.1 min | success |
+
+Seconds per gate on the macOS runner, from the timestamps of the status lines in the job logs
+(a gate's time is the time since the previous gate finished; gates under 10 s are left out):
+
+| Run | 02 clippy | 04 nextest | 05 hegel | 06 proptest | 06 window | 06 mutations | 08 coverage | All gates |
+|---|---|---|---|---|---|---|---|---|
+| `main` `39944d7`, 43217491627 | 76 | 187 | 197 | 149 | 96 | 64 | 512 | 1,303 |
+| #104 | 87 | 171 | 194 | 139 | 108 | 72 | 501 | 1,295 |
+| #105 | 77 | 161 | 208 | 159 | 90 | 72 | 501 | 1,289 |
+| #108 | 55 | 172 | 214 | 173 | 109 | 88 | 645 | 1,483 |
+| #109, attempt 1 | 92 | 229 | 368 | 177 | 142 | 81 | not finished | 1,111 before `08` |
+| #110, attempt 1 | 90 | 220 | 297 | 180 | 132 | 89 | 626 | 1,661 |
+
+The job also spends about 1.5 to 2 minutes before the gates step (checkout, Nix, the cached
+`cargo-llvm-cov`). The same commit varies by runner: `05-hegel` took 204 s to 369 s on the two
+Linux runners for #109 and #110. With 583 tests against 519 on `main`, the macOS job sits at
+about 87 % to 100 % of its limit, so a rerun alone does not make it reliable.
+
+Fix: `e599100` on `rust/ci-coverage-job`. `rust/scripts/gates.sh` takes `GATES_PART` (`all` by
+default, `gates`, `coverage`); the hosted workflow runs `gates` and `coverage` as separate
+jobs per OS. No gate is dropped and the 30-minute job limit is unchanged, but one OS may now
+use two 30-minute jobs where it had one, which is more total time than before. Checked
+locally: `bash -n`, `shellcheck` and `actionlint` exit 0; with every command stubbed the
+parts select 13, 12 and 1 gates; an unknown value exits 2. Not checked locally: a real run of
+either part. Its first hosted run is the check.
+
+The parent reran the cancelled macOS job of both runs once (`gh run rerun <id> --failed`);
+attempt 2 of both was running when this section was written.
+
 ## Acceptance per increment (parent)
 
 The seven checks are fmt, clippy `-Dwarnings`, rustdoc `-Dwarnings`, nextest, doctests,
@@ -356,5 +402,5 @@ steps.
 
 ## Not run
 
-2,000 cases, `cargo mutants`, anything against R2, and hosted CI for stack #111 (running when
-this record was written).
+2,000 cases, `cargo mutants`, anything against R2. Hosted CI for stack #111 had not finished
+when this record was written; the section on the macOS job time has what was known.
