@@ -277,6 +277,21 @@ pub struct StopHandle {
     shared: Arc<Shared>,
 }
 
+/// Read-only view of the stop request. Not counted as a stop source: holding one does not
+/// hide a failed source, it cannot request a stop, and dropping it has no effect.
+#[derive(Clone)]
+pub struct StopFlag {
+    shared: Arc<Shared>,
+}
+
+impl StopFlag {
+    /// Whether a stop has been requested. Sticky; reads nothing from the queue.
+    #[must_use]
+    pub fn requested(&self) -> bool {
+        self.shared.stop.load(Ordering::SeqCst)
+    }
+}
+
 /// A bounded queue of watcher inputs with overflow reported as [`Input::Rescan`].
 pub fn inbox(capacity: usize) -> (InboxTx, InboxRx) {
     let (tx, rx) = sync_channel(capacity);
@@ -344,6 +359,14 @@ impl InboxRx {
         self.shared.handles.fetch_add(1, Ordering::SeqCst);
         StopHandle {
             tx: self.wake.clone(),
+            shared: Arc::clone(&self.shared),
+        }
+    }
+
+    /// A read-only view of the stop request; see [`StopFlag`].
+    #[must_use]
+    pub fn stop_flag(&self) -> StopFlag {
+        StopFlag {
             shared: Arc::clone(&self.shared),
         }
     }
@@ -469,6 +492,12 @@ impl FsWatcher {
     #[must_use]
     pub fn skipped_roots(&self) -> usize {
         self.skipped
+    }
+
+    /// A read-only view of the stop request of this watcher's inbox.
+    #[must_use]
+    pub fn stop_flag(&self) -> StopFlag {
+        self.rx.stop_flag()
     }
 
     /// A handle that requests a stop of this watcher's inbox.

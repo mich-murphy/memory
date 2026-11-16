@@ -326,6 +326,53 @@ fn a_stop_then_dropped_handles_is_a_stop_not_a_failure() {
 }
 
 #[test]
+fn stop_flag_reads_without_receiving_and_is_sticky() {
+    let (tx, rx) = inbox(1);
+    let stop = rx.stop_handle();
+    let flag = rx.stop_flag();
+    let moved = flag.clone();
+    tx.push(at(0));
+    tx.push(at(1)); // overflow: the queue is full
+    assert!(!flag.requested());
+    assert!(
+        !std::thread::spawn(move || moved.requested())
+            .join()
+            .unwrap_or(true)
+    );
+    stop.stop();
+    let moved = flag.clone();
+    assert!(
+        std::thread::spawn(move || moved.requested())
+            .join()
+            .unwrap_or(false)
+    );
+    assert!(flag.requested());
+    assert!(flag.requested());
+    let none = Duration::ZERO;
+    assert_eq!(rx.recv_timeout(none), Received::Stop);
+    assert!(flag.requested());
+    assert_eq!(rx.recv_ignoring_stop(none), Received::Input(Input::Rescan));
+    assert_eq!(rx.recv_ignoring_stop(none), Received::Input(at(0)));
+    assert_eq!(rx.recv_ignoring_stop(none), Received::Timeout);
+    assert!(flag.requested());
+}
+
+#[test]
+fn a_live_stop_flag_does_not_hide_a_failed_source() {
+    let (tx, rx) = inbox(2);
+    let flag = rx.stop_flag();
+    let handle = rx.stop_handle();
+    tx.push(at(0));
+    drop(handle);
+    assert_eq!(rx.recv_timeout(Duration::ZERO), Received::Failed);
+    assert!(!flag.requested());
+    assert_eq!(
+        rx.recv_ignoring_stop(Duration::ZERO),
+        Received::Input(at(0))
+    );
+}
+
+#[test]
 fn forward_signal_requests_a_stop() {
     let (_tx, rx) = inbox(4);
     let stop = rx.stop_handle();
@@ -664,7 +711,10 @@ fn fs_watcher_rejects_a_missing_or_non_directory_extra_directory() -> R {
 #[test]
 fn fs_watcher_exposes_a_stop_handle() -> R {
     let w = FsWatcher::new(&[]).map_err(e)?;
+    let flag = w.stop_flag();
+    assert!(!flag.requested());
     w.stop_handle().stop();
+    assert!(flag.requested());
     assert_eq!(w.recv_timeout(Duration::from_secs(30)), Received::Stop);
     Ok(())
 }
