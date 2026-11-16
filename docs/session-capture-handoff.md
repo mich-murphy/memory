@@ -24,9 +24,12 @@ This is the single active task brief; dated operating records below remain histo
 > as the dated record of why each change was made. The baseline hash pin is removed (A14.3):
 > `verify-evidence.py` now checks only the prototype results, and DESIGN.md and AGENTS.md
 > are edited directly. Lines further down that call those files hash-pinned, or cite
-> `baseline-identities.json`, are history. Then read the "Session 2026-11-12, run
-> loop" block directly below, which is the current state, with
-> [brief 27](rust-rewrite/implementation/27-run-loop.md), the active coordinator brief, and
+> `baseline-identities.json`, are history. Then read the "Session 2026-11-12 to 2026-11-16,
+> production prerequisites (current)" block directly below, with
+> [brief 28](rust-rewrite/implementation/28-production-prerequisites.md) and
+> [evidence 19](rust-rewrite/implementation/evidence/19-production-prerequisites/). The
+> "Session 2026-11-12, run loop" block after it is the step before it, with
+> [brief 27](rust-rewrite/implementation/27-run-loop.md) and
 > [evidence 18](rust-rewrite/implementation/evidence/18-run-loop/). The "structural fixes" and
 > "walking skeleton" blocks after it, with
 > [report 26](rust-rewrite/implementation/26-walking-skeleton.md) and
@@ -44,8 +47,50 @@ This is the single active task brief; dated operating records below remain histo
 > in this brief (P5 authorization, acceptance bucket/token, hook argv, symlinks, state root)
 > are resolved by the amendments and kept only as history.
 
-**Session 2026-11-12, run loop (current).** Brief 27, increments R1 to R4; record in
+**Session 2026-11-12 to 2026-11-16, production prerequisites (current).** Brief 28; record in
+[evidence 19](rust-rewrite/implementation/evidence/19-production-prerequisites/). All
+increments are accepted locally. Hosted CI for the stack was running when this was written.
+- What exists now (implemented, commits in evidence 19): `memory daemon` logs `started`,
+  `state_load`, `round` (16 keys), `parked`, `host_paused`, `host_resumed` and `stopped` to
+  stderr through `tracing`; hint day files past 7 days are removed once consumed; append
+  sources are audited, a stable mismatch starts an epoch, and the third consecutive mismatch
+  at least 3 h after the first parks that source alone; the between-windows digest bug found
+  by AUDIT-1 is fixed; `status.json` carries audit counts and no `events` block; gate 08 runs
+  through nextest (`00e91ab`).
+- Stack #103 (PRs #96 to #102, the run-loop stack) merged into `main` as `39944d7` on
+  2026-11-12. Post-merge "Rust rewrite gates" succeeded; post-merge "CI" failed only in the
+  two accepted `govulncheck` steps. Two Go failures outside those steps (PR #96, PR #100)
+  passed on one rerun each; `gh stack merge --yes --merge` refused (`main` belongs to
+  multiple stacks) and `gh stack merge 103` merged it.
+- Stack #111 pushed on 2026-11-16: PRs #104 `368bc4a`, #105 `00e91ab`, #106 `8fe5bfa`, #107
+  `ec5c0cc`, #108 `c9941ff`, #109 `7f99613`, #110 `2edf2f8`. Hosted CI was running when this
+  was written; no hosted result is claimed.
+- Gates on `2edf2f8`: local, 500 cases, seed 3153221467, all 13 sub-gates 0, 583 tests under
+  coverage, 12 doctests, coverage 7044/7248 = 97.19 %. Earlier runs on `b37556e` and
+  `7f99613` are in evidence 19. Not run: 2,000 cases, `cargo mutants`, anything against R2,
+  hosted CI for the stack.
+- Known limits: no `unpark` command and no automatic unpark; a hint day file whose launch
+  record never commits is kept for ever; a daemon with no sources logs `state_load` on every
+  start for a damaged index; a pre-LOG-2 `status.json` loads as damaged; the Hegel generator
+  cannot reach a source park (a scripted test does); EPIPE on the real stderr not observed;
+  `signals_unavailable` and `state_root_unresolved` untested; no gate runs rustdoc. The
+  daemon still refuses an empty key prefix, and the watcher and scheduler are not connected.
+- Open for the operator (none blocks): no cap on kept hint files; the `events` block removal;
+  the empty-prefix refusal lifted after the watcher and in-round stop; the
+  `launch_attach_failed` removal and the dated notes under A11.3 and A13.3; the AUDIT-3
+  choices (per-source park, `scope` key, source id never logged, non-prefix-stable sources
+  never fail at the prefix site, no unpark yet).
+- Next: a separate brief for LOOP-1 / LOOP-2 / STOP-1 (watcher inbox, hint directory,
+  coalescer deadlines, 60 s wake-gap tick, retry deadlines, 15 min reconcile; stop checked
+  between owners and pieces); then lift the empty-prefix refusal and run the DESIGN 17
+  acceptance runs under the 2-day criterion. Before cutover also: `memory status`, `unpark`,
+  `reconcile`, `export`, the daily read-back restore, the coverage cross-check and heartbeat
+  object, service units and hook installation.
+
+**Session 2026-11-12, run loop (the step before the production-prerequisites block).** Brief 27, increments R1 to R4; record in
 [evidence 18](rust-rewrite/implementation/evidence/18-run-loop/).
+- Dated 2026-11-12 (later): stack #103, the run-loop stack below, merged into `main` as
+  `39944d7`; hosted CI and the merge are in the block above.
 - `memory daemon` starts from `config.toml` and the token file, waits 5 s to 60 s, runs the
   safety reconcile and repeats it every 15 minutes, and exits 0 only on SIGTERM or SIGINT
   after `Daemon::shutdown`. `memory restore <owner> --out DIR` reads an owner back through
@@ -64,7 +109,7 @@ This is the single active task brief; dated operating records below remain histo
 - The next stack, on top of `30f02f6`, in order: `docs/design-fold` (`dc3833f`),
   `docs/run-loop-brief` (`c25df8a`), `rust/run-config` (`bd25c4e`, R1), `rust/run-loop`
   (`9c8355b`, R2), `rust/restore-cmd` (`038c714`, R3), `rust/daemon-restore-e2e` (`2c10eb0`,
-  R4), `docs/run-loop` (this entry). Hosted CI had not run on them when this was written.
+  R4), `docs/run-loop` (this entry). Hosted CI had not run on them when this was written (it ran later and the stack merged, see the dated line above).
 - Gates on `2c10eb0`: local, 500 cases, seed 2202692434, all 13 sub-gates 0, 519 tests, 12
   doctests, coverage 6596/6775 = 97.36 %. Also passed on `bd25c4e` and `038c714`. Not run:
   2,000 cases, hosted CI on these branches, `cargo mutants`, anything against R2.
@@ -246,7 +291,10 @@ stays 0); 30k reconcile 1.24 s debug, not asserted (footprint measurement); dama
 `status.json` clears parks without a logged event (DESIGN 9.2 tension); no `rename-replace`
 step in either property-4 state machine; the macOS llvm-cov "unconfirmed failure" of
 `hegel_daemon_state_machine` (run 42565602976, seed 938868371) was not root-caused, only not
-seen again (local gates and three CI runs green since); P2 decisions still open (`cargo deny` license for
+seen again (local gates and three CI runs green since; resolved 2026-11-12: root cause found,
+the fork/exec lock race between `second_process_exits_lock_held` and the state machine's
+restarts when all daemon tests share one process under `cargo test`, fixed by `00e91ab`, gate
+08 through nextest, see [evidence 19](rust-rewrite/implementation/evidence/19-production-prerequisites/)); P2 decisions still open (`cargo deny` license for
 `CDLA-Permissive-2.0`, R2 `BadDigest` class, single checksum). Next: slice 2 (decide the
 license, S3 adapter `rusty-s3`+`ureq`, zstd, run loop wiring `FsWatcher`/`Scheduler`,
 `WalkSources`, `SharedFs` with the 60 s tick), then the slice-2 exit (a day of this Mac's
@@ -824,7 +872,11 @@ Checkout bullet below.
     "unconfirmed failure: failed 0 of 10 replays". Locally the same seed passed 5 of 5 at 500
     cases, and the same Rust source passed every gate at c1ab3ec. It needs a look at what can
     fail nondeterministically under instrumentation (timing or ordering in the daemon
-    simulation). Do not retry it away.
+    simulation). Do not retry it away. (Resolved 2026-11-12: root
+    cause found, the fork/exec lock race between `second_process_exits_lock_held` and the
+    state machine's restarts when all daemon tests share one process under `cargo test`;
+    fixed by `00e91ab`, gate 08 through nextest; details in
+    [evidence 19](rust-rewrite/implementation/evidence/19-production-prerequisites/).)
   - `Transient` is not counted apart from `Throttled` in status, because there are no
     per-class counters yet.
   - The daemon computes the retry delay but does not schedule on it. (Resolved 2a18883:
