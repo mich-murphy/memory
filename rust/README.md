@@ -36,7 +36,7 @@ PROPERTY_CASES=2000 bash scripts/gates.sh
 # CI invocation: PROPERTY_CASES=500 bash scripts/gates.sh
 ```
 
-Hosted CI uses the Rust-only `nix develop .#rust` shell: the same pinned Rust tools and environment as the default shell, without the Go and release tooling. Use either locally.
+Hosted CI uses the Rust-only `nix develop .#rust` shell: the same pinned Rust tools and environment as the default shell, without the Go and release tooling. Use either locally. Hosted CI sets `GATES_PART` and runs the wrapper as two jobs per OS: `gates` (every gate but `08-coverage`) and `coverage` (`08-coverage` alone); unset, the wrapper runs everything.
 
 The canonical wrapper also runs workspace doctests (nextest does not), gates `05-hegel` and
 `06-proptest` (every `hegel_` and every `proptest_` test in the workspace), and two

@@ -28,7 +28,7 @@ nix develop --max-jobs 2 --cores 2 --command sh -c \
   'cd rust && PROPERTY_CASES=2000 bash scripts/gates.sh'
 ```
 
-Hosted CI runs the same command in the Rust-only `.#rust` shell (`flake.nix`), which carries the same pinned Rust tools and environment as the default shell without the Go and release tooling, so the runner downloads less.
+Hosted CI runs the same command in the Rust-only `.#rust` shell (`flake.nix`), which carries the same pinned Rust tools and environment as the default shell without the Go and release tooling, so the runner downloads less. Hosted CI runs it as two jobs per OS, selected by `GATES_PART` (2026-11-16): `gates` is every gate but `08-coverage` and `coverage` is `08-coverage` alone, each under the unchanged 30-minute job limit, so one OS may now use up to two 30-minute jobs. Without `GATES_PART` the wrapper runs all 13 in one pass, which is the local evidence run.
 
 The wrapper runs format, strict clippy, dependency/license/security and pure-core
 dependency bans, nextest, compile-fail doctests, Hegel (every `hegel_` test in the workspace), proptest (every `proptest_` test in the workspace), the actual production
