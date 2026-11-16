@@ -504,6 +504,25 @@ fn of_yields_exactly_what_enumerate_yields() -> R {
 }
 
 #[test]
+fn of_and_the_walk_agree_on_the_depth_boundary() -> R {
+    let t = Tmp::new()?;
+    let file = t.write(T, b"{}\n")?;
+    for (max_depth, want) in [(2, 1), (1, 0)] {
+        let limits = WalkLimits {
+            max_depth,
+            ..WalkLimits::default()
+        };
+        let mut w = walker(&t.root(), limits)?;
+        assert_eq!(w.enumerate().len(), want, "walk at {max_depth}");
+        let mut w = walker(&t.root(), limits)?;
+        let noted = w.note(&file);
+        let of = noted.map_or(0, |o| w.of(&o).len());
+        assert_eq!(of, want, "of at {max_depth}");
+    }
+    Ok(())
+}
+
+#[test]
 fn of_does_not_yield_a_vanished_file_and_does_not_walk() -> R {
     let t = Tmp::new()?;
     let file = t.write(T, b"{}\n")?;
