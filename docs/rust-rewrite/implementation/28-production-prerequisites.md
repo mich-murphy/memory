@@ -3,7 +3,10 @@
 Coordinator brief. The parent session owns this file and acceptance. It follows
 [brief 27](27-run-loop.md) (R1 to R4: `memory daemon` and `memory restore` run on the real
 binary) and [evidence 18](evidence/18-run-loop/). It is R5 of brief 27, split into increments.
-Status: written; no increment started.
+Status (2026-11-16): all increments done and accepted locally; record in
+[evidence 19](evidence/19-production-prerequisites/); pushed on 2026-11-16 as stack #111 (PRs
+#104 to #110), hosted CI running when this was written. The text below up to "Result" is the
+dated statement of intent (2026-11-12) plus the decisions taken afterwards.
 
 ## Goal
 
@@ -15,15 +18,20 @@ empty-prefix refusal lifted and the acceptance runs of DESIGN 17 started.
 
 ## Checkout
 
-Everything sits on `e11db32` (`docs/run-loop`, top of stack #103, PRs #96 to #102, in hosted CI
-when this was written). The branches of this brief are local until that stack merges.
+Everything sits on `e11db32` (`docs/run-loop`, top of stack #103, PRs #96 to #102). That stack
+was in hosted CI when this was first written; it merged into `main` as `39944d7` on 2026-11-12.
+The branches below were rebased and pushed on 2026-11-16 as stack #111.
 
-| Branch | Worktree | Content |
-|---|---|---|
-| `docs/r5-brief` | `memory-wt/r5-brief` | This brief |
-| `rust/log-stderr` | `memory-wt/sk-zstd` | LOG-1 |
-| `rust/hint-retention` | `memory-wt/r5-hints` | HINT-1 |
-| `rust/audit` | `memory-wt/rl-run` | AUDIT-1, AUDIT-2 |
+| Branch | PR | Tip | Content |
+|---|---|---|---|
+| `docs/r5-brief` | #104 | `368bc4a` | This brief as first written |
+| `rust/coverage-per-process` | #105 | `00e91ab` | Gate 08 through nextest |
+| `rust/hint-retention` | #106 | `8fe5bfa` | HINT-1 |
+| `rust/log-stderr` | #107 | `ec5c0cc` | LOG-1 |
+| `rust/audit` | #108 | `c9941ff` | AUDIT-1, AUDIT-2 |
+| `rust/log-events` | #109 | `7f99613` | LOG-2 |
+| `rust/audit-park` | #110 | `2edf2f8` | AUDIT-3 |
+| `docs/production-prerequisites` | | this record | Result, evidence 19, handoff, gates entry |
 
 ## Facts checked on `e11db32` before writing
 
@@ -46,6 +54,11 @@ Paths are under `rust/crates/`.
 | A clean stop is asserted to leave stderr empty | `memory/tests/harness.rs:135`, `:247`; `tests/s3_store/daemon_restore.rs:151` |
 | `status.json` carries the interim `events` block of A11.3 | `daemon.rs:160`, `:182` |
 | `InboxTx::push` drops the input on a full queue and records an overflow | `memory/src/watch.rs:255` |
+
+Dated note (2026-11-12): the row "capture resets it on every write" was wrong for what the
+audit needs. It was replaced by the carry rules in the decisions table below (an extension
+keeps `last_checked_at_ns`; a new epoch clears it; a match zeroes the failure count; a stable
+mismatch increments it on the new epoch), and AUDIT-3 added `first_failure_at_ns`.
 
 ## Decisions the parent made where the design is silent
 
@@ -147,14 +160,28 @@ acceptance; the worker runs them too and reports the failing test.
 - Teeth: the window-mutation gate still passes; with the audit disabled the new property fails
   on a between-windows case.
 
-### Later, not dispatched from this text
+### LOG-2: state-load, park and pause events (dispatched after HINT-1 and AUDIT-2)
 
-- **AUDIT-3, parking.** 11.2 parks a source after 3 consecutive failures spanning at least 3 h.
-  The code parks whole owners and has no first-failure time for a source. The parent settles
-  the mechanics after AUDIT-2. Required before the refusal is lifted: it bounds a replay loop.
-- **LOG-2.** State-load, park, pause and audit events from `daemon.rs`; the `events` block
-  leaves `status.json` (A13.2: logs replace the interim counters). After HINT-1 and AUDIT-2,
-  because all three change `daemon.rs`.
+Decisions taken after the brief was written: `hints_removed` and `hints_kept_old` are keys of
+the `round` line. The events `state_load`, `parked`, `host_paused` and `host_resumed` are
+added; the `events` block leaves `status.json` (A13.2); audit events wait for AUDIT-3. A
+`status.json` that still has an `events` object loads as damaged, with no shim. Delivered at
+`7f99613` on `rust/log-events`.
+
+### AUDIT-3: park one source (dispatched after LOG-2 and the gates on `7f99613`)
+
+Decisions of the parent: (1) the rule is the core's (`transition_paced`), with no second
+copy of 3 failures over at least 3 h; (2) `AuditState` gains `first_failure_at_ns` (serde
+default); (3) `ParkedEntry` gains an optional source id; (4) a third consecutive mismatch at
+least 3 h after the first parks the source instead of starting an epoch; (5) a parked source
+is left out of its owner's capture and the rest of the owner flows; (6) both mismatch sites
+use the rule; (7) a source that is not prefix-stable never fails at the prefix site; (8) the
+park is recorded before the commit result and `status.json` is written in that round; (9) the
+`parked` line gains `scope` and a source id is never logged; (10) no `unpark` command yet.
+Delivered at `2edf2f8` on `rust/audit-park`.
+
+### Later, not in this stack
+
 - **LOOP-1, LOOP-2, STOP-1.** A per-owner capture entry on `Daemon`; the event loop over the
   watcher inbox, hint directory, coalescer deadlines, the 60 s wake-gap tick, retry deadlines
   and the 15 min reconcile; a stop that is never dropped by a full inbox and is checked between
@@ -188,14 +215,45 @@ Per increment: read the whole diff; rerun fmt, clippy, rustdoc, nextest, doctest
 guarantee and confirm it fails on the intended assertion; then `scripts/gates.sh` on the
 combined tip. Evidence goes to `evidence/19-production-prerequisites/`.
 
+## Result (2026-11-16, accepted locally)
+
+Commits, checks, mutants, gates and limits are in
+[evidence 19](evidence/19-production-prerequisites/). Not accepted by hosted CI: stack #111
+was running when this was written. Nothing was written outside local test prefixes; no R2 run
+happened, and the daemon still refuses an empty prefix.
+
+| Increment | Tip | Delivers |
+|---|---|---|
+| Gate 08 | `00e91ab` | Coverage gate through nextest, one process per test (root cause of the hosted failure) |
+| HINT-1 | `8fe5bfa` | Hint I/O on `StateDir`; day files past 7 days removed once consumed |
+| LOG-1 | `ec5c0cc` | `tracing` to stderr: `started`, `round`, `stopped` |
+| AUDIT-1 | `b37556e` | Audit evidence, audit state, stat refresh; fix of the between-windows digest bug |
+| AUDIT-2 | `c9941ff` | Audit counts, byte-count test, property for rewrites between the windows |
+| LOG-2 | `7f99613` | `state_load`, `parked`, `host_paused`, `host_resumed`; `events` block removed |
+| AUDIT-3 | `2edf2f8` | Per-source park at repeated audit mismatches |
+
+## Known limits
+
+- No `unpark` command and no automatic unpark.
+- A hint day file whose launch record never commits is kept for ever, including after index loss.
+- A daemon with no sources never rewrites a damaged `index.json`, so it logs `state_load` every start.
+- A `status.json` with an `events` block loads as damaged (none exists in production).
+- The Hegel generator of the capture property cannot reach a source park; only a scripted test does.
+- EPIPE on the real binary's stderr was not observed; `signals_unavailable` and
+  `state_root_unresolved` are untested; no gate runs rustdoc.
+- Not run: 2,000 cases, `cargo mutants`, anything against R2, hosted CI for stack #111.
+
 ## Open for the operator
 
-None blocks this brief.
+None blocks the next brief.
 
-1. A hint day file with a launch record that never commits is kept for ever. A cap (say 30
-   days) would delete launch evidence. Default: no cap; the kept count is reported.
-2. The `events` block leaves `status.json` when the events are logged (LOG-2), as A13.2 says.
-3. The refusal is lifted after the watcher and the in-round stop, later than A13.2 requires.
+1. No cap on kept hint files; a cap would delete launch evidence. Default: no cap, count reported.
+2. The `events` block left `status.json` in LOG-2, as A13.2 says; confirm.
+3. The empty-prefix refusal is lifted after the watcher and in-round stop, later than A13.2 requires.
+4. From earlier work: removal of the `launch_attach_failed` counter that A11.3 named, and the
+   dated 2026-11-12 notes under A11.3 and A13.3 in the amendments file.
+5. AUDIT-3 choices: per-source park, the `scope` key, source id never logged, non-prefix-stable
+   sources never fail at the prefix site, no unpark yet.
 
 ## Not in this brief
 
@@ -206,3 +264,9 @@ installation. Each is needed before cutover (DESIGN 17, 18), none before the wat
 ## Progress ledger
 
 - 2026-11-12: brief written on `e11db32`.
+- 2026-11-12: wave 1 (HINT-1, LOG-1, AUDIT-1) accepted; gate 08 fixed (`00e91ab`) after the
+  hosted failure of PR #101 was root-caused; stack #103 merged as `39944d7`; AUDIT-2 accepted
+  at `c9941ff`; LOG-2 accepted (`7f99613` after the rebase); AUDIT-3 worker commits to `0d28378`;
+  full gates on `b37556e` and `7f99613` (all 13 sub-gates 0).
+- 2026-11-16: AUDIT-3 accepted with parent commit `2edf2f8`; full gates on `2edf2f8` (500 cases,
+  seed 3153221467, 583 tests, 97.19 %); stack #111 pushed (PRs #104 to #110), hosted CI running.
