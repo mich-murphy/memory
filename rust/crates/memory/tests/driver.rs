@@ -157,6 +157,9 @@ impl Inputs for Script<'_> {
     }
 }
 
+/// A retry deadline (seconds since start) and the owner index.
+type Retry = (u64, usize);
+
 struct Rec<'a> {
     fake: &'a Fake,
     owners: Vec<Owner>,
@@ -234,7 +237,7 @@ impl Work for Rec<'_> {
             .min()
     }
     fn retries_due(&mut self, now: Duration) -> Vec<Owner> {
-        let (due, later): (Vec<(u64, usize)>, Vec<(u64, usize)>) = self
+        let (due, later): (Vec<Retry>, Vec<Retry>) = self
             .retries
             .iter()
             .copied()
