@@ -64,13 +64,13 @@ This is the single active task brief; dated operating records below remain histo
   and a `capture` line; there is no `wake_gap` event.
 - Found on the way: on `main` a hint record's owner was built from the raw `session_id` and
   never matched the locator's owner (found by a surviving mutant); fixed by taking the owner
-  from the transcript path (`d187108`). A hint-directory creation event after a zero-delay
+  from the transcript path (`b0ac599`). A hint-directory creation event after a zero-delay
   start round made the real-binary tests flaky (3 of 30 runs); fixed in the driver (`aca704a`),
   30 runs after: 0 failed.
 - Checks: seven checks 0 on every increment tip and on `e6060d5` (674 passed, 5 skipped, 12
   doctests); parent mutants killed on the intended assertion, survivors pinned by parent
-  commits (`7c31f6e`, `d28ca14`, `d187108`). Gates on `969d6fc`: 500 cases, seed 1749603793, all 13 sub-gates 0, 676 tests
-  under coverage, 97.40 % (7750/7957).
+  commits (`7c31f6e`, `d28ca14`, `d187108`). Gates on `969d6fc`: 500 cases, seed 1749603793,
+  all 13 sub-gates 0, 676 tests under coverage, 97.40 % (7750/7957).
 - Known limits: deleted files are never recorded as deleted (slice 3); commit pauses are
   zero; a capture holds the whole range in memory; a round does not end early when the
   network is down; no `unpark`; ownerless launch records keep their hint day file; the wake

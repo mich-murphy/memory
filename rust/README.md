@@ -11,9 +11,10 @@ work against fakes and temp directories: hook, commit protocol, daemon state, ca
 wiring, real filesystem adapter, source resolver, notify watcher/scheduler, the S3 adapter
 (`rusty-s3` + `ureq`), zstd piece encoding, and a daemon that one function starts from
 `config.toml` and the token file (`assemble::start_from_config`). `memory-reader` decodes
-pieces, restores a source and reads an owner's manifest chain. `run` is the daemon's event loop (after a 5 s to 60 s startup delay a
-reconcile, then per-owner capture after the coalescer window, hints, a safety reconcile every
-15 minutes, and a stop on SIGTERM or SIGINT honoured inside a round) and `restore` is the `memory restore` command
+pieces, restores a source and reads an owner's manifest chain. `run` starts the daemon's event
+loop (after a 5 s to 60 s startup delay a reconcile, then per-owner capture after the coalescer
+window, hints, a safety reconcile every 15 minutes, and a stop on SIGTERM or SIGINT honoured
+inside a round) and `restore` is the `memory restore` command
 ([brief 27](../docs/rust-rewrite/implementation/27-run-loop.md),
 [evidence 18](../docs/rust-rewrite/implementation/evidence/18-run-loop/)). The daemon logs
 `started`, `state_load`, `round`, `parked`, `host_paused`, `host_resumed` and `stopped` to
@@ -23,9 +24,9 @@ sources and parks a source after repeated audit mismatches
 [evidence 19](../docs/rust-rewrite/implementation/evidence/19-production-prerequisites/)).
 The event loop connects the watcher, the scheduler and the hints
 ([brief 29](../docs/rust-rewrite/implementation/29-event-loop.md),
-[evidence 20](../docs/rust-rewrite/implementation/evidence/20-event-loop/); accepted locally,
-not pushed). The daemon refuses an empty key prefix, so it writes only under an acceptance prefix. No slice or release acceptance is
-claimed.
+[evidence 20](../docs/rust-rewrite/implementation/evidence/20-event-loop/); accepted locally
+on 2026-11-16). The daemon refuses an empty key prefix, so it writes only under an acceptance
+prefix. No slice or release acceptance is claimed.
 
 All commands use the repository's **locked Nix shell**, Rust/cargo 1.99.0.
 No rustup/global installs. From repository root:

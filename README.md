@@ -41,7 +41,7 @@ append sources, accepted locally; see
 empty-prefix refusal and the unconnected watcher remain.
 **Update 2026-11-16 (brief 29):** the daemon now runs an event loop: per-owner capture after the
 coalescer window, hints, a safety reconcile every 15 minutes and a stop honoured inside a
-round; accepted locally, not pushed. The empty-prefix refusal remains. See
+round; accepted locally on 2026-11-16. The empty-prefix refusal remains. See
 [brief 29](docs/rust-rewrite/implementation/29-event-loop.md) and
 [evidence 20](docs/rust-rewrite/implementation/evidence/20-event-loop/).
 

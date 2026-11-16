@@ -2,9 +2,10 @@
 
 Coordinator brief. The parent session owns this file and acceptance. It follows
 [brief 28](28-production-prerequisites.md) (logs, hint retention, the audit; merged as `d765f9c`)
-and [evidence 19](evidence/19-production-prerequisites/). Status: built and accepted locally on 2026-11-16 as `969d6fc`; not yet pushed. Results,
-commits and checks are in [evidence 20](evidence/20-event-loop/); each increment section below
-ends with a "Result" paragraph. Text that states a plan stays as written; changes are marked.
+and [evidence 19](evidence/19-production-prerequisites/). Status: built and accepted locally on
+2026-11-16 as `969d6fc`; not yet pushed. Results, commits and checks are in
+[evidence 20](evidence/20-event-loop/); each increment section below ends with a "Result"
+paragraph. Text that states a plan stays as written; changes are marked.
 
 ## Goal
 
@@ -131,8 +132,7 @@ watcher tests), `tests/run.rs`. Must not touch `daemon.rs`, `commit.rs`, `Schedu
 **Result (STOP-1a).** Tip `7c31f6e`, accepted locally on 2026-11-16: a stop flag that a full queue
 cannot drop, a read-only view, and a non-recursive extra directory in the watcher. The parent's
 mutants killed 7 of 8 first; `dir-recursive` survived and `7c31f6e` pinned it. Details, mutants
-and
-checks: [evidence 20](evidence/20-event-loop/).
+and checks: [evidence 20](evidence/20-event-loop/).
 
 ### LOOP-1
 
@@ -204,7 +204,7 @@ Owns `commit.rs`, `daemon.rs` (stop argument and `land` only), `tests/commit_pro
 
 **Result (STOP-1b).** Tip `564577b`, accepted locally on 2026-11-16: `commit_stoppable`,
 `Failure::Stopped`, `Daemon::set_stop`; a stop is honoured between owners, between pieces, before
-the manifest and before the publish part. 11 of 11 parent mutants killed on the first run; the
+the manifest and before the publish part. 8 of 8 parent mutants killed on the first run; the
 parent fixed a false `host_resumed` in `564577b`. Details, mutants and
 checks: [evidence 20](evidence/20-event-loop/).
 
@@ -216,7 +216,7 @@ which never equals the locator's session owner, so a launch record never attache
 signalled an owner without sources. The fix is in the decisions table above.
 
 **Result (hint owner).** Tip `d187108`, accepted locally on 2026-11-16: `hint_owner`
-(`daemon.rs:438`); `owner_of` removed; `PendingHint.owner` is optional. 12 parent mutants, 11
+(`daemon.rs:438`); `owner_of` removed; `PendingHint.owner` is optional. 4 parent mutants, 3
 killed on the first run; `sub-without-main` survived and `d187108` pinned it. See
 [evidence 20](evidence/20-event-loop/).
 
@@ -289,8 +289,8 @@ Added since (2026-11-16):
 5. **Ownerless launch records** widen item "kept for ever" of brief 28: a record with no
    transcript path (for example a Codex session that is not persisted) has no owner, so its
    hint day file is kept and counted in `hints_kept_old`.
-6. **Deletions are not detected until slice 3** (the item 1 probe was repeated on `2edf2f8`
-   with the same result; see evidence 20).
+6. **Deletions are not detected until slice 3** (item 1; the probe that confirmed it ran on
+   `2edf2f8` and is described in evidence 20).
 7. **A round does not end early when the network is down** (item 4 still holds; nothing in
    the loop changes it).
 8. **`HintSignal.paths` has no production consumer**: paths are noted when the scan is built.

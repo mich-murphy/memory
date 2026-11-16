@@ -89,6 +89,10 @@ The seven checks are fmt, clippy `-Dwarnings`, rustdoc `-Dwarnings`, nextest, do
 below. Mutants are in [`teeth.txt`](teeth.txt) with the failing tests and assertion lines. The
 four mutation predicates each occurred once on the combined tips.
 
+Source `path:line` references below are on `969d6fc`. A test line named for a mutant is the
+line on the tip that mutant ran on (the headings of `teeth.txt` name each tip); later commits
+moved some of those tests.
+
 | Increment | Tip checked | Seven checks | Tests | Mutants |
 |---|---|---|---|---|
 | STOP-1a | `9dea33d` | 0 | 594 passed, 4 skipped, 12 doctests | 8; 7 killed, 1 survivor fixed by `7c31f6e` |
@@ -100,7 +104,7 @@ four mutation predicates each occurred once on the combined tips.
 
 ### STOP-1a
 
-Adds `StopFlag` (`watch.rs:292`, `FsWatcher::stop_flag` at `:508`, `Inbox::stop_flag` at `:377`)
+Adds `StopFlag` (`watch.rs:292`, `FsWatcher::stop_flag` at `:508`, `InboxRx::stop_flag` at `:377`)
 and `recv_ignoring_stop` (`watch.rs:395`): the stop is a flag the receive reports before an
 overflow and before queued inputs, so a full queue cannot drop it. The watcher also watches one
 given directory non-recursively. Parent follow-up `9dea33d`: the view is read-only and is not
@@ -155,7 +159,7 @@ Adds `commit_stoppable(store, base, request, known, pause, stop)` (`commit.rs:43
 argument), `Daemon::set_stop(impl Fn() -> bool + 'static)` (`daemon.rs:622`),
 `RoundReport.stopped` and `OwnerOutcome::Stopped`. Parent fix `564577b`: the stopped round
 cleared `host_paused` and logged a false `host_resumed`; the test fails at
-`tests/daemon.rs:4121` with the fix reverted.
+`tests/daemon.rs:4121` (on `564577b`) with the fix reverted.
 
 Mutants (wave 2): `stop-outcome-failed`, `no-probe-before-publish`, `no-probe-before-manifest`,
 `piece-probe-once`, `land-probe-false`, `outcome-not-stopped` (`tests/daemon.rs:4126`),
@@ -192,7 +196,7 @@ last two were added by the parent in `969d6fc` (5 of 5 runs each; about 2.6 s an
 
 Mutants on `969d6fc`, 11 of 11 killed: `inputs-stop-timeout` (`wired.rs` test `:75`),
 `inputs-failed-timeout` (`:86`), `next-retry-none` and `retries-due-empty` (retry test, 20 s
-bound), `hints-dropped` (hint test, bound), `capture-not-logged` (4 event-loop tests),
+bound), `hints-dropped` (hint test, bound), `capture-not-logged` (5 event-loop tests),
 `cause-fixed` (`event_loop.rs:55`), `shutdown-skipped` (`tests/harness.rs:186`, `:286`),
 `hint-dir-not-dirty` (`tests/driver.rs:420`), `signal-dropped` (run test, bound),
 `window-scaled` (4 event-loop tests, bound).
