@@ -7,7 +7,6 @@ use super::{BUCKET, R, e};
 use memory::assemble::start_wired;
 use memory::config::Config;
 use memory::daemon::Sources;
-use memory::environment::Clock;
 use memory::realfs::WalkLimits;
 use memory::resolve::{SharedFs, WalkSources};
 use memory::roots::locator_roots;
@@ -260,16 +259,7 @@ fn the_loop_clock_has_the_daemons_monotonic_origin() -> R {
     let s = setup("loop-origin")?;
     let wired = start_wired(&s.rig.state, &s.rig.state.join("config.toml")).map_err(e)?;
     let (mut daemon, clock) = (wired.daemon, wired.clock);
-    // Read the daemon's clock first, then the loop's: with one origin the later reading is not
-    // smaller. A clock created later (even by microseconds) reads less than the daemon's.
-    for _ in 0..50 {
-        let daemon_now = daemon.clock_mut().monotonic_ns();
-        let loop_now = clock.monotonic_ns();
-        assert!(loop_now >= daemon_now, "{loop_now} < {daemon_now}");
-        assert!(
-            loop_now - daemon_now < 50_000_000,
-            "{loop_now} {daemon_now}"
-        );
-    }
+    // One origin means equal clocks; a clock created even a microsecond earlier or later differs.
+    assert_eq!(clock, *daemon.clock_mut());
     Ok(())
 }

@@ -12,7 +12,7 @@ use crate::environment::Clock;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 /// The production clock.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SystemClock {
     origin: Instant,
 }
