@@ -3815,3 +3815,285 @@ fn an_uncommitted_hint_signals_once_more_after_a_restart() -> R {
     assert!(d.refresh_hints().is_empty());
     Ok(())
 }
+
+// ------------------------------------------------------------------ stop requests
+
+use std::cell::Cell;
+use std::rc::Rc;
+
+/// The store of `FStore` that logs every request and raises a stop flag when it receives the
+/// `n`th PUT whose key starts with (or, for `current.json`, ends with) a pattern.
+#[derive(Default)]
+struct Hooked {
+    inner: FStore,
+    flag: Rc<Cell<bool>>,
+    on: Option<(&'static str, usize)>,
+    seen: usize,
+    log: Vec<String>,
+}
+impl Hooked {
+    fn note(&mut self, op: &str, key: &str) {
+        self.log.push(format!("{op} {key}"));
+        if op != "PUT" {
+            return;
+        }
+        let Some((pattern, n)) = self.on else {
+            return;
+        };
+        let hit = if pattern == "current.json" {
+            key.ends_with(pattern)
+        } else {
+            key.starts_with(pattern)
+        };
+        if hit {
+            self.seen += 1;
+            if self.seen == n {
+                self.flag.set(true);
+            }
+        }
+    }
+    fn count(&self, prefix: &str) -> usize {
+        self.log.iter().filter(|l| l.starts_with(prefix)).count()
+    }
+}
+impl Store for Hooked {
+    fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
+        self.note("PUT", key);
+        self.inner.put_if_absent(key, body)
+    }
+    fn put_if_match(
+        &mut self,
+        key: &str,
+        etag: &ETag,
+        body: Published,
+    ) -> Result<ETag, StoreError> {
+        self.note("PUT", key);
+        self.inner.put_if_match(key, etag, body)
+    }
+    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
+        self.note("GET", key);
+        self.inner.get(key)
+    }
+}
+
+type H = Daemon<MemFs, Hooked, TestClock, FSrcs>;
+
+fn boot_h(tmp: &Tmp, cfg: &Path, fs: MemFs, store: Hooked, list: &[(Owner, Source)]) -> R<H> {
+    let list = list.to_vec();
+    let sources: FSrcs = Box::new(move || list.clone());
+    let flag = store.flag.clone();
+    let parts = Parts {
+        fs,
+        store,
+        clock: TestClock {
+            wall: WALL,
+            ..TestClock::at(0)
+        },
+        sources,
+        context: PolicyContext {
+            valid: true,
+            revision: "r".to_owned(),
+            rules: Some(rules_digest()),
+            collector_paths: vec![],
+            collector_identities: vec![],
+        },
+    };
+    let mut d = Daemon::start_with(
+        &tmp.root(),
+        cfg,
+        parts,
+        StartOptions {
+            sync: SyncPolicy::Full,
+        },
+    )
+    .map_err(|x| x.code().to_owned())?;
+    d.set_stop(move || flag.get());
+    Ok(d)
+}
+/// Restart without a stop: the files and the store content move to a new daemon.
+fn restart_h(mut d: H, tmp: &Tmp, cfg: &Path, list: &[(Owner, Source)]) -> R<H> {
+    let fs = std::mem::take(d.fs_mut());
+    let inner = std::mem::take(&mut d.store_mut().inner);
+    d.shutdown().map_err(e)?;
+    boot_h(
+        tmp,
+        cfg,
+        fs,
+        Hooked {
+            inner,
+            ..Hooked::default()
+        },
+        list,
+    )
+}
+fn hooked(on: Option<(&'static str, usize)>) -> Hooked {
+    Hooked {
+        on,
+        ..Hooked::default()
+    }
+}
+/// Three pieces of 8 MiB, 8 MiB and 1 MiB, each with its own letter so no two share an object.
+fn three_pieces() -> Vec<u8> {
+    let mut out = Vec::new();
+    for i in 0..(17 * 1024_usize) {
+        let letter = b'a' + u8::try_from(i / 8192).unwrap_or(0);
+        out.extend(std::iter::repeat_n(letter, 1023));
+        out.push(b'\n');
+    }
+    out
+}
+fn index_advanced(tmp: &Tmp, list: &[(Owner, Source)]) -> R<bool> {
+    let id = list.first().map(|l| l.1.id.clone()).ok_or("no source")?;
+    Ok(index_of(tmp)?.is_some_and(|i| i.sources.get(&id).is_some_and(|s| s.index.is_some())))
+}
+
+#[test]
+fn a_stop_after_piece_one_leaves_one_piece_and_the_next_start_captures_it_all() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let o = owner_of("s1")?;
+    let big = three_pieces();
+    let mut d = boot_h(
+        &tmp,
+        &cfg,
+        files_with(&big),
+        hooked(Some(("objects/", 1))),
+        &list,
+    )?;
+    let failures = format!("{:?}", d.status().failures);
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!((report.failed, report.stopped, report.landed), (0, 1, 0));
+    assert_eq!(d.store_mut().count("PUT objects/"), 1);
+    assert_eq!(d.store_mut().count("PUT manifests/"), 0);
+    assert_eq!(d.store_mut().count("PUT") - 1, 0);
+    assert!(d.store_mut().inner.peek(&current_key(&o)).is_none());
+    assert_eq!(d.store_mut().log.len(), 2, "one recovery GET, one piece");
+    assert_eq!(d.next_retry(), None);
+    assert_eq!(format!("{:?}", d.status().failures), failures);
+    let d = restart_h(d, &tmp, &cfg, &list)?;
+    assert!(!index_advanced(&tmp, &list)?);
+    let mut d = d;
+    let again = d.reconcile_once().map_err(e)?;
+    assert_eq!((again.landed, again.stopped), (1, 0));
+    let seen = observe(&d.store_mut().inner, &o, &[big.clone()])?;
+    assert_eq!(need(seen, "observed")?.latest, Some(big));
+    d.shutdown().map_err(e)?;
+    assert!(index_advanced(&tmp, &list)?);
+    Ok(())
+}
+
+#[test]
+fn a_stop_during_the_current_write_still_lands_and_advances_the_index() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let o = owner_of("s1")?;
+    let mut d = boot_h(
+        &tmp,
+        &cfg,
+        files_with(b"x\n"),
+        hooked(Some(("current.json", 1))),
+        &list,
+    )?;
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!((report.landed, report.stopped, report.failed), (1, 0, 0));
+    assert!(d.store_mut().inner.peek(&current_key(&o)).is_some());
+    d.shutdown().map_err(e)?;
+    assert!(index_advanced(&tmp, &list)?);
+    Ok(())
+}
+
+#[test]
+fn a_round_stopped_when_owner_two_lands_never_touches_owners_three_to_five() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![
+        src_of("s1", 1)?,
+        src_of("s2", 2)?,
+        src_of("s3", 3)?,
+        src_of("s4", 4)?,
+        src_of("s5", 5)?,
+    ];
+    let mut fs = MemFs::default();
+    for h in 1..=5_u64 {
+        fs.files.insert(h, format!("owner {h}\n").into_bytes());
+    }
+    let mut d = boot_h(&tmp, &cfg, fs, hooked(Some(("current.json", 2))), &list)?;
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!((report.landed, report.failed, report.stopped), (2, 0, 0));
+    for (n, expected) in [
+        ("s1", true),
+        ("s2", true),
+        ("s3", false),
+        ("s4", false),
+        ("s5", false),
+    ] {
+        let key = current_key(&owner_of(n)?);
+        assert_eq!(d.store_mut().inner.peek(&key).is_some(), expected, "{n}");
+        assert_eq!(
+            d.store_mut().log.iter().any(|l| l.ends_with(&key)),
+            expected,
+            "{n}"
+        );
+    }
+    assert_eq!(d.store_mut().count("PUT objects/"), 2);
+    assert_eq!(d.store_mut().count("PUT manifests/"), 2);
+    assert_eq!(d.status().rounds, 1);
+    Ok(())
+}
+
+#[test]
+fn capture_owner_stopped_mid_pieces_is_stopped_and_captures_again_without_a_stop() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let o = owner_of("s1")?;
+    let big = three_pieces();
+    let mut d = boot_h(
+        &tmp,
+        &cfg,
+        files_with(&big),
+        hooked(Some(("objects/", 1))),
+        &list,
+    )?;
+    assert_eq!(cap_h(&mut d, &o)?, OwnerOutcome::Stopped);
+    assert_eq!(d.next_retry(), None);
+    d.store_mut().flag.set(false);
+    d.store_mut().on = None;
+    assert_eq!(cap_h(&mut d, &o)?, OwnerOutcome::Landed);
+    let gets = d
+        .store_mut()
+        .log
+        .iter()
+        .filter(|l| l.starts_with("GET") && l.ends_with("current.json"))
+        .count();
+    assert_eq!(gets, 1, "the base survived the stop: no second recovery");
+    let seen = observe(&d.store_mut().inner, &o, &[big.clone()])?;
+    assert_eq!(need(seen, "observed")?.latest, Some(big));
+    Ok(())
+}
+fn cap_h(d: &mut H, o: &Owner) -> R<OwnerOutcome> {
+    d.capture_owner(o).map_err(e)
+}
+
+#[test]
+fn a_stop_before_the_round_runs_no_owner_and_sends_no_request() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?, src_of("s2", 2)?];
+    let mut d = boot_h(&tmp, &cfg, two_files(), hooked(None), &list)?;
+    d.store_mut().flag.set(true);
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!(
+        (
+            report.landed,
+            report.failed,
+            report.stopped,
+            report.deferred
+        ),
+        (0, 0, 0, 0)
+    );
+    assert!(d.store_mut().log.is_empty());
+    Ok(())
+}
