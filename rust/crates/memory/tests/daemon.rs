@@ -3976,7 +3976,7 @@ fn a_stop_after_piece_one_leaves_one_piece_and_the_next_start_captures_it_all() 
     let mut d = d;
     let again = d.reconcile_once().map_err(e)?;
     assert_eq!((again.landed, again.stopped), (1, 0));
-    let seen = observe(&d.store_mut().inner, &o, &[big.clone()])?;
+    let seen = observe(&d.store_mut().inner, &o, std::slice::from_ref(&big))?;
     assert_eq!(need(seen, "observed")?.latest, Some(big));
     d.shutdown().map_err(e)?;
     assert!(index_advanced(&tmp, &list)?);
@@ -4069,7 +4069,7 @@ fn capture_owner_stopped_mid_pieces_is_stopped_and_captures_again_without_a_stop
         .filter(|l| l.starts_with("GET") && l.ends_with("current.json"))
         .count();
     assert_eq!(gets, 1, "the base survived the stop: no second recovery");
-    let seen = observe(&d.store_mut().inner, &o, &[big.clone()])?;
+    let seen = observe(&d.store_mut().inner, &o, std::slice::from_ref(&big))?;
     assert_eq!(need(seen, "observed")?.latest, Some(big));
     Ok(())
 }
