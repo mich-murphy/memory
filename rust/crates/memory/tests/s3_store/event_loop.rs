@@ -5,7 +5,6 @@ use super::daemon_restore::{BOUND, PREFIX, Setup, restore, setup, stop};
 use super::fake::Fault;
 use super::{BUCKET, R, e};
 use memory::assemble::start_wired;
-use memory::clock::SystemClock;
 use memory::config::Config;
 use memory::daemon::Sources;
 use memory::environment::Clock;
@@ -261,16 +260,16 @@ fn the_loop_clock_has_the_daemons_monotonic_origin() -> R {
     let s = setup("loop-origin")?;
     let wired = start_wired(&s.rig.state, &s.rig.state.join("config.toml")).map_err(e)?;
     let (mut daemon, clock) = (wired.daemon, wired.clock);
-    // A gap after both exist: a clock created at the loop's start would read about zero.
-    std::thread::sleep(Duration::from_millis(300));
-    let loop_now = clock.monotonic_ns();
-    let daemon_now = daemon.clock_mut().monotonic_ns();
-    assert!(loop_now >= 300_000_000, "{loop_now}");
-    assert!(daemon_now >= loop_now, "{daemon_now} {loop_now}");
-    assert!(
-        daemon_now - loop_now < 100_000_000,
-        "{daemon_now} {loop_now}"
-    );
-    assert!(SystemClock::new().monotonic_ns() < loop_now);
+    // Read the daemon's clock first, then the loop's: with one origin the later reading is not
+    // smaller. A clock created later (even by microseconds) reads less than the daemon's.
+    for _ in 0..50 {
+        let daemon_now = daemon.clock_mut().monotonic_ns();
+        let loop_now = clock.monotonic_ns();
+        assert!(loop_now >= daemon_now, "{loop_now} < {daemon_now}");
+        assert!(
+            loop_now - daemon_now < 50_000_000,
+            "{loop_now} {daemon_now}"
+        );
+    }
     Ok(())
 }
