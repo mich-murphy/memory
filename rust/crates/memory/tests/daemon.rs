@@ -3419,6 +3419,22 @@ fn old_hint_file_within_the_read_bound_and_consumed_is_removed() -> R {
     Ok(())
 }
 
+#[test]
+fn a_swept_hint_file_does_not_return_through_an_owner_capture() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    fs::write(hint_path(&tmp, OLD8), hint_line("s1", &["PATH=/usr/bin"])?).map_err(e)?;
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!(report.hints_removed, 1, "{report:?}");
+    assert!(!hint_path(&tmp, OLD8).exists());
+    bytes_in(&mut d, 1, b"hello\nmore\n");
+    let (out, _) = cap(&mut d, &owner_of("s1")?)?;
+    assert_eq!(out, OwnerOutcome::Landed);
+    d.shutdown().map_err(e)?;
+    assert!(!index_has(&tmp, OLD8)?, "removed file back in the index");
+    Ok(())
+}
+
 // ------------------------------------------------------------------ per-owner capture
 use memory::daemon::OwnerOutcome;
 use memory_core::coalescer::Signal;

@@ -941,9 +941,16 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
 
     /// Retention sweep (DESIGN.md 9.1) over this round's scan, then drop offset entries of
     /// files that no longer exist. A failed removal keeps the entry and is retried next round.
-    fn sweep_hints(&mut self, files: &[ScannedFile], wall_ns: i128, report: &mut RoundReport) {
+    /// A removed file also leaves the scan, so a later per-owner capture cannot restore its entry.
+    fn sweep_hints(
+        &mut self,
+        files: &mut Vec<ScannedFile>,
+        wall_ns: i128,
+        report: &mut RoundReport,
+    ) {
         let secs = i64::try_from(wall_ns.div_euclid(1_000_000_000)).unwrap_or(-1);
-        for file in files {
+        let mut removed: Vec<String> = Vec::new();
+        for file in files.iter() {
             let day = file.name.strip_suffix(".jsonl").unwrap_or(&file.name);
             if !past_retention(day, secs) {
                 continue;
@@ -957,12 +964,15 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             };
             if removable(day, secs, &facts) && self.state.remove_hint_day(&file.name).is_ok() {
                 self.hints.remove(&file.name);
+                self.seen.remove(&file.name);
+                removed.push(file.name.clone());
                 self.dirty = true;
                 report.hints_removed += 1;
             } else {
                 report.hints_kept_old += 1;
             }
         }
+        files.retain(|f| !removed.contains(&f.name));
         if let Ok(listed) = self.state.list_hint_days() {
             let before = self.hints.len();
             self.hints.retain(|name, _| listed.contains(name));
@@ -1047,7 +1057,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             }
         }
         self.advance_hints(&files);
-        self.sweep_hints(&files, self.clock.wall_ns(), &mut report);
+        self.sweep_hints(&mut files, self.clock.wall_ns(), &mut report);
         self.files = files;
         self.status.failures.add(&report.failures);
         self.status.audit.add(&report.audit);
