@@ -378,6 +378,10 @@ fn unknown_owner_rows_are_counted_not_yielded() -> R {
 use memory::daemon::{Daemon, IndexBody, OwnerOutcome, Parts};
 use memory::environment::Clock;
 use memory::state::{Loaded, StateFile, read_durable};
+use memory_core::domain::SessionId;
+use memory_core::hint::{
+    HintEvent, HintPath, HintRecord, HintSchema, LaunchHint, PathHint, Reduction,
+};
 use std::os::unix::fs::PermissionsExt;
 
 fn walker(root: &Path, limits: WalkLimits) -> R<WalkSources> {
@@ -556,11 +560,10 @@ impl Clock for Clk {
     }
 }
 
-#[test]
-fn a_vanished_file_is_never_an_absence_for_an_owner_capture() -> R {
-    let t = Tmp::new()?;
-    fs::set_permissions(&t.0, fs::Permissions::from_mode(0o700))?;
-    let file = t.write(T, b"{\"a\":1}\n")?;
+type RealDaemon = Daemon<SharedFs, MemStore, Clk, WalkSources>;
+
+/// A daemon over the real filesystem and `WalkSources` on the root of `t`, state under `t`.
+fn real_daemon(t: &Tmp) -> R<RealDaemon> {
     let token = t.0.join("token");
     fs::write(&token, "x")?;
     fs::set_permissions(&token, fs::Permissions::from_mode(0o600))?;
@@ -579,7 +582,7 @@ fn a_vanished_file_is_never_an_absence_for_an_owner_capture() -> R {
         shared.clone(),
     );
     let state = t.0.join("state");
-    let mut d = Daemon::start(
+    let d = Daemon::start(
         &state,
         &cfg,
         Parts {
@@ -591,6 +594,62 @@ fn a_vanished_file_is_never_an_absence_for_an_owner_capture() -> R {
         },
     )
     .map_err(|x| x.code().to_owned())?;
+    Ok(d)
+}
+
+#[test]
+fn a_hint_names_a_file_no_walk_has_seen_and_its_owner_is_captured() -> R {
+    let t = Tmp::new()?;
+    fs::set_permissions(&t.0, fs::Permissions::from_mode(0o700))?;
+    t.write(T, b"{\"a\":1}\n")?;
+    let mut d = real_daemon(&t)?;
+    assert_eq!(d.reconcile_once().map_err(|x| format!("{x:?}"))?.landed, 1);
+    // Created after the walk and never reported by the watcher: only the hint names it.
+    let new = t.write("claude/projects/-p/new.jsonl", b"{\"b\":1}\n")?;
+    let owner = owner_at("projects/-p/new.jsonl")?;
+    assert_eq!(
+        d.capture_owner(&owner).map_err(|x| format!("{x:?}"))?,
+        OwnerOutcome::Unchanged,
+        "unknown until something names it"
+    );
+    let path =
+        HintPath::try_from(new.to_str().ok_or("path")?.to_owned()).map_err(|x| format!("{x:?}"))?;
+    let record = HintRecord {
+        schema: HintSchema::V1,
+        agent: Agent::Claude,
+        event: HintEvent::SessionEnd,
+        session: SessionId::try_from("new".to_owned())?,
+        cwd: PathHint::Absent,
+        transcript: PathHint::Present { path },
+        agent_transcript: PathHint::Absent,
+        launch: LaunchHint::None,
+        reduction: Reduction::None,
+    };
+    let mut line = serde_json::to_vec(&record)?;
+    line.push(b'\n');
+    fs::write(t.0.join("state/hints/2026-11-07.jsonl"), line)?;
+    let signals = d.refresh_hints();
+    assert_eq!(signals.len(), 1);
+    let signal = signals.first().ok_or("no signal")?;
+    assert_eq!(
+        signal.owner, owner,
+        "the hint and the locator name one owner"
+    );
+    assert_eq!(signal.paths, vec![new]);
+    assert_eq!(
+        d.capture_owner(&owner).map_err(|x| format!("{x:?}"))?,
+        OwnerOutcome::Landed
+    );
+    Ok(())
+}
+
+#[test]
+fn a_vanished_file_is_never_an_absence_for_an_owner_capture() -> R {
+    let t = Tmp::new()?;
+    fs::set_permissions(&t.0, fs::Permissions::from_mode(0o700))?;
+    let file = t.write(T, b"{\"a\":1}\n")?;
+    let state = t.0.join("state");
+    let mut d = real_daemon(&t)?;
     assert_eq!(d.reconcile_once().map_err(|x| format!("{x:?}"))?.landed, 1);
     let owner = d.note_path(&file).ok_or("not noted")?;
     fs::write(&file, b"{\"a\":1}\n{\"a\":2}\n")?;

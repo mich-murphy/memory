@@ -597,7 +597,28 @@ fn make_foreign(store: &FStore, owner: &Owner) -> R<Foreign> {
 
 // ---------------------------------------------------------------- daemon helpers
 
-type FSrcs = Box<dyn FnMut() -> Vec<(Owner, Source)> + Send>;
+/// Fixed-list sources. `note` maps a transcript path to the owner of the session named by its
+/// file stem (Claude, archive `a`, machine `m`); the stems `a` and `b` stand for `s1` and `s2`.
+struct FSrcs(Box<dyn FnMut() -> Vec<(Owner, Source)> + Send>);
+impl FSrcs {
+    fn new(list: impl FnMut() -> Vec<(Owner, Source)> + Send + 'static) -> Self {
+        Self(Box::new(list))
+    }
+}
+impl memory::daemon::Sources for FSrcs {
+    fn enumerate(&mut self) -> Vec<(Owner, Source)> {
+        (self.0)()
+    }
+    fn note(&mut self, path: &std::path::Path) -> Option<Owner> {
+        let stem = path.file_stem()?.to_str()?;
+        let session = match stem {
+            "a" => "s1",
+            "b" => "s2",
+            other => other,
+        };
+        owner_of(session).ok()
+    }
+}
 type D = Daemon<MemFs, FStore, TestClock, FSrcs>;
 
 fn boot(
@@ -620,7 +641,7 @@ fn boot_sync(
     sync: SyncPolicy,
 ) -> R<D> {
     let list = list.to_vec();
-    let sources: FSrcs = Box::new(move || list.clone());
+    let sources = FSrcs::new(move || list.clone());
     let parts = Parts {
         fs,
         store,
@@ -773,7 +794,9 @@ fn hint_line(session: &str, env: &[&str]) -> R<Vec<u8>> {
         event: HintEvent::SessionStart,
         session: SessionId::try_from(session.to_owned()).map_err(e)?,
         cwd: PathHint::Absent,
-        transcript: PathHint::Absent,
+        transcript: PathHint::Present {
+            path: HintPath::try_from(format!("/r/projects/p/{session}.jsonl")).map_err(e)?,
+        },
         agent_transcript: PathHint::Absent,
         launch: LaunchHint::Full(LaunchRecord::from_sanitized(&launch)),
         reduction: Reduction::None,
@@ -2416,7 +2439,7 @@ fn disk_status(tmp: &Tmp) -> R<StatusBody> {
 }
 fn boot_shared(tmp: &Tmp, cfg: &Path, fs: MemFs, list: &Shared) -> R<D> {
     let shared = Arc::clone(list);
-    let sources: FSrcs = Box::new(move || shared.lock().map(|g| g.clone()).unwrap_or_default());
+    let sources = FSrcs::new(move || shared.lock().map(|g| g.clone()).unwrap_or_default());
     let parts = Parts {
         fs,
         store: FStore::default(),
@@ -2439,7 +2462,9 @@ fn hint_with(session: &str, launch: LaunchHint) -> R<Vec<u8>> {
         event: HintEvent::SessionStart,
         session: SessionId::try_from(session.to_owned()).map_err(e)?,
         cwd: PathHint::Absent,
-        transcript: PathHint::Absent,
+        transcript: PathHint::Present {
+            path: HintPath::try_from(format!("/r/projects/p/{session}.jsonl")).map_err(e)?,
+        },
         agent_transcript: PathHint::Absent,
         launch,
         reduction: Reduction::None,
@@ -3880,7 +3905,7 @@ type H = Daemon<MemFs, Hooked, TestClock, FSrcs>;
 
 fn boot_h(tmp: &Tmp, cfg: &Path, fs: MemFs, store: Hooked, list: &[(Owner, Source)]) -> R<H> {
     let list = list.to_vec();
-    let sources: FSrcs = Box::new(move || list.clone());
+    let sources = FSrcs::new(move || list.clone());
     let flag = store.flag.clone();
     let parts = Parts {
         fs,

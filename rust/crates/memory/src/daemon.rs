@@ -33,7 +33,7 @@ use crate::state::{
 use memory_core::coalescer::Signal;
 use memory_core::disposition::Streak;
 use memory_core::domain::{
-    Disposition, ErrorClass, Owner, OwnerParkReason, ParkReason, RulesDigest, SessionKey,
+    Agent, Disposition, ErrorClass, Owner, OwnerParkReason, ParkReason, RulesDigest,
     SnapshotFingerprint, SourceId, SourceState,
 };
 use memory_core::hint::{
@@ -413,8 +413,13 @@ impl OwnerRt {
 struct PendingHint {
     end: u64,
     event: HintEvent,
+    /// The paths noted for `owner`.
     paths: Vec<PathBuf>,
-    owner: Owner,
+    /// The owner of the transcript path; `None` when the sources give no session owner of the
+    /// record's agent.
+    owner: Option<Owner>,
+    /// A subagent transcript's own owner and path, when it differs from `owner`.
+    other: Option<(Owner, PathBuf)>,
     launch: Option<SanitizedLaunch>,
     done: bool,
 }
@@ -426,6 +431,24 @@ struct ScannedFile {
     start: u64,
     scan: HintScan,
     records: Vec<PendingHint>,
+}
+
+/// The session owner of the record's agent that the sources give a hinted path, with the path.
+/// Hook input is untrusted: another agent's or a shared owner is no owner.
+fn hint_owner<E: Sources>(
+    sources: &mut E,
+    agent: &Agent,
+    hint: &PathHint,
+) -> Option<(Owner, PathBuf)> {
+    let PathHint::Present { path } = hint else {
+        return None;
+    };
+    let path = PathBuf::from(path.as_str());
+    let owner = sources.note(&path)?;
+    match &owner {
+        Owner::Session(key) if key.agent == *agent => Some((owner, path)),
+        _ => None,
+    }
 }
 
 fn stamp_of(wall_ns: i128) -> Result<(Timestamp, String), ManifestError> {
@@ -457,7 +480,6 @@ fn header_of(owner: &Owner, when: &Timestamp) -> Header {
 pub struct Daemon<F, S, C, E> {
     _lock: DaemonLock,
     state: StateDir,
-    config: Config,
     fs: F,
     store: S,
     clock: C,
@@ -573,7 +595,6 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         Ok(Self {
             _lock: opened.lock,
             state: opened.state,
-            config: opened.config,
             fs: parts.fs,
             store: parts.store,
             clock: parts.clock,
@@ -649,16 +670,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         }
     }
 
-    fn owner_of(&self, record: &memory_core::hint::HintRecord) -> Owner {
-        Owner::Session(SessionKey {
-            archive: self.config.archive_id.clone(),
-            machine: self.config.machine_id.clone(),
-            agent: record.agent.clone(),
-            session: record.session.clone(),
-        })
-    }
-
-    fn scan_hints(&self) -> Vec<ScannedFile> {
+    fn scan_hints(&mut self) -> Vec<ScannedFile> {
         let Ok(names) = self.state.list_hint_days() else {
             return Vec::new();
         };
@@ -688,18 +700,20 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                         }
                         LaunchHint::None | LaunchHint::DigestOnly { .. } => None,
                     };
-                    let paths = [&r.record.transcript, &r.record.agent_transcript]
-                        .into_iter()
-                        .filter_map(|p| match p {
-                            PathHint::Present { path } => Some(PathBuf::from(path.as_str())),
-                            PathHint::Absent => None,
-                        })
-                        .collect();
+                    let agent = &r.record.agent;
+                    let main = hint_owner(&mut self.sources, agent, &r.record.transcript);
+                    let sub = hint_owner(&mut self.sources, agent, &r.record.agent_transcript);
+                    let (owner, paths, other) = match (main, sub) {
+                        (None, _) => (None, Vec::new(), None),
+                        (Some((o, p)), Some((so, sp))) if so == o => (Some(o), vec![p, sp], None),
+                        (Some((o, p)), sub) => (Some(o), vec![p], sub.map(|(so, sp)| (so, sp))),
+                    };
                     PendingHint {
                         end: r.end,
                         event: r.record.event,
                         paths,
-                        owner: self.owner_of(&r.record),
+                        owner,
+                        other,
                         done: launch.is_none(),
                         launch,
                     }
@@ -836,7 +850,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         let launches: Vec<SanitizedLaunch> = hints
             .iter()
             .flat_map(|f| f.records.iter())
-            .filter(|r| !r.done && r.owner == *owner)
+            .filter(|r| !r.done && r.owner.as_ref() == Some(owner))
             .filter_map(|r| r.launch.clone())
             .collect();
         attach_launches(request, &launches);
@@ -885,7 +899,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     ) {
         self.apply(updates);
         for record in hints.iter_mut().flat_map(|f| f.records.iter_mut()) {
-            record.done |= record.owner == *owner;
+            record.done |= record.owner.as_ref() == Some(owner);
         }
     }
 
@@ -1138,7 +1152,8 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     /// Refresh the in-memory hint scan and return the records not signalled before. The
     /// "seen" offsets live in memory only and start at the stored offset, so after a restart
     /// the uncommitted records signal once more. The paths a record names are passed through
-    /// [`Daemon::note_path`].
+    /// [`Sources::note`] when the scan is built; a record's owner is the owner its transcript
+    /// path has there.
     pub fn refresh_hints(&mut self) -> Vec<HintSignal> {
         self.rescan_hints();
         let mut fresh = Vec::new();
@@ -1154,11 +1169,20 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                     } else {
                         Signal::Stop
                     };
-                    fresh.push(HintSignal {
-                        owner: r.owner.clone(),
-                        signal,
-                        paths: r.paths.clone(),
-                    });
+                    if let Some(owner) = &r.owner {
+                        fresh.push(HintSignal {
+                            owner: owner.clone(),
+                            signal,
+                            paths: r.paths.clone(),
+                        });
+                    }
+                    if let Some((owner, path)) = &r.other {
+                        fresh.push(HintSignal {
+                            owner: owner.clone(),
+                            signal,
+                            paths: vec![path.clone()],
+                        });
+                    }
                 }
             }
             if let Some(last) = file.records.last() {
@@ -1167,11 +1191,6 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         }
         let files = &self.files;
         self.seen.retain(|n, _| files.iter().any(|f| f.name == *n));
-        for signal in &fresh {
-            for path in &signal.paths {
-                self.sources.note(path);
-            }
-        }
         fresh
     }
 
