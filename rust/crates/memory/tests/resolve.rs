@@ -768,18 +768,18 @@ fn a_hint_without_an_owner_signals_nothing_and_stays_pending() -> R {
 fn a_subagent_path_of_another_owner_signals_it_too() -> R {
     let t = Tmp::new()?;
     fs::set_permissions(&t.0, fs::Permissions::from_mode(0o700))?;
-    let main = t.write("claude/projects/-p/main.jsonl", b"{}\n")?;
-    let sub = t.write("claude/projects/-p/sub.jsonl", b"{}\n")?;
+    let zmain = t.write("claude/projects/-p/zmain.jsonl", b"{}\n")?;
+    let sub = t.write("claude/projects/-p/asub.jsonl", b"{}\n")?;
     let mut d = real_daemon(&t)?;
     let day = t.0.join("state/hints").join(DAY);
-    fs::write(&day, hint(Agent::Claude, Some(&main), Some(&sub), true)?)?;
+    fs::write(&day, hint(Agent::Claude, Some(&zmain), Some(&sub), true)?)?;
     let got = d.refresh_hints();
     assert_eq!(got.len(), 2);
     assert_eq!(
         got.iter().map(|s| s.owner.clone()).collect::<Vec<_>>(),
         vec![
-            owner_at("projects/-p/main.jsonl")?,
-            owner_at("projects/-p/sub.jsonl")?
+            owner_at("projects/-p/zmain.jsonl")?,
+            owner_at("projects/-p/asub.jsonl")?
         ]
     );
     assert_eq!(got.get(1).map(|s| s.paths.clone()), Some(vec![sub.clone()]));
@@ -787,7 +787,7 @@ fn a_subagent_path_of_another_owner_signals_it_too() -> R {
     d.reconcile_once().map_err(|x| format!("{x:?}"))?;
     assert_eq!(launches(&mut d)?, 1);
     // The same owner gives one signal.
-    let mut line = hint(Agent::Claude, Some(&main), Some(&main), false)?;
+    let mut line = hint(Agent::Claude, Some(&zmain), Some(&zmain), false)?;
     let mut all = fs::read(&day)?;
     all.append(&mut line);
     fs::write(&day, all)?;
