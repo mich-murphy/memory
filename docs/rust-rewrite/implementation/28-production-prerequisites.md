@@ -4,8 +4,8 @@ Coordinator brief. The parent session owns this file and acceptance. It follows
 [brief 27](27-run-loop.md) (R1 to R4: `memory daemon` and `memory restore` run on the real
 binary) and [evidence 18](evidence/18-run-loop/). It is R5 of brief 27, split into increments.
 Status (2026-11-16): all increments done and accepted locally; record in
-[evidence 19](evidence/19-production-prerequisites/); pushed on 2026-11-16 as stack #111 (PRs
-#104 to #110), hosted CI running when this was written. The text below up to "Result" is the
+[evidence 19](evidence/19-production-prerequisites/); merged into `main` on 2026-11-16 as
+`d765f9c` (stack #111, PRs #104 to #110, #112 and #113). The text below up to "Result" is the
 dated statement of intent (2026-11-12) plus the decisions taken afterwards.
 
 ## Goal
@@ -32,7 +32,8 @@ without a rebase onto the merge commit, so the recorded hashes are the pushed on
 | `rust/audit` | #108 | `c9941ff` | AUDIT-1, AUDIT-2 |
 | `rust/log-events` | #109 | `7f99613` | LOG-2 |
 | `rust/audit-park` | #110 | `2edf2f8` | AUDIT-3 |
-| `docs/production-prerequisites` | | this record | Result, evidence 19, handoff, gates entry |
+| `docs/production-prerequisites` | #112 | `00af49e` | Result, evidence 19, handoff, gates entry |
+| `rust/ci-coverage-job` | #113 | `538279e` | Hosted CI runs coverage as its own job per OS |
 
 ## Facts checked on `e11db32` before writing
 
@@ -218,11 +219,13 @@ Per increment: read the whole diff; rerun fmt, clippy, rustdoc, nextest, doctest
 guarantee and confirm it fails on the intended assertion; then `scripts/gates.sh` on the
 combined tip. Evidence goes to `evidence/19-production-prerequisites/`.
 
-## Result (2026-11-16, accepted locally)
+## Result (2026-11-16)
 
 Commits, checks, mutants, gates and limits are in
-[evidence 19](evidence/19-production-prerequisites/). Not accepted by hosted CI: stack #111
-was running when this was written. Nothing was written outside local test prefixes; no R2 run
+[evidence 19](evidence/19-production-prerequisites/). Accepted locally by the parent, then by
+hosted CI: stack #111 merged as `d765f9c` after every "Rust rewrite gates" run succeeded and
+every "CI" run failed only in the two accepted `govulncheck` steps (three macOS jobs needed one
+rerun each; see evidence 19). Nothing was written outside local test prefixes; no R2 run
 happened, and the daemon still refuses an empty prefix.
 
 | Increment | Tip | Delivers |
@@ -244,7 +247,7 @@ happened, and the daemon still refuses an empty prefix.
 - The Hegel generator of the capture property cannot reach a source park; only a scripted test does.
 - EPIPE on the real binary's stderr was not observed; `signals_unavailable` and
   `state_root_unresolved` are untested; no gate runs rustdoc.
-- Not run: 2,000 cases, `cargo mutants`, anything against R2, hosted CI for stack #111.
+- Not run: 2,000 cases, `cargo mutants`, anything against R2.
 
 ## Open for the operator
 
@@ -272,4 +275,8 @@ installation. Each is needed before cutover (DESIGN 17, 18), none before the wat
   at `c9941ff`; LOG-2 accepted (`7f99613` after the rebase); AUDIT-3 worker commits to `0d28378`;
   full gates on `b37556e` and `7f99613` (all 13 sub-gates 0).
 - 2026-11-16: AUDIT-3 accepted with parent commit `2edf2f8`; full gates on `2edf2f8` (500 cases,
-  seed 3153221467, 583 tests, 97.19 %); stack #111 pushed (PRs #104 to #110), hosted CI running.
+  seed 3153221467, 583 tests, 97.19 %); stack #111 pushed (PRs #104 to #110).
+- 2026-11-16: record added as PR #112 (`00af49e`). The macOS job reached its 30-minute limit on
+  #109 and #110 with no gate failing (both passed on one rerun), so the hosted workflow now
+  runs the coverage gate as its own job per OS (PR #113, `538279e`). Stack #111 merged as
+  `d765f9c`; post-merge "Rust rewrite gates" succeeded on all six jobs.
