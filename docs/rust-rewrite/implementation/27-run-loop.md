@@ -3,7 +3,9 @@
 Coordinator brief. The parent session owns this file and acceptance. It follows
 [report 26](26-walking-skeleton.md) (the path exists as a test) and
 [evidence 17](evidence/17-structural-fixes/). Status: R1 to R4 done and accepted locally
-([evidence 18](evidence/18-run-loop/)); R5 not started.
+([evidence 18](evidence/18-run-loop/)); R5 is
+[brief 28](28-production-prerequisites.md), done and accepted locally on 2026-11-16
+([evidence 19](evidence/19-production-prerequisites/)).
 
 ## Goal
 

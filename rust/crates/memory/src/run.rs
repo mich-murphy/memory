@@ -229,7 +229,8 @@ fn refuse(code: &str, exit: u8) -> ExitCode {
 ///
 /// Signals are registered first, before the lock is taken, so a stop requested at any point
 /// after the lock file appears is queued and seen by the first wait. Every refusal and fatal
-/// error writes exactly one line, `memory: <closed code>`, to stderr; stdout stays empty.
+/// error writes exactly one line, `memory: <closed code>`, to stderr (the last one: after the
+/// subscriber starts, [`crate::log`] lines may precede it); stdout stays empty.
 #[must_use]
 pub fn main_entry() -> ExitCode {
     let Ok(signals) = StopSignals::register() else {
@@ -246,6 +247,12 @@ pub fn main_entry() -> ExitCode {
         Ok(daemon) => daemon,
         Err(error) => return refuse(error.code(), error.exit_code()),
     };
+    // Only now: every startup refusal above stays the sole line on stderr.
+    if crate::log::start().is_err() {
+        return refuse("log_unavailable", 1);
+    }
+    crate::log::started();
+    crate::log::state_loads(daemon.index_load(), daemon.status_load());
     let clock = SystemClock::new();
     let draw = draw_from(clock.monotonic_ns(), clock.wall_ns(), std::process::id());
     let timing = timing_override.unwrap_or(Timing {
@@ -256,11 +263,17 @@ pub fn main_entry() -> ExitCode {
         timing,
         daemon,
         |up_to| signals.wait(up_to),
-        |daemon| daemon.reconcile_once().map(|_| ()).map_err(|_| Failed),
+        |daemon| {
+            daemon
+                .reconcile_once()
+                .map(|report| crate::log::round(&report))
+                .map_err(|_| Failed)
+        },
         |daemon| daemon.shutdown().map_err(|_| Failed),
     );
     if let Some(code) = outcome.code() {
         return refuse(code, outcome.exit_code());
     }
+    crate::log::stopped();
     ExitCode::SUCCESS
 }

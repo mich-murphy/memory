@@ -121,8 +121,8 @@ impl Setup {
     }
 }
 
-/// SIGTERM, then exit 0 within a bound with empty stdout and stderr.
-fn stop(mut child: Guard) -> R {
+/// SIGTERM, then exit 0 within a bound with empty stdout and a stderr that is only log events.
+fn stop(s: &Setup, mut child: Guard) -> R {
     let status = Command::new("/bin/kill")
         .arg("-TERM")
         .arg(child.0.id().to_string())
@@ -148,7 +148,18 @@ fn stop(mut child: Guard) -> R {
     }
     assert_eq!(status.code(), Some(0), "stderr: {err}");
     assert!(out.is_empty(), "stdout: {out}");
-    assert!(err.is_empty(), "stderr: {err}");
+    let dir = s.rig.dir.display().to_string();
+    let state = s.rig.state.display().to_string();
+    let url = s.server.url();
+    let host = url.trim_start_matches("http://");
+    let token = s.rig.token.display().to_string();
+    super::log_lines::assert_clean_log(
+        &err,
+        1,
+        &[
+            &dir, &state, &token, host, SESSION, MARKER, BUCKET, KEY_ID, SECRET, PREFIX,
+        ],
+    );
     Ok(())
 }
 
@@ -241,7 +252,7 @@ fn daemon_captures_then_restore_returns_the_bytes() -> R {
     s.append(12..20)?;
     // A later round commits the append: current.json's ETag changes (it only changes by a PUT).
     s.wait_commit(&mut child, Some(&first))?;
-    stop(child)?;
+    stop(&s, child)?;
     let seen = s.server.requests();
     let after_append = seen.len();
     assert!(after_capture > 0 && after_append > after_capture);
@@ -267,12 +278,12 @@ fn a_restarted_daemon_continues_and_restore_returns_everything() -> R {
     let s = setup("restart")?;
     let mut one = s.spawn()?;
     let first = s.wait_commit(&mut one, None)?;
-    stop(one)?;
+    stop(&s, one)?;
     let before = s.server.requests().len();
     s.append(12..20)?;
     let mut two = s.spawn()?;
     s.wait_commit(&mut two, Some(&first))?;
-    stop(two)?;
+    stop(&s, two)?;
     // Nothing stored by the first daemon was uploaded again: every non-pointer PUT is unique.
     let puts: Vec<String> = s
         .server

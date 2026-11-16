@@ -1,0 +1,268 @@
+//! The daemon's log (DESIGN.md 11.5): the only module that uses `tracing`.
+//!
+//! Every event is one function taking typed values; no function takes text, a path or an
+//! error from outside this file, and no foreign error is ever formatted. Level is fixed at info.
+//! There is no environment variable and there are no debug or trace events.
+//!
+//! # Line grammar
+//!
+//! One event per line, ASCII only, written to stderr:
+//!
+//! ```text
+//! <timestamp> INFO <event>[ <key>=<value>]*
+//! ```
+//!
+//! `<timestamp>` is UTC, RFC 3339, whole seconds: `YYYY-MM-DDTHH:MM:SSZ`. Keys are in the fixed
+//! order below. A value is an unsigned decimal integer, except `version` (the crate version:
+//! digits and dots), `file`, `result` and `reason` (closed lower-case identifiers) and `owner`.
+//! `owner` is the only open value: the owner's stored key prefix, charset `[A-Za-z0-9._:/-]`,
+//! never empty, no space. It is safe to write because identifiers are validated on construction
+//! to ASCII alphanumerics and `._:-` and joined with `/`; it holds no path, secret or content.
+//! There is no ANSI escape, target, thread id, span, file or line.
+//!
+//! | event | keys |
+//! |---|---|
+//! | `started` | `version` |
+//! | `round` | `landed failed skipped parked deferred offline throttled transient destination_auth local deterministic hints_removed hints_kept_old audit_matched audit_mismatched audit_ineligible` |
+//! | `stopped` | none |
+//! | `state_load` | `file` (`index` or `status`) `result` (`damaged` or `newer_schema`) |
+//! | `parked` | `owner` `reason` `scope` (`owner` or `source`; reasons: `foreign_writer`, `newer_remote_schema`, `repeated_audit_mismatch`, `repeated_readback_mismatch`, `source_unstable`, `repeated_non_json_response`, `repeated_schema_error`) |
+//! | `host_paused` | none |
+//! | `host_resumed` | none |
+//!
+//! `state_load` follows `started`, `status` before `index`, only for a damaged or newer-schema
+//! startup load. `parked` is logged once, in the round an owner or one of its sources becomes
+//! parked; a source id is never logged. `host_paused` and `host_resumed` are logged in the
+//! round the pause starts and ends. All come before that round's `round` line.
+//!
+//! `memory hook` and `memory restore` never start the subscriber.
+use crate::daemon::{ParkedReason, RoundReport, StateLoad};
+use memory_core::domain::{Owner, OwnerParkReason, ParkReason};
+use memory_core::limits::owner_prefix;
+use std::fmt;
+use std::io::Write;
+use std::sync::{Arc, Mutex};
+use tracing::field::{Field, Visit};
+use tracing::{Event, Level, Subscriber};
+use tracing_subscriber::fmt::format::Writer;
+use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields, MakeWriter};
+use tracing_subscriber::registry::LookupSpan;
+
+/// The subscriber could not be installed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Unavailable;
+
+/// `secs` since the Unix epoch as `YYYY-MM-DDTHH:MM:SSZ` (proleptic Gregorian, UTC).
+#[must_use]
+pub fn format_utc(secs: u64) -> String {
+    let days = secs / 86_400;
+    let rest = secs % 86_400;
+    // Days since 0000-03-01 (Hinnant's civil_from_days).
+    let z = days + 719_468;
+    let era = z / 146_097;
+    let doe = z % 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + u64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        rest / 3_600,
+        rest % 3_600 / 60,
+        rest % 60
+    )
+}
+
+struct Line<'a>(Writer<'a>);
+
+impl Visit for Line<'_> {
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        let _ = write!(self.0, " {}={value}", field.name());
+    }
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "event" {
+            let _ = write!(self.0, " {value}");
+        } else {
+            let _ = write!(self.0, " {}={value}", field.name());
+        }
+    }
+    fn record_debug(&mut self, _field: &Field, _value: &dyn fmt::Debug) {}
+}
+
+struct Grammar;
+
+impl<S, N> FormatEvent<S, N> for Grammar
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        _ctx: &FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &Event<'_>,
+    ) -> fmt::Result {
+        // Only this module's events are written: foreign text never reaches a line. Nothing is
+        // written here, so the layer writes zero bytes (`write_all` of an empty buffer).
+        if event.metadata().target() != module_path!() {
+            return Ok(());
+        }
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        write!(writer, "{} {}", format_utc(secs), event.metadata().level())?;
+        event.record(&mut Line(writer.by_ref()));
+        writeln!(writer)
+    }
+}
+
+fn subscriber<W>(writer: W) -> impl Subscriber + Send + Sync
+where
+    W: for<'a> MakeWriter<'a> + Send + Sync + 'static,
+{
+    tracing_subscriber::fmt()
+        .with_max_level(Level::INFO)
+        // The builder default prints failures to stderr with `eprintln!`, which panics when
+        // stderr itself is unwritable. A failed log write is dropped silently.
+        .log_internal_errors(false)
+        .event_format(Grammar)
+        .with_writer(writer)
+        .finish()
+}
+
+/// Install the stderr subscriber for the process.
+///
+/// # Errors
+/// A global subscriber is already set.
+pub fn start() -> Result<(), Unavailable> {
+    tracing::subscriber::set_global_default(subscriber(std::io::stderr)).map_err(|_| Unavailable)
+}
+
+#[derive(Clone)]
+struct Buffer(Arc<Mutex<Vec<u8>>>);
+
+impl Write for Buffer {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        if let Ok(mut inner) = self.0.lock() {
+            inner.extend_from_slice(data);
+        }
+        Ok(data.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Run `emit` under a scoped subscriber that writes to memory; return what it logged.
+/// For tests: the global subscriber is not touched.
+pub fn render(emit: impl FnOnce()) -> String {
+    let buffer = Buffer(Arc::default());
+    let sink = buffer.clone();
+    tracing::subscriber::with_default(subscriber(move || sink.clone()), emit);
+    let bytes = buffer
+        .0
+        .lock()
+        .map(|inner| inner.clone())
+        .unwrap_or_default();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+fn count(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
+}
+
+/// The daemon is built from its config and about to wait out the startup delay.
+pub fn started() {
+    tracing::info!(event = "started", version = env!("CARGO_PKG_VERSION"));
+}
+
+/// One reconcile round succeeded.
+pub fn round(report: &RoundReport) {
+    let f = &report.failures;
+    tracing::info!(
+        event = "round",
+        landed = count(report.landed),
+        failed = count(report.failed),
+        skipped = count(report.skipped),
+        parked = count(report.parked),
+        deferred = count(report.deferred),
+        offline = f.offline,
+        throttled = f.throttled,
+        transient = f.transient,
+        destination_auth = f.destination_auth,
+        local = f.local,
+        deterministic = f.deterministic,
+        hints_removed = count(report.hints_removed),
+        hints_kept_old = count(report.hints_kept_old),
+        audit_matched = report.audit.matched,
+        audit_mismatched = report.audit.mismatched,
+        audit_ineligible = report.audit.ineligible,
+    );
+}
+
+/// A requested stop and a successful shutdown, just before exit 0.
+pub fn stopped() {
+    tracing::info!(event = "stopped");
+}
+
+/// The startup load of each state file; logs `status` then `index`, and only for a
+/// [`StateLoad::Damaged`] or [`StateLoad::NewerSchema`] result.
+pub fn state_loads(index: StateLoad, status: StateLoad) {
+    for (file, load) in [("status", status), ("index", index)] {
+        let result = match load {
+            StateLoad::Damaged => "damaged",
+            StateLoad::NewerSchema => "newer_schema",
+            StateLoad::Loaded | StateLoad::Missing => continue,
+        };
+        tracing::info!(event = "state_load", file = file, result = result);
+    }
+}
+
+/// The closed identifier of a parking reason; no digest is included.
+const fn reason_id(reason: &ParkedReason) -> &'static str {
+    match reason {
+        ParkedReason::Owner(OwnerParkReason::ForeignWriter { .. }) => "foreign_writer",
+        ParkedReason::Owner(OwnerParkReason::NewerRemoteSchema) => "newer_remote_schema",
+        ParkedReason::Source(ParkReason::RepeatedAuditMismatch) => "repeated_audit_mismatch",
+        ParkedReason::Source(ParkReason::RepeatedReadbackMismatch) => "repeated_readback_mismatch",
+        ParkedReason::Source(ParkReason::SourceUnstable) => "source_unstable",
+        ParkedReason::Source(ParkReason::RepeatedNonJsonResponse) => "repeated_non_json_response",
+        ParkedReason::Source(ParkReason::RepeatedSchemaError) => "repeated_schema_error",
+    }
+}
+
+/// What a `parked` event parks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// The whole owner.
+    Owner,
+    /// One source of the owner; its id is never logged.
+    Source,
+}
+
+/// An owner or one of its sources became parked in this round.
+pub fn parked(owner: &Owner, reason: &ParkedReason, scope: Scope) {
+    let prefix = owner_prefix(owner);
+    let scope = match scope {
+        Scope::Owner => "owner",
+        Scope::Source => "source",
+    };
+    tracing::info!(
+        event = "parked",
+        owner = prefix.as_str(),
+        reason = reason_id(reason),
+        scope = scope
+    );
+}
+
+/// Uploads were paused by a host-scoped failure in this round.
+pub fn host_paused() {
+    tracing::info!(event = "host_paused");
+}
+
+/// Uploads resumed in this round.
+pub fn host_resumed() {
+    tracing::info!(event = "host_resumed");
+}

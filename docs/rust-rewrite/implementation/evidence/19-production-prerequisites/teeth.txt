@@ -1,0 +1,462 @@
+# Teeth checks for the production-prerequisites stack (brief 28). Each block is the FAIL and Summary lines of one
+# parent run with the named change applied to the source (first failure's left/right lines where the log has them);
+# every change was reverted afterwards. Durations, test indexes and thread ids are stripped. Mutant names are the
+# keys of the parent's mutation scripts. The HINT-1, LOG-1, AUDIT-1 and LOG-2 runs were made on the tips before the
+# rebase named in each heading. A mutant named in the notes but without a log is listed as missing.
+
+## HINT-1 on aac52da (rust/hint-retention, before the rebase)
+
+### boundary
+FAIL memory-core::core_retention day_boundary_table
+FAIL memory-core::core_retention facts_table
+Summary 50 tests run: 48 passed, 2 failed, 33 skipped
+left: true
+right: false
+
+### cut
+FAIL memory::daemon old_hint_file_longer_than_the_read_bound_is_kept
+Summary 50 tests run: 49 passed, 1 failed, 33 skipped
+left: (1, 0)
+right: (0, 1)
+
+### failed-removal
+FAIL memory::daemon failed_hint_removal_keeps_the_entry_and_is_retried
+Summary 50 tests run: 49 passed, 1 failed, 33 skipped
+left: (1, 0)
+right: (0, 1)
+
+### len-fixed
+FAIL memory-core::core_retention facts_table
+Summary 50 tests run: 49 passed, 1 failed, 33 skipped
+
+### offset
+FAIL memory::daemon hint_record_in_the_chain_stays_pending_after_index_loss
+FAIL memory::daemon old_file_with_uncommitted_owner_is_kept_and_counted
+FAIL memory-core::core_retention facts_table
+Summary 50 tests run: 47 passed, 3 failed, 33 skipped
+left: (0, 1)
+right: (0, 0)
+
+### stale-entry
+FAIL memory::daemon stale_hint_offset_entry_is_dropped
+Summary 50 tests run: 49 passed, 1 failed, 33 skipped
+
+### today
+FAIL memory::daemon hint_launch_attached_once_and_offset_advances_after_commit
+FAIL memory::daemon hint_record_in_the_chain_stays_pending_after_index_loss
+FAIL memory::daemon replaced_hint_file_restarts_and_unreadable_entries_are_skipped
+FAIL memory::daemon stale_hint_offset_entry_is_dropped
+FAIL memory-core::core_retention day_boundary_table
+FAIL memory-core::core_retention facts_table
+Summary 50 tests run: 44 passed, 6 failed, 33 skipped
+left: 0
+right: 326
+
+### torn
+FAIL memory-core::core_retention facts_table
+Summary 50 tests run: 49 passed, 1 failed, 33 skipped
+
+## LOG-1 on a204f90 (rust/log-stderr, before the rebase)
+
+### early-start
+FAIL memory::harness a_malformed_sim_timing_is_a_config_refusal
+FAIL memory::harness a_missing_config_is_refused_with_exit_2
+FAIL memory::harness a_second_daemon_on_the_same_root_exits_75_and_the_first_is_unaffected
+FAIL memory::harness an_empty_prefix_is_refused_with_exit_2
+Summary 76 tests run: 72 passed, 4 failed, 3 skipped
+left: "2026-11-12T11:36:47Z INFO started version=0.1.0\nmemory: config_sim_timing\n"
+right: "memory: config_sim_timing\n"
+
+### foreign
+FAIL memory::log an_event_from_another_module_writes_nothing
+Summary 76 tests run: 75 passed, 1 failed, 3 skipped
+left: "2026-11-12T11:36:01Z INFO note=foreign text count=7\n"
+right: ""
+
+### internal-errors
+FAIL memory::harness a_closed_stderr_does_not_stop_the_daemon
+Summary 76 tests run: 75 passed, 1 failed, 3 skipped
+
+### no-stopped
+FAIL memory::harness a_new_daemon_starts_after_a_clean_stop
+FAIL memory::harness a_second_daemon_on_the_same_root_exits_75_and_the_first_is_unaffected
+FAIL memory::harness sigint_after_a_round_exits_zero_and_flushes_status
+FAIL memory::harness sigterm_after_a_round_exits_zero_and_flushes_status
+FAIL memory::harness sigterm_interrupts_the_production_startup_delay
+FAIL memory::s3_store daemon_restore::a_restarted_daemon_continues_and_restore_returns_everything
+FAIL memory::s3_store daemon_restore::daemon_captures_then_restore_returns_the_bytes
+Summary 76 tests run: 69 passed, 7 failed, 3 skipped
+left: Some("round")
+right: Some("stopped")
+
+### path-in-started
+FAIL memory::harness a_new_daemon_starts_after_a_clean_stop
+FAIL memory::harness a_second_daemon_on_the_same_root_exits_75_and_the_first_is_unaffected
+FAIL memory::harness sigint_after_a_round_exits_zero_and_flushes_status
+FAIL memory::harness sigterm_after_a_round_exits_zero_and_flushes_status
+FAIL memory::harness sigterm_interrupts_the_production_startup_delay
+FAIL memory::log started_has_the_version_only
+FAIL memory::s3_store daemon_restore::a_restarted_daemon_continues_and_restore_returns_everything
+FAIL memory::s3_store daemon_restore::daemon_captures_then_restore_returns_the_bytes
+Summary 76 tests run: 68 passed, 8 failed, 3 skipped
+left: "INFO started version=0.1.0 root="
+right: "INFO started version=0.1.0"
+
+## AUDIT-1 on ab13d1b (rust/audit, before the rebase)
+
+### due-always
+FAIL memory::audit append_after_an_audit_reads_no_full_stream_and_keeps_the_audit_time
+FAIL memory::audit due_rule_table
+FAIL memory::audit due_rule_through_the_daemon
+FAIL memory::audit first_quiet_round_audits_once_then_the_next_reads_nothing
+FAIL memory::audit settling_a_racy_stat_keeps_the_audit_time
+Summary 34 tests run: 29 passed, 5 failed, 0 skipped
+left: 205800
+right: 0
+
+### due-ignores-capture
+FAIL memory::audit due_rule_table
+Summary 34 tests run: 33 passed, 1 failed, 0 skipped
+
+### extend-clears
+FAIL memory::audit append_after_an_audit_reads_no_full_stream_and_keeps_the_audit_time
+FAIL memory::audit due_rule_through_the_daemon
+Summary 34 tests run: 32 passed, 2 failed, 0 skipped
+left: None
+right: Some(1794000001000000000)
+
+### mismatch-matched
+FAIL memory::audit a_mismatch_the_second_read_clears_is_a_match
+FAIL memory::audit rewrite_between_the_windows_with_growth_is_found_by_the_audit
+FAIL memory::audit same_size_rewrite_is_refreshed_then_audited
+FAIL memory::audit two_equal_corrupt_reads_are_a_stable_mismatch
+FAIL memory::audit two_reads_that_differ_are_ineligible
+Summary 34 tests run: 29 passed, 5 failed, 0 skipped
+left: 204800
+right: 409600
+
+### no-prefix-check
+FAIL memory::capture non_resumed_extension_after_a_between_windows_rewrite_restores_to_the_file
+Summary 34 tests run: 33 passed, 1 failed, 0 skipped
+left: Err("restore failed: Digest")
+right: Ok(205800)
+
+### no-recheck
+FAIL memory::audit a_mismatch_the_second_read_clears_is_a_match
+FAIL memory::audit two_equal_corrupt_reads_are_a_stable_mismatch
+FAIL memory::audit two_reads_that_differ_are_ineligible
+Summary 34 tests run: 31 passed, 3 failed, 0 skipped
+left: None
+right: Some(1794000001000000000)
+
+### post-stat
+FAIL memory::audit a_source_that_moves_between_the_stats_is_ineligible
+Summary 34 tests run: 33 passed, 1 failed, 0 skipped
+left: Some(1794000001000000000)
+right: None
+
+### refresh-keeps-audit
+FAIL memory::audit same_size_rewrite_is_refreshed_then_audited
+Summary 34 tests run: 33 passed, 1 failed, 0 skipped
+left: Some(1794000001000000000)
+right: None
+
+## AUDIT-2 on 22af43e (rust/audit)
+
+### due-never
+FAIL memory::audit a_between_windows_rewrite_is_counted_as_a_mismatch
+FAIL memory::audit a_cleared_first_mismatch_counts_one_match
+FAIL memory::audit a_match_is_counted_once_in_the_round_and_in_the_status
+FAIL memory::audit a_mismatch_the_second_read_clears_is_a_match
+FAIL memory::audit a_source_that_moves_between_the_stats_is_ineligible
+FAIL memory::audit a_stable_mismatch_is_counted_then_the_new_epoch_matches
+FAIL memory::audit due_rule_table
+FAIL memory::audit append_after_an_audit_reads_no_full_stream_and_keeps_the_audit_time
+FAIL memory::audit first_quiet_round_audits_once_then_the_next_reads_nothing
+FAIL memory::audit due_rule_through_the_daemon
+FAIL memory::audit ineligible_audits_are_counted
+FAIL memory::audit rewrite_between_the_windows_with_growth_is_found_by_the_audit
+FAIL memory::audit same_size_rewrite_is_refreshed_then_audited
+FAIL memory::audit settling_a_racy_stat_keeps_the_audit_time
+FAIL memory::audit two_equal_corrupt_reads_are_a_stable_mismatch
+FAIL memory::audit two_reads_that_differ_are_ineligible
+FAIL memory::capture_property between_windows_rewrites_are_found_by_the_audit_in_a_scripted_run
+FAIL memory::counters audit_reads_the_stream_once_per_turn_and_nothing_otherwise
+FAIL memory::capture_property hegel_property4_capture_state_machine
+Summary 60 tests run: 41 passed, 19 failed, 1 skipped
+left: (0, 0, 0)
+right: (0, 0, 1)
+
+### first-match-recheck
+FAIL memory::audit first_quiet_round_audits_once_then_the_next_reads_nothing
+FAIL memory::audit due_rule_through_the_daemon
+FAIL memory::audit rewrite_between_the_windows_with_growth_is_found_by_the_audit
+FAIL memory::audit settling_a_racy_stat_keeps_the_audit_time
+FAIL memory::counters audit_reads_the_stream_once_per_turn_and_nothing_otherwise
+Summary 60 tests run: 55 passed, 5 failed, 1 skipped
+left: 409600
+right: 204800
+
+### ineligible-uncounted
+FAIL memory::audit a_between_windows_rewrite_is_counted_as_a_mismatch
+FAIL memory::audit ineligible_audits_are_counted
+Summary 60 tests run: 58 passed, 2 failed, 1 skipped
+left: (0, 0, 0)
+right: (0, 0, 1)
+
+### log-swap
+FAIL memory::log round_has_every_count_in_order
+Summary 60 tests run: 59 passed, 1 failed, 1 skipped
+left: "INFO round landed=1 failed=2 skipped=3 parked=4 deferred=5 offline=6 throttled=7 transient=8 destination_auth=9 local=10 deterministic=11 hints_removed=12 hints_kept_old=13 audit_matched=15 audit_mismatched=15 audit_ineligible=16"
+right: "INFO round landed=1 failed=2 skipped=3 parked=4 deferred=5 offline=6 throttled=7 transient=8 destination_auth=9 local=10 deterministic=11 hints_removed=12 hints_kept_old=13 audit_matched=14 audit_mismatched=15 audit_ineligible=16"
+
+### matched-uncounted
+FAIL memory::audit a_cleared_first_mismatch_counts_one_match
+FAIL memory::audit a_match_is_counted_once_in_the_round_and_in_the_status
+FAIL memory::audit a_stable_mismatch_is_counted_then_the_new_epoch_matches
+FAIL memory::audit ineligible_audits_are_counted
+Summary 60 tests run: 56 passed, 4 failed, 1 skipped
+left: ((0, 0, 0), (0, 0, 0))
+right: ((1, 0, 0), (1, 0, 0))
+
+### prefix-mismatch-uncounted-2
+FAIL memory::capture non_resumed_extension_after_a_between_windows_rewrite_restores_to_the_file
+Summary 40 tests run: 39 passed, 1 failed, 0 skipped
+left: AuditCounts { matched: 0, mismatched: 0, ineligible: 1 }
+right: AuditCounts { matched: 0, mismatched: 1, ineligible: 1 }
+
+### prefix-mismatch-uncounted
+Summary 60 tests run: 60 passed, 1 skipped
+
+### refresh-keeps-audit
+FAIL memory::audit same_size_rewrite_is_refreshed_then_audited
+FAIL memory::capture_property between_windows_rewrites_are_found_by_the_audit_in_a_scripted_run
+FAIL memory::capture_property hegel_property4_capture_state_machine
+Summary 60 tests run: 57 passed, 3 failed, 1 skipped
+left: Some(1794000001000000000)
+right: None
+
+### replay-mismatch-uncounted
+FAIL memory::audit a_between_windows_rewrite_is_counted_as_a_mismatch
+FAIL memory::audit a_stable_mismatch_is_counted_then_the_new_epoch_matches
+Summary 60 tests run: 58 passed, 2 failed, 1 skipped
+left: ((0, 0, 0), (0, 0, 1))
+right: ((0, 1, 0), (0, 1, 1))
+
+### report-sum
+FAIL memory::audit a_between_windows_rewrite_is_counted_as_a_mismatch
+FAIL memory::audit a_match_is_counted_once_in_the_round_and_in_the_status
+FAIL memory::audit a_cleared_first_mismatch_counts_one_match
+FAIL memory::audit a_stable_mismatch_is_counted_then_the_new_epoch_matches
+FAIL memory::audit ineligible_audits_are_counted
+Summary 60 tests run: 55 passed, 5 failed, 1 skipped
+left: (0, 0, 0)
+right: (0, 0, 1)
+
+### second-verdict-uncounted
+FAIL memory::audit a_cleared_first_mismatch_counts_one_match
+FAIL memory::audit ineligible_audits_are_counted
+Summary 60 tests run: 58 passed, 2 failed, 1 skipped
+left: ((0, 0, 0), (0, 0, 0))
+right: ((1, 0, 0), (1, 0, 0))
+
+### stable-as-matched
+FAIL memory::audit a_between_windows_rewrite_is_counted_as_a_mismatch
+FAIL memory::audit a_stable_mismatch_is_counted_then_the_new_epoch_matches
+FAIL memory::audit rewrite_between_the_windows_with_growth_is_found_by_the_audit
+FAIL memory::audit same_size_rewrite_is_refreshed_then_audited
+FAIL memory::audit two_equal_corrupt_reads_are_a_stable_mismatch
+FAIL memory::capture_property between_windows_rewrites_are_found_by_the_audit_in_a_scripted_run
+FAIL memory::capture_property hegel_property4_capture_state_machine
+Summary 60 tests run: 53 passed, 7 failed, 1 skipped
+left: ((1, 0, 0), (1, 0, 1))
+right: ((0, 1, 0), (0, 1, 1))
+
+### status-sum
+FAIL memory::audit a_between_windows_rewrite_is_counted_as_a_mismatch
+FAIL memory::audit a_cleared_first_mismatch_counts_one_match
+FAIL memory::audit a_match_is_counted_once_in_the_round_and_in_the_status
+FAIL memory::audit a_stable_mismatch_is_counted_then_the_new_epoch_matches
+FAIL memory::audit ineligible_audits_are_counted
+Summary 60 tests run: 55 passed, 5 failed, 1 skipped
+left: ((0, 1, 0), (0, 0, 0))
+right: ((0, 1, 0), (0, 1, 1))
+
+## LOG-2 on a398d14 (rust/log-events, before the rebase)
+
+### before-started
+FAIL memory::harness a_damaged_index_is_logged_once
+FAIL memory::harness a_damaged_status_is_logged_once
+FAIL memory::harness a_newer_schema_is_logged_once_per_file
+FAIL memory::harness both_damaged_log_status_before_index
+Summary 75 tests run: 71 passed, 4 failed, 0 skipped
+left: Some("state_load")
+right: Some("started")
+
+### events-accepted
+FAIL memory::daemon a_status_with_an_events_object_loads_as_damaged
+Summary 75 tests run: 74 passed, 1 failed, 0 skipped
+left: Loaded
+right: Damaged
+
+### index-first
+FAIL memory::harness a_newer_schema_is_logged_once_per_file
+FAIL memory::harness both_damaged_log_status_before_index
+FAIL memory::log state_load_lines_are_status_then_index
+Summary 75 tests run: 72 passed, 3 failed, 0 skipped
+left: ["INFO state_load file=index result=newer_schema", "INFO state_load file=status result=newer_schema"]
+right: ["INFO state_load file=status result=newer_schema", "INFO state_load file=index result=newer_schema"]
+
+### no-resume
+FAIL memory::daemon host_pause_and_resume_are_logged_on_the_change_only
+Summary 75 tests run: 74 passed, 1 failed, 0 skipped
+left: []
+right: ["INFO host_resumed"]
+
+### parked-every-round
+FAIL memory::daemon a_source_park_is_logged_with_its_reason
+FAIL memory::daemon an_owner_is_logged_once_when_it_becomes_parked
+Summary 75 tests run: 73 passed, 2 failed, 0 skipped
+
+### pause-every-round
+FAIL memory::daemon host_pause_and_resume_are_logged_on_the_change_only
+Summary 75 tests run: 74 passed, 1 failed, 0 skipped
+
+### reason-swapped
+FAIL memory::daemon a_source_park_is_logged_with_its_reason
+FAIL memory::log parked_names_the_owner_prefix_and_a_closed_reason
+Summary 75 tests run: 73 passed, 2 failed, 0 skipped
+left: [[], [], ["INFO parked owner=sessions/a/m/claude/s1 reason=source_unstable"]]
+right: [[], [], ["INFO parked owner=sessions/a/m/claude/s1 reason=repeated_schema_error"]]
+
+### state-missing
+FAIL memory::harness a_clean_first_start_logs_no_state_load
+FAIL memory::harness a_damaged_index_is_logged_once
+FAIL memory::harness a_damaged_status_is_logged_once
+FAIL memory::harness a_newer_schema_is_logged_once_per_file
+FAIL memory::log state_load_renders_nothing_for_loaded_and_missing
+Summary 75 tests run: 70 passed, 5 failed, 0 skipped
+left: ["INFO state_load file=status result=damaged", "INFO state_load file=index result=damaged"]
+right: []
+
+## AUDIT-3 on 2edf2f8 (rust/audit-park)
+
+### first-overwritten
+FAIL memory::audit a_match_resets_the_streak_and_an_extension_keeps_it
+FAIL memory::audit a_park_is_recorded_when_the_owners_commit_fails
+FAIL memory::audit a_park_survives_a_restart_and_a_lost_status_heals
+FAIL memory::audit a_source_parks_at_the_next_mismatch_after_3_h
+FAIL memory::audit the_park_rule_table
+FAIL memory::audit the_other_source_of_the_owner_keeps_flowing
+FAIL memory::capture a_prefix_mismatch_parks_at_three_failures_over_three_hours
+FAIL memory::counters a_parked_source_costs_zero_reads_and_zero_stats_per_round
+Summary 125 tests run: 117 passed, 8 failed, 1 skipped
+left: AuditState { last_checked_at_ns: None, consecutive_failures: 2, first_failure_at_ns: Some(1794000002000000000) }
+right: AuditState { last_checked_at_ns: None, consecutive_failures: 2, first_failure_at_ns: Some(1794000001000000000) }
+
+### ignore-span
+FAIL memory::audit a_park_is_recorded_when_the_owners_commit_fails
+FAIL memory::audit a_park_survives_a_restart_and_a_lost_status_heals
+FAIL memory::audit a_source_parks_at_the_next_mismatch_after_3_h
+FAIL memory::audit the_park_rule_table
+FAIL memory::audit the_other_source_of_the_owner_keeps_flowing
+Summary 125 tests run: 120 passed, 5 failed, 1 skipped
+left: (0, 0, 1)
+right: (1, 0, 1)
+
+### logged-every-round
+FAIL memory::audit a_park_survives_a_restart_and_a_lost_status_heals
+FAIL memory::audit a_source_parks_at_the_next_mismatch_after_3_h
+Summary 125 tests run: 123 passed, 2 failed, 1 skipped
+left: (0, 1, 0)
+right: (0, 0, 0)
+
+### lost-on-restart
+FAIL memory::audit a_park_survives_a_restart_and_a_lost_status_heals
+Summary 125 tests run: 124 passed, 1 failed, 1 skipped
+left: 204800
+right: 0
+
+### match-keeps-streak
+FAIL memory::audit a_match_resets_the_streak_and_an_extension_keeps_it
+FAIL memory::audit a_park_survives_a_restart_and_a_lost_status_heals
+FAIL memory::audit rewrite_between_the_windows_with_growth_is_found_by_the_audit
+Summary 125 tests run: 122 passed, 3 failed, 1 skipped
+left: ((1, 0, 0), 2)
+right: ((1, 0, 0), 0)
+
+### owner-skipped
+FAIL memory::audit a_park_is_recorded_when_the_owners_commit_fails
+FAIL memory::audit the_other_source_of_the_owner_keeps_flowing
+Summary 125 tests run: 123 passed, 2 failed, 1 skipped
+left: 0
+right: 1
+
+### park-at-two
+FAIL memory::audit a_match_resets_the_streak_and_an_extension_keeps_it
+FAIL memory::audit a_source_parks_at_the_next_mismatch_after_3_h
+FAIL memory::audit the_park_rule_table
+FAIL memory::capture a_prefix_mismatch_parks_at_three_failures_over_three_hours
+Summary 125 tests run: 121 passed, 4 failed, 1 skipped
+left: AuditState { last_checked_at_ns: None, consecutive_failures: 3, first_failure_at_ns: Some(1794000001000000000) }
+right: AuditState { last_checked_at_ns: None, consecutive_failures: 2, first_failure_at_ns: Some(1794000001000000000) }
+
+### park-counted
+FAIL memory::audit a_source_parks_at_the_next_mismatch_after_3_h
+Summary 125 tests run: 124 passed, 1 failed, 1 skipped
+left: (0, 1, 0)
+right: (0, 0, 0)
+
+### park-needs-no-commit
+FAIL memory::audit a_park_is_recorded_when_the_owners_commit_fails
+Summary 125 tests run: 124 passed, 1 failed, 1 skipped
+left: (0, 0, 1)
+right: (1, 0, 1)
+
+### park-starts-epoch
+FAIL memory::audit a_park_is_recorded_when_the_owners_commit_fails
+FAIL memory::audit a_park_survives_a_restart_and_a_lost_status_heals
+FAIL memory::audit a_source_parks_at_the_next_mismatch_after_3_h
+FAIL memory::audit the_other_source_of_the_owner_keeps_flowing
+FAIL memory::counters a_parked_source_costs_zero_reads_and_zero_stats_per_round
+Summary 125 tests run: 120 passed, 5 failed, 1 skipped
+left: (0, 0, 1)
+right: (1, 0, 1)
+
+### parked-still-captured
+FAIL memory::audit a_park_survives_a_restart_and_a_lost_status_heals
+FAIL memory::audit a_source_parks_at_the_next_mismatch_after_3_h
+FAIL memory::counters a_parked_source_costs_zero_reads_and_zero_stats_per_round
+Summary 125 tests run: 122 passed, 3 failed, 1 skipped
+left: 204800
+right: 0
+
+### prefix-never-parks
+FAIL memory::capture a_prefix_mismatch_parks_at_three_failures_over_three_hours
+FAIL memory::capture_property repeated_prefix_mismatches_park_the_source_in_a_scripted_run
+Summary 125 tests run: 123 passed, 2 failed, 1 skipped
+left: [Planned]
+right: [Parked(RepeatedAuditMismatch)]
+
+### prefix-nonstable-counts
+FAIL memory::capture a_non_prefix_stable_prefix_difference_restarts_without_a_failure
+Summary 125 tests run: 124 passed, 1 failed, 1 skipped
+left: 1
+right: 0
+
+### scope-always-owner
+FAIL memory::audit a_park_is_recorded_when_the_owners_commit_fails
+FAIL memory::audit a_park_survives_a_restart_and_a_lost_status_heals
+FAIL memory::audit a_source_parks_at_the_next_mismatch_after_3_h
+FAIL memory::log parked_names_the_owner_prefix_and_a_closed_reason
+Summary 125 tests run: 121 passed, 4 failed, 1 skipped
+left: ["INFO parked owner=sessions/a/m/claude/s1 reason=repeated_audit_mismatch scope=owner"]
+right: ["INFO parked owner=sessions/a/m/claude/s1 reason=repeated_audit_mismatch scope=source"]
+
+### status-not-written
+FAIL memory::audit a_park_is_recorded_when_the_owners_commit_fails
+FAIL memory::audit a_park_survives_a_restart_and_a_lost_status_heals
+FAIL memory::audit a_source_parks_at_the_next_mismatch_after_3_h
+Summary 125 tests run: 122 passed, 3 failed, 1 skipped
+left: 0
+right: 1

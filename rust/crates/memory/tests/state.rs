@@ -1279,3 +1279,62 @@ fn decode_accepts_a_256_byte_header_and_refuses_257() -> R {
     );
     Ok(())
 }
+
+// ------------------------------------------------------------------ hint day files
+
+#[test]
+fn hint_day_list_read_remove() -> R {
+    let tmp = Tmp::new("hintdays")?;
+    let (_lock, dir) = open(&tmp)?;
+    assert!(dir.list_hint_days().is_err(), "missing directory");
+    let hints = dir.vet_hints_dir().map_err(e)?;
+    for name in [
+        "2026-11-02.jsonl",
+        "2026-11-01.jsonl",
+        "notes.txt",
+        "2026-11-01.json",
+        "x026-11-01.jsonl",
+    ] {
+        fs::write(hints.join(name), b"abcdef").map_err(e)?;
+    }
+    fs::create_dir(hints.join("2026-11-03.jsonl")).map_err(e)?;
+    let elsewhere = tmp.p().join("elsewhere");
+    fs::write(&elsewhere, b"secret").map_err(e)?;
+    symlink(&elsewhere, hints.join("2026-11-04.jsonl")).map_err(e)?;
+    assert_eq!(
+        dir.list_hint_days().map_err(e)?,
+        ["2026-11-01.jsonl", "2026-11-02.jsonl"]
+    );
+    let whole = dir.read_hint_day("2026-11-01.jsonl", 6).map_err(e)?;
+    assert_eq!(
+        (whole.bytes.as_slice(), whole.cut),
+        (b"abcdef".as_slice(), false)
+    );
+    let cut = dir.read_hint_day("2026-11-01.jsonl", 5).map_err(e)?;
+    assert_eq!((cut.bytes.as_slice(), cut.cut), (b"abcde".as_slice(), true));
+    assert_eq!(
+        dir.read_hint_day("../elsewhere", 9),
+        Err(StateError::InvalidName)
+    );
+    assert_eq!(
+        dir.read_hint_day("2026-11-04.jsonl", 9),
+        Err(StateError::Symlink)
+    );
+    assert!(dir.read_hint_day("2026-11-03.jsonl", 9).is_err());
+    assert_eq!(
+        dir.remove_hint_day("2026-11-04.jsonl"),
+        Err(StateError::Symlink)
+    );
+    assert!(dir.remove_hint_day("2026-11-03.jsonl").is_err());
+    assert_eq!(fs::read(&elsewhere).map_err(e)?, b"secret");
+    assert!(fs::symlink_metadata(hints.join("2026-11-04.jsonl")).is_ok());
+    assert_eq!(dir.remove_hint_day("2026-11-01.jsonl"), Ok(()));
+    assert_eq!(
+        dir.remove_hint_day("2026-11-01.jsonl"),
+        Ok(()),
+        "gone counts as removed"
+    );
+    assert_eq!(dir.remove_hint_day("bad"), Err(StateError::InvalidName));
+    assert_eq!(dir.list_hint_days().map_err(e)?, ["2026-11-02.jsonl"]);
+    Ok(())
+}

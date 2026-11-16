@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 # Invoke from the pinned Nix shell. Run all nine gates and preserve their statuses.
+# GATES_PART selects what runs: all (the default, and the local evidence run), gates (everything
+# but 08-coverage) or coverage (08-coverage alone). Hosted CI runs the two parts as separate jobs:
+# as one job the macOS runner reached its 30 minute limit (hosted runs 43865576080, 43865589662).
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit $?
+part="${GATES_PART:-all}"
+case "$part" in
+  all | gates | coverage) ;;
+  *) echo 'GATES_PART must be all, gates or coverage' >&2; exit 2 ;;
+esac
 mkdir -p artifacts
 export CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2
 export HEGEL_TEST_CASES="${PROPERTY_CASES:-500}" PROPTEST_CASES="${PROPERTY_CASES:-500}"
@@ -13,6 +21,11 @@ printf 'HEGEL_SEED=%s PROPTEST_RNG_SEED=%s CASES=%s\n' "$HEGEL_SEED" "$PROPTEST_
 failed=0
 run() {
   local name="$1"; shift
+  case "$part:$name" in
+    gates:08-coverage) return 0 ;;
+    coverage:08-coverage) ;;
+    coverage:*) return 0 ;;
+  esac
   "$@" > "artifacts/$name.log" 2>&1
   local status=$?
   printf '%s\t%s\n' "$name" "$status" | tee -a artifacts/status.tsv
@@ -38,6 +51,10 @@ run 06-mutations python3 scripts/check-mutations.py
 rm -rf "$MEMORY_MUTATION_TARGET"
 unset MEMORY_MUTATION_TARGET
 run 07-schema cargo xtask schemas --check
-run 08-coverage cargo llvm-cov --workspace --locked --fail-under-lines "$(< coverage-floor.txt)" --json --output-path artifacts/coverage.json -- --test-threads=2
+# Through nextest, like 04 to 06: one process per test. Under `cargo test` every test of a binary
+# shares one process, and a child spawned by one test (second_process_exits_lock_held) holds a
+# copy of every open descriptor between fork and exec, so another test that releases and
+# re-takes its daemon lock in that window gets lock_held (hosted runs 42565602976, 43193745120).
+run 08-coverage cargo llvm-cov nextest --workspace --locked --fail-under-lines "$(< coverage-floor.txt)" --json --output-path artifacts/coverage.json
 run 09-lints bash scripts/check-lints.sh
 exit "$failed"

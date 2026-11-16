@@ -1240,7 +1240,7 @@ Gates, in order, all required:
 5. Hegel properties at 500 cases in CI, with the seed recorded on failure
 6. The proptest cross-check
 7. Schema drift
-8. `cargo llvm-cov`, with a fixed line-coverage floor of 80 % (`rust/coverage-floor.txt`)
+8. `cargo llvm-cov nextest` (one process per test), with a fixed line-coverage floor of 80 % (`rust/coverage-floor.txt`)
 9. The lint-check crate
 
 Each test runs once: gate 4 runs every test that is not a named property, gate 5 the `hegel_`

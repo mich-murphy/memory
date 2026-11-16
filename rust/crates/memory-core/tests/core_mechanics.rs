@@ -67,6 +67,7 @@ fn state(bytes: &[u8], obs: Observed) -> SourceState {
         audit: AuditState {
             last_checked_at_ns: None,
             consecutive_failures: 0,
+            first_failure_at_ns: None,
         },
         whole_state: None,
     }

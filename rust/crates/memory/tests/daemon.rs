@@ -966,20 +966,19 @@ fn parked_daemon(tmp: &Tmp, cfg: &Path, list: &[(Owner, Source)]) -> R<(MemFs, F
 }
 
 /// DESIGN.md 9.2: a damaged or newer-schema `status.json` is treated as missing, so the parked
-/// list and host pause are lost. The daemon has no logging, so each case is a distinct open
-/// result and a persisted counter. Kills: mapping every failure to `Missing`, swapping the
-/// damaged and newer-schema classes, and not counting the event.
+/// list and host pause are lost. Each case is a distinct open result; the log line each one
+/// causes is checked on the real binary in `harness`. Kills: mapping every failure to `Missing`
+/// and swapping the damaged and newer-schema classes.
 #[test]
-fn status_and_index_load_cases_are_distinct_and_counted() -> R {
+fn status_and_index_load_cases_are_distinct() -> R {
     let list = vec![src_of("s1", 1)?, src_of("s2", 2)?];
-    // (what happens to status.json, expected result, expected counter after the restart)
+    // (what happens to status.json, expected result)
     type Damage = fn(&Tmp) -> R;
-    let cases: [(&str, Damage, StateLoad, [u64; 2]); 4] = [
+    let cases: [(&str, Damage, StateLoad); 4] = [
         (
             "checksum flip",
             |t| flip_last_byte(&t.root().join("status.json")),
             StateLoad::Damaged,
-            [1, 0],
         ),
         (
             "newer schema",
@@ -991,7 +990,6 @@ fn status_and_index_load_cases_are_distinct_and_counted() -> R {
                 )
             },
             StateLoad::NewerSchema,
-            [0, 1],
         ),
         (
             "valid envelope, unparsable body",
@@ -1003,16 +1001,14 @@ fn status_and_index_load_cases_are_distinct_and_counted() -> R {
                     .map_err(e)
             },
             StateLoad::Damaged,
-            [1, 0],
         ),
         (
             "deleted",
             |t| fs::remove_file(t.root().join("status.json")).map_err(e),
             StateLoad::Missing,
-            [0, 0],
         ),
     ];
-    for (label, damage, load, [damaged, newer]) in cases {
+    for (label, damage, load) in cases {
         let tmp = Tmp::new()?;
         let cfg = tmp.config(true)?;
         let (fs, store) = parked_daemon(&tmp, &cfg, &list)?;
@@ -1025,48 +1021,28 @@ fn status_and_index_load_cases_are_distinct_and_counted() -> R {
         let mut d = boot(&tmp, &cfg, fs, store, &list, WALL)?;
         assert_eq!(d.status_load(), load, "{label}");
         assert_eq!(d.index_load(), StateLoad::Loaded, "{label}");
-        let events = d.status().events;
-        assert_eq!(
-            (events.status_damaged, events.status_newer_schema),
-            (damaged, newer),
-            "{label}"
-        );
-        assert_eq!((events.index_damaged, events.index_newer_schema), (0, 0));
         assert!(
             d.status().parked.is_empty() && !d.status().host_paused,
             "{label}: the parked list is lost with the file"
         );
-        // The event is persisted with the next status write and survives another restart.
+        // The replacement status is written and loads on the next start.
         d.reconcile_once().map_err(e)?;
         let fs = std::mem::take(d.fs_mut());
         let store = std::mem::take(d.store_mut());
         d.shutdown().map_err(e)?;
-        let on_disk = status_via_state_dir(&tmp)?.events;
-        assert_eq!(
-            (on_disk.status_damaged, on_disk.status_newer_schema),
-            (damaged, newer),
-            "{label}: persisted"
-        );
         let d = boot(&tmp, &cfg, fs, store, &list, WALL)?;
         assert_eq!(
             d.status_load(),
             StateLoad::Loaded,
             "{label}: replacement loads"
         );
-        assert_eq!(
-            d.status().events,
-            on_disk,
-            "{label}: counters survive restart"
-        );
     }
-    // The index: damaged and newer-schema rebuild and are counted; a missing one (first start)
-    // is not an event.
-    let cases: [(&str, Damage, StateLoad, [u64; 2]); 3] = [
+    // The index: damaged and newer-schema rebuild; a missing one (first start) does too.
+    let cases: [(&str, Damage, StateLoad); 3] = [
         (
             "index checksum flip",
             |t| flip_last_byte(&t.root().join("index.json")),
             StateLoad::Damaged,
-            [1, 0],
         ),
         (
             "index newer schema",
@@ -1078,16 +1054,14 @@ fn status_and_index_load_cases_are_distinct_and_counted() -> R {
                 )
             },
             StateLoad::NewerSchema,
-            [0, 1],
         ),
         (
             "index deleted",
             |t| fs::remove_file(t.root().join("index.json")).map_err(e),
             StateLoad::Missing,
-            [0, 0],
         ),
     ];
-    for (label, damage, load, [damaged, newer]) in cases {
+    for (label, damage, load) in cases {
         let tmp = Tmp::new()?;
         let cfg = tmp.config(true)?;
         let (fs, store) = parked_daemon(&tmp, &cfg, &list)?;
@@ -1096,19 +1070,13 @@ fn status_and_index_load_cases_are_distinct_and_counted() -> R {
         assert_eq!(d.index_load(), load, "{label}");
         assert!(d.rebuilt(), "{label}");
         assert_eq!(d.status_load(), StateLoad::Loaded, "{label}");
-        let events = d.status().events;
-        assert_eq!(
-            (events.index_damaged, events.index_newer_schema),
-            (damaged, newer),
-            "{label}"
-        );
         assert_eq!(
             d.status().parked.len(),
             1,
             "{label}: an index problem keeps the parked list"
         );
     }
-    // A first start: both files are missing and nothing is an event.
+    // A first start: both files are missing.
     let tmp = Tmp::new()?;
     let cfg = tmp.config(true)?;
     let d = boot(
@@ -1123,7 +1091,145 @@ fn status_and_index_load_cases_are_distinct_and_counted() -> R {
         (d.index_load(), d.status_load()),
         (StateLoad::Missing, StateLoad::Missing)
     );
-    assert_eq!(d.status().events, memory::daemon::EventCounts::default());
+    Ok(())
+}
+
+/// A `status.json` written by a build that still had the `events` object is refused by
+/// `deny_unknown_fields`: it loads as damaged and its parked list is lost. No shim.
+#[test]
+fn a_status_with_an_events_object_loads_as_damaged() -> R {
+    let list = vec![src_of("s1", 1)?];
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    {
+        let lock = DaemonLock::acquire(&tmp.root()).map_err(e)?;
+        let state = StateDir::prepare(&lock).map_err(e)?;
+        let body = br#"{"updated_at":"2026-11-07T10:30:00Z","rounds":1,"host_paused":false,"parked":[],"failures":{"offline":0,"throttled":0,"transient":0,"destination_auth":0,"local":0,"deterministic":0},"events":{"status_damaged":0,"status_newer_schema":0,"index_damaged":0,"index_newer_schema":0}}"#;
+        state.write(StateFile::Status, body).map_err(e)?;
+    }
+    let d = boot(
+        &tmp,
+        &cfg,
+        files_with(b"hello\n"),
+        FStore::default(),
+        &list,
+        WALL,
+    )?;
+    assert_eq!(d.status_load(), StateLoad::Damaged);
+    assert_eq!(d.status().rounds, 0);
+    Ok(())
+}
+
+/// One round under a scoped subscriber: the report and the log lines without timestamps.
+macro_rules! logged_round {
+    ($d:expr) => {{
+        let mut out = None;
+        let text = memory::log::render(|| out = Some($d.reconcile_once()));
+        let report = need(out, "no round ran")?.map_err(e)?;
+        let lines: Vec<String> = text
+            .lines()
+            .map(|l| {
+                l.split_once(' ')
+                    .map(|(_, r)| r.to_owned())
+                    .unwrap_or_default()
+            })
+            .collect();
+        (report, lines)
+    }};
+}
+
+#[test]
+fn an_owner_is_logged_once_when_it_becomes_parked() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?, src_of("s2", 2)?];
+    let a = owner_of("s1")?;
+    let mut fs = files_with(b"a1\n");
+    fs.files.insert(2, b"b1\n".to_vec());
+    let mut d = boot(&tmp, &cfg, fs, FStore::default(), &list, WALL)?;
+    let (report, lines) = logged_round!(d);
+    assert_eq!(report.landed, 2);
+    assert!(lines.is_empty(), "{lines:?}");
+    let foreign = make_foreign(d.store_mut(), &a)?;
+    d.store_mut()
+        .arm(Some(current_key(&a)), Effect::Foreign(foreign));
+    bytes_in(&mut d, 1, b"a1\na2\n");
+    let (report, lines) = logged_round!(d);
+    assert_eq!(report.parked, 1);
+    assert_eq!(
+        lines,
+        [format!(
+            "INFO parked owner={} reason=foreign_writer scope=owner",
+            memory_core::limits::owner_prefix(&a)
+        )]
+    );
+    for _ in 0..2 {
+        bytes_in(&mut d, 1, b"a1\na2\na3\n");
+        let (report, lines) = logged_round!(d);
+        assert_eq!(report.skipped, 1);
+        assert!(lines.is_empty(), "no repeat while parked: {lines:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_source_park_is_logged_with_its_reason() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let o = owner_of("s1")?;
+    let mut d = boot(
+        &tmp,
+        &cfg,
+        files_with(b"hello\n"),
+        FStore::default(),
+        &list,
+        WALL,
+    )?;
+    d.store_mut()
+        .store
+        .write(&current_key(&o), b"garbage".to_vec());
+    let hour = 3_600_000_000_000;
+    let mut seen = Vec::new();
+    for at in [0, hour, 3 * hour] {
+        d.clock_mut().mono = at;
+        seen.push(logged_round!(d).1);
+    }
+    let want = format!(
+        "INFO parked owner={} reason=repeated_schema_error scope=owner",
+        memory_core::limits::owner_prefix(&o)
+    );
+    assert_eq!(seen, [vec![], vec![], vec![want]]);
+    d.clock_mut().mono = 3 * hour + 1;
+    assert!(logged_round!(d).1.is_empty());
+    Ok(())
+}
+
+#[test]
+fn host_pause_and_resume_are_logged_on_the_change_only() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let store = FStore {
+        revoked: true,
+        ..FStore::default()
+    };
+    let mut d = boot(&tmp, &cfg, files_with(b"hello\n"), store, &list, WALL)?;
+    let (_, lines) = logged_round!(d);
+    assert_eq!(lines, ["INFO host_paused"]);
+    assert!(d.status().host_paused);
+    // Still revoked, after the retry delay: paused again, no new event.
+    d.clock_mut().mono = 10_000_000_000_000;
+    let (_, lines) = logged_round!(d);
+    assert!(d.status().host_paused);
+    assert!(lines.is_empty(), "{lines:?}");
+    d.store_mut().revoked = false;
+    d.clock_mut().mono = 20_000_000_000_000;
+    let (report, lines) = logged_round!(d);
+    assert_eq!(report.landed, 1);
+    assert_eq!(lines, ["INFO host_resumed"]);
+    d.clock_mut().mono = 30_000_000_000_000;
+    assert!(logged_round!(d).1.is_empty());
     Ok(())
 }
 
@@ -2532,6 +2638,7 @@ fn authoritative_park_is_written_inside_the_interval() -> R {
         vec![memory::daemon::ParkedEntry {
             owner: o2,
             reason: ParkedReason::Owner(OwnerParkReason::NewerRemoteSchema),
+            source: None,
         }]
     );
     d.clock_mut().mono = 20_000_000_000;
@@ -3109,5 +3216,205 @@ fn a_held_write_that_lands_steps_later_is_adopted_and_the_store_converges() -> R
         assert_eq!(store.late_landed, 1);
         assert_eq!(store.refused_current, 1);
     }
+    Ok(())
+}
+
+// ------------------------------------------------------------------ hint retention
+
+const OLD8: &str = "2026-10-29.jsonl";
+const OLD7: &str = "2026-10-30.jsonl";
+
+fn hint_path(tmp: &Tmp, name: &str) -> PathBuf {
+    tmp.root().join("hints").join(name)
+}
+fn hint_boot(tmp: &Tmp, store: FStore) -> R<D> {
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    boot(tmp, &cfg, files_with(b"hello\n"), store, &list, WALL)
+}
+fn index_has(tmp: &Tmp, name: &str) -> R<bool> {
+    Ok(index_of(tmp)?.is_some_and(|i| i.hints.contains_key(name)))
+}
+
+#[test]
+fn old_consumed_hint_file_is_removed_and_stays_gone() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    fs::write(hint_path(&tmp, OLD8), hint_line("s1", &["PATH=/usr/bin"])?).map_err(e)?;
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!((report.landed, report.hints_removed), (1, 1), "{report:?}");
+    assert_eq!(report.hints_kept_old, 0);
+    assert!(!hint_path(&tmp, OLD8).exists());
+    assert!(!index_has(&tmp, OLD8)?, "entry gone from the written index");
+    d.shutdown().map_err(e)?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!(report.hints_removed, 0);
+    assert!(!hint_path(&tmp, OLD8).exists());
+    assert!(!index_has(&tmp, OLD8)?);
+    Ok(())
+}
+
+#[test]
+fn seven_day_yesterday_and_today_files_are_kept() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    let names = [OLD7, "2026-11-05.jsonl", "2026-11-06.jsonl"];
+    for name in names {
+        fs::write(hint_path(&tmp, name), hint_line("s1", &["PATH=/usr/bin"])?).map_err(e)?;
+    }
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!((report.hints_removed, report.hints_kept_old), (0, 0));
+    for name in names {
+        assert!(hint_path(&tmp, name).exists(), "{name}");
+    }
+    Ok(())
+}
+
+#[test]
+fn old_file_with_uncommitted_owner_is_kept_and_counted() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    // Session s2 has no source, so its record can never commit.
+    fs::write(hint_path(&tmp, OLD8), hint_line("s2", &["PATH=/usr/bin"])?).map_err(e)?;
+    for round in 1..=2 {
+        let report = d.reconcile_once().map_err(e)?;
+        assert_eq!(
+            (report.hints_removed, report.hints_kept_old),
+            (0, 1),
+            "{round}"
+        );
+    }
+    assert!(hint_path(&tmp, OLD8).exists());
+    Ok(())
+}
+
+#[test]
+fn old_file_with_torn_tail_is_kept() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    let mut bytes = hint_line("s1", &["PATH=/usr/bin"])?;
+    bytes.extend_from_slice(b"{\"schema\":\"memory.hint/1\",\"ag");
+    fs::write(hint_path(&tmp, OLD8), &bytes).map_err(e)?;
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!((report.hints_removed, report.hints_kept_old), (0, 1));
+    assert!(hint_path(&tmp, OLD8).exists());
+    Ok(())
+}
+
+#[test]
+fn failed_hint_removal_keeps_the_entry_and_is_retried() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    fs::write(hint_path(&tmp, OLD8), hint_line("s1", &["PATH=/usr/bin"])?).map_err(e)?;
+    let dir = tmp.root().join("hints");
+    set_mode(&dir, 0o500)?;
+    let first = d.reconcile_once();
+    set_mode(&dir, 0o700)?;
+    let report = first.map_err(e)?;
+    assert_eq!((report.hints_removed, report.hints_kept_old), (0, 1));
+    assert!(hint_path(&tmp, OLD8).exists());
+    d.clock_mut().mono = 61_000_000_000;
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!(report.hints_removed, 1);
+    assert!(!hint_path(&tmp, OLD8).exists());
+    assert!(!index_has(&tmp, OLD8)?);
+    Ok(())
+}
+
+#[test]
+fn stale_hint_offset_entry_is_dropped() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    let name = "2026-11-06.jsonl";
+    fs::write(hint_path(&tmp, name), hint_line("s1", &["PATH=/usr/bin"])?).map_err(e)?;
+    d.reconcile_once().map_err(e)?;
+    d.shutdown().map_err(e)?;
+    assert!(index_has(&tmp, name)?);
+    fs::remove_file(hint_path(&tmp, name)).map_err(e)?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    d.reconcile_once().map_err(e)?;
+    d.shutdown().map_err(e)?;
+    assert!(!index_has(&tmp, name)?);
+    Ok(())
+}
+
+#[test]
+fn hint_record_in_the_chain_stays_pending_after_index_loss() -> R {
+    let tmp = Tmp::new()?;
+    let name = "2026-11-06.jsonl";
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    fs::write(hint_path(&tmp, name), hint_line("s1", &["PATH=/usr/bin"])?).map_err(e)?;
+    assert_eq!(d.reconcile_once().map_err(e)?.landed, 1);
+    let store = std::mem::take(&mut d.store_mut().store);
+    d.shutdown().map_err(e)?;
+    fs::remove_file(tmp.root().join("index.json")).map_err(e)?;
+    let fstore = FStore {
+        store,
+        ..FStore::default()
+    };
+    let mut d = hint_boot(&tmp, fstore)?;
+    d.reconcile_once().map_err(e)?;
+    d.clock_mut().wall = WALL + 9 * 86_400 * 1_000_000_000;
+    d.clock_mut().mono = 61_000_000_000;
+    let report = d.reconcile_once().map_err(e)?;
+    // Finding (DESIGN 9.3 step 4): the chain carries this record's digest, but the recovered
+    // base (`OwnerState`) holds no launch digests and the owner has no commit, so the record
+    // is never marked done and the old file is kept. Closing it needs commit.rs/manifest code.
+    assert_eq!((report.landed, report.hints_removed), (0, 0), "{report:?}");
+    assert_eq!(report.hints_kept_old, 1);
+    assert!(hint_path(&tmp, name).exists());
+    Ok(())
+}
+
+/// The daemon reads at most 64 MiB of a day file (`MAX_HINT_FILE`).
+const HINT_BOUND: usize = 64 << 20;
+
+/// `lines` junk lines of exactly 1024 bytes each (newline included): cheap to scan, no record.
+fn junk_lines(lines: usize) -> Vec<u8> {
+    let mut line = vec![b'x'; 1023];
+    line.push(b'\n');
+    line.repeat(lines)
+}
+
+#[test]
+fn old_hint_file_longer_than_the_read_bound_is_kept() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    // The first 64 MiB end exactly on a line boundary, so the scan of the bytes read is
+    // fully consumed with no torn tail; only the cut read keeps the file.
+    let lines = HINT_BOUND / 1024 + 1;
+    let bytes = junk_lines(lines);
+    let full = u64::try_from(bytes.len()).map_err(e)?;
+    fs::write(hint_path(&tmp, OLD8), &bytes).map_err(e)?;
+    drop(bytes);
+    for round in 1..=3 {
+        if round > 1 {
+            d.clock_mut().mono = 61_000_000_000 * u64::try_from(round).map_err(e)?;
+        }
+        let report = d.reconcile_once().map_err(e)?;
+        assert_eq!(
+            (report.hints_removed, report.hints_kept_old),
+            (0, 1),
+            "{round}: {report:?}"
+        );
+        let len = fs::metadata(hint_path(&tmp, OLD8)).map_err(e)?.len();
+        assert_eq!(len, full, "{round}: file untouched at its full length");
+    }
+    Ok(())
+}
+
+#[test]
+fn old_hint_file_within_the_read_bound_and_consumed_is_removed() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    fs::write(hint_path(&tmp, OLD8), junk_lines(HINT_BOUND / 1024)).map_err(e)?;
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!(
+        (report.hints_removed, report.hints_kept_old),
+        (1, 0),
+        "{report:?}"
+    );
+    assert!(!hint_path(&tmp, OLD8).exists());
     Ok(())
 }

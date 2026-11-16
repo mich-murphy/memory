@@ -6,7 +6,7 @@ use hegel::{TestCase, generators as gs};
 use memory::capture::Source;
 use memory::daemon::{Daemon, Parts, StartOptions};
 use memory::environment::{Clock, FileSystem, Published, Stat, Store, StoreError, Stored};
-use memory::state::SyncPolicy;
+use memory::state::{StateFile, SyncPolicy};
 use memory_core::domain::{
     Agent, ArchiveId, ETag, MachineId, Owner, SessionId, SessionKey, SourceClass, SourceId,
     SourceKind,
@@ -25,7 +25,7 @@ mod mem_store;
 mod test_clock;
 use mem_fs::MemFs;
 use mem_store::{EtagModel, MemStore};
-use test_clock::TestClock;
+use test_clock::{TestClock, WALL};
 
 type R<T = ()> = Result<T, String>;
 fn e<E: std::fmt::Debug>(err: E) -> String {
@@ -298,6 +298,22 @@ impl Rig {
         self.mono = 0;
         Ok(())
     }
+    /// Set the wall clock to `WALL` plus `offset_ns`.
+    fn wall(&mut self, offset_ns: i128) -> R {
+        self.d()?.clock_mut().wall = WALL + offset_ns;
+        Ok(())
+    }
+    /// Restart with `index.json` deleted from the state directory.
+    fn restart_without_index(&mut self) -> R {
+        let mut d = need(self.d.take(), "no daemon")?;
+        let fs = std::mem::take(d.fs_mut());
+        let store = std::mem::take(d.store_mut());
+        drop(d);
+        fs::remove_file(self.tmp.root().join(StateFile::Index.name())).map_err(e)?;
+        self.d = Some(boot(&self.tmp, &self.cfg, fs, store, &self.list)?);
+        self.mono = 0;
+        Ok(())
+    }
     /// One round; returns (stats, bytes_read, puts) it made.
     fn measure(&mut self) -> R<(u64, u64, u64)> {
         let (f0, s0) = self.counts()?;
@@ -541,5 +557,99 @@ fn idle_rounds_by_owner_phase() -> R {
             );
         }
     }
+    Ok(())
+}
+
+/// Bytes read by the bounded audit (DESIGN.md 11.4) over a 200 KiB source, round by round.
+#[test]
+fn audit_reads_the_stream_once_per_turn_and_nothing_otherwise() -> R {
+    const SECOND: i128 = 1_000_000_000;
+    const DAY: i128 = 24 * 3_600 * SECOND;
+    const SIZE: u64 = 204_800;
+    const WINDOWS: u64 = 4_096 + 65_536;
+    let data = lines(SIZE as usize);
+    let mut r = rig(1, 1, &data)?;
+    let bytes = |r: &mut Rig, at: i128| -> R<u64> {
+        r.wall(at)?;
+        Ok(r.measure()?.1)
+    };
+    assert_eq!(
+        bytes(&mut r, 0)?,
+        SIZE,
+        "1: first capture reads the stream once"
+    );
+    assert_eq!(bytes(&mut r, SECOND)?, SIZE, "2: the audit reads [0, size)");
+    assert_eq!(bytes(&mut r, 2 * SECOND)?, 0, "3: audited, within a day");
+    let mut grown = data;
+    grown.extend(lines(1_000));
+    r.d()?.fs_mut().inner.set(1, &grown);
+    assert_eq!(
+        bytes(&mut r, 3 * SECOND)?,
+        WINDOWS + 1_000,
+        "4: the append reads the windows and the delta"
+    );
+    let size = SIZE + 1_000;
+    assert_eq!(bytes(&mut r, SECOND + DAY)?, size, "5: 24 h: one audit");
+    assert_eq!(bytes(&mut r, SECOND + DAY + SECOND)?, 0, "5: then nothing");
+    r.restart()?;
+    assert_eq!(
+        bytes(&mut r, SECOND + DAY + 2 * SECOND)?,
+        0,
+        "6: an intact index is not re-audited"
+    );
+    r.restart_without_index()?;
+    assert_eq!(
+        bytes(&mut r, SECOND + DAY + 3 * SECOND)?,
+        size,
+        "7: the adoption reads the committed prefix once"
+    );
+    assert_eq!(
+        bytes(&mut r, SECOND + DAY + 4 * SECOND)?,
+        size,
+        "7: the next quiet round audits once"
+    );
+    assert_eq!(
+        bytes(&mut r, SECOND + DAY + 5 * SECOND)?,
+        0,
+        "7: then nothing"
+    );
+    Ok(())
+}
+
+/// A source parked by repeated audit mismatches costs no stat and no read in later rounds,
+/// and the round that parks it uploads nothing for it.
+#[test]
+fn a_parked_source_costs_zero_reads_and_zero_stats_per_round() -> R {
+    const SECOND: i128 = 1_000_000_000;
+    const H3: i128 = 3 * 3_600 * SECOND;
+    let data = lines(10_000);
+    let mut r = rig(1, 1, &data)?;
+    // Same size, same mtime, one byte changed: the next audit is a stable mismatch.
+    let tamper = |r: &mut Rig| -> R {
+        let fs = &mut r.d()?.fs_mut().inner;
+        let mtime = need(fs.mtimes.get(&1).copied(), "mtime")?;
+        let mut bytes = need(fs.files.get(&1).cloned(), "file")?;
+        *need(bytes.get_mut(10), "byte")? ^= 0xff;
+        fs.set(1, &bytes);
+        fs.mtimes.insert(1, mtime);
+        Ok(())
+    };
+    r.wall(0)?;
+    r.round()?;
+    for at in [SECOND, 2 * SECOND, 3 * SECOND, SECOND + H3] {
+        tamper(&mut r)?;
+        r.wall(at)?;
+        r.round()?;
+    }
+    let (fs0, st0) = r.counts()?;
+    for n in 1..4 {
+        tamper(&mut r)?;
+        r.wall(SECOND + H3 + n * SECOND)?;
+        let (stats, bytes, puts) = r.measure()?;
+        assert_eq!((stats, bytes, puts), (0, 0, 0), "round {n}");
+    }
+    let (fs1, st1) = r.counts()?;
+    assert_eq!((fs1.stats, fs1.bytes_read), (fs0.stats, fs0.bytes_read));
+    assert_eq!(st1.puts, st0.puts);
     Ok(())
 }

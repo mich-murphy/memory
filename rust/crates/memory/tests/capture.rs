@@ -1,5 +1,6 @@
 //! Capture wiring table tests (slice 2). Synthetic in-memory filesystem and fake store only.
 //! Not the real filesystem, not zstd, not R2, not the daemon loop.
+use memory::audit::AuditCounts;
 use memory::capture::{Env, Locals, Source, SourceOutcome, attach_launches, capture};
 use memory::commit::Commit;
 use memory::commit::{Base, commit};
@@ -74,6 +75,10 @@ struct Rig {
     context: PolicyContext,
     piece_len: usize,
     launches: Vec<SanitizedLaunch>,
+    /// Audit verdicts of the last cycle's capture step.
+    audit: AuditCounts,
+    /// Wall time of the next capture step.
+    now_ns: i64,
 }
 impl Rig {
     fn new(sources: Vec<Source>) -> Self {
@@ -85,6 +90,8 @@ impl Rig {
             base: None,
             piece_len: 4,
             launches: vec![],
+            audit: AuditCounts::default(),
+            now_ns: 10_000_000_000,
             context: PolicyContext {
                 valid: true,
                 revision: "r".to_owned(),
@@ -101,10 +108,11 @@ impl Rig {
         let env = Env {
             header: header()?,
             context: &self.context,
-            now_ns: 10_000_000_000,
+            now_ns: self.now_ns,
             piece_len: self.piece_len,
         };
         let got = capture(&mut self.fs, &self.sources, &self.locals, state, &env);
+        self.audit = got.audit;
         let mut changes = Vec::new();
         if let Some(mut request) = got.commit {
             attach_launches(&mut request, &self.launches);
@@ -879,5 +887,204 @@ fn stored_pieces_are_zstd_frames_that_match_their_descriptors() -> R {
         restored.extend(decoded);
     }
     assert_eq!(restored, data);
+    Ok(())
+}
+
+/// Restore the latest epoch of the first source from the rig's store through `memory_reader`.
+fn restore_latest(rig: &Rig) -> R<Vec<u8>> {
+    let id = &rig.sources.first().ok_or("no source")?.id;
+    let base = rig.base.as_ref().ok_or("no base")?;
+    let entry = base.state.sources.get(id).ok_or("no entry")?;
+    memory_reader::restore_source(entry, |key| {
+        rig.store
+            .objects
+            .get(key)
+            .map(|(body, _)| body.clone())
+            .ok_or_else(|| "piece object missing".to_owned())
+    })
+    .map_err(|err| format!("restore failed: {err:?}"))
+}
+
+/// Facts-table row 7: an extension that cannot resume the digest re-reads `[0, to)`. A byte
+/// rewritten strictly between the windows, with growth, passes the window check; the committed
+/// digest is then of the new bytes while the stored pieces before `from` are the old ones. The
+/// committed epoch must still restore to its own digest and to the file.
+#[test]
+fn non_resumed_extension_after_a_between_windows_rewrite_restores_to_the_file() -> R {
+    let mut rig = rig()?;
+    rig.piece_len = 1 << 20;
+    let old = pattern(200 * 1024);
+    transcript(&mut rig, &old);
+    assert_eq!(kinds(&rig.cycle()?.1), ["epoch"]);
+    // No resumable state: the next extension reads [0, to) again.
+    let id = rig.sources.first().ok_or("no source")?.id.clone();
+    let local = rig.locals.get_mut(&id).ok_or("no local")?;
+    local.index.as_mut().ok_or("no index")?.whole_state = None;
+    let mut new = old.clone();
+    let at = 50_000;
+    *new.get_mut(at).ok_or("byte")? ^= 0xff;
+    new.extend_from_slice(&pattern(1_000));
+    transcript(&mut rig, &new);
+    let (_, changes) = rig.cycle()?;
+    let restored = restore_latest(&rig);
+    assert_eq!(
+        restored.as_ref().map(Vec::len),
+        Ok(new.len()),
+        "kinds {:?}: the latest epoch restores",
+        kinds(&changes)
+    );
+    assert_eq!(restored, Ok(new), "the latest epoch equals the file");
+    // The grown file fails the due audit's stat pre-check (one ineligible); the prefix that no
+    // longer hashes to the committed digest starts the epoch and is counted as a mismatch.
+    assert_eq!(
+        rig.audit,
+        AuditCounts {
+            matched: 0,
+            mismatched: 1,
+            ineligible: 1,
+        }
+    );
+    Ok(())
+}
+
+const HOUR_NS: i64 = 3_600 * 1_000_000_000;
+
+fn audit_of(rig: &Rig) -> R<memory_core::domain::AuditState> {
+    Ok(index_of(rig)?.audit)
+}
+
+/// Grow the file and flip one byte under the committed boundary, without resumable state, so the
+/// next extension re-reads the prefix and finds it changed.
+fn rewrite_and_grow(rig: &mut Rig, bytes: &mut Vec<u8>, at: usize) -> R {
+    let id = rig.sources.first().ok_or("no source")?.id.clone();
+    let local = rig.locals.get_mut(&id).ok_or("no local")?;
+    local.index.as_mut().ok_or("no index")?.whole_state = None;
+    *bytes.get_mut(at).ok_or("byte")? ^= 0xff;
+    bytes.extend_from_slice(&pattern(1_000));
+    transcript(rig, bytes);
+    Ok(())
+}
+
+/// Guarantee: the prefix site parks a prefix-stable source at the third failure spanning 3 h,
+/// starting no epoch and leaving the index entry as it was.
+#[test]
+fn a_prefix_mismatch_parks_at_three_failures_over_three_hours() -> R {
+    let mut rig = rig()?;
+    rig.piece_len = 1 << 20;
+    let mut bytes = pattern(200 * 1024);
+    transcript(&mut rig, &bytes);
+    rig.cycle()?;
+    for (n, at) in [(1_u32, 50_000_usize), (2, 51_000), (3, 52_000)] {
+        rig.now_ns = 10_000_000_000 + i64::from(n) * 1_000_000_000;
+        rewrite_and_grow(&mut rig, &mut bytes, at)?;
+        let (outcomes, changes) = rig.cycle()?;
+        assert_eq!(outcomes, [SourceOutcome::Planned], "failure {n}");
+        assert_eq!(kinds(&changes), ["epoch"]);
+        assert_eq!(rig.audit.mismatched, 1);
+        assert_eq!(audit_of(&rig)?.consecutive_failures, n);
+    }
+    let before = index_of(&rig)?;
+    let puts = rig.store.version;
+    rig.now_ns = 11_000_000_000 + HOUR_NS * 3;
+    rewrite_and_grow(&mut rig, &mut bytes, 53_000)?;
+    let before = memory_core::domain::SourceState {
+        whole_state: None,
+        ..before
+    };
+    let (outcomes, changes) = rig.cycle()?;
+    assert_eq!(
+        outcomes,
+        [SourceOutcome::Parked(
+            memory_core::domain::ParkReason::RepeatedAuditMismatch
+        )]
+    );
+    assert!(changes.is_empty());
+    assert_eq!(rig.audit.mismatched, 0, "a park is not counted");
+    assert_eq!(rig.store.version, puts);
+    assert_eq!(index_of(&rig)?, before, "the index entry is unchanged");
+    Ok(())
+}
+
+/// Guarantee: a source that is not prefix-stable restarts on every extension (so the restore
+/// stays the file) without counting a failure, however many and however far apart.
+#[test]
+fn a_source_that_is_not_prefix_stable_never_parks_at_the_prefix_site() -> R {
+    let mut rig = Rig::new(vec![source(
+        1,
+        "projects/p/settings.json",
+        SourceClass::Append,
+        Profile::Transcript,
+    )?]);
+    rig.piece_len = 1 << 20;
+    let doc = |n: i64| {
+        let keys: Vec<String> = (0..=n).map(|k| format!("\"k{k}\":{k}")).collect();
+        format!("{{{}}}", keys.join(",")).into_bytes()
+    };
+    transcript(&mut rig, &doc(0));
+    rig.cycle()?;
+    let mut epochs = 1;
+    for n in 1..7_i64 {
+        rig.now_ns = 10_000_000_000 + n * 50 * HOUR_NS;
+        let text = doc(n);
+        transcript(&mut rig, &text);
+        let (outcomes, changes) = rig.cycle()?;
+        assert_eq!(outcomes, [SourceOutcome::Planned], "step {n}");
+        assert_eq!(rig.audit.mismatched, 0, "step {n}");
+        assert_eq!(audit_of(&rig)?.consecutive_failures, 0, "step {n}");
+        epochs += changes
+            .iter()
+            .filter(|c| matches!(c, Change::Epoch(_)))
+            .count();
+        let restored: serde_json::Value =
+            serde_json::from_slice(&restore_latest(&rig)?).map_err(e)?;
+        let want: serde_json::Value = serde_json::from_slice(&text).map_err(e)?;
+        assert_eq!(restored, want, "step {n}");
+    }
+    assert!(epochs >= 2, "extensions restarted the epoch: {epochs}");
+    Ok(())
+}
+
+/// Guarantee: the prefix site is reached by a source that is not prefix-stable (the windows
+/// accept the extension, the transformed prefix differs) and restarts the epoch without counting
+/// a failure or a mismatch.
+#[test]
+fn a_non_prefix_stable_prefix_difference_restarts_without_a_failure() -> R {
+    let mut rig = Rig::new(vec![source(
+        1,
+        "projects/p/settings.json",
+        SourceClass::Append,
+        Profile::Transcript,
+    )?]);
+    rig.piece_len = 1 << 20;
+    let doc = |value: u32| {
+        let keys: Vec<String> = (0..8000_u32)
+            .map(|k| format!("\"k{k:05}\":{}", if k == 3000 { value } else { k }))
+            .collect();
+        format!("{{{}}}", keys.join(",")).into_bytes()
+    };
+    let old = doc(3000);
+    assert!(old.len() > 110_000);
+    transcript(&mut rig, &old);
+    rig.cycle()?;
+    for n in 1..=4_i64 {
+        let mut new = doc(u32::try_from(3000 + n).map_err(e)?);
+        new.extend_from_slice(&b" ".repeat(usize::try_from(3 * n).map_err(e)?));
+        rig.now_ns = 10_000_000_000 + n * 50 * HOUR_NS;
+        transcript(&mut rig, &new);
+        let (outcomes, changes) = rig.cycle()?;
+        assert_eq!(outcomes, [SourceOutcome::Planned], "step {n}");
+        assert_eq!(
+            kinds(&changes),
+            ["epoch"],
+            "step {n}: the prefix site restarts"
+        );
+        assert_eq!(rig.audit.mismatched, 0, "step {n}");
+        assert_eq!(audit_of(&rig)?.consecutive_failures, 0, "step {n}");
+        let restored: serde_json::Value =
+            serde_json::from_slice(&restore_latest(&rig)?).map_err(e)?;
+        let want: serde_json::Value =
+            serde_json::from_slice(&doc(u32::try_from(3000 + n).map_err(e)?)).map_err(e)?;
+        assert_eq!(restored, want, "step {n}");
+    }
     Ok(())
 }

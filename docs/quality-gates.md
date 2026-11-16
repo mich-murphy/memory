@@ -28,7 +28,7 @@ nix develop --max-jobs 2 --cores 2 --command sh -c \
   'cd rust && PROPERTY_CASES=2000 bash scripts/gates.sh'
 ```
 
-Hosted CI runs the same command in the Rust-only `.#rust` shell (`flake.nix`), which carries the same pinned Rust tools and environment as the default shell without the Go and release tooling, so the runner downloads less.
+Hosted CI runs the same command in the Rust-only `.#rust` shell (`flake.nix`), which carries the same pinned Rust tools and environment as the default shell without the Go and release tooling, so the runner downloads less. Hosted CI runs it as two jobs per OS, selected by `GATES_PART` (2026-11-16): `gates` is every gate but `08-coverage` and `coverage` is `08-coverage` alone, each under the unchanged 30-minute job limit, so one OS may now use up to two 30-minute jobs. Without `GATES_PART` the wrapper runs all 13 in one pass, which is the local evidence run.
 
 The wrapper runs format, strict clippy, dependency/license/security and pure-core
 dependency bans, nextest, compile-fail doctests, Hegel (every `hegel_` test in the workspace), proptest (every `proptest_` test in the workspace), the actual production
@@ -49,9 +49,12 @@ compile-fail doctests, 2,000 cases, seed 730213; see
 (98.3173%, seed 730210, [round 10](rust-rewrite/implementation/evidence/12-slice2-round10/))
 is superseded. After the design and test review (2026-11-11, `main` at `c239d1b`,
 [report 24](rust-rewrite/implementation/24-design-and-test-review.md)) the gates passed at 500 cases, seed 3481505894, 431 tests, **97.72%** (5,840/5,976 lines); that run was not repeated at 2,000 cases. On the data-structure stack (2026-11-12, `0f3cb7d`,
-[report 25](rust-rewrite/implementation/25-engineering-practice-review.md)) they passed at 500 cases, seed 374449330, 431 tests, **97.72%** (5,869/6,006 lines). On the walking-skeleton stack (2026-11-12, `8f10261`, [report 26](rust-rewrite/implementation/26-walking-skeleton.md)) they passed at 500 cases, seed 335062796, 471 tests, **97.62%** (6,140/6,290 lines). After the structural fixes on the same stack (2026-11-12, `6fd536a`, [evidence 17](rust-rewrite/implementation/evidence/17-structural-fixes/)) they passed at 500 cases, seed 3194196348, 472 tests, **97.75%** (6,031/6,170 lines). On the run-loop branches above that stack (2026-11-12, `2c10eb0`, local run, [evidence 18](rust-rewrite/implementation/evidence/18-run-loop/)) they passed at 500 cases, seed 2202692434, 519 tests, **97.36%** (6,596/6,775 lines). Under `gates.sh` the two mutation scripts share one temporary target
+[report 25](rust-rewrite/implementation/25-engineering-practice-review.md)) they passed at 500 cases, seed 374449330, 431 tests, **97.72%** (5,869/6,006 lines). On the walking-skeleton stack (2026-11-12, `8f10261`, [report 26](rust-rewrite/implementation/26-walking-skeleton.md)) they passed at 500 cases, seed 335062796, 471 tests, **97.62%** (6,140/6,290 lines). After the structural fixes on the same stack (2026-11-12, `6fd536a`, [evidence 17](rust-rewrite/implementation/evidence/17-structural-fixes/)) they passed at 500 cases, seed 3194196348, 472 tests, **97.75%** (6,031/6,170 lines). On the run-loop branches above that stack (2026-11-12, `2c10eb0`, local run, [evidence 18](rust-rewrite/implementation/evidence/18-run-loop/)) they passed at 500 cases, seed 2202692434, 519 tests, **97.36%** (6,596/6,775 lines). On the production-prerequisites stack (2026-11-16, `2edf2f8`, local run, [brief 28](rust-rewrite/implementation/28-production-prerequisites.md)) they passed at 500 cases, seed 3153221467, 583 tests, **97.19%** (7,044/7,248 lines). Under `gates.sh` the two mutation scripts share one temporary target
 directory (`MEMORY_MUTATION_TARGET`), so the second does not rebuild dependencies; this kept
 the macOS job inside its unchanged 30-minute limit.
+Gate 08 runs through `cargo llvm-cov nextest` (one process per test, since `00e91ab`): under
+plain `cargo test` the daemon tests share one process, and a child spawned by
+`second_process_exits_lock_held` could hold the daemon lock a state-machine restart retakes.
 At 2,000 cases the two daemon state-machine properties took about 6 minutes because every
 simulated round did real `F_FULLFSYNC` writes. Amendment A7 is implemented on
 `rust/sync-policy`: only those two properties select `SyncPolicy::None` and now take about

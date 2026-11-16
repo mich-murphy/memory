@@ -40,6 +40,10 @@ zstd = { version = "=0.14.3", default-features = false }
 # Signal delivery for the run loop (R2). Source read before pinning: signal-hook-0.4.6 src/iterator/mod.rs
 # (Signals::new, forever, Handle::close) and Cargo.toml. `iterator` is the only feature used; no unsafe in our code.
 signal-hook = { version = "=0.4.6", default-features = false, features = ["iterator"] }
+# Logs to stderr (DESIGN.md 11.5), used only by the `memory` crate's `log` module. `std` only for
+# tracing; `fmt` and `std` for the subscriber: no ansi, env-filter, json, tracing-log or attributes.
+tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["fmt", "std"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

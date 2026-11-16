@@ -15,9 +15,15 @@ pieces, restores a source and reads an owner's manifest chain. `run` is the daem
 safety reconcile after a 5 s to 60 s startup delay, then every 15 minutes, stop on SIGTERM or
 SIGINT) and `restore` is the `memory restore` command
 ([brief 27](../docs/rust-rewrite/implementation/27-run-loop.md),
-[evidence 18](../docs/rust-rewrite/implementation/evidence/18-run-loop/)). The watcher and
-scheduler are not connected to the loop, and the daemon refuses an empty key prefix, so it
-writes only under an acceptance prefix. No slice or release acceptance is claimed.
+[evidence 18](../docs/rust-rewrite/implementation/evidence/18-run-loop/)). The daemon logs
+`started`, `state_load`, `round`, `parked`, `host_paused`, `host_resumed` and `stopped` to
+stderr through `tracing`, removes hint day files past 7 days once consumed, audits append
+sources and parks a source after repeated audit mismatches
+([brief 28](../docs/rust-rewrite/implementation/28-production-prerequisites.md),
+[evidence 19](../docs/rust-rewrite/implementation/evidence/19-production-prerequisites/)).
+The watcher and scheduler are not connected to the loop, and the daemon refuses an empty key
+prefix, so it writes only under an acceptance prefix. No slice or release acceptance is
+claimed.
 
 All commands use the repository's **locked Nix shell**, Rust/cargo 1.99.0.
 No rustup/global installs. From repository root:
@@ -30,7 +36,7 @@ PROPERTY_CASES=2000 bash scripts/gates.sh
 # CI invocation: PROPERTY_CASES=500 bash scripts/gates.sh
 ```
 
-Hosted CI uses the Rust-only `nix develop .#rust` shell: the same pinned Rust tools and environment as the default shell, without the Go and release tooling. Use either locally.
+Hosted CI uses the Rust-only `nix develop .#rust` shell: the same pinned Rust tools and environment as the default shell, without the Go and release tooling. Use either locally. Hosted CI sets `GATES_PART` and runs the wrapper as two jobs per OS: `gates` (every gate but `08-coverage`) and `coverage` (`08-coverage` alone); unset, the wrapper runs everything.
 
 The canonical wrapper also runs workspace doctests (nextest does not), gates `05-hegel` and
 `06-proptest` (every `hegel_` and every `proptest_` test in the workspace), and two
