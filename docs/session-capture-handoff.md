@@ -49,7 +49,7 @@ This is the single active task brief; dated operating records below remain histo
 
 **Session 2026-11-12 to 2026-11-16, production prerequisites (current).** Brief 28; record in
 [evidence 19](rust-rewrite/implementation/evidence/19-production-prerequisites/). All
-increments are accepted locally. Hosted CI for the stack was running when this was written.
+increments are accepted and on `main`: stack #111 merged as `d765f9c` on 2026-11-16.
 - What exists now (implemented, commits in evidence 19): `memory daemon` logs `started`,
   `state_load`, `round` (16 keys), `parked`, `host_paused`, `host_resumed` and `stopped` to
   stderr through `tracing`; hint day files past 7 days are removed once consumed; append
@@ -64,12 +64,20 @@ increments are accepted locally. Hosted CI for the stack was running when this w
   and their causes were not established. `gh stack merge --yes --merge` refused (`main`
   belongs to multiple stacks) and `gh stack merge 103` merged it.
 - Stack #111 pushed on 2026-11-16: PRs #104 `368bc4a`, #105 `00e91ab`, #106 `8fe5bfa`, #107
-  `ec5c0cc`, #108 `c9941ff`, #109 `7f99613`, #110 `2edf2f8`. Hosted CI was running when this
-  was written; no hosted result is claimed.
+  `ec5c0cc`, #108 `c9941ff`, #109 `7f99613`, #110 `2edf2f8`, then #112 `00af49e` (the record)
+  and #113 `538279e`. It merged the same day as `d765f9c` (`gh stack merge 111 --yes --merge`;
+  tree equal to `538279e`). Every "Rust rewrite gates" run succeeded and every "CI" run failed
+  only in the two accepted `govulncheck` steps. Post-merge: "Rust rewrite gates" run
+  43887779155 success, "CI" run 43887779219 accepted steps only.
+- Hosted macOS time: the single `Rust (macos-26)` job reached its 30-minute limit on #109 and
+  #110 with no gate failing (26.0 to 30.4 minutes from #107 up); one rerun each passed. PR
+  #113 fixes the cause: `gates.sh` takes `GATES_PART` and the workflow runs `gates` and
+  `coverage` as separate jobs per OS, six jobs per run, the longest 17.4 minutes so far. No
+  gate was dropped and the limit is unchanged. A macOS job can still fail to get a runner
+  (#113, attempt 1, no steps); rerun that job.
 - Gates on `2edf2f8`: local, 500 cases, seed 3153221467, all 13 sub-gates 0, 583 tests under
   coverage, 12 doctests, coverage 7044/7248 = 97.19 %. Earlier runs on `b37556e` and
-  `7f99613` are in evidence 19. Not run: 2,000 cases, `cargo mutants`, anything against R2,
-  hosted CI for the stack.
+  `7f99613` are in evidence 19. Not run: 2,000 cases, `cargo mutants`, anything against R2.
 - Known limits: no `unpark` command and no automatic unpark; a hint day file whose launch
   record never commits is kept for ever; a daemon with no sources logs `state_load` on every
   start for a damaged index; a pre-LOG-2 `status.json` loads as damaged; the Hegel generator

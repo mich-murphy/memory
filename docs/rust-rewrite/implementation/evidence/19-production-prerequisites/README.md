@@ -2,13 +2,14 @@
 
 Dates: work up to `0d28378` and the gates on `b37556e` and `7f99613` ran on 2026-11-12. The
 parent's AUDIT-3 acceptance, `2edf2f8` and the final gates ran on 2026-11-16. Everything here
-is local evidence. Hosted CI for stack #111 was running when this record was written; no
-hosted result for it is claimed. No R2 run happened in brief 28, and the daemon still refuses
-an empty key prefix.
+is local evidence except the two sections on hosted CI ("Hosted macOS job time on stack #111"
+and "Stack #111 merge"), which were added the same day as the hosted runs finished. No R2 run
+happened in brief 28, and the daemon still refuses an empty key prefix.
 
 [Brief 28](../../28-production-prerequisites.md) sits on `e11db32`, the top of stack #103
 (merged into `main` as `39944d7` on 2026-11-12; `git diff e11db32 origin/main` was empty).
-The stack was pushed on 2026-11-16 as stack #111 (PRs #104 to #110). Pre-push check of
+The stack was pushed on 2026-11-16 as stack #111 (PRs #104 to #110; #112 and #113 were added
+on top the same day, each with the same check and 0 matches). Pre-push check of
 `e11db32..2edf2f8` (27 commits): 0 matches for the secret, the key id, the endpoint, the host
 and the account.
 
@@ -21,7 +22,8 @@ and the account.
 | `rust/audit` | `c9941ff` | #108 | 7 | 11 files, +1440/-48 | AUDIT-1, AUDIT-2 |
 | `rust/log-events` | `7f99613` | #109 | 3 | 7 files, +536/-102 | LOG-2 |
 | `rust/audit-park` | `2edf2f8` | #110 | 8 | 14 files, +890/-79 | AUDIT-3 |
-| `docs/production-prerequisites` | this record | | | | Brief 28 result, evidence 19, handoff, gates entry |
+| `docs/production-prerequisites` | `00af49e` | #112 | 6 | 19 files, +1073/-34 | Brief 28 result, evidence 19, handoff, gates entry |
+| `rust/ci-coverage-job` | `538279e` | #113 | 2 | 5 files, +71/-6 | Hosted CI runs coverage as its own job per OS |
 
 Code over `368bc4a`: 28 files, +3877/-188. The lockfile gains 62 lines (7 packages, LOG-1
 only); `rust/Cargo.toml` +4; `memory/Cargo.toml` +2; `memory-core/deny.toml` +1;
@@ -108,7 +110,7 @@ took 262 s; `hegel_daemon_state_machine` passed in 31.4 s.
 
 ## Hosted macOS job time on stack #111
 
-Added on 2026-11-16 after the record above; this section is the only hosted evidence in it.
+Added on 2026-11-16 after the record above.
 
 On stack #111 the `Rust (macos-26)` job of "Rust rewrite gates" reached its 30-minute limit
 twice. No gate failed in either run.
@@ -121,7 +123,9 @@ twice. No gate failed in either run.
 | #107 | `ec5c0cc` | 43865542471 | 26.0 min | success |
 | #108 | `c9941ff` | 43865560855 | 26.2 min | success |
 | #109 | `7f99613` | 43865576080, attempt 1 | 30.4 min | cancelled at the limit inside `08-coverage`; the 11 gates before it were 0 |
+| #109 | `7f99613` | 43865576080, attempt 2 | 26.1 min | success |
 | #110 | `2edf2f8` | 43865589662, attempt 1 | 30.0 min | cancelled at the limit after the gates step succeeded; all 13 gates 0 in the uploaded `status.tsv`, seed 1749040497 |
+| #110 | `2edf2f8` | 43865589662, attempt 2 | 28.6 min | success |
 | #112 | `00af49e` | 43867816396 | 26.1 min | success |
 
 Seconds per gate on the macOS runner, from the timestamps of the status lines in the job logs
@@ -138,8 +142,9 @@ Seconds per gate on the macOS runner, from the timestamps of the status lines in
 
 The job also spends about 1.5 to 2 minutes before the gates step (checkout, Nix, the cached
 `cargo-llvm-cov`). The same commit varies by runner: `05-hegel` took 204 s to 369 s on the two
-Linux runners for #109 and #110. With 583 tests against 519 on `main`, the macOS job sits at
-about 87 % to 100 % of its limit, so a rerun alone does not make it reliable.
+Linux runners for #109 and #110. From #107 up the macOS job took 26.0 to 30.4 minutes, 87 % or
+more of its limit (the top of the stack has 583 tests against 519 on `main`), so a rerun alone
+does not make it reliable.
 
 Fix: `e599100` on `rust/ci-coverage-job`. `rust/scripts/gates.sh` takes `GATES_PART` (`all` by
 default, `gates`, `coverage`); the hosted workflow runs `gates` and `coverage` as separate
@@ -147,10 +152,30 @@ jobs per OS. No gate is dropped and the 30-minute job limit is unchanged, but on
 use two 30-minute jobs where it had one, which is more total time than before. Checked
 locally: `bash -n`, `shellcheck` and `actionlint` exit 0; with every command stubbed the
 parts select 13, 12 and 1 gates; an unknown value exits 2. Not checked locally: a real run of
-either part. Its first hosted run is the check.
+either part.
 
-The parent reran the cancelled macOS job of both runs once (`gh run rerun <id> --failed`);
-attempt 2 of both was running when this section was written.
+First hosted runs of the split, in minutes per job (PR #113 is run 43878896700; the post-merge
+run on `main` `d765f9c` is 43887779155):
+
+| Job | PR #113 | Post-merge |
+|---|---|---|
+| Rust gates (ubuntu-24.04) | 9.8 | 9.4 |
+| Rust gates (ubuntu-24.04-arm) | 14.0 | 14.0 |
+| Rust gates (macos-26) | 17.4 | 16.6 |
+| Rust coverage (ubuntu-24.04) | 7.7 | 7.2 |
+| Rust coverage (ubuntu-24.04-arm) | 10.0 | 10.5 |
+| Rust coverage (macos-26) | 12.1 | 15.0 |
+
+The longest job is now 17.4 minutes against the 30-minute limit. On PR #113 the
+`Rust coverage (macos-26)` job of attempt 1 never started: it was cancelled after 15.0 minutes
+in the queue with no steps and the annotation "The job was not acquired by Runner of type
+hosted even after multiple attempts". The parent reran that job once; the 12.1 minutes are
+attempt 2. The split does not prevent that kind of failure, and it can now happen to any of
+six jobs per run where there were three.
+
+The parent reran the cancelled macOS job of #109 and #110 once (`gh run rerun <id> --failed`).
+Attempt 2 succeeded for both, at 26.1 and 28.6 minutes, so both still ran as one job close to
+the limit.
 
 ## Acceptance per increment (parent)
 
@@ -377,6 +402,25 @@ runs, heads, PR states and `origin/main` (`cf99a3d`), then ran `gh stack merge 1
 43217491627 succeeded (3 jobs); post-merge "CI" run 43217492534 failed only in the two accepted
 steps.
 
+## Stack #111 merge
+
+PRs #104 to #110, #112 and #113 merged on 2026-11-16 (about 14:38 UTC) as `d765f9c` with
+`gh stack merge 111 --yes --merge`; `git diff 538279e origin/main` is empty. Before the merge
+every "Rust rewrite gates" run was `success` on its latest attempt and every "CI" run failed
+only in the two accepted `govulncheck` steps, checked job by job for all nine. Three "Rust
+rewrite gates" runs needed one rerun of one macOS job each, none after a failed step:
+
+| PR | Run | Attempt 1 | Attempt 2 |
+|---|---|---|---|
+| #109 | 43865576080 | macOS job cancelled at the 30-minute limit inside `08-coverage` | success, 26.1 min |
+| #110 | 43865589662 | macOS job cancelled at the limit after all 13 gates were 0 | success, 28.6 min |
+| #113 | 43878896700 | `Rust coverage (macos-26)` never acquired a runner (no steps) | success, 12.1 min |
+
+No Go "CI" run was rerun. Post-merge on `d765f9c`: "Rust rewrite gates" run 43887779155
+succeeded on all six jobs at attempt 1; "CI" run 43887779219 failed only in the two accepted
+steps. The `govulncheck` output was not read again; acceptance of the "CI" runs rests on the
+job and step names.
+
 ## Known limits
 
 - No `unpark` command and no automatic unpark. A parked source stays parked when its file
@@ -402,5 +446,4 @@ steps.
 
 ## Not run
 
-2,000 cases, `cargo mutants`, anything against R2. Hosted CI for stack #111 had not finished
-when this record was written; the section on the macOS job time has what was known.
+2,000 cases, `cargo mutants`, anything against R2.
