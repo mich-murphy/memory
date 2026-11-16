@@ -373,3 +373,237 @@ fn unknown_owner_rows_are_counted_not_yielded() -> R {
     assert_eq!((c.yielded, c.unknown_owner, c.unknown_kind), (1, 1, 0));
     Ok(())
 }
+
+// ------------------------------------------------------------------ note / of
+use memory::daemon::{Daemon, IndexBody, OwnerOutcome, Parts};
+use memory::environment::Clock;
+use memory::state::{Loaded, StateFile, read_durable};
+use std::os::unix::fs::PermissionsExt;
+
+fn walker(root: &Path, limits: WalkLimits) -> R<WalkSources> {
+    Ok(WalkSources::new(
+        vec![(root.to_path_buf(), roots()?)],
+        limits,
+        SharedFs::new(),
+    ))
+}
+fn key_of(owner: &Owner, s: &memory::capture::Source) -> String {
+    format!("{owner:?}|{:?}|{}", s.id, s.handle)
+}
+fn owner_at(rel: &str) -> R<Owner> {
+    match located(rel)? {
+        Located::Source { owner, .. } => Ok(owner),
+        _ => Err("not a source".into()),
+    }
+}
+
+#[test]
+fn note_maps_a_path_to_its_owner_in_either_spelling() -> R {
+    let t = Tmp::new()?;
+    let file = t.write(T, b"{}\n")?;
+    let link = t.0.join("link");
+    symlink(t.root(), &link)?;
+    let want = owner_at("projects/-p/abc.jsonl")?;
+    // Configured through a link; reported canonically, as FSEvents does.
+    let mut w = walker(&link, WalkLimits::default())?;
+    assert_eq!(w.note(&fs::canonicalize(&file)?), Some(want.clone()));
+    assert_eq!(
+        w.note(&link.join("projects/-p/abc.jsonl")),
+        Some(want.clone())
+    );
+    assert_eq!(w.of(&want).len(), 1);
+    // Configured canonically; reported through the link is not a spelling of the root.
+    let mut w = walker(&fs::canonicalize(t.root())?, WalkLimits::default())?;
+    assert_eq!(w.note(&fs::canonicalize(&file)?), Some(want));
+    Ok(())
+}
+
+#[test]
+fn note_ignores_paths_outside_the_roots_and_paths_locate_rejects() -> R {
+    let t = Tmp::new()?;
+    t.write(T, b"{}\n")?;
+    t.write("other/projects/-p/abc.jsonl", b"{}\n")?;
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    assert_eq!(w.note(&t.0.join("other/projects/-p/abc.jsonl")), None);
+    assert_eq!(w.note(&t.0.join("claude2/projects/-p/abc.jsonl")), None);
+    assert_eq!(w.note(&t.root()), None);
+    assert_eq!(w.note(Path::new("relative/projects/-p/abc.jsonl")), None);
+    assert_eq!(w.note(&t.root().join("projects/-p/notes.txt")), None);
+    assert_eq!(w.note(&t.root().join("zzz/unknown.bin")), None);
+    Ok(())
+}
+
+#[test]
+fn of_yields_exactly_what_enumerate_yields() -> R {
+    let t = Tmp::new()?;
+    t.write("claude/projects/-p/a.jsonl", b"{}\n")?;
+    t.write("claude/projects/-q/b.jsonl", b"{}\n")?;
+    t.write("ext/-z/c.jsonl", b"{}\n")?;
+    t.write("claude/projects/-p/x/y/deep.jsonl", b"{}\n")?;
+    symlink(
+        t.root().join("projects/-p/a.jsonl"),
+        t.root().join("projects/-p/s.jsonl"),
+    )?;
+    symlink(t.0.join("ext/-z"), t.root().join("projects/-z"))?;
+    let limits = WalkLimits {
+        max_depth: 3,
+        ..WalkLimits::default()
+    };
+    let paths: Vec<PathBuf> = [
+        "projects/-p/a.jsonl",
+        "projects/-q/b.jsonl",
+        "projects/-p/s.jsonl",
+        "projects/-z/c.jsonl",
+        "projects/-p/x/y/deep.jsonl",
+    ]
+    .iter()
+    .map(|p| t.root().join(p))
+    .collect();
+    let union = |w: &mut WalkSources, owners: &[Owner]| -> Vec<String> {
+        let mut got: Vec<String> = owners
+            .iter()
+            .flat_map(|o| w.of(o).iter().map(|s| key_of(o, s)).collect::<Vec<_>>())
+            .collect();
+        got.sort();
+        got
+    };
+    // Every path noted first, then the walk.
+    let mut w = walker(&t.root(), limits.clone())?;
+    let mut owners: Vec<Owner> = Vec::new();
+    for p in &paths {
+        if let Some(o) = w.note(p)
+            && !owners.contains(&o)
+        {
+            owners.push(o);
+        }
+    }
+    assert!(w.note(&paths[2]).is_some() && w.note(&paths[3]).is_some());
+    let before = union(&mut w, &owners);
+    let mut walked: Vec<String> = w.enumerate().iter().map(|(o, s)| key_of(o, s)).collect();
+    walked.sort();
+    assert_eq!(walked.len(), 2, "{walked:?}");
+    assert_eq!(before, walked, "of before the walk");
+    assert_eq!(union(&mut w, &owners), walked, "of after the walk");
+    // The walk first, then every path noted.
+    let mut w = walker(&t.root(), limits)?;
+    let found = w.enumerate();
+    let mut owners: Vec<Owner> = found.iter().map(|f| f.0.clone()).collect();
+    for p in &paths {
+        if let Some(o) = w.note(p)
+            && !owners.contains(&o)
+        {
+            owners.push(o);
+        }
+    }
+    let mut walked: Vec<String> = found.iter().map(|(o, s)| key_of(o, s)).collect();
+    walked.sort();
+    assert_eq!(union(&mut w, &owners), walked);
+    Ok(())
+}
+
+#[test]
+fn of_does_not_yield_a_vanished_file_and_does_not_walk() -> R {
+    let t = Tmp::new()?;
+    let file = t.write(T, b"{}\n")?;
+    t.write("claude/projects/-q/b.jsonl", b"{}\n")?;
+    let want = owner_at("projects/-p/abc.jsonl")?;
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    assert_eq!(w.enumerate().len(), 2);
+    assert_eq!(w.counts().unreadable, 0);
+    assert_eq!(w.of(&want).len(), 1);
+    // A walk would meet the unreadable directory and count it; `of` must not touch it.
+    let sibling = t.root().join("projects/-q");
+    fs::set_permissions(&sibling, fs::Permissions::from_mode(0o000))?;
+    let yielded = w.of(&want).len();
+    let unreadable = w.counts().unreadable;
+    fs::set_permissions(&sibling, fs::Permissions::from_mode(0o700))?;
+    assert_eq!((yielded, unreadable), (1, 0), "of walked the tree");
+    fs::remove_file(&file)?;
+    assert!(w.of(&want).is_empty());
+    assert_eq!(w.note(&file), Some(want.clone()));
+    assert!(w.of(&want).is_empty());
+    Ok(())
+}
+
+struct Clk;
+impl Clock for Clk {
+    fn monotonic_ns(&self) -> u64 {
+        0
+    }
+    fn wall_ns(&self) -> i128 {
+        1_794_000_000_000_000_000
+    }
+}
+
+#[test]
+fn a_vanished_file_is_never_an_absence_for_an_owner_capture() -> R {
+    let t = Tmp::new()?;
+    fs::set_permissions(&t.0, fs::Permissions::from_mode(0o700))?;
+    let file = t.write(T, b"{\"a\":1}\n")?;
+    let token = t.0.join("token");
+    fs::write(&token, "x")?;
+    fs::set_permissions(&token, fs::Permissions::from_mode(0o600))?;
+    let cfg = t.0.join("config.toml");
+    fs::write(
+        &cfg,
+        format!(
+            "archive_id = \"a\"\nmachine_id = \"m\"\nendpoint = \"http://127.0.0.1:9\"\nbucket = \"bucket-1\"\ntoken_path = \"{}\"\n",
+            token.display()
+        ),
+    )?;
+    let shared = SharedFs::new();
+    let sources = WalkSources::new(
+        vec![(t.root(), roots()?)],
+        WalkLimits::default(),
+        shared.clone(),
+    );
+    let state = t.0.join("state");
+    let mut d = Daemon::start(
+        &state,
+        &cfg,
+        Parts {
+            fs: shared,
+            store: MemStore::default(),
+            clock: Clk,
+            sources,
+            context: context(),
+        },
+    )
+    .map_err(|x| x.code().to_owned())?;
+    assert_eq!(d.reconcile_once().map_err(|x| format!("{x:?}"))?.landed, 1);
+    let owner = d.note_path(&file).ok_or("not noted")?;
+    fs::write(&file, b"{\"a\":1}\n{\"a\":2}\n")?;
+    assert_eq!(
+        d.capture_owner(&owner).map_err(|x| format!("{x:?}"))?,
+        OwnerOutcome::Landed
+    );
+    let objects = d.store_mut().objects.len();
+    fs::remove_file(&file)?;
+    for _ in 0..4 {
+        assert_eq!(
+            d.capture_owner(&owner).map_err(|x| format!("{x:?}"))?,
+            OwnerOutcome::Unchanged
+        );
+    }
+    assert_eq!(
+        d.store_mut().objects.len(),
+        objects,
+        "no deletion was written"
+    );
+    d.shutdown().map_err(|x| format!("{x:?}"))?;
+    let Loaded::Present(stored) = read_durable(
+        &state.join(StateFile::Index.name()),
+        StateFile::Index.schema(),
+    ) else {
+        return Err("no index".into());
+    };
+    let index: IndexBody = serde_json::from_slice(&stored.body)?;
+    assert!(!index.sources.is_empty());
+    assert!(
+        index
+            .sources
+            .values()
+            .all(|s| s.missing == 0 && !s.deletion_recorded)
+    );
+    Ok(())
+}

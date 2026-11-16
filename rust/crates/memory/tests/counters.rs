@@ -653,3 +653,96 @@ fn a_parked_source_costs_zero_reads_and_zero_stats_per_round() -> R {
     assert_eq!(st1.puts, st0.puts);
     Ok(())
 }
+
+// ------------------------------------------------------------------ per-owner capture
+use memory::daemon::{OwnerOutcome, ParkedEntry, ParkedReason, StatusBody};
+use memory::state::{DaemonLock, StateDir};
+use memory_core::domain::ParkReason;
+use memory_core::limits::current_key;
+
+#[test]
+fn owner_capture_costs_what_one_owner_costs() -> R {
+    let run = |owners: u64| -> R<(u64, u64, u64)> {
+        let mut r = rig(owners, 1, b"hello\n")?;
+        r.converge()?;
+        let o = need(r.list.first().map(|l| l.0.clone()), "owner")?;
+        for handle in 1..=owners {
+            r.d()?.fs_mut().inner.set(handle, b"hello\nmore\n");
+        }
+        let (f0, s0) = r.counts()?;
+        r.mono += 61_000_000_000;
+        let mono = r.mono;
+        r.d()?.clock_mut().mono = mono;
+        assert_eq!(r.d()?.capture_owner(&o).map_err(e)?, OwnerOutcome::Landed);
+        let (f1, s1) = r.counts()?;
+        Ok((
+            f1.stats - f0.stats,
+            f1.bytes_read - f0.bytes_read,
+            s1.puts - s0.puts,
+        ))
+    };
+    let alone = run(1)?;
+    assert!(alone.1 > 0 && alone.2 > 0, "{alone:?}");
+    assert_eq!(
+        run(2)?,
+        alone,
+        "the other owner's changed file is neither stat nor read"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_parked_owner_costs_nothing() -> R {
+    let mut r = rig(2, 1, b"hello\n")?;
+    let o1 = need(r.list.get(1).map(|l| l.0.clone()), "owner")?;
+    r.d()?.store_mut().inner.write(
+        &current_key(&o1),
+        b"{\"schema\":\"memory.current/2\"}".to_vec(),
+    );
+    r.round()?;
+    let before = r.counts()?;
+    assert_eq!(r.d()?.capture_owner(&o1).map_err(e)?, OwnerOutcome::Skipped);
+    let after = r.counts()?;
+    assert_eq!(
+        (after.0.stats, after.0.bytes_read),
+        (before.0.stats, before.0.bytes_read)
+    );
+    assert_eq!(after.1.puts, before.1.puts);
+    Ok(())
+}
+
+#[test]
+fn a_parked_source_is_not_read_while_its_sibling_is_captured() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config()?;
+    let a = src_with(0, 1, Profile::Transcript)?;
+    let b = src_with(0, 2, Profile::Transcript)?;
+    {
+        let lock = DaemonLock::acquire(&tmp.root()).map_err(e)?;
+        let state = StateDir::prepare(&lock).map_err(e)?;
+        let body = StatusBody {
+            parked: vec![ParkedEntry {
+                owner: a.0.clone(),
+                reason: ParkedReason::Source(ParkReason::RepeatedSchemaError),
+                source: Some(a.1.id.clone()),
+            }],
+            ..StatusBody::default()
+        };
+        state
+            .write(StateFile::Status, &serde_json::to_vec(&body).map_err(e)?)
+            .map_err(e)?;
+    }
+    let mut fs = Fs::default();
+    fs.inner.set(1, "hello\n".repeat(100).as_bytes());
+    fs.inner.set(2, b"hi\n");
+    let owner = a.0.clone();
+    let mut d = boot(&tmp, &cfg, fs, St::default(), &[a, b])?;
+    assert_eq!(d.capture_owner(&owner).map_err(e)?, OwnerOutcome::Landed);
+    assert_eq!(
+        d.fs_mut().counters.bytes_read,
+        3,
+        "only the sibling was read"
+    );
+    assert_eq!(d.status().parked.len(), 1);
+    Ok(())
+}

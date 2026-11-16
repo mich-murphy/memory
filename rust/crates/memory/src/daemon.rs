@@ -1185,9 +1185,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         }
         match self.owners.get(owner).map(|rt| &rt.turn) {
             Some(Turn::Parked(_)) => return Ok(OwnerOutcome::Skipped),
-            Some(Turn::RetryAt(t))
-                if Duration::from_nanos(self.clock.monotonic_ns()) < *t =>
-            {
+            Some(Turn::RetryAt(t)) if Duration::from_nanos(self.clock.monotonic_ns()) < *t => {
                 return Ok(OwnerOutcome::Deferred);
             }
             _ => {}

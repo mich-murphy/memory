@@ -321,7 +321,10 @@ fn plain_file(root: &Path, rel: &RootRelativePath) -> bool {
 impl WalkSources {
     /// Enumerate `roots`, registering paths in `fs`.
     pub fn new(roots: Vec<(PathBuf, Roots)>, limits: WalkLimits, fs: SharedFs) -> Self {
-        let canon = roots.iter().map(|(d, _)| fs::canonicalize(d).ok()).collect();
+        let canon = roots
+            .iter()
+            .map(|(d, _)| fs::canonicalize(d).ok())
+            .collect();
         Self {
             roots,
             limits,
