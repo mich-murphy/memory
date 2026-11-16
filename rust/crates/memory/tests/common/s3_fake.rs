@@ -26,6 +26,9 @@ pub enum Fault {
     Status(u16, Option<&'static str>),
     /// Flip a body byte before the `content-md5` check, as a damaged upload would.
     CorruptInFlight,
+    /// Hold the request for this long (counted by [`Fake::held`] while it waits), then apply it
+    /// and reply normally.
+    HoldThenApply(Duration),
 }
 
 /// What the server saw for one request.
@@ -45,6 +48,7 @@ struct State {
     objects: HashMap<String, (Vec<u8>, String)>,
     faults: VecDeque<(String, String, Fault)>,
     seen: Vec<Seen>,
+    held: usize,
 }
 
 impl State {
@@ -127,6 +131,11 @@ impl Fake {
         lock(&self.state).seen.clone()
     }
 
+    /// How many requests have started a hold.
+    pub fn held(&self) -> usize {
+        lock(&self.state).held
+    }
+
     pub fn count(&self, method: &str) -> usize {
         self.requests()
             .iter()
@@ -199,6 +208,12 @@ fn handle(stream: TcpStream, state: &Mutex<State>) -> Option<()> {
 
     let mut g = lock(state);
     let fault = g.take_fault(&method, &path);
+    if let Some(Fault::HoldThenApply(hold)) = fault {
+        g.held += 1;
+        drop(g);
+        thread::sleep(hold);
+        g = lock(state);
+    }
     let seen = |status: u16, body: Vec<u8>| Seen {
         method: method.clone(),
         path: path.clone(),

@@ -22,11 +22,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-const PREFIX: &str = "rust-acceptance/r4-test/";
-const BOUND: Duration = Duration::from_secs(20);
+pub(super) const PREFIX: &str = "rust-acceptance/r4-test/";
+pub(super) const BOUND: Duration = Duration::from_secs(20);
 
 /// Kills the child if a test leaves it running.
-struct Guard(Child);
+pub(super) struct Guard(pub(super) Child);
 impl Drop for Guard {
     fn drop(&mut self) {
         let _ = self.0.kill();
@@ -34,15 +34,15 @@ impl Drop for Guard {
     }
 }
 
-struct Setup {
-    server: Fake,
-    rig: Rig,
-    owner: Owner,
-    file: PathBuf,
-    current: String,
+pub(super) struct Setup {
+    pub(super) server: Fake,
+    pub(super) rig: Rig,
+    pub(super) owner: Owner,
+    pub(super) file: PathBuf,
+    pub(super) current: String,
 }
 
-fn setup(label: &str) -> R<Setup> {
+pub(super) fn setup(label: &str) -> R<Setup> {
     let server = Fake::start()?;
     let rig = Rig::new(label, &server.url(), PREFIX, false)?;
     fs::create_dir_all(&rig.state).map_err(e)?;
@@ -73,10 +73,10 @@ fn setup(label: &str) -> R<Setup> {
 }
 
 impl Setup {
-    fn etag(&self) -> Option<String> {
+    pub(super) fn etag(&self) -> Option<String> {
         self.server.object(&self.current).map(|(_, tag)| tag)
     }
-    fn append(&self, range: std::ops::Range<u32>) -> R {
+    pub(super) fn append(&self, range: std::ops::Range<u32>) -> R {
         fs::OpenOptions::new()
             .append(true)
             .open(&self.file)
@@ -84,12 +84,15 @@ impl Setup {
             .write_all(lines(range).as_bytes())
             .map_err(e)
     }
-    fn spawn(&self) -> R<Guard> {
+    pub(super) fn spawn(&self) -> R<Guard> {
+        self.spawn_with("0,200")
+    }
+    pub(super) fn spawn_with(&self, timing: &str) -> R<Guard> {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_memory"));
         cmd.arg("daemon")
             .env_clear()
             .env("MEMORY_STATE_DIR", &self.rig.state)
-            .env("MEMORY_SIM_TIMING", "0,200")
+            .env("MEMORY_SIM_TIMING", timing)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -99,7 +102,7 @@ impl Setup {
         Ok(Guard(cmd.spawn().map_err(e)?))
     }
     /// Wait (bounded) until `current.json` exists and differs from `before`.
-    fn wait_commit(&self, child: &mut Guard, before: Option<&str>) -> R<String> {
+    pub(super) fn wait_commit(&self, child: &mut Guard, before: Option<&str>) -> R<String> {
         let start = Instant::now();
         loop {
             if let Some(tag) = self.etag()
@@ -122,7 +125,7 @@ impl Setup {
 }
 
 /// SIGTERM, then exit 0 within a bound with empty stdout and a stderr that is only log events.
-fn stop(s: &Setup, mut child: Guard) -> R {
+pub(super) fn stop(s: &Setup, mut child: Guard) -> R<String> {
     let status = Command::new("/bin/kill")
         .arg("-TERM")
         .arg(child.0.id().to_string())
@@ -160,7 +163,7 @@ fn stop(s: &Setup, mut child: Guard) -> R {
             &dir, &state, &token, host, SESSION, MARKER, BUCKET, KEY_ID, SECRET, PREFIX,
         ],
     );
-    Ok(())
+    Ok(err)
 }
 
 fn files_under(dir: &Path, out: &mut Vec<PathBuf>) -> R {
@@ -176,7 +179,7 @@ fn files_under(dir: &Path, out: &mut Vec<PathBuf>) -> R {
 }
 
 /// Run `memory restore` into a fresh directory and check the output; returns it.
-fn restore(s: &Setup, label: &str) -> R<PathBuf> {
+pub(super) fn restore(s: &Setup, label: &str) -> R<PathBuf> {
     let out = s.rig.dir.join(format!("out-{label}"));
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_memory"));
     cmd.env_clear()
