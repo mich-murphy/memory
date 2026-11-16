@@ -30,12 +30,15 @@ use crate::hook::utc_day;
 use crate::state::{
     DaemonLock, Loaded, MissingReason, StateDir, StateError, StateFile, SyncPolicy, WRITER_VERSION,
 };
+use memory_core::coalescer::Signal;
 use memory_core::disposition::Streak;
 use memory_core::domain::{
     Disposition, ErrorClass, Owner, OwnerParkReason, ParkReason, RulesDigest, SessionKey,
     SnapshotFingerprint, SourceId, SourceState,
 };
-use memory_core::hint::{HintScan, LaunchHint, RetentionFacts, past_retention, removable, scan};
+use memory_core::hint::{
+    HintEvent, HintScan, LaunchHint, PathHint, RetentionFacts, past_retention, removable, scan,
+};
 use memory_core::manifest::{Header, ManifestError, OwnerState, Timestamp, Writer};
 use memory_core::privacy::{PolicyContext, SanitizedLaunch, sanitize_launch};
 use serde::de::DeserializeOwned;
@@ -248,11 +251,52 @@ pub struct RoundReport {
 pub trait Sources {
     /// All currently known sources with their owner.
     fn enumerate(&mut self) -> Vec<(Owner, Source)>;
+    /// Remember a path an event named and return its owner, or `None` when the path is not a
+    /// source of a known root. Reads no file content. Default: nothing is recognised.
+    fn note(&mut self, _path: &Path) -> Option<Owner> {
+        None
+    }
+    /// The current sources of one owner. Default: [`Sources::enumerate`] filtered.
+    fn of(&mut self, owner: &Owner) -> Vec<Source> {
+        self.enumerate()
+            .into_iter()
+            .filter(|(o, _)| o == owner)
+            .map(|(_, s)| s)
+            .collect()
+    }
 }
 impl<T: FnMut() -> Vec<(Owner, Source)>> Sources for T {
     fn enumerate(&mut self) -> Vec<(Owner, Source)> {
         self()
     }
+}
+
+/// How one per-owner capture ended ([`Daemon::capture_owner`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnerOutcome {
+    /// A commit landed.
+    Landed,
+    /// Nothing to commit.
+    Unchanged,
+    /// The capture failed, or the owner or a source was parked by it.
+    Failed,
+    /// The owner's retry deadline has not passed.
+    Deferred,
+    /// The owner is parked.
+    Skipped,
+    /// The host is paused; nothing was attempted.
+    Paused,
+}
+
+/// A hint record not signalled before: its owner, the signal it carries and the paths it names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HintSignal {
+    /// The session's owner.
+    pub owner: Owner,
+    /// [`Signal::SessionEnd`] for a flushing event, else [`Signal::Stop`].
+    pub signal: Signal,
+    /// Transcript and subagent transcript paths the record names (hints only).
+    pub paths: Vec<PathBuf>,
 }
 
 /// Everything the daemon drives.
@@ -363,6 +407,8 @@ impl OwnerRt {
 
 struct PendingHint {
     end: u64,
+    event: HintEvent,
+    paths: Vec<PathBuf>,
     owner: Owner,
     launch: Option<SanitizedLaunch>,
     done: bool,
@@ -414,6 +460,8 @@ pub struct Daemon<F, S, C, E> {
     context: PolicyContext,
     locals: Locals,
     hints: BTreeMap<String, u64>,
+    files: Vec<ScannedFile>,
+    seen: BTreeMap<String, u64>,
     owners: HashMap<Owner, OwnerRt>,
     status: StatusBody,
     index_load: StateLoad,
@@ -527,6 +575,8 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             context: parts.context,
             locals,
             hints: opened.index.hints,
+            files: Vec::new(),
+            seen: BTreeMap::new(),
             owners,
             status: opened.status,
             index_load: opened.index_load,
@@ -624,8 +674,17 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                         }
                         LaunchHint::None | LaunchHint::DigestOnly { .. } => None,
                     };
+                    let paths = [&r.record.transcript, &r.record.agent_transcript]
+                        .into_iter()
+                        .filter_map(|p| match p {
+                            PathHint::Present { path } => Some(PathBuf::from(path.as_str())),
+                            PathHint::Absent => None,
+                        })
+                        .collect();
                     PendingHint {
                         end: r.end,
+                        event: r.record.event,
+                        paths,
                         owner: self.owner_of(&r.record),
                         done: launch.is_none(),
                         launch,
@@ -740,7 +799,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     }
 
     /// Capture the owner's sources against the remote state of its base.
-    fn capture_owner(
+    fn capture_sources(
         &mut self,
         owner: &Owner,
         sources: &[Source],
@@ -844,7 +903,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 .collect();
             &live
         };
-        let mut got = self.capture_owner(owner, sources, base.as_ref(), when);
+        let mut got = self.capture_sources(owner, sources, base.as_ref(), when);
         report.audit.add(&got.audit);
         // A source park takes effect whether or not the owner's commit lands.
         for (id, outcome) in &got.outcomes {
@@ -961,7 +1020,8 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 None => groups.push((owner, vec![source])),
             }
         }
-        let mut files = self.scan_hints();
+        self.rescan_hints();
+        let mut files = std::mem::take(&mut self.files);
         let mut report = RoundReport::default();
         self.status.host_paused = false;
         for (owner, sources) in &groups {
@@ -972,15 +1032,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             let was_parked = matches!(rt.turn, Turn::Parked(_));
             let known: Vec<SourceId> = rt.parked_sources.keys().cloned().collect();
             let pause = self.run_owner(owner, sources, &mut rt, &mut files, &when, &mut report);
-            if !was_parked && let Turn::Parked(reason) = &rt.turn {
-                crate::log::parked(owner, reason, crate::log::Scope::Owner);
-            }
-            for (id, reason) in &rt.parked_sources {
-                if !known.contains(id) {
-                    let reason = ParkedReason::Source(reason.clone());
-                    crate::log::parked(owner, &reason, crate::log::Scope::Source);
-                }
-            }
+            Self::log_parks(owner, &rt, was_parked, &known);
             self.owners.insert(owner.clone(), rt);
             if pause {
                 self.status.host_paused = true;
@@ -996,10 +1048,36 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         }
         self.advance_hints(&files);
         self.sweep_hints(&files, self.clock.wall_ns(), &mut report);
+        self.files = files;
         self.status.failures.add(&report.failures);
         self.status.audit.add(&report.audit);
         self.status.rounds += 1;
         self.status.updated_at = text;
+        self.rebuild_parked();
+        // The parked list and host pause are authoritative (DESIGN.md 11.3): a change is made
+        // durable at once. Counters and `updated_at` follow the 60 s rule of 9.2.
+        let authoritative = before != (self.status.host_paused, self.status.parked.clone());
+        self.write_status(authoritative)
+            .map_err(RoundError::State)?;
+        self.write_index(false).map_err(RoundError::State)?;
+        Ok(report)
+    }
+
+    /// Log the parks this turn caused: the owner once, each newly parked source once.
+    fn log_parks(owner: &Owner, rt: &OwnerRt, was_parked: bool, known: &[SourceId]) {
+        if !was_parked && let Turn::Parked(reason) = &rt.turn {
+            crate::log::parked(owner, reason, crate::log::Scope::Owner);
+        }
+        for (id, reason) in &rt.parked_sources {
+            if !known.contains(id) {
+                let reason = ParkedReason::Source(reason.clone());
+                crate::log::parked(owner, &reason, crate::log::Scope::Source);
+            }
+        }
+    }
+
+    /// Recompute the sorted parked list of the status from the owners.
+    fn rebuild_parked(&mut self) {
         let mut parked: Vec<ParkedEntry> = Vec::new();
         for (owner, rt) in &self.owners {
             if let Turn::Parked(reason) = &rt.turn {
@@ -1019,13 +1097,138 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         }
         parked.sort_by_key(|p| (format!("{:?}", p.owner), p.source.clone()));
         self.status.parked = parked;
-        // The parked list and host pause are authoritative (DESIGN.md 11.3): a change is made
-        // durable at once. Counters and `updated_at` follow the 60 s rule of 9.2.
+    }
+
+    /// Re-read every hint day file into the daemon's in-memory scan.
+    fn rescan_hints(&mut self) {
+        self.files = self.scan_hints();
+    }
+
+    /// Refresh the in-memory hint scan and return the records not signalled before. The
+    /// "seen" offsets live in memory only and start at the stored offset, so after a restart
+    /// the uncommitted records signal once more. The paths a record names are passed through
+    /// [`Daemon::note_path`].
+    pub fn refresh_hints(&mut self) -> Vec<HintSignal> {
+        self.rescan_hints();
+        let mut fresh = Vec::new();
+        for file in &self.files {
+            let seen = self.seen.entry(file.name.clone()).or_insert(file.start);
+            if *seen > file.len {
+                *seen = file.start;
+            }
+            for r in &file.records {
+                if r.end > *seen {
+                    let signal = if r.event.flushes() {
+                        Signal::SessionEnd
+                    } else {
+                        Signal::Stop
+                    };
+                    fresh.push(HintSignal {
+                        owner: r.owner.clone(),
+                        signal,
+                        paths: r.paths.clone(),
+                    });
+                }
+            }
+            if let Some(last) = file.records.last() {
+                *seen = (*seen).max(last.end);
+            }
+        }
+        let files = &self.files;
+        self.seen.retain(|n, _| files.iter().any(|f| f.name == *n));
+        for signal in &fresh {
+            for path in &signal.paths {
+                self.sources.note(path);
+            }
+        }
+        fresh
+    }
+
+    /// Remember a path an event named; the owner it belongs to, if it is a source.
+    pub fn note_path(&mut self, path: &Path) -> Option<Owner> {
+        self.sources.note(path)
+    }
+
+    /// The earliest retry deadline among owners (monotonic), if any.
+    pub fn next_retry(&self) -> Option<Duration> {
+        self.owners
+            .values()
+            .filter_map(|rt| match rt.turn {
+                Turn::RetryAt(t) => Some(t),
+                _ => None,
+            })
+            .min()
+    }
+
+    /// Owners whose retry deadline has passed at the current monotonic time, in a fixed order.
+    pub fn retries_due(&self) -> Vec<Owner> {
+        let now = Duration::from_nanos(self.clock.monotonic_ns());
+        let mut due: Vec<Owner> = self
+            .owners
+            .iter()
+            .filter(|(_, rt)| matches!(rt.turn, Turn::RetryAt(t) if t <= now))
+            .map(|(o, _)| o.clone())
+            .collect();
+        due.sort_by_key(|o| format!("{o:?}"));
+        due
+    }
+
+    /// Capture one owner from its own sources (no walk). Unlike a full round it neither sweeps
+    /// hints, resets a host pause, nor counts a round: only a full round re-probes a paused
+    /// host (DESIGN.md 11.1).
+    ///
+    /// # Errors
+    /// [`RoundError`] for an unusable clock or an unwritable index or status.
+    pub fn capture_owner(&mut self, owner: &Owner) -> Result<OwnerOutcome, RoundError> {
+        if self.status.host_paused {
+            return Ok(OwnerOutcome::Paused);
+        }
+        match self.owners.get(owner).map(|rt| &rt.turn) {
+            Some(Turn::Parked(_)) => return Ok(OwnerOutcome::Skipped),
+            Some(Turn::RetryAt(t))
+                if Duration::from_nanos(self.clock.monotonic_ns()) < *t =>
+            {
+                return Ok(OwnerOutcome::Deferred);
+            }
+            _ => {}
+        }
+        let (when, _) = stamp_of(self.clock.wall_ns()).map_err(|_| RoundError::Clock)?;
+        let sources = self.sources.of(owner);
+        if sources.is_empty() {
+            return Ok(OwnerOutcome::Unchanged);
+        }
+        let before = (self.status.host_paused, self.status.parked.clone());
+        let mut files = std::mem::take(&mut self.files);
+        let mut report = RoundReport::default();
+        let mut rt = self
+            .owners
+            .remove(owner)
+            .unwrap_or_else(|| OwnerRt::new(None));
+        let was_parked = matches!(rt.turn, Turn::Parked(_));
+        let known: Vec<SourceId> = rt.parked_sources.keys().cloned().collect();
+        let pause = self.run_owner(owner, &sources, &mut rt, &mut files, &when, &mut report);
+        Self::log_parks(owner, &rt, was_parked, &known);
+        self.owners.insert(owner.clone(), rt);
+        if pause {
+            self.status.host_paused = true;
+            crate::log::host_paused();
+        }
+        self.advance_hints(&files);
+        self.files = files;
+        self.status.failures.add(&report.failures);
+        self.status.audit.add(&report.audit);
+        self.rebuild_parked();
         let authoritative = before != (self.status.host_paused, self.status.parked.clone());
         self.write_status(authoritative)
             .map_err(RoundError::State)?;
         self.write_index(false).map_err(RoundError::State)?;
-        Ok(report)
+        Ok(if report.landed > 0 {
+            OwnerOutcome::Landed
+        } else if report.failed > 0 || report.parked > 0 {
+            OwnerOutcome::Failed
+        } else {
+            OwnerOutcome::Unchanged
+        })
     }
 
     fn write_status(&mut self, force: bool) -> Result<(), StateError> {
