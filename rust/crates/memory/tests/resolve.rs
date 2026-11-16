@@ -468,7 +468,7 @@ fn of_yields_exactly_what_enumerate_yields() -> R {
         got
     };
     // Every path noted first, then the walk.
-    let mut w = walker(&t.root(), limits.clone())?;
+    let mut w = walker(&t.root(), limits)?;
     let mut owners: Vec<Owner> = Vec::new();
     for p in &paths {
         if let Some(o) = w.note(p)
@@ -477,7 +477,9 @@ fn of_yields_exactly_what_enumerate_yields() -> R {
             owners.push(o);
         }
     }
-    assert!(w.note(&paths[2]).is_some() && w.note(&paths[3]).is_some());
+    for p in paths.iter().skip(2).take(2) {
+        assert!(w.note(p).is_some());
+    }
     let before = union(&mut w, &owners);
     let mut walked: Vec<String> = w.enumerate().iter().map(|(o, s)| key_of(o, s)).collect();
     walked.sort();
