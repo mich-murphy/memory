@@ -11,8 +11,9 @@ use crate::resolve::{SharedFs, WalkSources, pack};
 use crate::roots::{RootsError, locator_roots};
 use crate::s3::{S3ConfigError, S3Store, TimeoutPolicy};
 use crate::token::{TokenError, read_token};
+use memory_core::coalescer::{Window, WindowSeconds};
 use memory_core::privacy::{PolicyContext, rules_digest};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The policy revision bound into every capture. Fixed: it is hashed into the binding, so it
 /// changes only when the built-in policy does.
@@ -34,6 +35,8 @@ pub enum AssembleError {
     Token(TokenError),
     /// The S3 client could not be built.
     Store(S3ConfigError),
+    /// The validated window was refused by the coalescer (cannot happen after config checks).
+    Window,
 }
 
 impl AssembleError {
@@ -46,6 +49,7 @@ impl AssembleError {
             Self::Roots(error) => error.code(),
             Self::Token(error) => error.code(),
             Self::Store(_) => "config_store",
+            Self::Window => "config_window",
         }
     }
 
@@ -133,6 +137,50 @@ fn build(
     })
 }
 
+/// A started daemon with what the event loop needs next to it.
+pub struct Wired {
+    /// The daemon.
+    pub daemon: ProductionDaemon,
+    /// The configured root directories, as configured.
+    pub roots: Vec<PathBuf>,
+    /// The coalescer window from `config.toml`.
+    pub window: Window,
+    /// A copy of the daemon's own clock: the same monotonic origin, so the instants of
+    /// [`Daemon::next_retry`] and the driver's readings are comparable.
+    pub clock: SystemClock,
+}
+
+/// Start a daemon from `root` (the state root) and `config_path` alone, as
+/// [`start_from_config`], and return it with the roots, the window and the daemon's clock.
+///
+/// # Errors
+/// An [`AssembleError`]; the lock is released on every refusal.
+pub fn start_wired(root: &Path, config_path: &Path) -> Result<Wired, AssembleError> {
+    let mut seam = None;
+    let daemon = Daemon::start_built(root, config_path, |config| {
+        let parts = build(root, config_path, config)?;
+        let window = Window::try_from(WindowSeconds {
+            quiet: config.window.quiet.as_secs(),
+            cap: config.window.cap.as_secs(),
+        })
+        .map_err(|_| AssembleError::Window)?;
+        let roots = config.roots.iter().map(|r| r.path.clone()).collect();
+        seam = Some((roots, window, parts.clock));
+        Ok(parts)
+    })
+    .map_err(|error| match error {
+        BuildError::Start(start) => AssembleError::Start(start),
+        BuildError::Build(inner) => inner,
+    })?;
+    let (roots, window, clock) = seam.ok_or(AssembleError::Window)?;
+    Ok(Wired {
+        daemon,
+        roots,
+        window,
+        clock,
+    })
+}
+
 /// Start a daemon from `root` (the state root) and `config_path` alone.
 ///
 /// The config is read once. The lock is taken first; the token file is read only after it, and
@@ -146,10 +194,5 @@ pub fn start_from_config(
     root: &Path,
     config_path: &Path,
 ) -> Result<ProductionDaemon, AssembleError> {
-    Daemon::start_built(root, config_path, |config| build(root, config_path, config)).map_err(
-        |error| match error {
-            BuildError::Start(start) => AssembleError::Start(start),
-            BuildError::Build(inner) => inner,
-        },
-    )
+    start_wired(root, config_path).map(|wired| wired.daemon)
 }

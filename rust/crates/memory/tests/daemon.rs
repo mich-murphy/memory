@@ -597,7 +597,28 @@ fn make_foreign(store: &FStore, owner: &Owner) -> R<Foreign> {
 
 // ---------------------------------------------------------------- daemon helpers
 
-type FSrcs = Box<dyn FnMut() -> Vec<(Owner, Source)> + Send>;
+/// Fixed-list sources. `note` maps a transcript path to the owner of the session named by its
+/// file stem (Claude, archive `a`, machine `m`); the stems `a` and `b` stand for `s1` and `s2`.
+struct FSrcs(Box<dyn FnMut() -> Vec<(Owner, Source)> + Send>);
+impl FSrcs {
+    fn new(list: impl FnMut() -> Vec<(Owner, Source)> + Send + 'static) -> Self {
+        Self(Box::new(list))
+    }
+}
+impl memory::daemon::Sources for FSrcs {
+    fn enumerate(&mut self) -> Vec<(Owner, Source)> {
+        (self.0)()
+    }
+    fn note(&mut self, path: &std::path::Path) -> Option<Owner> {
+        let stem = path.file_stem()?.to_str()?;
+        let session = match stem {
+            "a" => "s1",
+            "b" => "s2",
+            other => other,
+        };
+        owner_of(session).ok()
+    }
+}
 type D = Daemon<MemFs, FStore, TestClock, FSrcs>;
 
 fn boot(
@@ -620,7 +641,7 @@ fn boot_sync(
     sync: SyncPolicy,
 ) -> R<D> {
     let list = list.to_vec();
-    let sources: FSrcs = Box::new(move || list.clone());
+    let sources = FSrcs::new(move || list.clone());
     let parts = Parts {
         fs,
         store,
@@ -773,7 +794,9 @@ fn hint_line(session: &str, env: &[&str]) -> R<Vec<u8>> {
         event: HintEvent::SessionStart,
         session: SessionId::try_from(session.to_owned()).map_err(e)?,
         cwd: PathHint::Absent,
-        transcript: PathHint::Absent,
+        transcript: PathHint::Present {
+            path: HintPath::try_from(format!("/r/projects/p/{session}.jsonl")).map_err(e)?,
+        },
         agent_transcript: PathHint::Absent,
         launch: LaunchHint::Full(LaunchRecord::from_sanitized(&launch)),
         reduction: Reduction::None,
@@ -781,6 +804,47 @@ fn hint_line(session: &str, env: &[&str]) -> R<Vec<u8>> {
     let mut line = serde_json::to_vec(&record).map_err(e)?;
     line.push(b'\n');
     Ok(line)
+}
+
+#[test]
+fn a_hint_launch_goes_to_the_owner_of_its_path_not_to_the_namesake() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?, src_of("s2", 2)?];
+    let mut fs = files_with(b"hello\n");
+    fs.files.insert(2, b"hello\n".to_vec());
+    let mut d = boot(&tmp, &cfg, fs, FStore::default(), &list, WALL)?;
+    let argv = vec!["claude".to_owned()];
+    let launch = sanitize_launch(&argv, &["PATH=/usr/bin".to_owned()]);
+    let record = HintRecord {
+        schema: HintSchema::V1,
+        agent: Agent::Claude,
+        event: HintEvent::SessionStart,
+        // The text of the namesake's session, but the transcript is the other session's.
+        session: SessionId::try_from("s1".to_owned()).map_err(e)?,
+        cwd: PathHint::Absent,
+        transcript: PathHint::Present {
+            path: HintPath::try_from("/r/projects/p/s2.jsonl".to_owned()).map_err(e)?,
+        },
+        agent_transcript: PathHint::Absent,
+        launch: LaunchHint::Full(LaunchRecord::from_sanitized(&launch)),
+        reduction: Reduction::None,
+    };
+    let mut line = serde_json::to_vec(&record).map_err(e)?;
+    line.push(b'\n');
+    fs::write(hint_path(&tmp, "2026-11-09.jsonl"), &line).map_err(e)?;
+    assert_eq!(d.reconcile_once().map_err(e)?.landed, 2);
+    let hist = vec![b"hello\n".to_vec()];
+    let two = need(
+        observe(d.store_mut(), &owner_of("s2")?, &hist)?,
+        "no chain s2",
+    )?;
+    let one = need(
+        observe(d.store_mut(), &owner_of("s1")?, &hist)?,
+        "no chain s1",
+    )?;
+    assert_eq!((one.launches, two.launches), (0, 1));
+    Ok(())
 }
 
 #[test]
@@ -2416,7 +2480,7 @@ fn disk_status(tmp: &Tmp) -> R<StatusBody> {
 }
 fn boot_shared(tmp: &Tmp, cfg: &Path, fs: MemFs, list: &Shared) -> R<D> {
     let shared = Arc::clone(list);
-    let sources: FSrcs = Box::new(move || shared.lock().map(|g| g.clone()).unwrap_or_default());
+    let sources = FSrcs::new(move || shared.lock().map(|g| g.clone()).unwrap_or_default());
     let parts = Parts {
         fs,
         store: FStore::default(),
@@ -2439,7 +2503,9 @@ fn hint_with(session: &str, launch: LaunchHint) -> R<Vec<u8>> {
         event: HintEvent::SessionStart,
         session: SessionId::try_from(session.to_owned()).map_err(e)?,
         cwd: PathHint::Absent,
-        transcript: PathHint::Absent,
+        transcript: PathHint::Present {
+            path: HintPath::try_from(format!("/r/projects/p/{session}.jsonl")).map_err(e)?,
+        },
         agent_transcript: PathHint::Absent,
         launch,
         reduction: Reduction::None,
@@ -3416,5 +3482,719 @@ fn old_hint_file_within_the_read_bound_and_consumed_is_removed() -> R {
         "{report:?}"
     );
     assert!(!hint_path(&tmp, OLD8).exists());
+    Ok(())
+}
+
+#[test]
+fn a_swept_hint_file_does_not_return_through_an_owner_capture() -> R {
+    let tmp = Tmp::new()?;
+    let mut d = hint_boot(&tmp, FStore::default())?;
+    fs::write(hint_path(&tmp, OLD8), hint_line("s1", &["PATH=/usr/bin"])?).map_err(e)?;
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!(report.hints_removed, 1, "{report:?}");
+    assert!(!hint_path(&tmp, OLD8).exists());
+    bytes_in(&mut d, 1, b"hello\nmore\n");
+    let (out, _) = cap(&mut d, &owner_of("s1")?)?;
+    assert_eq!(out, OwnerOutcome::Landed);
+    d.shutdown().map_err(e)?;
+    assert!(!index_has(&tmp, OLD8)?, "removed file back in the index");
+    Ok(())
+}
+
+#[test]
+fn owner_capture_refreshes_the_status_stamp_and_early_returns_do_not() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let o = owner_of("s1")?;
+    let mut d = boot(
+        &tmp,
+        &cfg,
+        files_with(b"x\n"),
+        FStore::default(),
+        &list,
+        WALL,
+    )?;
+    d.reconcile_once().map_err(e)?;
+    let t1 = d.status().updated_at.clone();
+    assert_eq!(disk_status(&tmp)?.updated_at, t1);
+    d.clock_mut().wall = WALL + 3_600_000_000_000;
+    d.clock_mut().mono = 61_000_000_000;
+    bytes_in(&mut d, 1, b"x\ny\n");
+    assert_eq!(cap(&mut d, &o)?.0, OwnerOutcome::Landed);
+    let on_disk = disk_status(&tmp)?;
+    assert_ne!(on_disk.updated_at, t1, "status carries the old stamp");
+    assert_eq!(on_disk.updated_at, d.status().updated_at);
+    assert_eq!(on_disk.rounds, 1);
+    Ok(())
+}
+
+// ------------------------------------------------------------------ per-owner capture
+use memory::daemon::OwnerOutcome;
+use memory_core::coalescer::Signal;
+use memory_core::hint::HintPath;
+
+fn logged<T>(f: impl FnOnce() -> T) -> R<(T, Vec<String>)> {
+    let mut out = None;
+    let text = memory::log::render(|| out = Some(f()));
+    let lines = text
+        .lines()
+        .map(|l| {
+            l.split_once(' ')
+                .map(|(_, r)| r.to_owned())
+                .unwrap_or_default()
+        })
+        .collect();
+    Ok((need(out, "closure did not run")?, lines))
+}
+fn cap(d: &mut D, o: &Owner) -> R<(OwnerOutcome, Vec<String>)> {
+    let (r, lines) = logged(|| d.capture_owner(o))?;
+    Ok((r.map_err(e)?, lines))
+}
+fn two_files() -> MemFs {
+    let mut fs = files_with(b"one\n");
+    fs.files.insert(2, b"two\n".to_vec());
+    fs
+}
+
+#[test]
+fn owner_capture_commits_what_a_round_commits() -> R {
+    let list = vec![src_of("s1", 1)?, src_of("s2", 2)?];
+    let (t1, t2) = (Tmp::new()?, Tmp::new()?);
+    let (c1, c2) = (t1.config(true)?, t2.config(true)?);
+    let mut full = boot(&t1, &c1, two_files(), FStore::default(), &list, WALL)?;
+    let mut one = boot(&t2, &c2, two_files(), FStore::default(), &list, WALL)?;
+    assert_eq!(full.reconcile_once().map_err(e)?.landed, 2);
+    let (o1, o2) = (owner_of("s1")?, owner_of("s2")?);
+    assert_eq!(cap(&mut one, &o1)?.0, OwnerOutcome::Landed);
+    let key = current_key(&o1);
+    let stored = |d: &mut D| d.store_mut().peek(&key).map(<[u8]>::to_vec);
+    assert!(stored(&mut one).is_some());
+    assert_eq!(stored(&mut one), stored(&mut full));
+    assert!(one.store_mut().peek(&current_key(&o2)).is_none());
+    assert_eq!(one.status().rounds, 0);
+    one.shutdown().map_err(e)?;
+    full.shutdown().map_err(e)?;
+    let (i1, i2) = (
+        need(index_of(&t1)?, "index 1")?,
+        need(index_of(&t2)?, "index 2")?,
+    );
+    let id = list.first().map(|l| l.1.id.clone()).ok_or("no source")?;
+    assert_eq!(
+        format!("{:?}", i1.sources.get(&id)),
+        format!("{:?}", i2.sources.get(&id))
+    );
+    assert!(i1.sources.get(&id).is_some_and(|s| s.index.is_some()));
+    assert_eq!(i2.sources.len(), 1, "the other owner's source is untouched");
+    Ok(())
+}
+
+#[test]
+fn parked_owner_is_skipped_and_nothing_is_sent() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let o = owner_of("s1")?;
+    let mut d = boot(
+        &tmp,
+        &cfg,
+        files_with(b"x\n"),
+        FStore::default(),
+        &list,
+        WALL,
+    )?;
+    d.store_mut().store.write(&current_key(&o), NEWER.to_vec());
+    assert_eq!(d.reconcile_once().map_err(e)?.parked, 1);
+    let rounds = d.status().rounds;
+    let stamp = d.status().updated_at.clone();
+    d.clock_mut().wall = WALL + 3_600_000_000_000;
+    let (out, lines) = cap(&mut d, &o)?;
+    assert_eq!(out, OwnerOutcome::Skipped);
+    assert_eq!(d.status().updated_at, stamp);
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(d.store_mut().put_log.is_empty());
+    assert_eq!(d.status().rounds, rounds);
+    Ok(())
+}
+
+#[test]
+fn retry_deadline_defers_then_the_capture_runs() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let o = owner_of("s1")?;
+    let store = FStore {
+        offline: true,
+        ..FStore::default()
+    };
+    let mut d = boot(&tmp, &cfg, files_with(b"x\n"), store, &list, WALL)?;
+    assert_eq!(d.next_retry(), None);
+    assert_eq!(cap(&mut d, &o)?.0, OwnerOutcome::Failed);
+    let t = need(d.next_retry(), "a retry deadline")?;
+    let at = u64::try_from(t.as_nanos()).map_err(e)?;
+    let before = at.checked_sub(1).ok_or("deadline at zero")?;
+    assert!(d.retries_due().is_empty());
+    d.store_mut().offline = false;
+    d.clock_mut().mono = before;
+    let stamp = d.status().updated_at.clone();
+    d.clock_mut().wall = WALL + 3_600_000_000_000;
+    assert_eq!(cap(&mut d, &o)?.0, OwnerOutcome::Deferred);
+    assert_eq!(d.status().updated_at, stamp);
+    assert!(d.store_mut().put_log.is_empty());
+    assert!(d.store_mut().store.objects.is_empty());
+    assert!(d.retries_due().is_empty());
+    d.clock_mut().mono = at;
+    assert_eq!(d.retries_due(), vec![o.clone()]);
+    assert_eq!(cap(&mut d, &o)?.0, OwnerOutcome::Landed);
+    assert_eq!(d.next_retry(), None);
+    assert_eq!(d.status().rounds, 0);
+    Ok(())
+}
+
+#[test]
+fn next_retry_is_the_earliest_deadline_among_owners() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?, src_of("s2", 2)?];
+    let (o1, o2) = (owner_of("s1")?, owner_of("s2")?);
+    let store = FStore {
+        offline: true,
+        ..FStore::default()
+    };
+    let mut d = boot(&tmp, &cfg, two_files(), store, &list, WALL)?;
+    assert_eq!(cap(&mut d, &o1)?.0, OwnerOutcome::Failed);
+    let first = need(d.next_retry(), "a retry deadline")?;
+    // The second owner fails after the first deadline has passed, so its own is later.
+    let at = u64::try_from(first.as_nanos()).map_err(e)?;
+    d.clock_mut().mono = at + 1_000_000_000;
+    assert_eq!(cap(&mut d, &o2)?.0, OwnerOutcome::Failed);
+    assert_eq!(d.next_retry(), Some(first), "the earliest, not the latest");
+    assert!(d.retries_due().contains(&o1));
+    Ok(())
+}
+
+#[test]
+fn owner_capture_auth_failure_pauses_and_is_written_at_once() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?, src_of("s2", 2)?];
+    let (o1, o2) = (owner_of("s1")?, owner_of("s2")?);
+    let mut d = boot(&tmp, &cfg, two_files(), FStore::default(), &list, WALL)?;
+    // A first write of status.json, so the pause below is inside the 60 s interval.
+    assert_eq!(cap(&mut d, &o2)?.0, OwnerOutcome::Landed);
+    assert!(!disk_status(&tmp)?.host_paused);
+    d.store_mut().revoked = true;
+    let (out, lines) = cap(&mut d, &o1)?;
+    assert_eq!(out, OwnerOutcome::Failed);
+    assert_eq!(lines, ["INFO host_paused"]);
+    assert!(d.status().host_paused);
+    assert!(disk_status(&tmp)?.host_paused, "written at once");
+    d.store_mut().revoked = false;
+    let (out, lines) = cap(&mut d, &o1)?;
+    assert_eq!(out, OwnerOutcome::Paused);
+    assert!(lines.is_empty());
+    assert!(
+        d.store_mut()
+            .store
+            .objects
+            .keys()
+            .all(|k| !k.contains("s1"))
+    );
+    assert_eq!(d.status().rounds, 0);
+    Ok(())
+}
+
+#[test]
+fn a_pause_from_a_round_survives_owner_captures_until_the_next_round() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let o = owner_of("s1")?;
+    let store = FStore {
+        revoked: true,
+        ..FStore::default()
+    };
+    let mut d = boot(&tmp, &cfg, files_with(b"x\n"), store, &list, WALL)?;
+    d.reconcile_once().map_err(e)?;
+    assert!(d.status().host_paused);
+    d.store_mut().revoked = false;
+    let stamp = d.status().updated_at.clone();
+    d.clock_mut().wall = WALL + 3_600_000_000_000;
+    for _ in 0..2 {
+        let (out, lines) = cap(&mut d, &o)?;
+        assert_eq!(out, OwnerOutcome::Paused);
+        assert_eq!(d.status().updated_at, stamp);
+        assert!(lines.is_empty(), "{lines:?}");
+        assert!(d.status().host_paused, "an owner capture does not resume");
+        assert_eq!(d.status().rounds, 1);
+    }
+    assert!(d.store_mut().store.objects.is_empty());
+    let (report, lines) = logged_round!(d);
+    assert_eq!(report.landed, 1);
+    assert!(!d.status().host_paused);
+    assert_eq!(lines, ["INFO host_resumed"]);
+    assert_eq!(d.status().rounds, 2);
+    Ok(())
+}
+
+#[test]
+fn owner_capture_park_is_written_at_once_and_logged_once() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?, src_of("s2", 2)?];
+    let (o1, o2) = (owner_of("s1")?, owner_of("s2")?);
+    let mut d = boot(&tmp, &cfg, two_files(), FStore::default(), &list, WALL)?;
+    assert_eq!(cap(&mut d, &o2)?.0, OwnerOutcome::Landed);
+    assert!(disk_status(&tmp)?.parked.is_empty());
+    d.store_mut().store.write(&current_key(&o1), NEWER.to_vec());
+    let (out, lines) = cap(&mut d, &o1)?;
+    assert_eq!(out, OwnerOutcome::Failed);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines
+            .iter()
+            .all(|l| l.starts_with("INFO parked owner=") && l.ends_with("scope=owner")),
+        "{lines:?}"
+    );
+    assert_eq!(
+        disk_status(&tmp)?.parked,
+        vec![memory::daemon::ParkedEntry {
+            owner: o1.clone(),
+            reason: ParkedReason::Owner(OwnerParkReason::NewerRemoteSchema),
+            source: None,
+        }]
+    );
+    let (out, lines) = cap(&mut d, &o1)?;
+    assert_eq!((out, lines.is_empty()), (OwnerOutcome::Skipped, true));
+    assert_eq!(d.status().rounds, 0);
+    Ok(())
+}
+
+#[test]
+fn owner_capture_attaches_the_launch_and_advances_the_hint_offset() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let o = owner_of("s1")?;
+    let mut d = boot(
+        &tmp,
+        &cfg,
+        files_with(b"hello\n"),
+        FStore::default(),
+        &list,
+        WALL,
+    )?;
+    let name = "2026-11-09.jsonl";
+    let line = hint_line("s1", &["PATH=/usr/bin"])?;
+    fs::write(tmp.root().join("hints").join(name), &line).map_err(e)?;
+    assert_eq!(d.refresh_hints().len(), 1);
+    assert_eq!(cap(&mut d, &o)?.0, OwnerOutcome::Landed);
+    assert_eq!(hint_offset(&tmp, name)?, len64(&line));
+    let obs = need(
+        observe(d.store_mut(), &o, &[b"hello\n".to_vec()])?,
+        "no chain",
+    )?;
+    assert_eq!(obs.launches, 1);
+    assert_eq!(d.status().rounds, 0);
+    Ok(())
+}
+
+fn hint_event(session: &str, event: HintEvent, transcript: &str) -> R<Vec<u8>> {
+    let path = HintPath::try_from(transcript.to_owned()).map_err(e)?;
+    let record = HintRecord {
+        schema: HintSchema::V1,
+        agent: Agent::Claude,
+        event,
+        session: SessionId::try_from(session.to_owned()).map_err(e)?,
+        cwd: PathHint::Absent,
+        transcript: PathHint::Present { path },
+        agent_transcript: PathHint::Absent,
+        launch: LaunchHint::None,
+        reduction: Reduction::None,
+    };
+    let mut line = serde_json::to_vec(&record).map_err(e)?;
+    line.push(b'\n');
+    Ok(line)
+}
+
+#[test]
+fn hint_refresh_returns_each_record_once_with_its_signal() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let mut d = boot(
+        &tmp,
+        &cfg,
+        files_with(b"x\n"),
+        FStore::default(),
+        &list,
+        WALL,
+    )?;
+    let file = tmp.root().join("hints").join("2026-11-09.jsonl");
+    assert!(d.refresh_hints().is_empty());
+    let a = hint_event("s1", HintEvent::TurnEnd, "/x/a.jsonl")?;
+    fs::write(&file, &a).map_err(e)?;
+    let got = d.refresh_hints();
+    assert_eq!(
+        got,
+        vec![memory::daemon::HintSignal {
+            owner: owner_of("s1")?,
+            signal: Signal::Stop,
+            paths: vec![PathBuf::from("/x/a.jsonl")],
+        }]
+    );
+    assert!(d.refresh_hints().is_empty(), "already signalled");
+    let mut both = a;
+    both.extend(hint_event("s2", HintEvent::SessionEnd, "/x/b.jsonl")?);
+    fs::write(&file, &both).map_err(e)?;
+    let got = d.refresh_hints();
+    assert_eq!(got.len(), 1);
+    assert_eq!(
+        got.first().map(|s| (s.owner.clone(), s.signal)),
+        Some((owner_of("s2")?, Signal::SessionEnd))
+    );
+    assert!(d.refresh_hints().is_empty());
+    // A full round does not make a signalled record signal again.
+    d.reconcile_once().map_err(e)?;
+    assert!(d.refresh_hints().is_empty());
+    Ok(())
+}
+
+#[test]
+fn an_uncommitted_hint_signals_once_more_after_a_restart() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let mut d = boot(
+        &tmp,
+        &cfg,
+        files_with(b"x\n"),
+        FStore::default(),
+        &list,
+        WALL,
+    )?;
+    let file = tmp.root().join("hints").join("2026-11-09.jsonl");
+    fs::write(&file, hint_event("s1", HintEvent::TurnEnd, "/x/a.jsonl")?).map_err(e)?;
+    assert_eq!(d.refresh_hints().len(), 1);
+    let mut d = cycle_sync(d, &tmp, &cfg, &list, false, SyncPolicy::Full)?;
+    assert_eq!(d.refresh_hints().len(), 1, "the offset never advanced");
+    assert!(d.refresh_hints().is_empty());
+    Ok(())
+}
+
+// ------------------------------------------------------------------ stop requests
+
+use std::cell::Cell;
+use std::rc::Rc;
+
+/// The store of `FStore` that logs every request and raises a stop flag when it receives the
+/// `n`th PUT whose key starts with (or, for `current.json`, ends with) a pattern.
+#[derive(Default)]
+struct Hooked {
+    inner: FStore,
+    flag: Rc<Cell<bool>>,
+    on: Option<(&'static str, usize)>,
+    seen: usize,
+    log: Vec<String>,
+}
+impl Hooked {
+    fn note(&mut self, op: &str, key: &str) {
+        self.log.push(format!("{op} {key}"));
+        if op != "PUT" {
+            return;
+        }
+        let Some((pattern, n)) = self.on else {
+            return;
+        };
+        let hit = if pattern == "current.json" {
+            key.ends_with(pattern)
+        } else {
+            key.starts_with(pattern)
+        };
+        if hit {
+            self.seen += 1;
+            if self.seen == n {
+                self.flag.set(true);
+            }
+        }
+    }
+    fn count(&self, prefix: &str) -> usize {
+        self.log.iter().filter(|l| l.starts_with(prefix)).count()
+    }
+}
+impl Store for Hooked {
+    fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
+        self.note("PUT", key);
+        self.inner.put_if_absent(key, body)
+    }
+    fn put_if_match(
+        &mut self,
+        key: &str,
+        etag: &ETag,
+        body: Published,
+    ) -> Result<ETag, StoreError> {
+        self.note("PUT", key);
+        self.inner.put_if_match(key, etag, body)
+    }
+    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
+        self.note("GET", key);
+        self.inner.get(key)
+    }
+}
+
+type H = Daemon<MemFs, Hooked, TestClock, FSrcs>;
+
+fn boot_h(tmp: &Tmp, cfg: &Path, fs: MemFs, store: Hooked, list: &[(Owner, Source)]) -> R<H> {
+    let list = list.to_vec();
+    let sources = FSrcs::new(move || list.clone());
+    let flag = store.flag.clone();
+    let parts = Parts {
+        fs,
+        store,
+        clock: TestClock {
+            wall: WALL,
+            ..TestClock::at(0)
+        },
+        sources,
+        context: PolicyContext {
+            valid: true,
+            revision: "r".to_owned(),
+            rules: Some(rules_digest()),
+            collector_paths: vec![],
+            collector_identities: vec![],
+        },
+    };
+    let mut d = Daemon::start_with(
+        &tmp.root(),
+        cfg,
+        parts,
+        StartOptions {
+            sync: SyncPolicy::Full,
+        },
+    )
+    .map_err(|x| x.code().to_owned())?;
+    d.set_stop(move || flag.get());
+    Ok(d)
+}
+/// Restart without a stop: the files and the store content move to a new daemon.
+fn restart_h(mut d: H, tmp: &Tmp, cfg: &Path, list: &[(Owner, Source)]) -> R<H> {
+    let fs = std::mem::take(d.fs_mut());
+    let inner = std::mem::take(&mut d.store_mut().inner);
+    d.shutdown().map_err(e)?;
+    boot_h(
+        tmp,
+        cfg,
+        fs,
+        Hooked {
+            inner,
+            ..Hooked::default()
+        },
+        list,
+    )
+}
+fn hooked(on: Option<(&'static str, usize)>) -> Hooked {
+    Hooked {
+        on,
+        ..Hooked::default()
+    }
+}
+/// Three pieces of 8 MiB, 8 MiB and 1 MiB, each with its own letter so no two share an object.
+fn three_pieces() -> Vec<u8> {
+    let mut out = Vec::new();
+    for i in 0..(17 * 1024_usize) {
+        let letter = b'a' + u8::try_from(i / 8192).unwrap_or(0);
+        out.extend(std::iter::repeat_n(letter, 1023));
+        out.push(b'\n');
+    }
+    out
+}
+fn index_advanced(tmp: &Tmp, list: &[(Owner, Source)]) -> R<bool> {
+    let id = list.first().map(|l| l.1.id.clone()).ok_or("no source")?;
+    Ok(index_of(tmp)?.is_some_and(|i| i.sources.get(&id).is_some_and(|s| s.index.is_some())))
+}
+
+#[test]
+fn a_stop_after_piece_one_leaves_one_piece_and_the_next_start_captures_it_all() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let o = owner_of("s1")?;
+    let big = three_pieces();
+    let mut d = boot_h(
+        &tmp,
+        &cfg,
+        files_with(&big),
+        hooked(Some(("objects/", 1))),
+        &list,
+    )?;
+    let failures = format!("{:?}", d.status().failures);
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!((report.failed, report.stopped, report.landed), (0, 1, 0));
+    assert_eq!(d.store_mut().count("PUT objects/"), 1);
+    assert_eq!(d.store_mut().count("PUT manifests/"), 0);
+    assert_eq!(d.store_mut().count("PUT") - 1, 0);
+    assert!(d.store_mut().inner.peek(&current_key(&o)).is_none());
+    assert_eq!(d.store_mut().log.len(), 2, "one recovery GET, one piece");
+    assert_eq!(d.next_retry(), None);
+    assert_eq!(format!("{:?}", d.status().failures), failures);
+    let d = restart_h(d, &tmp, &cfg, &list)?;
+    assert!(!index_advanced(&tmp, &list)?);
+    let mut d = d;
+    let again = d.reconcile_once().map_err(e)?;
+    assert_eq!((again.landed, again.stopped), (1, 0));
+    let seen = observe(&d.store_mut().inner, &o, std::slice::from_ref(&big))?;
+    assert_eq!(need(seen, "observed")?.latest, Some(big));
+    d.shutdown().map_err(e)?;
+    assert!(index_advanced(&tmp, &list)?);
+    Ok(())
+}
+
+#[test]
+fn a_stop_during_the_current_write_still_lands_and_advances_the_index() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let o = owner_of("s1")?;
+    let mut d = boot_h(
+        &tmp,
+        &cfg,
+        files_with(b"x\n"),
+        hooked(Some(("current.json", 1))),
+        &list,
+    )?;
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!((report.landed, report.stopped, report.failed), (1, 0, 0));
+    assert!(d.store_mut().inner.peek(&current_key(&o)).is_some());
+    d.shutdown().map_err(e)?;
+    assert!(index_advanced(&tmp, &list)?);
+    Ok(())
+}
+
+#[test]
+fn a_round_stopped_when_owner_two_lands_never_touches_owners_three_to_five() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![
+        src_of("s1", 1)?,
+        src_of("s2", 2)?,
+        src_of("s3", 3)?,
+        src_of("s4", 4)?,
+        src_of("s5", 5)?,
+    ];
+    let mut fs = MemFs::default();
+    for h in 1..=5_u64 {
+        fs.files.insert(h, format!("owner {h}\n").into_bytes());
+    }
+    let mut d = boot_h(&tmp, &cfg, fs, hooked(Some(("current.json", 2))), &list)?;
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!((report.landed, report.failed, report.stopped), (2, 0, 0));
+    for (n, expected) in [
+        ("s1", true),
+        ("s2", true),
+        ("s3", false),
+        ("s4", false),
+        ("s5", false),
+    ] {
+        let key = current_key(&owner_of(n)?);
+        assert_eq!(d.store_mut().inner.peek(&key).is_some(), expected, "{n}");
+        assert_eq!(
+            d.store_mut().log.iter().any(|l| l.ends_with(&key)),
+            expected,
+            "{n}"
+        );
+    }
+    assert_eq!(d.store_mut().count("PUT objects/"), 2);
+    assert_eq!(d.store_mut().count("PUT manifests/"), 2);
+    assert_eq!(d.status().rounds, 1);
+    Ok(())
+}
+
+#[test]
+fn capture_owner_stopped_mid_pieces_is_stopped_and_captures_again_without_a_stop() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let o = owner_of("s1")?;
+    let big = three_pieces();
+    let mut d = boot_h(
+        &tmp,
+        &cfg,
+        files_with(&big),
+        hooked(Some(("objects/", 1))),
+        &list,
+    )?;
+    assert_eq!(cap_h(&mut d, &o)?, OwnerOutcome::Stopped);
+    assert_eq!(d.next_retry(), None);
+    d.store_mut().flag.set(false);
+    d.store_mut().on = None;
+    assert_eq!(cap_h(&mut d, &o)?, OwnerOutcome::Landed);
+    let gets = d
+        .store_mut()
+        .log
+        .iter()
+        .filter(|l| l.starts_with("GET") && l.ends_with("current.json"))
+        .count();
+    assert_eq!(gets, 1, "the base survived the stop: no second recovery");
+    let seen = observe(&d.store_mut().inner, &o, std::slice::from_ref(&big))?;
+    assert_eq!(need(seen, "observed")?.latest, Some(big));
+    Ok(())
+}
+fn cap_h(d: &mut H, o: &Owner) -> R<OwnerOutcome> {
+    d.capture_owner(o).map_err(e)
+}
+
+#[test]
+fn a_stop_before_the_round_runs_no_owner_and_sends_no_request() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?, src_of("s2", 2)?];
+    let mut d = boot_h(&tmp, &cfg, two_files(), hooked(None), &list)?;
+    d.store_mut().flag.set(true);
+    let report = d.reconcile_once().map_err(e)?;
+    assert_eq!(
+        (
+            report.landed,
+            report.failed,
+            report.stopped,
+            report.deferred
+        ),
+        (0, 0, 0, 0)
+    );
+    assert!(d.store_mut().log.is_empty());
+    Ok(())
+}
+
+#[test]
+fn a_round_cut_short_by_a_stop_does_not_resume_a_paused_host() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let store = Hooked {
+        inner: FStore {
+            revoked: true,
+            ..FStore::default()
+        },
+        ..Hooked::default()
+    };
+    let mut d = boot_h(&tmp, &cfg, files_with(b"x\n"), store, &list)?;
+    d.reconcile_once().map_err(e)?;
+    assert!(d.status().host_paused);
+    d.store_mut().inner.revoked = false;
+    d.store_mut().flag.set(true);
+    let requests = d.store_mut().log.len();
+    let (report, lines) = logged_round!(d);
+    assert_eq!(report.landed, 0);
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(
+        d.status().host_paused,
+        "no owner ran: nothing was re-probed"
+    );
+    assert!(disk_status(&tmp)?.host_paused);
+    assert_eq!(d.store_mut().log.len(), requests);
+    d.store_mut().flag.set(false);
+    let (report, lines) = logged_round!(d);
+    assert_eq!(report.landed, 1);
+    assert_eq!(lines, ["INFO host_resumed"]);
+    assert!(!d.status().host_paused);
     Ok(())
 }

@@ -1,7 +1,9 @@
 //! Watcher tests: scheduler tables, properties against an independent model, translation
 //! of notify events, and real FsWatcher runs on temp dirs this file creates.
 use hegel::{TestCase, generators as gs};
-use memory::watch::{Action, FsWatcher, Input, Scheduler, inbox, translate, translate_with};
+use memory::watch::{
+    Action, FsWatcher, Input, Received, Scheduler, inbox, translate, translate_with,
+};
 use memory_core::coalescer::{CoalescerError, Signal, Window, WindowSeconds};
 use memory_core::domain::{Agent, ArchiveId, MachineId, Owner, SessionId, SessionKey};
 use notify::event::{AccessKind, CreateKind, Flag, ModifyKind, RemoveKind, RenameMode};
@@ -42,12 +44,24 @@ fn map_path(path: &Path) -> Option<Owner> {
     let digit = rest.chars().next()?.to_digit(10)?;
     owner(usize::try_from(digit).ok()?).ok()
 }
-type Sched = Scheduler<fn(&Path) -> Option<Owner>>;
+/// A scheduler plus the per-call map, so tests keep the call shape `handle(input, now)`.
+struct Sched(Scheduler);
+impl Sched {
+    fn handle(&mut self, input: Input, now: Duration) -> Vec<Action> {
+        self.0.handle(input, now, &mut map_path)
+    }
+    fn complete(&mut self, owner: &Owner, now: Duration) -> Result<Vec<Action>, CoalescerError> {
+        self.0.complete(owner, now)
+    }
+    fn unmapped(&self) -> u64 {
+        self.0.unmapped()
+    }
+    fn clock_errors(&self) -> u64 {
+        self.0.clock_errors()
+    }
+}
 fn sched() -> R<Sched> {
-    Ok(Scheduler::new(
-        window()?,
-        map_path as fn(&Path) -> Option<Owner>,
-    ))
+    Ok(Sched(Scheduler::new(window()?)))
 }
 fn changed(i: usize) -> Input {
     Input::PathChanged {
@@ -233,13 +247,149 @@ fn full_inbox_drops_inputs_and_reports_one_rescan() {
     }
     // The overflow is reported first, once; then the queued inputs, then silence.
     let none = Duration::ZERO;
-    assert_eq!(rx.recv_timeout(none), Some(Input::Rescan));
-    assert_eq!(rx.recv_timeout(none), Some(at(0)));
-    assert_eq!(rx.recv_timeout(none), Some(at(1)));
-    assert_eq!(rx.recv_timeout(none), None);
+    assert_eq!(rx.recv_timeout(none), Received::Input(Input::Rescan));
+    assert_eq!(rx.recv_timeout(none), Received::Input(at(0)));
+    assert_eq!(rx.recv_timeout(none), Received::Input(at(1)));
+    assert_eq!(rx.recv_timeout(none), Received::Timeout);
     // After draining, the queue accepts inputs again without a spurious rescan.
     tx.push(at(9));
-    assert_eq!(rx.recv_timeout(none), Some(at(9)));
+    assert_eq!(rx.recv_timeout(none), Received::Input(at(9)));
+}
+
+fn at(n: u32) -> Input {
+    Input::PathChanged {
+        path: PathBuf::from(format!("/r/o1/{n}")),
+    }
+}
+
+#[test]
+fn stop_beats_a_full_queue_and_an_overflow_and_is_sticky() {
+    let (tx, rx) = inbox(1);
+    let stop = rx.stop_handle();
+    tx.push(at(0));
+    tx.push(at(1)); // overflow
+    stop.stop(); // queue full: the wake is not sent, the flag still is
+    let none = Duration::ZERO;
+    for _ in 0..3 {
+        assert_eq!(rx.recv_timeout(none), Received::Stop);
+    }
+    // Pinned rule: after a stop nothing else is delivered by `recv_timeout`; a caller that
+    // ignores the stop still drains the overflow (once) and then the queue.
+    assert_eq!(rx.recv_ignoring_stop(none), Received::Input(Input::Rescan));
+    assert_eq!(rx.recv_ignoring_stop(none), Received::Input(at(0)));
+    assert_eq!(rx.recv_ignoring_stop(none), Received::Timeout);
+    assert_eq!(rx.recv_timeout(none), Received::Stop);
+}
+
+#[test]
+fn stop_before_the_first_receive_and_overflow_after_it() {
+    let (tx, rx) = inbox(1);
+    let stop = rx.stop_handle();
+    stop.stop();
+    tx.push(at(0));
+    tx.push(at(1)); // overflow after the stop
+    assert_eq!(rx.recv_timeout(Duration::ZERO), Received::Stop);
+    assert_eq!(rx.recv_timeout(Duration::from_secs(30)), Received::Stop);
+    assert_eq!(
+        rx.recv_ignoring_stop(Duration::ZERO),
+        Received::Input(Input::Rescan)
+    );
+}
+
+#[test]
+fn stop_from_another_thread_wakes_a_blocked_receiver() {
+    let (_tx, rx) = inbox(4);
+    let stop = rx.stop_handle();
+    let started = Instant::now();
+    let thread = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        stop.stop();
+    });
+    assert_eq!(rx.recv_timeout(Duration::from_secs(30)), Received::Stop);
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(thread.join().is_ok());
+}
+
+#[test]
+fn dropped_handles_without_a_stop_are_a_failed_source() {
+    let (_tx, rx) = inbox(4);
+    let a = rx.stop_handle();
+    let b = a.clone();
+    drop(a);
+    assert_eq!(rx.recv_timeout(Duration::ZERO), Received::Timeout);
+    let started = Instant::now();
+    let thread = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        drop(b);
+    });
+    assert_eq!(rx.recv_timeout(Duration::from_secs(30)), Received::Failed);
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(rx.recv_timeout(Duration::ZERO), Received::Failed);
+    assert!(thread.join().is_ok());
+}
+
+#[test]
+fn a_stop_then_dropped_handles_is_a_stop_not_a_failure() {
+    let (_tx, rx) = inbox(4);
+    let stop = rx.stop_handle();
+    stop.stop();
+    drop(stop);
+    assert_eq!(rx.recv_timeout(Duration::ZERO), Received::Stop);
+}
+
+#[test]
+fn stop_flag_reads_without_receiving_and_is_sticky() {
+    let (tx, rx) = inbox(1);
+    let stop = rx.stop_handle();
+    let flag = rx.stop_flag();
+    let moved = flag.clone();
+    tx.push(at(0));
+    tx.push(at(1)); // overflow: the queue is full
+    assert!(!flag.requested());
+    assert!(
+        !std::thread::spawn(move || moved.requested())
+            .join()
+            .unwrap_or(true)
+    );
+    stop.stop();
+    let moved = flag.clone();
+    assert!(
+        std::thread::spawn(move || moved.requested())
+            .join()
+            .unwrap_or(false)
+    );
+    assert!(flag.requested());
+    assert!(flag.requested());
+    let none = Duration::ZERO;
+    assert_eq!(rx.recv_timeout(none), Received::Stop);
+    assert!(flag.requested());
+    assert_eq!(rx.recv_ignoring_stop(none), Received::Input(Input::Rescan));
+    assert_eq!(rx.recv_ignoring_stop(none), Received::Input(at(0)));
+    assert_eq!(rx.recv_ignoring_stop(none), Received::Timeout);
+    assert!(flag.requested());
+}
+
+#[test]
+fn a_live_stop_flag_does_not_hide_a_failed_source() {
+    let (tx, rx) = inbox(2);
+    let flag = rx.stop_flag();
+    let handle = rx.stop_handle();
+    tx.push(at(0));
+    drop(handle);
+    assert_eq!(rx.recv_timeout(Duration::ZERO), Received::Failed);
+    assert!(!flag.requested());
+    assert_eq!(
+        rx.recv_ignoring_stop(Duration::ZERO),
+        Received::Input(at(0))
+    );
+}
+
+#[test]
+fn forward_signal_requests_a_stop() {
+    let (_tx, rx) = inbox(4);
+    let stop = rx.stop_handle();
+    memory::run::forward_signal(&stop);
+    assert_eq!(rx.recv_timeout(Duration::ZERO), Received::Stop);
 }
 
 // ------------------------------------------------------------------ properties
@@ -457,7 +607,7 @@ impl Drop for Tmp {
 fn wait_for(w: &FsWatcher, mut want: impl FnMut(&Input) -> bool) -> bool {
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
-        if let Some(input) = w.recv_timeout(Duration::from_millis(200))
+        if let Received::Input(input) = w.recv_timeout(Duration::from_millis(200))
             && want(&input)
         {
             return true;
@@ -541,6 +691,62 @@ fn fs_watcher_skips_a_missing_root_and_counts_it() -> R {
 }
 
 #[test]
+fn fs_watcher_watches_an_extra_directory_non_recursively() -> R {
+    let tmp = Tmp::new()?;
+    let hints = tmp.0.join("hints");
+    let deep = hints.join("deep");
+    fs::create_dir_all(&deep).map_err(e)?;
+    let w = FsWatcher::with_dir(&[], &hints).map_err(e)?;
+    assert_eq!(w.skipped_roots(), 0);
+    // Written first: a recursive watch would report it no later than the file below.
+    fs::write(deep.join("inner.jsonl"), "x").map_err(e)?;
+    let file = hints.join("day.jsonl");
+    fs::write(&file, "x").map_err(e)?;
+    let mut below = false;
+    let mut seen = |i: &Input| {
+        let (Input::PathChanged { path } | Input::DirCreated { path }) = i else {
+            return false;
+        };
+        below |= path.starts_with(&deep) && *path != deep;
+        matches!(i, Input::PathChanged { .. }) && *path == file
+    };
+    assert!(
+        wait_for(&w, &mut seen),
+        "no PathChanged for {}",
+        file.display()
+    );
+    let until = Instant::now() + Duration::from_millis(500);
+    while Instant::now() < until {
+        if let Received::Input(input) = w.recv_timeout(Duration::from_millis(100)) {
+            seen(&input);
+        }
+    }
+    assert!(!below, "an event below the extra directory was reported");
+    Ok(())
+}
+
+#[test]
+fn fs_watcher_rejects_a_missing_or_non_directory_extra_directory() -> R {
+    let tmp = Tmp::new()?;
+    assert!(FsWatcher::with_dir(&[], &tmp.0.join("missing")).is_err());
+    let file = tmp.0.join("f");
+    fs::write(&file, "x").map_err(e)?;
+    assert!(FsWatcher::with_dir(&[], &file).is_err());
+    Ok(())
+}
+
+#[test]
+fn fs_watcher_exposes_a_stop_handle() -> R {
+    let w = FsWatcher::new(&[]).map_err(e)?;
+    let flag = w.stop_flag();
+    assert!(!flag.requested());
+    w.stop_handle().stop();
+    assert!(flag.requested());
+    assert_eq!(w.recv_timeout(Duration::from_secs(30)), Received::Stop);
+    Ok(())
+}
+
+#[test]
 fn fs_watcher_rejects_a_root_that_is_a_regular_file() -> R {
     let tmp = Tmp::new()?;
     let file = tmp.0.join("not-a-dir");
@@ -578,5 +784,49 @@ fn translate_never_treats_a_symlink_as_a_directory() -> R {
         assert_eq!(at(&link), vec![Input::PathChanged { path: link.clone() }]);
         assert_eq!(at(&real), vec![Input::DirCreated { path: real.clone() }]);
     }
+    Ok(())
+}
+
+// ------------------------------------------------------------------ measurement
+
+/// `Scheduler::handle` per `PathChanged` with 5,000 owners known, none due. Run with
+/// `cargo nextest run --release -p memory --test watch --run-ignored only measure_handle -- --nocapture`.
+#[test]
+#[ignore = "measurement, prints medians"]
+fn measure_handle_cost_with_5000_known_owners() -> R {
+    let owners: Vec<Owner> = (0..5000).map(owner).collect::<R<_>>()?;
+    let mut map = |p: &Path| -> Option<Owner> {
+        let n: usize = p
+            .to_str()?
+            .strip_prefix("/r/n")?
+            .split('/')
+            .next()?
+            .parse()
+            .ok()?;
+        owners.get(n).cloned()
+    };
+    let mut runs = Vec::new();
+    for _ in 0..7 {
+        let mut sc = Scheduler::new(window()?);
+        for n in 0..5000 {
+            let input = Input::PathChanged {
+                path: PathBuf::from(format!("/r/n{n}/f")),
+            };
+            sc.handle(input, s(0), &mut map);
+        }
+        let probes = 500;
+        let start = Instant::now();
+        for n in 0..probes {
+            let input = Input::PathChanged {
+                path: PathBuf::from(format!("/r/n{}/f", n * 7)),
+            };
+            let actions = sc.handle(input, s(1), &mut map);
+            assert!(actions.is_empty());
+        }
+        runs.push(start.elapsed().as_nanos() / probes);
+    }
+    runs.sort_unstable();
+    let median = runs.get(runs.len() / 2).copied().unwrap_or(0);
+    eprintln!("handle ns/input runs sorted: {runs:?} median {median}");
     Ok(())
 }

@@ -10,10 +10,10 @@ use hegel::{TestCase, generators as gs};
 use memory::capture::Published;
 use memory::commit::{
     Base, Commit, CommitEnd, Failure, KnownOurs, Landed, LandedHow, Upload, check_fence, commit,
-    commit_known, disposition, manifest_key, recover_base,
+    commit_known, commit_stoppable, disposition, disposition_paced, manifest_key, recover_base,
 };
 use memory::environment::{Store, StoreError, Stored};
-use memory_core::disposition::Streak;
+use memory_core::disposition::{Outcome, Streak};
 use memory_core::domain::{
     Agent, ArchiveId, CommitOutcome, Disposition, ETag, ErrorClass, Fault, MachineId, Offset,
     Owner, OwnerParkReason, SessionId, SessionKey, Sha256, SourceClass, SourceId, SourceKind,
@@ -2822,4 +2822,178 @@ fn raw_piece(
         Ok(p) => p,
         Err(_) => panic!("piece"),
     }
+}
+
+// ------------------------------------------------------------------ stop before current.json
+
+/// A store that raises the stop flag when it receives the `n`th request of one kind.
+struct Hook {
+    inner: FakeStore,
+    flag: std::rc::Rc<std::cell::Cell<bool>>,
+    on: Option<(Op, usize)>,
+    seen: usize,
+}
+impl Hook {
+    fn note(&mut self, op: Op) {
+        if let Some((o, n)) = self.on
+            && o == op
+        {
+            self.seen += 1;
+            if self.seen == n {
+                self.flag.set(true);
+            }
+        }
+    }
+}
+impl Store for Hook {
+    fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
+        self.note(Op::Put(kind_of(key)));
+        self.inner.put_if_absent(key, body)
+    }
+    fn put_if_match(
+        &mut self,
+        key: &str,
+        etag: &ETag,
+        body: Published,
+    ) -> Result<ETag, StoreError> {
+        self.note(Op::Put(kind_of(key)));
+        self.inner.put_if_match(key, etag, body)
+    }
+    fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
+        self.note(Op::Get(kind_of(key)));
+        self.inner.get(key)
+    }
+}
+
+/// Commit three pieces with the stop raised on the `nth` request of `op`; returns the result,
+/// how often the probe was asked and the store.
+fn stoppable_run(
+    op: Op,
+    nth: usize,
+    arm: impl FnOnce(&mut FakeStore),
+) -> R<(Result<CommitEnd, Failure>, u32, FakeStore)> {
+    let mut rig = Rig::seeded(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])?;
+    let request = rig.request()?;
+    let mut inner = std::mem::take(&mut rig.store);
+    arm(&mut inner);
+    let flag = std::rc::Rc::new(std::cell::Cell::new(false));
+    let calls = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let mut hook = Hook {
+        inner,
+        flag: flag.clone(),
+        on: Some((op, nth)),
+        seen: 0,
+    };
+    let counter = calls.clone();
+    let result = commit_stoppable(
+        &mut hook,
+        None,
+        request,
+        &mut KnownOurs::new(),
+        &mut |_| {},
+        &mut || {
+            counter.set(counter.get() + 1);
+            flag.get()
+        },
+    );
+    Ok((result, calls.get(), hook.inner))
+}
+
+#[test]
+fn a_stop_after_piece_one_of_three_leaves_one_piece_and_nothing_else() -> R {
+    let (result, calls, store) = stoppable_run(Op::Put(Kind::Object), 1, |_| {})?;
+    assert_eq!(result, Err(Failure::Stopped));
+    assert_eq!(calls, 2);
+    assert_eq!(store.count(Op::Put(Kind::Object)), 1);
+    assert_eq!(store.count(Op::Put(Kind::Manifest)), 0);
+    assert_eq!(store.count(Op::Put(Kind::Current)), 0);
+    assert_eq!(store.log.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn a_stop_after_the_last_piece_sends_no_manifest() -> R {
+    let (result, calls, store) = stoppable_run(Op::Put(Kind::Object), 3, |_| {})?;
+    assert_eq!(result, Err(Failure::Stopped));
+    assert_eq!(calls, 4);
+    assert_eq!(store.count(Op::Put(Kind::Object)), 3);
+    assert_eq!(store.log.len(), 3);
+    Ok(())
+}
+
+#[test]
+fn a_stop_after_the_manifest_sends_no_current_request() -> R {
+    let (result, calls, store) = stoppable_run(Op::Put(Kind::Manifest), 1, |_| {})?;
+    assert_eq!(result, Err(Failure::Stopped));
+    assert_eq!(calls, 5);
+    assert_eq!(store.count(Op::Put(Kind::Manifest)), 1);
+    assert_eq!(store.log.len(), 4);
+    assert!(store.peek("current.json").is_none());
+    Ok(())
+}
+
+fn assert_completed_despite_stop(
+    result: &Result<CommitEnd, Failure>,
+    calls: u32,
+    store: &FakeStore,
+    how: LandedHow,
+) -> R {
+    let Ok(CommitEnd::Landed(landed)) = result else {
+        return Err(format!("expected a landed commit, got {result:?}"));
+    };
+    assert_eq!(landed.how(), how);
+    assert_eq!(
+        calls, 5,
+        "the probe is never asked again after the publish check"
+    );
+    let key = current_key(&owner()?);
+    let pointer = parse_current(need(store.peek(&key), "current.json")?).map_err(e)?;
+    assert_eq!(pointer.manifest, landed.built().hash);
+    Ok(())
+}
+
+#[test]
+fn a_stop_raised_during_the_current_write_changes_nothing() -> R {
+    let (result, calls, store) = stoppable_run(Op::Put(Kind::Current), 1, |_| {})?;
+    assert_completed_despite_stop(&result, calls, &store, LandedHow::Committed)
+}
+
+#[test]
+fn a_stop_raised_during_a_verification_get_changes_nothing() -> R {
+    for nth in [1, 2] {
+        let (result, calls, store) = stoppable_run(Op::Get(Kind::Current), nth, |s| {
+            s.arm(
+                Op::Put(Kind::Current),
+                Effect::LandThen {
+                    err: StoreError::Ambiguous,
+                    then_offline: false,
+                },
+            );
+            if nth == 2 {
+                s.arm(
+                    Op::Get(Kind::Current),
+                    Effect::FailBefore(StoreError::Offline),
+                );
+            }
+        })?;
+        assert_completed_despite_stop(&result, calls, &store, LandedHow::AlreadyOurs)?;
+        assert_eq!(store.count(Op::Get(Kind::Current)), nth);
+    }
+    Ok(())
+}
+
+#[test]
+fn a_stop_maps_to_a_cancelled_attempt_that_changes_nothing() {
+    let stopped = Failure::Stopped;
+    assert_eq!(stopped.outcome(), Outcome::Aborted);
+    assert_eq!(stopped.commit_outcome(), None);
+    assert_eq!(stopped.retry_after(), None);
+    assert!(!stopped.base_may_be_stale());
+    let prior = Streak {
+        retries: 3,
+        ..Streak::default()
+    };
+    let (d, streak) = disposition_paced(&Err(stopped), false, Duration::ZERO, &prior, 0);
+    assert_eq!(d, Disposition::Cancelled);
+    assert_eq!(streak, prior);
 }

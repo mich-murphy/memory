@@ -1,10 +1,11 @@
 //! `memory::log` event lines against a scoped subscriber writing to a buffer.
 use memory::audit::AuditCounts;
 use memory::daemon::{FailureCounts, RoundReport};
-use memory::daemon::{ParkedReason, StateLoad};
+use memory::daemon::{OwnerOutcome, ParkedReason, StateLoad};
+use memory::driver::Cause;
 use memory::log::{
-    Scope, format_utc, host_paused, host_resumed, parked, render, round, started, state_loads,
-    stopped,
+    Scope, capture_outcome, format_utc, host_paused, host_resumed, parked, render, round, started,
+    state_loads, stopped,
 };
 use memory_core::domain::{
     Agent, ArchiveId, MachineId, Owner, OwnerParkReason, ParkReason, SessionId, SessionKey, Sha256,
@@ -40,6 +41,7 @@ fn round_has_every_count_in_order() {
         skipped: 3,
         parked: 4,
         deferred: 5,
+        stopped: 0,
         failures: FailureCounts {
             offline: 6,
             throttled: 7,
@@ -56,11 +58,11 @@ fn round_has_every_count_in_order() {
         hints_removed: 12,
         hints_kept_old: 13,
     };
-    let text = render(|| round(&report));
+    let text = render(|| round(Cause::Timer, &report));
     let (_, rest) = split(only_line(&text)).unwrap_or_default();
     assert_eq!(
         rest,
-        "INFO round landed=1 failed=2 skipped=3 parked=4 deferred=5 offline=6 throttled=7 transient=8 destination_auth=9 local=10 deterministic=11 hints_removed=12 hints_kept_old=13 audit_matched=14 audit_mismatched=15 audit_ineligible=16"
+        "INFO round cause=timer landed=1 failed=2 skipped=3 parked=4 deferred=5 offline=6 throttled=7 transient=8 destination_auth=9 local=10 deterministic=11 hints_removed=12 hints_kept_old=13 audit_matched=14 audit_mismatched=15 audit_ineligible=16"
     );
 }
 
@@ -191,4 +193,50 @@ fn host_pause_events_have_no_keys() {
     assert_eq!(lines_of(&text), ["INFO host_paused"]);
     let text = render(host_resumed);
     assert_eq!(lines_of(&text), ["INFO host_resumed"]);
+}
+
+#[test]
+fn round_names_every_cause() {
+    for (cause, id) in [
+        (Cause::Start, "start"),
+        (Cause::Timer, "timer"),
+        (Cause::Rescan, "rescan"),
+        (Cause::Wake, "wake"),
+        (Cause::Dir, "dir"),
+    ] {
+        let text = render(|| round(cause, &RoundReport::default()));
+        let (_, rest) = split(only_line(&text)).unwrap_or_default();
+        assert!(
+            rest.starts_with(&format!("INFO round cause={id} landed=0 ")),
+            "{rest}"
+        );
+    }
+}
+
+#[test]
+fn capture_logs_four_outcomes_with_the_owner_prefix_and_nothing_else() -> Result<(), String> {
+    let owner = owner()?;
+    let prefix = memory_core::limits::owner_prefix(&owner);
+    for (outcome, id) in [
+        (OwnerOutcome::Landed, "landed"),
+        (OwnerOutcome::Unchanged, "unchanged"),
+        (OwnerOutcome::Failed, "failed"),
+        (OwnerOutcome::Stopped, "stopped"),
+    ] {
+        let text = render(|| capture_outcome(&owner, outcome));
+        let (_, rest) = split(only_line(&text)).unwrap_or_default();
+        assert_eq!(rest, format!("INFO capture owner={prefix} result={id}"));
+    }
+    for outcome in [
+        OwnerOutcome::Paused,
+        OwnerOutcome::Skipped,
+        OwnerOutcome::Deferred,
+    ] {
+        assert_eq!(
+            render(|| capture_outcome(&owner, outcome)),
+            "",
+            "{outcome:?}"
+        );
+    }
+    Ok(())
 }

@@ -83,6 +83,14 @@ struct Slot {
     pending: Option<Pending>,
     in_flight: bool,
 }
+/// Result of [`Coalescer::take_due`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DueOwners {
+    /// Owners now in flight, in the documented deterministic order.
+    pub owners: Vec<Owner>,
+    /// Owners skipped because their monotonic clock regressed.
+    pub regressed: u64,
+}
 /// A caller-owned scheduler, one in-flight capture per owner with later edges retained.
 #[derive(Debug)]
 pub struct Coalescer {
@@ -170,6 +178,47 @@ impl Coalescer {
             self.slots.remove(owner);
         }
         Ok(())
+    }
+    /// Take every owner that is due at `now` and mark each in flight, in one call.
+    ///
+    /// Same rule as [`Coalescer::poll`] applied to every owner. Order is deterministic and
+    /// independent of the map: by the owner's first pending edge, then its last pending edge,
+    /// then the owner's `Debug` text. Owners with a capture in flight are never returned; their
+    /// later edges stay pending for one follow-up after `complete`. An owner whose clock
+    /// regressed is skipped and counted in `regressed` (as `poll` would have returned `Backwards`).
+    pub fn take_due(&mut self, now: Duration) -> DueOwners {
+        let window = self.window;
+        let mut regressed = 0;
+        let mut taken: Vec<(Duration, Duration, Owner)> = Vec::new();
+        for (owner, slot) in &mut self.slots {
+            if advance(slot, now).is_err() {
+                regressed += 1;
+                continue;
+            }
+            if slot.in_flight {
+                continue;
+            }
+            let Some(p) = slot.pending.as_ref() else {
+                continue;
+            };
+            if p.flush
+                || now.saturating_sub(p.last) >= window.quiet
+                || now.saturating_sub(p.first) >= window.cap
+            {
+                taken.push((p.first, p.last, owner.clone()));
+                slot.pending = None;
+                slot.in_flight = true;
+            }
+        }
+        taken.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then(a.1.cmp(&b.1))
+                .then_with(|| format!("{:?}", a.2).cmp(&format!("{:?}", b.2)))
+        });
+        DueOwners {
+            owners: taken.into_iter().map(|(_, _, owner)| owner).collect(),
+            regressed,
+        }
     }
     /// Earliest monotonic deadline at which any idle owner's pending edge becomes due,
     /// or `None` when nothing is pending. Owners with a capture in flight are excluded:

@@ -373,3 +373,467 @@ fn unknown_owner_rows_are_counted_not_yielded() -> R {
     assert_eq!((c.yielded, c.unknown_owner, c.unknown_kind), (1, 1, 0));
     Ok(())
 }
+
+// ------------------------------------------------------------------ note / of
+use memory::daemon::{Daemon, IndexBody, OwnerOutcome, Parts};
+use memory::environment::Clock;
+use memory::state::{Loaded, StateFile, read_durable};
+use memory_core::domain::SessionId;
+use memory_core::hint::{
+    HintEvent, HintPath, HintRecord, HintSchema, LaunchHint, LaunchRecord, PathHint, Reduction,
+};
+use memory_core::limits::manifest_key;
+use memory_core::manifest::{Manifest, manifest_hash, parse_manifest};
+use memory_core::privacy::sanitize_launch;
+use std::os::unix::fs::PermissionsExt;
+
+fn walker(root: &Path, limits: WalkLimits) -> R<WalkSources> {
+    Ok(WalkSources::new(
+        vec![(root.to_path_buf(), roots()?)],
+        limits,
+        SharedFs::new(),
+    ))
+}
+fn key_of(owner: &Owner, s: &memory::capture::Source) -> String {
+    format!("{owner:?}|{:?}|{}", s.id, s.handle)
+}
+fn owner_at(rel: &str) -> R<Owner> {
+    match located(rel)? {
+        Located::Source { owner, .. } => Ok(owner),
+        _ => Err("not a source".into()),
+    }
+}
+
+#[test]
+fn note_maps_a_path_to_its_owner_in_either_spelling() -> R {
+    let t = Tmp::new()?;
+    let file = t.write(T, b"{}\n")?;
+    let link = t.0.join("link");
+    symlink(t.root(), &link)?;
+    let want = owner_at("projects/-p/abc.jsonl")?;
+    // Configured through a link; reported canonically, as FSEvents does.
+    let mut w = walker(&link, WalkLimits::default())?;
+    assert_eq!(w.note(&fs::canonicalize(&file)?), Some(want.clone()));
+    assert_eq!(
+        w.note(&link.join("projects/-p/abc.jsonl")),
+        Some(want.clone())
+    );
+    assert_eq!(w.of(&want).len(), 1);
+    // Configured canonically; reported through the link is not a spelling of the root.
+    let mut w = walker(&fs::canonicalize(t.root())?, WalkLimits::default())?;
+    assert_eq!(w.note(&fs::canonicalize(&file)?), Some(want));
+    Ok(())
+}
+
+#[test]
+fn note_ignores_paths_outside_the_roots_and_paths_locate_rejects() -> R {
+    let t = Tmp::new()?;
+    t.write(T, b"{}\n")?;
+    t.write("other/projects/-p/abc.jsonl", b"{}\n")?;
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    assert_eq!(w.note(&t.0.join("other/projects/-p/abc.jsonl")), None);
+    assert_eq!(w.note(&t.0.join("claude2/projects/-p/abc.jsonl")), None);
+    assert_eq!(w.note(&t.root()), None);
+    assert_eq!(w.note(Path::new("relative/projects/-p/abc.jsonl")), None);
+    assert_eq!(w.note(&t.root().join("projects/-p/notes.txt")), None);
+    assert_eq!(w.note(&t.root().join("zzz/unknown.bin")), None);
+    Ok(())
+}
+
+#[test]
+fn of_yields_exactly_what_enumerate_yields() -> R {
+    let t = Tmp::new()?;
+    t.write("claude/projects/-p/a.jsonl", b"{}\n")?;
+    t.write("claude/projects/-q/b.jsonl", b"{}\n")?;
+    t.write("ext/-z/c.jsonl", b"{}\n")?;
+    t.write("claude/projects/-p/x/y/deep.jsonl", b"{}\n")?;
+    symlink(
+        t.root().join("projects/-p/a.jsonl"),
+        t.root().join("projects/-p/s.jsonl"),
+    )?;
+    symlink(t.0.join("ext/-z"), t.root().join("projects/-z"))?;
+    let limits = WalkLimits {
+        max_depth: 3,
+        ..WalkLimits::default()
+    };
+    let paths: Vec<PathBuf> = [
+        "projects/-p/a.jsonl",
+        "projects/-q/b.jsonl",
+        "projects/-p/s.jsonl",
+        "projects/-z/c.jsonl",
+        "projects/-p/x/y/deep.jsonl",
+    ]
+    .iter()
+    .map(|p| t.root().join(p))
+    .collect();
+    let union = |w: &mut WalkSources, owners: &[Owner]| -> Vec<String> {
+        let mut got: Vec<String> = owners
+            .iter()
+            .flat_map(|o| w.of(o).iter().map(|s| key_of(o, s)).collect::<Vec<_>>())
+            .collect();
+        got.sort();
+        got
+    };
+    // Every path noted first, then the walk.
+    let mut w = walker(&t.root(), limits)?;
+    let mut owners: Vec<Owner> = Vec::new();
+    for p in &paths {
+        if let Some(o) = w.note(p)
+            && !owners.contains(&o)
+        {
+            owners.push(o);
+        }
+    }
+    for p in paths.iter().skip(2).take(2) {
+        assert!(w.note(p).is_some());
+    }
+    let before = union(&mut w, &owners);
+    let mut walked: Vec<String> = w.enumerate().iter().map(|(o, s)| key_of(o, s)).collect();
+    walked.sort();
+    assert_eq!(walked.len(), 2, "{walked:?}");
+    assert_eq!(before, walked, "of before the walk");
+    assert_eq!(union(&mut w, &owners), walked, "of after the walk");
+    // The walk first, then every path noted.
+    let mut w = walker(&t.root(), limits)?;
+    let found = w.enumerate();
+    let mut owners: Vec<Owner> = found.iter().map(|f| f.0.clone()).collect();
+    for p in &paths {
+        if let Some(o) = w.note(p)
+            && !owners.contains(&o)
+        {
+            owners.push(o);
+        }
+    }
+    let mut walked: Vec<String> = found.iter().map(|(o, s)| key_of(o, s)).collect();
+    walked.sort();
+    assert_eq!(union(&mut w, &owners), walked);
+    Ok(())
+}
+
+#[test]
+fn of_and_the_walk_agree_on_the_depth_boundary() -> R {
+    let t = Tmp::new()?;
+    let file = t.write(T, b"{}\n")?;
+    for (max_depth, want) in [(2, 1), (1, 0)] {
+        let limits = WalkLimits {
+            max_depth,
+            ..WalkLimits::default()
+        };
+        let mut w = walker(&t.root(), limits)?;
+        assert_eq!(w.enumerate().len(), want, "walk at {max_depth}");
+        let mut w = walker(&t.root(), limits)?;
+        let noted = w.note(&file);
+        let of = noted.map_or(0, |o| w.of(&o).len());
+        assert_eq!(of, want, "of at {max_depth}");
+    }
+    Ok(())
+}
+
+#[test]
+fn of_does_not_yield_a_vanished_file_and_does_not_walk() -> R {
+    let t = Tmp::new()?;
+    let file = t.write(T, b"{}\n")?;
+    t.write("claude/projects/-q/b.jsonl", b"{}\n")?;
+    let want = owner_at("projects/-p/abc.jsonl")?;
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    assert_eq!(w.enumerate().len(), 2);
+    assert_eq!(w.counts().unreadable, 0);
+    assert_eq!(w.of(&want).len(), 1);
+    // A walk would meet the unreadable directory and count it; `of` must not touch it.
+    let sibling = t.root().join("projects/-q");
+    fs::set_permissions(&sibling, fs::Permissions::from_mode(0o000))?;
+    let yielded = w.of(&want).len();
+    let unreadable = w.counts().unreadable;
+    fs::set_permissions(&sibling, fs::Permissions::from_mode(0o700))?;
+    assert_eq!((yielded, unreadable), (1, 0), "of walked the tree");
+    fs::remove_file(&file)?;
+    assert!(w.of(&want).is_empty());
+    assert_eq!(w.note(&file), Some(want.clone()));
+    assert!(w.of(&want).is_empty());
+    Ok(())
+}
+
+struct Clk;
+impl Clock for Clk {
+    fn monotonic_ns(&self) -> u64 {
+        0
+    }
+    fn wall_ns(&self) -> i128 {
+        1_794_000_000_000_000_000
+    }
+}
+
+type RealDaemon = Daemon<SharedFs, MemStore, Clk, WalkSources>;
+
+/// A daemon over the real filesystem and `WalkSources` on the root of `t`, state under `t`.
+fn real_daemon(t: &Tmp) -> R<RealDaemon> {
+    let token = t.0.join("token");
+    fs::write(&token, "x")?;
+    fs::set_permissions(&token, fs::Permissions::from_mode(0o600))?;
+    let cfg = t.0.join("config.toml");
+    fs::write(
+        &cfg,
+        format!(
+            "archive_id = \"a\"\nmachine_id = \"m\"\nendpoint = \"http://127.0.0.1:9\"\nbucket = \"bucket-1\"\ntoken_path = \"{}\"\n",
+            token.display()
+        ),
+    )?;
+    let shared = SharedFs::new();
+    let sources = WalkSources::new(
+        vec![(t.root(), roots()?)],
+        WalkLimits::default(),
+        shared.clone(),
+    );
+    let state = t.0.join("state");
+    let d = Daemon::start(
+        &state,
+        &cfg,
+        Parts {
+            fs: shared,
+            store: MemStore::default(),
+            clock: Clk,
+            sources,
+            context: context(),
+        },
+    )
+    .map_err(|x| x.code().to_owned())?;
+    Ok(d)
+}
+
+#[test]
+fn a_hint_names_a_file_no_walk_has_seen_and_its_owner_is_captured() -> R {
+    let t = Tmp::new()?;
+    fs::set_permissions(&t.0, fs::Permissions::from_mode(0o700))?;
+    t.write(T, b"{\"a\":1}\n")?;
+    let mut d = real_daemon(&t)?;
+    assert_eq!(d.reconcile_once().map_err(|x| format!("{x:?}"))?.landed, 1);
+    // Created after the walk and never reported by the watcher: only the hint names it.
+    let new = t.write("claude/projects/-p/new.jsonl", b"{\"b\":1}\n")?;
+    let owner = owner_at("projects/-p/new.jsonl")?;
+    assert_eq!(
+        d.capture_owner(&owner).map_err(|x| format!("{x:?}"))?,
+        OwnerOutcome::Unchanged,
+        "unknown until something names it"
+    );
+    let path =
+        HintPath::try_from(new.to_str().ok_or("path")?.to_owned()).map_err(|x| format!("{x:?}"))?;
+    let record = HintRecord {
+        schema: HintSchema::V1,
+        agent: Agent::Claude,
+        event: HintEvent::SessionEnd,
+        session: SessionId::try_from("new".to_owned())?,
+        cwd: PathHint::Absent,
+        transcript: PathHint::Present { path },
+        agent_transcript: PathHint::Absent,
+        launch: LaunchHint::None,
+        reduction: Reduction::None,
+    };
+    let mut line = serde_json::to_vec(&record)?;
+    line.push(b'\n');
+    fs::write(t.0.join("state/hints/2026-11-07.jsonl"), line)?;
+    let signals = d.refresh_hints();
+    assert_eq!(signals.len(), 1);
+    let signal = signals.first().ok_or("no signal")?;
+    assert_eq!(
+        signal.owner, owner,
+        "the hint and the locator name one owner"
+    );
+    assert_eq!(signal.paths, vec![new]);
+    assert_eq!(
+        d.capture_owner(&owner).map_err(|x| format!("{x:?}"))?,
+        OwnerOutcome::Landed
+    );
+    Ok(())
+}
+
+const DAY: &str = "2026-11-07.jsonl";
+
+fn hint_path_of(p: Option<&Path>) -> R<PathHint> {
+    Ok(match p {
+        None => PathHint::Absent,
+        Some(p) => PathHint::Present {
+            path: HintPath::try_from(p.to_str().ok_or("path")?.to_owned())
+                .map_err(|x| format!("{x:?}"))?,
+        },
+    })
+}
+
+/// One hint line; `launch` adds launch evidence.
+fn hint(agent: Agent, transcript: Option<&Path>, sub: Option<&Path>, launch: bool) -> R<Vec<u8>> {
+    let launch = if launch {
+        let s = sanitize_launch(&["claude".to_owned()], &["PATH=/usr/bin".to_owned()]);
+        LaunchHint::Full(LaunchRecord::from_sanitized(&s))
+    } else {
+        LaunchHint::None
+    };
+    let record = HintRecord {
+        schema: HintSchema::V1,
+        agent,
+        event: if matches!(launch, LaunchHint::None) {
+            HintEvent::SessionEnd
+        } else {
+            HintEvent::SessionStart
+        },
+        session: SessionId::try_from("raw".to_owned())?,
+        cwd: PathHint::Absent,
+        transcript: hint_path_of(transcript)?,
+        agent_transcript: hint_path_of(sub)?,
+        launch,
+        reduction: Reduction::None,
+    };
+    let mut line = serde_json::to_vec(&record)?;
+    line.push(b'\n');
+    Ok(line)
+}
+
+fn stored_offset(t: &Tmp) -> R<u64> {
+    let Loaded::Present(stored) = read_durable(
+        &t.0.join("state").join(StateFile::Index.name()),
+        StateFile::Index.schema(),
+    ) else {
+        return Ok(0);
+    };
+    let index: IndexBody = serde_json::from_slice(&stored.body)?;
+    Ok(index.hints.get(DAY).copied().unwrap_or(0))
+}
+
+fn launches(d: &mut RealDaemon) -> R<usize> {
+    let mut n = 0;
+    for (key, (body, _)) in &d.store_mut().objects {
+        if *key == manifest_key(&manifest_hash(body)) {
+            n += match parse_manifest(body).map_err(|x| format!("{x:?}"))? {
+                Manifest::Delta(m) => m.launch().len(),
+                Manifest::Checkpoint(m) => m.launch().len(),
+            };
+        }
+    }
+    Ok(n)
+}
+
+#[test]
+fn a_launch_hint_with_a_transcript_path_is_attached_once_in_a_round_and_per_owner() -> R {
+    for per_owner in [false, true] {
+        let t = Tmp::new()?;
+        fs::set_permissions(&t.0, fs::Permissions::from_mode(0o700))?;
+        let file = t.write("claude/projects/-p/new.jsonl", b"{\"b\":1}\n")?;
+        let mut d = real_daemon(&t)?;
+        let line = hint(Agent::Claude, Some(&file), None, true)?;
+        fs::write(t.0.join("state/hints").join(DAY), &line)?;
+        if per_owner {
+            assert_eq!(d.refresh_hints().len(), 1);
+            let owner = owner_at("projects/-p/new.jsonl")?;
+            assert_eq!(
+                d.capture_owner(&owner).map_err(|x| format!("{x:?}"))?,
+                OwnerOutcome::Landed
+            );
+        } else {
+            assert_eq!(d.reconcile_once().map_err(|x| format!("{x:?}"))?.landed, 1);
+        }
+        assert_eq!(launches(&mut d)?, 1);
+        assert_eq!(stored_offset(&t)?, u64::try_from(line.len())?);
+        fs::write(&file, b"{\"b\":1}\n{\"b\":2}\n")?;
+        assert_eq!(d.reconcile_once().map_err(|x| format!("{x:?}"))?.landed, 1);
+        assert_eq!(launches(&mut d)?, 1, "attached exactly once");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_hint_without_an_owner_signals_nothing_and_stays_pending() -> R {
+    let t = Tmp::new()?;
+    fs::set_permissions(&t.0, fs::Permissions::from_mode(0o700))?;
+    let file = t.write("claude/projects/-p/new.jsonl", b"{\"b\":1}\n")?;
+    let mut d = real_daemon(&t)?;
+    let outside = t.0.join("elsewhere/x.jsonl");
+    let mut lines = hint(Agent::Claude, None, None, true)?;
+    lines.extend(hint(Agent::Claude, Some(&outside), None, true)?);
+    lines.extend(hint(Agent::Codex, Some(&file), None, true)?);
+    // A subagent path alone gives the record no owner, and so no signal, either.
+    lines.extend(hint(Agent::Claude, None, Some(&file), true)?);
+    fs::write(t.0.join("state/hints").join(DAY), &lines)?;
+    assert!(d.refresh_hints().is_empty());
+    for _ in 0..2 {
+        d.reconcile_once().map_err(|x| format!("{x:?}"))?;
+        assert_eq!(stored_offset(&t)?, 0, "an ownerless launch stays pending");
+        assert_eq!(launches(&mut d)?, 0);
+        assert!(d.refresh_hints().is_empty());
+    }
+    Ok(())
+}
+
+#[test]
+fn a_subagent_path_of_another_owner_signals_it_too() -> R {
+    let t = Tmp::new()?;
+    fs::set_permissions(&t.0, fs::Permissions::from_mode(0o700))?;
+    let zmain = t.write("claude/projects/-p/zmain.jsonl", b"{}\n")?;
+    let sub = t.write("claude/projects/-p/asub.jsonl", b"{}\n")?;
+    let mut d = real_daemon(&t)?;
+    let day = t.0.join("state/hints").join(DAY);
+    fs::write(&day, hint(Agent::Claude, Some(&zmain), Some(&sub), true)?)?;
+    let got = d.refresh_hints();
+    assert_eq!(got.len(), 2);
+    assert_eq!(
+        got.iter().map(|s| s.owner.clone()).collect::<Vec<_>>(),
+        vec![
+            owner_at("projects/-p/zmain.jsonl")?,
+            owner_at("projects/-p/asub.jsonl")?
+        ]
+    );
+    assert_eq!(got.get(1).map(|s| s.paths.clone()), Some(vec![sub.clone()]));
+    // Launch evidence belongs to the transcript's owner only.
+    d.reconcile_once().map_err(|x| format!("{x:?}"))?;
+    assert_eq!(launches(&mut d)?, 1);
+    // The same owner gives one signal.
+    let mut line = hint(Agent::Claude, Some(&zmain), Some(&zmain), false)?;
+    let mut all = fs::read(&day)?;
+    all.append(&mut line);
+    fs::write(&day, all)?;
+    let got = d.refresh_hints();
+    assert_eq!(got.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn a_vanished_file_is_never_an_absence_for_an_owner_capture() -> R {
+    let t = Tmp::new()?;
+    fs::set_permissions(&t.0, fs::Permissions::from_mode(0o700))?;
+    let file = t.write(T, b"{\"a\":1}\n")?;
+    let state = t.0.join("state");
+    let mut d = real_daemon(&t)?;
+    assert_eq!(d.reconcile_once().map_err(|x| format!("{x:?}"))?.landed, 1);
+    let owner = d.note_path(&file).ok_or("not noted")?;
+    fs::write(&file, b"{\"a\":1}\n{\"a\":2}\n")?;
+    assert_eq!(
+        d.capture_owner(&owner).map_err(|x| format!("{x:?}"))?,
+        OwnerOutcome::Landed
+    );
+    let objects = d.store_mut().objects.len();
+    fs::remove_file(&file)?;
+    for _ in 0..4 {
+        assert_eq!(
+            d.capture_owner(&owner).map_err(|x| format!("{x:?}"))?,
+            OwnerOutcome::Unchanged
+        );
+    }
+    assert_eq!(
+        d.store_mut().objects.len(),
+        objects,
+        "no deletion was written"
+    );
+    d.shutdown().map_err(|x| format!("{x:?}"))?;
+    let Loaded::Present(stored) = read_durable(
+        &state.join(StateFile::Index.name()),
+        StateFile::Index.schema(),
+    ) else {
+        return Err("no index".into());
+    };
+    let index: IndexBody = serde_json::from_slice(&stored.body)?;
+    assert!(!index.sources.is_empty());
+    assert!(
+        index
+            .sources
+            .values()
+            .all(|s| s.missing == 0 && !s.deletion_recorded)
+    );
+    Ok(())
+}

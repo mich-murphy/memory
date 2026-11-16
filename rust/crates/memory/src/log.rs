@@ -23,7 +23,8 @@
 //! | event | keys |
 //! |---|---|
 //! | `started` | `version` |
-//! | `round` | `landed failed skipped parked deferred offline throttled transient destination_auth local deterministic hints_removed hints_kept_old audit_matched audit_mismatched audit_ineligible` |
+//! | `round` | `cause` (`start`, `timer`, `rescan`, `wake`, `dir`) `landed failed skipped parked deferred offline throttled transient destination_auth local deterministic hints_removed hints_kept_old audit_matched audit_mismatched audit_ineligible` |
+//! | `capture` | `owner` `result` (`landed`, `unchanged`, `failed`, `stopped`) |
 //! | `stopped` | none |
 //! | `state_load` | `file` (`index` or `status`) `result` (`damaged` or `newer_schema`) |
 //! | `parked` | `owner` `reason` `scope` (`owner` or `source`; reasons: `foreign_writer`, `newer_remote_schema`, `repeated_audit_mismatch`, `repeated_readback_mismatch`, `source_unstable`, `repeated_non_json_response`, `repeated_schema_error`) |
@@ -33,10 +34,17 @@
 //! `state_load` follows `started`, `status` before `index`, only for a damaged or newer-schema
 //! startup load. `parked` is logged once, in the round an owner or one of its sources becomes
 //! parked; a source id is never logged. `host_paused` and `host_resumed` are logged in the
-//! round the pause starts and ends. All come before that round's `round` line.
+//! round the pause starts and ends. In a full round all come before that round's `round` line;
+//! in a per-owner capture `parked` and `host_paused` are logged inside `capture_owner`, so they
+//! come before that capture's `capture` line, which is written after it returns (a capture that
+//! parks an owner or source or pauses the host maps to `Failed` unless something landed or
+//! stopped, so the reader sees `parked` or
+//! `host_paused`, then `capture ... result=failed`). `capture` is logged for the outcomes
+//! landed, unchanged, failed and stopped only; `Paused`, `Skipped` and `Deferred` write none.
 //!
 //! `memory hook` and `memory restore` never start the subscriber.
-use crate::daemon::{ParkedReason, RoundReport, StateLoad};
+use crate::daemon::{OwnerOutcome, ParkedReason, RoundReport, StateLoad};
+use crate::driver::Cause;
 use memory_core::domain::{Owner, OwnerParkReason, ParkReason};
 use memory_core::limits::owner_prefix;
 use std::fmt;
@@ -178,11 +186,23 @@ pub fn started() {
     tracing::info!(event = "started", version = env!("CARGO_PKG_VERSION"));
 }
 
-/// One reconcile round succeeded.
-pub fn round(report: &RoundReport) {
+/// The closed identifier of a reconcile cause.
+const fn cause_id(cause: Cause) -> &'static str {
+    match cause {
+        Cause::Start => "start",
+        Cause::Timer => "timer",
+        Cause::Rescan => "rescan",
+        Cause::Wake => "wake",
+        Cause::Dir => "dir",
+    }
+}
+
+/// One reconcile round succeeded, run for `cause`.
+pub fn round(cause: Cause, report: &RoundReport) {
     let f = &report.failures;
     tracing::info!(
         event = "round",
+        cause = cause_id(cause),
         landed = count(report.landed),
         failed = count(report.failed),
         skipped = count(report.skipped),
@@ -200,6 +220,46 @@ pub fn round(report: &RoundReport) {
         audit_mismatched = report.audit.mismatched,
         audit_ineligible = report.audit.ineligible,
     );
+}
+
+/// How a logged per-owner capture ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureResult {
+    /// A commit landed.
+    Landed,
+    /// Nothing to commit.
+    Unchanged,
+    /// The capture failed.
+    Failed,
+    /// A stop ended it.
+    Stopped,
+}
+
+/// One per-owner capture ended with `result`.
+pub fn capture(owner: &Owner, result: CaptureResult) {
+    let prefix = owner_prefix(owner);
+    let result = match result {
+        CaptureResult::Landed => "landed",
+        CaptureResult::Unchanged => "unchanged",
+        CaptureResult::Failed => "failed",
+        CaptureResult::Stopped => "stopped",
+    };
+    tracing::info!(event = "capture", owner = prefix.as_str(), result = result);
+}
+
+/// Log the outcome of [`crate::daemon::Daemon::capture_owner`]: landed, unchanged, failed and
+/// stopped only. A paused host, a parked owner and a deferred retry write nothing: each was
+/// logged when it happened, and a retry that stays due while the host is paused is offered
+/// every turn.
+pub fn capture_outcome(owner: &Owner, outcome: OwnerOutcome) {
+    let result = match outcome {
+        OwnerOutcome::Landed => CaptureResult::Landed,
+        OwnerOutcome::Unchanged => CaptureResult::Unchanged,
+        OwnerOutcome::Failed => CaptureResult::Failed,
+        OwnerOutcome::Stopped => CaptureResult::Stopped,
+        OwnerOutcome::Deferred | OwnerOutcome::Skipped | OwnerOutcome::Paused => return,
+    };
+    capture(owner, result);
 }
 
 /// A requested stop and a successful shutdown, just before exit 0.

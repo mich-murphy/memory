@@ -164,6 +164,9 @@ pub enum Failure {
     },
     /// The remote document has a newer schema: park.
     NewerSchema,
+    /// A stop was requested before `current.json` was touched: nothing of ours is referenced,
+    /// the attempt is cancelled and neither counts as a failure nor earns a retry deadline.
+    Stopped,
     /// Our own manifest or invariant 6 was invalid (a bug, deterministic).
     Invalid(ManifestError),
     /// A remote document could not be read and is not a newer schema.
@@ -186,6 +189,7 @@ impl Failure {
             Self::NotLanded(class) | Self::LandingUnknown(class) => Outcome::Failed(class.clone()),
             Self::Throttled { .. } => Outcome::Failed(ErrorClass::Throttled),
             Self::BaseUnchanged => Outcome::Failed(ErrorClass::Transient),
+            Self::Stopped => Outcome::Aborted,
             Self::Foreign { theirs, ours } => Outcome::OwnerFault(OwnerParkReason::ForeignWriter {
                 theirs: *theirs,
                 ours: *ours,
@@ -305,9 +309,13 @@ fn upload_pieces<S: Store>(
     store: &mut S,
     uploads: Vec<Upload>,
     changes: &mut [Change],
+    stop: &mut dyn FnMut() -> bool,
 ) -> Result<(), Failure> {
     let mut winners = BTreeMap::new();
     for upload in uploads {
+        if stop() {
+            return Err(Failure::Stopped);
+        }
         match store.put_if_absent(&upload.key, upload.body) {
             Ok(_) => {}
             Err(StoreError::PreconditionFailed) => {
@@ -413,6 +421,46 @@ pub fn commit_known<S: Store>(
     known: &mut KnownOurs,
     pause: &mut dyn FnMut(u32),
 ) -> Result<CommitEnd, Failure> {
+    commit_stoppable(store, base, request, known, pause, &mut || false)
+}
+
+/// As [`commit_known`], with a stop probe (`true` means a stop was requested). The probe is
+/// asked before each piece PUT, before the manifest PUT and once before `current.json` is
+/// touched; a `true` answer returns [`Failure::Stopped`] with nothing further requested. After
+/// that last question the commit cannot stop: the publish part takes no probe.
+///
+/// A stop after the manifest was built leaves it in `known`: `current.json` does not name it,
+/// so it can only matter if a later verification finds it named, which is then correct.
+///
+/// # Errors
+/// As [`commit`], and [`Failure::Stopped`].
+pub fn commit_stoppable<S: Store>(
+    store: &mut S,
+    base: Option<&Base>,
+    request: Commit,
+    known: &mut KnownOurs,
+    pause: &mut dyn FnMut(u32),
+    stop: &mut dyn FnMut() -> bool,
+) -> Result<CommitEnd, Failure> {
+    let ready = prepare(store, base, request, known, stop)?;
+    publish(store, base, ready, known, pause)
+}
+
+/// A manifest whose pieces and document are stored, ready for the `current.json` write.
+struct Prepared {
+    key: String,
+    built: Built,
+    pointer: Vec<u8>,
+}
+
+/// The stoppable part: pieces, build, manifest PUT.
+fn prepare<S: Store>(
+    store: &mut S,
+    base: Option<&Base>,
+    request: Commit,
+    known: &mut KnownOurs,
+    stop: &mut dyn FnMut() -> bool,
+) -> Result<Prepared, Failure> {
     let Commit {
         header,
         mut changes,
@@ -420,15 +468,43 @@ pub fn commit_known<S: Store>(
     } = request;
     let key = current_key(&header.owner);
     let updated_at = header.captured_at.clone();
-    upload_pieces(store, uploads, &mut changes)?;
+    upload_pieces(store, uploads, &mut changes, stop)?;
     let built =
         build(base.map(|b| (&b.position, &b.state)), header, changes).map_err(Failure::Invalid)?;
     let ours = built.hash;
     known.insert(ours, built.clone());
+    if stop() {
+        return Err(Failure::Stopped);
+    }
     put_document(store, &manifest_key(&ours), built.bytes.clone())?;
     let pointer = Current::new(ours, built.position.seq, updated_at)
         .to_bytes()
         .map_err(Failure::Invalid)?;
+    if stop() {
+        return Err(Failure::Stopped);
+    }
+    Ok(Prepared {
+        key,
+        built,
+        pointer,
+    })
+}
+
+/// The publish part: `current.json` write, verification and rebase retries. It has no stop
+/// argument, so a stop cannot land between the write and its verification.
+fn publish<S: Store>(
+    store: &mut S,
+    base: Option<&Base>,
+    ready: Prepared,
+    known: &mut KnownOurs,
+    pause: &mut dyn FnMut(u32),
+) -> Result<CommitEnd, Failure> {
+    let Prepared {
+        key,
+        built,
+        pointer,
+    } = ready;
+    let ours = built.hash;
     let previous = base.map(|b| b.position.manifest);
     let mut fence = base.map(|b| b.etag.clone());
     let mut named = previous;

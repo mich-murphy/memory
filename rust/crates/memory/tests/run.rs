@@ -1,113 +1,41 @@
-//! The run loop with a scripted waiting primitive: no time, no signals, no threads.
+//! `memory::run`: exit codes, the startup delay, the simulation timing and the signal source.
 use memory::run::{
-    Failed, Outcome, STARTUP_MAX, STARTUP_MIN, Timing, Waited, draw_from, parse_sim_timing,
-    run_loop, startup_delay,
+    Outcome, STARTUP_MAX, STARTUP_MIN, SignalSource, Timing, draw_from, parse_sim_timing,
+    startup_delay,
 };
-use std::cell::RefCell;
-use std::time::Duration;
+use memory::watch::{FsWatcher, Received};
+use std::time::{Duration, Instant};
 
-const TIMING: Timing = Timing {
-    startup: Duration::from_secs(7),
-    interval: Duration::from_secs(900),
-};
-
-#[derive(Debug, PartialEq, Eq)]
-enum Event {
-    Wait(Duration),
-    Round(u32),
-    Shutdown,
+fn e<E: std::fmt::Debug>(err: E) -> String {
+    format!("{err:?}")
 }
 
-/// Run the loop with scripted waits and round results; return the outcome and the event log.
-fn script(
-    waits: &[Waited],
-    round_fails_at: Option<u32>,
-    shutdown_ok: bool,
-) -> (Outcome, Vec<Event>) {
-    let log = RefCell::new(Vec::new());
-    let mut waits = waits.iter().copied();
-    let outcome = run_loop(
-        TIMING,
-        0_u32,
-        |up_to| {
-            log.borrow_mut().push(Event::Wait(up_to));
-            waits.next().unwrap_or(Waited::Failed)
-        },
-        |count| {
-            *count += 1;
-            log.borrow_mut().push(Event::Round(*count));
-            if Some(*count) == round_fails_at {
-                Err(Failed)
-            } else {
-                Ok(())
-            }
-        },
-        |_| {
-            log.borrow_mut().push(Event::Shutdown);
-            if shutdown_ok { Ok(()) } else { Err(Failed) }
-        },
+/// The daemon installs its handlers before it takes the lock and starts the forwarding thread
+/// only once the watcher exists. A signal raised in between is kept and forwarded.
+#[test]
+fn a_signal_raised_before_the_forwarding_thread_starts_is_forwarded() -> Result<(), String> {
+    let source = SignalSource::install().map_err(e)?;
+    signal_hook::low_level::raise(signal_hook::consts::SIGTERM).map_err(e)?;
+    let watcher = FsWatcher::new(&[]).map_err(e)?;
+    let flag = watcher.stop_flag();
+    assert!(
+        !flag.requested(),
+        "nothing forwards before the thread starts"
     );
-    (outcome, log.into_inner())
-}
-
-#[test]
-fn elapsed_elapsed_stop_runs_two_rounds_then_shuts_down() {
-    let (outcome, log) = script(
-        &[Waited::Elapsed, Waited::Elapsed, Waited::Stop],
-        None,
-        true,
-    );
-    assert_eq!(outcome, Outcome::Stopped);
-    assert_eq!(outcome.exit_code(), 0);
-    assert_eq!(
-        log,
-        vec![
-            Event::Wait(TIMING.startup),
-            Event::Round(1),
-            Event::Wait(TIMING.interval),
-            Event::Round(2),
-            Event::Wait(TIMING.interval),
-            Event::Shutdown,
-        ]
-    );
-}
-
-#[test]
-fn stop_during_startup_wait_runs_no_round() {
-    let (outcome, log) = script(&[Waited::Stop], None, true);
-    assert_eq!(outcome, Outcome::Stopped);
-    assert_eq!(log, vec![Event::Wait(TIMING.startup), Event::Shutdown]);
-}
-
-#[test]
-fn round_error_exits_one_after_shutdown() {
-    let (outcome, log) = script(&[Waited::Elapsed, Waited::Elapsed], Some(1), true);
-    assert_eq!(outcome, Outcome::RoundFailed);
-    assert_eq!(outcome.exit_code(), 1);
-    assert_eq!(outcome.code(), Some("round_failed"));
-    assert_eq!(
-        log,
-        vec![
-            Event::Wait(TIMING.startup),
-            Event::Round(1),
-            Event::Shutdown
-        ]
-    );
-}
-
-#[test]
-fn failed_shutdown_after_stop_exits_one() {
-    let (outcome, _) = script(&[Waited::Stop], None, false);
-    assert_eq!(outcome, Outcome::ShutdownFailed);
-    assert_eq!(outcome.exit_code(), 1);
-}
-
-#[test]
-fn failed_wait_exits_one_and_never_zero() {
-    let (outcome, log) = script(&[Waited::Elapsed, Waited::Failed], None, true);
-    assert_eq!(outcome, Outcome::WaitFailed);
-    assert_eq!(outcome.exit_code(), 1);
-    assert_eq!(log.last(), Some(&Event::Shutdown));
+    source.forward_to(watcher.stop_handle()).map_err(e)?;
+    let start = Instant::now();
+    loop {
+        match watcher.recv_timeout(Duration::from_millis(50)) {
+            Received::Stop => break,
+            Received::Timeout => {}
+            other => return Err(format!("{other:?}")),
+        }
+        if start.elapsed() > Duration::from_secs(20) {
+            return Err("the signal was never forwarded".to_owned());
+        }
+    }
+    assert!(flag.requested());
+    Ok(())
 }
 
 #[test]
@@ -121,6 +49,7 @@ fn only_a_stop_gives_exit_zero() {
         assert!(outcome.code().is_some());
     }
     assert_eq!(Outcome::Stopped.code(), None);
+    assert_eq!(Outcome::Stopped.exit_code(), 0);
 }
 
 #[test]

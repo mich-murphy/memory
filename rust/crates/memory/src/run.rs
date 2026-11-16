@@ -1,19 +1,24 @@
-//! The run loop of `memory daemon` (DESIGN.md 10.3, 11.2, 11.5): wait out a startup delay, run
-//! one safety reconcile, then one every 15 minutes, until a stop is requested.
+//! Entry of `memory daemon` (DESIGN.md 10.3, 11.2, 11.5): the event loop of [`crate::driver`]
+//! over the real watcher and the real daemon, until a stop is requested.
 //!
-//! [`run_loop`] is generic over the thing it drives and over its waiting primitive, so a test
-//! scripts "elapsed, elapsed, stop" without time or signals. [`StopSignals`] is the production
-//! waiting primitive; [`main_entry`] wires it to the real daemon.
-use crate::assemble::start_from_config;
-use crate::clock::SystemClock;
+//! [`SignalSource`] holds the signal handlers from before the lock is taken until the watcher
+//! exists; [`main_entry`] wires everything.
+use crate::assemble::{Wired, start_wired};
 use crate::daemon::EXIT_CONFIG;
+use crate::driver::{Timings, drive};
 use crate::environment::Clock;
+use crate::watch::{FsWatcher, StopHandle};
+use crate::wired::{DaemonWork, WatchInputs};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use std::io::Write;
 use std::process::ExitCode;
-use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
+
+/// Most inputs the loop takes per turn.
+const BATCH: usize = 256;
+/// Period of the wake tick (DESIGN.md 10.3).
+const TICK: Duration = Duration::from_secs(60);
 
 const STARTUP_MIN_MS: u64 = 5_000;
 const STARTUP_MAX_MS: u64 = 60_000;
@@ -25,7 +30,7 @@ pub const STARTUP_MAX: Duration = Duration::from_millis(STARTUP_MAX_MS);
 /// The pause between safety reconciles (DESIGN.md 10.3).
 pub const RECONCILE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
-/// The two durations of the loop.
+/// The two durations of the loop that a simulation may replace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Timing {
     /// Wait before the first round.
@@ -50,17 +55,6 @@ pub const fn draw_from(monotonic_ns: u64, wall_ns: i128, pid: u32) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^ (z >> 31)
-}
-
-/// What a wait returned.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Waited {
-    /// The full time passed.
-    Elapsed,
-    /// A stop was requested.
-    Stop,
-    /// The waiting primitive broke; no stop can be seen any more.
-    Failed,
 }
 
 /// A step failed. Carries no detail by design: the process reports a closed code only.
@@ -102,86 +96,54 @@ impl Outcome {
     }
 }
 
-fn finish<D>(
-    daemon: D,
-    shutdown: impl FnOnce(D) -> Result<(), Failed>,
-    outcome: Outcome,
-) -> Outcome {
-    match (shutdown(daemon), outcome) {
-        (Err(Failed), Outcome::Stopped) => Outcome::ShutdownFailed,
-        _ => outcome,
-    }
-}
-
-/// Wait `timing.startup`, run `round`, then wait `timing.interval` and run it again, forever.
+/// SIGTERM and SIGINT, caught from the moment of installation.
 ///
-/// `wait(up_to)` returns [`Waited::Stop`] as soon as a stop is requested, so a stop ends any
-/// wait at once, and the stop is looked at before every round. A stop that arrives during a
-/// round is not seen until that round returns; the next wait then returns at once. On a stop
-/// `shutdown` runs and the outcome is [`Outcome::Stopped`]. A failed round or wait ends the
-/// loop too, after a best-effort `shutdown` whose result is ignored, so the index is still
-/// flushed. Only a requested stop can give exit code 0.
-pub fn run_loop<D>(
-    timing: Timing,
-    mut daemon: D,
-    mut wait: impl FnMut(Duration) -> Waited,
-    mut round: impl FnMut(&mut D) -> Result<(), Failed>,
-    shutdown: impl FnOnce(D) -> Result<(), Failed>,
-) -> Outcome {
-    let mut delay = timing.startup;
-    loop {
-        match wait(delay) {
-            Waited::Elapsed => {}
-            Waited::Stop => return finish(daemon, shutdown, Outcome::Stopped),
-            Waited::Failed => return finish(daemon, shutdown, Outcome::WaitFailed),
-        }
-        if round(&mut daemon).is_err() {
-            return finish(daemon, shutdown, Outcome::RoundFailed);
-        }
-        delay = timing.interval;
-    }
-}
-
-/// SIGTERM and SIGINT, delivered to a channel the loop blocks on with a timeout.
-///
-/// `signal-hook` writes each signal into a pipe from its async-signal-safe handler; a
-/// forwarding thread reads the pipe and sends on the channel. A signal that arrives before the
-/// loop first waits is queued, not lost. A second signal while stopping only queues another
-/// message that nobody reads: the process is not killed by it.
+/// `signal-hook` writes each signal into a self-pipe and a pending flag from its
+/// async-signal-safe handler. Both are kept by the [`Signals`] value, so a signal raised
+/// before [`SignalSource::forward_to`] starts iterating is not lost: `forever()` reads the
+/// pending state first (verified in signal-hook 0.4.6, `src/iterator/backend.rs`: the pipe is
+/// drained and the pending flags read only when iteration begins). A second signal while
+/// stopping only sets the flag again: the process is not killed by it.
 #[derive(Debug)]
-pub struct StopSignals {
-    receiver: mpsc::Receiver<()>,
+pub struct SignalSource {
+    signals: Signals,
 }
 
-impl StopSignals {
-    /// Install the handlers and start the forwarding thread.
+impl SignalSource {
+    /// Install the handlers.
     ///
     /// # Errors
-    /// The handlers or the thread could not be created.
-    pub fn register() -> std::io::Result<Self> {
-        let mut signals = Signals::new([SIGTERM, SIGINT])?;
-        let (sender, receiver) = mpsc::channel();
+    /// The handlers could not be created.
+    pub fn install() -> std::io::Result<Self> {
+        Ok(Self {
+            signals: Signals::new([SIGTERM, SIGINT])?,
+        })
+    }
+
+    /// Start the forwarding thread, which requests a stop through `handle` (flag first, then a
+    /// wake of the inbox) for each signal, including one raised since [`SignalSource::install`].
+    /// The thread owns the handle: if it ends without a signal, the handle drops and the inbox
+    /// reports a failed stop source ([`crate::watch::Received::Failed`]).
+    ///
+    /// # Errors
+    /// The thread could not be created.
+    pub fn forward_to(self, handle: StopHandle) -> std::io::Result<()> {
+        let mut signals = self.signals;
         std::thread::Builder::new()
             .name("stop-signals".to_owned())
             .spawn(move || {
                 for _ in signals.forever() {
-                    if sender.send(()).is_err() {
-                        break;
-                    }
+                    forward_signal(&handle);
                 }
             })?;
-        Ok(Self { receiver })
+        Ok(())
     }
+}
 
-    /// Wait up to `up_to` for a stop.
-    #[must_use]
-    pub fn wait(&self, up_to: Duration) -> Waited {
-        match self.receiver.recv_timeout(up_to) {
-            Ok(()) => Waited::Stop,
-            Err(RecvTimeoutError::Timeout) => Waited::Elapsed,
-            Err(RecvTimeoutError::Disconnected) => Waited::Failed,
-        }
-    }
+/// What the signal thread does for each signal: request a stop through the inbox handle.
+/// Separate from the operating-system source so a test can call it without raising a signal.
+pub fn forward_signal(handle: &StopHandle) {
+    handle.stop();
 }
 
 /// Environment variable that replaces the two durations. Exists only with the `sim` feature.
@@ -224,16 +186,18 @@ fn refuse(code: &str, exit: u8) -> ExitCode {
     ExitCode::from(exit)
 }
 
-/// Entry of `memory daemon`: register the stop signals, start from `config.toml` under the
-/// state root, run the loop, return the exit code.
+/// Entry of `memory daemon`: install the stop signals, start from `config.toml` under the
+/// state root, build the watcher, run the event loop, return the exit code.
 ///
-/// Signals are registered first, before the lock is taken, so a stop requested at any point
-/// after the lock file appears is queued and seen by the first wait. Every refusal and fatal
-/// error writes exactly one line, `memory: <closed code>`, to stderr (the last one: after the
-/// subscriber starts, [`crate::log`] lines may precede it); stdout stays empty.
+/// Order: signal handlers, the lock and state, the watcher over the configured roots and the
+/// hint directory, the forwarding thread, the log. Signals are installed before the lock, so a
+/// stop requested at any point after the lock file appears is kept and forwarded as soon as the
+/// thread starts. Every refusal and fatal error writes exactly one line, `memory: <closed
+/// code>`, to stderr (the last one: after the subscriber starts, [`crate::log`] lines may
+/// precede it); stdout stays empty.
 #[must_use]
 pub fn main_entry() -> ExitCode {
-    let Ok(signals) = StopSignals::register() else {
+    let Ok(signals) = SignalSource::install() else {
         return refuse("signals_unavailable", 1);
     };
     let timing_override = match timing_override() {
@@ -243,34 +207,45 @@ pub fn main_entry() -> ExitCode {
     let Some(root) = crate::state::default_root() else {
         return refuse("state_root_unresolved", 1);
     };
-    let daemon = match start_from_config(&root, &root.join("config.toml")) {
-        Ok(daemon) => daemon,
+    let Wired {
+        mut daemon,
+        roots,
+        window,
+        clock,
+    } = match start_wired(&root, &root.join("config.toml")) {
+        Ok(wired) => wired,
         Err(error) => return refuse(error.code(), error.exit_code()),
     };
+    let hints = daemon.root().join("hints");
+    let Ok(watcher) = FsWatcher::with_dir(&roots, &hints) else {
+        return refuse("watch_unavailable", 1);
+    };
+    let flag = watcher.stop_flag();
+    let probe = flag.clone();
+    daemon.set_stop(move || probe.requested());
+    if signals.forward_to(watcher.stop_handle()).is_err() {
+        return refuse("signals_unavailable", 1);
+    }
     // Only now: every startup refusal above stays the sole line on stderr.
     if crate::log::start().is_err() {
         return refuse("log_unavailable", 1);
     }
     crate::log::started();
     crate::log::state_loads(daemon.index_load(), daemon.status_load());
-    let clock = SystemClock::new();
     let draw = draw_from(clock.monotonic_ns(), clock.wall_ns(), std::process::id());
     let timing = timing_override.unwrap_or(Timing {
         startup: startup_delay(draw),
         interval: RECONCILE_INTERVAL,
     });
-    let outcome = run_loop(
-        timing,
-        daemon,
-        |up_to| signals.wait(up_to),
-        |daemon| {
-            daemon
-                .reconcile_once()
-                .map(|report| crate::log::round(&report))
-                .map_err(|_| Failed)
-        },
-        |daemon| daemon.shutdown().map_err(|_| Failed),
-    );
+    let timings = Timings {
+        startup: timing.startup,
+        tick: TICK,
+        interval: timing.interval,
+        batch: BATCH,
+    };
+    let mut inputs = WatchInputs::new(watcher, flag);
+    let mut work = DaemonWork::new(daemon, &hints);
+    let outcome = drive(timings, window, &clock, &mut inputs, &mut work);
     if let Some(code) = outcome.code() {
         return refuse(code, outcome.exit_code());
     }

@@ -18,10 +18,10 @@ use crate::capture::Source;
 use crate::environment::{FileSystem, Stat};
 use crate::realfs::{RealFs, RealFsError, WalkLimits, walk};
 use memory_core::domain::{Owner, SourceKind};
-use memory_core::locator::{Located, RootRelativePath, Roots};
+use memory_core::locator::{Located, RootRelativePath, Roots, locate};
 use memory_core::privacy::{Profile, ResolvedSourceFacts};
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::ErrorKind;
 use std::ops::Range;
@@ -277,17 +277,62 @@ pub struct WalkSources {
     fs: SharedFs,
     handles: BTreeMap<PathBuf, u64>,
     counts: Counts,
+    /// Canonical spelling of each root (FSEvents reports canonical paths); `None` until the
+    /// root exists.
+    canon: Vec<Option<PathBuf>>,
+    /// Per owner, the files of the last walk and the paths noted since, as (root index, path
+    /// spelled under the configured root).
+    known: HashMap<Owner, BTreeSet<(usize, PathBuf)>>,
+}
+
+/// Root-relative path of `rest`, or `None` for a non-UTF-8 or non-plain component.
+fn rel_of(rest: &Path) -> Option<RootRelativePath> {
+    let mut parts = Vec::new();
+    for c in rest.components() {
+        match c {
+            std::path::Component::Normal(n) => parts.push(n.to_str()?),
+            _ => return None,
+        }
+    }
+    RootRelativePath::parse(&parts.join("/")).ok()
+}
+
+/// What the walk would yield: every directory on the way is a real directory (the root itself
+/// may be a link) and the last component is a regular file, never a link. One `lstat` per
+/// component.
+fn plain_file(root: &Path, rel: &RootRelativePath) -> bool {
+    let mut current = root.to_path_buf();
+    let last = rel.components().len().saturating_sub(1);
+    for (k, part) in rel.components().iter().enumerate() {
+        current.push(part);
+        let Ok(meta) = fs::symlink_metadata(&current) else {
+            return false;
+        };
+        if k == last {
+            return meta.file_type().is_file();
+        }
+        if !meta.file_type().is_dir() {
+            return false;
+        }
+    }
+    false
 }
 
 impl WalkSources {
     /// Enumerate `roots`, registering paths in `fs`.
     pub fn new(roots: Vec<(PathBuf, Roots)>, limits: WalkLimits, fs: SharedFs) -> Self {
+        let canon = roots
+            .iter()
+            .map(|(d, _)| fs::canonicalize(d).ok())
+            .collect();
         Self {
             roots,
             limits,
             fs,
             handles: BTreeMap::new(),
             counts: Counts::default(),
+            canon,
+            known: HashMap::new(),
         }
     }
     /// Counts of the last enumeration.
@@ -299,6 +344,11 @@ impl WalkSources {
 impl crate::daemon::Sources for WalkSources {
     fn enumerate(&mut self) -> Vec<(Owner, Source)> {
         let mut counts = Counts::default();
+        for ((dir, _), canon) in self.roots.iter().zip(self.canon.iter_mut()) {
+            if canon.is_none() {
+                *canon = fs::canonicalize(dir).ok();
+            }
+        }
         let Ok(mut fs) = self.fs.0.try_borrow_mut() else {
             counts.busy = true;
             self.counts = counts;
@@ -309,7 +359,8 @@ impl crate::daemon::Sources for WalkSources {
         counts.unreadable = found.unreadable;
         counts.truncated = found.truncated;
         let mut out = Vec::new();
-        for (dir, _) in &self.roots {
+        self.known.clear();
+        for (index, (dir, _)) in self.roots.iter().enumerate() {
             for (path, rel, located) in found.files.iter().filter(|f| f.0.starts_with(dir)) {
                 match located {
                     Located::UnknownKind => counts.unknown_kind += 1,
@@ -321,11 +372,70 @@ impl crate::daemon::Sources for WalkSources {
                 {
                     counts.yielded += 1;
                     counts.unresolved += u64::from(!source.facts.path_resolved);
+                    self.known
+                        .entry(owner.clone())
+                        .or_default()
+                        .insert((index, path.clone()));
                     out.push((owner, source));
                 }
             }
         }
         self.counts = counts;
+        out
+    }
+
+    fn note(&mut self, path: &Path) -> Option<Owner> {
+        for (index, (dir, roots)) in self.roots.iter().enumerate() {
+            let canon = self.canon.get(index).and_then(Option::as_ref);
+            let Some(rel) = [Some(dir), canon]
+                .into_iter()
+                .flatten()
+                .find_map(|prefix| path.strip_prefix(prefix).ok())
+                .and_then(rel_of)
+            else {
+                continue;
+            };
+            let Located::Source { owner, .. } = locate(&rel, roots) else {
+                continue;
+            };
+            let spelled = dir.join(rel.components().join("/"));
+            self.known
+                .entry(owner.clone())
+                .or_default()
+                .insert((index, spelled));
+            return Some(owner);
+        }
+        None
+    }
+
+    fn of(&mut self, owner: &Owner) -> Vec<Source> {
+        let Some(paths) = self.known.get(owner) else {
+            return Vec::new();
+        };
+        let Ok(mut fs) = self.fs.0.try_borrow_mut() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for (index, path) in paths {
+            let Some((dir, roots)) = self.roots.get(*index) else {
+                continue;
+            };
+            let Some(rel) = path.strip_prefix(dir).ok().and_then(rel_of) else {
+                continue;
+            };
+            if rel.components().len() > self.limits.max_depth.saturating_add(1)
+                || !plain_file(dir, &rel)
+            {
+                continue;
+            }
+            let located = locate(&rel, roots);
+            if let Some((found, source)) =
+                to_source(&mut fs, &mut self.handles, path, dir, &rel, &located)
+                && found == *owner
+            {
+                out.push(source);
+            }
+        }
         out
     }
 }
