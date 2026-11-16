@@ -408,6 +408,19 @@ fn dir() -> Step {
     })
 }
 
+fn hint_subdir() -> Step {
+    Step::In(Input::DirCreated {
+        path: PathBuf::from("/h/sub"),
+    })
+}
+
+#[test]
+fn a_directory_created_in_the_hint_directory_is_a_hint_change_and_no_reconcile() -> R {
+    let (_, log) = go_plain(300, vec![(100, hint_subdir())])?;
+    assert_eq!(log, vec![start(7), hints(100), shut(300)]);
+    Ok(())
+}
+
 #[test]
 fn a_session_end_hint_is_captured_in_the_same_turn() -> R {
     let steps = vec![(100, hint_dir())];

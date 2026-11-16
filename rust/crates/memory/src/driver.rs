@@ -14,6 +14,11 @@
 //! | tick | `t0 + k * tick` | [`Input::Tick`] fed to the scheduler (`Wake` on a gap) |
 //! | reconcile | end of the last reconcile + `interval` | `reconcile(Timer)` |
 //!
+//! A directory event ([`Input::DirCreated`]) asks for a reconcile ([`Cause::Dir`]), except one
+//! inside the hint directory: that is a hint-directory change (the daemon creates the directory
+//! just before the watcher starts, and the platform reports it), so it only marks the hints
+//! dirty like a changed file there.
+//!
 //! One turn: stop; tick; captures; retries; the reconcile (flag or timer, one reconcile
 //! however many causes, the first set is reported); then wait for the earliest wake and drain
 //! up to a batch of inputs. A stop is looked at between every two units of work.
@@ -244,6 +249,10 @@ impl<I: Inputs, W: Work, C: Clock> Driver<'_, I, W, C> {
                     self.sched.handle(input, now, &mut |_| None)
                 }
             },
+            Input::DirCreated { path } if self.work.classify(&path) == Route::Hints => {
+                self.hints_dirty = true;
+                Vec::new()
+            }
             other => self.sched.handle(other, now, &mut |_| None),
         };
         self.apply(actions, cause);
