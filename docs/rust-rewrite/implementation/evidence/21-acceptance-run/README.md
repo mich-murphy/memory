@@ -229,3 +229,30 @@ same `notify` 8.2.0 that printed event kinds and paths with every component unde
   and its sources reconciled, so this is a gap between the design and the code, not a design
   choice. Wanted (brief 31): read only the new directory, and do nothing for a directory that is
   gone or that no locator layout can hold a source in.
+
+### Check 2 (recorded 2026-11-17 at 20:10Z)
+
+Commands: `checks.log`, `launchctl print`, `ps`, the daemon log (counts of `round` causes and
+non-zero failure keys), `status.json` and the hint day file (agent and event only), hourly maxima
+of `footprint.tsv`, and the names and birth times of transcript files.
+
+- **Second `memory check`** (19:46:11Z to 20:08:57Z, 22.8 minutes, exit 0): `owners=1076
+  sources=6033 match=6033 behind=0 unsettled=0 mismatch=0 uncaptured=0 withheld=0 remote_only=0
+  parked=0 unknown_kind=19073 unknown_owner=0 deferred_snapshot=3123 unreadable=0 store_error=0
+  status=loaded`. Two consecutive clean checks.
+- **Daemon.** Same process since the start (one launchd run, never exited); 702 rounds (`start` 1,
+  `timer` 30, `dir` 671); no round after the first has `parked` or `audit_mismatched` above 0.
+  `status.json` at 20:02:55Z: `parked` empty, failures `offline=9` only, audit `matched=6046
+  mismatched=0 ineligible=25`. The `offline` failures came in three bursts (the first round,
+  12:31Z, 15:31Z); at 15:31Z this host also could not resolve `api.github.com` for about a minute.
+  Each failed owner landed within two minutes.
+- **Hints.** The hint day file holds Pi records only: `session_start` 7, `turn_end` 7,
+  `session_end` 6. Since the start no Claude or Codex transcript was created (0 of each), so Claude
+  and Codex hint delivery is still unverified.
+- **Footprint.** Peak unchanged at 1,254 MB (07:07Z). Hourly maxima of the current footprint since
+  08h: 128 to 341 MB.
+- The brief 31 build (streaming, `2e5f193`) is on `main`; this run keeps the `a28bfa4` binary to
+  its end.
+- Next checks: the loop sleeps 12 h after each check ends, so about 08:09Z and 20:35Z on
+  2026-11-18 and about 09:00Z on 2026-11-19. The run can end after the first clean check that ends
+  after 2026-11-19T07:46Z.
