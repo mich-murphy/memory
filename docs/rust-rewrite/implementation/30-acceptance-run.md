@@ -170,3 +170,11 @@ on the intended assertion, `scripts/gates.sh` on the combined tip.
 ## Progress ledger
 
 - 2026-11-17: brief written on `90cdbdf` with the operator's answers 4 to 10.
+- 2026-11-17: PAUSE accepted locally as `f0cb744`, WALK as `80e2943`, CHECK as `09e763d`
+  (seven checks 0 on each combined tip; 704 passed on `09e763d`). Full gates on `09e763d`: all 13
+  sub-gates 0, 500 cases, seed 3302469678, coverage 96.97 %. Parent mutants, survivors and their
+  fixes: [evidence 21](evidence/21-acceptance-run/). Changes made at review: CHECK tests live in
+  `tests/s3_store/check.rs` (a module of the `s3_store` binary, which already holds the S3 fake),
+  not `tests/check.rs`; `memory check` also exits 64 on a usage error; the uncaptured reason code
+  is `no_live_entry`; a missing `status.json` reports `status=missing` and does not fail the
+  check (the run reads it only after the daemon has written one). Next: push the stack, then RUN.

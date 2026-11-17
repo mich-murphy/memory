@@ -102,6 +102,11 @@ from `main` alone.
   and nothing fills the `ClaudeSessionIndex`, so Claude `debug` files never get an owner. Its
   increments PAUSE, WALK, CHECK and RUN supersede the list below, which is kept as the plan it
   was written from.
+- 2026-11-17: PAUSE, WALK and CHECK are accepted locally as `09e763d` (8 commits over
+  `3d46e18`; full gates all 13 sub-gates 0, 500 cases, seed 3302469678, coverage 96.97 %);
+  record in [evidence 21](rust-rewrite/implementation/evidence/21-acceptance-run/). Next: push
+  that stack, then RUN (brief 30): templates, release binary, state root, hooks, launchd agent,
+  `memory check` twice a day, the peak-memory measurement.
 - Next actions, in order (written before brief 30). Write brief 30 first and scope it with a read-only
   planner whose claims the parent rechecks against the code, as for briefs 28 and 29.
   1. Build the commit pauses of decision 3. The brief must say which waits they are (the
