@@ -52,6 +52,23 @@ impl Rig {
         rig.write_config(url, prefix)?;
         Ok(rig)
     }
+    /// Add a further `[[roots]]` entry (codex or pi) beside the claude root; returns its
+    /// directory. Call before the daemon starts.
+    pub(super) fn add_root(&self, agent: &str) -> R<PathBuf> {
+        let path = self.dir.join(agent);
+        fs::create_dir_all(&path).map_err(e)?;
+        let mut cfg = fs::OpenOptions::new()
+            .append(true)
+            .open(&self.cfg)
+            .map_err(e)?;
+        write!(
+            cfg,
+            "[[roots]]\nagent = \"{agent}\"\npath = \"{}\"\n",
+            path.display()
+        )
+        .map_err(e)?;
+        Ok(path)
+    }
     fn write_token(&self, body: &str, mode: u32) -> R {
         fs::write(&self.token, body).map_err(e)?;
         fs::set_permissions(&self.token, fs::Permissions::from_mode(mode)).map_err(e)
