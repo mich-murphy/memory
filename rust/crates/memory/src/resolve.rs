@@ -450,16 +450,9 @@ impl crate::daemon::Sources for WalkSources {
             {
                 continue;
             }
+            // No snapshot row reaches `known`: `enumerate` and `note` both leave them out, and a
+            // path's class depends on its pattern alone, not on the session index.
             let located = locate(&rel, roots);
-            if matches!(
-                located,
-                Located::Source {
-                    class: SourceClass::Snapshot,
-                    ..
-                }
-            ) {
-                continue;
-            }
             if let Some((found, source)) =
                 to_source(&mut fs, &mut self.handles, path, dir, &rel, &located)
                 && found == *owner

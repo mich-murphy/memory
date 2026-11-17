@@ -885,6 +885,22 @@ fn a_debug_file_takes_the_owner_of_its_transcript() -> R {
     Ok(())
 }
 
+/// The walk never follows a link, so a symlinked `projects/` must not teach the session index
+/// either: the debug file stays unowned and nothing under the link is yielded.
+#[test]
+fn a_symlinked_projects_dir_does_not_fill_the_session_index() -> R {
+    let t = Tmp::new()?;
+    t.write(&format!("elsewhere/-p/{U1}.jsonl"), b"{}\n")?;
+    let debug = t.write(&format!("claude/debug/{U1}.txt"), b"log\n")?;
+    symlink(t.0.join("elsewhere"), t.root().join("projects"))?;
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    assert!(w.enumerate().is_empty());
+    let c = w.counts();
+    assert_eq!((c.yielded, c.unknown_owner, c.symlinks), (0, 1, 1));
+    assert_eq!(w.note(&debug), None);
+    Ok(())
+}
+
 #[test]
 fn a_uuid_under_two_slugs_leaves_its_debug_file_unowned() -> R {
     let t = Tmp::new()?;
