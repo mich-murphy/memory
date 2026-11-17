@@ -185,3 +185,11 @@ on the intended assertion, `scripts/gates.sh` on the combined tip.
   the first reconcile takes hours at this host's upload rate and logs nothing until it ends.
   Next: after the first `round` line, read `checks.log`; two consecutive clean days end the run;
   then teardown, prefix deletion verified empty, and decision 2 on streaming.
+- 2026-11-17 09:50Z (day 0): first round ended 07:07:10Z (1,074 landed, 1 offline then landed);
+  first `memory check` clean (6,026 of 6,026 sources match; mismatch, uncaptured, parked 0). The
+  19,015 `unknown_kind` files hold no transcript (census). Peak memory 1,254 MB, during the audit
+  round right after the start round. Operator: Codex hooks trusted; **decision 2: streaming
+  capture is required before the first production write** (DESIGN D45). Open findings: bursts of
+  `cause=dir` full reconciles (one every 3 s at 09:40Z); hint delivery unverified until a new
+  session starts. Day 1 counts from the first clean check (07:46Z): the run can end at the
+  earliest after the check due about 2026-11-19T07:46Z if every check until then is clean.

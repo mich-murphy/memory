@@ -56,16 +56,37 @@ the parent keeps its own context, verifies every claim and decides acceptance.
 
 **State on 2026-11-17 and next session (current).** Written so that a new session can start
 from `main` alone.
-- Where `main` is: `fdc43c2` plus this record. `fdc43c2` is stack #124 (brief 29, the event
-  loop, merged as `f15f651`) and its close-out record (PR #125). Every Rust branch through
-  brief 29 is merged; no Rust PR is open and no Rust work exists outside `main`. Dependabot
-  PR #115 (Go modules) is open and was not touched.
+- **Current (2026-11-17, 09:50Z): the 2-day acceptance run `20261117-a28bfa4` is running** on
+  this Mac (brief 30, increment RUN). `main` holds brief 30's code (stack #132, merged as
+  `a28bfa4`) and the run records (PR #133 and the day-0 record after it). No Rust PR is open
+  and no Rust work exists outside `main`; Dependabot PR #115 is untouched. The run's state,
+  teardown and tools are in `~/.local/state/memory-acceptance-run/README.md`; its record is
+  [evidence 21](rust-rewrite/implementation/evidence/21-acceptance-run/) and the ledger of
+  [brief 30](rust-rewrite/implementation/30-acceptance-run.md). Day 0: first round and first
+  `memory check` clean; peak memory 1,254 MB. The operator trusted the Codex hooks and took
+  decision 2: **streaming capture is required before the first production write** (DESIGN
+  D45, section 18). What the next session does, in order:
+  1. Read `checks.log` (a check every 12 h; abort on any `mismatch` or an owner parked as
+     `Foreign`), the daemon log and `status.json`; confirm the agent, sampler, `caffeinate` and
+     check loop are alive. Confirm a hint line appears once a new Claude, Codex or Pi session
+     has started (`hints/` was empty on day 0 because none had).
+  2. End the run after two consecutive clean days (earliest about 2026-11-19T07:46Z), or on an
+     abort trigger: teardown per the run README (agent, hooks restored, Pi extension removed,
+     sampler, `caffeinate`, check loop), delete the prefix and list it empty (A2), record the
+     result and the footprint series in evidence 21.
+  3. Then brief 31: streaming capture and audit (D45) measured against 128 MB, the
+     directory-event reconcile storm, progress logging inside a long round, and the open ARM
+     CI timeout (no nextest `slow-timeout`); after that `memory export` and the consumer gate
+     (answer 9), lifting the empty-prefix refusal, and cutover (DESIGN 18).
+- Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
+  event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
   window, hints, a full reconcile at start, every 15 minutes and on lost events, retries, a
   stop inside a round), `memory restore <owner> --out DIR` and `memory hook <agent>`. Details
   and limits are in the "Session 2026-11-16, event loop" block below and in
   [evidence 20](rust-rewrite/implementation/evidence/20-event-loop/).
-- What has not happened: no acceptance run on real session data, no R2 write since the
+- What had not happened before brief 30 (the run above changed the first four): no acceptance
+  run on real session data, no R2 write since the
   skeleton run of 2026-11-12, no installed Rust hook or service, no host change, no cutover.
   The daemon refuses an empty key prefix (`config_prefix_required`), so it cannot write to
   the production root of the bucket. The Go hooks still fill the local Go spool (A0).
@@ -75,9 +96,10 @@ from `main` alone.
      `rust-acceptance/<run-id>/`. It is the first upload of real transcripts by the Rust path.
   2. Streaming capture: measure peak resident memory in that run first (target 128 MB,
      A10.4; a capture holds its whole range in memory), then decide whether streaming is
-     required before the first production write.
+     required before the first production write. Taken later on 2026-11-17 after the
+     measured 1,254 MB peak: streaming is required (D45).
   3. Commit pauses: full jitter with ceilings of 1 s, 2 s and 4 s. DESIGN 7.4 gives no
-     lengths and production pauses are zero today. Not built yet.
+     lengths and production pauses are zero today. Built in brief 30 (PAUSE, D44).
 
   Operator answers later on 2026-11-17, in reply to the review that opened brief 30:
   4. The daemon runs for the two days as a separate launchd user agent (label
@@ -117,6 +139,9 @@ from `main` alone.
   ends. Codex runs a new hook only after it is trusted in Codex's `/hooks`. Next: read
   `checks.log` once the first round has ended; two consecutive clean days end the run; teardown,
   prefix deletion verified empty; then decision 2 (streaming).
+- 2026-11-17 09:50Z, day 0 (superseded "Next" above; the current plan is the first item of this
+  block): first round ended 07:07:10Z; first check clean; Codex hooks trusted by the operator;
+  peak 1,254 MB; decision 2 taken (streaming required, D45). Details in evidence 21.
 - Next actions, in order (written before brief 30). Write brief 30 first and scope it with a read-only
   planner whose claims the parent rechecks against the code, as for briefs 28 and 29.
   1. Build the commit pauses of decision 3. The brief must say which waits they are (the
@@ -145,7 +170,13 @@ from `main` alone.
   stopped); a hint day file whose launch record never commits, or has no owner, is kept; a
   round does not end early when the network is down; the wake stagger of DESIGN 7.1 is not
   built and is dropped (D43, folded 2026-11-17); no gate runs rustdoc. Not run: 2,000 property
-  cases, `cargo mutants`, a Linux stress run of the real-binary tests.
+  cases, `cargo mutants`, a Linux stress run of the real-binary tests. Added 2026-11-17: a
+  capture and an audit read hold a source's whole range in memory (peak 1,254 MB; streaming
+  required, D45); a burst of directory events runs back-to-back full reconciles; a full round
+  logs nothing until it ends; each PUT opens a new TLS connection; snapshot and config kinds
+  are withheld (counted as `deferred_snapshot`) until slice 3.
+- Local only, after brief 30: the six worktrees in `memory-wt/` listed below are still there
+  (all merged, removable); the brief 30 worktrees were removed.
 - How the last four stacks were delivered (operator instruction of 2026-11-12: the
   coordinator skill, Sonnet subagents, the parent keeps its own context and decides
   acceptance):

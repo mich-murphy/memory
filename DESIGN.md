@@ -689,6 +689,12 @@ random buffers, which does not settle it; the settling measurement is the peak R
 daemon with 8 concurrent 8 MiB incompressible PUTs and a 30k-entry index (A10.4). The reviewed
 design's whole-object buffers allowed 368 MB. [review, 04 M5]
 
+Measured 2026-11-17 in the 2-day acceptance run on this Mac (brief 30, evidence 21): the
+built daemon's `phys_footprint_peak` reached 1,254 MB, and 431 MB during the first full
+reconcile. A capture and an audit each hold a source's whole range in memory, and local files
+reach 98 MB. The operator decided on 2026-11-17 that streaming capture is required before the
+first production write (D45, section 18). [measured 2026-11-17]
+
 ### 7.4 Commit protocol
 
 1. PUT all pieces (section 7.3). A 412 is success.
@@ -1410,7 +1416,9 @@ simplified because no R2 data is kept. [decided 2026-11-07]
 No production write happens before all of these exist (A12.2, A13.2): zstd encoding of pieces,
 so the `zstd-3` label and the `.zst` key suffix are true (the schema gains no `identity`
 encoding); the audit of 11.4, with a property that covers a rewrite between the windows; hint
-retention (7.6, 9.1); and `tracing` to stderr as sections 11.5 and 13 specify.
+retention (7.6, 9.1); and `tracing` to stderr as sections 11.5 and 13 specify. Added
+2026-11-17 (D45): streaming capture, so that neither a capture nor an audit read holds a
+source's whole range in memory, measured against the 128 MB target (section 7.4, memory bound).
 
 1. No production bucket is created. Both hosts use the existing `agent-sessions` bucket (A2).
 2. Install `memory` and its hooks on one host. The Go capture daemons and the
@@ -1502,6 +1510,7 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D42 | 2026-11-12: the baseline hash pin is removed; amendments A0 to A13 are folded into this document; DESIGN.md and AGENTS.md are edited directly | A14.3; 0 |
 | D43 | 2026-11-17: no wake stagger; a wake gap sets the reconcile flag only, because captures are serial | brief 29; 7.1 |
 | D44 | 2026-11-17: commit pauses are full jitter, `uniform(0, ceiling)`, ceilings 1 s, 2 s, 4 s, then 4 s; a stop does not cut a pause inside the publish part | brief 30; 7.4 |
+| D45 | 2026-11-17: streaming capture is required before the first production write (measured peak 1,254 MB against 128 MB) | brief 30, evidence 21; 7.4, 18 |
 
 Finding-to-section map for the challenge review:
 

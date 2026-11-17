@@ -58,10 +58,15 @@ mechanisms do not override DESIGN.md for Rust or the retained contract goals:
 - [Rust parent review](rust-rewrite/implementation/02-parent-review.md) — source-bound
   results, corrections, acceptance boundary and remaining work. Reports 00–05 in
   that directory retain worker-specific evidence, not independent release approvals.
-- [Latest record: the event loop](rust-rewrite/implementation/evidence/20-event-loop/) and
-  [brief 29](rust-rewrite/implementation/29-event-loop.md): what the binary does on `main`,
-  the gates on `969d6fc` (all 13 sub-gates, 500 cases, 97.40 % line coverage), the hosted
-  runs and the known limits. Evidence 15 to 19 in the same directory are the steps before it.
+- [Latest record: the acceptance run](rust-rewrite/implementation/evidence/21-acceptance-run/)
+  and [brief 30](rust-rewrite/implementation/30-acceptance-run.md): commit pauses, slice-2
+  walk scope, `memory check`, the gates on `09e763d` (all 13 sub-gates, 500 cases, 96.97 % line
+  coverage), and the 2-day acceptance run `20261117-a28bfa4` (running since 2026-11-17; day 0
+  clean; peak memory 1,254 MB, so streaming is required, D45).
+- [The event loop](rust-rewrite/implementation/evidence/20-event-loop/) and
+  [brief 29](rust-rewrite/implementation/29-event-loop.md): the gates on `969d6fc` (all 13
+  sub-gates, 500 cases, 97.40 % line coverage), the hosted runs and the known limits.
+  Evidence 15 to 19 in the same directory are the steps before it.
 - [Integrated run of 2026-11-10, review and fix round](rust-rewrite/implementation/evidence/13-review-fix-round/) —
   `d8e80a6`, all 13 subgates, 391/391 nextest, 2,000-case properties, seed 730213, production
   mutation checks killed, 97.03% coverage against the fixed 80% backstop (A9). Its
