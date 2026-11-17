@@ -865,3 +865,114 @@ fn a_412_on_a_streamed_piece_adopts_the_stored_encoding_into_the_manifest() -> R
     );
     Ok(())
 }
+
+// ------------------------------------------------------------------ one piece alive, read lengths
+
+/// Takes each body and drops it at once, so at most the body being handed over is alive.
+#[derive(Default)]
+struct DropSink {
+    lens: Vec<usize>,
+}
+impl PieceSink for DropSink {
+    fn put(&mut self, _key: &str, body: Published) -> Result<(), Halted> {
+        self.lens.push(body.as_ref().len());
+        drop(body);
+        Ok(())
+    }
+    fn halted(&self) -> bool {
+        false
+    }
+}
+
+#[test]
+fn each_piece_is_handed_over_before_the_next_is_read() -> R {
+    let mut side = Side::new();
+    side.fs.inner.set(1, &data(3, 100, 0));
+    let (ctx, empty) = (policy(), OwnerState::default());
+    let env = Env {
+        header: header()?,
+        context: &ctx,
+        now_ns: 10_000_000_000,
+        piece_len: 8,
+    };
+    let mut drop_sink = DropSink::default();
+    let mut tee = Tee {
+        inner: &mut drop_sink,
+        log: side.fs.log.clone(),
+    };
+    capture_into(
+        &mut side.fs,
+        &[source(1)?],
+        &side.locals,
+        &empty,
+        &env,
+        &mut tee,
+    );
+    assert_eq!(drop_sink.lens.len(), 13);
+    assert!(
+        drop_sink.lens.iter().all(|n| *n <= 64),
+        "an encoded piece is bounded"
+    );
+    let log = side.fs.log.borrow().clone();
+    // Strict alternation: read k, put k, read k+1, put k+1 ...
+    assert_eq!(log.len(), 26, "{log:?}");
+    for pair in log.chunks(2) {
+        assert!(
+            matches!(pair, [Ev::Read(_, r), Ev::Put(_)] if r.end - r.start <= 8),
+            "{pair:?}"
+        );
+    }
+    Ok(())
+}
+
+fn max_read(out: &Out) -> u64 {
+    out.log
+        .iter()
+        .filter_map(|ev| match ev {
+            Ev::Read(_, r) => Some(r.end - r.start),
+            Ev::Put(_) => None,
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+#[test]
+fn the_audit_read_and_the_adopt_read_are_at_most_one_piece_long() -> R {
+    let file = data(5, 1000, 0);
+    let src = [source(1)?];
+    // Audit: a second capture of an unchanged file whose audit is due.
+    let mut side = Side::new();
+    side.fs.inner.set(1, &file);
+    run_step(&mut side, true, 10_000_000_000, 8, &src)?;
+    let audited = run_step(&mut side, true, 20_000_000_000, 8, &src)?;
+    assert_eq!(audited.audit.matched, 1, "{:?}", audited.audit);
+    assert_eq!(max_read(&audited), 8);
+    assert!(
+        audited
+            .log
+            .iter()
+            .filter(|ev| matches!(ev, Ev::Read(..)))
+            .count()
+            >= 125
+    );
+    // Adopt: the local index is lost and the file has grown.
+    let mut side = Side::new();
+    side.fs.inner.set(1, &file);
+    run_step(&mut side, true, 10_000_000_000, 8, &src)?;
+    side.locals.clear();
+    side.fs
+        .inner
+        .set(1, &[file.clone(), data(5, 40, 9)].concat());
+    let adopted = run_step(&mut side, true, 20_000_000_000, 8, &src)?;
+    assert_eq!(adopted.outcomes, [SourceOutcome::Planned]);
+    assert_eq!(max_read(&adopted), 8);
+    assert!(
+        adopted
+            .log
+            .iter()
+            .filter(|ev| matches!(ev, Ev::Put(_)))
+            .count()
+            == 5
+    );
+    Ok(())
+}
