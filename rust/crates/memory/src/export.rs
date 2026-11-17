@@ -42,6 +42,9 @@ pub enum Failure {
     /// The stored chain is corrupt.
     #[error("chain_corrupt")]
     ChainCorrupt,
+    /// The owner is a shared owner; the envelope needs a session id.
+    #[error("owner_shared")]
+    Shared,
     /// The export library refused; its code.
     #[error("{0}")]
     Export(&'static str),
@@ -57,7 +60,7 @@ impl Failure {
         match self {
             Self::Absent => EXIT_ABSENT,
             Self::TooLarge => EXIT_TOO_LARGE,
-            Self::Export("owner_shared") => EXIT_USAGE,
+            Self::Shared => EXIT_USAGE,
             _ => EXIT_FAILED,
         }
     }
@@ -79,7 +82,7 @@ fn code<E>(error: &ExportError<E>) -> Failure {
         ExportError::TooLarge => Failure::TooLarge,
         ExportError::DestinationExists => Failure::OutputExists,
         ExportError::Fetch(_) => Failure::Store,
-        ExportError::Shared => Failure::Export("owner_shared"),
+        ExportError::Shared => Failure::Shared,
         ExportError::Overflow => Failure::Export("export_overflow"),
         ExportError::BadTime => Failure::Export("export_bad_time"),
         ExportError::TooManySources => Failure::Export("export_too_many_sources"),
@@ -102,7 +105,7 @@ pub fn export_owner<E>(
     max_bytes: u64,
 ) -> Result<Report, Failure> {
     if matches!(owner, Owner::Shared { .. }) {
-        return Err(Failure::Export("owner_shared"));
+        return Err(Failure::Shared);
     }
     match std::fs::symlink_metadata(out) {
         Ok(_) => return Err(Failure::OutputExists),
