@@ -110,6 +110,8 @@ finding.
 
 ## RUN: the 2-day acceptance run (started)
 
+(Later records follow under "Day 0" and "Day 0, continued" below.)
+
 Run id `20261117-a28bfa4`, prefix `rust-acceptance/20261117-a28bfa4/`, bucket `agent-sessions`.
 Release build of `main` `a28bfa4` (sha256 prefix `421a1564d71b8e34`), installed at
 `~/.local/libexec/memory-acceptance/memory`. State root `~/.local/state/memory-acceptance`
@@ -191,3 +193,39 @@ walk of the session roots that reads names, sizes and times only.
   session starts.
 - The sampler, `caffeinate` and the check loop have parent pid 1, so they outlive the session
   that started them.
+
+### Day 0, continued (recorded 2026-11-17 at 12:01Z)
+
+Commands: `launchctl print`, `ps`, the daemon log, `status.json` and the hint day file (keys,
+agent, event and closed state values only), `footprint.tsv`, and a throwaway watcher built on the
+same `notify` 8.2.0 that printed event kinds and paths with every component under `sessions/`,
+`projects/` and `backups/` masked. The watcher was first checked against a scratch directory: a
+`mkdir x.lock; rmdir x.lock` shows as `Create(Folder)` then `Remove(Folder)`.
+
+- **Health at 12:01Z.** Agent running since the start (one run, never exited); sampler,
+  `caffeinate` and check loop alive. 211 rounds (`start` 1, `timer` 15, `dir` 195); no round since
+  the first has `failed`, `parked` or `audit_mismatched` above 0. `status.json`: `parked` empty,
+  failures `offline=1` only (the first round), audit `matched=6031 mismatched=0 ineligible=2`.
+  Current footprint 94 to 248 MB, peak unchanged at 1,254 MB. Daemon CPU time 11 min 56 s over
+  6 h 30 min. Next check due about 19:46Z.
+- **Pi hint delivery works.** A new Pi session started at 11:41:21Z. The hint day file got one
+  record (`memory.hint/1`, agent `pi`, event `session_start`, transcript state `present`) whose
+  transcript path is that session's file. The daemon captured that session's owner at 11:51:20Z
+  and 11:56:38Z (`capture ... result=landed`). Claude and Codex hint delivery are still
+  unverified: no Claude or Codex transcript was created since the start (0 of 253 and 0 of 27).
+  The `claude` processes spawned by this Pi session run with `--setting-sources=` and load no
+  hooks.
+- **Cause of the `cause=dir` storms: short-lived lock directories in a non-source part of
+  `~/.claude`.** In 4 minutes of watching (11:53:49Z to 11:57:49Z) every `Create(Folder)` event
+  under the three roots, 12 in all, was `~/.claude/plugins/store/cc-plugin-agents-md_builtin-<hash>.json.lock`,
+  a lock directory made and removed around a write of that `.json` (Claude Code, run once per turn
+  of the Pi session's Claude provider). They came in groups of three at three moments; each group
+  was followed about 5 s later by two `round cause=dir` lines (six rounds in that window, none
+  for anything else). Each such round walks every root (about 25,000 files) and lands nothing
+  unless a capture was due anyway. Code path: `watch::translate_with` turns every
+  `Create(Folder)` into `Input::DirCreated`, even when the directory is gone when it is looked
+  at; `Scheduler::handle` turns that into `Action::ReadDir { path }`; `Driver::apply` ignores the
+  path and sets the reconcile flag (`Cause::Dir`). DESIGN 10.2 says only that directory is read
+  and its sources reconciled, so this is a gap between the design and the code, not a design
+  choice. Wanted (brief 31): read only the new directory, and do nothing for a directory that is
+  gone or that no locator layout can hold a source in.

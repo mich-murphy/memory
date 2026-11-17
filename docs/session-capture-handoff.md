@@ -65,17 +65,22 @@ from `main` alone.
   [brief 30](rust-rewrite/implementation/30-acceptance-run.md). Day 0: first round and first
   `memory check` clean; peak memory 1,254 MB. The operator trusted the Codex hooks and took
   decision 2: **streaming capture is required before the first production write** (DESIGN
-  D45, section 18). What the next session does, in order:
+  D45, section 18). Rechecked 12:01Z: healthy (211 rounds, no failure, park or audit mismatch
+  since the first round); Pi hint delivery verified on a new Pi session; the `cause=dir`
+  storms come from `*.json.lock` directories Claude Code makes under `~/.claude/plugins/store/`,
+  each of which runs a full reconcile where DESIGN 10.2 reads only the new directory (evidence
+  21, "Day 0, continued"). What the next session does, in order:
   1. Read `checks.log` (a check every 12 h; abort on any `mismatch` or an owner parked as
      `Foreign`), the daemon log and `status.json`; confirm the agent, sampler, `caffeinate` and
-     check loop are alive. Confirm a hint line appears once a new Claude, Codex or Pi session
-     has started (`hints/` was empty on day 0 because none had).
+     check loop are alive. Confirm a hint line appears once a new Claude or Codex session has
+     started (Pi verified 11:41Z; no new Claude or Codex session had started by 12:01Z).
   2. End the run after two consecutive clean days (earliest about 2026-11-19T07:46Z), or on an
      abort trigger: teardown per the run README (agent, hooks restored, Pi extension removed,
      sampler, `caffeinate`, check loop), delete the prefix and list it empty (A2), record the
      result and the footprint series in evidence 21.
   3. Then brief 31: streaming capture and audit (D45) measured against 128 MB, the
-     directory-event reconcile storm, progress logging inside a long round, and the open ARM
+     directory-event reconcile storm (read only the new directory, DESIGN 10.2), progress
+     logging inside a long round, and the open ARM
      CI timeout (no nextest `slow-timeout`); after that `memory export` and the consumer gate
      (answer 9), lifting the empty-prefix refusal, and cutover (DESIGN 18).
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
