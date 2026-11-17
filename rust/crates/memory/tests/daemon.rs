@@ -640,9 +640,19 @@ fn boot_sync(
     wall: i128,
     sync: SyncPolicy,
 ) -> R<D> {
+    let mut d = boot_default_sleep(tmp, cfg, parts_of(fs, store, list, wall), sync)?;
+    d.set_sleep(|_| {});
+    Ok(d)
+}
+fn parts_of(
+    fs: MemFs,
+    store: FStore,
+    list: &[(Owner, Source)],
+    wall: i128,
+) -> Parts<MemFs, FStore, TestClock, FSrcs> {
     let list = list.to_vec();
     let sources = FSrcs::new(move || list.clone());
-    let parts = Parts {
+    Parts {
         fs,
         store,
         clock: TestClock {
@@ -657,11 +667,17 @@ fn boot_sync(
             collector_paths: vec![],
             collector_identities: vec![],
         },
-    };
-    let mut d = Daemon::start_with(&tmp.root(), cfg, parts, StartOptions { sync })
-        .map_err(|x| x.code().to_owned())?;
-    d.set_sleep(|_| {});
-    Ok(d)
+    }
+}
+/// A daemon that keeps its default (real) commit-pause sleep.
+fn boot_default_sleep(
+    tmp: &Tmp,
+    cfg: &Path,
+    parts: Parts<MemFs, FStore, TestClock, FSrcs>,
+    sync: SyncPolicy,
+) -> R<D> {
+    Daemon::start_with(&tmp.root(), cfg, parts, StartOptions { sync })
+        .map_err(|x| x.code().to_owned())
 }
 /// Restart: move the fs and store out, end the daemon (flushed or not) and start a new one.
 fn cycle_sync(
@@ -4242,6 +4258,56 @@ fn verification_pauses_sleep_once_each_within_the_ceiling_and_a_healthy_commit_n
     assert!(
         got.iter().any(|t| Some(t) != got.first()),
         "the draws differ: {got:?}"
+    );
+    Ok(())
+}
+
+/// The default commit-pause sleep is a real sleep (decision D44): production cannot forget to
+/// wire it. One `Churn` gives exactly one rebase pause (ceiling 1 s). The test clock makes the
+/// jitter draw deterministic, so a recording daemon learns the pause, and an identical daemon
+/// left with its default sleep must take at least that long.
+#[test]
+fn the_default_commit_pause_sleep_is_a_real_sleep() -> R {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::time::{Duration, Instant};
+    let run = |record: Option<Rc<RefCell<Vec<Duration>>>>| -> R<Duration> {
+        let tmp = Tmp::new()?;
+        let cfg = tmp.config(true)?;
+        let list = vec![src_of("s1", 1)?];
+        let parts = parts_of(
+            files_with(b"hello\n"),
+            FStore::with_model(EtagModel::PerWrite),
+            &list,
+            WALL,
+        );
+        let mut d = boot_default_sleep(&tmp, &cfg, parts, SyncPolicy::Full)?;
+        if let Some(sink) = record {
+            d.set_sleep(move |t| sink.borrow_mut().push(t));
+        }
+        assert_eq!(round_at(&mut d, 0)?.0.landed, 1);
+        bytes_in(&mut d, 1, b"hello\nworld\n");
+        d.store_mut()
+            .arm(Some(current_key(&owner_of("s1")?)), Effect::Churn);
+        let started = Instant::now();
+        let (report, refused) = round_at(&mut d, 61)?;
+        let took = started.elapsed();
+        assert_eq!((report.landed, refused), (1, 1));
+        Ok(took)
+    };
+    let slept: Rc<RefCell<Vec<Duration>>> = Rc::default();
+    run(Some(Rc::clone(&slept)))?;
+    let pauses = slept.borrow().clone();
+    assert_eq!(pauses.len(), 1, "one rebase pause: {pauses:?}");
+    let pause = pauses.first().copied().ok_or("no pause")?;
+    assert!(
+        pause >= Duration::from_millis(20),
+        "the fixed draw must give a measurable pause: {pause:?}"
+    );
+    let took = run(None)?;
+    assert!(
+        took >= pause,
+        "default sleep took {took:?}, pause {pause:?}"
     );
     Ok(())
 }
