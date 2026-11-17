@@ -13,9 +13,10 @@
    For Rust, DESIGN.md supersedes its spool/work-queue/whole-object mechanisms.
 2. **[Delivery handoff](session-capture-handoff.md#current-session-checkpoint)** — sole
    current status, ownership and next-action brief. Resume at its **Rust implementation
-   delivery** section, not a dated Go checkpoint. Local Rust foundation gates and the
-   final-toolchain BC-01 synthetic probe passed; the collector/reader and release
-   acceptance are incomplete. Earlier Go host-state tables are historical observations,
+   delivery** section, not a dated Go checkpoint. Its first block ("State on 2026-11-17 and
+   next session") says where the work is and what comes next. The Rust daemon, its event loop
+   and the reader's restore are merged; no acceptance run on real session data and no
+   release acceptance has happened. Earlier Go host-state tables are historical observations,
    not a fresh health check or instructions to enable capture.
 3. [Design review and sources](research/session-capture-contract-review.md) — rationale,
    alternatives, industry precedents, and analysis of the legacy consumer mismatch.
@@ -57,7 +58,11 @@ mechanisms do not override DESIGN.md for Rust or the retained contract goals:
 - [Rust parent review](rust-rewrite/implementation/02-parent-review.md) — source-bound
   results, corrections, acceptance boundary and remaining work. Reports 00–05 in
   that directory retain worker-specific evidence, not independent release approvals.
-- [Latest integrated run, review and fix round](rust-rewrite/implementation/evidence/13-review-fix-round/) —
+- [Latest record: the event loop](rust-rewrite/implementation/evidence/20-event-loop/) and
+  [brief 29](rust-rewrite/implementation/29-event-loop.md): what the binary does on `main`,
+  the gates on `969d6fc` (all 13 sub-gates, 500 cases, 97.40 % line coverage), the hosted
+  runs and the known limits. Evidence 15 to 19 in the same directory are the steps before it.
+- [Integrated run of 2026-11-10, review and fix round](rust-rewrite/implementation/evidence/13-review-fix-round/) —
   `d8e80a6`, all 13 subgates, 391/391 nextest, 2,000-case properties, seed 730213, production
   mutation checks killed, 97.03% coverage against the fixed 80% backstop (A9). Its
   [report 23](rust-rewrite/implementation/23-review-fix-round.md) maps progress against
