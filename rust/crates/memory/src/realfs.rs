@@ -160,7 +160,11 @@ impl FileSystem for RealFs {
             return Err(RealFsError::Changed);
         }
         file.seek(SeekFrom::Start(range.start)).map_err(io)?;
-        let mut buf = Vec::new();
+        let file_len = meta.len().saturating_sub(range.start);
+        // Exact allocation: a growing buffer would leave several large freed blocks behind.
+        let size = file_len.min(len);
+        let mut buf =
+            Vec::with_capacity(usize::try_from(size).map_err(|_| RealFsError::InvalidRange)?);
         file.take(len).read_to_end(&mut buf).map_err(io)?;
         self.counters.reads += 1;
         self.counters.bytes_read += buf.len() as u64;

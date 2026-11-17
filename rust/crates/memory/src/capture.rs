@@ -59,7 +59,7 @@ use memory_core::planner::{
 };
 use memory_core::privacy::{
     Admission, AdmittedSource, Authorization, AuthorizedBody, PolicyContext, Profile, Reason,
-    ResolvedSourceFacts, SanitizedLaunch, UnknownReason, admit, authorize, transform,
+    ResolvedSourceFacts, SanitizedLaunch, UnknownReason, admit, authorize, transform_owned,
 };
 use std::collections::BTreeMap;
 
@@ -295,7 +295,20 @@ pub fn publishable(
     raw: &[u8],
     context: &PolicyContext,
 ) -> Result<AuthorizedBody, SourceOutcome> {
-    let redacted = transform(admitted, raw).map_err(|r| SourceOutcome::Withheld(withhold_of(r)))?;
+    publishable_owned(admitted, raw.to_vec(), context)
+}
+
+/// [`publishable`] over a buffer the caller gives up, so no second copy of it is made.
+///
+/// # Errors
+/// As [`publishable`].
+pub fn publishable_owned(
+    admitted: &AdmittedSource,
+    raw: Vec<u8>,
+    context: &PolicyContext,
+) -> Result<AuthorizedBody, SourceOutcome> {
+    let redacted =
+        transform_owned(admitted, raw).map_err(|r| SourceOutcome::Withheld(withhold_of(r)))?;
     match authorize(admitted, redacted, context) {
         Authorization::Allow(body) => Ok(body),
         Authorization::Deny(r) => Err(SourceOutcome::Withheld(withhold_of(r))),
@@ -718,7 +731,7 @@ impl Job<'_> {
             while at < from {
                 let end = at.saturating_add(step).min(from);
                 let raw = read_checked(fs, handle, at..end)?;
-                let body = self.authorized_body(&raw)?;
+                let body = self.authorized_owned(raw)?;
                 authorized = true;
                 whole = whole
                     .extend(body.bytes())
@@ -743,7 +756,7 @@ impl Job<'_> {
         while at < to {
             let end = at.saturating_add(step).min(to);
             let raw = read_checked(fs, handle, at..end)?;
-            let body = self.authorized_body(&raw)?;
+            let body = self.authorized_owned(raw)?;
             authorized = true;
             let len = body.bytes().len();
             whole = whole
@@ -887,7 +900,7 @@ impl Job<'_> {
         while at < size {
             let end = at.saturating_add(step).min(size);
             let raw = read_checked(fs, handle, at..end).ok()?;
-            let body = self.authorized_body(&raw).ok()?;
+            let body = self.authorized_owned(raw).ok()?;
             state = state.extend(body.bytes()).ok()?;
             at = end;
         }
@@ -896,6 +909,10 @@ impl Job<'_> {
     /// Privacy transform, then the final authorization of the transformed bytes.
     fn authorized_body(&self, raw: &[u8]) -> Result<AuthorizedBody, SourceOutcome> {
         publishable(&self.admitted, raw, self.env.context)
+    }
+    /// As [`Self::authorized_body`] for a buffer that is not needed afterwards: no copy is made.
+    fn authorized_owned(&self, raw: Vec<u8>) -> Result<AuthorizedBody, SourceOutcome> {
+        publishable_owned(&self.admitted, raw, self.env.context)
     }
     /// Slice `body` from `at` into pieces of the configured size; `base` is the stream
     /// offset of `body[0]`. Pushes each piece's upload and returns the descriptors.
