@@ -139,9 +139,55 @@ First observations (2026-11-17, 50 minutes in):
    range plus its encoded pieces. This is the measurement decision 2 waits for; the operator
    decides whether streaming is required before the first production write.
 2. **The first reconcile is slow and silent.** After 50 minutes the prefix held 569 owners
-   (`current.json`), 569 manifests and 2,614 objects of about 4,400 local owners: about 16 owners
-   a minute, so the first round needs several hours. The host's measured upload rate was 180 to
+   (`current.json`), 569 manifests and 2,614 objects. ("Of about 4,400 local owners" was written
+   here at first; that counted `.jsonl` files, and most Pi and Claude files are child files of a
+   shared owner. The first round landed 1,074 owners; see below.) The host's measured upload rate was 180 to
    380 KB/s. The daemon logs nothing until a round ends (no `capture` line inside a full round),
    so from outside a long first round looks like a stall; it took a stack sample, `nettop` and a
    prefix listing to tell. Each PUT opened a new TLS connection (the local port changed about
    every 10 s).
+
+### Day 0 (recorded 2026-11-17 at 09:50Z)
+
+Commands: `cat` of the daemon log, `checks.log`, `footprint.tsv` and `status.json` (counts and
+closed codes only); the prefix list tool (counts per key family); `launchctl print`; a Python
+walk of the session roots that reads names, sizes and times only.
+
+- **First round.** `round cause=start` ended 07:07:10Z after 1 h 36 min: `landed=1074 failed=1
+  offline=1`, everything else 0. The failed owner landed in a later round. Prefix at 09:42Z:
+  1,075 `current.json`, 1,077 manifests, 6,087 objects.
+- **First `memory check`** (07:07:40Z to 07:46:11Z, 38.5 minutes, exit 0): `owners=1075
+  sources=6026 match=6026 behind=0 unsettled=0 mismatch=0 uncaptured=0 withheld=0 remote_only=0
+  parked=0 unknown_kind=19015 unknown_owner=0 deferred_snapshot=3123 unreadable=0 store_error=0
+  status=loaded`. The check loop runs again 12 h after each check ends (next about 19:46Z).
+- **`status.json`** at 09:45Z: 66 rounds, `parked` empty, failures `offline=1` only, audit
+  `matched=6029 mismatched=0 ineligible=2`.
+- **The 19,015 `unknown_kind` files hold no transcript.** A census built on the daemon's own
+  `walk`, `index_claude_sessions` and locator, printing counts by root, first path component,
+  extension and verdict (19,070 at its time, `truncated=false`, `unknown_owner` 0): Pi `git/`
+  (about 9,700 package files), Codex `.tmp/` and `plugins/`, Claude `plugins/`. The only
+  `.jsonl` files among them: 40 under Pi `pi-terminology/`, Codex `session_index.jsonl`, one
+  file under Codex `.tmp/`, and a Pi top-level cache file. The census source is kept in the run
+  directory (`unknown-census/`). Local `.jsonl` counts behind the corrected owner estimate: Claude
+  253 main transcripts and 837 subagent files; Pi 4,076 under `sessions/` (684 at depth 1, 3,289
+  at depth 3, 103 at depth 4); Codex 27.
+- **Peak memory 1,254 MB** (`phys_footprint_peak` at 07:07:46Z). Footprint went 46 MB, 112 MB,
+  790 MB, 1,156 MB, 1,210 MB between 07:07:05Z and 07:07:46Z, the seconds after the start round
+  ended, while the first `cause=dir` round audited 6,021 sources (`audit_matched=6021`); it
+  stayed at 1,157 MB for some minutes, then fell (hourly maxima of the current footprint: 08h
+  128 MB, 09h 239 MB). An audit read holds a source's whole `[0, size)` plus its transformed
+  copy; the process was not profiled, so the split between live buffers and allocator retention
+  is not known. **Decision 2 taken by the operator on 2026-11-17: streaming capture is required
+  before the first production write** (DESIGN D45, sections 7.4 and 18).
+- **Bursts of directory-event reconciles.** 59 `round cause=dir` rounds so far, 52 of them
+  between 09:00Z and 09:42Z, at 09:40Z one about every 3 s; each walks every root (about 25,000
+  files) and landed 0. Which directories fired was not looked at (that needs paths). Open
+  finding: a directory-creation storm runs back-to-back full reconciles.
+- **Hooks not yet exercised.** Codex trusts all six new hooks (each has a `trusted_hash` in
+  Codex `config.toml` and is enabled; checked 09:42Z). `hints/` is still empty, which fits the
+  file times: no Claude, Codex or Pi session file was created after 05:30:59Z, and Claude Code
+  and Pi load hooks and extensions at session start; only one Claude and one Pi session that
+  started earlier wrote since. Hint delivery in this run is therefore unverified until a new
+  session starts.
+- The sampler, `caffeinate` and the check loop have parent pid 1, so they outlive the session
+  that started them.
