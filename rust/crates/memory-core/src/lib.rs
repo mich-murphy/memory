@@ -10,6 +10,7 @@ mod launch;
 pub mod limits;
 pub mod locator;
 pub mod manifest;
+pub mod pause;
 pub mod planner;
 pub mod privacy;
 pub mod slice;
