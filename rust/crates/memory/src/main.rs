@@ -14,6 +14,7 @@ fn main() -> ExitCode {
         }
         Some(word) if word == "daemon" => memory::run::main_entry(),
         Some(word) if word == "check" => memory::check::main_entry(args),
+        Some(word) if word == "export" => memory::export::main_entry(args),
         Some(word) if word == "restore" => memory::restore::main_entry(args),
         // Fail explicitly rather than simulate successful capture or restore.
         _ => ExitCode::from(78),

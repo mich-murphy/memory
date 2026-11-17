@@ -12,6 +12,7 @@ pub mod config;
 pub mod daemon;
 pub mod driver;
 pub mod environment;
+pub mod export;
 pub mod hook;
 pub mod log;
 pub mod realfs;

@@ -888,6 +888,10 @@ impl ExportRole {
 /// stores no role). Locator `Main` is `main`, `Superseded` is `transcript`, `Child` is
 /// `subagent`, every other role is `artifact`. Pure and total; meaningful for session-owned
 /// sources, and pinned against [`locate`] by a property test.
+///
+/// Kind exception to the locator mapping: `CodexCompressed` (`rollout-*.jsonl.zst`) is
+/// `artifact`, because Rust stores the raw on-disk bytes, which are zstd-compressed, and the
+/// importer must not parse them as JSONL.
 #[must_use]
 pub fn export_role(kind: &SourceKind, path: &str) -> ExportRole {
     let parts: Vec<&str> = path.split('/').collect();
@@ -910,7 +914,7 @@ pub fn export_role(kind: &SourceKind, path: &str) -> ExportRole {
             }
         }
         SourceKind::ClaudeSubagent => ExportRole::Subagent,
-        SourceKind::CodexRollout | SourceKind::CodexCompressed => ExportRole::Main,
+        SourceKind::CodexRollout => ExportRole::Main,
         SourceKind::PiSession => {
             if matches!(parent, "tasks" | "forks") || (last == "session.jsonl" && pi_run_ok(parent))
             {

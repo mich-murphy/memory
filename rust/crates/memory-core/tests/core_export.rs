@@ -72,9 +72,25 @@ const U: &str = "11111111-2222-3333-4444-555555555555";
 
 fn vocab() -> Vec<String> {
     let mut v: Vec<String> = [
-        "projects", "-p", "sessions", "archived_sessions", "2026", "subagents", "tool-results",
-        "tasks", "forks", "run-1", "run-0", "session.jsonl", "--cwd--", "x", "a.jsonl", "debug",
-        "memory", "history.jsonl", "notes.txt",
+        "projects",
+        "-p",
+        "sessions",
+        "archived_sessions",
+        "2026",
+        "subagents",
+        "tool-results",
+        "tasks",
+        "forks",
+        "run-1",
+        "run-0",
+        "session.jsonl",
+        "--cwd--",
+        "x",
+        "a.jsonl",
+        "debug",
+        "memory",
+        "history.jsonl",
+        "notes.txt",
     ]
     .iter()
     .map(|s| (*s).to_owned())
@@ -115,7 +131,12 @@ fn check_path(parts: &[&str], all: &[Roots]) -> Result<[usize; 4], String> {
         } = locate(&path, r)
         {
             let got = export_role(&kind, &parts.join("/"));
-            if got != mapped(role) {
+            let want = if kind == memory_core::domain::SourceKind::CodexCompressed {
+                ExportRole::Artifact
+            } else {
+                mapped(role)
+            };
+            if got != want {
                 return Err(format!("{parts:?} {kind:?} {role:?} -> {got:?}"));
             }
             n[0] += 1;
@@ -158,7 +179,10 @@ fn export_role_equals_the_locator_role_for_every_short_path() -> R {
         }
     }
     let [checked, main, transcript, subagent] = totals;
-    assert!(checked > 0 && main > 0 && transcript > 0 && subagent > 0, "{totals:?}");
+    assert!(
+        checked > 0 && main > 0 && transcript > 0 && subagent > 0,
+        "{totals:?}"
+    );
     Ok(())
 }
 
@@ -166,12 +190,36 @@ fn export_role_equals_the_locator_role_for_every_short_path() -> R {
 fn export_role_named_rows() {
     use memory_core::domain::SourceKind as K;
     let rows = [
-        (K::ClaudeTranscript, format!("projects/-p/{U}.jsonl"), ExportRole::Main),
-        (K::ClaudeTranscript, format!("projects/-p/{U}.orphaned-x.jsonl"), ExportRole::Transcript),
-        (K::ClaudeSubagent, format!("projects/-p/{U}/subagents/a.jsonl"), ExportRole::Subagent),
-        (K::ClaudeToolResults, format!("projects/-p/{U}/tool-results/a"), ExportRole::Artifact),
-        (K::PiSession, "--c--/2026-01-02T03-04-05.123Z_".to_owned() + U + "/tasks/a.jsonl", ExportRole::Subagent),
-        (K::CodexRollout, "sessions/x.jsonl".to_owned(), ExportRole::Main),
+        (
+            K::ClaudeTranscript,
+            format!("projects/-p/{U}.jsonl"),
+            ExportRole::Main,
+        ),
+        (
+            K::ClaudeTranscript,
+            format!("projects/-p/{U}.orphaned-x.jsonl"),
+            ExportRole::Transcript,
+        ),
+        (
+            K::ClaudeSubagent,
+            format!("projects/-p/{U}/subagents/a.jsonl"),
+            ExportRole::Subagent,
+        ),
+        (
+            K::ClaudeToolResults,
+            format!("projects/-p/{U}/tool-results/a"),
+            ExportRole::Artifact,
+        ),
+        (
+            K::PiSession,
+            "--c--/2026-01-02T03-04-05.123Z_".to_owned() + U + "/tasks/a.jsonl",
+            ExportRole::Subagent,
+        ),
+        (
+            K::CodexRollout,
+            "sessions/x.jsonl".to_owned(),
+            ExportRole::Main,
+        ),
     ];
     for (kind, path, want) in rows {
         assert_eq!(export_role(&kind, &path), want, "{path}");
@@ -183,7 +231,7 @@ proptest! {
     fn proptest_export_role_matches_locate(picks in prop::collection::vec(0_usize..64, 1..7)) {
         let all = all_roots().map_err(|e| TestCaseError::fail(e.to_string()))?;
         let v = vocab();
-        let parts: Vec<&str> = picks.iter().map(|p| v[p % v.len()].as_str()).collect();
+        let parts: Vec<&str> = picks.iter().filter_map(|p| v.get(p % v.len())).map(String::as_str).collect();
         prop_assert!(check_path(&parts, &all).is_ok(), "{:?}", check_path(&parts, &all));
     }
 }

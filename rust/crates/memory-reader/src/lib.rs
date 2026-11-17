@@ -5,9 +5,11 @@
 use memory_core::domain::{CommitOutcome, Owner};
 use memory_core::limits::{current_key, manifest_key};
 use memory_core::manifest::{
-    CHECKPOINT_INTERVAL, EpochRecord, Folded, ManifestError, Piece, ProjectedKind, SourceEntry,
-    fold, manifest_hash, parse_current, recover_projection,
+    CHECKPOINT_INTERVAL, EpochRecord, Folded, Manifest, ManifestError, Piece, ProjectedKind,
+    SourceEntry, Timestamp, fold, manifest_hash, parse_current, parse_manifest, recover_projection,
 };
+pub mod export;
+
 use std::io::Read;
 
 /// Why a stored piece did not decode to the bytes its descriptor promises.
@@ -174,6 +176,17 @@ fn newer_or_invalid<E>(e: &ManifestError) -> OwnerError<E> {
     }
 }
 
+/// An owner's folded state with the two times the export envelope needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnerHead {
+    /// The folded state and position.
+    pub folded: Folded,
+    /// `captured_at` of the head manifest.
+    pub captured_at: Timestamp,
+    /// `updated_at` of `current.json`.
+    pub updated_at: Timestamp,
+}
+
 /// Read an owner's folded state: GET `current.json`, walk `previous` back to the checkpoint
 /// (at most [`CHECKPOINT_INTERVAL`] manifest fetches, each verified against its key) and fold.
 ///
@@ -184,8 +197,20 @@ fn newer_or_invalid<E>(e: &ManifestError) -> OwnerError<E> {
 /// [`OwnerError`]; a fetch error is returned unchanged in [`OwnerError::Fetch`].
 pub fn read_owner<E>(
     owner: &Owner,
-    mut fetch: impl FnMut(&str) -> Result<Option<Vec<u8>>, E>,
+    fetch: impl FnMut(&str) -> Result<Option<Vec<u8>>, E>,
 ) -> Result<Option<Folded>, OwnerError<E>> {
+    Ok(read_owner_head(owner, fetch)?.map(|head| head.folded))
+}
+
+/// As [`read_owner`], also returning the head manifest's `captured_at` and `current.json`'s
+/// `updated_at`.
+///
+/// # Errors
+/// As [`read_owner`].
+pub fn read_owner_head<E>(
+    owner: &Owner,
+    mut fetch: impl FnMut(&str) -> Result<Option<Vec<u8>>, E>,
+) -> Result<Option<OwnerHead>, OwnerError<E>> {
     let Some(pointer) = fetch(&current_key(owner)).map_err(OwnerError::Fetch)? else {
         return Ok(None);
     };
@@ -223,5 +248,16 @@ pub fn read_owner<E>(
     if folded.position.manifest != current.manifest {
         return Err(OwnerError::Corrupt(ChainFault::WrongHead));
     }
-    Ok(Some(folded))
+    let head = chain
+        .last()
+        .ok_or(OwnerError::Corrupt(ChainFault::Invalid))?;
+    let captured_at = match parse_manifest(head).map_err(|e| newer_or_invalid(&e))? {
+        Manifest::Delta(d) => d.captured_at().clone(),
+        Manifest::Checkpoint(c) => c.captured_at().clone(),
+    };
+    Ok(Some(OwnerHead {
+        folded,
+        captured_at,
+        updated_at: current.updated_at,
+    }))
 }
