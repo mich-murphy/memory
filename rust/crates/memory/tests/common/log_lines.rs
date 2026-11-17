@@ -69,6 +69,7 @@ fn parse(line: &str) -> Result<&str, String> {
     let want: &[&str] = match event {
         "started" => &["version"],
         "round" => &ROUND_KEYS,
+        "progress" => &["done", "total", "landed", "failed", "elapsed_s"],
         "capture" => &["owner", "result"],
         "stopped" | "host_paused" | "host_resumed" => &[],
         "state_load" => &["file", "result"],

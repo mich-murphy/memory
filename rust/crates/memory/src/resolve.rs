@@ -16,7 +16,7 @@
 
 use crate::capture::Source;
 use crate::environment::{FileSystem, Stat};
-use crate::realfs::{RealFs, RealFsError, WalkLimits, index_claude_sessions, walk};
+use crate::realfs::{RealFs, RealFsError, WalkLimits, index_claude_sessions, walk, walk_under};
 use memory_core::domain::{Owner, SourceClass, SourceKind};
 use memory_core::locator::{Located, RootRelativePath, Roots, locate};
 use memory_core::privacy::{Profile, ResolvedSourceFacts};
@@ -321,6 +321,31 @@ fn plain_file(root: &Path, rel: &RootRelativePath) -> bool {
     false
 }
 
+/// Plain components of a directory path under a root, or `None` for a non-UTF-8 or non-plain
+/// component. Empty for the root itself.
+fn dir_parts(rest: &Path) -> Option<Vec<String>> {
+    rest.components()
+        .map(|c| match c {
+            std::path::Component::Normal(n) => n.to_str().map(str::to_owned),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `root/rel` is a real directory: every component on the way is one, never a link (the root
+/// itself may be a link). One `lstat` per component.
+fn plain_dir(root: &Path, rel: &[String]) -> bool {
+    let is_dir = |p: &Path| fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_dir());
+    let mut current = root.to_path_buf();
+    if rel.is_empty() {
+        return fs::metadata(&current).is_ok_and(|m| m.is_dir());
+    }
+    rel.iter().all(|part| {
+        current.push(part);
+        is_dir(&current)
+    })
+}
+
 impl WalkSources {
     /// Enumerate `roots`, registering paths in `fs`.
     pub fn new(roots: Vec<(PathBuf, Roots)>, limits: WalkLimits, fs: SharedFs) -> Self {
@@ -428,6 +453,50 @@ impl crate::daemon::Sources for WalkSources {
             return Some(owner);
         }
         None
+    }
+
+    fn read_dir(&mut self, path: &Path) -> (Vec<Owner>, bool) {
+        let Some((index, rel)) = self.roots.iter().enumerate().find_map(|(index, (dir, _))| {
+            let canon = self.canon.get(index).and_then(Option::as_ref);
+            [Some(dir), canon]
+                .into_iter()
+                .flatten()
+                .find_map(|prefix| path.strip_prefix(prefix).ok())
+                .and_then(dir_parts)
+                .map(|rel| (index, rel))
+        }) else {
+            return (Vec::new(), false);
+        };
+        let Some((dir, roots)) = self.roots.get(index) else {
+            return (Vec::new(), false);
+        };
+        if !plain_dir(dir, &rel) {
+            return (Vec::new(), false);
+        }
+        let found = walk_under(dir, &rel, roots, &self.limits);
+        let mut owners = Vec::new();
+        let append: Vec<PathBuf> = found
+            .files
+            .iter()
+            .filter(|(_, _, located)| {
+                matches!(
+                    located,
+                    Located::Source {
+                        class: SourceClass::Append,
+                        ..
+                    }
+                )
+            })
+            .map(|(file, _, _)| file.clone())
+            .collect();
+        for file in append {
+            if let Some(owner) = self.note(&file)
+                && !owners.contains(&owner)
+            {
+                owners.push(owner);
+            }
+        }
+        (owners, found.truncated)
     }
 
     fn of(&mut self, owner: &Owner) -> Vec<Source> {

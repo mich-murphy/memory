@@ -430,8 +430,26 @@ fn need_windows_reads_head_and_tail_through_the_seam() -> R {
             Some(&SourceOutcome::Planned)
         );
         // head window, tail window (both 0..10 at the old boundary), then the planned range:
-        // only the appended delta for an extend, the whole stream for an epoch.
-        assert_eq!(spy.reads, [0..10, 0..10, planned], "{content:?}");
+        // only the appended delta for an extend, the whole stream for an epoch. The planned
+        // range is streamed in contiguous reads of at most piece_len (4) bytes.
+        assert_eq!(spy.reads.get(..2), Some(&[0..10, 0..10][..]), "{content:?}");
+        let rest = spy.reads.get(2..).unwrap_or_default();
+        assert_eq!(
+            rest.first().map(|r| r.start),
+            Some(planned.start),
+            "{content:?}"
+        );
+        assert_eq!(rest.last().map(|r| r.end), Some(planned.end), "{content:?}");
+        assert!(
+            rest.iter()
+                .zip(rest.iter().skip(1))
+                .all(|(a, b)| a.end == b.start),
+            "{content:?}: {rest:?}"
+        );
+        assert!(
+            rest.iter().all(|r| r.end - r.start <= 4),
+            "{content:?}: {rest:?}"
+        );
     }
     Ok(())
 }
@@ -821,7 +839,8 @@ fn extend_from_an_empty_capture_reads_nothing_beyond_the_delta() -> R {
     assert_eq!(kinds_of(&got), ["extend"]);
     // Two empty window reads at the old boundary, then the delta; deriving the new windows
     // from the verified prefix and the delta needs no further read, not even an empty one.
-    assert_eq!(spy.reads, [0..0, 0..0, 0..10]);
+    // The delta is streamed in piece_len (4) chunks, not read in one call.
+    assert_eq!(spy.reads, [0..0, 0..0, 0..4, 4..8, 8..10]);
     Ok(())
 }
 

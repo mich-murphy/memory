@@ -648,3 +648,34 @@ fn text_guard_unterminated_reference_quote_and_one_mib_boundary_are_exact()
     );
     Ok(())
 }
+
+proptest::proptest! {
+    /// The by-value transform gives the same bytes and authorization as `transform`.
+    #[test]
+    fn proptest_transform_owned_equals_transform(
+        input in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..512),
+        config in proptest::prelude::any::<bool>(),
+    ) {
+        let profile = if config { Profile::Config } else { Profile::Transcript };
+        let path = if config { "notes.txt" } else { "s.jsonl" };
+        let source = admitted(&[path], profile).map_err(proptest::test_runner::TestCaseError::fail)?;
+        let a = privacy::transform(&source, &input);
+        let b = privacy::transform_owned(&source, input.clone());
+        match (a, b) {
+            (Ok(x), Ok(y)) => {
+                let (x, y) = (privacy::authorize(&source, x, &context()), privacy::authorize(&source, y, &context()));
+                match (x, y) {
+                    (Authorization::Allow(x), Authorization::Allow(y)) => {
+                        proptest::prop_assert_eq!(x.bytes(), y.bytes());
+                        proptest::prop_assert!(config || x.bytes() == input.as_slice());
+                    }
+                    (Authorization::Deny(x), Authorization::Deny(y)) => proptest::prop_assert_eq!(x, y),
+                    (Authorization::Unknown(x), Authorization::Unknown(y)) => proptest::prop_assert_eq!(x, y),
+                    _ => proptest::prop_assert!(false, "authorization differs"),
+                }
+            }
+            (Err(x), Err(y)) => proptest::prop_assert_eq!(x, y),
+            _ => proptest::prop_assert!(false, "transform differs"),
+        }
+    }
+}

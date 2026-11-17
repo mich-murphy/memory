@@ -18,11 +18,11 @@
 use crate::audit::AuditCounts;
 use crate::capture::{
     Captured, Env, Local, Locals, MAX_PIECE_BYTES, Source, SourceOutcome, Update, attach_launches,
-    capture,
+    capture_into,
 };
 use crate::commit::{
-    Base, Commit, CommitEnd, Failure, KnownOurs, Landed, commit_stoppable, disposition_paced,
-    recover_base,
+    Base, Commit, CommitEnd, Failure, KnownOurs, Landed, StoreSink, Winners, commit_staged,
+    disposition_paced, recover_base,
 };
 use crate::config::{Config, ConfigError};
 use crate::environment::{Clock, FileSystem, Store};
@@ -251,6 +251,9 @@ pub struct RoundReport {
     pub hints_kept_old: usize,
 }
 
+/// Monotonic time between `progress` log lines of a running round.
+const PROGRESS_EVERY_NS: u64 = 60_000_000_000;
+
 /// Source enumeration, supplied by the shell.
 pub trait Sources {
     /// All currently known sources with their owner.
@@ -259,6 +262,12 @@ pub trait Sources {
     /// source of a known root. Reads no file content. Default: nothing is recognised.
     fn note(&mut self, _path: &Path) -> Option<Owner> {
         None
+    }
+    /// Read one directory an event named: note each append source found under it and return
+    /// the owners, and whether the bounded walk was cut short. Reads no file content. Default:
+    /// nothing is found.
+    fn read_dir(&mut self, _path: &Path) -> (Vec<Owner>, bool) {
+        (Vec::new(), false)
     }
     /// The current sources of one owner. Default: [`Sources::enumerate`] filtered.
     fn of(&mut self, owner: &Owner) -> Vec<Source> {
@@ -837,7 +846,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         sources: &[Source],
         base: Option<&Base>,
         when: &Timestamp,
-    ) -> Captured {
+    ) -> (Captured, Winners, Option<Failure>) {
         let env = Env {
             header: header_of(owner, when),
             context: &self.context,
@@ -846,7 +855,12 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         };
         let empty = OwnerState::default();
         let remote = base.map_or(&empty, |b| &b.state);
-        capture(&mut self.fs, sources, &self.locals, remote, &env)
+        let stop = &self.stop;
+        let mut probe = || stop();
+        let mut sink = StoreSink::new(&mut self.store, &mut probe);
+        let got = capture_into(&mut self.fs, sources, &self.locals, remote, &env, &mut sink);
+        let staged = sink.finish();
+        (got, staged.winners, staged.failed)
     }
 
     /// Attach the owner's pending launch records (DESIGN.md 7.6).
@@ -867,16 +881,18 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         rt: &mut OwnerRt,
         base: Option<&Base>,
         request: Commit,
-        got: Captured,
+        staged: (Captured, Winners),
         hints: &mut [ScannedFile],
         owner: &Owner,
     ) -> Result<CommitEnd, Failure> {
+        let (got, winners) = staged;
         let stop = &self.stop;
         let (sleep, draws, clock) = (&mut self.sleep, &mut self.draws, &self.clock);
-        let result = commit_stoppable(
+        let result = commit_staged(
             &mut self.store,
             base,
             request,
+            winners,
             &mut rt.known_ours,
             &mut |wait| sleep(pause_for(wait, draw(draws, clock))),
             &mut || stop(),
@@ -938,7 +954,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 .collect();
             &live
         };
-        let mut got = self.capture_sources(owner, sources, base.as_ref(), when);
+        let (mut got, winners, failed) = self.capture_sources(owner, sources, base.as_ref(), when);
         report.audit.add(&got.audit);
         // A source park takes effect whether or not the owner's commit lands.
         for (id, outcome) in &got.outcomes {
@@ -947,12 +963,17 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 report.parked += 1;
             }
         }
+        if let Some(failure) = failed {
+            // A piece was not stored: the owner's commit is not built (as when its upload failed).
+            let draw = self.next_draw();
+            return Self::settle(rt, &Err(failure), at, draw, report);
+        }
         let Some(mut request) = got.commit.take() else {
             self.apply(got.updates);
             return false;
         };
         Self::attach_pending(&mut request, hints, owner);
-        let result = self.land(rt, base.as_ref(), request, got, hints, owner);
+        let result = self.land(rt, base.as_ref(), request, (got, winners), hints, owner);
         let draw = self.next_draw();
         Self::settle(rt, &result, at, draw, report)
     }
@@ -1069,7 +1090,9 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         let mut files = std::mem::take(&mut self.files);
         let mut report = RoundReport::default();
         self.status.host_paused = false;
-        for (owner, sources) in &groups {
+        let started_ns = self.clock.monotonic_ns();
+        let mut last_progress_ns = started_ns;
+        for (done, (owner, sources)) in groups.iter().enumerate() {
             if (self.stop)() {
                 // A round cut short re-probed nothing more: it cannot resume a paused host.
                 self.status.host_paused |= before.0;
@@ -1084,6 +1107,17 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             let pause = self.run_owner(owner, sources, &mut rt, &mut files, &when, &mut report);
             Self::log_parks(owner, &rt, was_parked, &known);
             self.owners.insert(owner.clone(), rt);
+            let now_ns = self.clock.monotonic_ns();
+            if now_ns.saturating_sub(last_progress_ns) >= PROGRESS_EVERY_NS {
+                last_progress_ns = now_ns;
+                crate::log::progress(
+                    done + 1,
+                    groups.len(),
+                    report.landed,
+                    report.failed,
+                    now_ns.saturating_sub(started_ns) / 1_000_000_000,
+                );
+            }
             if pause {
                 self.status.host_paused = true;
                 break;
@@ -1202,6 +1236,11 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     /// Remember a path an event named; the owner it belongs to, if it is a source.
     pub fn note_path(&mut self, path: &Path) -> Option<Owner> {
         self.sources.note(path)
+    }
+
+    /// Read one directory an event named (see [`Sources::read_dir`]).
+    pub fn read_dir(&mut self, path: &Path) -> (Vec<Owner>, bool) {
+        self.sources.read_dir(path)
     }
 
     /// The earliest retry deadline among owners (monotonic), if any.

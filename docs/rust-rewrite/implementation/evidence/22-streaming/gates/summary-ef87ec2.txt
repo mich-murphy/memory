@@ -1,0 +1,5 @@
+05-hegel: Summary [ 158.192s] 31 tests run: 31 passed (1 slow), 706 skipped
+08-coverage: Summary [ 326.369s] 732 tests run: 732 passed (1 slow), 5 skipped
+04-nextest: Summary [  59.672s] 670 tests run: 670 passed, 67 skipped
+06-proptest: Summary [ 111.929s] 31 tests run: 31 passed, 706 skipped
+coverage lines: 8413/8694 = 96.77 % (floor 80)

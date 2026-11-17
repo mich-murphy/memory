@@ -14,6 +14,11 @@ use std::time::Duration;
 
 /// Cap on a downloaded body.
 const MAX_GET_BODY: u64 = 64 << 20;
+/// The most of a PUT reply body, or of a GET error reply body, that is read to free its
+/// connection. An S3 error reply is a short XML document; ureq pools a connection only once its
+/// body is read to the end, so a reply larger than this is not read and its connection is
+/// dropped.
+const MAX_PUT_REPLY_BODY: u64 = 64 << 10;
 /// Validity of one presigned request; it is used immediately.
 const SIGN_VALIDITY: Duration = Duration::from_secs(300);
 
@@ -221,7 +226,12 @@ impl S3Store {
             .header("content-md5", digest.as_str())
             .send(bytes)
             .map_err(|error| map_transport(true, &error))?;
-        let (parts, _body) = response.into_parts();
+        let (parts, mut reply_body) = response.into_parts();
+        // A body left unread keeps its connection out of ureq's pool (run.rs `ended`).
+        let _drained = reply_body
+            .with_config()
+            .limit(MAX_PUT_REPLY_BODY)
+            .read_to_vec();
         map_reply(
             op,
             parts.status.as_u16(),
@@ -269,12 +279,20 @@ impl Store for S3Store {
             .call()
             .map_err(|error| map_transport(false, &error))?;
         let (parts, mut body) = response.into_parts();
-        let etag = map_reply(
+        let etag = match map_reply(
             Operation::Get,
             parts.status.as_u16(),
             header(&parts, "etag"),
             header(&parts, "retry-after"),
-        )?;
+        ) {
+            Ok(etag) => etag,
+            Err(error) => {
+                // An error reply (a 404 for an absent `current.json` above all) is read like a
+                // PUT reply, so its connection returns to the pool.
+                let _drained = body.with_config().limit(MAX_PUT_REPLY_BODY).read_to_vec();
+                return Err(error);
+            }
+        };
         let bytes = body
             .with_config()
             .limit(MAX_GET_BODY)

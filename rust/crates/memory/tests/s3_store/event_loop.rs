@@ -297,3 +297,67 @@ fn the_loop_clock_has_the_daemons_monotonic_origin() -> R {
     assert_eq!(clock, *daemon.clock_mut());
     Ok(())
 }
+
+#[test]
+fn creating_and_removing_lock_directories_logs_no_round_cause_dir() -> R {
+    let s = setup("loop-lockdir")?;
+    with_window(&s, 1, 2)?;
+    let mut child = s.spawn_with(HOUR)?;
+    let first = s.wait_commit(&mut child, None)?;
+    for k in 0..20 {
+        let lock = s.rig.root.join(format!("plugins/store/x{k}.json.lock"));
+        fs::create_dir_all(&lock).map_err(e)?;
+        fs::remove_dir(&lock).map_err(e)?;
+    }
+    // A later append proves the loop has worked through the events before it.
+    s.append(12..20)?;
+    s.wait_commit(&mut child, Some(&first))?;
+    let log = stop(&s, child)?;
+    assert_eq!(lines_with(&log, "round").len(), 1, "{log}");
+    assert!(!log.contains("round cause=dir"), "{log}");
+    Ok(())
+}
+
+#[test]
+fn a_directory_moved_into_a_root_with_a_transcript_is_captured() -> R {
+    let s = setup("loop-moved")?;
+    with_window(&s, 1, 2)?;
+    let mut child = s.spawn_with(HOUR)?;
+    s.wait_commit(&mut child, None)?;
+    let stage = s
+        .rig
+        .root
+        .parent()
+        .ok_or("parent")?
+        .join("moved-in-stage")
+        .join("-m");
+    fs::create_dir_all(&stage).map_err(e)?;
+    let name = SECOND_SESSION.rsplit('/').next().ok_or("name")?;
+    fs::write(stage.join(name), super::assemble::lines(0..5)).map_err(e)?;
+    fs::rename(&stage, s.rig.root.join("projects/-m")).map_err(e)?;
+    let config = Config::load(&s.rig.cfg).map_err(e)?;
+    let owner = WalkSources::new(
+        locator_roots(&config).map_err(e)?,
+        WalkLimits::default(),
+        SharedFs::new(),
+    )
+    .enumerate()
+    .into_iter()
+    .map(|(owner, _)| owner)
+    .find(|owner| *owner != s.owner)
+    .ok_or("no second owner")?;
+    let path = format!("/{BUCKET}/{PREFIX}{}", current_key(&owner));
+    let start = Instant::now();
+    while s.server.object(&path).is_none() {
+        if let Some(status) = child.0.try_wait().map_err(e)? {
+            return Err(format!("daemon exited early: {status}"));
+        }
+        if start.elapsed() > BOUND {
+            return Err("the moved-in transcript was never captured".to_owned());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let log = stop(&s, child)?;
+    assert_eq!(lines_with(&log, "round").len(), 1, "{log}");
+    Ok(())
+}

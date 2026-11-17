@@ -304,37 +304,141 @@ fn adopt_winner(changes: &mut [Change], winners: &BTreeMap<String, StoredEncodin
     }
 }
 
-/// Step 1: PUT every piece. A 412 means the object is stored; read it back and describe
+/// Stored encodings that won a 412, by object key (R2).
+pub type Winners = BTreeMap<String, StoredEncoding>;
+
+/// Step 1 for one piece: stop check, PUT, and on a 412 read the stored object back and record
 /// the encoding that actually won (R2).
+fn put_piece<S: Store>(
+    store: &mut S,
+    key: String,
+    body: Published,
+    winners: &mut Winners,
+    stop: &mut dyn FnMut() -> bool,
+) -> Result<(), Failure> {
+    if stop() {
+        return Err(Failure::Stopped);
+    }
+    match store.put_if_absent(&key, body) {
+        Ok(_) => Ok(()),
+        Err(StoreError::PreconditionFailed) => {
+            let stored = store.get(&key).map_err(not_landed)?;
+            let bytes = stored.body.as_ref();
+            winners.insert(
+                key,
+                StoredEncoding {
+                    encoded_len: length(bytes),
+                    encoded_sha256: sha256_of(bytes),
+                },
+            );
+            Ok(())
+        }
+        Err(error) => Err(not_landed(error)),
+    }
+}
+
+/// Step 1: PUT every piece.
 fn upload_pieces<S: Store>(
     store: &mut S,
     uploads: Vec<Upload>,
-    changes: &mut [Change],
     stop: &mut dyn FnMut() -> bool,
-) -> Result<(), Failure> {
-    let mut winners = BTreeMap::new();
+) -> Result<Winners, Failure> {
+    let mut winners = Winners::new();
     for upload in uploads {
-        if stop() {
-            return Err(Failure::Stopped);
-        }
-        match store.put_if_absent(&upload.key, upload.body) {
-            Ok(_) => {}
-            Err(StoreError::PreconditionFailed) => {
-                let stored = store.get(&upload.key).map_err(not_landed)?;
-                let bytes = stored.body.as_ref();
-                winners.insert(
-                    upload.key,
-                    StoredEncoding {
-                        encoded_len: length(bytes),
-                        encoded_sha256: sha256_of(bytes),
-                    },
-                );
-            }
-            Err(error) => return Err(not_landed(error)),
+        put_piece(store, upload.key, upload.body, &mut winners, stop)?;
+    }
+    Ok(winners)
+}
+
+/// The sink has refused a piece: it already holds the failure, and capture stops reading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Halted;
+
+/// Where capture hands each encoded piece as it is produced (DESIGN.md 7.3 step 6).
+pub trait PieceSink {
+    /// Take one piece. After the first `Err` every later call is `Err` too.
+    ///
+    /// # Errors
+    /// [`Halted`] when this or an earlier piece could not be stored.
+    fn put(&mut self, key: &str, body: Published) -> Result<(), Halted>;
+    /// True once a piece was refused.
+    fn halted(&self) -> bool;
+}
+
+/// A sink that keeps every piece, for the whole-commit path ([`Commit::uploads`]).
+#[derive(Debug, Default)]
+pub struct Collect(pub Vec<Upload>);
+
+impl PieceSink for Collect {
+    fn put(&mut self, key: &str, body: Published) -> Result<(), Halted> {
+        self.0.push(Upload {
+            key: key.to_owned(),
+            body,
+        });
+        Ok(())
+    }
+    fn halted(&self) -> bool {
+        false
+    }
+}
+
+/// What a [`StoreSink`] settled on.
+#[derive(Debug)]
+pub struct Staged {
+    /// Encodings that won a 412.
+    pub winners: Winners,
+    /// The first failure, when a piece was not stored.
+    pub failed: Option<Failure>,
+}
+
+/// A sink that stores each piece at once: stop check before each PUT, a 412 adopts the stored
+/// encoding. It holds no piece after `put` returns.
+pub struct StoreSink<'a, S: Store> {
+    store: &'a mut S,
+    stop: &'a mut dyn FnMut() -> bool,
+    staged: Staged,
+}
+
+impl<'a, S: Store> StoreSink<'a, S> {
+    /// A sink over `store`; `stop` is asked before each PUT.
+    pub fn new(store: &'a mut S, stop: &'a mut dyn FnMut() -> bool) -> Self {
+        Self {
+            store,
+            stop,
+            staged: Staged {
+                winners: Winners::new(),
+                failed: None,
+            },
         }
     }
-    adopt_winner(changes, &winners);
-    Ok(())
+    /// End the sink and take what it settled on.
+    pub fn finish(self) -> Staged {
+        self.staged
+    }
+}
+
+impl<S: Store> PieceSink for StoreSink<'_, S> {
+    fn put(&mut self, key: &str, body: Published) -> Result<(), Halted> {
+        if self.staged.failed.is_some() {
+            return Err(Halted);
+        }
+        match put_piece(
+            self.store,
+            key.to_owned(),
+            body,
+            &mut self.staged.winners,
+            self.stop,
+        ) {
+            Ok(()) => Ok(()),
+            Err(failure) => {
+                self.staged.failed = Some(failure);
+                Err(Halted)
+            }
+        }
+    }
+    fn halted(&self) -> bool {
+        self.staged.failed.is_some()
+    }
 }
 
 /// Step 5: GET `current.json` and classify it with the pure [`classify`]. `Ok(None)` is 404
@@ -443,7 +547,27 @@ pub fn commit_stoppable<S: Store>(
     pause: &mut dyn FnMut(Wait),
     stop: &mut dyn FnMut() -> bool,
 ) -> Result<CommitEnd, Failure> {
-    let ready = prepare(store, base, request, known, stop)?;
+    let mut request = request;
+    let winners = upload_pieces(store, std::mem::take(&mut request.uploads), stop)?;
+    commit_staged(store, base, request, winners, known, pause, stop)
+}
+
+/// As [`commit_stoppable`] for a commit whose pieces are already stored (`staged`, from a
+/// [`StoreSink`]): `request.uploads` is not used. The manifest is built only now, after every
+/// piece of every source is stored.
+///
+/// # Errors
+/// As [`commit_stoppable`].
+pub fn commit_staged<S: Store>(
+    store: &mut S,
+    base: Option<&Base>,
+    request: Commit,
+    winners: Winners,
+    known: &mut KnownOurs,
+    pause: &mut dyn FnMut(Wait),
+    stop: &mut dyn FnMut() -> bool,
+) -> Result<CommitEnd, Failure> {
+    let ready = prepare(store, base, request, winners, known, stop)?;
     publish(store, base, ready, known, pause)
 }
 
@@ -459,17 +583,18 @@ fn prepare<S: Store>(
     store: &mut S,
     base: Option<&Base>,
     request: Commit,
+    winners: Winners,
     known: &mut KnownOurs,
     stop: &mut dyn FnMut() -> bool,
 ) -> Result<Prepared, Failure> {
     let Commit {
         header,
         mut changes,
-        uploads,
+        uploads: _,
     } = request;
     let key = current_key(&header.owner);
     let updated_at = header.captured_at.clone();
-    upload_pieces(store, uploads, &mut changes, stop)?;
+    adopt_winner(&mut changes, &winners);
     let built =
         build(base.map(|b| (&b.position, &b.state)), header, changes).map_err(Failure::Invalid)?;
     let ours = built.hash;

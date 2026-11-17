@@ -334,6 +334,15 @@ pub fn admit(context: &PolicyContext, facts: ResolvedSourceFacts) -> Admission {
 /// # Errors
 /// Returns only fixed reasons; parser diagnostics and source values never escape.
 pub fn transform(source: &AdmittedSource, bytes: &[u8]) -> Result<RedactedBytes, Reason> {
+    transform_owned(source, bytes.to_vec())
+}
+
+/// [`transform`] over bytes the caller no longer needs: the identity path keeps the buffer
+/// instead of copying it. The result is the same as `transform` on the same bytes.
+///
+/// # Errors
+/// As [`transform`].
+pub fn transform_owned(source: &AdmittedSource, bytes: Vec<u8>) -> Result<RedactedBytes, Reason> {
     let protected = source
         .facts
         .identities
@@ -342,7 +351,7 @@ pub fn transform(source: &AdmittedSource, bytes: &[u8]) -> Result<RedactedBytes,
     if protected && bytes.len() > MAX_PROTECTED_BYTES {
         return Err(Reason::SourceLimit);
     }
-    let mut out = bytes.to_vec();
+    let mut out = bytes;
     for name in &source.facts.identities {
         if document::recognizes(name) {
             out = document::scrub(name, &out)?;

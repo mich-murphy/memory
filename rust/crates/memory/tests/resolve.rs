@@ -1001,3 +1001,70 @@ fn of_over_every_owner_equals_enumerate_on_a_mixed_tree() -> R {
     assert_eq!(w.counts().deferred_snapshot, 3);
     Ok(())
 }
+
+// ------------------------------------------------------- directory reads (DIRSTORM)
+
+#[test]
+fn read_dir_finds_the_owner_of_a_new_project_directory_and_notes_it() -> R {
+    let t = Tmp::new()?;
+    t.write("claude/projects/-q/b.jsonl", b"{}\n")?;
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    assert_eq!(w.enumerate().len(), 1);
+    let file = t.write(T, b"{}\n")?;
+    let want = owner_at("projects/-p/abc.jsonl")?;
+    let (owners, truncated) = w.read_dir(&t.root().join("projects/-p"));
+    assert_eq!((owners, truncated), (vec![want.clone()], false));
+    assert_eq!(w.of(&want).len(), 1);
+    assert_eq!(w.note(&file), Some(want));
+    Ok(())
+}
+
+#[test]
+fn read_dir_ignores_a_vanished_directory_and_one_under_no_root() -> R {
+    let t = Tmp::new()?;
+    t.write(T, b"{}\n")?;
+    t.write("other/projects/-p/abc.jsonl", b"{}\n")?;
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    assert_eq!(
+        w.read_dir(&t.root().join("projects/-gone")),
+        (vec![], false)
+    );
+    assert_eq!(w.read_dir(&t.0.join("other/projects/-p")), (vec![], false));
+    assert_eq!(w.read_dir(&t.0.join("claude2")), (vec![], false));
+    Ok(())
+}
+
+#[test]
+fn read_dir_does_not_enter_a_symlinked_directory() -> R {
+    let t = Tmp::new()?;
+    t.write("elsewhere/abc.jsonl", b"{}\n")?;
+    fs::create_dir_all(t.root().join("projects"))?;
+    symlink(t.0.join("elsewhere"), t.root().join("projects/-p"))?;
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    assert_eq!(w.read_dir(&t.root().join("projects/-p")), (vec![], false));
+    // A link on the way is no real directory either.
+    symlink(t.0.join("elsewhere"), t.root().join("lnk"))?;
+    assert_eq!(w.read_dir(&t.root().join("lnk")), (vec![], false));
+    Ok(())
+}
+
+#[test]
+fn read_dir_defers_snapshots_and_reports_a_truncated_walk() -> R {
+    let t = Tmp::new()?;
+    for k in 0..4 {
+        t.write(&format!("claude/projects/-p/f{k}.txt"), b"x\n")?;
+    }
+    t.write(T, b"{}\n")?;
+    let limits = WalkLimits {
+        max_depth: 32,
+        max_entries: 2,
+    };
+    let mut w = walker(&t.root(), limits)?;
+    let (_, truncated) = w.read_dir(&t.root().join("projects"));
+    assert!(truncated);
+    let t = Tmp::new()?;
+    t.write(&format!("claude/debug/{U1}.txt"), b"log\n")?;
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    assert_eq!(w.read_dir(&t.root().join("debug")), (vec![], false));
+    Ok(())
+}

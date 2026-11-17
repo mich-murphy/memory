@@ -78,11 +78,14 @@ from `main` alone.
      abort trigger: teardown per the run README (agent, hooks restored, Pi extension removed,
      sampler, `caffeinate`, check loop), delete the prefix and list it empty (A2), record the
      result and the footprint series in evidence 21.
-  3. Then brief 31: streaming capture and audit (D45) measured against 128 MB, the
-     directory-event reconcile storm (read only the new directory, DESIGN 10.2), progress
-     logging inside a long round, and the open ARM
-     CI timeout (no nextest `slow-timeout`); after that `memory export` and the consumer gate
-     (answer 9), lifting the empty-prefix refusal, and cutover (DESIGN 18).
+  3. Brief 31 ([31-streaming-and-run-findings.md](rust-rewrite/implementation/31-streaming-and-run-findings.md),
+     [evidence 22](rust-rewrite/implementation/evidence/22-streaming/)) is built and accepted
+     locally as `ef87ec2` (2026-11-17 14:50Z): streaming capture and audit (peak 32 MB in the
+     real-binary test, was 1,254 MB in the run), a directory event reads only that directory,
+     a `progress` log line, PUT/GET connection reuse, nextest `slow-timeout`. If its stack is
+     not yet merged, push and merge it first. After the run ends: a short run with the
+     streamed binary on real data to measure the peak; then `memory export` and the consumer
+     gate (answer 9), lifting the empty-prefix refusal, and cutover (DESIGN 18).
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

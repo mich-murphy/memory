@@ -4317,3 +4317,111 @@ fn the_default_commit_pause_sleep_is_a_real_sleep() -> R {
     );
     Ok(())
 }
+
+// ------------------------------------------------------------------ round progress
+/// A monotonic clock the test moves through a shared cell, also while a round runs.
+struct SharedClock(Rc<Cell<u64>>);
+impl memory::environment::Clock for SharedClock {
+    fn monotonic_ns(&self) -> u64 {
+        self.0.get()
+    }
+    fn wall_ns(&self) -> i128 {
+        WALL
+    }
+}
+
+/// How often one owner's turn asks the stop probe (the loop once, the commit steps after it);
+/// the exact elapsed values below fail if this drifts.
+const PROBES_PER_OWNER: u64 = 4;
+
+/// A round of three owners in which the monotonic clock moves `step_s` seconds per owner's turn
+/// (spread over the stop probe's calls); the round's log lines without timestamps.
+fn progress_round(step_s: u64) -> R<Vec<String>> {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?, src_of("s2", 2)?, src_of("s3", 3)?];
+    let mut fs = files_with(b"a1\n");
+    fs.files.insert(2, b"b1\n".to_vec());
+    fs.files.insert(3, b"c1\n".to_vec());
+    let now = Rc::new(Cell::new(5_000_000_000));
+    let sources = list.clone();
+    let parts = Parts {
+        fs,
+        store: FStore::default(),
+        clock: SharedClock(now.clone()),
+        sources: FSrcs::new(move || sources.clone()),
+        context: PolicyContext {
+            valid: true,
+            revision: "r".to_owned(),
+            rules: Some(rules_digest()),
+            collector_paths: vec![],
+            collector_identities: vec![],
+        },
+    };
+    let mut d = Daemon::start_with(
+        &tmp.root(),
+        &cfg,
+        parts,
+        StartOptions {
+            sync: SyncPolicy::Full,
+        },
+    )
+    .map_err(|x| x.code().to_owned())?;
+    d.set_sleep(|_| {});
+    d.set_stop(move || {
+        now.set(now.get() + step_s * 1_000_000_000 / PROBES_PER_OWNER);
+        false
+    });
+    let (report, lines) = logged_round!(d);
+    assert_eq!(report.landed, 3);
+    Ok(lines)
+}
+
+fn progress_lines(lines: &[String]) -> Vec<&str> {
+    lines
+        .iter()
+        .map(String::as_str)
+        .filter(|l| l.starts_with("INFO progress"))
+        .collect()
+}
+
+#[test]
+fn a_round_logs_a_progress_line_after_each_owner_when_61_seconds_pass_per_owner() -> R {
+    let lines = progress_round(61)?;
+    assert_eq!(
+        progress_lines(&lines),
+        [
+            "INFO progress done=1 total=3 landed=1 failed=0 elapsed_s=61",
+            "INFO progress done=2 total=3 landed=2 failed=0 elapsed_s=122",
+            "INFO progress done=3 total=3 landed=3 failed=0 elapsed_s=183",
+        ]
+    );
+    for line in progress_lines(&lines) {
+        let keys: Vec<&str> = line
+            .split(' ')
+            .skip(2)
+            .filter_map(|w| w.split_once('=').map(|(k, _)| k))
+            .collect();
+        assert_eq!(keys, ["done", "total", "landed", "failed", "elapsed_s"]);
+        assert!(!line.contains("owner") && !line.contains('/'), "{line}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_round_under_60_seconds_logs_no_progress() -> R {
+    let lines = progress_round(19)?;
+    assert!(progress_lines(&lines).is_empty(), "{lines:?}");
+    Ok(())
+}
+
+#[test]
+fn progress_is_spaced_60_seconds_from_the_last_line_not_the_round_start() -> R {
+    // 30 s per owner: 30 (none), 60 (line), 90 (30 s since the line: none).
+    let lines = progress_round(30)?;
+    assert_eq!(
+        progress_lines(&lines),
+        ["INFO progress done=2 total=3 landed=2 failed=0 elapsed_s=60"]
+    );
+    Ok(())
+}

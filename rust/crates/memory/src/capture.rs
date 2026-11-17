@@ -6,7 +6,7 @@
 //!
 //! # How the type system keeps unredacted bytes out of the store
 //!
-//! [`Commit`] and [`Upload`] are generic over the body. This module only ever builds
+//! [`Commit`] and [`crate::commit::Upload`] are generic over the body. This module only ever builds
 //! `Commit`. [`Published`] has a private field and its only piece constructor is a
 //! private function that slices a `memory_core::privacy::AuthorizedBody`, a value only
 //! `privacy::authorize` can produce (from a borrowed `AdmittedSource` and a consumed
@@ -42,7 +42,7 @@
 //! prefix-stable sources (otherwise it is recomputed from a fresh read of `[0, to)`). Snapshot
 //! and missing-source planning never carry audit evidence (`NotDue`).
 use crate::audit::{self, AuditCounts};
-use crate::commit::{Commit, Upload};
+use crate::commit::{Collect, Commit, PieceSink};
 use crate::environment::{FileSystem, PieceError};
 use memory_core::domain::{
     AuditState, EpochPosition, Fingerprint, Observed, Offset, ParkReason, Plan, ReplayReason,
@@ -54,12 +54,12 @@ use memory_core::manifest::{
     manifest_hash,
 };
 use memory_core::planner::{
-    AppendBasis, AuditEvidence, Observation, PlanInput, Planning, Strategy, WindowEvidence,
-    audit_eligible, plan, window_ranges,
+    AppendBasis, AuditEvidence, HEAD_WINDOW_BYTES, Observation, PlanInput, Planning, Strategy,
+    TAIL_WINDOW_BYTES, WindowEvidence, audit_eligible, plan, window_ranges,
 };
 use memory_core::privacy::{
     Admission, AdmittedSource, Authorization, AuthorizedBody, PolicyContext, Profile, Reason,
-    ResolvedSourceFacts, SanitizedLaunch, UnknownReason, admit, authorize, transform,
+    ResolvedSourceFacts, SanitizedLaunch, UnknownReason, admit, authorize, transform_owned,
 };
 use std::collections::BTreeMap;
 
@@ -183,15 +183,15 @@ pub struct Captured {
     pub audit: AuditCounts,
 }
 
-#[derive(Default)]
-struct Acc {
+struct Acc<'a> {
     audit: AuditCounts,
     changes: Vec<Change>,
-    uploads: Vec<Upload>,
     updates: Vec<Update>,
+    /// Where each encoded piece goes the moment it is produced.
+    sink: &'a mut dyn PieceSink,
 }
 
-/// Run one capture step for one owner.
+/// Run one capture step for one owner, collecting every encoded piece in the commit.
 pub fn capture<F: FileSystem>(
     fs: &mut F,
     sources: &[Source],
@@ -199,18 +199,46 @@ pub fn capture<F: FileSystem>(
     remote: &OwnerState,
     env: &Env<'_>,
 ) -> Captured {
-    let mut acc = Acc::default();
+    let mut sink = Collect::default();
+    let mut got = capture_into(fs, sources, locals, remote, env, &mut sink);
+    if let Some(commit) = &mut got.commit {
+        commit.uploads = sink.0;
+    }
+    got
+}
+
+/// Run one capture step for one owner, handing each encoded piece to `sink` as it is produced.
+/// The commit's `uploads` stay empty. Once the sink has refused a piece, later sources are
+/// not read and end `Unavailable`; the sink holds the reason.
+pub fn capture_into<F: FileSystem>(
+    fs: &mut F,
+    sources: &[Source],
+    locals: &Locals,
+    remote: &OwnerState,
+    env: &Env<'_>,
+    sink: &mut dyn PieceSink,
+) -> Captured {
+    let mut acc = Acc {
+        audit: AuditCounts::default(),
+        changes: Vec::new(),
+        updates: Vec::new(),
+        sink,
+    };
     let mut outcomes = Vec::new();
     let none = Local::default();
     for src in sources {
         let local = locals.get(&src.id).unwrap_or(&none);
-        let outcome = step(fs, src, local, remote, env, &mut acc);
+        let outcome = if acc.sink.halted() {
+            SourceOutcome::Unavailable
+        } else {
+            step(fs, src, local, remote, env, &mut acc)
+        };
         outcomes.push((src.id.clone(), outcome));
     }
     let commit = (!acc.changes.is_empty()).then(|| Commit {
         header: env.header.clone(),
         changes: acc.changes,
-        uploads: acc.uploads,
+        uploads: Vec::new(),
     });
     Captured {
         commit,
@@ -267,7 +295,20 @@ pub fn publishable(
     raw: &[u8],
     context: &PolicyContext,
 ) -> Result<AuthorizedBody, SourceOutcome> {
-    let redacted = transform(admitted, raw).map_err(|r| SourceOutcome::Withheld(withhold_of(r)))?;
+    publishable_owned(admitted, raw.to_vec(), context)
+}
+
+/// [`publishable`] over a buffer the caller gives up, so no second copy of it is made.
+///
+/// # Errors
+/// As [`publishable`].
+pub fn publishable_owned(
+    admitted: &AdmittedSource,
+    raw: Vec<u8>,
+    context: &PolicyContext,
+) -> Result<AuthorizedBody, SourceOutcome> {
+    let redacted =
+        transform_owned(admitted, raw).map_err(|r| SourceOutcome::Withheld(withhold_of(r)))?;
     match authorize(admitted, redacted, context) {
         Authorization::Allow(body) => Ok(body),
         Authorization::Deny(r) => Err(SourceOutcome::Withheld(withhold_of(r))),
@@ -281,12 +322,54 @@ fn hash_span(bytes: &[u8], range: &std::ops::Range<Offset>) -> Option<Sha256> {
     bytes.get(start..end).map(manifest_hash)
 }
 
-fn windows_of(stream: &[u8]) -> Option<WindowEvidence> {
-    let (head, tail) = window_ranges(Offset::new(u64::try_from(stream.len()).ok()?));
-    Some(WindowEvidence {
-        head: hash_span(stream, &head)?,
-        tail: hash_span(stream, &tail)?,
-    })
+/// The first [`HEAD_WINDOW_BYTES`] and the last [`TAIL_WINDOW_BYTES`] bytes of a region that
+/// is streamed through in chunks, so the window digests need no copy of the region itself.
+#[derive(Default)]
+struct Edges {
+    head: Vec<u8>,
+    tail: Vec<u8>,
+    /// Bytes pushed so far.
+    len: u64,
+}
+
+impl Edges {
+    fn push(&mut self, chunk: &[u8]) {
+        let head_cap = usize::try_from(HEAD_WINDOW_BYTES).unwrap_or(usize::MAX);
+        let take = head_cap.saturating_sub(self.head.len()).min(chunk.len());
+        self.head
+            .extend_from_slice(chunk.get(..take).unwrap_or_default());
+        let tail_cap = usize::try_from(TAIL_WINDOW_BYTES).unwrap_or(usize::MAX);
+        let skip = chunk.len().saturating_sub(tail_cap);
+        self.tail
+            .extend_from_slice(chunk.get(skip..).unwrap_or_default());
+        let excess = self.tail.len().saturating_sub(tail_cap);
+        self.tail.drain(..excess);
+        self.len = self
+            .len
+            .saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
+    }
+    /// Bytes `[lo, hi)` of the region, when they lie in the head or the tail.
+    fn span(&self, lo: u64, hi: u64) -> Option<&[u8]> {
+        let head_len = u64::try_from(self.head.len()).ok()?;
+        if hi <= head_len {
+            return self
+                .head
+                .get(usize::try_from(lo).ok()?..usize::try_from(hi).ok()?);
+        }
+        let tail_start = self.len.checked_sub(u64::try_from(self.tail.len()).ok()?)?;
+        let lo = lo.checked_sub(tail_start)?;
+        let hi = hi.checked_sub(tail_start)?;
+        self.tail
+            .get(usize::try_from(lo).ok()?..usize::try_from(hi).ok()?)
+    }
+    /// Window digests of a stream that is exactly this region.
+    fn windows(&self) -> Option<WindowEvidence> {
+        let (head, tail) = window_ranges(Offset::new(self.len));
+        Some(WindowEvidence {
+            head: manifest_hash(self.span(head.start.get(), head.end.get())?),
+            tail: manifest_hash(self.span(tail.start.get(), tail.end.get())?),
+        })
+    }
 }
 
 /// Read exactly `range` through the seam. The seam's own error is not an absence and is
@@ -309,12 +392,13 @@ fn read_checked<F: FileSystem>(
 }
 
 /// Bytes `range` of the transformed stream whose first `from` bytes are still on disk
-/// (identity transform) and whose remainder is `delta`; reads only the on-disk part.
+/// (identity transform) and whose remainder is the region `delta` (kept as its edges); reads
+/// only the on-disk part.
 fn stream_span<F: FileSystem>(
     fs: &mut F,
     handle: u64,
     from: u64,
-    delta: &[u8],
+    delta: &Edges,
     range: &std::ops::Range<Offset>,
     known: &[(u64, Vec<u8>)],
 ) -> Result<Vec<u8>, SourceOutcome> {
@@ -334,9 +418,8 @@ fn stream_span<F: FileSystem>(
         Vec::new()
     };
     if end > from {
-        let lo = usize::try_from(start.max(from) - from).map_err(|_| SourceOutcome::Raced)?;
-        let hi = usize::try_from(end - from).map_err(|_| SourceOutcome::Raced)?;
-        out.extend_from_slice(delta.get(lo..hi).ok_or(SourceOutcome::Raced)?);
+        let (lo, hi) = (start.max(from) - from, end - from);
+        out.extend_from_slice(delta.span(lo, hi).ok_or(SourceOutcome::Raced)?);
     }
     Ok(out)
 }
@@ -348,7 +431,7 @@ fn absence_plan(
     local: &Local,
     recorded: bool,
     rules: Option<RulesDigest>,
-    acc: &mut Acc,
+    acc: &mut Acc<'_>,
 ) -> Planning {
     let observation = if recorded {
         Observation::DeletionRecorded
@@ -373,7 +456,7 @@ fn step<F: FileSystem>(
     local: &Local,
     remote: &OwnerState,
     env: &Env<'_>,
-    acc: &mut Acc,
+    acc: &mut Acc<'_>,
 ) -> SourceOutcome {
     let admitted = match admit(env.context, src.facts.clone()) {
         Admission::Allow(a) => a,
@@ -456,7 +539,7 @@ fn snapshot<F: FileSystem>(
     job: &Job<'_>,
     local: &Local,
     fp: SnapshotFingerprint,
-    acc: &mut Acc,
+    acc: &mut Acc<'_>,
 ) -> SourceOutcome {
     let planning = plan(&PlanInput {
         withheld: None,
@@ -502,6 +585,16 @@ type Known = Vec<(u64, Vec<u8>)>;
 /// Borrowed [`Known`] segments.
 type Segments<'a> = &'a [(u64, Vec<u8>)];
 
+/// What a write produced before its change and index entry are pushed.
+struct Done {
+    pieces: Vec<Piece>,
+    whole: Sha256,
+    whole_state: Option<Sha256State>,
+    stream_len: u64,
+    /// Windows of the region read in memory (the whole stream, or a resumed delta).
+    edges: Edges,
+}
+
 enum Mode {
     /// Extend from the offset, whose committed whole-stream digest is the second field; the
     /// state, when present, is the resumable digest of `[0, from)`.
@@ -525,22 +618,58 @@ struct Job<'a> {
 }
 
 impl Job<'_> {
-    /// Read, transform, authorize and slice; pushes the change and its uploads.
+    /// Read, transform, authorize and slice; hands each piece to the sink and pushes the change.
+    ///
+    /// A prefix-stable source (identity transform) streams: one piece is read, authorized,
+    /// hashed, encoded and handed to the sink at a time. Any other source is read whole.
     fn write<F: FileSystem>(
         &self,
         fs: &mut F,
         mode: Mode,
-        acc: &mut Acc,
+        acc: &mut Acc<'_>,
     ) -> Result<(), SourceOutcome> {
-        let src = self.src;
-        let (from, to, epoch) = match mode {
+        if self.admitted.prefix_stable() {
+            self.write_streamed(fs, mode, acc)
+        } else {
+            self.write_whole(fs, mode, acc)
+        }
+    }
+    /// A mismatching re-read prefix: restart as an epoch (no audit failure for a source that
+    /// is not prefix-stable), or count the mismatch and park or restart.
+    fn prefix_mismatch<F: FileSystem>(
+        &self,
+        fs: &mut F,
+        acc: &mut Acc<'_>,
+    ) -> Result<(), SourceOutcome> {
+        if !self.admitted.prefix_stable() {
+            return self.write(fs, Mode::Epoch(audit::never()), acc);
+        }
+        match audit::mismatch(&self.previous, self.env.now_ns) {
+            audit::Mismatch::Park(reason) => Err(SourceOutcome::Parked(reason)),
+            audit::Mismatch::Epoch(state) => {
+                acc.audit.mismatch();
+                self.write(fs, Mode::Epoch(state), acc)
+            }
+        }
+    }
+    fn range_of(&self, mode: &Mode) -> (u64, u64, Option<u32>) {
+        match mode {
             Mode::Extend(from, ..) => (from.get(), from.get().max(self.observed.size), None),
             Mode::Epoch(_) | Mode::Replace => (0, self.observed.size, Some(self.next_epoch)),
-        };
+        }
+    }
+    /// The whole-input path: the range is read as one buffer.
+    fn write_whole<F: FileSystem>(
+        &self,
+        fs: &mut F,
+        mode: Mode,
+        acc: &mut Acc<'_>,
+    ) -> Result<(), SourceOutcome> {
+        let (from, to, epoch) = self.range_of(&mode);
         let resume = self.resume_state(&mode, from, to);
         let raw = match resume {
-            Some(_) => read_checked(fs, src.handle, from..to)?,
-            None => read_checked(fs, src.handle, 0..to)?,
+            Some(_) => read_checked(fs, self.src.handle, from..to)?,
+            None => read_checked(fs, self.src.handle, 0..to)?,
         };
         let body = self.authorized_body(&raw)?;
         // Re-read prefix: the stored pieces before `from` are the bytes of an earlier read, so
@@ -548,18 +677,7 @@ impl Job<'_> {
         if let (Mode::Extend(_, committed, ..), None) = (&mode, &resume) {
             let prefix = Offset::new(0)..Offset::new(from);
             if hash_span(body.bytes(), &prefix) != Some(*committed) {
-                // A source that is not prefix-stable is expected to differ here: its transform
-                // depends on the whole text. It restarts but is no audit failure.
-                if !self.admitted.prefix_stable() {
-                    return self.write(fs, Mode::Epoch(audit::never()), acc);
-                }
-                return match audit::mismatch(&self.previous, self.env.now_ns) {
-                    audit::Mismatch::Park(reason) => Err(SourceOutcome::Parked(reason)),
-                    audit::Mismatch::Epoch(state) => {
-                        acc.audit.mismatch();
-                        self.write(fs, Mode::Epoch(state), acc)
-                    }
-                };
+                return self.prefix_mismatch(fs, acc);
             }
         }
         let (base, first) = if resume.is_some() {
@@ -576,6 +694,123 @@ impl Job<'_> {
             .ok_or(SourceOutcome::Raced)?;
         let pieces = self.slice(&body, base, first, acc)?;
         let (whole, whole_state) = self.whole_digest(resume.as_ref(), body.bytes())?;
+        let mut edges = Edges::default();
+        edges.push(body.bytes());
+        self.finish(
+            fs,
+            mode,
+            resume.is_some().then_some(from),
+            epoch,
+            Done {
+                pieces,
+                whole,
+                whole_state,
+                stream_len,
+                edges,
+            },
+            acc,
+        )
+    }
+    /// The streaming path for a prefix-stable source: at most `piece_len` bytes are read at a
+    /// time. A re-read prefix is hashed against the committed digest chunk by chunk and not
+    /// uploaded; the new bytes are authorized, hashed, encoded and handed over per piece.
+    fn write_streamed<F: FileSystem>(
+        &self,
+        fs: &mut F,
+        mode: Mode,
+        acc: &mut Acc<'_>,
+    ) -> Result<(), SourceOutcome> {
+        let (handle, step) = (self.src.handle, self.step());
+        let (from, to, epoch) = self.range_of(&mode);
+        let resume = self.resume_state(&mode, from, to);
+        let mut edges = Edges::default();
+        let mut authorized = false;
+        let mut whole = resume.clone().unwrap_or_else(Sha256State::empty);
+        if let (Mode::Extend(_, committed, ..), None) = (&mode, &resume) {
+            let mut at = 0_u64;
+            while at < from {
+                let end = at.saturating_add(step).min(from);
+                let raw = read_checked(fs, handle, at..end)?;
+                let body = self.authorized_owned(raw)?;
+                authorized = true;
+                whole = whole
+                    .extend(body.bytes())
+                    .map_err(|_| SourceOutcome::Raced)?;
+                edges.push(body.bytes());
+                at = end;
+            }
+            if whole.digest() != Ok(*committed) {
+                // The whole-input path reads the new bytes before it compares: a read that
+                // fails or comes up short there ends the source before the mismatch counts.
+                let mut at = from;
+                while at < to {
+                    let end = at.saturating_add(step).min(to);
+                    read_checked(fs, handle, at..end)?;
+                    at = end;
+                }
+                return self.prefix_mismatch(fs, acc);
+            }
+        }
+        let mut pieces = Vec::new();
+        let mut at = from;
+        while at < to {
+            let end = at.saturating_add(step).min(to);
+            let raw = read_checked(fs, handle, at..end)?;
+            let body = self.authorized_owned(raw)?;
+            authorized = true;
+            let len = body.bytes().len();
+            whole = whole
+                .extend(body.bytes())
+                .map_err(|_| SourceOutcome::Raced)?;
+            edges.push(body.bytes());
+            let (piece, stored) = Published::piece(&body, 0, len).map_err(|e| match e {
+                PieceError::Range => SourceOutcome::Raced,
+                PieceError::Encode => SourceOutcome::Unavailable,
+            })?;
+            let described = Piece::from_authorized(&body, Offset::new(at), 0, len, &stored)
+                .map_err(|_| SourceOutcome::Raced)?;
+            acc.sink
+                .put(described.object(), piece)
+                .map_err(|_| SourceOutcome::Unavailable)?;
+            pieces.push(described);
+            at = end;
+        }
+        if !authorized {
+            self.authorized_body(&[])?;
+        }
+        self.finish(
+            fs,
+            mode,
+            resume.is_some().then_some(from),
+            epoch,
+            Done {
+                pieces,
+                whole: whole.digest().map_err(|_| SourceOutcome::Raced)?,
+                whole_state: Some(whole),
+                stream_len: to,
+                edges,
+            },
+            acc,
+        )
+    }
+    /// Push the change and the index entry once every piece is handed over.
+    fn finish<F: FileSystem>(
+        &self,
+        fs: &mut F,
+        mode: Mode,
+        resumed_from: Option<u64>,
+        epoch: Option<u32>,
+        done: Done,
+        acc: &mut Acc<'_>,
+    ) -> Result<(), SourceOutcome> {
+        let src = self.src;
+        let Done {
+            pieces,
+            whole,
+            whole_state,
+            stream_len,
+            edges,
+        } = done;
         let write = SourceWrite {
             id: src.id.clone(),
             kind: src.kind.clone(),
@@ -601,8 +836,8 @@ impl Job<'_> {
                 Mode::Extend(_, _, _, known) => known,
                 Mode::Epoch(_) | Mode::Replace => &[],
             };
-            let resumed = resume.is_some().then_some((from, known));
-            let windows = self.windows(fs, resumed, body.bytes(), stream_len)?;
+            let resumed = resumed_from.map(|from| (from, known));
+            let windows = self.windows(fs, resumed, &edges, stream_len)?;
             let position = EpochPosition {
                 epoch: epoch.unwrap_or(self.next_epoch.saturating_sub(1)),
                 captured_to: Offset::new(stream_len),
@@ -625,27 +860,59 @@ impl Job<'_> {
             _ => None,
         }
     }
+    /// Bytes per read of a streamed source: one piece.
+    fn step(&self) -> u64 {
+        u64::try_from(self.env.piece_len.clamp(1, MAX_PIECE_BYTES)).unwrap_or(u64::MAX)
+    }
     /// One independent audit read: stat, read `[0, size)`, stat again, and only when the source
     /// held still (identity, size and mtime equal to the captured stat throughout) transform it
-    /// as a whole-stream capture does and hash it with a fresh hasher. `None` is "no verdict":
-    /// the source moved, or the seam or the transform failed.
+    /// as a whole-stream capture transforms it and hash it with a fresh hasher. `None` is "no
+    /// verdict": the source moved, or the seam or the transform failed.
+    ///
+    /// A prefix-stable source is read, authorized and hashed one chunk (at most `piece_len`
+    /// bytes) at a time; its transform is the identity, so this is the digest of the whole
+    /// transformed stream. Any other source is read whole.
     fn audit_read<F: FileSystem>(&self, fs: &mut F, state: &SourceState) -> Option<Sha256> {
         let handle = self.src.handle;
         let before = observe_now(fs, handle, self.env.now_ns)?;
         if !audit_eligible(&state.observed, &before, &before) {
             return None;
         }
-        let raw = read_checked(fs, handle, 0..before.size).ok()?;
+        let read = if self.admitted.prefix_stable() {
+            Audited::Digest(self.stream_digest(fs, before.size)?)
+        } else {
+            Audited::Raw(read_checked(fs, handle, 0..before.size).ok()?)
+        };
         let after = observe_now(fs, handle, self.env.now_ns)?;
         if !audit_eligible(&state.observed, &before, &after) {
             return None;
         }
-        let body = self.authorized_body(&raw).ok()?;
-        Some(manifest_hash(body.bytes()))
+        match read {
+            Audited::Digest(digest) => Some(digest),
+            Audited::Raw(raw) => Some(manifest_hash(self.authorized_body(&raw).ok()?.bytes())),
+        }
+    }
+    /// Digest of the first `size` bytes of a prefix-stable source, authorized chunk by chunk.
+    fn stream_digest<F: FileSystem>(&self, fs: &mut F, size: u64) -> Option<Sha256> {
+        let (handle, step) = (self.src.handle, self.step());
+        let mut state = Sha256State::empty();
+        let mut at = 0_u64;
+        while at < size {
+            let end = at.saturating_add(step).min(size);
+            let raw = read_checked(fs, handle, at..end).ok()?;
+            let body = self.authorized_owned(raw).ok()?;
+            state = state.extend(body.bytes()).ok()?;
+            at = end;
+        }
+        state.digest().ok()
     }
     /// Privacy transform, then the final authorization of the transformed bytes.
     fn authorized_body(&self, raw: &[u8]) -> Result<AuthorizedBody, SourceOutcome> {
         publishable(&self.admitted, raw, self.env.context)
+    }
+    /// As [`Self::authorized_body`] for a buffer that is not needed afterwards: no copy is made.
+    fn authorized_owned(&self, raw: Vec<u8>) -> Result<AuthorizedBody, SourceOutcome> {
+        publishable_owned(&self.admitted, raw, self.env.context)
     }
     /// Slice `body` from `at` into pieces of the configured size; `base` is the stream
     /// offset of `body[0]`. Pushes each piece's upload and returns the descriptors.
@@ -654,7 +921,7 @@ impl Job<'_> {
         body: &AuthorizedBody,
         base: Offset,
         mut at: usize,
-        acc: &mut Acc,
+        acc: &mut Acc<'_>,
     ) -> Result<Vec<Piece>, SourceOutcome> {
         let body_len = body.bytes().len();
         let step = self.env.piece_len.clamp(1, MAX_PIECE_BYTES);
@@ -668,10 +935,9 @@ impl Job<'_> {
             let described = Piece::from_authorized(body, base, at, end, &stored)
                 .map_err(|_| SourceOutcome::Raced)?;
             pieces.push(described.clone());
-            acc.uploads.push(Upload {
-                key: described.object().to_owned(),
-                body: piece,
-            });
+            acc.sink
+                .put(described.object(), piece)
+                .map_err(|_| SourceOutcome::Unavailable)?;
             at = end;
         }
         Ok(pieces)
@@ -700,22 +966,20 @@ impl Job<'_> {
         }
     }
     /// Head and tail window digests of the new stream. A resumed write (`Some((from, known))`)
-    /// holds only the delta in memory, so the windows are assembled from verified on-disk
-    /// segments and the delta; otherwise `body` is the whole stream.
+    /// holds only the delta's edges, so the windows are assembled from verified on-disk
+    /// segments and the delta; otherwise `edges` are those of the whole stream.
     fn windows<F: FileSystem>(
         &self,
         fs: &mut F,
         resumed: Option<(u64, Segments<'_>)>,
-        body: &[u8],
+        edges: &Edges,
         stream_len: u64,
     ) -> Result<WindowEvidence, SourceOutcome> {
-        let Some((from, known)) = resumed else {
-            return windows_of(body).ok_or(SourceOutcome::Raced);
-        };
+        let (from, known) = resumed.unwrap_or((0, &[]));
         let handle = self.src.handle;
         let (head, tail) = window_ranges(Offset::new(stream_len));
-        let head = stream_span(fs, handle, from, body, &head, known)?;
-        let tail = stream_span(fs, handle, from, body, &tail, known)?;
+        let head = stream_span(fs, handle, from, edges, &head, known)?;
+        let tail = stream_span(fs, handle, from, edges, &tail, known)?;
         Ok(WindowEvidence {
             head: manifest_hash(&head),
             tail: manifest_hash(&tail),
@@ -750,12 +1014,27 @@ impl Job<'_> {
     }
 }
 
+/// What an audit read produced before the second stat.
+enum Audited {
+    /// The digest of a streamed prefix-stable source.
+    Digest(Sha256),
+    /// The raw bytes of any other source, authorized after the second stat.
+    Raw(Vec<u8>),
+}
+
+/// The adopted remote prefix, streamed: only its windows and resumable digest are kept.
+struct Adopted {
+    digest: Sha256,
+    state: Sha256State,
+    windows: Option<WindowEvidence>,
+}
+
 /// What the planning rounds of one append source settled on.
 struct Resolved {
     plan: Plan,
-    /// The remote position adopted by this plan, with `prefix` its verified bytes.
+    /// The remote position adopted by this plan, with `prefix` its verified evidence.
     adopted: Option<EpochPosition>,
-    prefix: Option<Vec<u8>>,
+    prefix: Option<Adopted>,
     /// Head and tail segments read at the old boundary, reusable by the write.
     known: Known,
     /// The planner asked for the fresh stat to be stored.
@@ -784,6 +1063,31 @@ fn read_windows<F: FileSystem>(
             (tail.start.get(), tail_bytes),
         ],
     ))
+}
+
+/// Read `[0, captured_to)` raw (as the adopt check hashes it) one chunk at a time, keeping its
+/// digest, resumable state and windows but no more than the window bytes.
+fn read_adopted<F: FileSystem>(
+    fs: &mut F,
+    handle: u64,
+    captured_to: u64,
+    step: u64,
+) -> Result<Adopted, SourceOutcome> {
+    let mut state = Sha256State::empty();
+    let mut edges = Edges::default();
+    let mut at = 0_u64;
+    while at < captured_to {
+        let end = at.saturating_add(step).min(captured_to);
+        let raw = read_checked(fs, handle, at..end)?;
+        state = state.extend(&raw).map_err(|_| SourceOutcome::Raced)?;
+        edges.push(&raw);
+        at = end;
+    }
+    Ok(Adopted {
+        digest: state.digest().map_err(|_| SourceOutcome::Raced)?,
+        windows: edges.windows(),
+        state,
+    })
 }
 
 /// Planning rounds an append source may need. An indexed source can ask for the audit recheck,
@@ -856,9 +1160,9 @@ fn resolve<F: FileSystem>(
                 plan: Plan::Adopt { remote },
                 ..
             } => {
-                let bytes = read_checked(fs, handle, 0..remote.captured_to.get())?;
-                adopt = Some(manifest_hash(&bytes));
-                prefix = Some(bytes);
+                let read = read_adopted(fs, handle, remote.captured_to.get(), job.step())?;
+                adopt = Some(read.digest);
+                prefix = Some(read);
             }
             Planning::Ready {
                 plan,
@@ -884,7 +1188,7 @@ fn append<F: FileSystem>(
     mut job: Job<'_>,
     local: &Local,
     remote: Option<EpochPosition>,
-    acc: &mut Acc,
+    acc: &mut Acc<'_>,
 ) -> SourceOutcome {
     let src = job.src;
     // The remote position is authoritative and the index is a deletable cache (DESIGN.md
@@ -901,10 +1205,11 @@ fn append<F: FileSystem>(
         Ok(resolved) => resolved,
         Err(outcome) => return outcome,
     };
-    if let (Some(position), Some(bytes)) = (resolved.adopted, &resolved.prefix)
-        && let Some(windows) = windows_of(bytes)
+    if let (Some(position), Some(read)) = (resolved.adopted, resolved.prefix)
+        && let Some(windows) = read.windows
     {
-        let state = job.state(position, windows, job.whole_state_of(bytes), audit::never());
+        let whole = job.admitted.prefix_stable().then_some(read.state);
+        let state = job.state(position, windows, whole, audit::never());
         acc.updates
             .push(Update::Index(src.id.clone(), Box::new(state)));
     }

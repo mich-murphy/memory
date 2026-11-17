@@ -24,12 +24,18 @@
 //! |---|---|
 //! | `started` | `version` |
 //! | `round` | `cause` (`start`, `timer`, `rescan`, `wake`, `dir`) `landed failed skipped parked deferred offline throttled transient destination_auth local deterministic hints_removed hints_kept_old audit_matched audit_mismatched audit_ineligible` |
+//! | `progress` | `done total landed failed elapsed_s` |
 //! | `capture` | `owner` `result` (`landed`, `unchanged`, `failed`, `stopped`) |
 //! | `stopped` | none |
 //! | `state_load` | `file` (`index` or `status`) `result` (`damaged` or `newer_schema`) |
 //! | `parked` | `owner` `reason` `scope` (`owner` or `source`; reasons: `foreign_writer`, `newer_remote_schema`, `repeated_audit_mismatch`, `repeated_readback_mismatch`, `source_unstable`, `repeated_non_json_response`, `repeated_schema_error`) |
 //! | `host_paused` | none |
 //! | `host_resumed` | none |
+//!
+//! `progress` is logged inside a full round after an owner's turn when at least 60 s of monotonic
+//! time passed since the round started or since the last `progress` line; a shorter round logs
+//! none. `done` and `total` count owners, `landed` and `failed` are the round's running counts,
+//! `elapsed_s` is whole seconds since the round started. It carries no owner and no path.
 //!
 //! `state_load` follows `started`, `status` before `index`, only for a damaged or newer-schema
 //! startup load. `parked` is logged once, in the round an owner or one of its sources becomes
@@ -219,6 +225,18 @@ pub fn round(cause: Cause, report: &RoundReport) {
         audit_matched = report.audit.matched,
         audit_mismatched = report.audit.mismatched,
         audit_ineligible = report.audit.ineligible,
+    );
+}
+
+/// A running full round has handled `done` of `total` owners, `elapsed_s` seconds in.
+pub fn progress(done: usize, total: usize, landed: usize, failed: usize, elapsed_s: u64) {
+    tracing::info!(
+        event = "progress",
+        done = count(done),
+        total = count(total),
+        landed = count(landed),
+        failed = count(failed),
+        elapsed_s = elapsed_s,
     );
 }
 
