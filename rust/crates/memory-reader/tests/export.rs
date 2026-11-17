@@ -261,31 +261,38 @@ fn exported() -> R<(Fx, PathBuf, PathBuf, Value)> {
 #[test]
 fn unit_identity_digest_sequence_times_and_coverage() -> R {
     let (fx, base, _out, m) = exported()?;
-    assert_eq!(m["contract"], "session-reader/v2");
+    assert_eq!(at(&m, "contract"), "session-reader/v2");
     let manifest_hex = String::from(fx.head.folded.position.manifest);
-    assert_eq!(m["manifest_sha256"], manifest_hex);
-    assert_eq!(m["manifest"]["publication_id"], manifest_hex);
-    assert_eq!(m["manifest"]["contract"], "session-publication/v2");
-    assert_eq!(m["manifest"]["sequence"], 5, "seq 4 -> sequence 5");
+    assert_eq!(at(&m, "manifest_sha256"), manifest_hex);
+    assert_eq!(at(&at(&m, "manifest"), "publication_id"), manifest_hex);
+    assert_eq!(
+        at(&at(&m, "manifest"), "contract"),
+        "session-publication/v2"
+    );
+    assert_eq!(
+        at(&at(&m, "manifest"), "sequence"),
+        5,
+        "seq 4 -> sequence 5"
+    );
     // 2026-11-07T10:30:00Z and 10:45:00Z, independently computed.
     assert_eq!(
-        m["manifest"]["captured_at_ns"],
+        at(&at(&m, "manifest"), "captured_at_ns"),
         1_794_047_400_000_000_000u64
     );
     assert_eq!(
-        m["manifest"]["observed_at_ns"],
+        at(&at(&m, "manifest"), "observed_at_ns"),
         1_794_047_400_000_000_000u64
     );
     assert_eq!(
-        m["manifest"]["published_at_ns"],
+        at(&at(&m, "manifest"), "published_at_ns"),
         1_794_048_300_000_000_000u64
     );
     assert_eq!(
-        m["manifest"]["identity"],
+        at(&at(&m, "manifest"), "identity"),
         serde_json::json!({"archive_id":"arch","machine_id":"mach","agent":"claude","session_id":"sess-1"})
     );
     assert_eq!(
-        m["manifest"]["coverage"],
+        at(&at(&m, "manifest"), "coverage"),
         serde_json::json!({"discovery":"complete","enrichment":"partial","missing":["snapshot-kinds-deferred"]})
     );
     let _ = fs::remove_dir_all(&base);
@@ -296,21 +303,24 @@ fn unit_identity_digest_sequence_times_and_coverage() -> R {
 fn sources_one_per_epoch_ordered_deleted_skipped_with_role_state_revision() -> R {
     let (fx, base, _out, m) = exported()?;
     let want = flat(&fx);
-    let got = m["manifest"]["sources"].as_array().ok_or("sources")?;
+    let got = m
+        .pointer("/manifest/sources")
+        .and_then(Value::as_array)
+        .ok_or("sources")?;
     assert_eq!(got.len(), 5, "a/0, b/0, b/1, d/0, e/0");
     assert_eq!(got.len(), want.len());
     for (g, (id, role, path, state, n, _)) in got.iter().zip(&want) {
-        assert_eq!(g["source_id"], *id);
-        assert_eq!(g["path"], *path);
-        assert_eq!(g["role"], *role);
-        assert_eq!(g["state"], *state);
-        assert_eq!(g["epoch_id"], n.to_string());
-        assert_eq!(g["revision"], u64::from(*n) + 1);
-        assert_eq!(g["optional"], false);
-        assert_eq!(g["associations"], serde_json::json!([]));
+        assert_eq!(at(g, "source_id"), *id);
+        assert_eq!(at(g, "path"), *path);
+        assert_eq!(at(g, "role"), *role);
+        assert_eq!(at(g, "state"), *state);
+        assert_eq!(at(g, "epoch_id"), n.to_string());
+        assert_eq!(at(g, "revision"), u64::from(*n) + 1);
+        assert_eq!(at(g, "optional"), false);
+        assert_eq!(at(g, "associations"), serde_json::json!([]));
         assert!(g.get("withheld").is_none());
-        assert_eq!(g["observed_at_ns"], 1_794_047_400_000_000_000u64);
-        assert_eq!(g["captured_at_ns"], 1_794_047_400_000_000_000u64);
+        assert_eq!(at(g, "observed_at_ns"), 1_794_047_400_000_000_000u64);
+        assert_eq!(at(g, "captured_at_ns"), 1_794_047_400_000_000_000u64);
     }
     let order: Vec<(&str, &str)> = want.iter().map(|w| (w.0, w.3)).collect();
     assert_eq!(
@@ -324,7 +334,7 @@ fn sources_one_per_epoch_ordered_deleted_skipped_with_role_state_revision() -> R
         ]
     );
     assert!(
-        got.iter().all(|g| g["source_id"] != "c"),
+        got.iter().all(|g| at(g, "source_id") != "c"),
         "deleted source exported"
     );
     let env = build_envelope::<()>(&fx.head, 1 << 30).map_err(bad)?;
@@ -342,32 +352,47 @@ fn sources_one_per_epoch_ordered_deleted_skipped_with_role_state_revision() -> R
 fn object_descriptors_for_zero_one_and_several_pieces() -> R {
     let (fx, base, _out, m) = exported()?;
     let want = flat(&fx);
-    let got = m["manifest"]["sources"].as_array().ok_or("sources")?;
+    let got = m
+        .pointer("/manifest/sources")
+        .and_then(Value::as_array)
+        .ok_or("sources")?;
     for (g, (_, _, _, _, _, chunks)) in got.iter().zip(&want) {
-        let o = &g["object"];
+        let o = &at(g, "object");
         let whole: Vec<u8> = chunks.concat();
-        assert_eq!(o["encoding"], "zstd");
-        assert_eq!(o["sha256"], hex(&whole));
-        assert_eq!(o["size"], whole.len() as u64);
+        assert_eq!(at(o, "encoding"), "zstd");
+        assert_eq!(at(o, "sha256"), hex(&whole));
+        assert_eq!(at(o, "size"), whole.len() as u64);
         let stored: Vec<Vec<u8>> = chunks.iter().map(|c| enc(c)).collect::<R<_>>()?;
         match stored.as_slice() {
             [] => {
-                assert_eq!(o["key"], "objects/none");
-                assert_eq!(o["encoded_size"], 0);
-                assert_eq!(o["encoded_sha256"], hex(b""));
+                assert_eq!(at(o, "key"), "objects/none");
+                assert_eq!(at(o, "encoded_size"), 0);
+                assert_eq!(at(o, "encoded_sha256"), hex(b""));
             }
             [one] => {
-                assert_eq!(o["key"], format!("objects/{}.zst", hex(&chunks[0])));
-                assert_eq!(o["encoded_size"], one.len() as u64);
-                assert_eq!(o["encoded_sha256"], hex(one));
+                assert_eq!(
+                    at(o, "key"),
+                    format!(
+                        "objects/{}.zst",
+                        hex(chunks.first().map_or(&[][..], Vec::as_slice))
+                    )
+                );
+                assert_eq!(at(o, "encoded_size"), one.len() as u64);
+                assert_eq!(at(o, "encoded_sha256"), hex(one));
             }
             many => {
-                assert_eq!(o["key"], format!("objects/{}.zst", hex(&chunks[0])));
+                assert_eq!(
+                    at(o, "key"),
+                    format!(
+                        "objects/{}.zst",
+                        hex(chunks.first().map_or(&[][..], Vec::as_slice))
+                    )
+                );
                 let size: u64 = many.iter().map(|x| x.len() as u64).sum();
-                assert_eq!(o["encoded_size"], size);
+                assert_eq!(at(o, "encoded_size"), size);
                 // Commitment: sha256 of the pieces' encoded digests (hex text) in order.
                 let concat: String = many.iter().map(|x| hex(x)).collect();
-                assert_eq!(o["encoded_sha256"], hex(concat.as_bytes()));
+                assert_eq!(at(o, "encoded_sha256"), hex(concat.as_bytes()));
                 let reversed: String = many.iter().rev().map(|x| hex(x)).collect();
                 assert_ne!(hex(reversed.as_bytes()), hex(concat.as_bytes()));
             }
@@ -381,16 +406,19 @@ fn object_descriptors_for_zero_one_and_several_pieces() -> R {
 fn bodies_paths_digests_and_destination_contract() -> R {
     let (fx, base, out, m) = exported()?;
     let want = flat(&fx);
-    let bodies = m["bodies"].as_array().ok_or("bodies")?;
+    let bodies = m
+        .pointer("/bodies")
+        .and_then(Value::as_array)
+        .ok_or("bodies")?;
     assert_eq!(bodies.len(), want.len());
     for (i, (b, (id, _, _, _, n, chunks))) in bodies.iter().zip(&want).enumerate() {
         let whole: Vec<u8> = chunks.concat();
-        assert_eq!(b["source_id"], *id);
-        assert_eq!(b["epoch_id"], n.to_string());
-        assert_eq!(b["path"], format!("bodies/{i:04}.bin"));
-        assert_eq!(b["sha256"], hex(&whole));
-        assert_eq!(b["size"], whole.len() as u64);
-        let file = out.join(s(&b["path"])?);
+        assert_eq!(at(b, "source_id"), *id);
+        assert_eq!(at(b, "epoch_id"), n.to_string());
+        assert_eq!(at(b, "path"), format!("bodies/{i:04}.bin"));
+        assert_eq!(at(b, "sha256"), hex(&whole));
+        assert_eq!(at(b, "size"), whole.len() as u64);
+        let file = out.join(s(&at(b, "path"))?);
         assert_eq!(fs::read(&file).map_err(bad)?, whole);
         assert_eq!(mode(&file)?, 0o600);
     }
@@ -410,7 +438,7 @@ fn metadata_key_sets_are_exactly_the_importers() -> R {
         keys(&m)?,
         set(&["contract", "manifest_sha256", "manifest", "bodies"])
     );
-    let man = &m["manifest"];
+    let man = &at(&m, "manifest");
     assert_eq!(
         keys(man)?,
         set(&[
@@ -426,11 +454,11 @@ fn metadata_key_sets_are_exactly_the_importers() -> R {
         ])
     );
     assert_eq!(
-        keys(&man["identity"])?,
+        keys(&at(man, "identity"))?,
         set(&["archive_id", "machine_id", "agent", "session_id"])
     );
     assert_eq!(
-        keys(&man["coverage"])?,
+        keys(&at(man, "coverage"))?,
         set(&["discovery", "enrichment", "missing"])
     );
     // _SOURCE minus withheld.
@@ -456,11 +484,19 @@ fn metadata_key_sets_are_exactly_the_importers() -> R {
         "encoded_size",
     ]);
     let body_keys = set(&["source_id", "epoch_id", "path", "sha256", "size"]);
-    for src in man["sources"].as_array().ok_or("sources")? {
+    for src in man
+        .pointer("/sources")
+        .and_then(Value::as_array)
+        .ok_or("sources")?
+    {
         assert_eq!(keys(src)?, source_keys);
-        assert_eq!(keys(&src["object"])?, object_keys);
+        assert_eq!(keys(&at(src, "object"))?, object_keys);
     }
-    for b in m["bodies"].as_array().ok_or("bodies")? {
+    for b in m
+        .pointer("/bodies")
+        .and_then(Value::as_array)
+        .ok_or("bodies")?
+    {
         assert_eq!(keys(b)?, body_keys);
     }
     let _ = fs::remove_dir_all(&base);
@@ -608,27 +644,53 @@ fn every_decode_corruption_a_missing_object_a_gap_and_bad_epoch_totals_leave_not
         let r = custom(raw, stored, |_| {})?;
         let mut longer = stored.to_vec();
         longer.push(0);
-        o.insert(r.pieces[0].object().to_owned(), longer);
+        o.insert(
+            r.pieces
+                .first()
+                .map(|p| p.object().to_owned())
+                .unwrap_or_default(),
+            longer,
+        );
         Ok(r)
     })?;
     bad_case("stored-digest", c.clone(), |raw, stored, o| {
         let r = custom(raw, stored, |_| {})?;
         let mut flipped = stored.to_vec();
-        flipped[0] ^= 1;
-        o.insert(r.pieces[0].object().to_owned(), flipped);
+        if let Some(b) = flipped.first_mut() {
+            *b ^= 1;
+        }
+        o.insert(
+            r.pieces
+                .first()
+                .map(|p| p.object().to_owned())
+                .unwrap_or_default(),
+            flipped,
+        );
         Ok(r)
     })?;
     bad_case("bad-zstd", c.clone(), |raw, _, o| {
         let garbage = b"definitely not a zstd frame".to_vec();
         let r = custom(raw, &garbage, |_| {})?;
-        o.insert(r.pieces[0].object().to_owned(), garbage);
+        o.insert(
+            r.pieces
+                .first()
+                .map(|p| p.object().to_owned())
+                .unwrap_or_default(),
+            garbage,
+        );
         Ok(r)
     })?;
     let with_stored = |f: fn(&mut Value, usize)| {
         move |raw: &[u8], stored: &[u8], o: &mut Objects| -> R<EpochRecord> {
             let n = raw.len();
             let r = custom(raw, stored, |j| f(j, n))?;
-            o.insert(r.pieces[0].object().to_owned(), stored.to_vec());
+            o.insert(
+                r.pieces
+                    .first()
+                    .map(|p| p.object().to_owned())
+                    .unwrap_or_default(),
+                stored.to_vec(),
+            );
             Ok(r)
         }
     };
@@ -654,13 +716,25 @@ fn every_decode_corruption_a_missing_object_a_gap_and_bad_epoch_totals_leave_not
     )?;
     bad_case("epoch-size", c.clone(), |raw, stored, o| {
         let mut r = custom(raw, stored, |_| {})?;
-        o.insert(r.pieces[0].object().to_owned(), stored.to_vec());
+        o.insert(
+            r.pieces
+                .first()
+                .map(|p| p.object().to_owned())
+                .unwrap_or_default(),
+            stored.to_vec(),
+        );
         r.size += 1;
         Ok(r)
     })?;
     bad_case("epoch-digest", c, |raw, stored, o| {
         let mut r = custom(raw, stored, |_| {})?;
-        o.insert(r.pieces[0].object().to_owned(), stored.to_vec());
+        o.insert(
+            r.pieces
+                .first()
+                .map(|p| p.object().to_owned())
+                .unwrap_or_default(),
+            stored.to_vec(),
+        );
         r.sha256 = sha(b"other")?;
         Ok(r)
     })?;
@@ -866,4 +940,8 @@ fn shared_owner_heads_and_overflowing_sequence_are_refused() -> R {
         Err(ExportError::BadTime)
     );
     Ok(())
+}
+
+fn at(v: &Value, k: &str) -> Value {
+    v.get(k).cloned().unwrap_or(Value::Null)
 }
