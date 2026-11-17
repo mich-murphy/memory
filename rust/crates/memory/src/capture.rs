@@ -54,8 +54,8 @@ use memory_core::manifest::{
     manifest_hash,
 };
 use memory_core::planner::{
-    AppendBasis, AuditEvidence, Observation, PlanInput, Planning, Strategy, WindowEvidence,
-    audit_eligible, plan, window_ranges,
+    AppendBasis, AuditEvidence, HEAD_WINDOW_BYTES, Observation, PlanInput, Planning, Strategy,
+    TAIL_WINDOW_BYTES, WindowEvidence, audit_eligible, plan, window_ranges,
 };
 use memory_core::privacy::{
     Admission, AdmittedSource, Authorization, AuthorizedBody, PolicyContext, Profile, Reason,
@@ -281,12 +281,54 @@ fn hash_span(bytes: &[u8], range: &std::ops::Range<Offset>) -> Option<Sha256> {
     bytes.get(start..end).map(manifest_hash)
 }
 
-fn windows_of(stream: &[u8]) -> Option<WindowEvidence> {
-    let (head, tail) = window_ranges(Offset::new(u64::try_from(stream.len()).ok()?));
-    Some(WindowEvidence {
-        head: hash_span(stream, &head)?,
-        tail: hash_span(stream, &tail)?,
-    })
+/// The first [`HEAD_WINDOW_BYTES`] and the last [`TAIL_WINDOW_BYTES`] bytes of a region that
+/// is streamed through in chunks, so the window digests need no copy of the region itself.
+#[derive(Default)]
+struct Edges {
+    head: Vec<u8>,
+    tail: Vec<u8>,
+    /// Bytes pushed so far.
+    len: u64,
+}
+
+impl Edges {
+    fn push(&mut self, chunk: &[u8]) {
+        let head_cap = usize::try_from(HEAD_WINDOW_BYTES).unwrap_or(usize::MAX);
+        let take = head_cap.saturating_sub(self.head.len()).min(chunk.len());
+        self.head
+            .extend_from_slice(chunk.get(..take).unwrap_or_default());
+        let tail_cap = usize::try_from(TAIL_WINDOW_BYTES).unwrap_or(usize::MAX);
+        let skip = chunk.len().saturating_sub(tail_cap);
+        self.tail
+            .extend_from_slice(chunk.get(skip..).unwrap_or_default());
+        let excess = self.tail.len().saturating_sub(tail_cap);
+        self.tail.drain(..excess);
+        self.len = self
+            .len
+            .saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
+    }
+    /// Bytes `[lo, hi)` of the region, when they lie in the head or the tail.
+    fn span(&self, lo: u64, hi: u64) -> Option<&[u8]> {
+        let head_len = u64::try_from(self.head.len()).ok()?;
+        if hi <= head_len {
+            return self
+                .head
+                .get(usize::try_from(lo).ok()?..usize::try_from(hi).ok()?);
+        }
+        let tail_start = self.len.checked_sub(u64::try_from(self.tail.len()).ok()?)?;
+        let lo = lo.checked_sub(tail_start)?;
+        let hi = hi.checked_sub(tail_start)?;
+        self.tail
+            .get(usize::try_from(lo).ok()?..usize::try_from(hi).ok()?)
+    }
+    /// Window digests of a stream that is exactly this region.
+    fn windows(&self) -> Option<WindowEvidence> {
+        let (head, tail) = window_ranges(Offset::new(self.len));
+        Some(WindowEvidence {
+            head: manifest_hash(self.span(head.start.get(), head.end.get())?),
+            tail: manifest_hash(self.span(tail.start.get(), tail.end.get())?),
+        })
+    }
 }
 
 /// Read exactly `range` through the seam. The seam's own error is not an absence and is
@@ -309,12 +351,13 @@ fn read_checked<F: FileSystem>(
 }
 
 /// Bytes `range` of the transformed stream whose first `from` bytes are still on disk
-/// (identity transform) and whose remainder is `delta`; reads only the on-disk part.
+/// (identity transform) and whose remainder is the region `delta` (kept as its edges); reads
+/// only the on-disk part.
 fn stream_span<F: FileSystem>(
     fs: &mut F,
     handle: u64,
     from: u64,
-    delta: &[u8],
+    delta: &Edges,
     range: &std::ops::Range<Offset>,
     known: &[(u64, Vec<u8>)],
 ) -> Result<Vec<u8>, SourceOutcome> {
@@ -334,9 +377,8 @@ fn stream_span<F: FileSystem>(
         Vec::new()
     };
     if end > from {
-        let lo = usize::try_from(start.max(from) - from).map_err(|_| SourceOutcome::Raced)?;
-        let hi = usize::try_from(end - from).map_err(|_| SourceOutcome::Raced)?;
-        out.extend_from_slice(delta.get(lo..hi).ok_or(SourceOutcome::Raced)?);
+        let (lo, hi) = (start.max(from) - from, end - from);
+        out.extend_from_slice(delta.span(lo, hi).ok_or(SourceOutcome::Raced)?);
     }
     Ok(out)
 }
@@ -602,7 +644,9 @@ impl Job<'_> {
                 Mode::Epoch(_) | Mode::Replace => &[],
             };
             let resumed = resume.is_some().then_some((from, known));
-            let windows = self.windows(fs, resumed, body.bytes(), stream_len)?;
+            let mut edges = Edges::default();
+            edges.push(body.bytes());
+            let windows = self.windows(fs, resumed, &edges, stream_len)?;
             let position = EpochPosition {
                 epoch: epoch.unwrap_or(self.next_epoch.saturating_sub(1)),
                 captured_to: Offset::new(stream_len),
@@ -625,23 +669,51 @@ impl Job<'_> {
             _ => None,
         }
     }
+    /// Bytes per read of a streamed source: one piece.
+    fn step(&self) -> u64 {
+        u64::try_from(self.env.piece_len.clamp(1, MAX_PIECE_BYTES)).unwrap_or(u64::MAX)
+    }
     /// One independent audit read: stat, read `[0, size)`, stat again, and only when the source
     /// held still (identity, size and mtime equal to the captured stat throughout) transform it
-    /// as a whole-stream capture does and hash it with a fresh hasher. `None` is "no verdict":
-    /// the source moved, or the seam or the transform failed.
+    /// as a whole-stream capture transforms it and hash it with a fresh hasher. `None` is "no
+    /// verdict": the source moved, or the seam or the transform failed.
+    ///
+    /// A prefix-stable source is read, authorized and hashed one chunk (at most `piece_len`
+    /// bytes) at a time; its transform is the identity, so this is the digest of the whole
+    /// transformed stream. Any other source is read whole.
     fn audit_read<F: FileSystem>(&self, fs: &mut F, state: &SourceState) -> Option<Sha256> {
         let handle = self.src.handle;
         let before = observe_now(fs, handle, self.env.now_ns)?;
         if !audit_eligible(&state.observed, &before, &before) {
             return None;
         }
-        let raw = read_checked(fs, handle, 0..before.size).ok()?;
+        let read = if self.admitted.prefix_stable() {
+            Audited::Digest(self.stream_digest(fs, before.size)?)
+        } else {
+            Audited::Raw(read_checked(fs, handle, 0..before.size).ok()?)
+        };
         let after = observe_now(fs, handle, self.env.now_ns)?;
         if !audit_eligible(&state.observed, &before, &after) {
             return None;
         }
-        let body = self.authorized_body(&raw).ok()?;
-        Some(manifest_hash(body.bytes()))
+        match read {
+            Audited::Digest(digest) => Some(digest),
+            Audited::Raw(raw) => Some(manifest_hash(self.authorized_body(&raw).ok()?.bytes())),
+        }
+    }
+    /// Digest of the first `size` bytes of a prefix-stable source, authorized chunk by chunk.
+    fn stream_digest<F: FileSystem>(&self, fs: &mut F, size: u64) -> Option<Sha256> {
+        let (handle, step) = (self.src.handle, self.step());
+        let mut state = Sha256State::empty();
+        let mut at = 0_u64;
+        while at < size {
+            let end = at.saturating_add(step).min(size);
+            let raw = read_checked(fs, handle, at..end).ok()?;
+            let body = self.authorized_body(&raw).ok()?;
+            state = state.extend(body.bytes()).ok()?;
+            at = end;
+        }
+        state.digest().ok()
     }
     /// Privacy transform, then the final authorization of the transformed bytes.
     fn authorized_body(&self, raw: &[u8]) -> Result<AuthorizedBody, SourceOutcome> {
@@ -700,22 +772,20 @@ impl Job<'_> {
         }
     }
     /// Head and tail window digests of the new stream. A resumed write (`Some((from, known))`)
-    /// holds only the delta in memory, so the windows are assembled from verified on-disk
-    /// segments and the delta; otherwise `body` is the whole stream.
+    /// holds only the delta's edges, so the windows are assembled from verified on-disk
+    /// segments and the delta; otherwise `edges` are those of the whole stream.
     fn windows<F: FileSystem>(
         &self,
         fs: &mut F,
         resumed: Option<(u64, Segments<'_>)>,
-        body: &[u8],
+        edges: &Edges,
         stream_len: u64,
     ) -> Result<WindowEvidence, SourceOutcome> {
-        let Some((from, known)) = resumed else {
-            return windows_of(body).ok_or(SourceOutcome::Raced);
-        };
+        let (from, known) = resumed.unwrap_or((0, &[]));
         let handle = self.src.handle;
         let (head, tail) = window_ranges(Offset::new(stream_len));
-        let head = stream_span(fs, handle, from, body, &head, known)?;
-        let tail = stream_span(fs, handle, from, body, &tail, known)?;
+        let head = stream_span(fs, handle, from, edges, &head, known)?;
+        let tail = stream_span(fs, handle, from, edges, &tail, known)?;
         Ok(WindowEvidence {
             head: manifest_hash(&head),
             tail: manifest_hash(&tail),
@@ -750,12 +820,27 @@ impl Job<'_> {
     }
 }
 
+/// What an audit read produced before the second stat.
+enum Audited {
+    /// The digest of a streamed prefix-stable source.
+    Digest(Sha256),
+    /// The raw bytes of any other source, authorized after the second stat.
+    Raw(Vec<u8>),
+}
+
+/// The adopted remote prefix, streamed: only its windows and resumable digest are kept.
+struct Adopted {
+    digest: Sha256,
+    state: Sha256State,
+    windows: Option<WindowEvidence>,
+}
+
 /// What the planning rounds of one append source settled on.
 struct Resolved {
     plan: Plan,
-    /// The remote position adopted by this plan, with `prefix` its verified bytes.
+    /// The remote position adopted by this plan, with `prefix` its verified evidence.
     adopted: Option<EpochPosition>,
-    prefix: Option<Vec<u8>>,
+    prefix: Option<Adopted>,
     /// Head and tail segments read at the old boundary, reusable by the write.
     known: Known,
     /// The planner asked for the fresh stat to be stored.
@@ -784,6 +869,31 @@ fn read_windows<F: FileSystem>(
             (tail.start.get(), tail_bytes),
         ],
     ))
+}
+
+/// Read `[0, captured_to)` raw (as the adopt check hashes it) one chunk at a time, keeping its
+/// digest, resumable state and windows but no more than the window bytes.
+fn read_adopted<F: FileSystem>(
+    fs: &mut F,
+    handle: u64,
+    captured_to: u64,
+    step: u64,
+) -> Result<Adopted, SourceOutcome> {
+    let mut state = Sha256State::empty();
+    let mut edges = Edges::default();
+    let mut at = 0_u64;
+    while at < captured_to {
+        let end = at.saturating_add(step).min(captured_to);
+        let raw = read_checked(fs, handle, at..end)?;
+        state = state.extend(&raw).map_err(|_| SourceOutcome::Raced)?;
+        edges.push(&raw);
+        at = end;
+    }
+    Ok(Adopted {
+        digest: state.digest().map_err(|_| SourceOutcome::Raced)?,
+        windows: edges.windows(),
+        state,
+    })
 }
 
 /// Planning rounds an append source may need. An indexed source can ask for the audit recheck,
@@ -856,9 +966,9 @@ fn resolve<F: FileSystem>(
                 plan: Plan::Adopt { remote },
                 ..
             } => {
-                let bytes = read_checked(fs, handle, 0..remote.captured_to.get())?;
-                adopt = Some(manifest_hash(&bytes));
-                prefix = Some(bytes);
+                let read = read_adopted(fs, handle, remote.captured_to.get(), job.step())?;
+                adopt = Some(read.digest);
+                prefix = Some(read);
             }
             Planning::Ready {
                 plan,
@@ -901,10 +1011,11 @@ fn append<F: FileSystem>(
         Ok(resolved) => resolved,
         Err(outcome) => return outcome,
     };
-    if let (Some(position), Some(bytes)) = (resolved.adopted, &resolved.prefix)
-        && let Some(windows) = windows_of(bytes)
+    if let (Some(position), Some(read)) = (resolved.adopted, resolved.prefix)
+        && let Some(windows) = read.windows
     {
-        let state = job.state(position, windows, job.whole_state_of(bytes), audit::never());
+        let whole = job.admitted.prefix_stable().then_some(read.state);
+        let state = job.state(position, windows, whole, audit::never());
         acc.updates
             .push(Update::Index(src.id.clone(), Box::new(state)));
     }
