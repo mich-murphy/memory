@@ -206,3 +206,7 @@ does not end early when the network is down.
   inspected the live acceptance daemon with `heap`/`vmmap` (boundary incident, run unaffected).
   Record: [evidence 22](evidence/22-streaming/). Next: push the stack, then end the run after two
   clean days, then a short run with the streamed binary on real data.
+- 2026-11-17 18:59Z: stack #143 (PRs #136 to #142) merged as `2e5f193`. Hosted gates green on every
+  branch and post-merge; reruns were macOS jobs without a runner and an existing Go coverage flake
+  in `hook_detaches_and_syncs` (finding, evidence 22). Next: the acceptance run's checks; end it
+  after two clean days; then the short streamed-binary run.

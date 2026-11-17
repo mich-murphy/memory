@@ -143,3 +143,30 @@ Each applied alone, the focused tests run, the file reverted with `git checkout`
   peak-memory test ran on macOS only. A new Claude session's `debug` file has no owner until the next
   full reconcile. The CONN cause of the run's per-PUT connections is not confirmed live.
 - Not run: 2,000 property cases, `cargo mutants`, a Linux stress run, anything against R2.
+
+## Stack #143 and hosted CI
+
+Pushed as stack #143 (PRs #136 to #142) without a rebase, after a check of the whole range for the
+values in `.env` (no added line holds one), and merged into `main` as `2e5f193` on 2026-11-17
+(`gh stack merge 143 --yes --merge`). Before the merge, "Rust rewrite gates" succeeded on all six jobs
+of its latest attempt on every branch (the Linux jobs, including ARM, all passed under the new
+`slow-timeout`), and "CI" failed only in the two accepted `govulncheck` steps on every branch.
+Post-merge on `2e5f193`: "Rust rewrite gates" run 44145426842 success; "CI" run 44145426856 attempt 2
+failed only in the two accepted steps.
+
+Reruns, each for a reason the ready rule names:
+
+- macOS jobs cancelled with zero steps (no runner) were rerun: "Rust coverage (macos-26)" on
+  `docs/brief-31`, `rust/nextest-timeout` (twice) and `rust/streaming-capture`; "Rust gates (macos-26)"
+  on `docs/brief-31`; CI "Tests (macos-26)" on `rust/round-progress` (three times), on
+  `docs/brief-31-record` and post-merge on `main`.
+- **Finding (Go, existing flake):** CI "Tests (macos-26)" step `make crap` failed in the Go e2e test
+  `cmd/agent-sessions` `TestScripts/hook_detaches_and_syncs` on `rust/nextest-timeout` (run 44107218200
+  attempt 1) and `rust/round-progress` (run 44107297555 attempt 3): the hook printed "coverage meta-data
+  emit failed ... rename ... tmp.covmeta... no such file or directory" to stderr, where the script
+  expects nothing. The stack changes no file outside `rust/` and `docs/`, the same Go tree passed on the
+  other branches, and the same step failed on a Dependabot branch on 2026-11-16 (`316531f`). It looks
+  like a race between the hook and its detached sync child writing the same `GOCOVERDIR` metadata. Both
+  passed on rerun. Not fixed: the Go hooks remain until cutover; recorded here.
+- A local DNS failure for `api.github.com` (about 15:31Z) interrupted `gh run watch`; the acceptance
+  daemon logged `offline` failures in the same minute and landed the owner at 15:32:56Z.
