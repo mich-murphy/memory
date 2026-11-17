@@ -7,7 +7,7 @@
 
 use crate::environment::{FileSystem, Stat};
 use memory_core::domain::{Birth, FileId};
-use memory_core::locator::{Located, RootRelativePath, Roots, locate};
+use memory_core::locator::{ClaudeSessionIndex, Located, RootRelativePath, Roots, locate};
 use rustix::fs::{Mode, OFlags};
 use rustix::io::Errno;
 use std::fs;
@@ -207,6 +207,44 @@ pub struct Walk {
     pub entries: u64,
     /// The entry bound stopped the walk early.
     pub truncated: bool,
+}
+
+/// Attach to `roots` the UUID -> project slug facts of `root`: one `read_dir` of `projects/`
+/// and one per slug directory, no file content. Only a regular `<uuid>.jsonl` directly under a
+/// real slug directory counts (the locator's `record` validates both names); a UUID under two
+/// slugs stays ambiguous. Derived on every call, never stored.
+pub fn index_claude_sessions(root: &Path, roots: &Roots) -> Roots {
+    let mut index = ClaudeSessionIndex::new();
+    let projects = root.join("projects");
+    let plain_dir = |m: Result<fs::Metadata, std::io::Error>| m.is_ok_and(|m| m.is_dir());
+    if plain_dir(fs::symlink_metadata(&projects))
+        && let Ok(slugs) = fs::read_dir(&projects)
+    {
+        for slug in slugs.flatten() {
+            let Some(slug_name) = slug.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if !slug.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            let Ok(files) = fs::read_dir(slug.path()) else {
+                continue;
+            };
+            for file in files.flatten() {
+                if !file.file_type().is_ok_and(|t| t.is_file()) {
+                    continue;
+                }
+                if let Some(stem) = file
+                    .file_name()
+                    .to_str()
+                    .and_then(|n| n.strip_suffix(".jsonl"))
+                {
+                    index.record(stem, &slug_name).ok();
+                }
+            }
+        }
+    }
+    roots.clone().with_claude_sessions(index)
 }
 
 /// Walk each `(directory, roots)` pair with `read_dir`, calling `locate` per regular file.

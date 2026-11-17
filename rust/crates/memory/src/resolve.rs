@@ -16,8 +16,8 @@
 
 use crate::capture::Source;
 use crate::environment::{FileSystem, Stat};
-use crate::realfs::{RealFs, RealFsError, WalkLimits, walk};
-use memory_core::domain::{Owner, SourceKind};
+use crate::realfs::{RealFs, RealFsError, WalkLimits, index_claude_sessions, walk};
+use memory_core::domain::{Owner, SourceClass, SourceKind};
 use memory_core::locator::{Located, RootRelativePath, Roots, locate};
 use memory_core::privacy::{Profile, ResolvedSourceFacts};
 use std::cell::RefCell;
@@ -255,6 +255,9 @@ pub struct Counts {
     pub unknown_kind: u64,
     /// Files with a known pattern but no unambiguous owner.
     pub unknown_owner: u64,
+    /// Snapshot-class files located but withheld until slice 3 (DESIGN.md 17); neither
+    /// yielded nor counted as unknown.
+    pub deferred_snapshot: u64,
     /// Yielded sources whose facts are unresolved (capture will block them).
     pub unresolved: u64,
     /// Symlinks the walk skipped.
@@ -354,6 +357,13 @@ impl crate::daemon::Sources for WalkSources {
             self.counts = counts;
             return Vec::new();
         };
+        // The Claude session index is derived: rebuilt from `projects/` before every locate,
+        // and kept in `roots` so `note` and `of` resolve as the last walk did.
+        self.roots = self
+            .roots
+            .iter()
+            .map(|(d, r)| (d.clone(), index_claude_sessions(d, r)))
+            .collect();
         let found = walk(&self.roots, &self.limits);
         counts.symlinks = found.symlinks;
         counts.unreadable = found.unreadable;
@@ -365,6 +375,13 @@ impl crate::daemon::Sources for WalkSources {
                 match located {
                     Located::UnknownKind => counts.unknown_kind += 1,
                     Located::UnknownOwner => counts.unknown_owner += 1,
+                    Located::Source {
+                        class: SourceClass::Snapshot,
+                        ..
+                    } => {
+                        counts.deferred_snapshot += 1;
+                        continue;
+                    }
                     Located::Source { .. } => {}
                 }
                 if let Some((owner, source)) =
@@ -395,7 +412,12 @@ impl crate::daemon::Sources for WalkSources {
             else {
                 continue;
             };
-            let Located::Source { owner, .. } = locate(&rel, roots) else {
+            let Located::Source {
+                owner,
+                class: SourceClass::Append,
+                ..
+            } = locate(&rel, roots)
+            else {
                 continue;
             };
             let spelled = dir.join(rel.components().join("/"));
@@ -429,6 +451,15 @@ impl crate::daemon::Sources for WalkSources {
                 continue;
             }
             let located = locate(&rel, roots);
+            if matches!(
+                located,
+                Located::Source {
+                    class: SourceClass::Snapshot,
+                    ..
+                }
+            ) {
+                continue;
+            }
             if let Some((found, source)) =
                 to_source(&mut fs, &mut self.handles, path, dir, &rel, &located)
                 && found == *owner
