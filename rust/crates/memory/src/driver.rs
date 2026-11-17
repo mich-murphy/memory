@@ -14,10 +14,13 @@
 //! | tick | `t0 + k * tick` | [`Input::Tick`] fed to the scheduler (`Wake` on a gap) |
 //! | reconcile | end of the last reconcile + `interval` | `reconcile(Timer)` |
 //!
-//! A directory event ([`Input::DirCreated`]) asks for a reconcile ([`Cause::Dir`]), except one
-//! inside the hint directory: that is a hint-directory change (the daemon creates the directory
-//! just before the watcher starts, and the platform reports it), so it only marks the hints
-//! dirty like a changed file there.
+//! A directory event ([`Input::DirCreated`]) reads that directory only ([`Work::read_dir`]),
+//! once per distinct path in a batch; the owners found are signalled as changed, so they are
+//! captured after the window. A read that was cut short asks for a reconcile ([`Cause::Dir`]).
+//! A directory read is not a round: it does not move the reconcile timer. One inside the hint
+//! directory is a hint-directory change (the daemon creates the directory just before the
+//! watcher starts, and the platform reports it), so it only marks the hints dirty like a
+//! changed file there.
 //!
 //! One turn: stop; tick; captures; retries; the reconcile (flag or timer, one reconcile
 //! however many causes, the first set is reported); then wait for the earliest wake and drain
@@ -28,7 +31,7 @@ use crate::watch::{Action, Input, Scheduler};
 use memory_core::coalescer::{Signal, Window};
 use memory_core::domain::Owner;
 use std::collections::VecDeque;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Why a full reconcile runs.
@@ -42,7 +45,7 @@ pub enum Cause {
     Rescan,
     /// A wake gap was detected.
     Wake,
-    /// A directory appeared.
+    /// A directory read was cut short.
     Dir,
 }
 
@@ -91,12 +94,23 @@ pub enum Route {
     Nothing,
 }
 
+/// What reading one directory found.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DirRead {
+    /// Owners with an append source under the directory.
+    pub owners: Vec<Owner>,
+    /// The bounded walk stopped early: a full reconcile is needed.
+    pub truncated: bool,
+}
+
 /// What the loop does.
 pub trait Work {
     /// Classify a changed path.
     fn classify(&mut self, path: &Path) -> Route;
     /// New hint signals; asked once per batch in which the hint directory changed.
     fn hints(&mut self) -> Vec<(Owner, Signal)>;
+    /// Read one directory a [`Input::DirCreated`] named, nothing else.
+    fn read_dir(&mut self, path: &Path) -> DirRead;
     /// Capture one owner.
     ///
     /// # Errors
@@ -136,6 +150,7 @@ pub fn drive<I: Inputs, W: Work>(
         ready: VecDeque::new(),
         flag: None,
         hints_dirty: false,
+        dirs: Vec::new(),
         tick_at: t0 + timings.tick,
         reconcile_at: None,
         offered: None,
@@ -168,6 +183,8 @@ struct Driver<'a, I, W, C> {
     ready: VecDeque<Owner>,
     flag: Option<Cause>,
     hints_dirty: bool,
+    /// Distinct directories named in this batch, not read yet.
+    dirs: Vec<PathBuf>,
     tick_at: Duration,
     /// `None` until the start reconcile has completed.
     reconcile_at: Option<Duration>,
@@ -262,12 +279,30 @@ impl<I: Inputs, W: Work, C: Clock> Driver<'_, I, W, C> {
         for action in actions {
             match action {
                 Action::Capture { owner } => self.ready.push_back(owner),
-                Action::ReadDir { .. } => {
-                    self.flag.get_or_insert(Cause::Dir);
+                Action::ReadDir { path } => {
+                    if !self.dirs.contains(&path) {
+                        self.dirs.push(path);
+                    }
                 }
                 Action::ReconcileAll => {
                     self.flag.get_or_insert(cause);
                 }
+            }
+        }
+    }
+
+    /// Read each directory of the batch once; its owners become changed signals.
+    fn read_dirs(&mut self) {
+        for path in std::mem::take(&mut self.dirs) {
+            let read = self.work.read_dir(&path);
+            if read.truncated {
+                self.flag.get_or_insert(Cause::Dir);
+            }
+            for owner in read.owners {
+                self.feed(Input::Hint {
+                    owner,
+                    signal: Signal::Changed,
+                });
             }
         }
     }
@@ -344,6 +379,7 @@ impl<I: Inputs, W: Work, C: Clock> Driver<'_, I, W, C> {
             up_to = Duration::ZERO;
             taken += 1;
         }
+        self.read_dirs();
         if std::mem::take(&mut self.hints_dirty) {
             for (owner, signal) in self.work.hints() {
                 self.feed(Input::Hint { owner, signal });

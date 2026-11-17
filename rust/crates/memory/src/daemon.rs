@@ -260,6 +260,12 @@ pub trait Sources {
     fn note(&mut self, _path: &Path) -> Option<Owner> {
         None
     }
+    /// Read one directory an event named: note each append source found under it and return
+    /// the owners, and whether the bounded walk was cut short. Reads no file content. Default:
+    /// nothing is found.
+    fn read_dir(&mut self, _path: &Path) -> (Vec<Owner>, bool) {
+        (Vec::new(), false)
+    }
     /// The current sources of one owner. Default: [`Sources::enumerate`] filtered.
     fn of(&mut self, owner: &Owner) -> Vec<Source> {
         self.enumerate()
@@ -1202,6 +1208,11 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     /// Remember a path an event named; the owner it belongs to, if it is a source.
     pub fn note_path(&mut self, path: &Path) -> Option<Owner> {
         self.sources.note(path)
+    }
+
+    /// Read one directory an event named (see [`Sources::read_dir`]).
+    pub fn read_dir(&mut self, path: &Path) -> (Vec<Owner>, bool) {
+        self.sources.read_dir(path)
     }
 
     /// The earliest retry deadline among owners (monotonic), if any.

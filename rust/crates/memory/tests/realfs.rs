@@ -627,3 +627,34 @@ fn read_does_not_block_on_or_read_a_fifo_or_directory() -> TestResult {
     );
     Ok(())
 }
+
+#[test]
+fn walk_under_examines_only_entries_of_that_directory() -> Result<(), Box<dyn std::error::Error>> {
+    use memory::realfs::{WalkLimits, walk_under};
+    use memory_core::domain::{Agent, ArchiveId, MachineId};
+    use memory_core::locator::{RootLayout, RootNamespace, Roots};
+    let dir = std::env::temp_dir().join(format!("walk-under-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("projects/-p"))?;
+    fs::create_dir_all(dir.join("projects/-q"))?;
+    fs::write(dir.join("projects/-p/abc.jsonl"), b"{}\n")?;
+    for k in 0..10 {
+        fs::write(dir.join(format!("projects/-q/f{k}.jsonl")), b"{}\n")?;
+    }
+    let roots = Roots::new(
+        ArchiveId::try_from("a".to_owned())?,
+        MachineId::try_from("m".to_owned())?,
+        Agent::Claude,
+        RootNamespace::new("r1")?,
+        RootLayout::AgentDir,
+    );
+    let found = walk_under(
+        &dir,
+        &["projects".to_owned(), "-p".to_owned()],
+        &roots,
+        &WalkLimits::default(),
+    );
+    fs::remove_dir_all(&dir)?;
+    assert_eq!((found.entries, found.files.len()), (1, 1));
+    Ok(())
+}

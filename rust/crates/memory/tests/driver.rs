@@ -1,6 +1,6 @@
 //! The event-loop driver with a scripted input source, a recording worker and a fake clock:
 //! no sleeping, no watcher, no filesystem. Times in logs are seconds since the driver started.
-use memory::driver::{Cause, Inputs, Next, Route, Timings, Work, drive};
+use memory::driver::{Cause, DirRead, Inputs, Next, Route, Timings, Work, drive};
 use memory::environment::Clock;
 use memory::run::{Failed, Outcome};
 use memory::watch::Input;
@@ -36,6 +36,7 @@ enum Ev {
     Capture(usize),
     Reconcile(Cause),
     Hints,
+    ReadDir(String),
     Shutdown,
 }
 type Entry = (u64, Ev);
@@ -50,6 +51,9 @@ fn cap(t: u64, i: usize) -> Entry {
 }
 fn hints(t: u64) -> Entry {
     (t, Ev::Hints)
+}
+fn read(t: u64, path: &str) -> Entry {
+    (t, Ev::ReadDir(path.to_owned()))
 }
 fn shut(t: u64) -> Entry {
     (t, Ev::Shutdown)
@@ -169,6 +173,8 @@ struct Rec<'a> {
     stop_after_captures: Option<usize>,
     stop_after_reconciles: Option<usize>,
     hint_batches: VecDeque<Vec<(Owner, Signal)>>,
+    /// What reading a directory finds: path, owner indexes, truncated.
+    dir_results: Vec<(String, Vec<usize>, bool)>,
     /// Retry deadlines: (seconds since start, owner index).
     retries: Vec<(u64, usize)>,
     /// Retries the work leaves due after offering them (a paused host does this).
@@ -204,6 +210,18 @@ impl Work for Rec<'_> {
     fn hints(&mut self) -> Vec<(Owner, Signal)> {
         self.fake.push(Ev::Hints);
         self.hint_batches.pop_front().unwrap_or_default()
+    }
+    fn read_dir(&mut self, path: &Path) -> DirRead {
+        let text = path.to_str().unwrap_or("").to_owned();
+        self.fake.push(Ev::ReadDir(text.clone()));
+        let found = self.dir_results.iter().find(|(p, _, _)| *p == text);
+        found.map_or_else(DirRead::default, |(_, idx, truncated)| DirRead {
+            owners: idx
+                .iter()
+                .filter_map(|i| self.owners.get(*i).cloned())
+                .collect(),
+            truncated: *truncated,
+        })
     }
     fn capture(&mut self, owner: &Owner) -> Result<(), Failed> {
         self.captures += 1;
@@ -302,6 +320,7 @@ fn go_calls(cfg: Cfg, setup: impl FnOnce(&mut Rec<'_>) -> R) -> R<(Outcome, Vec<
         stop_after_captures: None,
         stop_after_reconciles: None,
         hint_batches: VecDeque::new(),
+        dir_results: Vec::new(),
         retries: Vec::new(),
         sticky_retries: Vec::new(),
         reconcile_cost: 0,
@@ -522,12 +541,8 @@ fn an_input_does_not_move_the_tick() -> R {
 // ------------------------------------------------------------------ reconcile causes
 
 #[test]
-fn rescan_error_and_new_directory_each_reconcile_once() -> R {
-    for (step, cause) in [
-        (rescan(), Cause::Rescan),
-        (error(), Cause::Rescan),
-        (dir(), Cause::Dir),
-    ] {
+fn rescan_and_error_each_reconcile_once() -> R {
+    for (step, cause) in [(rescan(), Cause::Rescan), (error(), Cause::Rescan)] {
         let (_, log) = go_plain(300, vec![(100, step)])?;
         assert_eq!(log, vec![start(7), recon(100, cause), shut(300)]);
     }
@@ -543,10 +558,32 @@ fn many_causes_in_one_batch_give_one_reconcile_with_the_first_cause() -> R {
         (100, rescan()),
     ];
     let (_, log) = go_plain(300, steps)?;
-    assert_eq!(log, vec![start(7), recon(100, Cause::Rescan), shut(300)]);
+    assert_eq!(
+        log,
+        vec![
+            start(7),
+            read(100, "/r/o1/new"),
+            recon(100, Cause::Rescan),
+            shut(300)
+        ]
+    );
+    // A truncated directory read is made after the batch's inputs are fed, so a cause set by
+    // those inputs is the first one; the read alone gives Cause::Dir (see
+    // a_truncated_directory_read_sets_the_flag_with_cause_dir).
     let steps = vec![(100, dir()), (100, rescan()), (100, error())];
-    let (_, log) = go_plain(300, steps)?;
-    assert_eq!(log, vec![start(7), recon(100, Cause::Dir), shut(300)]);
+    let (_, log) = go(cfg(300, steps), |rec| {
+        rec.dir_results.push(("/r/o1/new".to_owned(), vec![], true));
+        Ok(())
+    })?;
+    assert_eq!(
+        log,
+        vec![
+            start(7),
+            read(100, "/r/o1/new"),
+            recon(100, Cause::Rescan),
+            shut(300)
+        ]
+    );
     // Separate batches are separate reconciles.
     let (_, log) = go_plain(300, vec![(100, rescan()), (200, rescan())])?;
     assert_eq!(
@@ -866,6 +903,89 @@ fn a_retry_that_becomes_due_during_a_reconcile_runs_in_the_next_turn() -> R {
     assert_eq!(
         log,
         vec![start(7), recon(100, Cause::Rescan), cap(105, 3), shut(300)]
+    );
+    Ok(())
+}
+
+// ------------------------------------------------------------------ directory reads
+
+fn dir_at(path: &str) -> Step {
+    Step::In(Input::DirCreated {
+        path: PathBuf::from(path),
+    })
+}
+
+#[test]
+fn directories_of_a_batch_are_read_once_each_and_nothing_reconciles() -> R {
+    let steps = vec![
+        (100, dir_at("/r/o1/a")),
+        (100, dir_at("/r/o1/b")),
+        (100, dir_at("/r/o1/a")),
+        (100, dir_at("/r/o1/a")),
+    ];
+    let (_, log) = go_plain(300, steps)?;
+    assert_eq!(
+        log,
+        vec![
+            start(7),
+            read(100, "/r/o1/a"),
+            read(100, "/r/o1/b"),
+            shut(300)
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn owners_a_directory_read_finds_are_captured_after_the_window() -> R {
+    let (_, log) = go(cfg(400, vec![(100, dir_at("/r/o1/a"))]), |rec| {
+        rec.dir_results
+            .push(("/r/o1/a".to_owned(), vec![2, 3], false));
+        Ok(())
+    })?;
+    assert_eq!(
+        log,
+        vec![
+            start(7),
+            read(100, "/r/o1/a"),
+            cap(160, 2),
+            cap(160, 3),
+            shut(400)
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn a_truncated_directory_read_sets_the_flag_with_cause_dir() -> R {
+    let (_, log) = go(cfg(300, vec![(100, dir_at("/r/o1/a"))]), |rec| {
+        rec.dir_results.push(("/r/o1/a".to_owned(), vec![], true));
+        Ok(())
+    })?;
+    assert_eq!(
+        log,
+        vec![
+            start(7),
+            read(100, "/r/o1/a"),
+            recon(100, Cause::Dir),
+            shut(300)
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn a_directory_read_does_not_move_the_reconcile_timer() -> R {
+    // Start reconcile at 7; the timer is due at 907 whatever a read at 800 did.
+    let (_, log) = go_plain(1000, vec![(800, dir_at("/r/o1/a"))])?;
+    assert_eq!(
+        log,
+        vec![
+            start(7),
+            read(800, "/r/o1/a"),
+            recon(907, Cause::Timer),
+            shut(1000)
+        ]
     );
     Ok(())
 }

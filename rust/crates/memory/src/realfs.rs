@@ -262,8 +262,31 @@ pub fn walk(roots: &[(PathBuf, Roots)], limits: &WalkLimits) -> Walk {
     out
 }
 
+/// Walk only `dir`, a directory under `root` whose root-relative components are `rel` (empty for
+/// the root itself). Depth, entry bound, symlink and locate rules are those of [`walk`]; files
+/// are returned sorted by relative path.
+pub fn walk_under(root: &Path, rel: &[String], roots: &Roots, limits: &WalkLimits) -> Walk {
+    let mut out = Walk::default();
+    let mut dir = root.to_path_buf();
+    dir.extend(rel);
+    walk_dir(&dir, rel.to_vec(), roots, limits, &mut out);
+    out.files
+        .sort_by(|a, b| a.1.components().cmp(b.1.components()));
+    out
+}
+
 fn walk_root(root: &Path, roots: &Roots, limits: &WalkLimits, out: &mut Walk) {
-    let mut stack = vec![(root.to_path_buf(), Vec::<String>::new())];
+    walk_dir(root, Vec::new(), roots, limits, out);
+}
+
+fn walk_dir(
+    start: &Path,
+    start_rel: Vec<String>,
+    roots: &Roots,
+    limits: &WalkLimits,
+    out: &mut Walk,
+) {
+    let mut stack = vec![(start.to_path_buf(), start_rel)];
     while let Some((dir, rel)) = stack.pop() {
         let Ok(rd) = fs::read_dir(&dir) else {
             out.unreadable += 1;

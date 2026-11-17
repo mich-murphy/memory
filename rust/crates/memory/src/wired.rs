@@ -1,7 +1,7 @@
 //! The two adapters of the event loop: the watcher as [`Inputs`] and the daemon as [`Work`]
 //! (docs/rust-rewrite/implementation/29-event-loop.md, LOOP-2b).
 use crate::assemble::ProductionDaemon;
-use crate::driver::{Cause, Inputs, Next, Route, Work};
+use crate::driver::{Cause, DirRead, Inputs, Next, Route, Work};
 use crate::run::Failed;
 use crate::watch::{FsWatcher, Received, StopFlag};
 use memory_core::coalescer::Signal;
@@ -97,6 +97,15 @@ impl Work for DaemonWork {
                 .map(|hint| (hint.owner, hint.signal))
                 .collect()
         })
+    }
+
+    fn read_dir(&mut self, path: &Path) -> DirRead {
+        self.daemon
+            .as_mut()
+            .map_or_else(DirRead::default, |daemon| {
+                let (owners, truncated) = daemon.read_dir(path);
+                DirRead { owners, truncated }
+            })
     }
 
     fn capture(&mut self, owner: &Owner) -> Result<(), Failed> {
