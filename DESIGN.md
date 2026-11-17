@@ -574,8 +574,9 @@ Clocks [DDIA ch. 9, Monotonic clocks; prototype P6]:
   `Instant`. On Linux it is `CLOCK_MONOTONIC`. Both exclude sleep, so deadlines pause across
   sleep rather than firing at once on wake.
 - A 60 s tick compares elapsed wall time with elapsed monotonic time. A gap of more than 120 s
-  means the host slept. It sets the reconcile flag and staggers queued captures with jitter
-  over 30 s. [review, 03 M2, M5]
+  means the host slept. It sets the reconcile flag. Queued captures are not staggered:
+  captures run one at a time, so a wake gives no burst to spread. [review, 03 M2, M5;
+  decided 2026-11-17, D43]
 - Manifest `captured_at` uses the wall clock. Nothing orders by it.
 
 ### 7.2 Reconcile
@@ -1499,6 +1500,8 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D40 | 2026-11-12: a restarted daemon's first commit is at least 5 s after start | A14.1; 11.2 |
 | D41 | 2026-11-12: the 2-day exit criterion replaces the 7-day shadow runs of slices 2b and 3 | A14.2; 17 |
 | D42 | 2026-11-12: the baseline hash pin is removed; amendments A0 to A13 are folded into this document; DESIGN.md and AGENTS.md are edited directly | A14.3; 0 |
+| D43 | 2026-11-17: no wake stagger; a wake gap sets the reconcile flag only, because captures are serial | brief 29; 7.1 |
+| D44 | 2026-11-17: commit pauses are full jitter, `uniform(0, ceiling)`, ceilings 1 s, 2 s, 4 s, then 4 s; a stop does not cut a pause inside the publish part | brief 30; 7.4 |
 
 Finding-to-section map for the challenge review:
 

@@ -79,12 +79,30 @@ from `main` alone.
   3. Commit pauses: full jitter with ceilings of 1 s, 2 s and 4 s. DESIGN 7.4 gives no
      lengths and production pauses are zero today. Not built yet.
 
-  Not decided, ask before doing: installing the Rust hooks for the run (without them the run
-  exercises no hint), and how the daemon is kept running for two days (no launchd unit or
-  other installed service was approved). The earlier confirmations in brief 29, "Open for the
-  operator" (items 2, 4 and 5), were listed again and not answered one by one; none blocks
-  the run.
-- Next actions, in order. None is started. Write brief 30 first and scope it with a read-only
+  Operator answers later on 2026-11-17, in reply to the review that opened brief 30:
+  4. The daemon runs for the two days as a separate launchd user agent (label
+     `memory-acceptance`, its own state root and config, `KeepAlive`), removed when the run
+     ends.
+  5. The Rust hooks are installed for the run, beside the Go hooks; the Go hooks keep
+     filling their local spool.
+  6. The Mac is kept awake for the run (`caffeinate`, as now); natural sleep is not part of
+     this run.
+  7. Commit pauses: the three ceilings are 1 s, 2 s, 4 s; a fourth rebase pause uses 4 s.
+     A shutdown may wait for the pauses inside a verification (up to about 7 s).
+  8. The wake stagger of DESIGN 7.1 is dropped (serial captures); fold it into DESIGN.md.
+  9. `memory export` and the consumer gate come after the run, before cutover; the
+     export-canary abort trigger therefore cannot fire during this run.
+  10. Brief 29 items 2, 4 and 5 (and the brief 28 items they repeat) are accepted as built:
+      no cap on kept hint files, the `events` block removal, the `launch_attach_failed`
+      removal and the dated notes under A11.3 and A13.3, the AUDIT-3 choices, no `unpark`
+      yet, the `capture` line, `round cause=wake` and the hint-owner rule.
+- Brief 30 is written ([30-acceptance-run.md](rust-rewrite/implementation/30-acceptance-run.md)),
+  scoped by a read-only planner and rechecked by the parent. It adds two findings to the list
+  below: nothing withholds snapshot and config kinds (DESIGN 17 slice 2 says they stay withheld),
+  and nothing fills the `ClaudeSessionIndex`, so Claude `debug` files never get an owner. Its
+  increments PAUSE, WALK, CHECK and RUN supersede the list below, which is kept as the plan it
+  was written from.
+- Next actions, in order (written before brief 30). Write brief 30 first and scope it with a read-only
   planner whose claims the parent rechecks against the code, as for briefs 28 and 29.
   1. Build the commit pauses of decision 3. The brief must say which waits they are (the
      pauses between the four verification GETs and between the rebase retries of DESIGN 7.4)
@@ -111,7 +129,7 @@ from `main` alone.
   deleted; there is no `unpark` (clearing a park means deleting `status.json` with the daemon
   stopped); a hint day file whose launch record never commits, or has no owner, is kept; a
   round does not end early when the network is down; the wake stagger of DESIGN 7.1 is not
-  built and DESIGN.md still describes it; no gate runs rustdoc. Not run: 2,000 property
+  built and is dropped (D43, folded 2026-11-17); no gate runs rustdoc. Not run: 2,000 property
   cases, `cargo mutants`, a Linux stress run of the real-binary tests.
 - How the last four stacks were delivered (operator instruction of 2026-11-12: the
   coordinator skill, Sonnet subagents, the parent keeps its own context and decides
