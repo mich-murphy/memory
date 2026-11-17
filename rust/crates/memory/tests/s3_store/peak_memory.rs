@@ -152,12 +152,17 @@ fn run_daemon(s: &Setup, until: &dyn Fn(&str) -> bool) -> R<(u64, String)> {
     kill_term(pid)?;
     let begin = Instant::now();
     while guard.0.try_wait().map_err(e)?.is_none() {
-        ensure_ok(begin.elapsed() < Duration::from_secs(30), "no exit after SIGTERM")?;
+        ensure_ok(
+            begin.elapsed() < Duration::from_secs(30),
+            "no exit after SIGTERM",
+        )?;
         thread::sleep(Duration::from_millis(20));
     }
     let _ = reader.join();
     let text = snapshot();
-    let peak = hwm.or_else(|| peak_of(&text)).ok_or("no peak memory reading")?;
+    let peak = hwm
+        .or_else(|| peak_of(&text))
+        .ok_or("no peak memory reading")?;
     Ok((peak, text))
 }
 
@@ -171,7 +176,7 @@ fn audit_matched(log: &str) -> u64 {
         .unwrap_or(0)
 }
 
-fn measure(label: &str, files: &[(&str, u64, bool)], min_objects: usize) -> R {
+fn measure(label: &str, files: &[(&str, u64, bool)], min_objects: usize) -> R<(u64, u64)> {
     let s = setup(label)?;
     let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
     let _ = fs::remove_file(&s.file);
@@ -187,7 +192,10 @@ fn measure(label: &str, files: &[(&str, u64, bool)], min_objects: usize) -> R {
         .iter()
         .filter(|r| r.method == "PUT" && r.path.contains("/objects/"))
         .count();
-    ensure_ok(objects >= min_objects, &format!("{objects} piece PUTs, wanted {min_objects}"))?;
+    ensure_ok(
+        objects >= min_objects,
+        &format!("{objects} piece PUTs, wanted {min_objects}"),
+    )?;
     // Audit: a second run over the same state; every source is due.
     let want = files.len() as u64;
     let (audit_peak, log) = run_daemon(&s, &|l| l.contains(" INFO round cause=start"))?;
@@ -197,15 +205,22 @@ fn measure(label: &str, files: &[(&str, u64, bool)], min_objects: usize) -> R {
         "audit_matched {} < {want}\n{log}",
         audit_matched(&log)
     );
-    assert!(capture_peak < LIMIT, "{label}: capture peak {capture_peak}");
-    assert!(audit_peak < LIMIT, "{label}: audit peak {audit_peak}");
-    Ok(())
+    Ok((capture_peak, audit_peak))
+}
+
+fn within(label: &str, peaks: (u64, u64)) {
+    assert!(peaks.0 < LIMIT, "{label}: capture peak {}", peaks.0);
+    assert!(peaks.1 < LIMIT, "{label}: audit peak {}", peaks.1);
 }
 
 #[test]
 fn one_100_mb_incompressible_source_stays_under_128_mb() -> R {
     let rel = format!("{OWNER_DIR}.jsonl");
-    measure("peak-a", &[(rel.as_str(), 100, true)], 12)
+    within(
+        "peak-a",
+        measure("peak-a", &[(rel.as_str(), 100, true)], 12)?,
+    );
+    Ok(())
 }
 
 #[test]
@@ -216,5 +231,6 @@ fn an_owner_of_more_than_256_mb_stays_under_128_mb() -> R {
         .collect();
     let mut files: Vec<(&str, u64, bool)> = vec![(main.as_str(), 60, false)];
     files.extend(subs.iter().map(|p| (p.as_str(), 60, false)));
-    measure("peak-b", &files, 30)
+    within("peak-b", measure("peak-b", &files, 30)?);
+    Ok(())
 }
