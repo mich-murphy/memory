@@ -15,6 +15,7 @@ use memory_core::manifest::{
     Position, ProjectedKind, StoredEncoding, build, fold, manifest_hash, parse_current,
     recover_projection,
 };
+use memory_core::pause::Wait;
 use memory_core::verify::{Verdict, classify};
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -344,7 +345,7 @@ fn verify<S: Store>(
     ours: Sha256,
     previous: Option<Sha256>,
     known: &KnownOurs,
-    pause: &mut dyn FnMut(u32),
+    pause: &mut dyn FnMut(Wait),
 ) -> Result<Option<Verdict>, Failure> {
     let mut last = StoreError::NotFound;
     for attempt in 0..GET_ATTEMPTS {
@@ -374,7 +375,7 @@ fn verify<S: Store>(
             Err(error) => last = error,
         }
         if attempt + 1 < GET_ATTEMPTS {
-            pause(attempt);
+            pause(Wait::Verify(attempt));
         }
     }
     if last == StoreError::NotFound {
@@ -402,7 +403,7 @@ pub fn commit<S: Store>(
     store: &mut S,
     base: Option<&Base>,
     request: Commit,
-    pause: &mut dyn FnMut(u32),
+    pause: &mut dyn FnMut(Wait),
 ) -> Result<CommitEnd, Failure> {
     commit_known(store, base, request, &mut KnownOurs::new(), pause)
 }
@@ -419,7 +420,7 @@ pub fn commit_known<S: Store>(
     base: Option<&Base>,
     request: Commit,
     known: &mut KnownOurs,
-    pause: &mut dyn FnMut(u32),
+    pause: &mut dyn FnMut(Wait),
 ) -> Result<CommitEnd, Failure> {
     commit_stoppable(store, base, request, known, pause, &mut || false)
 }
@@ -439,7 +440,7 @@ pub fn commit_stoppable<S: Store>(
     base: Option<&Base>,
     request: Commit,
     known: &mut KnownOurs,
-    pause: &mut dyn FnMut(u32),
+    pause: &mut dyn FnMut(Wait),
     stop: &mut dyn FnMut() -> bool,
 ) -> Result<CommitEnd, Failure> {
     let ready = prepare(store, base, request, known, stop)?;
@@ -497,7 +498,7 @@ fn publish<S: Store>(
     base: Option<&Base>,
     ready: Prepared,
     known: &mut KnownOurs,
-    pause: &mut dyn FnMut(u32),
+    pause: &mut dyn FnMut(Wait),
 ) -> Result<CommitEnd, Failure> {
     let Prepared {
         key,
@@ -569,7 +570,7 @@ fn publish<S: Store>(
                 Failure::BaseUnchanged
             });
         }
-        pause(rebases);
+        pause(Wait::Rebase(rebases));
     }
 }
 

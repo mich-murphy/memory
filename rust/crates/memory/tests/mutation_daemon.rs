@@ -164,7 +164,7 @@ fn boot(tmp: &Tmp, initial: &[u8], model: EtagModel) -> R<D> {
             collector_identities: vec![],
         },
     };
-    Daemon::start_with(
+    let mut d = Daemon::start_with(
         &tmp.0.join("state"),
         &cfg,
         parts,
@@ -172,7 +172,9 @@ fn boot(tmp: &Tmp, initial: &[u8], model: EtagModel) -> R<D> {
             sync: SyncPolicy::None,
         },
     )
-    .map_err(|x| x.code().to_owned())
+    .map_err(|x| x.code().to_owned())?;
+    d.set_sleep(|_| {});
+    Ok(d)
 }
 
 /// `n` rounds, each an hour apart so no backoff can defer a retry.

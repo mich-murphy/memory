@@ -189,7 +189,7 @@ fn boot(tmp: &Tmp, cfg: &std::path::Path, fs: Spy, store: Flaky, list: &[(Owner,
             collector_identities: vec![],
         },
     };
-    Daemon::start_with(
+    let mut d = Daemon::start_with(
         &tmp.root(),
         cfg,
         parts,
@@ -197,7 +197,9 @@ fn boot(tmp: &Tmp, cfg: &std::path::Path, fs: Spy, store: Flaky, list: &[(Owner,
             sync: SyncPolicy::None,
         },
     )
-    .map_err(|x| x.code().to_owned())
+    .map_err(|x| x.code().to_owned())?;
+    d.set_sleep(|_| {});
+    Ok(d)
 }
 
 impl Rig {

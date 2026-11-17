@@ -24,6 +24,7 @@ use memory_core::manifest::{
     OwnerState, Piece, Position, ProjectedKind, SourceWrite, StoredEncoding, Timestamp, Writer,
     build, fold, manifest_hash, object_key, parse_current, parse_manifest, recover_projection,
 };
+use memory_core::pause::Wait;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestRunner};
 use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
@@ -1644,7 +1645,7 @@ struct Rig {
     variant: u8,
     base: Option<Base>,
 }
-type Run = (Result<CommitEnd, Failure>, Vec<u32>);
+type Run = (Result<CommitEnd, Failure>, Vec<Wait>);
 
 impl Rig {
     fn new() -> R<Self> {
@@ -1691,7 +1692,7 @@ impl Rig {
             CommitEnd::Adopted(a) => Err(format!("expected landed, adopted {a:?}")),
         }
     }
-    fn failed(&mut self) -> R<(Failure, Vec<u32>)> {
+    fn failed(&mut self) -> R<(Failure, Vec<Wait>)> {
         let (result, pauses) = self.go()?;
         match result {
             Err(f) => Ok((f, pauses)),
@@ -1821,7 +1822,7 @@ fn unlanded_5xx_reads_base_unchanged_and_retries_from_step_three() -> R {
     };
     assert_eq!(landed.how(), LandedHow::Committed);
     assert_eq!(rig.store.count(Op::Put(Kind::Current)) - before, 2);
-    assert_eq!(pauses, vec![1]);
+    assert_eq!(pauses, vec![Wait::Rebase(1)]);
     rig.assert_safe()
 }
 
@@ -1856,6 +1857,15 @@ fn base_unchanged_retries_exactly_four_times_then_retries_the_capture() -> R {
     // so one first attempt plus 4 retries is 5 PUTs and 4 pauses.
     assert_eq!(rig.store.count(Op::Put(Kind::Current)) - before, 5);
     assert_eq!(pauses.len(), 4);
+    assert_eq!(
+        pauses,
+        vec![
+            Wait::Rebase(1),
+            Wait::Rebase(2),
+            Wait::Rebase(3),
+            Wait::Rebase(4)
+        ]
+    );
     assert_eq!(failure.commit_outcome(), Some(CommitOutcome::BaseUnchanged));
     assert!(!failure.base_may_be_stale());
     // Nothing advanced: current.json still names the previous head.
@@ -2029,6 +2039,10 @@ fn a_404_under_a_fence_is_landing_unknown() -> R {
     assert_eq!(rig.store.count(Op::Put(Kind::Current)) - before, 1);
     assert_eq!(rig.store.count(Op::Get(Kind::Current)), 4);
     assert_eq!(pauses.len(), 3);
+    assert_eq!(
+        pauses,
+        vec![Wait::Verify(0), Wait::Verify(1), Wait::Verify(2)]
+    );
     Ok(())
 }
 
@@ -2064,6 +2078,10 @@ fn verification_that_cannot_read_is_landing_unknown_with_its_class() -> R {
     assert_eq!(failure, Failure::LandingUnknown(ErrorClass::Offline));
     // Amendment A13.5: 4 attempts leave 3 pauses between them.
     assert_eq!(pauses.len(), 3);
+    assert_eq!(
+        pauses,
+        vec![Wait::Verify(0), Wait::Verify(1), Wait::Verify(2)]
+    );
     let (d, _) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
     assert!(matches!(
         d,

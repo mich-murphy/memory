@@ -658,8 +658,10 @@ fn boot_sync(
             collector_identities: vec![],
         },
     };
-    Daemon::start_with(&tmp.root(), cfg, parts, StartOptions { sync })
-        .map_err(|x| x.code().to_owned())
+    let mut d = Daemon::start_with(&tmp.root(), cfg, parts, StartOptions { sync })
+        .map_err(|x| x.code().to_owned())?;
+    d.set_sleep(|_| {});
+    Ok(d)
 }
 /// Restart: move the fs and store out, end the daemon (flushed or not) and start a new one.
 fn cycle_sync(
@@ -2494,7 +2496,9 @@ fn boot_shared(tmp: &Tmp, cfg: &Path, fs: MemFs, list: &Shared) -> R<D> {
             collector_identities: vec![],
         },
     };
-    Daemon::start(&tmp.root(), cfg, parts).map_err(|x| x.code().to_owned())
+    let mut d = Daemon::start(&tmp.root(), cfg, parts).map_err(|x| x.code().to_owned())?;
+    d.set_sleep(|_| {});
+    Ok(d)
 }
 fn hint_with(session: &str, launch: LaunchHint) -> R<Vec<u8>> {
     let record = HintRecord {
@@ -2857,6 +2861,7 @@ fn unlanded_first_write_resets_the_base_and_converges() -> R {
         },
     };
     let mut d = Daemon::start(&tmp.root(), &cfg, parts).map_err(|x| x.code().to_owned())?;
+    d.set_sleep(|_| {});
     let r = d.reconcile_once().map_err(e)?;
     assert_eq!((r.landed, r.failed), (0, 1));
     d.store_mut().drop_current = false;
@@ -3974,6 +3979,7 @@ fn boot_h(tmp: &Tmp, cfg: &Path, fs: MemFs, store: Hooked, list: &[(Owner, Sourc
     )
     .map_err(|x| x.code().to_owned())?;
     d.set_stop(move || flag.get());
+    d.set_sleep(|_| {});
     Ok(d)
 }
 /// Restart without a stop: the files and the store content move to a new daemon.
@@ -4196,5 +4202,46 @@ fn a_round_cut_short_by_a_stop_does_not_resume_a_paused_host() -> R {
     assert_eq!(report.landed, 1);
     assert_eq!(lines, ["INFO host_resumed"]);
     assert!(!d.status().host_paused);
+    Ok(())
+}
+
+/// A lost `current.json` reply followed by an unreadable store pauses between the four
+/// verification GETs: three sleeps, each within its ceiling, drawn (not constant).
+#[test]
+fn verification_pauses_sleep_once_each_within_the_ceiling_and_a_healthy_commit_none() -> R {
+    use memory_core::pause::{Wait, ceiling};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::time::Duration;
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let list = vec![src_of("s1", 1)?];
+    let mut d = boot(
+        &tmp,
+        &cfg,
+        files_with(b"hello\n"),
+        FStore::default(),
+        &list,
+        WALL,
+    )?;
+    let slept: Rc<RefCell<Vec<Duration>>> = Rc::default();
+    let sink = Rc::clone(&slept);
+    d.set_sleep(move |t| sink.borrow_mut().push(t));
+    assert_eq!(round_at(&mut d, 0)?.0.landed, 1);
+    assert!(slept.borrow().is_empty(), "a healthy commit does not sleep");
+    bytes_in(&mut d, 1, b"hello\nworld\n");
+    d.store_mut()
+        .arm(None, Effect::LandThenDark(StoreError::Ambiguous));
+    let (report, _) = round_at(&mut d, 61)?;
+    assert_eq!(report.failed, 1);
+    let got = slept.borrow().clone();
+    assert_eq!(got.len(), 3, "one sleep per pause");
+    for (t, n) in got.iter().zip(0..) {
+        assert!(*t <= ceiling(Wait::Verify(n)), "{t:?} above ceiling {n}");
+    }
+    assert!(
+        got.iter().any(|t| Some(t) != got.first()),
+        "the draws differ: {got:?}"
+    );
     Ok(())
 }
