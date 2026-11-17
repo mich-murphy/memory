@@ -837,3 +837,167 @@ fn a_vanished_file_is_never_an_absence_for_an_owner_capture() -> R {
     );
     Ok(())
 }
+
+// ------------------------------------------------------- slice-2 walk: snapshots, index
+const U1: &str = "0f0e0d0c-0b0a-4908-8706-050403020100";
+const U2: &str = "1f0e0d0c-0b0a-4908-8706-050403020101";
+
+fn agent_walker(root: &Path, agent: Agent) -> R<WalkSources> {
+    let roots = Roots::new(
+        ArchiveId::try_from("a".to_owned())?,
+        MachineId::try_from("m".to_owned())?,
+        agent,
+        RootNamespace::new("r1")?,
+        RootLayout::AgentDir,
+    );
+    Ok(WalkSources::new(
+        vec![(root.to_path_buf(), roots)],
+        WalkLimits::default(),
+        SharedFs::new(),
+    ))
+}
+
+#[test]
+fn a_debug_file_takes_the_owner_of_its_transcript() -> R {
+    let t = Tmp::new()?;
+    t.write(&format!("claude/projects/-p/{U1}.jsonl"), b"{}\n")?;
+    let debug = t.write(&format!("claude/debug/{U1}.txt"), b"log\n")?;
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    let found = w.enumerate();
+    assert_eq!(found.len(), 2);
+    let owner = owner_at(&format!("projects/-p/{U1}.jsonl"))?;
+    assert!(found.iter().all(|(o, _)| *o == owner));
+    let c = w.counts();
+    assert_eq!(
+        (
+            c.yielded,
+            c.unknown_owner,
+            c.unknown_kind,
+            c.deferred_snapshot
+        ),
+        (2, 0, 0, 0)
+    );
+    assert_eq!(w.of(&owner).len(), 2);
+    assert_eq!(w.note(&debug), Some(owner));
+    // A fresh walker that never walked cannot know the uuid.
+    let mut cold = walker(&t.root(), WalkLimits::default())?;
+    assert_eq!(cold.note(&debug), None);
+    Ok(())
+}
+
+/// The walk never follows a link, so a symlinked `projects/` must not teach the session index
+/// either: the debug file stays unowned and nothing under the link is yielded.
+#[test]
+fn a_symlinked_projects_dir_does_not_fill_the_session_index() -> R {
+    let t = Tmp::new()?;
+    t.write(&format!("elsewhere/-p/{U1}.jsonl"), b"{}\n")?;
+    let debug = t.write(&format!("claude/debug/{U1}.txt"), b"log\n")?;
+    symlink(t.0.join("elsewhere"), t.root().join("projects"))?;
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    assert!(w.enumerate().is_empty());
+    let c = w.counts();
+    assert_eq!((c.yielded, c.unknown_owner, c.symlinks), (0, 1, 1));
+    assert_eq!(w.note(&debug), None);
+    Ok(())
+}
+
+#[test]
+fn a_uuid_under_two_slugs_leaves_its_debug_file_unowned() -> R {
+    let t = Tmp::new()?;
+    t.write(&format!("claude/projects/-p/{U1}.jsonl"), b"{}\n")?;
+    t.write(&format!("claude/projects/-q/{U1}.jsonl"), b"{}\n")?;
+    let debug = t.write(&format!("claude/debug/{U1}.txt"), b"log\n")?;
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    assert_eq!(w.enumerate().len(), 2);
+    let c = w.counts();
+    assert_eq!((c.yielded, c.unknown_owner, c.deferred_snapshot), (2, 1, 0));
+    assert_eq!(w.note(&debug), None);
+    Ok(())
+}
+
+#[test]
+fn snapshot_files_are_deferred_not_yielded_and_not_unknown() -> R {
+    let t = Tmp::new()?;
+    t.write(&format!("claude/projects/-p/{U1}.jsonl"), b"{}\n")?;
+    let settings = t.write("claude/settings.json", b"{}")?;
+    let history = t.write(&format!("claude/file-history/{U1}/f@v1"), b"x")?;
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    let owner = owner_at(&format!("projects/-p/{U1}.jsonl"))?;
+    assert_eq!(w.enumerate().len(), 1);
+    let c = w.counts();
+    assert_eq!(
+        (
+            c.yielded,
+            c.deferred_snapshot,
+            c.unknown_owner,
+            c.unknown_kind
+        ),
+        (1, 2, 0, 0)
+    );
+    assert_eq!(w.note(&settings), None);
+    assert_eq!(w.note(&history), None);
+    assert_eq!(w.of(&owner).len(), 1);
+
+    let codex = t.0.join("codex");
+    t.write("codex/state.sqlite", b"x")?;
+    let mut w = agent_walker(&codex, Agent::Codex)?;
+    assert!(w.enumerate().is_empty());
+    let c = w.counts();
+    assert_eq!(
+        (
+            c.yielded,
+            c.deferred_snapshot,
+            c.unknown_owner,
+            c.unknown_kind
+        ),
+        (0, 1, 0, 0)
+    );
+    assert_eq!(w.note(&codex.join("state.sqlite")), None);
+
+    let pi = t.0.join("pi");
+    t.write("pi/settings.json", b"{}")?;
+    let mut w = agent_walker(&pi, Agent::Pi)?;
+    assert!(w.enumerate().is_empty());
+    let c = w.counts();
+    assert_eq!(
+        (
+            c.yielded,
+            c.deferred_snapshot,
+            c.unknown_owner,
+            c.unknown_kind
+        ),
+        (0, 1, 0, 0)
+    );
+    Ok(())
+}
+
+#[test]
+fn of_over_every_owner_equals_enumerate_on_a_mixed_tree() -> R {
+    let t = Tmp::new()?;
+    t.write(&format!("claude/projects/-p/{U1}.jsonl"), b"{}\n")?;
+    t.write(&format!("claude/projects/-q/{U2}.jsonl"), b"{}\n")?;
+    t.write(&format!("claude/debug/{U1}.txt"), b"a")?;
+    t.write(&format!("claude/debug/{U2}.txt"), b"b")?;
+    t.write(&format!("claude/todos/{U1}-agent.json"), b"[]")?;
+    t.write(&format!("claude/session-env/{U2}/e"), b"x")?;
+    t.write("claude/settings.json", b"{}")?;
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    let found = w.enumerate();
+    let mut walked: Vec<String> = found.iter().map(|(o, s)| key_of(o, s)).collect();
+    walked.sort();
+    assert_eq!(walked.len(), 4, "{walked:?}");
+    let mut owners: Vec<Owner> = Vec::new();
+    for (o, _) in &found {
+        if !owners.contains(o) {
+            owners.push(o.clone());
+        }
+    }
+    let mut got: Vec<String> = owners
+        .iter()
+        .flat_map(|o| w.of(o).iter().map(|s| key_of(o, s)).collect::<Vec<_>>())
+        .collect();
+    got.sort();
+    assert_eq!(got, walked);
+    assert_eq!(w.counts().deferred_snapshot, 3);
+    Ok(())
+}

@@ -24,6 +24,8 @@ use std::time::Duration;
 
 #[path = "s3_store/assemble.rs"]
 mod assemble;
+#[path = "s3_store/check.rs"]
+mod check;
 #[path = "common/clock.rs"]
 mod clock;
 #[path = "s3_store/daemon_restore.rs"]

@@ -188,7 +188,10 @@ fn scenario(make: &dyn Fn() -> R<S3Store>, mark: &mut dyn FnMut(&str)) -> R<Outc
                 collector_identities: vec![],
             },
         };
-        Daemon::start(&tmp.0.join(state), &cfg, parts).map_err(|x| x.code().to_owned())
+        let mut d =
+            Daemon::start(&tmp.0.join(state), &cfg, parts).map_err(|x| x.code().to_owned())?;
+        d.set_sleep(|_| {});
+        Ok(d)
     };
     // An independent reader: its own store, and nothing from the daemon but the owner.
     let read_back = || -> R<(Folded, Vec<u8>)> {

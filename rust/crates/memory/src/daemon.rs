@@ -40,6 +40,7 @@ use memory_core::hint::{
     HintEvent, HintScan, LaunchHint, PathHint, RetentionFacts, past_retention, removable, scan,
 };
 use memory_core::manifest::{Header, ManifestError, OwnerState, Timestamp, Writer};
+use memory_core::pause::pause_for;
 use memory_core::privacy::{PolicyContext, SanitizedLaunch, sanitize_launch};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -498,6 +499,7 @@ pub struct Daemon<F, S, C, E> {
     last_status: Option<Duration>,
     draws: u64,
     stop: Box<dyn Fn() -> bool>,
+    sleep: Box<dyn FnMut(Duration)>,
 }
 
 impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
@@ -613,6 +615,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             last_status: None,
             draws: 0,
             stop: Box::new(|| false),
+            sleep: Box::new(std::thread::sleep),
         })
     }
 
@@ -621,6 +624,12 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     /// publish part. Default: never stops.
     pub fn set_stop(&mut self, probe: impl Fn() -> bool + 'static) {
         self.stop = Box::new(probe);
+    }
+
+    /// Install the sleep used for commit pauses (decision D44). Default: a real
+    /// `std::thread::sleep`. The stop probe is not consulted during a pause.
+    pub fn set_sleep(&mut self, sleep: impl FnMut(Duration) + 'static) {
+        self.sleep = Box::new(sleep);
     }
 
     /// True when the index was missing, damaged or of a newer schema at startup.
@@ -653,14 +662,9 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         &mut self.clock
     }
 
-    /// Jitter draw for the pure backoff: splitmix64 over a counter seeded from the clocks.
+    /// Jitter draw for the pure backoff.
     fn next_draw(&mut self) -> u64 {
-        self.draws = self.draws.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let seed = self.draws ^ self.clock.monotonic_ns() ^ (self.clock.wall_ns() as u64);
-        let mut z = seed;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
+        draw(&mut self.draws, &self.clock)
     }
 
     fn apply(&mut self, updates: Vec<Update>) {
@@ -868,12 +872,13 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         owner: &Owner,
     ) -> Result<CommitEnd, Failure> {
         let stop = &self.stop;
+        let (sleep, draws, clock) = (&mut self.sleep, &mut self.draws, &self.clock);
         let result = commit_stoppable(
             &mut self.store,
             base,
             request,
             &mut rt.known_ours,
-            &mut |_| {},
+            &mut |wait| sleep(pause_for(wait, draw(draws, clock))),
             &mut || stop(),
         );
         if let Ok(end) = &result {
@@ -1312,4 +1317,14 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     pub fn root(&self) -> PathBuf {
         self.state.root().to_path_buf()
     }
+}
+
+/// Jitter draw: splitmix64 over a counter seeded from the clocks.
+fn draw<C: Clock>(draws: &mut u64, clock: &C) -> u64 {
+    *draws = draws.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let seed = *draws ^ clock.monotonic_ns() ^ (clock.wall_ns() as u64);
+    let mut z = seed;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }

@@ -320,6 +320,9 @@ Answered on 2026-11-17 (UTC), in reply to the report that closed this brief:
   under `rust-acceptance/<run-id>/`. It has not started.
 - Items 2, 4 and 5 were listed again and not answered one by one. Installing the Rust hooks
   for the run, and how the daemon is kept running for two days, were not decided.
+- Later on 2026-11-17: items 2, 4 and 5 are accepted as built (the wake stagger is dropped
+  and folded into DESIGN 7.1). The hooks are installed for the run and the daemon runs as a
+  launchd user agent; see the handoff's "State on 2026-11-17" block, answers 4 to 10.
 
 The next actions are in the handoff's
 ["State on 2026-11-17" block](../../session-capture-handoff.md#current-session-checkpoint).
