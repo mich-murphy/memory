@@ -4,8 +4,8 @@ use memory::daemon::{FailureCounts, RoundReport};
 use memory::daemon::{OwnerOutcome, ParkedReason, StateLoad};
 use memory::driver::Cause;
 use memory::log::{
-    Scope, capture_outcome, format_utc, host_paused, host_resumed, parked, render, round, started,
-    state_loads, stopped,
+    Scope, capture_outcome, format_utc, host_paused, host_resumed, parked, progress, render, round,
+    started, state_loads, stopped,
 };
 use memory_core::domain::{
     Agent, ArchiveId, MachineId, Owner, OwnerParkReason, ParkReason, SessionId, SessionKey, Sha256,
@@ -63,6 +63,26 @@ fn round_has_every_count_in_order() {
     assert_eq!(
         rest,
         "INFO round cause=timer landed=1 failed=2 skipped=3 parked=4 deferred=5 offline=6 throttled=7 transient=8 destination_auth=9 local=10 deterministic=11 hints_removed=12 hints_kept_old=13 audit_matched=14 audit_mismatched=15 audit_ineligible=16"
+    );
+}
+
+#[test]
+fn progress_has_exactly_the_closed_numeric_keys() {
+    let text = render(|| progress(2, 3, 1, 4, 125));
+    let (_, rest) = split(only_line(&text)).unwrap_or_default();
+    assert_eq!(
+        rest,
+        "INFO progress done=2 total=3 landed=1 failed=4 elapsed_s=125"
+    );
+}
+
+#[test]
+fn progress_is_in_the_event_table_of_the_module_doc() {
+    let doc = include_str!("../src/log.rs");
+    assert!(
+        doc.lines()
+            .any(|l| l == "//! | `progress` | `done total landed failed elapsed_s` |"),
+        "no progress row in the event table"
     );
 }
 

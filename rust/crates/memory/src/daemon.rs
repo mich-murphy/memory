@@ -251,6 +251,9 @@ pub struct RoundReport {
     pub hints_kept_old: usize,
 }
 
+/// Monotonic time between `progress` log lines of a running round.
+const PROGRESS_EVERY_NS: u64 = 60_000_000_000;
+
 /// Source enumeration, supplied by the shell.
 pub trait Sources {
     /// All currently known sources with their owner.
@@ -1087,7 +1090,9 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         let mut files = std::mem::take(&mut self.files);
         let mut report = RoundReport::default();
         self.status.host_paused = false;
-        for (owner, sources) in &groups {
+        let started_ns = self.clock.monotonic_ns();
+        let mut last_progress_ns = started_ns;
+        for (done, (owner, sources)) in groups.iter().enumerate() {
             if (self.stop)() {
                 // A round cut short re-probed nothing more: it cannot resume a paused host.
                 self.status.host_paused |= before.0;
@@ -1102,6 +1107,17 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             let pause = self.run_owner(owner, sources, &mut rt, &mut files, &when, &mut report);
             Self::log_parks(owner, &rt, was_parked, &known);
             self.owners.insert(owner.clone(), rt);
+            let now_ns = self.clock.monotonic_ns();
+            if now_ns.saturating_sub(last_progress_ns) >= PROGRESS_EVERY_NS {
+                last_progress_ns = now_ns;
+                crate::log::progress(
+                    done + 1,
+                    groups.len(),
+                    report.landed,
+                    report.failed,
+                    now_ns.saturating_sub(started_ns) / 1_000_000_000,
+                );
+            }
             if pause {
                 self.status.host_paused = true;
                 break;
