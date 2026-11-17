@@ -337,8 +337,77 @@ fn compare_decides_each_case() {
     assert_eq!(compare(b"abc", b"abd", false), Compared::Mismatch);
 }
 
+/// A captured file that can no longer be read cannot be compared: `unsettled`, never `match`
+/// and never a failure of the criterion.
 #[test]
-fn an_appended_not_prefix_stable_source_is_unsettled() -> R {
+fn an_unreadable_captured_file_is_unsettled_not_match() -> R {
+    use std::os::unix::fs::PermissionsExt;
+    let s = setup("check-unreadable")?;
+    capture(&s)?;
+    let config = Config::load(&s.rig.cfg).map_err(e)?;
+    let mut walk = WalkSources::new(
+        locator_roots(&config).map_err(e)?,
+        WalkLimits::default(),
+        SharedFs::new(),
+    );
+    let rows = walk.enumerate();
+    assert_eq!(rows.len(), 1);
+    let file = s.rig.root.join(&rows.first().ok_or("row")?.1.path);
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).map_err(e)?;
+    let ran = run(&s);
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).map_err(e)?;
+    let ran = ran?;
+    assert_eq!(ran.code, 0, "{}", ran.out);
+    assert!(ran.has("unsettled", 1) && ran.has("match", 0) && ran.has("mismatch", 0));
+    Ok(())
+}
+
+/// A file whose size or identity changes between the two stats is not read as settled.
+#[test]
+fn read_settled_refuses_a_file_that_moved_during_the_read() {
+    use memory::check::read_settled;
+    use memory::environment::{FileSystem, Stat};
+    use memory_core::domain::{Birth, FileId};
+    struct Moving {
+        stats: u64,
+        grow: bool,
+    }
+    impl FileSystem for Moving {
+        type Error = ();
+        fn stat(&mut self, _: u64) -> Result<Option<Stat>, ()> {
+            self.stats += 1;
+            let size = if self.grow && self.stats > 1 { 6 } else { 5 };
+            Ok(Some(Stat {
+                id: FileId {
+                    dev: 1,
+                    ino: 1,
+                    birth: Birth::Unavailable,
+                },
+                size,
+                mtime_ns: 1,
+            }))
+        }
+        fn read(&mut self, _: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, ()> {
+            let end = usize::try_from(range.end).unwrap_or(5).min(5);
+            Ok(b"hello".get(..end).unwrap_or_default().to_vec())
+        }
+    }
+    let mut still = Moving {
+        stats: 0,
+        grow: false,
+    };
+    assert_eq!(read_settled(&mut still, 1), Some(b"hello".to_vec()));
+    let mut moving = Moving {
+        stats: 0,
+        grow: true,
+    };
+    assert_eq!(read_settled(&mut moving, 1), None);
+}
+
+/// A Claude debug log is not a protected document, so it is prefix-stable: appended bytes put
+/// it `behind`, not `unsettled` and not `mismatch`.
+#[test]
+fn an_appended_debug_log_is_behind() -> R {
     let s = setup("check-unsettled")?;
     let debug = s.rig.root.join(format!("debug/{UUID}.txt"));
     fs::create_dir_all(debug.parent().ok_or("parent")?).map_err(e)?;
@@ -352,6 +421,6 @@ fn an_appended_not_prefix_stable_source_is_unsettled() -> R {
         .map_err(e)?;
     let ran = run(&s)?;
     assert_eq!(ran.code, 0, "{}", ran.out);
-    assert!(ran.has("mismatch", 0));
+    assert!(ran.has("mismatch", 0) && ran.has("behind", 1) && ran.has("unsettled", 0));
     Ok(())
 }

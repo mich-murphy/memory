@@ -224,7 +224,8 @@ fn outcome_code(outcome: &SourceOutcome) -> String {
 }
 
 /// Stat, read `[0, size)`, stat again; `None` when the file moved or could not be read.
-fn read_settled<F: FileSystem>(fs: &mut F, handle: u64) -> Option<Vec<u8>> {
+#[must_use]
+pub fn read_settled<F: FileSystem>(fs: &mut F, handle: u64) -> Option<Vec<u8>> {
     let before = fs.stat(handle).ok()??;
     let raw = fs.read(handle, 0..before.size).ok()?;
     let after = fs.stat(handle).ok()??;
