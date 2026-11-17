@@ -80,10 +80,11 @@ from `main` alone.
      result and the footprint series in evidence 21.
   3. Brief 31 ([31-streaming-and-run-findings.md](rust-rewrite/implementation/31-streaming-and-run-findings.md),
      [evidence 22](rust-rewrite/implementation/evidence/22-streaming/)) is built and accepted
-     locally as `ef87ec2` (2026-11-17 14:50Z): streaming capture and audit (peak 32 MB in the
-     real-binary test, was 1,254 MB in the run), a directory event reads only that directory,
-     a `progress` log line, PUT/GET connection reuse, nextest `slow-timeout`. If its stack is
-     not yet merged, push and merge it first. After the run ends: a short run with the
+     locally as `ef87ec2` (2026-11-17 14:50Z) and merged into `main` as `2e5f193` (stack #143,
+     18:59Z): streaming capture and audit (peak 32 MB in the real-binary test, was 1,254 MB in
+     the run), a directory event reads only that directory, a `progress` log line, PUT/GET
+     connection reuse, nextest `slow-timeout`. The running acceptance daemon is still the
+     `a28bfa4` build and is not replaced mid-run. After the run ends: a short run with the
      streamed binary on real data to measure the peak; then `memory export` and the consumer
      gate (answer 9), lifting the empty-prefix refusal, and cutover (DESIGN 18).
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
