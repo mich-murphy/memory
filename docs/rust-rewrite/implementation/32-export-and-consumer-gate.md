@@ -184,3 +184,16 @@ whole sources.
   `CodexCompressed` -> `artifact` (its stored bytes are compressed); role row amended. Uptake
   pending. Finding for later: Codex rollouts that Codex has recompressed reach the importer
   unparsed, unlike in Go; decompressing at export or capture is a decision for after this brief.
+- 2026-11-17 23:46Z: EXPORT accepted locally at `f33770a` (7 commits over `96d2e69`; the first
+  worker ran out of turns after the code, a second wrote the tests and replaced the string match
+  on `owner_shared` with a typed `Failure::Shared`). Correction uptake verified (`4de9669`, named
+  row and oracle exception). Parent checks on `f33770a`: fmt, clippy, rustdoc, nextest (692
+  passed), doctests, hegel (31), proptest (33), schemas, `cargo deny` and core bans, lints, window
+  mutation and the four mutation predicates all 0. Parent teeth, 13 of 13 caught: `sequence = seq`,
+  `revision = n`, state always `active`, `object.size` = encoded size, reversed commitment,
+  wrapping budget, destination created before the limits, existing destination allowed, final
+  digest check removed, Claude subagent -> `main`, deleted source exported, exit 1 for too large,
+  `CodexCompressed` -> `main`; each fails a named test in `memory-reader/tests/export.rs`,
+  `memory-core/tests/core_export.rs` or `memory/tests/s3_store/export.rs`. The three real-binary
+  export tests: 30 of 30 alone. Streaming bound: a 70-piece epoch never has two stored buffers
+  alive. Next: GATE from the EXPORT branch.
