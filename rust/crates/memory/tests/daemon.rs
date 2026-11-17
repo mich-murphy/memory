@@ -4255,10 +4255,16 @@ fn verification_pauses_sleep_once_each_within_the_ceiling_and_a_healthy_commit_n
     for (t, n) in got.iter().zip(0..) {
         assert!(*t <= ceiling(Wait::Verify(n)), "{t:?} above ceiling {n}");
     }
-    assert!(
-        got.iter().any(|t| Some(t) != got.first()),
-        "the draws differ: {got:?}"
-    );
+    // Each pause as a fraction of its own ceiling: a constant draw gives one fraction for all
+    // three (the ceilings alone would make the durations differ).
+    let fractions: Vec<f64> = got
+        .iter()
+        .zip(0..)
+        .map(|(t, n)| t.as_secs_f64() / ceiling(Wait::Verify(n)).as_secs_f64())
+        .collect();
+    let low = fractions.iter().copied().fold(f64::INFINITY, f64::min);
+    let high = fractions.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    assert!(high - low > 0.01, "the draws differ: {got:?} {fractions:?}");
     Ok(())
 }
 
