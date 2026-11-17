@@ -268,3 +268,30 @@ fn a_corrupt_object_exits_1_and_leaves_no_directory() -> R {
     assert!(!out.exists());
     Ok(())
 }
+
+#[test]
+fn an_existing_destination_is_refused_before_any_fetch() -> R {
+    let owner = memory_core::limits::parse_owner_prefix("sessions/a/m/claude/s1").map_err(e)?;
+    let dir = std::env::temp_dir().join(format!("b32-exists-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).map_err(e)?;
+    let mut calls = 0;
+    let r = memory::export::export_owner(
+        &owner,
+        |_: &str| -> Result<Option<Vec<u8>>, ()> {
+            calls += 1;
+            Ok(None)
+        },
+        &dir,
+        1 << 30,
+    );
+    assert_eq!(r, Err(memory::export::Failure::OutputExists));
+    assert_eq!(calls, 0);
+    let shared = memory_core::limits::parse_owner_prefix("shared/a/m/claude").map_err(e)?;
+    let r =
+        memory::export::export_owner(&shared, |_: &str| Ok::<Option<Vec<u8>>, ()>(None), &dir, 1);
+    assert_eq!(r, Err(memory::export::Failure::Shared));
+    assert_eq!(memory::export::Failure::Shared.exit_code(), 64);
+    let _ = fs::remove_dir_all(&dir);
+    Ok(())
+}
