@@ -344,3 +344,20 @@ nothing for `rust/loop-driver` and `docs/event-loop` while their runs (439394679
 
 2,000 property cases, `cargo mutants`, anything against R2, a stress run of the real-binary
 tests on Linux.
+
+## PR #125 and the runs on `fdc43c2`
+
+Added 2026-11-17 (UTC). PR #125 (`docs/stack-124-merged`, `f74cab5`, the "Stack #124 merge"
+section above) ran "Rust rewrite gates" 43963004761: success at attempt 1 on all six jobs.
+"CI" 43963004666 attempt 1 failed only in the two accepted `govulncheck` steps. No rerun was
+needed. It is a one-branch stack, so it was merged with `gh pr merge 125 --merge
+--match-head-commit <sha>` at 2026-11-16T22:04:04Z. `origin/main` is `fdc43c2`, tree equal to
+`f74cab5`.
+
+Post-merge on `fdc43c2`: "Rust rewrite gates" 43966363987 succeeded on all six jobs at
+attempt 1; "CI" 43966363918 failed only in the two accepted steps, checked job by job and
+step by step.
+
+The operator's answers of 2026-11-17 are in
+[brief 29](../../29-event-loop.md#open-for-the-operator); the next actions are in the
+[handoff](../../../../session-capture-handoff.md#current-session-checkpoint).

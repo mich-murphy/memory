@@ -17,15 +17,19 @@ history, not current execution instructions or renewed operating authority.
 **Acceptance: pending.** User requested implementation of DESIGN.md with
 `gpt-6.1-sol` workers at medium effort, parent-owned quality and verification.
 This is the single active task brief; dated operating records below remain history.
+Since 2026-11-12 the operator's instruction is the coordinator skill with Sonnet subagents:
+the parent keeps its own context, verifies every claim and decides acceptance.
 
-> **Resume here (updated 2026-11-12, after the design fold).** Read DESIGN.md. Amendments
+> **Resume here (updated 2026-11-17).** Read the "State on 2026-11-17 and next session
+> (current)" block below this note first: it says where the work is, what the operator
+> decided and what to do next. Then read DESIGN.md. Amendments
 > A0–A14 are folded into it (2026-11-12) and it wins;
 > [design-amendments-20261109.md](rust-rewrite/design-amendments-20261109.md) is kept only
 > as the dated record of why each change was made. The baseline hash pin is removed (A14.3):
 > `verify-evidence.py` now checks only the prototype results, and DESIGN.md and AGENTS.md
 > are edited directly. Lines further down that call those files hash-pinned, or cite
-> `baseline-identities.json`, are history. Then read the "Session 2026-11-16, event loop
-> (current)" block directly below, with
+> `baseline-identities.json`, are history. Then read the "Session 2026-11-16, event loop"
+> block (the second block below), with
 > [brief 29](rust-rewrite/implementation/29-event-loop.md) and
 > [evidence 20](rust-rewrite/implementation/evidence/20-event-loop/); the "Session 2026-11-12
 > to 2026-11-16, production prerequisites" block after it is the step before it, with
@@ -50,7 +54,97 @@ This is the single active task brief; dated operating records below remain histo
 > in this brief (P5 authorization, acceptance bucket/token, hook argv, symlinks, state root)
 > are resolved by the amendments and kept only as history.
 
-**Session 2026-11-16, event loop (current).** Brief 29; record in
+**State on 2026-11-17 and next session (current).** Written so that a new session can start
+from `main` alone.
+- Where `main` is: `fdc43c2` plus this record. `fdc43c2` is stack #124 (brief 29, the event
+  loop, merged as `f15f651`) and its close-out record (PR #125). Every Rust branch through
+  brief 29 is merged; no Rust PR is open and no Rust work exists outside `main`. Dependabot
+  PR #115 (Go modules) is open and was not touched.
+- What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
+  window, hints, a full reconcile at start, every 15 minutes and on lost events, retries, a
+  stop inside a round), `memory restore <owner> --out DIR` and `memory hook <agent>`. Details
+  and limits are in the "Session 2026-11-16, event loop" block below and in
+  [evidence 20](rust-rewrite/implementation/evidence/20-event-loop/).
+- What has not happened: no acceptance run on real session data, no R2 write since the
+  skeleton run of 2026-11-12, no installed Rust hook or service, no host change, no cutover.
+  The daemon refuses an empty key prefix (`config_prefix_required`), so it cannot write to
+  the production root of the bucket. The Go hooks still fill the local Go spool (A0).
+- Operator decisions on 2026-11-17, in reply to the report that closed brief 29:
+  1. The 2-day acceptance run (the exit criterion of DESIGN 17 slice 2b; A13.1, A14.2) on
+     this Mac's real session directories is approved, writing only under
+     `rust-acceptance/<run-id>/`. It is the first upload of real transcripts by the Rust path.
+  2. Streaming capture: measure peak resident memory in that run first (target 128 MB,
+     A10.4; a capture holds its whole range in memory), then decide whether streaming is
+     required before the first production write.
+  3. Commit pauses: full jitter with ceilings of 1 s, 2 s and 4 s. DESIGN 7.4 gives no
+     lengths and production pauses are zero today. Not built yet.
+
+  Not decided, ask before doing: installing the Rust hooks for the run (without them the run
+  exercises no hint), and how the daemon is kept running for two days (no launchd unit or
+  other installed service was approved). The earlier confirmations in brief 29, "Open for the
+  operator" (items 2, 4 and 5), were listed again and not answered one by one; none blocks
+  the run.
+- Next actions, in order. None is started. Write brief 30 first and scope it with a read-only
+  planner whose claims the parent rechecks against the code, as for briefs 28 and 29.
+  1. Build the commit pauses of decision 3. The brief must say which waits they are (the
+     pauses between the four verification GETs and between the rebase retries of DESIGN 7.4)
+     and pin them with tests; today `Daemon::land` passes a pause that does nothing.
+  2. Decide what the run needs that does not exist. The exit criterion is two consecutive
+     days with zero restore mismatches, zero parked owners and zero local session files
+     without a captured owner. So something must restore every captured owner and compare it
+     with `transform(local)`, and something must count local session files that have no
+     captured owner. Neither exists; `memory restore` and `memory-reader` are the parts to
+     build on. Also missing, to place before or after the run: the peak-memory measurement,
+     `memory export` with the consumer gate, `memory status`, and the age of the oldest
+     uncaptured change (DESIGN 11.3).
+  3. Prepare the run, and check each point against the code before starting (none was
+     checked in this session): a dedicated state root through `MEMORY_STATE_DIR` that is not
+     under a session root; a `config.toml` with the real roots, the prefix
+     `rust-acceptance/<run-id>/` and the archive and machine ids DESIGN 9.1 asks for; a 0600
+     token file built from the ignored `.env` without printing it; that snapshot and config
+     kinds stay withheld (they are slice 3); the abort triggers of A13.1; what a sleeping Mac
+     does to the two days.
+  4. Run it, record it in the next evidence directory, delete the prefix and verify it empty
+     (A2). Then take decision 2, lift the empty-prefix refusal, and go on to cutover
+     (DESIGN 18) and slice 3 (BC-01, snapshot kinds, deletions).
+- Known gaps a new session should not rediscover: a deleted file is never recorded as
+  deleted; there is no `unpark` (clearing a park means deleting `status.json` with the daemon
+  stopped); a hint day file whose launch record never commits, or has no owner, is kept; a
+  round does not end early when the network is down; the wake stagger of DESIGN 7.1 is not
+  built and DESIGN.md still describes it; no gate runs rustdoc. Not run: 2,000 property
+  cases, `cargo mutants`, a Linux stress run of the real-binary tests.
+- How the last four stacks were delivered (operator instruction of 2026-11-12: the
+  coordinator skill, Sonnet subagents, the parent keeps its own context and decides
+  acceptance):
+  - Workers get a self-contained brief and one worktree and branch each, and make local
+    commits only. The rules are in brief 28,
+    [Rules for workers](rust-rewrite/implementation/28-production-prerequisites.md#rules-for-workers).
+    A finished worker's session often cannot be resumed: send follow-ups to a fresh worker.
+  - Parent acceptance per increment: read the whole diff; run fmt, clippy, rustdoc, nextest,
+    doctests, schemas and `cargo deny`; check that the four mutation predicates still occur
+    once; run the parent's own mutants, each of which must fail on the assertion it is meant
+    to prove; then run `rust/scripts/gates.sh` once on the combined tip. Real-binary tests
+    are timing-sensitive: never run them beside another cargo job, and stress a new one
+    (30 runs) before accepting it.
+  - Push: check the whole range for the values in `.env` (sourced into a subshell, never
+    printed), then `gh stack init` and `gh stack submit --auto --open`, without a rebase so
+    that recorded hashes stay valid. Merge with `gh stack merge <stack number> --yes --merge`;
+    a one-branch stack needs `gh pr merge <n> --merge --match-head-commit <sha>`.
+  - Ready rule before a merge: "Rust rewrite gates" is success on all six jobs of its latest
+    attempt; "CI" fails only in the two accepted `govulncheck` steps (job "Format, lint and
+    static checks", step "Run make fmt-check fix-check tidy-check deadcode vuln actionlint";
+    job "Tests (macos-26)", step "Scan darwin-only code for vulnerabilities"); the PRs are
+    open and mergeable on the expected heads; `origin/main` has not moved. A macOS job
+    cancelled with zero steps never got a runner: rerun that job. Anything else red is a
+    finding, not a rerun. `gh run list --branch` can omit a run that exists; the commit's
+    check-runs name it.
+- Local only, on this Mac: six worktrees in `memory-wt/` beside the checkout, all on merged
+  branches, and the `backup/*` and `proto/ds-*` branches from this work. They can be removed;
+  none holds work that `main` lacks and needs. Older Go-era branches were not touched. The
+  session's scratch notes were in a temporary directory; what matters from them is in
+  evidence 19, evidence 20 and this block.
+
+**Session 2026-11-16, event loop.** Brief 29; record in
 [evidence 20](rust-rewrite/implementation/evidence/20-event-loop/). Accepted locally as
 `969d6fc` (34 commits over `ef18965`, on `94b8abd`) and merged into `main` as `f15f651` on
 2026-11-16 (stack #124, PRs #116 to #123); the hosted runs are in evidence 20.
@@ -79,9 +173,8 @@ This is the single active task brief; dated operating records below remain histo
   Linux they passed in the hosted runs); the wake stagger of DESIGN 7.1 is not built. The
   daemon still refuses an empty key prefix. Not run: 2,000 cases, `cargo mutants`, anything
   against R2.
-- Next action: decide commit pause lengths and the streaming-capture question (both open for
-  the operator in brief 29), lift the empty-prefix refusal, and start the DESIGN 17
-  acceptance runs.
+- Next action: superseded by the "State on 2026-11-17" block above; the operator answered
+  on 2026-11-17.
 
 **Session 2026-11-12 to 2026-11-16, production prerequisites.** Brief 28; record in
 [evidence 19](rust-rewrite/implementation/evidence/19-production-prerequisites/). All

@@ -12,7 +12,23 @@ job tables, hooks/notifications with safety reconciliation, and one shared reade
 The [capture contract](docs/session-capture-contract.md) retains the goals and Go
 maintenance contract; its replaced mechanisms are not the Rust implementation plan.
 
-**Current Rust state (2026-11-10):** under [`rust/`](rust/README.md), slice 1 (pure core:
+**Current Rust state (2026-11-17):** everything through brief 29 is merged into `main`. Under
+[`rust/`](rust/README.md), `memory daemon` runs an event loop (per-owner capture after the
+coalescer window, hook hints, a full reconcile at start and every 15 minutes, retries, a stop
+honoured inside a round) and writes zstd pieces and manifests through the S3 adapter;
+`memory restore <owner> --out DIR` reads an owner back; `memory hook <agent>` writes hint
+lines. Tests run the real binary against a local S3 server on macOS and Linux. It is **not
+yet a production collector**: the daemon refuses an empty key prefix, no acceptance run on
+real session data has happened, deletions, snapshot kinds and the BC-01 host are slice 3,
+and `memory status`, `unpark`, `reconcile` and `export` do not exist. The operator approved
+the 2-day acceptance run under `rust-acceptance/<run-id>/` on 2026-11-17; it has not started.
+Where the work is and what comes next:
+[the handoff](docs/session-capture-handoff.md#current-session-checkpoint),
+[brief 29](docs/rust-rewrite/implementation/29-event-loop.md) and
+[evidence 20](docs/rust-rewrite/implementation/evidence/20-event-loop/). The dated paragraphs
+below are the history of how it got here.
+
+**Rust state on 2026-11-10 (history):** under [`rust/`](rust/README.md), slice 1 (pure core:
 domain, locator, manifests, hints, planner, coalescer, privacy) meets its exit criteria, with
 P5 waived by the operator. Slice 2 is partly built against fakes and temp directories: the
 `memory hook` binary, the commit protocol, daemon state, capture wiring (delta-only append
@@ -45,8 +61,8 @@ round; merged into `main` on 2026-11-16 as `f15f651`. The empty-prefix refusal r
 [brief 29](docs/rust-rewrite/implementation/29-event-loop.md) and
 [evidence 20](docs/rust-rewrite/implementation/evidence/20-event-loop/).
 
-The work is committed as draft gh stack #56 (PRs #54, #55, #57, #58, #59, #60, top branch
-`rust/coverage-floor-80`), green on hosted CI. No Rust deployment or cutover occurred.
+Every Rust stack so far (#56, #95, #103, #111 and #124) is merged into `main`. No Rust
+deployment or cutover occurred.
 On 2026-11-09, by operator instruction, the Go capture daemons (Mac and BC-01) and the Mac
 refresh job were stopped and disabled, and the old capture prefixes in the R2 bucket were
 deleted. The Go hooks are still installed and write only local spool files. Preserve existing

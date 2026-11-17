@@ -311,6 +311,19 @@ None blocks wave 1.
    `launch_attach_failed` removal and the dated notes under A11.3 and A13.3; the AUDIT-3
    choices; no `unpark` yet.
 
+Answered on 2026-11-17 (UTC), in reply to the report that closed this brief:
+
+- Item 1, pause lengths: full jitter with ceilings of 1 s, 2 s and 4 s. Not built yet.
+- Item 1, streaming capture: measure peak resident memory in the 2-day acceptance run first,
+  then decide.
+- The 2-day acceptance run on this Mac's real session directories is approved, writing only
+  under `rust-acceptance/<run-id>/`. It has not started.
+- Items 2, 4 and 5 were listed again and not answered one by one. Installing the Rust hooks
+  for the run, and how the daemon is kept running for two days, were not decided.
+
+The next actions are in the handoff's
+["State on 2026-11-17" block](../../session-capture-handoff.md#current-session-checkpoint).
+
 ## Not in this brief
 
 Lifting the empty-prefix refusal; `memory status`, `unpark`, `reconcile`, `export`; the age of
@@ -330,3 +343,7 @@ units and hook installation; deletions, snapshots and inotify (slice 3).
 - 2026-11-16: pushed as stack #124 (PRs #116 to #123) at 19:27 UTC and merged as `f15f651` at
   21:20 UTC. Hosted "Rust rewrite gates" succeeded on every branch and on `main`; the
   real-binary tests passed on Linux at their first run. Details in evidence 20.
+- 2026-11-16: the close-out record merged as PR #125 (`fdc43c2`); its hosted results are in
+  evidence 20.
+- 2026-11-17: the operator's answers are recorded under "Open for the operator". This brief
+  is closed. Next: brief 30 (commit pauses, then the 2-day acceptance run), see the handoff.
