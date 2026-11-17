@@ -78,7 +78,7 @@ finds one wrong reports it as a question and does not decide.
 | Sources | One envelope source per retained epoch of every live (not deleted) source, ordered by source id then epoch. Deleted sources are skipped and counted | DESIGN 6.4 keeps every append epoch; same skip as `restore` |
 | `source_id`, `path` | The Rust `SourceId` string; the stored root-relative path (provenance only) | Stable trace ids |
 | `epoch_id`, `revision`, `state` | `epoch_id` = decimal `n`; `revision` = `n + 1`; `state` = `active` for the source's last epoch, `sealed` for earlier ones | Epochs start at 0; Go's state words |
-| `role` | A pure memory-core function `export_role(kind, path)`: locator `Main` -> `main`, `Superseded` -> `transcript`, `Child` -> `subagent`, everything else -> `artifact`. Pinned by a property: for every path `locate` maps to a session source, `export_role(kind, path)` equals the mapped locator role | Role is not stored; the locator is the independent oracle; artifacts (tool results, debug, aux) are not parsed, so they raise no bogus issues |
+| `role` | A pure memory-core function `export_role(kind, path)`: locator `Main` -> `main`, `Superseded` -> `transcript`, `Child` -> `subagent`, everything else -> `artifact`, with one kind exception: `CodexCompressed` -> `artifact` (amended 2026-11-17 22:56Z). Pinned by a property: for every path `locate` maps to a session source, `export_role(kind, path)` equals the mapped locator role, except for that kind | Role is not stored; the locator is the independent oracle; artifacts (tool results, debug, aux) are not parsed, so they raise no bogus issues. The Rust writer stores a `.jsonl.zst` rollout's on-disk bytes unchanged (its only zstd call compresses pieces, `memory/src/environment.rs:161`), whereas Go decompressed them before upload (`internal/syncer/prepare.go:147`). Parsed as `main`, they would turn into `malformed_json` issues |
 | `optional`, `associations`, `withheld` | `false`, `[]`, never emitted | Rust records no withheld sources in R2 (DESIGN 6.3) |
 | `object` for an epoch | `sha256`/`size` = the epoch's; `encoding` `"zstd"`; one piece: that piece's `object`, `encoded_sha256`, `encoded_len`; several pieces: the first piece's `object`, `encoded_size` = checked sum, `encoded_sha256` = sha256 of the pieces' `encoded_sha256` hex strings concatenated in order; zero pieces: key `"objects/none"`, `encoded_size` 0, `encoded_sha256` = sha256 of the empty string. Documented in the module as a commitment that is never fetched | Shape-checked only by the importer; a new field is impossible (unknown keys rejected) |
 | Bodies | `bodies/NNNN.bin` with `NNNN` the zero-padded index in `sources`, written piece by piece (fetch, `decode_piece`, write, incremental sha256), length and digest checked at the end; at most one stored and one decoded piece alive | 128 MB target (A10.4); export must not call `restore_epoch` |
@@ -179,3 +179,8 @@ whole sources.
 ## Progress ledger
 
 - 2026-11-17 22:50Z: brief written on `988ab88`; planner claims rechecked, four corrected.
+- 2026-11-17 22:56Z: EXPORT worker started on `rust/export`; first commit `71964dc`
+  (`Timestamp::unix_ns`, `export_role`, oracle tests) reviewed by the parent. Correction sent:
+  `CodexCompressed` -> `artifact` (its stored bytes are compressed); role row amended. Uptake
+  pending. Finding for later: Codex rollouts that Codex has recompressed reach the importer
+  unparsed, unlike in Go; decompressing at export or capture is a decision for after this brief.
