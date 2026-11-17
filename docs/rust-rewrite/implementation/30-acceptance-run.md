@@ -199,3 +199,8 @@ on the intended assertion, `scripts/gates.sh` on the combined tip.
   (`*.json.lock`) that Claude Code makes and removes under `~/.claude/plugins/store/` on each
   turn; the daemon runs a full reconcile for each, where DESIGN 10.2 reads only the new
   directory. Goes to brief 31 (evidence 21, "Day 0, continued").
+- 2026-11-17 20:10Z (check 2): second `memory check` clean (6,033 of 6,033 sources match;
+  mismatch, uncaptured, parked 0). Daemon unchanged since the start; `offline` failures only, each
+  landed within two minutes. Hints: Pi only; no new Claude or Codex session. Brief 31 (streaming)
+  merged as `2e5f193`; this run keeps its `a28bfa4` binary. Next checks about 2026-11-18T08:09Z and
+  20:35Z, then about 2026-11-19T09:00Z, after which the run can end (evidence 21, "Check 2").

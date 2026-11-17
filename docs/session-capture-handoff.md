@@ -69,12 +69,16 @@ from `main` alone.
   since the first round); Pi hint delivery verified on a new Pi session; the `cause=dir`
   storms come from `*.json.lock` directories Claude Code makes under `~/.claude/plugins/store/`,
   each of which runs a full reconcile where DESIGN 10.2 reads only the new directory (evidence
-  21, "Day 0, continued"). What the next session does, in order:
+  21, "Day 0, continued"). Check 2 (19:46Z to 20:09Z) clean: 6,033 of 6,033 sources match,
+  mismatch, uncaptured and parked 0; still no new Claude or Codex session (evidence 21,
+  "Check 2"). Next checks about 2026-11-18T08:09Z and 20:35Z, then about 2026-11-19T09:00Z.
+  What the next session does, in order:
   1. Read `checks.log` (a check every 12 h; abort on any `mismatch` or an owner parked as
      `Foreign`), the daemon log and `status.json`; confirm the agent, sampler, `caffeinate` and
      check loop are alive. Confirm a hint line appears once a new Claude or Codex session has
      started (Pi verified 11:41Z; no new Claude or Codex session had started by 12:01Z).
-  2. End the run after two consecutive clean days (earliest about 2026-11-19T07:46Z), or on an
+  2. End the run after two consecutive clean days (the first clean check ending after
+     2026-11-19T07:46Z, about 09:00Z by the loop's drift), or on an
      abort trigger: teardown per the run README (agent, hooks restored, Pi extension removed,
      sampler, `caffeinate`, check loop), delete the prefix and list it empty (A2), record the
      result and the footprint series in evidence 21.
