@@ -24,8 +24,10 @@ const U1: &str = "11111111-1111-4111-8111-111111111111";
 const UR: &str = "22222222-2222-4222-8222-222222222222";
 const CX: &str = "33333333-3333-4333-8333-333333333333";
 const PI: &str = "44444444-4444-4444-8444-444444444444";
-const CODEX_FILE: &str = "sessions/2026/11/17/rollout-2026-11-17T10-00-00-33333333-3333-4333-8333-333333333333.jsonl";
-const PI_DIR: &str = "sessions/--home-me--/2026-11-17T10:00:00.000Z_44444444-4444-4444-8444-444444444444";
+const CODEX_FILE: &str =
+    "sessions/2026/11/17/rollout-2026-11-17T10-00-00-33333333-3333-4333-8333-333333333333.jsonl";
+const PI_DIR: &str =
+    "sessions/--home-me--/2026-11-17T10:00:00.000Z_44444444-4444-4444-8444-444444444444";
 const NON_ASCII: &str = "projects/-p-ü/séss-é.jsonl";
 
 fn jl(records: &[&str]) -> String {
@@ -121,7 +123,10 @@ fn fixture(server: &Fake, label: &str) -> R<Fixture> {
     plant("CANARY-ENV-7f3a9c", p.join(format!("{U1}/.env")))?;
     plant("CANARY-UNKNOWN-2b81d4", claude.join("unknown-kind.bin"))?;
     plant("CANARY-BACKUP-90c5e1", p.join(format!("{U1}.jsonl.bak")))?;
-    plant("CANARY-CODEXAUTH-5d62aa", codex.join("sessions/2026/11/17/auth.json"))?;
+    plant(
+        "CANARY-CODEXAUTH-5d62aa",
+        codex.join("sessions/2026/11/17/auth.json"),
+    )?;
     plant("CANARY-PEM-e417b3", pi.join(format!("{PI_DIR}/key.pem")))?;
     let outside = rig.dir.join("outside/secret.txt");
     put(&outside, "CANARY-SYMLINK-c08f26\n")?;
@@ -164,9 +169,15 @@ fn run(state: &Path, args: &[&std::ffi::OsStr]) -> R<Output> {
 }
 
 fn export(fx: &Fixture, text: &str, out: &Path) -> R {
+    fs::create_dir_all(out.parent().ok_or("parent")?).map_err(e)?;
     let r = run(
         &fx.rig.dir,
-        &["export".as_ref(), text.as_ref(), "--out".as_ref(), out.as_os_str()],
+        &[
+            "export".as_ref(),
+            text.as_ref(),
+            "--out".as_ref(),
+            out.as_os_str(),
+        ],
     )?;
     assert_eq!(
         r.status.code(),
@@ -227,8 +238,14 @@ fn has(hay: &[u8], needle: &[u8]) -> bool {
 /// Scan every export: `metadata.json`, each body, and all bodies concatenated.
 fn scan(fx: &Fixture, dirs: &[PathBuf]) -> R {
     for (needle, exists, holder) in &fx.canaries {
-        assert!(fs::symlink_metadata(exists).is_ok(), "canary file {exists:?} missing");
-        assert!(has(&fs::read(holder).map_err(e)?, needle.as_bytes()), "{needle} not on disk");
+        assert!(
+            fs::symlink_metadata(exists).is_ok(),
+            "canary file {exists:?} missing"
+        );
+        assert!(
+            has(&fs::read(holder).map_err(e)?, needle.as_bytes()),
+            "{needle} not on disk"
+        );
     }
     let mut all = Vec::new();
     let mut scanned = 0;
@@ -242,13 +259,19 @@ fn scan(fx: &Fixture, dirs: &[PathBuf]) -> R {
             all.extend_from_slice(part);
             scanned += 1;
             for (needle, _, _) in &fx.canaries {
-                assert!(!has(part, needle.as_bytes()), "{needle} leaked into {dir:?}");
+                assert!(
+                    !has(part, needle.as_bytes()),
+                    "{needle} leaked into {dir:?}"
+                );
             }
         }
     }
     assert!(scanned >= dirs.len() * 2);
     for (needle, _, _) in &fx.canaries {
-        assert!(!has(&all, needle.as_bytes()), "{needle} leaked across bodies");
+        assert!(
+            !has(&all, needle.as_bytes()),
+            "{needle} leaked across bodies"
+        );
     }
     // Positive control: the scan really reads transcript bytes.
     assert!(has(&all, b"hello claude") && has(&all, b"pi prompt"));
@@ -312,23 +335,57 @@ fn captured(fx: &Fixture) -> R<memory::assemble::ProductionDaemon> {
     let mut daemon = start_from_config(&fx.rig.state, &fx.rig.cfg).map_err(e)?;
     let report = daemon.reconcile_once().map_err(e)?;
     assert_eq!((report.failed, report.parked), (0, 0));
-    assert_eq!(report.landed, 8, "eight admitted sources land");
+    assert_eq!(report.landed, 5, "five owners land");
     Ok(daemon)
 }
 
 fn phase1() -> Vec<Want> {
     vec![
-        Want { name: "s1", agent: "claude", needle: U1, sources: 3, events: 6,
+        Want {
+            name: "s1",
+            agent: "claude",
+            needle: U1,
+            sources: 3,
+            events: 6,
             issues: json!({"artifact_not_normalized": 1}),
-            roles: json!({"main": 1, "subagent": 1, "artifact": 1}) },
-        Want { name: "nonascii", agent: "claude", needle: "séss-é", sources: 1, events: 1,
-            issues: json!({}), roles: json!({"main": 1}) },
-        Want { name: "rewrite", agent: "claude", needle: UR, sources: 1, events: 3,
-            issues: json!({}), roles: json!({"main": 1}) },
-        Want { name: "codex", agent: "codex", needle: CX, sources: 1, events: 6,
-            issues: json!({}), roles: json!({"main": 1}) },
-        Want { name: "pi", agent: "pi", needle: PI, sources: 2, events: 7,
-            issues: json!({}), roles: json!({"main": 1, "subagent": 1}) },
+            roles: json!({"main": 1, "subagent": 1, "artifact": 1}),
+        },
+        Want {
+            name: "nonascii",
+            agent: "claude",
+            needle: "s_c3_a9ss",
+            sources: 1,
+            events: 1,
+            issues: json!({}),
+            roles: json!({"main": 1}),
+        },
+        Want {
+            name: "rewrite",
+            agent: "claude",
+            needle: UR,
+            sources: 1,
+            events: 3,
+            issues: json!({}),
+            roles: json!({"main": 1}),
+        },
+        Want {
+            name: "codex",
+            agent: "codex",
+            needle: CX,
+            sources: 1,
+            events: 6,
+            issues: json!({}),
+            roles: json!({"main": 1}),
+        },
+        Want {
+            name: "pi",
+            agent: "pi",
+            needle: PI,
+            sources: 2,
+            events: 7,
+            issues: json!({}),
+            roles: json!({"main": 1, "subagent": 1}),
+        },
     ]
 }
 
@@ -394,14 +451,28 @@ fn consumer_gate_claude_codex_pi_export_imports_and_reports() -> R {
     for (i, w) in phase1().iter().enumerate() {
         let text = find(&all, w)?;
         let dir = out.join(format!("restore-{i}"));
+        fs::create_dir_all(&out).map_err(e)?;
         let r = run(
             &fx.rig.dir,
-            &["restore".as_ref(), text.as_ref(), "--out".as_ref(), dir.as_os_str()],
+            &[
+                "restore".as_ref(),
+                text.as_ref(),
+                "--out".as_ref(),
+                dir.as_os_str(),
+            ],
         )?;
-        assert_eq!(r.status.code(), Some(0), "{}", String::from_utf8_lossy(&r.stderr));
+        assert_eq!(
+            r.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&r.stderr)
+        );
         let mut files = Vec::new();
         walk(&dir, &dir, &mut files)?;
-        assert_eq!(files.len(), w.sources.max(if w.name == "rewrite" { 1 } else { 0 }));
+        assert_eq!(
+            files.len(),
+            w.sources.max(if w.name == "rewrite" { 1 } else { 0 })
+        );
         for f in files {
             assert_eq!(
                 fs::read(dir.join(&f)).map_err(e)?,
@@ -430,9 +501,17 @@ fn consumer_gate_claude_codex_pi_export_imports_and_reports() -> R {
         .output()
         .map_err(e)?;
     let text = String::from_utf8_lossy(&o.stderr);
-    assert_eq!(o.status.code(), Some(0), "{text}{}", String::from_utf8_lossy(&o.stdout));
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "{text}{}",
+        String::from_utf8_lossy(&o.stdout)
+    );
     assert!(text.contains("\nOK"), "{text}");
-    assert!(!text.contains("skipped"), "the Python half must run, not skip: {text}");
+    assert!(
+        !text.contains("skipped"),
+        "the Python half must run, not skip: {text}"
+    );
     assert!(text.contains("Ran "), "{text}");
     Ok(())
 }
@@ -441,7 +520,7 @@ fn consumer_gate_claude_codex_pi_export_imports_and_reports() -> R {
 fn consumer_gate_withheld_canaries_never_reach_an_export() -> R {
     let server = Fake::start()?;
     let fx = fixture(&server, "canary")?;
-    let mut daemon = captured(&fx)?;
+    let daemon = captured(&fx)?;
     daemon.shutdown().map_err(e)?;
     let mut dirs = Vec::new();
     for (i, text) in owners(&fx.rig)?.iter().enumerate() {
