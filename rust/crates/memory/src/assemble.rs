@@ -106,6 +106,22 @@ pub fn build_store(config: &Config) -> Result<S3Store, AssembleError> {
     .map_err(AssembleError::Store)
 }
 
+/// The policy context the daemon captures under: valid, the built-in revision and rules, and
+/// the identities of the config file, the token file and the state root. `memory check` builds
+/// the same context so it judges sources as capture does.
+#[must_use]
+pub fn policy_context(root: &Path, config_path: &Path, config: &Config) -> PolicyContext {
+    let (collector_paths, collector_identities) =
+        collector([config_path, &config.token_path, root]);
+    PolicyContext {
+        valid: true,
+        revision: POLICY_REVISION.to_owned(),
+        rules: Some(rules_digest()),
+        collector_paths,
+        collector_identities,
+    }
+}
+
 fn build(
     root: &Path,
     config_path: &Path,
@@ -120,20 +136,12 @@ fn build(
     let store = build_store(config)?;
     let fs = SharedFs::new();
     let sources = WalkSources::new(roots, WalkLimits::default(), fs.clone());
-    let (collector_paths, collector_identities) =
-        collector([config_path, &config.token_path, root]);
     Ok(Parts {
         fs,
         store,
         clock: SystemClock::new(),
         sources,
-        context: PolicyContext {
-            valid: true,
-            revision: POLICY_REVISION.to_owned(),
-            rules: Some(rules_digest()),
-            collector_paths,
-            collector_identities,
-        },
+        context: policy_context(root, config_path, config),
     })
 }
 

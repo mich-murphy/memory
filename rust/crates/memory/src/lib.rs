@@ -5,6 +5,7 @@
 pub mod assemble;
 pub mod audit;
 pub mod capture;
+pub mod check;
 pub mod clock;
 pub mod commit;
 pub mod config;

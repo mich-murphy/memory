@@ -255,6 +255,26 @@ fn withhold_of(reason: Reason) -> WithholdReason {
     }
 }
 
+/// Privacy transform, then the final authorization of the transformed bytes: the one place the
+/// bytes capture would publish for `raw` are decided. `memory check` calls it too, so the check
+/// compares against what capture stores rather than a reimplementation.
+///
+/// # Errors
+/// [`SourceOutcome::Withheld`] when the transform or the authorization denies, and
+/// [`SourceOutcome::Blocked`] when policy evidence is missing.
+pub fn publishable(
+    admitted: &AdmittedSource,
+    raw: &[u8],
+    context: &PolicyContext,
+) -> Result<AuthorizedBody, SourceOutcome> {
+    let redacted = transform(admitted, raw).map_err(|r| SourceOutcome::Withheld(withhold_of(r)))?;
+    match authorize(admitted, redacted, context) {
+        Authorization::Allow(body) => Ok(body),
+        Authorization::Deny(r) => Err(SourceOutcome::Withheld(withhold_of(r))),
+        Authorization::Unknown(u) => Err(SourceOutcome::Blocked(u)),
+    }
+}
+
 fn hash_span(bytes: &[u8], range: &std::ops::Range<Offset>) -> Option<Sha256> {
     let start = usize::try_from(range.start.get()).ok()?;
     let end = usize::try_from(range.end.get()).ok()?;
@@ -625,13 +645,7 @@ impl Job<'_> {
     }
     /// Privacy transform, then the final authorization of the transformed bytes.
     fn authorized_body(&self, raw: &[u8]) -> Result<AuthorizedBody, SourceOutcome> {
-        let redacted =
-            transform(&self.admitted, raw).map_err(|r| SourceOutcome::Withheld(withhold_of(r)))?;
-        match authorize(&self.admitted, redacted, self.env.context) {
-            Authorization::Allow(body) => Ok(body),
-            Authorization::Deny(r) => Err(SourceOutcome::Withheld(withhold_of(r))),
-            Authorization::Unknown(u) => Err(SourceOutcome::Blocked(u)),
-        }
+        publishable(&self.admitted, raw, self.env.context)
     }
     /// Slice `body` from `at` into pieces of the configured size; `base` is the stream
     /// offset of `body[0]`. Pushes each piece's upload and returns the descriptors.
