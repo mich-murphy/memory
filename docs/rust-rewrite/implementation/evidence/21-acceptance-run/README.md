@@ -90,3 +90,58 @@ Each applied alone, the focused tests run, the file reverted with `git checkout`
 - A capture still holds its whole range in memory; the run measures peak memory (largest local
   file 98 MB, target 128 MB).
 - Not run: 2,000 property cases, `cargo mutants`, a Linux stress run, anything against R2.
+
+## Stack #132 and hosted CI
+
+Pushed as stack #132 (PRs #127 to #131) and merged into `main` as `a28bfa4` on 2026-11-17
+(`gh stack merge 132 --yes --merge`). Before the push, the whole range was checked for the
+values in `.env` (0 hits). "Rust rewrite gates" succeeded on all six jobs of the latest attempt
+on every branch. "CI" failed only in the two accepted `govulncheck` steps on every branch.
+Post-merge on `a28bfa4`: "Rust rewrite gates" run 44021465203 success; "CI" run 44021465320
+failed only in the two accepted steps.
+
+Finding: on `docs/brief-30` (run 44014160296, attempt 1) the job "Rust gates
+(ubuntu-24.04-arm)" was cancelled at the 30-minute limit inside "Run all Rust gates without
+live access". That branch's `rust/` tree equals `main`'s, and the same job took about 14 minutes
+on `main` and on the four other branches. The job log returned 404 and the job saved no
+artifact, so the cause is unknown. `rust/.config/nextest.toml` sets no `slow-timeout`, so a hung
+test runs until the job limit. Attempt 2 passed in 14 minutes. Not fixed; recorded as an open
+finding.
+
+## RUN: the 2-day acceptance run (started)
+
+Run id `20261117-a28bfa4`, prefix `rust-acceptance/20261117-a28bfa4/`, bucket `agent-sessions`.
+Release build of `main` `a28bfa4` (sha256 prefix `421a1564d71b8e34`), installed at
+`~/.local/libexec/memory-acceptance/memory`. State root `~/.local/state/memory-acceptance`
+(config 0600 with archive id `acceptance-20261117-a28bfa4`, machine id `mac-acceptance`, roots
+`~/.claude`, `~/.codex`, `~/.pi/agent`; token 0600 written from `.env` in a subshell, never
+printed). Run files, backups, teardown steps and a list/delete tool restricted to this prefix:
+`~/.local/state/memory-acceptance-run/` (README there).
+
+Host changes (operator answers 4 to 6), all to be reverted at the end:
+
+- launchd user agent `memory-acceptance` (`KeepAlive` on unsuccessful exit, throttle 60 s,
+  stderr to `~/Library/Logs/memory-acceptance/daemon.log`); started 2026-11-17T05:30:59Z.
+- Rust hooks: 8 groups appended to Claude `settings.json`, 6 to Codex `hooks.json`, each a new
+  last group of its event so existing groups keep their positions (Codex trust keys). Every other
+  key and group was verified unchanged against the backups; Codex `config.toml` unchanged. Codex
+  skips a new hook until it is trusted in `/hooks`, so Codex hints need the operator's approval
+  there. Pi: a new extension `memory-acceptance.ts` that writes a JSON payload (`event`,
+  `session_id`, `session_file`, `cwd`) to the hook's stdin. The release hook was first run on
+  synthetic payloads for all three agents against a throwaway state root: exit 0, one line each.
+- `caffeinate -i -m -s`, a footprint sampler (`footprint -p`, `phys_footprint_peak`, every 10 s)
+  and a loop that runs `memory check` every 12 h after the first `round` line.
+
+First observations (2026-11-17, 50 minutes in):
+
+1. **Peak memory 431 MB** (`phys_footprint_peak`), against the 128 MB target (A10.4). Steady
+   state between captures 45 to 140 MB. The local files reach 98 MB, and a capture holds its whole
+   range plus its encoded pieces. This is the measurement decision 2 waits for; the operator
+   decides whether streaming is required before the first production write.
+2. **The first reconcile is slow and silent.** After 50 minutes the prefix held 569 owners
+   (`current.json`), 569 manifests and 2,614 objects of about 4,400 local owners: about 16 owners
+   a minute, so the first round needs several hours. The host's measured upload rate was 180 to
+   380 KB/s. The daemon logs nothing until a round ends (no `capture` line inside a full round),
+   so from outside a long first round looks like a stall; it took a stack sample, `nettop` and a
+   prefix listing to tell. Each PUT opened a new TLS connection (the local port changed about
+   every 10 s).

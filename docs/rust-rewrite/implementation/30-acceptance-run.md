@@ -178,3 +178,10 @@ on the intended assertion, `scripts/gates.sh` on the combined tip.
   not `tests/check.rs`; `memory check` also exits 64 on a usage error; the uncaptured reason code
   is `no_live_entry`; a missing `status.json` reports `status=missing` and does not fail the
   check (the run reads it only after the daemon has written one). Next: push the stack, then RUN.
+- 2026-11-17: stack #132 (PRs #127 to #131) merged as `a28bfa4`; one ARM gates job timed out at
+  30 minutes on a docs-only branch, cause unknown, passed on rerun (evidence 21, open finding).
+- 2026-11-17 05:30Z: RUN started as `20261117-a28bfa4` (launchd agent, hooks, sampler, check
+  loop; details and teardown in evidence 21). First findings: peak memory 431 MB against 128 MB;
+  the first reconcile takes hours at this host's upload rate and logs nothing until it ends.
+  Next: after the first `round` line, read `checks.log`; two consecutive clean days end the run;
+  then teardown, prefix deletion verified empty, and decision 2 on streaming.

@@ -107,6 +107,16 @@ from `main` alone.
   record in [evidence 21](rust-rewrite/implementation/evidence/21-acceptance-run/). Next: push
   that stack, then RUN (brief 30): templates, release binary, state root, hooks, launchd agent,
   `memory check` twice a day, the peak-memory measurement.
+- 2026-11-17: stack #132 merged as `a28bfa4`. **The 2-day acceptance run is running** since
+  05:30:59Z (run id `20261117-a28bfa4`; launchd agent `memory-acceptance`; Rust hooks installed
+  beside the Go hooks; `caffeinate`, a footprint sampler and a 12-hourly `memory check` loop).
+  Everything a later session needs, including teardown, is in
+  `~/.local/state/memory-acceptance-run/README.md` and in
+  [evidence 21](rust-rewrite/implementation/evidence/21-acceptance-run/). First findings: peak
+  memory 431 MB (target 128 MB), and the first reconcile takes hours and logs nothing until it
+  ends. Codex runs a new hook only after it is trusted in Codex's `/hooks`. Next: read
+  `checks.log` once the first round has ended; two consecutive clean days end the run; teardown,
+  prefix deletion verified empty; then decision 2 (streaming).
 - Next actions, in order (written before brief 30). Write brief 30 first and scope it with a read-only
   planner whose claims the parent rechecks against the code, as for briefs 28 and 29.
   1. Build the commit pauses of decision 3. The brief must say which waits they are (the
