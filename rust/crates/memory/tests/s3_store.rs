@@ -137,6 +137,55 @@ fn one_put_after(fault: Fault, expected: StoreError) -> R {
     Ok(())
 }
 
+fn keep_alive_rig() -> R<(Fake, S3Store)> {
+    let fake = Fake::start_keep_alive()?;
+    let store = store_at(&fake.url(), "", TimeoutPolicy::PRODUCTION)?;
+    Ok((fake, store))
+}
+
+#[test]
+fn ten_puts_and_a_get_share_one_connection_for_200_and_412() -> R {
+    let (fake, mut s) = keep_alive_rig()?;
+    for n in 0..10 {
+        s.put_if_absent(&format!("o/k{n}"), body(b"x")).map_err(e)?;
+    }
+    s.get("o/k0").map_err(e)?;
+    assert_eq!(fake.accepted(), 1, "200 replies: one connection");
+
+    let (fake, mut s) = keep_alive_rig()?;
+    s.put_if_absent("o/k", body(b"x")).map_err(e)?;
+    for _ in 0..10 {
+        assert!(s.put_if_absent("o/k", body(b"y")).is_err());
+    }
+    s.get("o/k").map_err(e)?;
+    assert_eq!(fake.count("PUT"), 11);
+    assert_eq!(fake.accepted(), 1, "412 replies: one connection");
+    Ok(())
+}
+
+#[test]
+fn a_reply_body_over_the_bound_is_not_read_whole_and_its_connection_is_dropped() -> R {
+    let (fake, mut s) = keep_alive_rig()?;
+    let small = {
+        fake.queue("PUT", "big", Fault::StatusWithBody(412, 100));
+        s.put_if_absent("o/big", body(b"x"))
+    };
+    let large = {
+        fake.queue("PUT", "big", Fault::StatusWithBody(412, 1 << 20));
+        s.put_if_absent("o/big", body(b"x"))
+    };
+    assert!(small.is_err());
+    assert_eq!(large, small, "the result does not depend on the body size");
+    assert_eq!(fake.accepted(), 1, "the small reply kept its connection");
+    s.get("o/missing").ok();
+    assert_eq!(
+        fake.accepted(),
+        2,
+        "the oversized reply's connection was dropped"
+    );
+    Ok(())
+}
+
 #[test]
 fn a_503_after_a_landed_write_is_throttled_and_sent_once() -> R {
     one_put_after(Fault::ApplyThenStatus(503), StoreError::Throttled(None))

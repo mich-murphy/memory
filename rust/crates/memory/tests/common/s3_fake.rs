@@ -29,6 +29,8 @@ pub enum Fault {
     /// Hold the request for this long (counted by [`Fake::held`] while it waits), then apply it
     /// and reply normally.
     HoldThenApply(Duration),
+    /// Reply with this status and a body of this many bytes, without applying anything.
+    StatusWithBody(u16, usize),
 }
 
 /// What the server saw for one request.
@@ -49,6 +51,7 @@ struct State {
     faults: VecDeque<(String, String, Fault)>,
     seen: Vec<Seen>,
     held: usize,
+    accepted: usize,
 }
 
 impl State {
@@ -92,6 +95,16 @@ pub struct Fake {
 
 impl Fake {
     pub fn start() -> Result<Self, String> {
+        Self::start_with(false)
+    }
+
+    /// As [`Fake::start`], but a connection stays open for further requests (`Connection:
+    /// keep-alive`); [`Fake::accepted`] counts the connections.
+    pub fn start_keep_alive() -> Result<Self, String> {
+        Self::start_with(true)
+    }
+
+    fn start_with(keep_alive: bool) -> Result<Self, String> {
         let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| format!("{e}"))?;
         let addr = listener.local_addr().map_err(|e| format!("{e}"))?;
         let state = Arc::new(Mutex::new(State::default()));
@@ -99,7 +112,8 @@ impl Fake {
         thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let state = Arc::clone(&shared);
-                thread::spawn(move || handle(stream, &state));
+                lock(&state).accepted += 1;
+                thread::spawn(move || handle(stream, &state, keep_alive));
             }
         });
         Ok(Self { addr, state })
@@ -136,6 +150,11 @@ impl Fake {
         lock(&self.state).held
     }
 
+    /// How many connections the server has accepted.
+    pub fn accepted(&self) -> usize {
+        lock(&self.state).accepted
+    }
+
     pub fn count(&self, method: &str) -> usize {
         self.requests()
             .iter()
@@ -144,15 +163,18 @@ impl Fake {
     }
 }
 
-fn reply(w: &mut TcpStream, code: u16, extra: &str, body: &[u8]) {
+fn reply(w: &mut TcpStream, code: u16, extra: &str, body: &[u8], keep_alive: bool) {
+    let connection = if keep_alive { "keep-alive" } else { "close" };
     let head = format!(
-        "HTTP/1.1 {code} X\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n",
+        "HTTP/1.1 {code} X\r\nContent-Length: {}\r\nConnection: {connection}\r\n{extra}\r\n",
         body.len()
     );
     let _ = w.write_all(head.as_bytes());
     let _ = w.write_all(body);
     let _ = w.flush();
-    let _ = w.shutdown(Shutdown::Both);
+    if !keep_alive {
+        let _ = w.shutdown(Shutdown::Both);
+    }
 }
 
 fn percent_decode(raw: &str) -> Option<String> {
@@ -170,12 +192,22 @@ fn percent_decode(raw: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-fn handle(stream: TcpStream, state: &Mutex<State>) -> Option<()> {
+fn handle(stream: TcpStream, state: &Mutex<State>, keep_alive: bool) -> Option<()> {
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .ok()?;
     let mut reader = BufReader::new(stream.try_clone().ok()?);
     let mut w = stream;
+    while exchange(&mut reader, &mut w, state, keep_alive).is_some() && keep_alive {}
+    Some(())
+}
+
+fn exchange(
+    reader: &mut BufReader<TcpStream>,
+    w: &mut TcpStream,
+    state: &Mutex<State>,
+    keep_alive: bool,
+) -> Option<()> {
     let mut line = String::new();
     reader.read_line(&mut line).ok().filter(|n| *n > 0)?;
     let mut parts = line.split_whitespace();
@@ -229,7 +261,19 @@ fn handle(stream: TcpStream, state: &Mutex<State>) -> Option<()> {
         let extra = retry_after
             .map(|v| format!("Retry-After: {v}\r\n"))
             .unwrap_or_default();
-        reply(&mut w, code, &extra, b"<Error><Code>Fault</Code></Error>");
+        reply(
+            w,
+            code,
+            &extra,
+            b"<Error><Code>Fault</Code></Error>",
+            keep_alive,
+        );
+        return Some(());
+    }
+    if let Some(Fault::StatusWithBody(code, size)) = fault {
+        g.seen.push(seen(code, body));
+        drop(g);
+        reply(w, code, "", &vec![b'x'; size], keep_alive);
         return Some(());
     }
     if matches!(fault, Some(Fault::CorruptInFlight))
@@ -270,7 +314,7 @@ fn handle(stream: TcpStream, state: &Mutex<State>) -> Option<()> {
     g.seen.push(seen(code, body));
     drop(g);
     match fault {
-        Some(Fault::ApplyThenStatus(c)) => reply(&mut w, c, "", b"<Error/>"),
+        Some(Fault::ApplyThenStatus(c)) => reply(w, c, "", b"<Error/>", keep_alive),
         Some(Fault::ApplyThenDrop) => {
             let _ = w.shutdown(Shutdown::Both);
         }
@@ -280,7 +324,7 @@ fn handle(stream: TcpStream, state: &Mutex<State>) -> Option<()> {
         }
         _ => {
             let extra = etag.map(|e| format!("ETag: {e}\r\n")).unwrap_or_default();
-            reply(&mut w, code, &extra, &payload);
+            reply(w, code, &extra, &payload, keep_alive);
         }
     }
     Some(())
