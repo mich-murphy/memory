@@ -164,6 +164,20 @@ fn ten_puts_and_a_get_share_one_connection_for_200_and_412() -> R {
 }
 
 #[test]
+fn ten_gets_of_absent_keys_share_one_connection() -> R {
+    let (fake, mut s) = keep_alive_rig()?;
+    for n in 0..10 {
+        assert_eq!(
+            s.get(&format!("o/missing{n}")).map(|_| ()),
+            Err(StoreError::NotFound)
+        );
+    }
+    s.put_if_absent("o/k", body(b"x")).map_err(e)?;
+    assert_eq!(fake.accepted(), 1, "404 replies: one connection");
+    Ok(())
+}
+
+#[test]
 fn a_reply_body_over_the_bound_is_not_read_whole_and_its_connection_is_dropped() -> R {
     let (fake, mut s) = keep_alive_rig()?;
     let small = {
