@@ -193,3 +193,9 @@ on the intended assertion, `scripts/gates.sh` on the combined tip.
   `cause=dir` full reconciles (one every 3 s at 09:40Z); hint delivery unverified until a new
   session starts. Day 1 counts from the first clean check (07:46Z): the run can end at the
   earliest after the check due about 2026-11-19T07:46Z if every check until then is clean.
+- 2026-11-17 12:01Z (day 0, continued): healthy (211 rounds, no failure, park or audit mismatch
+  since the first round). Pi hint delivery verified on a new Pi session; Claude and Codex
+  unverified (no new session of either). The `cause=dir` storms come from lock directories
+  (`*.json.lock`) that Claude Code makes and removes under `~/.claude/plugins/store/` on each
+  turn; the daemon runs a full reconcile for each, where DESIGN 10.2 reads only the new
+  directory. Goes to brief 31 (evidence 21, "Day 0, continued").
