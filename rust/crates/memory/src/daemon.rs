@@ -18,11 +18,11 @@
 use crate::audit::AuditCounts;
 use crate::capture::{
     Captured, Env, Local, Locals, MAX_PIECE_BYTES, Source, SourceOutcome, Update, attach_launches,
-    capture,
+    capture_into,
 };
 use crate::commit::{
-    Base, Commit, CommitEnd, Failure, KnownOurs, Landed, commit_stoppable, disposition_paced,
-    recover_base,
+    Base, Commit, CommitEnd, Failure, KnownOurs, Landed, StoreSink, Winners, commit_staged,
+    disposition_paced, recover_base,
 };
 use crate::config::{Config, ConfigError};
 use crate::environment::{Clock, FileSystem, Store};
@@ -843,7 +843,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         sources: &[Source],
         base: Option<&Base>,
         when: &Timestamp,
-    ) -> Captured {
+    ) -> (Captured, Winners, Option<Failure>) {
         let env = Env {
             header: header_of(owner, when),
             context: &self.context,
@@ -852,7 +852,12 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         };
         let empty = OwnerState::default();
         let remote = base.map_or(&empty, |b| &b.state);
-        capture(&mut self.fs, sources, &self.locals, remote, &env)
+        let stop = &self.stop;
+        let mut probe = || stop();
+        let mut sink = StoreSink::new(&mut self.store, &mut probe);
+        let got = capture_into(&mut self.fs, sources, &self.locals, remote, &env, &mut sink);
+        let staged = sink.finish();
+        (got, staged.winners, staged.failed)
     }
 
     /// Attach the owner's pending launch records (DESIGN.md 7.6).
@@ -873,16 +878,18 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         rt: &mut OwnerRt,
         base: Option<&Base>,
         request: Commit,
-        got: Captured,
+        staged: (Captured, Winners),
         hints: &mut [ScannedFile],
         owner: &Owner,
     ) -> Result<CommitEnd, Failure> {
+        let (got, winners) = staged;
         let stop = &self.stop;
         let (sleep, draws, clock) = (&mut self.sleep, &mut self.draws, &self.clock);
-        let result = commit_stoppable(
+        let result = commit_staged(
             &mut self.store,
             base,
             request,
+            winners,
             &mut rt.known_ours,
             &mut |wait| sleep(pause_for(wait, draw(draws, clock))),
             &mut || stop(),
@@ -944,7 +951,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 .collect();
             &live
         };
-        let mut got = self.capture_sources(owner, sources, base.as_ref(), when);
+        let (mut got, winners, failed) = self.capture_sources(owner, sources, base.as_ref(), when);
         report.audit.add(&got.audit);
         // A source park takes effect whether or not the owner's commit lands.
         for (id, outcome) in &got.outcomes {
@@ -953,12 +960,17 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 report.parked += 1;
             }
         }
+        if let Some(failure) = failed {
+            // A piece was not stored: the owner's commit is not built (as when its upload failed).
+            let draw = self.next_draw();
+            return Self::settle(rt, &Err(failure), at, draw, report);
+        }
         let Some(mut request) = got.commit.take() else {
             self.apply(got.updates);
             return false;
         };
         Self::attach_pending(&mut request, hints, owner);
-        let result = self.land(rt, base.as_ref(), request, got, hints, owner);
+        let result = self.land(rt, base.as_ref(), request, (got, winners), hints, owner);
         let draw = self.next_draw();
         Self::settle(rt, &result, at, draw, report)
     }

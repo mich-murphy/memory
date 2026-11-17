@@ -6,7 +6,7 @@
 //!
 //! # How the type system keeps unredacted bytes out of the store
 //!
-//! [`Commit`] and [`Upload`] are generic over the body. This module only ever builds
+//! [`Commit`] and [`crate::commit::Upload`] are generic over the body. This module only ever builds
 //! `Commit`. [`Published`] has a private field and its only piece constructor is a
 //! private function that slices a `memory_core::privacy::AuthorizedBody`, a value only
 //! `privacy::authorize` can produce (from a borrowed `AdmittedSource` and a consumed
@@ -42,7 +42,7 @@
 //! prefix-stable sources (otherwise it is recomputed from a fresh read of `[0, to)`). Snapshot
 //! and missing-source planning never carry audit evidence (`NotDue`).
 use crate::audit::{self, AuditCounts};
-use crate::commit::{Commit, Upload};
+use crate::commit::{Collect, Commit, PieceSink};
 use crate::environment::{FileSystem, PieceError};
 use memory_core::domain::{
     AuditState, EpochPosition, Fingerprint, Observed, Offset, ParkReason, Plan, ReplayReason,
@@ -183,15 +183,15 @@ pub struct Captured {
     pub audit: AuditCounts,
 }
 
-#[derive(Default)]
-struct Acc {
+struct Acc<'a> {
     audit: AuditCounts,
     changes: Vec<Change>,
-    uploads: Vec<Upload>,
     updates: Vec<Update>,
+    /// Where each encoded piece goes the moment it is produced.
+    sink: &'a mut dyn PieceSink,
 }
 
-/// Run one capture step for one owner.
+/// Run one capture step for one owner, collecting every encoded piece in the commit.
 pub fn capture<F: FileSystem>(
     fs: &mut F,
     sources: &[Source],
@@ -199,18 +199,46 @@ pub fn capture<F: FileSystem>(
     remote: &OwnerState,
     env: &Env<'_>,
 ) -> Captured {
-    let mut acc = Acc::default();
+    let mut sink = Collect::default();
+    let mut got = capture_into(fs, sources, locals, remote, env, &mut sink);
+    if let Some(commit) = &mut got.commit {
+        commit.uploads = sink.0;
+    }
+    got
+}
+
+/// Run one capture step for one owner, handing each encoded piece to `sink` as it is produced.
+/// The commit's `uploads` stay empty. Once the sink has refused a piece, later sources are
+/// not read and end `Unavailable`; the sink holds the reason.
+pub fn capture_into<F: FileSystem>(
+    fs: &mut F,
+    sources: &[Source],
+    locals: &Locals,
+    remote: &OwnerState,
+    env: &Env<'_>,
+    sink: &mut dyn PieceSink,
+) -> Captured {
+    let mut acc = Acc {
+        audit: AuditCounts::default(),
+        changes: Vec::new(),
+        updates: Vec::new(),
+        sink,
+    };
     let mut outcomes = Vec::new();
     let none = Local::default();
     for src in sources {
         let local = locals.get(&src.id).unwrap_or(&none);
-        let outcome = step(fs, src, local, remote, env, &mut acc);
+        let outcome = if acc.sink.halted() {
+            SourceOutcome::Unavailable
+        } else {
+            step(fs, src, local, remote, env, &mut acc)
+        };
         outcomes.push((src.id.clone(), outcome));
     }
     let commit = (!acc.changes.is_empty()).then(|| Commit {
         header: env.header.clone(),
         changes: acc.changes,
-        uploads: acc.uploads,
+        uploads: Vec::new(),
     });
     Captured {
         commit,
@@ -390,7 +418,7 @@ fn absence_plan(
     local: &Local,
     recorded: bool,
     rules: Option<RulesDigest>,
-    acc: &mut Acc,
+    acc: &mut Acc<'_>,
 ) -> Planning {
     let observation = if recorded {
         Observation::DeletionRecorded
@@ -415,7 +443,7 @@ fn step<F: FileSystem>(
     local: &Local,
     remote: &OwnerState,
     env: &Env<'_>,
-    acc: &mut Acc,
+    acc: &mut Acc<'_>,
 ) -> SourceOutcome {
     let admitted = match admit(env.context, src.facts.clone()) {
         Admission::Allow(a) => a,
@@ -498,7 +526,7 @@ fn snapshot<F: FileSystem>(
     job: &Job<'_>,
     local: &Local,
     fp: SnapshotFingerprint,
-    acc: &mut Acc,
+    acc: &mut Acc<'_>,
 ) -> SourceOutcome {
     let planning = plan(&PlanInput {
         withheld: None,
@@ -544,6 +572,16 @@ type Known = Vec<(u64, Vec<u8>)>;
 /// Borrowed [`Known`] segments.
 type Segments<'a> = &'a [(u64, Vec<u8>)];
 
+/// What a write produced before its change and index entry are pushed.
+struct Done {
+    pieces: Vec<Piece>,
+    whole: Sha256,
+    whole_state: Option<Sha256State>,
+    stream_len: u64,
+    /// Windows of the region read in memory (the whole stream, or a resumed delta).
+    edges: Edges,
+}
+
 enum Mode {
     /// Extend from the offset, whose committed whole-stream digest is the second field; the
     /// state, when present, is the resumable digest of `[0, from)`.
@@ -567,22 +605,58 @@ struct Job<'a> {
 }
 
 impl Job<'_> {
-    /// Read, transform, authorize and slice; pushes the change and its uploads.
+    /// Read, transform, authorize and slice; hands each piece to the sink and pushes the change.
+    ///
+    /// A prefix-stable source (identity transform) streams: one piece is read, authorized,
+    /// hashed, encoded and handed to the sink at a time. Any other source is read whole.
     fn write<F: FileSystem>(
         &self,
         fs: &mut F,
         mode: Mode,
-        acc: &mut Acc,
+        acc: &mut Acc<'_>,
     ) -> Result<(), SourceOutcome> {
-        let src = self.src;
-        let (from, to, epoch) = match mode {
+        if self.admitted.prefix_stable() {
+            self.write_streamed(fs, mode, acc)
+        } else {
+            self.write_whole(fs, mode, acc)
+        }
+    }
+    /// A mismatching re-read prefix: restart as an epoch (no audit failure for a source that
+    /// is not prefix-stable), or count the mismatch and park or restart.
+    fn prefix_mismatch<F: FileSystem>(
+        &self,
+        fs: &mut F,
+        acc: &mut Acc<'_>,
+    ) -> Result<(), SourceOutcome> {
+        if !self.admitted.prefix_stable() {
+            return self.write(fs, Mode::Epoch(audit::never()), acc);
+        }
+        match audit::mismatch(&self.previous, self.env.now_ns) {
+            audit::Mismatch::Park(reason) => Err(SourceOutcome::Parked(reason)),
+            audit::Mismatch::Epoch(state) => {
+                acc.audit.mismatch();
+                self.write(fs, Mode::Epoch(state), acc)
+            }
+        }
+    }
+    fn range_of(&self, mode: &Mode) -> (u64, u64, Option<u32>) {
+        match mode {
             Mode::Extend(from, ..) => (from.get(), from.get().max(self.observed.size), None),
             Mode::Epoch(_) | Mode::Replace => (0, self.observed.size, Some(self.next_epoch)),
-        };
+        }
+    }
+    /// The whole-input path: the range is read as one buffer.
+    fn write_whole<F: FileSystem>(
+        &self,
+        fs: &mut F,
+        mode: Mode,
+        acc: &mut Acc<'_>,
+    ) -> Result<(), SourceOutcome> {
+        let (from, to, epoch) = self.range_of(&mode);
         let resume = self.resume_state(&mode, from, to);
         let raw = match resume {
-            Some(_) => read_checked(fs, src.handle, from..to)?,
-            None => read_checked(fs, src.handle, 0..to)?,
+            Some(_) => read_checked(fs, self.src.handle, from..to)?,
+            None => read_checked(fs, self.src.handle, 0..to)?,
         };
         let body = self.authorized_body(&raw)?;
         // Re-read prefix: the stored pieces before `from` are the bytes of an earlier read, so
@@ -590,18 +664,7 @@ impl Job<'_> {
         if let (Mode::Extend(_, committed, ..), None) = (&mode, &resume) {
             let prefix = Offset::new(0)..Offset::new(from);
             if hash_span(body.bytes(), &prefix) != Some(*committed) {
-                // A source that is not prefix-stable is expected to differ here: its transform
-                // depends on the whole text. It restarts but is no audit failure.
-                if !self.admitted.prefix_stable() {
-                    return self.write(fs, Mode::Epoch(audit::never()), acc);
-                }
-                return match audit::mismatch(&self.previous, self.env.now_ns) {
-                    audit::Mismatch::Park(reason) => Err(SourceOutcome::Parked(reason)),
-                    audit::Mismatch::Epoch(state) => {
-                        acc.audit.mismatch();
-                        self.write(fs, Mode::Epoch(state), acc)
-                    }
-                };
+                return self.prefix_mismatch(fs, acc);
             }
         }
         let (base, first) = if resume.is_some() {
@@ -618,6 +681,123 @@ impl Job<'_> {
             .ok_or(SourceOutcome::Raced)?;
         let pieces = self.slice(&body, base, first, acc)?;
         let (whole, whole_state) = self.whole_digest(resume.as_ref(), body.bytes())?;
+        let mut edges = Edges::default();
+        edges.push(body.bytes());
+        self.finish(
+            fs,
+            mode,
+            resume.is_some().then_some(from),
+            epoch,
+            Done {
+                pieces,
+                whole,
+                whole_state,
+                stream_len,
+                edges,
+            },
+            acc,
+        )
+    }
+    /// The streaming path for a prefix-stable source: at most `piece_len` bytes are read at a
+    /// time. A re-read prefix is hashed against the committed digest chunk by chunk and not
+    /// uploaded; the new bytes are authorized, hashed, encoded and handed over per piece.
+    fn write_streamed<F: FileSystem>(
+        &self,
+        fs: &mut F,
+        mode: Mode,
+        acc: &mut Acc<'_>,
+    ) -> Result<(), SourceOutcome> {
+        let (handle, step) = (self.src.handle, self.step());
+        let (from, to, epoch) = self.range_of(&mode);
+        let resume = self.resume_state(&mode, from, to);
+        let mut edges = Edges::default();
+        let mut authorized = false;
+        let mut whole = resume.clone().unwrap_or_else(Sha256State::empty);
+        if let (Mode::Extend(_, committed, ..), None) = (&mode, &resume) {
+            let mut at = 0_u64;
+            while at < from {
+                let end = at.saturating_add(step).min(from);
+                let raw = read_checked(fs, handle, at..end)?;
+                let body = self.authorized_body(&raw)?;
+                authorized = true;
+                whole = whole
+                    .extend(body.bytes())
+                    .map_err(|_| SourceOutcome::Raced)?;
+                edges.push(body.bytes());
+                at = end;
+            }
+            if whole.digest() != Ok(*committed) {
+                // The whole-input path reads the new bytes before it compares: a read that
+                // fails or comes up short there ends the source before the mismatch counts.
+                let mut at = from;
+                while at < to {
+                    let end = at.saturating_add(step).min(to);
+                    read_checked(fs, handle, at..end)?;
+                    at = end;
+                }
+                return self.prefix_mismatch(fs, acc);
+            }
+        }
+        let mut pieces = Vec::new();
+        let mut at = from;
+        while at < to {
+            let end = at.saturating_add(step).min(to);
+            let raw = read_checked(fs, handle, at..end)?;
+            let body = self.authorized_body(&raw)?;
+            authorized = true;
+            let len = body.bytes().len();
+            whole = whole
+                .extend(body.bytes())
+                .map_err(|_| SourceOutcome::Raced)?;
+            edges.push(body.bytes());
+            let (piece, stored) = Published::piece(&body, 0, len).map_err(|e| match e {
+                PieceError::Range => SourceOutcome::Raced,
+                PieceError::Encode => SourceOutcome::Unavailable,
+            })?;
+            let described = Piece::from_authorized(&body, Offset::new(at), 0, len, &stored)
+                .map_err(|_| SourceOutcome::Raced)?;
+            acc.sink
+                .put(described.object(), piece)
+                .map_err(|_| SourceOutcome::Unavailable)?;
+            pieces.push(described);
+            at = end;
+        }
+        if !authorized {
+            self.authorized_body(&[])?;
+        }
+        self.finish(
+            fs,
+            mode,
+            resume.is_some().then_some(from),
+            epoch,
+            Done {
+                pieces,
+                whole: whole.digest().map_err(|_| SourceOutcome::Raced)?,
+                whole_state: Some(whole),
+                stream_len: to,
+                edges,
+            },
+            acc,
+        )
+    }
+    /// Push the change and the index entry once every piece is handed over.
+    fn finish<F: FileSystem>(
+        &self,
+        fs: &mut F,
+        mode: Mode,
+        resumed_from: Option<u64>,
+        epoch: Option<u32>,
+        done: Done,
+        acc: &mut Acc<'_>,
+    ) -> Result<(), SourceOutcome> {
+        let src = self.src;
+        let Done {
+            pieces,
+            whole,
+            whole_state,
+            stream_len,
+            edges,
+        } = done;
         let write = SourceWrite {
             id: src.id.clone(),
             kind: src.kind.clone(),
@@ -643,9 +823,7 @@ impl Job<'_> {
                 Mode::Extend(_, _, _, known) => known,
                 Mode::Epoch(_) | Mode::Replace => &[],
             };
-            let resumed = resume.is_some().then_some((from, known));
-            let mut edges = Edges::default();
-            edges.push(body.bytes());
+            let resumed = resumed_from.map(|from| (from, known));
             let windows = self.windows(fs, resumed, &edges, stream_len)?;
             let position = EpochPosition {
                 epoch: epoch.unwrap_or(self.next_epoch.saturating_sub(1)),
@@ -726,7 +904,7 @@ impl Job<'_> {
         body: &AuthorizedBody,
         base: Offset,
         mut at: usize,
-        acc: &mut Acc,
+        acc: &mut Acc<'_>,
     ) -> Result<Vec<Piece>, SourceOutcome> {
         let body_len = body.bytes().len();
         let step = self.env.piece_len.clamp(1, MAX_PIECE_BYTES);
@@ -740,10 +918,9 @@ impl Job<'_> {
             let described = Piece::from_authorized(body, base, at, end, &stored)
                 .map_err(|_| SourceOutcome::Raced)?;
             pieces.push(described.clone());
-            acc.uploads.push(Upload {
-                key: described.object().to_owned(),
-                body: piece,
-            });
+            acc.sink
+                .put(described.object(), piece)
+                .map_err(|_| SourceOutcome::Unavailable)?;
             at = end;
         }
         Ok(pieces)
@@ -994,7 +1171,7 @@ fn append<F: FileSystem>(
     mut job: Job<'_>,
     local: &Local,
     remote: Option<EpochPosition>,
-    acc: &mut Acc,
+    acc: &mut Acc<'_>,
 ) -> SourceOutcome {
     let src = job.src;
     // The remote position is authoritative and the index is a deletable cache (DESIGN.md
