@@ -859,6 +859,70 @@ fn pi_session<'a>(rest: &[&'a str], mode: PiMode, parts: &[&'a str]) -> Res<'a> 
     }
 }
 
+/// Role of one exported source in the `session-reader/v2` envelope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExportRole {
+    /// Main transcript (`main`).
+    Main,
+    /// Superseded or orphaned transcript (`transcript`).
+    Transcript,
+    /// Child transcript (`subagent`).
+    Subagent,
+    /// Everything else (`artifact`); the importer does not parse it.
+    Artifact,
+}
+impl ExportRole {
+    /// Wire spelling in the envelope.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Main => "main",
+            Self::Transcript => "transcript",
+            Self::Subagent => "subagent",
+            Self::Artifact => "artifact",
+        }
+    }
+}
+
+/// Envelope role of a stored source, from its kind and root-relative path alone (the manifest
+/// stores no role). Locator `Main` is `main`, `Superseded` is `transcript`, `Child` is
+/// `subagent`, every other role is `artifact`. Pure and total; meaningful for session-owned
+/// sources, and pinned against [`locate`] by a property test.
+#[must_use]
+pub fn export_role(kind: &SourceKind, path: &str) -> ExportRole {
+    let parts: Vec<&str> = path.split('/').collect();
+    let last = parts.last().copied().unwrap_or("");
+    let parent = parts
+        .len()
+        .checked_sub(2)
+        .and_then(|i| parts.get(i))
+        .copied()
+        .unwrap_or("");
+    match kind {
+        SourceKind::ClaudeTranscript => {
+            if last
+                .strip_suffix(".jsonl")
+                .is_some_and(|stem| !stem.contains('.'))
+            {
+                ExportRole::Main
+            } else {
+                ExportRole::Transcript
+            }
+        }
+        SourceKind::ClaudeSubagent => ExportRole::Subagent,
+        SourceKind::CodexRollout | SourceKind::CodexCompressed => ExportRole::Main,
+        SourceKind::PiSession => {
+            if matches!(parent, "tasks" | "forks") || (last == "session.jsonl" && pi_run_ok(parent))
+            {
+                ExportRole::Subagent
+            } else {
+                ExportRole::Main
+            }
+        }
+        _ => ExportRole::Artifact,
+    }
+}
+
 /// Map one root-relative path to its source, or to a countable withhold. Pure and total.
 pub fn locate(path: &RootRelativePath, roots: &Roots) -> Located {
     let parts: Vec<&str> = path.0.iter().map(String::as_str).collect();
