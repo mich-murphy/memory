@@ -196,3 +196,13 @@ does not end early when the network is down.
 
 - 2026-11-17 13:00Z: brief written on `4db2975` from the run findings of evidence 21 (day 0 and
   day 0 continued); planner claims rechecked; test durations measured.
+- 2026-11-17 14:50Z: all five increments accepted locally; stacked as TIMEOUT, CONN, DIRSTORM,
+  STREAM, PROGRESS, tip `ef87ec2` (11 commits over `d7d40cb`). Seven checks 0 (670 passed, 12
+  doctests); full gates all 13 sub-gates 0, 500 cases, seed 391027579, coverage 96.77 %. Peak
+  footprint in the real-binary test 32 MB capture, 23 MB audit (was 138 MB and 357 MB), 30 runs 0
+  failed. Changes at review: the parent added the GET error-body read to CONN; the first STREAM
+  worker hit its turn limit, the parent committed its sink change and a fresh worker wrote the
+  proofs and found the per-file growth (exact read allocation, by-value transform). A worker
+  inspected the live acceptance daemon with `heap`/`vmmap` (boundary incident, run unaffected).
+  Record: [evidence 22](evidence/22-streaming/). Next: push the stack, then end the run after two
+  clean days, then a short run with the streamed binary on real data.
