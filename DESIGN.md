@@ -1514,6 +1514,7 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D44 | 2026-11-17: commit pauses are full jitter, `uniform(0, ceiling)`, ceilings 1 s, 2 s, 4 s, then 4 s; a stop does not cut a pause inside the publish part | brief 30; 7.4 |
 | D45 | 2026-11-17: streaming capture is required before the first production write (measured peak 1,254 MB against 128 MB) | brief 30, evidence 21; 7.4, 18 |
 | D46 | 2026-11-18: recompressed Codex rollouts (`CodexCompressed`) are stored as their on-disk bytes and decompressed by `memory export` (role `main`, window at most 2^27, whole frames only); operator decision | brief 37, evidence 28; 17 slice 2b |
+| D47 | 2026-11-18: a Codex `.jsonl.zst` rollout is its own source (`rollouts:<name>.jsonl.zst`) in the same owner as the plain rollout; an append source may change path on `Extend` and `Epoch` (kind and class may not); the walk yields one file per (owner, source id), the lexicographically first path, and counts the rest as `duplicate` | brief 38, evidence 29; 5, 7.2 |
 
 Finding-to-section map for the challenge review:
 

@@ -122,3 +122,10 @@ section 5 and decision log, handoff); push (secret check of the range), hosted g
 ## Ledger
 
 - 2026-11-18 23:00Z: brief written on `d123b3e`.
+- 2026-11-18 23:36Z: IDENTITY accepted locally at `213e67b` (worker 5 commits). Deviation
+  accepted: the "Recompression" and "Resume" rows' deletion of the vanished spelling does not
+  happen, because the daemon captures only files the walk yields and has never recorded a
+  deletion (the existing slice 3 gap of briefs 30 and 31); the scenarios assert the landed state
+  with both spellings live. Teeth 6 of 6. Full gates on `213e67b`: 14 sub-gates 0, seed
+  1620338970, coverage 96.55 %. Record: [evidence 29](evidence/29-rollout-identity/). Next: push,
+  hosted gates, merge.

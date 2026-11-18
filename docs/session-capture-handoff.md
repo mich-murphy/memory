@@ -138,9 +138,16 @@ from `main` alone.
      locally as `a7ffe82`: operator decision 2026-11-18 (DESIGN D46), `memory export` writes a
      recompressed Codex rollout (`.jsonl.zst`) decompressed with role `main` (window at most
      2^27, whole frames only, `export_decompress` exit 1 otherwise); capture still stores the
-     on-disk bytes. Open finding (capture, its own brief): a rollout recompressed after it was
-     captured fails every later round with `SourceChanged` and is never parked (same source id,
-     changed kind and path); this Mac had no `.jsonl.zst` on 2026-11-18.
+     on-disk bytes. Its capture finding (a recompressed rollout failing every later round with
+     `SourceChanged`) is fixed by brief 38.
+  10. Brief 38 ([38-rollout-identity.md](rust-rewrite/implementation/38-rollout-identity.md),
+     [evidence 29](rust-rewrite/implementation/evidence/29-rollout-identity/)) is accepted
+     locally as `213e67b` (DESIGN D47): archiving, recompressing and resuming a Codex rollout,
+     and two spellings present at once, are captured with no failure (on `main` before, each
+     stopped capture of that owner for good). A `.jsonl.zst` is its own source in the same owner;
+     an append source may change path; the walk keeps one file per source id and `memory check`
+     prints `duplicate=N`. Open (slice 3, existing): deleted files are never recorded as deleted,
+     so after a recompression or resume the export holds both spellings as live `main` sources.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
