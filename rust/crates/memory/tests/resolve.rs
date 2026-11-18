@@ -574,7 +574,7 @@ fn real_daemon(t: &Tmp) -> R<RealDaemon> {
     fs::write(
         &cfg,
         format!(
-            "archive_id = \"a\"\nmachine_id = \"m\"\nendpoint = \"http://127.0.0.1:9\"\nbucket = \"bucket-1\"\ntoken_path = \"{}\"\n",
+            "archive_id = \"a\"\nmachine_id = \"m\"\nendpoint = \"http://127.0.0.1:9\"\nbucket = \"bucket-1\"\nprefix = \"\"\ntoken_path = \"{}\"\n",
             token.display()
         ),
     )?;

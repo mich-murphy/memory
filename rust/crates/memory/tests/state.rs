@@ -624,6 +624,7 @@ archive_id = "arch-1"
 machine_id = "bc-01"
 endpoint = "https://s3.example.com"
 bucket = "memory-acceptance"
+prefix = "p/"
 token_path = "/tokens/r2"
 [[roots]]
 agent = "claude"
@@ -635,6 +636,22 @@ cap = 120
 
 fn with_line(extra: &str) -> String {
     format!("{VALID}\n{extra}\n")
+}
+
+fn with_prefix(line: &str) -> String {
+    VALID.replace("prefix = \"p/\"", line)
+}
+
+#[test]
+fn config_prefix_is_a_required_key() -> R {
+    assert_eq!(
+        Config::parse(&with_prefix("")),
+        Err(ConfigError::PrefixMissing)
+    );
+    assert_eq!(ConfigError::PrefixMissing.code(), "config_prefix_missing");
+    let root = Config::parse(&with_prefix("prefix = \"\"")).map_err(e)?;
+    assert_eq!(root.prefix, "");
+    Ok(())
 }
 
 fn with_top(extra: &str) -> String {
@@ -651,7 +668,7 @@ fn config_accept_reject_table() -> R {
     assert_eq!(ok.window.cap.as_secs(), 120);
     // Minimal with defaults.
     let min =
-        Config::parse("archive_id=\"a\"\nmachine_id=\"m\"\nendpoint=\"https://e.example\"\nbucket=\"abc\"\ntoken_path=\"/t\"\n")
+        Config::parse("archive_id=\"a\"\nmachine_id=\"m\"\nendpoint=\"https://e.example\"\nbucket=\"abc\"\nprefix=\"\"\ntoken_path=\"/t\"\n")
             .map_err(e)?;
     assert_eq!(
         (min.window.quiet.as_secs(), min.window.cap.as_secs()),
@@ -673,7 +690,7 @@ fn config_accept_reject_table() -> R {
         "rust-acceptance/r1/",
         &format!("{}/", "a".repeat(255)),
     ] {
-        let cfg = Config::parse(&with_top(&format!("prefix = \"{prefix}\""))).map_err(e)?;
+        let cfg = Config::parse(&with_prefix(&format!("prefix = \"{prefix}\""))).map_err(e)?;
         assert_eq!(cfg.prefix, *prefix);
     }
     let cfg = Config::parse(&with_top("region = \"us-east-1\"")).map_err(e)?;
@@ -805,7 +822,7 @@ fn config_accept_reject_table() -> R {
     ] {
         table.push((
             label,
-            with_top(&format!("prefix = \"{prefix}\"")),
+            with_prefix(&format!("prefix = \"{prefix}\"")),
             ConfigError::Prefix,
         ));
     }

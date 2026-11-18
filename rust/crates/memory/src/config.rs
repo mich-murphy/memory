@@ -63,6 +63,9 @@ pub enum ConfigError {
     /// `prefix` is not empty or a relative, `/`-terminated path of clean segments.
     #[error("config_prefix")]
     Prefix,
+    /// `prefix` is absent: it is a required key (`prefix = ""` is the bucket root).
+    #[error("config_prefix_missing")]
+    PrefixMissing,
 }
 
 impl ConfigError {
@@ -84,6 +87,7 @@ impl ConfigError {
             Self::Endpoint => "config_endpoint",
             Self::Region => "config_region",
             Self::Prefix => "config_prefix",
+            Self::PrefixMissing => "config_prefix_missing",
         }
     }
 }
@@ -136,8 +140,7 @@ struct Raw {
     endpoint: String,
     #[serde(default = "default_region")]
     region: String,
-    #[serde(default)]
-    prefix: String,
+    prefix: Option<String>,
     bucket: String,
     token_path: PathBuf,
 }
@@ -208,7 +211,7 @@ pub struct Config {
     pub endpoint: String,
     /// Signing region, `auto` by default.
     pub region: String,
-    /// Key prefix: empty, or relative and `/`-terminated.
+    /// Key prefix: a required key; empty (the bucket root), or relative and `/`-terminated.
     pub prefix: String,
     /// Bucket name.
     pub bucket: String,
@@ -259,7 +262,10 @@ impl Config {
         if raw.region.is_empty() {
             return Err(ConfigError::Region);
         }
-        if !valid_prefix(&raw.prefix) {
+        let Some(prefix) = raw.prefix else {
+            return Err(ConfigError::PrefixMissing);
+        };
+        if !valid_prefix(&prefix) {
             return Err(ConfigError::Prefix);
         }
         let RawWindow { quiet, cap } = raw.window;
@@ -282,7 +288,7 @@ impl Config {
             },
             endpoint: raw.endpoint,
             region: raw.region,
-            prefix: raw.prefix,
+            prefix,
             bucket: raw.bucket,
             token_path: raw.token_path,
         })

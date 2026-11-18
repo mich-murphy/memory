@@ -199,11 +199,14 @@ fn refusals_are_closed_codes_and_leave_no_lock() -> R {
     let rig = Rig::new("refuse", &url, "", false)?;
     let again = |rig: &Rig| -> R { start_from_config(&rig.state, &rig.cfg).map(drop).map_err(e) };
 
+    let with_line = fs::read_to_string(&rig.cfg).map_err(e)?;
+    fs::write(&rig.cfg, with_line.replace("prefix = \"\"\n", "")).map_err(e)?;
     assert_eq!(
         code_of(start_from_config(&rig.state, &rig.cfg))?,
-        ("config_prefix_required".to_owned(), 2)
+        ("config_prefix_missing".to_owned(), 2)
     );
     rig.write_config(&url, PREFIX)?;
+    again(&rig)?; // the lock was released by the refusal
 
     rig.write_token(&good_token(), 0o640)?;
     assert_eq!(
@@ -218,5 +221,81 @@ fn refusals_are_closed_codes_and_leave_no_lock() -> R {
     rig.write_token(&good_token(), 0o600)?;
     again(&rig)?;
     assert!(server.requests().is_empty(), "no network call");
+    Ok(())
+}
+
+#[test]
+fn an_empty_prefix_writes_only_at_the_bucket_root_and_restore_and_owners_find_it() -> R {
+    use super::consumer_gate::run;
+    let server = Fake::start()?;
+    let rig = Rig::new("rootprefix", &server.url(), "", false)?;
+    let file = rig.root.join(SESSION);
+    fs::create_dir_all(file.parent().ok_or("parent")?).map_err(e)?;
+    fs::write(&file, lines(0..12)).map_err(e)?;
+    let mut daemon = start_from_config(&rig.state, &rig.cfg).map_err(e)?;
+    let report = daemon.reconcile_once().map_err(e)?;
+    assert_eq!((report.landed, report.failed, report.parked), (1, 0, 0));
+    daemon.shutdown().map_err(e)?;
+
+    let seen = server.requests();
+    assert!(seen.iter().any(|r| r.method == "PUT"));
+    let families = ["sessions/", "objects/", "manifests/"].map(|f| format!("/{BUCKET}/{f}"));
+    for r in &seen {
+        assert!(
+            families.iter().any(|f| r.path.starts_with(f.as_str())),
+            "key outside the root families: {}",
+            r.path
+        );
+    }
+    for family in &families {
+        assert!(
+            seen.iter()
+                .any(|r| r.method == "PUT" && r.path.starts_with(family.as_str())),
+            "no PUT under {family}"
+        );
+    }
+
+    let config = Config::load(&rig.cfg).map_err(e)?;
+    let owner = WalkSources::new(
+        locator_roots(&config).map_err(e)?,
+        WalkLimits::default(),
+        SharedFs::new(),
+    )
+    .enumerate()
+    .first()
+    .ok_or("no source")?
+    .0
+    .clone();
+    let text = memory_core::limits::owner_prefix(&owner);
+
+    let listed = run(&rig.dir, &["owners".as_ref()])?;
+    assert_eq!(
+        listed.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&listed.stdout), format!("{text}\n"));
+
+    let out = rig.dir.join("out");
+    let restored = run(
+        &rig.dir,
+        &[
+            "restore".as_ref(),
+            text.as_ref(),
+            "--out".as_ref(),
+            out.as_os_str(),
+        ],
+    )?;
+    assert_eq!(
+        restored.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&restored.stderr)
+    );
+    assert_eq!(
+        fs::read(out.join(SESSION)).map_err(e)?,
+        fs::read(&file).map_err(e)?
+    );
     Ok(())
 }

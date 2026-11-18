@@ -241,10 +241,20 @@ fn owners_an_argument_is_usage_64() -> R {
 }
 
 #[test]
-fn owners_empty_config_prefix_is_exit_2() -> R {
+fn owners_with_an_empty_prefix_lists_sessions_at_the_bucket_root() -> R {
     let server = Fake::start()?;
-    let rig = Rig::new("own-noprefix", &server.url(), "", false)?;
-    failing(&server, &rig, "config_prefix_required", 2)?;
-    assert!(server.requests().is_empty(), "no network call");
+    let rig = Rig::new("own-root", &server.url(), "", false)?;
+    server.seed(
+        &format!("/{BUCKET}/sessions/a/m/claude/s1/current.json"),
+        b"{}",
+    );
+    server.seed(
+        &format!("/{BUCKET}/other/sessions/a/m/claude/s2/current.json"),
+        b"{}",
+    );
+    let out = owners_cmd(&rig, &[])?;
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(text(&out.stdout), "sessions/a/m/claude/s1\n");
+    assert_eq!(text(&out.stderr), "memory: owners=1\n");
     Ok(())
 }

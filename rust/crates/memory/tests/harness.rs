@@ -19,6 +19,16 @@ struct Setup {
 
 impl Setup {
     fn new(name: &str, prefix: &str, with_config: bool) -> std::io::Result<Self> {
+        Self::build(name, Some(prefix), with_config)
+    }
+
+    /// A config with no `prefix` line.
+    fn without_prefix(name: &str) -> std::io::Result<Self> {
+        Self::build(name, None, true)
+    }
+
+    fn build(name: &str, prefix: Option<&str>, with_config: bool) -> std::io::Result<Self> {
+        let prefix_line = prefix.map_or_else(String::new, |p| format!("prefix = \"{p}\"\n"));
         let base =
             std::env::temp_dir().join(format!("memory-harness-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -33,7 +43,7 @@ impl Setup {
             std::fs::write(
                 root.join("config.toml"),
                 format!(
-                    "archive_id = \"a\"\nmachine_id = \"m\"\nendpoint = \"http://127.0.0.1:9\"\nbucket = \"bucket-1\"\nprefix = \"{prefix}\"\ntoken_path = \"{}\"\n",
+                    "archive_id = \"a\"\nmachine_id = \"m\"\nendpoint = \"http://127.0.0.1:9\"\nbucket = \"bucket-1\"\n{prefix_line}token_path = \"{}\"\n",
                     token.display()
                 ),
             )?;
@@ -214,12 +224,24 @@ fn a_second_daemon_on_the_same_root_exits_75_and_the_first_is_unaffected() -> st
 }
 
 #[test]
-fn an_empty_prefix_is_refused_with_exit_2() -> std::io::Result<()> {
-    let setup = Setup::new("prefix", "", true)?;
-    let done = setup.spawn(&["daemon"], None)?.finish(BOUND)?;
-    assert_eq!(done.code, Some(2));
-    assert_eq!(done.stderr, "memory: config_prefix_required\n");
-    assert!(done.stdout.is_empty());
+fn a_missing_prefix_is_refused_with_exit_2_by_every_command() -> std::io::Result<()> {
+    let setup = Setup::without_prefix("prefix")?;
+    let out = setup.base.join("out");
+    let out = out.to_string_lossy().into_owned();
+    let owner = "sessions/a/m/claude/s1";
+    let commands: [&[&str]; 5] = [
+        &["daemon"],
+        &["check"],
+        &["export", owner, "--out", &out],
+        &["restore", owner, "--out", &out],
+        &["owners"],
+    ];
+    for args in commands {
+        let done = setup.spawn(args, None)?.finish(BOUND)?;
+        assert_eq!(done.code, Some(2), "{args:?}");
+        assert_eq!(done.stderr, "memory: config_prefix_missing\n", "{args:?}");
+        assert!(done.stdout.is_empty(), "{args:?}");
+    }
     Ok(())
 }
 
@@ -289,7 +311,7 @@ fn a_closed_stderr_does_not_stop_the_daemon() -> std::io::Result<()> {
 
 #[test]
 fn a_refusal_with_a_closed_stderr_still_exits_2() -> std::io::Result<()> {
-    let setup = Setup::new("prefixclosed", "", true)?;
+    let setup = Setup::without_prefix("prefixclosed")?;
     let done = setup
         .spawn_stderr_closed(&["daemon"], None)?
         .finish(BOUND)?;
