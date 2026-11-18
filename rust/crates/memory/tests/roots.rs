@@ -13,7 +13,7 @@ fn e<E: Debug>(error: E) -> String {
 
 fn config(roots: &[(&str, &str)]) -> Result<Config, String> {
     let mut text = String::from(
-        "archive_id = \"a\"\nmachine_id = \"m\"\nendpoint = \"https://s3.example.com\"\nbucket = \"bucket-1\"\ntoken_path = \"/t\"\n",
+        "archive_id = \"a\"\nmachine_id = \"m\"\nendpoint = \"https://s3.example.com\"\nbucket = \"bucket-1\"\nprefix = \"\"\ntoken_path = \"/t\"\n",
     );
     for (agent, path) in roots {
         text.push_str(&format!(

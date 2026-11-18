@@ -27,8 +27,6 @@ pub type ProductionDaemon = Daemon<SharedFs, S3Store, SystemClock, WalkSources>;
 pub enum AssembleError {
     /// Lock, state, config or config-token metadata refusal.
     Start(StartError),
-    /// `prefix` is empty.
-    PrefixRequired,
     /// The configured roots are unusable.
     Roots(RootsError),
     /// The token file was refused.
@@ -45,7 +43,6 @@ impl AssembleError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Start(error) => error.code(),
-            Self::PrefixRequired => "config_prefix_required",
             Self::Roots(error) => error.code(),
             Self::Token(error) => error.code(),
             Self::Store(_) => "config_store",
@@ -87,8 +84,8 @@ fn collector(paths: [&Path; 3]) -> (Vec<String>, Vec<u128>) {
 
 /// Build the S3 store from the config and the token file: the one place both the daemon and
 /// `memory restore` construct it. The token is read here, after the config's own checks.
-/// No network call is made and the prefix is not judged (the daemon refuses an empty one
-/// itself; reading a bucket is not a production write).
+/// No network call is made and the prefix is not judged (the config already checked it; an
+/// empty one is the bucket root).
 ///
 /// # Errors
 /// [`AssembleError::Token`] or [`AssembleError::Store`].
@@ -127,11 +124,6 @@ fn build(
     config_path: &Path,
     config: &Config,
 ) -> Result<Parts<SharedFs, S3Store, SystemClock, WalkSources>, AssembleError> {
-    // No production write until the A13.2 prerequisites (tracing, hint retention, the audit)
-    // exist: an empty prefix is the production bucket root, so only a prefixed run may start.
-    if config.prefix.is_empty() {
-        return Err(AssembleError::PrefixRequired);
-    }
     let roots = locator_roots(config).map_err(AssembleError::Roots)?;
     let store = build_store(config)?;
     let fs = SharedFs::new();
@@ -192,9 +184,7 @@ pub fn start_wired(root: &Path, config_path: &Path) -> Result<Wired, AssembleErr
 /// Start a daemon from `root` (the state root) and `config_path` alone.
 ///
 /// The config is read once. The lock is taken first; the token file is read only after it, and
-/// no network call is made here. An empty `prefix` is refused with
-/// [`AssembleError::PrefixRequired`] (exit [`EXIT_CONFIG`]) so that no production write can
-/// happen before the A13.2 prerequisites exist.
+/// no network call is made here. An empty `prefix` is the bucket root and is accepted.
 ///
 /// # Errors
 /// An [`AssembleError`]; the lock is released on every refusal.

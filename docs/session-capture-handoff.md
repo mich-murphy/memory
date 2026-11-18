@@ -111,9 +111,15 @@ from `main` alone.
      as `1adecef`: `memory check` streams prefix-stable sources (verdict equal to the whole path
      by a property), and `S3Store::get` and `decode_piece` allocate exactly; a check of one
      100 MB source peaks at 43 MB (was 249 MB). The 2,000-case property run passed on `b3a08d2`.
-     If its stack is not yet merged, push and merge it first. After the run ends: a short run with the streamed binary on real data that
-     measures the peak and exports and imports every captured owner; then lifting the
-     empty-prefix refusal and cutover (DESIGN 18). Open: recompressed Codex rollouts reach the
+     Merged as `1cca558` (stack #160); hosted gates passed the peak test on Linux and macOS.
+  7. Brief 35 ([35-prefix-guard.md](rust-rewrite/implementation/35-prefix-guard.md),
+     [evidence 26](rust-rewrite/implementation/evidence/26-prefix-guard/)) is accepted locally
+     as `616132b`: the empty-prefix refusal is lifted (every DESIGN 18 prerequisite is on
+     `main`), and `prefix` is a required config key (`config_prefix_missing`, exit 2), so only
+     an explicit `prefix = ""` selects the bucket root. If its stack is not yet merged, push and
+     merge it first. After the run ends: a short run with the current binary on real data that
+     measures the peak and exports and imports every captured owner; then cutover (DESIGN 18),
+     which still needs an install path (plist, hooks, Pi extension) for this Mac. Open: recompressed Codex rollouts reach the
      importer unparsed (Go decompressed them; this Mac had none on 2026-11-18).
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
@@ -125,8 +131,9 @@ from `main` alone.
 - What had not happened before brief 30 (the run above changed the first four): no acceptance
   run on real session data, no R2 write since the
   skeleton run of 2026-11-12, no installed Rust hook or service, no host change, no cutover.
-  The daemon refuses an empty key prefix (`config_prefix_required`), so it cannot write to
-  the production root of the bucket. The Go hooks still fill the local Go spool (A0).
+  The daemon refused an empty key prefix (`config_prefix_required`), so it could not write to
+  the production root of the bucket (lifted by brief 35, 2026-11-18). The Go hooks still fill
+  the local Go spool (A0).
 - Operator decisions on 2026-11-17, in reply to the report that closed brief 29:
   1. The 2-day acceptance run (the exit criterion of DESIGN 17 slice 2b; A13.1, A14.2) on
      this Mac's real session directories is approved, writing only under

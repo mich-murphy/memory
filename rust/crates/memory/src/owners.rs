@@ -107,9 +107,6 @@ pub fn main_entry(mut args: impl Iterator<Item = OsString>) -> ExitCode {
         Ok(config) => config,
         Err(error) => return fail(error.code(), EXIT_CONFIG),
     };
-    if config.prefix.is_empty() {
-        return fail("config_prefix_required", EXIT_CONFIG);
-    }
     let mut store = match build_store(&config) {
         Ok(store) => store,
         Err(error) => return fail(error.code(), error.exit_code()),
