@@ -15,21 +15,22 @@
 //! parked item with the owner prefix, the source kind and a reason code. Never a path, a source
 //! id, file content or a credential.
 use crate::assemble::{build_store, policy_context};
-use crate::capture::{Source, SourceOutcome, publishable};
+use crate::capture::{MAX_PIECE_BYTES, Source, SourceOutcome, publishable, publishable_owned};
 use crate::config::Config;
 use crate::daemon::{EXIT_CONFIG, ParkedReason, Sources, StatusBody};
-use crate::environment::{FileSystem, Store, StoreError};
+use crate::environment::{FileSystem, Stat, Store, StoreError};
 use crate::realfs::WalkLimits;
 use crate::resolve::{SharedFs, WalkSources};
 use crate::roots::locator_roots;
 use crate::s3::S3Store;
 use crate::state::{Loaded, MissingReason, StateFile, default_root, read_durable};
-use memory_core::domain::{Owner, SourceId};
+use memory_core::domain::{Owner, Sha256, SourceId};
 use memory_core::limits::owner_prefix;
-use memory_core::manifest::OwnerState;
-use memory_core::privacy::{Admission, PolicyContext, UnknownReason, admit};
-use memory_reader::{OwnerError, RestoreError, read_owner, restore_source};
+use memory_core::manifest::{EpochRecord, OwnerState, SourceEntry};
+use memory_core::privacy::{Admission, AdmittedSource, PolicyContext, UnknownReason, admit};
+use memory_reader::{OwnerError, RestoreError, decode_piece, read_owner, restore_source};
 use serde::Serialize;
+use sha2::Digest as _;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::Path;
@@ -178,13 +179,22 @@ pub struct Refusal {
     pub exit: u8,
 }
 
-enum Verdict {
+/// What `memory check` concludes for one local source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Verdict {
+    /// Equal to the stored latest epoch.
     Match,
+    /// The stored epoch is a strict prefix of the local bytes.
     Behind,
+    /// The file moved during the read, or cannot be compared yet.
     Unsettled,
+    /// The stored state differs (`bytes`) or cannot be restored (`restore`).
     Mismatch(&'static str),
+    /// No live stored entry.
     Uncaptured,
+    /// Policy withholds the source, with the reason code.
     Withheld(String),
+    /// Fetching a stored object failed for a reason other than absence.
     StoreFailed,
 }
 
@@ -232,32 +242,56 @@ pub fn read_settled<F: FileSystem>(fs: &mut F, handle: u64) -> Option<Vec<u8>> {
     (before == after && u64::try_from(raw.len()) == Ok(before.size)).then_some(raw)
 }
 
-fn judge(
-    fs: &mut SharedFs,
-    store: &mut S3Store,
+/// Admission: the verdict that ends the judgement, or the admitted source.
+fn admit_source(context: &PolicyContext, source: &Source) -> Result<AdmittedSource, Verdict> {
+    match admit(context, source.facts.clone()) {
+        Admission::Allow(admitted) => Ok(admitted),
+        Admission::Deny(reason) => Err(Verdict::Withheld(reason.to_string())),
+        Admission::Unknown(reason) => Err(Verdict::Withheld(unknown_code(reason).to_owned())),
+    }
+}
+
+/// The live stored entry of `source`, if any.
+fn live_entry<'a>(state: Option<&'a OwnerState>, source: &Source) -> Option<&'a SourceEntry> {
+    state
+        .and_then(|state| state.sources.get(&source.id))
+        .filter(|entry| entry.deleted_at.is_none())
+}
+
+/// The whole-buffer judgement: the local file and the restored epoch are each held whole.
+/// Used for sources that are not prefix-stable, and as the oracle of the streamed path.
+pub fn judge_whole<F: FileSystem>(
+    fs: &mut F,
+    fetch: impl FnMut(&str) -> Result<Vec<u8>, StoreError>,
     context: &PolicyContext,
     state: Option<&OwnerState>,
     source: &Source,
 ) -> Verdict {
-    let admitted = match admit(context, source.facts.clone()) {
-        Admission::Allow(admitted) => admitted,
-        Admission::Deny(reason) => return Verdict::Withheld(reason.to_string()),
-        Admission::Unknown(reason) => return Verdict::Withheld(unknown_code(reason).to_owned()),
-    };
+    match admit_source(context, source) {
+        Ok(admitted) => whole_admitted(fs, fetch, &admitted, context, state, source),
+        Err(verdict) => verdict,
+    }
+}
+
+fn whole_admitted<F: FileSystem>(
+    fs: &mut F,
+    fetch: impl FnMut(&str) -> Result<Vec<u8>, StoreError>,
+    admitted: &AdmittedSource,
+    context: &PolicyContext,
+    state: Option<&OwnerState>,
+    source: &Source,
+) -> Verdict {
     let Some(raw) = read_settled(fs, source.handle) else {
         return Verdict::Unsettled;
     };
-    let body = match publishable(&admitted, &raw, context) {
+    let body = match publishable(admitted, &raw, context) {
         Ok(body) => body,
         Err(outcome) => return Verdict::Withheld(outcome_code(&outcome)),
     };
-    let Some(entry) = state
-        .and_then(|state| state.sources.get(&source.id))
-        .filter(|entry| entry.deleted_at.is_none())
-    else {
+    let Some(entry) = live_entry(state, source) else {
         return Verdict::Uncaptured;
     };
-    match restore_source(entry, |key| store.get(key).map(|stored| stored.body)) {
+    match restore_source(entry, fetch) {
         Ok(restored) => match compare(&restored, body.bytes(), admitted.prefix_stable()) {
             Compared::Match => Verdict::Match,
             Compared::Behind => Verdict::Behind,
@@ -268,6 +302,202 @@ fn judge(
         Err(RestoreError::Fetch(_)) => Verdict::StoreFailed,
         Err(_) => Verdict::Mismatch("restore"),
     }
+}
+
+/// Judge one source: streamed when it is prefix-stable (`chunk` bytes of the local file at a
+/// time), whole otherwise. The streamed verdict equals [`judge_whole`]'s for every input: it
+/// drains both sides (the local file to its stat size, every stored piece) before it decides.
+pub fn judge_with<F: FileSystem>(
+    fs: &mut F,
+    fetch: impl FnMut(&str) -> Result<Vec<u8>, StoreError>,
+    chunk: usize,
+    context: &PolicyContext,
+    state: Option<&OwnerState>,
+    source: &Source,
+) -> Verdict {
+    match admit_source(context, source) {
+        Ok(admitted) if admitted.prefix_stable() => {
+            let mut local = Local::new(fs, &admitted, context, source);
+            streamed(&mut local, fetch, chunk.max(1), live_entry(state, source))
+        }
+        Ok(admitted) => whole_admitted(fs, fetch, &admitted, context, state, source),
+        Err(verdict) => verdict,
+    }
+}
+
+/// The local side of a streamed judgement: reads `[at, size)` one chunk at a time.
+struct Local<'a, F> {
+    fs: &'a mut F,
+    handle: u64,
+    admitted: &'a AdmittedSource,
+    context: &'a PolicyContext,
+    /// Outcome of authorizing the empty buffer; for a prefix-stable source it is every chunk's.
+    empty: Result<(), String>,
+    at: u64,
+    size: u64,
+}
+
+impl<'a, F: FileSystem> Local<'a, F> {
+    fn new(
+        fs: &'a mut F,
+        admitted: &'a AdmittedSource,
+        context: &'a PolicyContext,
+        source: &Source,
+    ) -> Self {
+        let empty = publishable(admitted, &[], context)
+            .map(|_| ())
+            .map_err(|outcome| outcome_code(&outcome));
+        Self {
+            fs,
+            handle: source.handle,
+            admitted,
+            context,
+            empty,
+            at: 0,
+            size: 0,
+        }
+    }
+
+    fn left(&self) -> usize {
+        usize::try_from(self.size.saturating_sub(self.at)).unwrap_or(usize::MAX)
+    }
+
+    /// Read and authorize the next chunk of at most `max` bytes. `None`: the seam failed, the
+    /// read came up short, or the chunk's outcome differs from the empty buffer's. When the
+    /// empty buffer is withheld the chunk's bytes are not needed and the result is empty.
+    fn next(&mut self, max: usize) -> Option<Vec<u8>> {
+        let take = max.min(self.left());
+        let end = self.at.checked_add(u64::try_from(take).ok()?)?;
+        let raw = self.fs.read(self.handle, self.at..end).ok()?;
+        if raw.len() != take {
+            return None;
+        }
+        let bytes = match publishable_owned(self.admitted, raw, self.context) {
+            Ok(body) => {
+                self.empty.as_ref().ok()?;
+                (body.bytes().len() == take).then(|| body.bytes().to_vec())?
+            }
+            Err(outcome) => {
+                (self.empty.as_ref().err() == Some(&outcome_code(&outcome))).then(Vec::new)?
+            }
+        };
+        self.at = end;
+        Some(bytes)
+    }
+}
+
+/// Compare the stored stream with the local file piece by piece. `None`: the local side is
+/// unsettled. Otherwise the verdict the comparison alone gives; the caller still drains the
+/// local file before it is final.
+fn walk_stored<F: FileSystem>(
+    local: &mut Local<'_, F>,
+    mut fetch: impl FnMut(&str) -> Result<Vec<u8>, StoreError>,
+    chunk: usize,
+    record: &EpochRecord,
+) -> Option<Verdict> {
+    let mut hasher = sha2::Sha256::new();
+    let mut restored: u64 = 0;
+    let mut differs = false;
+    for piece in &record.pieces {
+        if restored != piece.offset().get() {
+            return Some(Verdict::Mismatch("restore"));
+        }
+        let stored = match fetch(piece.object()) {
+            Ok(stored) => stored,
+            Err(StoreError::NotFound) => return Some(Verdict::Mismatch("restore")),
+            Err(_) => return Some(Verdict::StoreFailed),
+        };
+        let Ok(decoded) = decode_piece(piece, &stored) else {
+            return Some(Verdict::Mismatch("restore"));
+        };
+        drop(stored);
+        hasher.update(&decoded);
+        restored = restored.saturating_add(u64::try_from(decoded.len()).ok()?);
+        let mut off = 0_usize;
+        while off < decoded.len() && !differs {
+            if local.left() == 0 {
+                differs = true;
+                break;
+            }
+            let take = chunk.min(decoded.len() - off).min(local.left());
+            let got = local.next(take)?;
+            let end = off.checked_add(take)?;
+            differs = decoded.get(off..end) != Some(got.as_slice());
+            off = end;
+        }
+    }
+    if restored != record.size || Sha256::from_bytes(hasher.finalize().into()) != record.sha256 {
+        return Some(Verdict::Mismatch("restore"));
+    }
+    Some(if differs {
+        Verdict::Mismatch("bytes")
+    } else if restored == local.size {
+        Verdict::Match
+    } else {
+        Verdict::Behind
+    })
+}
+
+fn streamed<F: FileSystem>(
+    local: &mut Local<'_, F>,
+    fetch: impl FnMut(&str) -> Result<Vec<u8>, StoreError>,
+    chunk: usize,
+    entry: Option<&SourceEntry>,
+) -> Verdict {
+    let Some(before) = local.fs.stat(local.handle).ok().flatten() else {
+        return Verdict::Unsettled;
+    };
+    local.size = before.size;
+    let prospective = if let Err(code) = &local.empty {
+        Verdict::Withheld(code.clone())
+    } else if let Some(entry) = entry {
+        let Some(record) = entry.epochs.last() else {
+            return drained(local, chunk, &before, Verdict::Mismatch("restore"));
+        };
+        match walk_stored(local, fetch, chunk, record) {
+            Some(verdict) => verdict,
+            None => return Verdict::Unsettled,
+        }
+    } else {
+        Verdict::Uncaptured
+    };
+    drained(local, chunk, &before, prospective)
+}
+
+/// Read the rest of the local file, then stat again: `verdict` stands only when the file held
+/// still.
+fn drained<F: FileSystem>(
+    local: &mut Local<'_, F>,
+    chunk: usize,
+    before: &Stat,
+    verdict: Verdict,
+) -> Verdict {
+    while local.left() > 0 {
+        if local.next(chunk).is_none() {
+            return Verdict::Unsettled;
+        }
+    }
+    match local.fs.stat(local.handle) {
+        Ok(Some(after)) if after == *before => verdict,
+        _ => Verdict::Unsettled,
+    }
+}
+
+fn judge(
+    fs: &mut SharedFs,
+    store: &mut S3Store,
+    context: &PolicyContext,
+    state: Option<&OwnerState>,
+    source: &Source,
+) -> Verdict {
+    judge_with(
+        fs,
+        |key| store.get(key).map(|stored| stored.body),
+        MAX_PIECE_BYTES,
+        context,
+        state,
+        source,
+    )
 }
 
 fn read_status(root: &Path) -> (Option<StatusBody>, &'static str) {

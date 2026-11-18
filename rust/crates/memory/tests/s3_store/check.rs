@@ -424,3 +424,105 @@ fn an_appended_debug_log_is_behind() -> R {
     assert!(ran.has("mismatch", 0) && ran.has("behind", 1) && ran.has("unsettled", 0));
     Ok(())
 }
+
+/// `bytes` of incompressible content, written one MiB at a time.
+fn fill_random(path: &Path, bytes: u64) -> R {
+    let mut out = fs::File::create(path).map_err(e)?;
+    let mut x = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut written = 0_u64;
+    while written < bytes {
+        let mut chunk = Vec::with_capacity(1 << 20);
+        while chunk.len() < 1 << 20 {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            chunk.extend_from_slice(&x.to_le_bytes());
+        }
+        let take = usize::try_from((bytes - written).min(chunk.len() as u64)).map_err(e)?;
+        out.write_all(chunk.get(..take).ok_or("take")?).map_err(e)?;
+        written += take as u64;
+    }
+    Ok(())
+}
+
+/// Run `memory check` to completion and return its output and peak memory in bytes: macOS under
+/// `/usr/bin/time -l` (`peak memory footprint`), elsewhere the last `VmHWM` read before exit.
+fn check_peak(s: &Setup) -> R<(Ran, u64)> {
+    use std::process::Stdio;
+    let bin = env!("CARGO_BIN_EXE_memory");
+    let mut cmd = if cfg!(target_os = "macos") {
+        let mut c = Command::new("/usr/bin/time");
+        c.arg("-l").arg(bin);
+        c
+    } else {
+        Command::new(bin)
+    };
+    cmd.arg("check")
+        .env_clear()
+        .env("MEMORY_STATE_DIR", &s.rig.state)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().map_err(e)?;
+    let pid = child.id();
+    let mut out = child.stdout.take().ok_or("stdout")?;
+    let mut err = child.stderr.take().ok_or("stderr")?;
+    let t_out = std::thread::spawn(move || {
+        let mut v = Vec::new();
+        let _ = std::io::Read::read_to_end(&mut out, &mut v);
+        v
+    });
+    let t_err = std::thread::spawn(move || {
+        let mut v = Vec::new();
+        let _ = std::io::Read::read_to_end(&mut err, &mut v);
+        v
+    });
+    let mut hwm = None;
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(e)? {
+            break status;
+        }
+        if !cfg!(target_os = "macos")
+            && let Ok(text) = fs::read_to_string(format!("/proc/{pid}/status"))
+            && let Some(kb) = text
+                .lines()
+                .find_map(|l| l.strip_prefix("VmHWM:"))
+                .and_then(|v| v.split_whitespace().next()?.parse::<u64>().ok())
+        {
+            hwm = Some(kb * 1024);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    let out = String::from_utf8_lossy(&t_out.join().map_err(|_| "join")?).into_owned();
+    let err = String::from_utf8_lossy(&t_err.join().map_err(|_| "join")?).into_owned();
+    let peak = hwm
+        .or_else(|| {
+            err.lines()
+                .find(|l| l.contains("peak memory footprint"))?
+                .split_whitespace()
+                .next()?
+                .parse()
+                .ok()
+        })
+        .ok_or("no peak memory reading")?;
+    let ran = Ran {
+        code: status.code().ok_or("signal")?,
+        out,
+        err,
+    };
+    Ok((ran, peak))
+}
+
+#[test]
+fn checking_one_100_mb_incompressible_source_stays_under_128_mb() -> R {
+    const LIMIT: u64 = 128_000_000;
+    let s = setup("check-peak")?;
+    fill_random(&s.file, 100 << 20)?;
+    capture(&s)?;
+    let (ran, peak) = check_peak(&s)?;
+    eprintln!("PEAK check={peak}");
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    assert!(ran.has("match", 1) && ran.has("mismatch", 0), "{}", ran.out);
+    assert!(peak < LIMIT, "check peak {peak}");
+    Ok(())
+}
