@@ -87,6 +87,11 @@ func updateExisting(hooks *jsonx.Object, command string, selected map[string]eve
 		if !ok {
 			return errors.New("native hook event must be an array")
 		}
+		if len(groups) == 0 {
+			// An empty event list holds none of our handlers. Deleting it would rewrite a key
+			// this installer does not own (fuzz input {"hooks":{"":[]}}, CI run 44237035954).
+			continue
+		}
 		groups, err := editGroups(groups, name, command, selected)
 		if err != nil {
 			return err

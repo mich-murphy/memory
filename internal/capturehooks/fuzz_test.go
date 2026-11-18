@@ -60,14 +60,36 @@ func FuzzEditJSON(f *testing.F) {
 		if err != nil {
 			t.Fatalf("remove: %v", err)
 		}
+		// UseNumber keeps numbers exact: a number beyond float64 is valid JSON that editJSON
+		// preserves, and plain Unmarshal would refuse it (fuzz input 911dd7510ae4f76a).
+		decode := func(b []byte, v *any) error {
+			d := json.NewDecoder(bytes.NewReader(b))
+			d.UseNumber()
+			return d.Decode(v)
+		}
 		var x, y any
-		if json.Unmarshal(before, &x) != nil || json.Unmarshal(rm, &y) != nil {
+		if decode(before, &x) != nil || decode(rm, &y) != nil {
 			t.Fatal("unmarshal")
 		}
 		norm := func(v any) {
 			if m, ok := v.(map[string]any); ok {
 				if h, ok := m["hooks"].(map[string]any); ok && len(h) == 0 {
 					delete(m, "hooks")
+				}
+			}
+		}
+		// edit installs into an empty list of one of its own events exactly as into an absent
+		// one, so remove cannot restore that difference; only the input is normalized for it.
+		ours := map[string]bool{}
+		for _, e := range events(agent) {
+			ours[e.name] = true
+		}
+		if m, ok := x.(map[string]any); ok {
+			if h, ok := m["hooks"].(map[string]any); ok {
+				for name, groups := range h {
+					if g, ok := groups.([]any); ok && len(g) == 0 && ours[name] {
+						delete(h, name)
+					}
 				}
 			}
 		}
