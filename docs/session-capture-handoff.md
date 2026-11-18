@@ -116,10 +116,17 @@ from `main` alone.
      [evidence 26](rust-rewrite/implementation/evidence/26-prefix-guard/)) is accepted locally
      as `616132b`: the empty-prefix refusal is lifted (every DESIGN 18 prerequisite is on
      `main`), and `prefix` is a required config key (`config_prefix_missing`, exit 2), so only
-     an explicit `prefix = ""` selects the bucket root. If its stack is not yet merged, push and
-     merge it first. After the run ends: a short run with the current binary on real data that
-     measures the peak and exports and imports every captured owner; then cutover (DESIGN 18),
-     which still needs an install path (plist, hooks, Pi extension) for this Mac. Open: recompressed Codex rollouts reach the
+     an explicit `prefix = ""` selects the bucket root. Merged as `ae26e3e` (stack #165).
+  8. Brief 36 ([36-install.md](rust-rewrite/implementation/36-install.md),
+     [evidence 27](rust-rewrite/implementation/evidence/27-install/)) is accepted locally as
+     `f3b3deb`: `memory install [--dry-run]` writes the launchd agent `memory`, the Claude and
+     Codex hook entries and the Pi extension for the binary as invoked (named `memory`), and
+     `memory uninstall` removes exactly those; Go entries are left alone. On copies of this
+     Mac's settings, uninstall gave back both files byte for byte. If its stack is not yet
+     merged, push and merge it first. After the run ends: a short run with the current binary
+     on real data that measures the peak and exports and imports every captured owner; then
+     cutover (DESIGN 18): `memory install` with `prefix = ""`, the Go uninstall commands, and a
+     person approving the hooks in Codex `/hooks`. Open: recompressed Codex rollouts reach the
      importer unparsed (Go decompressed them; this Mac had none on 2026-11-18).
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
