@@ -991,6 +991,9 @@ fn codex_head(stream: &[u8], split: usize, objects: &mut Objects) -> R<OwnerHead
         0,
     )
 }
+fn pj(v: &Value, p: &str) -> Value {
+    v.pointer(p).cloned().unwrap_or(Value::Null)
+}
 fn src(m: &Value, i: usize) -> R<&Value> {
     m.pointer(&format!("/manifest/sources/{i}"))
         .ok_or_else(|| format!("source {i}"))
@@ -1022,8 +1025,8 @@ fn a_multi_piece_compressed_epoch_exports_the_decompressed_jsonl_as_main() -> R 
     let z = src(&m, 1)?;
     assert_eq!(s(&z["role"])?, "main");
     assert_eq!(s(&z["path"])?, "sessions/rollout-z.jsonl.zst");
-    assert_eq!(s(&z["object"]["sha256"])?, hex(&text));
-    assert_eq!(z["object"]["size"], text.len());
+    assert_eq!(s(&pj(z, "/object/sha256"))?, hex(&text));
+    assert_eq!(pj(z, "/object/size"), text.len());
     let record = h
         .folded
         .state
@@ -1038,14 +1041,14 @@ fn a_multi_piece_compressed_epoch_exports_the_decompressed_jsonl_as_main() -> R 
         sum += p.encoded_len();
         commit.push_str(&String::from(p.encoded_sha256()));
     }
-    assert_eq!(z["object"]["encoded_size"], sum);
-    assert_eq!(s(&z["object"]["encoded_sha256"])?, hex(commit.as_bytes()));
+    assert_eq!(pj(z, "/object/encoded_size"), sum);
+    assert_eq!(s(&pj(z, "/object/encoded_sha256"))?, hex(commit.as_bytes()));
     let first = record.pieces.first().ok_or("piece")?;
-    assert_eq!(s(&z["object"]["key"])?, first.object());
-    assert_eq!(s(&z["object"]["encoding"])?, "zstd");
+    assert_eq!(s(&pj(z, "/object/key"))?, first.object());
+    assert_eq!(s(&pj(z, "/object/encoding"))?, "zstd");
     let body = m.pointer("/bodies/1").ok_or("body")?;
-    assert_eq!(s(&body["sha256"])?, hex(&text));
-    assert_eq!(body["size"], text.len());
+    assert_eq!(s(&pj(body, "/sha256"))?, hex(&text));
+    assert_eq!(pj(body, "/size"), text.len());
     // The plain source is what a plain-only export gives.
     let plain_only = head(
         vec![(
@@ -1142,8 +1145,8 @@ fn an_empty_compressed_epoch_exports_an_empty_body() -> R {
         Vec::<u8>::new()
     );
     let m = meta(&out)?;
-    assert_eq!(src(&m, 1)?["object"]["size"], 0);
-    assert_eq!(s(&src(&m, 1)?["object"]["sha256"])?, hex(b""));
+    assert_eq!(pj(src(&m, 1)?, "/object/size"), 0);
+    assert_eq!(s(&pj(src(&m, 1)?, "/object/sha256"))?, hex(b""));
     let _ = fs::remove_dir_all(&base);
     Ok(())
 }
