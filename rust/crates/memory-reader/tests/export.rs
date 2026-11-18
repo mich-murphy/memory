@@ -1178,3 +1178,76 @@ fn a_corrupt_stored_piece_of_a_compressed_epoch_is_still_corrupt() -> R {
     let _ = fs::remove_dir_all(&base);
     Ok(())
 }
+
+/// The compressed epoch (index 1) of `h`.
+fn codex_record(h: &OwnerHead) -> R<&EpochRecord> {
+    h.folded
+        .state
+        .sources
+        .values()
+        .nth(1)
+        .and_then(|e| e.epochs.first())
+        .ok_or_else(|| "record".to_owned())
+}
+
+#[test]
+fn a_stored_piece_that_decodes_but_differs_from_its_descriptor_is_corrupt() -> R {
+    // The piece is replaced by another valid encoding (two frames) of the same bytes: the
+    // decoded stream is unchanged, so only the stored-digest check refuses it.
+    let stream = frames(&[&jsonl(50)])?;
+    let mut objects = Objects::new();
+    let h = codex_head(&stream, 64, &mut objects)?;
+    let key = codex_record(&h)?
+        .pieces
+        .first()
+        .ok_or("piece")?
+        .object()
+        .to_owned();
+    let old = objects.get(&key).ok_or("object")?.clone();
+    let raw = zstd::stream::decode_all(old.as_slice()).map_err(bad)?;
+    let (x, y) = raw.split_at(raw.len() / 2);
+    let mut other = enc(x)?;
+    other.extend(enc(y)?);
+    assert_ne!(other, old);
+    assert_eq!(
+        zstd::stream::decode_all(other.as_slice()).map_err(bad)?,
+        raw
+    );
+    objects.insert(key, other);
+    let base = tmp("dec-reenc")?;
+    let out = base.join("out");
+    assert_eq!(
+        export(&h, 1 << 30, &objects, &out),
+        Err(ExportError::Corrupt)
+    );
+    assert!(!out.exists());
+    let _ = fs::remove_dir_all(&base);
+    Ok(())
+}
+
+#[test]
+fn a_compressed_epoch_whose_stored_digest_differs_is_corrupt() -> R {
+    // Every piece is intact and the stream decodes, but the epoch's recorded SHA-256 of the
+    // stored stream is wrong.
+    let stream = frames(&[&jsonl(50)])?;
+    let mut objects = Objects::new();
+    let mut h = codex_head(&stream, 64, &mut objects)?;
+    let record = h
+        .folded
+        .state
+        .sources
+        .values_mut()
+        .nth(1)
+        .and_then(|e| e.epochs.first_mut())
+        .ok_or("record")?;
+    record.sha256 = sha(b"not the stored stream")?;
+    let base = tmp("dec-digest")?;
+    let out = base.join("out");
+    assert_eq!(
+        export(&h, 1 << 30, &objects, &out),
+        Err(ExportError::Corrupt)
+    );
+    assert!(!out.exists());
+    let _ = fs::remove_dir_all(&base);
+    Ok(())
+}
