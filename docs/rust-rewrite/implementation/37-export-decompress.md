@@ -123,3 +123,10 @@ decision log, handoff); push (secret check of the range), hosted gates, merge.
 ## Ledger
 
 - 2026-11-18 20:05Z: brief written on `b435f73`.
+- 2026-11-18 20:40Z: DECOMPRESS accepted locally at `a7ffe82` (worker 5 commits, parent 1).
+  Deviation accepted: `metadata.json` is rendered up front and patched after the bodies (a second
+  size check runs before publishing). The tooth "stored-piece checks skipped" first survived (the
+  worker's corrupt-piece test broke the zstd magic, which fails either way); the parent added two
+  tests whose stored pieces decode but differ from the manifest. Teeth 7 of 7. Full gates on
+  `a7ffe82`: 14 sub-gates 0, seed 3529537878, coverage 96.56 %. Record:
+  [evidence 28](evidence/28-export-decompress/). Next: push, hosted gates, merge.
