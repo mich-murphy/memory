@@ -182,6 +182,55 @@ impl TryFrom<String> for Timestamp {
         }
     }
 }
+impl Timestamp {
+    /// Nanoseconds since the Unix epoch, or `None` for a real-calendar impossibility (a day that
+    /// does not exist in its month), an instant before 1970, or one past `i64::MAX` nanoseconds
+    /// (the largest value the session-reader contract accepts). Checked arithmetic throughout.
+    #[must_use]
+    pub fn unix_ns(&self) -> Option<u64> {
+        let b = self.0.as_bytes();
+        let num = |r: std::ops::Range<usize>| -> Option<i64> {
+            let part = self.0.get(r)?;
+            if part.bytes().all(|c| c.is_ascii_digit()) {
+                part.parse().ok()
+            } else {
+                None
+            }
+        };
+        if b.len() != 20 {
+            return None;
+        }
+        let (year, month, day) = (num(0..4)?, num(5..7)?, num(8..10)?);
+        let (hour, minute, second) = (num(11..13)?, num(14..16)?, num(17..19)?);
+        let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+        let last = match month {
+            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+            4 | 6 | 9 | 11 => 30,
+            2 if leap => 29,
+            2 => 28,
+            _ => return None,
+        };
+        if !(1..=last).contains(&day) {
+            return None;
+        }
+        let y = year.checked_sub(i64::from(month <= 2))?;
+        let era = y.div_euclid(400);
+        let yoe = y.rem_euclid(400);
+        let mp = (month + 9) % 12;
+        let doy = (153 * mp + 2) / 5 + day - 1;
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        let days = era
+            .checked_mul(146_097)?
+            .checked_add(doe)?
+            .checked_sub(719_468)?;
+        let secs = days
+            .checked_mul(86_400)?
+            .checked_add(hour * 3600 + minute * 60 + second)?;
+        let ns = u64::try_from(secs).ok()?.checked_mul(1_000_000_000)?;
+        i64::try_from(ns).ok()?;
+        Some(ns)
+    }
+}
 impl From<Timestamp> for String {
     fn from(value: Timestamp) -> Self {
         value.0

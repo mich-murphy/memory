@@ -88,9 +88,18 @@ from `main` alone.
      18:59Z): streaming capture and audit (peak 32 MB in the real-binary test, was 1,254 MB in
      the run), a directory event reads only that directory, a `progress` log line, PUT/GET
      connection reuse, nextest `slow-timeout`. The running acceptance daemon is still the
-     `a28bfa4` build and is not replaced mid-run. After the run ends: a short run with the
-     streamed binary on real data to measure the peak; then `memory export` and the consumer
-     gate (answer 9), lifting the empty-prefix refusal, and cutover (DESIGN 18).
+     `a28bfa4` build and is not replaced mid-run.
+  4. Brief 32 ([32-export-and-consumer-gate.md](rust-rewrite/implementation/32-export-and-consumer-gate.md),
+     [evidence 23](rust-rewrite/implementation/evidence/23-export/)) is built and accepted
+     locally as `1e922d8` (2026-11-18 00:25Z): `memory export <owner> --out DIR` writes the
+     `session-reader/v2` envelope (streamed bodies, one envelope source per epoch, role from
+     kind and path, `CodexCompressed` as an artifact), and gate `10-consumer` runs real writer
+     output through it into the unchanged Python importer and report for Claude, Codex and Pi,
+     with a privacy canary scan. Full gates 14 of 14. If its stack is not yet merged, push and
+     merge it first. After the run ends: a short run with the streamed binary on real data that
+     measures the peak and exports and imports every captured owner; then lifting the
+     empty-prefix refusal and cutover (DESIGN 18). Open: recompressed Codex rollouts reach the
+     importer unparsed (Go decompressed them); no owner enumeration for export yet.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

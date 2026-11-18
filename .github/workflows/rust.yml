@@ -58,7 +58,29 @@ jobs:
         run: |
           nix build .#cargo-llvm-cov --no-link --max-jobs 2 --cores 2
           nix copy --to "file://$HOME/nix-llvm-cov-cache" "$(nix eval --raw .#cargo-llvm-cov.outPath)"
+      # 10-consumer runs the unchanged Python importer against `memory export` output; it
+      # needs the pinned analytics dependencies, installed like the Go consumer job does.
+      # The interpreter is pinned: macos-26's python3 is 3.15, for which duckdb 1.5.6 has no
+      # wheel, and building it from source took 18 minutes (hosted run 44207967760).
+      # --only-binary turns a missing wheel into a fast failure instead of a source build.
+      - name: Pinned Python for the analytics venv
+        if: matrix.part == 'gates'
+        id: analytics-python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+          update-environment: false
+      - name: Isolated pinned analytics dependencies
+        if: matrix.part == 'gates'
+        env:
+          ANALYTICS_BASE_PYTHON: ${{ steps.analytics-python.outputs.python-path }}
+        run: |
+          "$ANALYTICS_BASE_PYTHON" -m venv "$RUNNER_TEMP/analytics-venv"
+          "$RUNNER_TEMP/analytics-venv/bin/python" -m pip install --only-binary=:all: -r tools/analytics/requirements.txt
       - name: Run all Rust gates without live access
+        env:
+          # Absent in the coverage part, where the consumer test skips and 10-consumer does not run.
+          MEMORY_ANALYTICS_PYTHON: ${{ runner.temp }}/analytics-venv/bin/python
         run: >-
           nix develop .#rust --max-jobs 2 --cores 2 --command
           sh -c 'cd rust && PROPERTY_CASES=500 bash scripts/gates.sh'

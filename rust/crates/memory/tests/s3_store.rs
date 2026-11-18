@@ -28,10 +28,14 @@ mod assemble;
 mod check;
 #[path = "common/clock.rs"]
 mod clock;
+#[path = "s3_store/consumer_gate.rs"]
+mod consumer_gate;
 #[path = "s3_store/daemon_restore.rs"]
 mod daemon_restore;
 #[path = "s3_store/event_loop.rs"]
 mod event_loop;
+#[path = "s3_store/export.rs"]
+mod export;
 #[path = "common/s3_fake.rs"]
 mod fake;
 #[path = "common/log_lines.rs"]
