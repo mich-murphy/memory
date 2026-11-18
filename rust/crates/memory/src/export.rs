@@ -73,7 +73,7 @@ pub struct Report {
     pub sources: usize,
     /// Deleted sources skipped.
     pub skipped_deleted: usize,
-    /// Body bytes.
+    /// Exported body bytes (decompressed where a source was compressed).
     pub bytes: u64,
 }
 
@@ -90,6 +90,7 @@ fn code<E>(error: &ExportError<E>) -> Failure {
         ExportError::Io => Failure::Export("output_io"),
         ExportError::ObjectMissing => Failure::Export("object_missing"),
         ExportError::Corrupt => Failure::Export("source_corrupt"),
+        ExportError::Decompress => Failure::Export("export_decompress"),
     }
 }
 
@@ -120,11 +121,11 @@ pub fn export_owner<E>(
         Err(OwnerError::Corrupt(_)) => return Err(Failure::ChainCorrupt),
     };
     let envelope = build_envelope::<E>(&head, max_bytes).map_err(|e| code(&e))?;
-    write_export(&envelope, &mut fetch, out).map_err(|e| code(&e))?;
+    let bytes = write_export(&envelope, &mut fetch, out).map_err(|e| code(&e))?;
     Ok(Report {
         sources: envelope.sources,
         skipped_deleted: envelope.skipped_deleted,
-        bytes: envelope.bytes,
+        bytes,
     })
 }
 

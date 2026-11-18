@@ -130,8 +130,15 @@ from `main` alone.
      changed; the timeout is not raised. After the run ends: a short run with the current binary
      on real data that measures the peak and exports and imports every captured owner; then
      cutover (DESIGN 18): `memory install` with `prefix = ""`, the Go uninstall commands, and a
-     person approving the hooks in Codex `/hooks`. Open: recompressed Codex rollouts reach the
-     importer unparsed (Go decompressed them; this Mac had none on 2026-11-18).
+     person approving the hooks in Codex `/hooks`.
+  9. Brief 37 ([37-export-decompress.md](rust-rewrite/implementation/37-export-decompress.md),
+     [evidence 28](rust-rewrite/implementation/evidence/28-export-decompress/)) is accepted
+     locally as `a7ffe82`: operator decision 2026-11-18 (DESIGN D46), `memory export` writes a
+     recompressed Codex rollout (`.jsonl.zst`) decompressed with role `main` (window at most
+     2^27, whole frames only, `export_decompress` exit 1 otherwise); capture still stores the
+     on-disk bytes. Open finding (capture, its own brief): a rollout recompressed after it was
+     captured fails every later round with `SourceChanged` and is never parked (same source id,
+     changed kind and path); this Mac had no `.jsonl.zst` on 2026-11-18.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

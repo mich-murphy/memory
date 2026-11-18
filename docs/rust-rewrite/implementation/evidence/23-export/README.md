@@ -121,6 +121,7 @@ pins.
 - A multi-piece epoch's `object` descriptor is a documented commitment, not a fetchable object.
 - A Codex rollout that Codex has recompressed (`.jsonl.zst`) reaches the importer as an unparsed
   artifact; Go decompressed it. Decompressing at capture or export is an open decision.
+  (Later, 2026-11-18: decided as export, DESIGN D46; built in brief 37, evidence 28.)
 - No Rust equivalent of the Go refresher's heads pages or `capture-v1` CLI; export is one owner per
   call and cutover needs a way to enumerate owners.
 - Not run: 2,000 property cases, `cargo mutants`, the gate on real data (after the acceptance run),

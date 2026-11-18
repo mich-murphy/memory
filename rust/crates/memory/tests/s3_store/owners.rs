@@ -57,12 +57,12 @@ fn owners_lists_exactly_the_local_walk_and_every_owner_exports() -> R {
     let fx = fixture(&server, "own-gate")?;
     let _daemon = captured(&fx)?;
     let want = walk_owners(&fx.rig)?;
-    assert_eq!(want.len(), 5);
+    assert_eq!(want.len(), 6);
     let out = owners_cmd(&fx.rig, &[])?;
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let got: Vec<String> = text(&out.stdout).lines().map(str::to_owned).collect();
     assert_eq!(got, want);
-    assert_eq!(text(&out.stderr), "memory: owners=5\n");
+    assert_eq!(text(&out.stderr), "memory: owners=6\n");
     no_leak(&out, &server, &[]);
     for (i, owner) in got.iter().enumerate() {
         export(&fx, owner, &fx.rig.dir.join(format!("exp/{i}")))?;
