@@ -927,7 +927,7 @@ dataflows]
 | File | Class | Written by | Notes |
 |---|---|---|---|
 | Agent session files | System of record (leader) | Agents | Never written by us |
-| `config.toml` | System of record | Operator | Holds the archive id, machine id, agent roots, window, bucket and token path. `deny_unknown_fields`. The daemon refuses to start if it is invalid |
+| `config.toml` | System of record | Operator | Holds the archive id, machine id, agent roots, window, endpoint, region, bucket, key prefix and token path. `deny_unknown_fields`. `prefix` is required: `""` is the bucket root, so a forgotten line cannot select it (brief 35). The daemon refuses to start if it is invalid |
 | Token file | System of record | Operator | 0600. Excluded from capture |
 | `state/roots.json` | System of record | Daemon | Learned custom roots. Monotonic union: a root is never removed automatically |
 | `state/hints/YYYY-MM-DD.jsonl` | System of record for launch evidence | `memory hook` | Directory 0700, files 0600. Kept for 7 days [default, unmeasured] and until every launch record in the file is committed |

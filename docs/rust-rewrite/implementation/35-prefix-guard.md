@@ -116,3 +116,7 @@ range), hosted gates, merge.
 ## Ledger
 
 - 2026-11-18 09:20Z: brief written on `7a6221d`.
+- 2026-11-18 09:43Z: PREFIX accepted locally at `616132b` (worker, one commit). The five refusal
+  tests are one real-binary test looping over the commands. Teeth 5 of 5. Full gates on `616132b`:
+  14 sub-gates 0, seed 2480786143, coverage 96.69 %. DESIGN 9.1 `config.toml` row updated by the
+  parent. Record: [evidence 26](evidence/26-prefix-guard/). Next: push, hosted gates, merge.
