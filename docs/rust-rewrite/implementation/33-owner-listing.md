@@ -110,3 +110,10 @@ with `MEMORY_ANALYTICS_PYTHON` set; then push (secret check of the range), hoste
 ## Ledger
 
 - 2026-11-18 03:25Z: brief written on `714635b`; the dependency probe run by the parent.
+- 2026-11-18 03:48Z: OWNERS accepted locally at `5d5366f` (4 worker commits, 1 parent commit over
+  `1c9ff5d`). Three facts above were wrong and are corrected in [evidence 24](evidence/24-owners/):
+  the empty-prefix refusal is in `assemble::build`, not `build_store` (`owners` checks it itself);
+  a non-ASCII owner cannot exist (`SessionId` admits `[A-Za-z0-9._:-]`), so that proof was dropped;
+  crate paths are under `rust/crates/`. Parent teeth: first pass 6 of 7 (unsorted output survived);
+  the parent added `owners_sorts_by_owner_text_and_drops_a_repeated_key`, then 7 of 7. Full gates
+  on `5d5366f`: 14 sub-gates 0, seed 1849428079, coverage 96.66 %. Next: push, hosted gates, merge.
