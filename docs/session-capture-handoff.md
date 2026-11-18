@@ -100,8 +100,15 @@ from `main` alone.
   5. Brief 33 ([33-owner-listing.md](rust-rewrite/implementation/33-owner-listing.md),
      [evidence 24](rust-rewrite/implementation/evidence/24-owners/)) is accepted locally as
      `5d5366f`: `memory owners` lists every session owner with a `current.json` under the
-     prefix (ListObjectsV2, rusty-s3 feature `xml`), sorted, in the text `export` takes. If its
-     stack is not yet merged, push and merge it first. After the run ends: a short run with the streamed binary on real data that
+     prefix (ListObjectsV2, rusty-s3 feature `xml`), sorted, in the text `export` takes. Merged
+     as `e85b1f2` (stack #155); the post-merge Go fuzz failure (`FuzzEditJSON`, an existing
+     `capturehooks` bug) was fixed in PR #156, merged as `b3a08d2`.
+  6. Brief 34 ([34-streamed-check.md](rust-rewrite/implementation/34-streamed-check.md),
+     [evidence 25](rust-rewrite/implementation/evidence/25-streamed-check/)) is accepted locally
+     as `1adecef`: `memory check` streams prefix-stable sources (verdict equal to the whole path
+     by a property), and `S3Store::get` and `decode_piece` allocate exactly; a check of one
+     100 MB source peaks at 43 MB (was 249 MB). The 2,000-case property run passed on `b3a08d2`.
+     If its stack is not yet merged, push and merge it first. After the run ends: a short run with the streamed binary on real data that
      measures the peak and exports and imports every captured owner; then lifting the
      empty-prefix refusal and cutover (DESIGN 18). Open: recompressed Codex rollouts reach the
      importer unparsed (Go decompressed them; this Mac had none on 2026-11-18).

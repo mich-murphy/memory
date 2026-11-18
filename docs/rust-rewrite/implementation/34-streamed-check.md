@@ -115,3 +115,10 @@ of the range), hosted gates, merge.
 ## Ledger
 
 - 2026-11-18 06:20Z: brief written on `b3a08d2`.
+- 2026-11-18 07:17Z: CHECK accepted locally at `1adecef`. The worker ran out of turns after 4
+  commits with the peak test failing at 249 MB; the parent took over. Bisection put the memory on
+  the stored side: doubling buffers in `S3Store::get` and `decode_piece` (outside this brief's
+  owned paths; scope widened by the parent, both now allocate exactly; 43 MB). Teeth 8 of 8. Full
+  gates on `1adecef`: 14 sub-gates 0, seed 4165249849, coverage 96.68 %. The 2,000-case property
+  run on `b3a08d2` passed (seed 2145483499). Record: [evidence 25](evidence/25-streamed-check/).
+  Next: push, hosted gates, merge.
