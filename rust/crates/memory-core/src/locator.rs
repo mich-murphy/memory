@@ -728,7 +728,8 @@ fn codex_top<'a>(name: &str, parts: &[&'a str]) -> Res<'a> {
     Err(Miss::Kind)
 }
 
-/// The logical rollout identity drops date folders, archive location and `.zst`.
+/// The logical rollout identity drops date folders and archive location. A `.zst`
+/// spelling is its own source (id keeps `.zst`) in the same owner as the plain one.
 fn codex_rollout<'a>(name: &'a str) -> Res<'a> {
     let (plain, zst) = match name.strip_suffix(".zst") {
         Some(p) => (p, true),
@@ -748,7 +749,7 @@ fn codex_rollout<'a>(name: &'a str) -> Res<'a> {
         class: SourceClass::Append,
         role: Role::Main,
         owner: OwnerSpec::Session(vec![stem]),
-        id: vec!["rollouts", plain],
+        id: vec!["rollouts", name],
     })
 }
 
