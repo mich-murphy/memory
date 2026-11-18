@@ -40,6 +40,8 @@ mod export;
 mod fake;
 #[path = "common/log_lines.rs"]
 mod log_lines;
+#[path = "s3_store/owners.rs"]
+mod owners;
 #[path = "s3_store/peak_memory.rs"]
 mod peak_memory;
 #[path = "s3_store/restore.rs"]

@@ -39,8 +39,8 @@ fn put(path: &Path, body: &str) -> R {
     fs::write(path, body).map_err(e)
 }
 
-struct Fixture {
-    rig: Rig,
+pub(super) struct Fixture {
+    pub(super) rig: Rig,
     claude: PathBuf,
     codex: PathBuf,
     pi: PathBuf,
@@ -48,7 +48,7 @@ struct Fixture {
     canaries: Vec<(&'static str, PathBuf, PathBuf)>,
 }
 
-fn fixture(server: &Fake, label: &str) -> R<Fixture> {
+pub(super) fn fixture(server: &Fake, label: &str) -> R<Fixture> {
     let rig = Rig::new(label, &server.url(), PREFIX, false)?;
     let codex = rig.add_root("codex")?;
     let pi = rig.add_root("pi")?;
@@ -153,7 +153,7 @@ fn fixture(server: &Fake, label: &str) -> R<Fixture> {
     })
 }
 
-fn owners(rig: &Rig) -> R<Vec<String>> {
+pub(super) fn owners(rig: &Rig) -> R<Vec<String>> {
     let config = Config::load(&rig.cfg).map_err(e)?;
     let mut v: Vec<String> = WalkSources::new(
         locator_roots(&config).map_err(e)?,
@@ -170,7 +170,7 @@ fn owners(rig: &Rig) -> R<Vec<String>> {
     Ok(v)
 }
 
-fn run(state: &Path, args: &[&std::ffi::OsStr]) -> R<Output> {
+pub(super) fn run(state: &Path, args: &[&std::ffi::OsStr]) -> R<Output> {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_memory"));
     cmd.env_clear().env("MEMORY_STATE_DIR", state).args(args);
     if let Some(v) = std::env::var_os("LLVM_PROFILE_FILE") {
@@ -179,7 +179,7 @@ fn run(state: &Path, args: &[&std::ffi::OsStr]) -> R<Output> {
     cmd.output().map_err(e)
 }
 
-fn export(fx: &Fixture, text: &str, out: &Path) -> R {
+pub(super) fn export(fx: &Fixture, text: &str, out: &Path) -> R {
     fs::create_dir_all(out.parent().ok_or("parent")?).map_err(e)?;
     let r = run(
         &fx.rig.dir,
@@ -368,7 +368,7 @@ fn entry(w: &Want, text: &str, dir: &Path) -> Value {
         "issues": w.issues, "roles": w.roles})
 }
 
-fn captured(fx: &Fixture) -> R<memory::assemble::ProductionDaemon> {
+pub(super) fn captured(fx: &Fixture) -> R<memory::assemble::ProductionDaemon> {
     let mut daemon = start_from_config(&fx.rig.state, &fx.rig.cfg).map_err(e)?;
     let report = daemon.reconcile_once().map_err(e)?;
     assert_eq!((report.failed, report.parked), (0, 0));
