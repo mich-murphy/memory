@@ -100,6 +100,18 @@ sh -c 'cd rust && MEMORY_ANALYTICS_PYTHON=<repo>/.analytics-venv/bin/python PROP
 scripts/gates.sh'`: all 14 sub-gates 0, seed 4123598146; 04-nextest 755 passed, 05-hegel 32,
 06-proptest 34, 10-consumer 2; coverage 96.55 % (9,725 of 10,073 lines).
 
+## Hosted CI (stack #169)
+
+- `docs/brief-36-record`, Rust gates (macos-26), attempt 1: `02-clippy` exited 101 because the
+  runner could not resolve `index.crates.io`; every other sub-gate 0. Rerun of the failed job:
+  success. The same gates passed on `rust/install`.
+- Post-merge CI on `8b095ff` (run 44307310632): attempts 1 and 2 failed `make crap` on macOS,
+  `internal/syncer` hitting Go's 10-minute package limit (running test 9 s old, nothing hung).
+  The merge changed no Go file; the package took 439 to 555 s on the five earlier `main` runs and
+  263 s locally with the same flags. Attempt 3 got no runner (0 steps); attempt 4 passed it in
+  446.6 s, leaving only the two accepted `govulncheck` failures. Recorded as an existing Go
+  finding; the timeout is not raised.
+
 ## Limits
 
 - macOS only (DESIGN 17 slice 3 owns Linux and systemd).

@@ -122,8 +122,12 @@ from `main` alone.
      `f3b3deb`: `memory install [--dry-run]` writes the launchd agent `memory`, the Claude and
      Codex hook entries and the Pi extension for the binary as invoked (named `memory`), and
      `memory uninstall` removes exactly those; Go entries are left alone. On copies of this
-     Mac's settings, uninstall gave back both files byte for byte. If its stack is not yet
-     merged, push and merge it first. After the run ends: a short run with the current binary
+     Mac's settings, uninstall gave back both files byte for byte. Merged as `8b095ff` (stack
+     #169). Open finding (Go, existing): under `make cover` on hosted macOS the frozen
+     `internal/syncer` package runs close to Go's 10-minute test limit (439 to 555 s on the five
+     `main` runs before `8b095ff`; 600 s timeouts on attempts 1 and 2 of CI run 44307310632, no
+     single test hung; 446.6 s on attempt 4; 263 s locally with the same flags). No Go file
+     changed; the timeout is not raised. After the run ends: a short run with the current binary
      on real data that measures the peak and exports and imports every captured owner; then
      cutover (DESIGN 18): `memory install` with `prefix = ""`, the Go uninstall commands, and a
      person approving the hooks in Codex `/hooks`. Open: recompressed Codex rollouts reach the
