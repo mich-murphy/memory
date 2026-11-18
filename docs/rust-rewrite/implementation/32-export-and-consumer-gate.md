@@ -197,3 +197,17 @@ whole sources.
   `memory-core/tests/core_export.rs` or `memory/tests/s3_store/export.rs`. The three real-binary
   export tests: 30 of 30 alone. Streaming bound: a 70-piece epoch never has two stored buffers
   alive. Next: GATE from the EXPORT branch.
+- 2026-11-18 00:25Z: GATE accepted locally at `1e922d8` (5 commits over the EXPORT tip `725bea6`,
+  which is `f33770a` rebased onto `0d12d64` with an identical `rust/` tree). Scope change: the parent
+  took `gates.sh`, `rust.yml` and `quality-gates.md` (`1e922d8`). The worker ran out of turns with
+  a clippy fix uncommitted; the parent checked and committed it (`441fc12`). Parent gate teeth: the
+  first pass caught 5 of 7; an unstable `manifest_sha256` and a skipped credential denylist
+  survived. The parent strengthened the test (`d9d3050`: digest checked against the stored head,
+  byte-identical re-export, `.env` and `id_rsa` canaries inside `tool-results/`), then 7 of 7
+  caught. Stress 30 of 30. Fails closed without the analytics Python under
+  `MEMORY_REQUIRE_CONSUMER=1`. Full gates on `1e922d8`: 14 sub-gates 0 including `10-consumer`,
+  seed 900846677, coverage 96.69 %. Record: [evidence 23](evidence/23-export/). Next: push the
+  stack, hosted gates (the new venv step runs for the first time), merge.
+- 2026-11-18 01:20Z: first hosted run: macOS gates hit the 30-minute limit because pip built
+  duckdb from source for Python 3.15 (no wheel). Fixed in `b043b38` (pinned Python 3.13 for the
+  venv, wheels only); evidence 23, "Hosted CI".
