@@ -208,6 +208,25 @@ fn a_reply_body_over_the_bound_is_not_read_whole_and_its_connection_is_dropped()
     Ok(())
 }
 
+/// `get` reserves from `Content-Length` (brief 34) and still refuses a body over its 64 MiB
+/// limit as `Server`; one byte under the limit is read whole. (ureq's limit reader also refuses
+/// a body of exactly the limit: `read_to_end` asks once more after the last byte. That was so
+/// before brief 34 as well.)
+#[test]
+fn a_get_body_over_the_limit_is_server_and_one_under_it_is_read() -> R {
+    let (fake, mut s) = rig("")?;
+    let limit = 64_usize << 20;
+    fake.seed("/bkt/o/under", &vec![7_u8; limit - 1]);
+    fake.seed("/bkt/o/over", &vec![7_u8; limit + 1]);
+    let under = s.get("o/under").map_err(e)?;
+    assert_eq!(under.body.len(), limit - 1);
+    assert_eq!(
+        s.get("o/over").map(|g| g.body.len()),
+        Err(StoreError::Server)
+    );
+    Ok(())
+}
+
 #[test]
 fn a_503_after_a_landed_write_is_throttled_and_sent_once() -> R {
     one_put_after(Fault::ApplyThenStatus(503), StoreError::Throttled(None))
