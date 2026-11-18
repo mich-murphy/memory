@@ -58,7 +58,17 @@ jobs:
         run: |
           nix build .#cargo-llvm-cov --no-link --max-jobs 2 --cores 2
           nix copy --to "file://$HOME/nix-llvm-cov-cache" "$(nix eval --raw .#cargo-llvm-cov.outPath)"
+      # 10-consumer runs the unchanged Python importer against `memory export` output; it
+      # needs the pinned analytics dependencies, installed like the Go consumer job does.
+      - name: Isolated pinned analytics dependencies
+        if: matrix.part == 'gates'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/analytics-venv"
+          "$RUNNER_TEMP/analytics-venv/bin/python" -m pip install -r tools/analytics/requirements.txt
       - name: Run all Rust gates without live access
+        env:
+          # Absent in the coverage part, where the consumer test skips and 10-consumer does not run.
+          MEMORY_ANALYTICS_PYTHON: ${{ runner.temp }}/analytics-venv/bin/python
         run: >-
           nix develop .#rust --max-jobs 2 --cores 2 --command
           sh -c 'cd rust && PROPERTY_CASES=500 bash scripts/gates.sh'
