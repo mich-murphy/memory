@@ -15,7 +15,7 @@
 //! parked item with the owner prefix, the source kind and a reason code. Never a path, a source
 //! id, file content or a credential.
 use crate::assemble::{build_store, policy_context};
-use crate::capture::{Source, SourceOutcome, publishable};
+use crate::capture::{MAX_PIECE_BYTES, Source, SourceOutcome, publishable};
 use crate::config::Config;
 use crate::daemon::{EXIT_CONFIG, ParkedReason, Sources, StatusBody};
 use crate::environment::{FileSystem, Store, StoreError};
@@ -26,8 +26,8 @@ use crate::s3::S3Store;
 use crate::state::{Loaded, MissingReason, StateFile, default_root, read_durable};
 use memory_core::domain::{Owner, SourceId};
 use memory_core::limits::owner_prefix;
-use memory_core::manifest::OwnerState;
-use memory_core::privacy::{Admission, PolicyContext, UnknownReason, admit};
+use memory_core::manifest::{OwnerState, SourceEntry};
+use memory_core::privacy::{Admission, AdmittedSource, PolicyContext, UnknownReason, admit};
 use memory_reader::{OwnerError, RestoreError, read_owner, restore_source};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -178,13 +178,22 @@ pub struct Refusal {
     pub exit: u8,
 }
 
-enum Verdict {
+/// What `memory check` concludes for one local source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Verdict {
+    /// Equal to the stored latest epoch.
     Match,
+    /// The stored epoch is a strict prefix of the local bytes.
     Behind,
+    /// The file moved during the read, or cannot be compared yet.
     Unsettled,
+    /// The stored state differs (`bytes`) or cannot be restored (`restore`).
     Mismatch(&'static str),
+    /// No live stored entry.
     Uncaptured,
+    /// Policy withholds the source, with the reason code.
     Withheld(String),
+    /// Fetching a stored object failed for a reason other than absence.
     StoreFailed,
 }
 
@@ -232,32 +241,56 @@ pub fn read_settled<F: FileSystem>(fs: &mut F, handle: u64) -> Option<Vec<u8>> {
     (before == after && u64::try_from(raw.len()) == Ok(before.size)).then_some(raw)
 }
 
-fn judge(
-    fs: &mut SharedFs,
-    store: &mut S3Store,
+/// Admission: the verdict that ends the judgement, or the admitted source.
+fn admit_source(context: &PolicyContext, source: &Source) -> Result<AdmittedSource, Verdict> {
+    match admit(context, source.facts.clone()) {
+        Admission::Allow(admitted) => Ok(admitted),
+        Admission::Deny(reason) => Err(Verdict::Withheld(reason.to_string())),
+        Admission::Unknown(reason) => Err(Verdict::Withheld(unknown_code(reason).to_owned())),
+    }
+}
+
+/// The live stored entry of `source`, if any.
+fn live_entry<'a>(state: Option<&'a OwnerState>, source: &Source) -> Option<&'a SourceEntry> {
+    state
+        .and_then(|state| state.sources.get(&source.id))
+        .filter(|entry| entry.deleted_at.is_none())
+}
+
+/// The whole-buffer judgement: the local file and the restored epoch are each held whole.
+/// Used for sources that are not prefix-stable, and as the oracle of the streamed path.
+pub fn judge_whole<F: FileSystem>(
+    fs: &mut F,
+    fetch: impl FnMut(&str) -> Result<Vec<u8>, StoreError>,
     context: &PolicyContext,
     state: Option<&OwnerState>,
     source: &Source,
 ) -> Verdict {
-    let admitted = match admit(context, source.facts.clone()) {
-        Admission::Allow(admitted) => admitted,
-        Admission::Deny(reason) => return Verdict::Withheld(reason.to_string()),
-        Admission::Unknown(reason) => return Verdict::Withheld(unknown_code(reason).to_owned()),
-    };
+    match admit_source(context, source) {
+        Ok(admitted) => whole_admitted(fs, fetch, &admitted, context, state, source),
+        Err(verdict) => verdict,
+    }
+}
+
+fn whole_admitted<F: FileSystem>(
+    fs: &mut F,
+    fetch: impl FnMut(&str) -> Result<Vec<u8>, StoreError>,
+    admitted: &AdmittedSource,
+    context: &PolicyContext,
+    state: Option<&OwnerState>,
+    source: &Source,
+) -> Verdict {
     let Some(raw) = read_settled(fs, source.handle) else {
         return Verdict::Unsettled;
     };
-    let body = match publishable(&admitted, &raw, context) {
+    let body = match publishable(admitted, &raw, context) {
         Ok(body) => body,
         Err(outcome) => return Verdict::Withheld(outcome_code(&outcome)),
     };
-    let Some(entry) = state
-        .and_then(|state| state.sources.get(&source.id))
-        .filter(|entry| entry.deleted_at.is_none())
-    else {
+    let Some(entry) = live_entry(state, source) else {
         return Verdict::Uncaptured;
     };
-    match restore_source(entry, |key| store.get(key).map(|stored| stored.body)) {
+    match restore_source(entry, fetch) {
         Ok(restored) => match compare(&restored, body.bytes(), admitted.prefix_stable()) {
             Compared::Match => Verdict::Match,
             Compared::Behind => Verdict::Behind,
@@ -268,6 +301,39 @@ fn judge(
         Err(RestoreError::Fetch(_)) => Verdict::StoreFailed,
         Err(_) => Verdict::Mismatch("restore"),
     }
+}
+
+/// Judge one source: streamed when it is prefix-stable (`chunk` bytes of the local file at a
+/// time), whole otherwise.
+pub fn judge_with<F: FileSystem>(
+    fs: &mut F,
+    fetch: impl FnMut(&str) -> Result<Vec<u8>, StoreError>,
+    _chunk: usize,
+    context: &PolicyContext,
+    state: Option<&OwnerState>,
+    source: &Source,
+) -> Verdict {
+    match admit_source(context, source) {
+        Ok(admitted) => whole_admitted(fs, fetch, &admitted, context, state, source),
+        Err(verdict) => verdict,
+    }
+}
+
+fn judge(
+    fs: &mut SharedFs,
+    store: &mut S3Store,
+    context: &PolicyContext,
+    state: Option<&OwnerState>,
+    source: &Source,
+) -> Verdict {
+    judge_with(
+        fs,
+        |key| store.get(key).map(|stored| stored.body),
+        MAX_PIECE_BYTES,
+        context,
+        state,
+        source,
+    )
 }
 
 fn read_status(root: &Path) -> (Option<StatusBody>, &'static str) {
