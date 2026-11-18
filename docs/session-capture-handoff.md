@@ -71,7 +71,10 @@ from `main` alone.
   each of which runs a full reconcile where DESIGN 10.2 reads only the new directory (evidence
   21, "Day 0, continued"). Check 2 (19:46Z to 20:09Z) clean: 6,033 of 6,033 sources match,
   mismatch, uncaptured and parked 0; still no new Claude or Codex session (evidence 21,
-  "Check 2"). Next checks about 2026-11-18T08:09Z and 20:35Z, then about 2026-11-19T09:00Z.
+  "Check 2"). Check 3 (2026-11-18 08:09Z to 08:34Z) clean: 6,039 of 6,039 sources match,
+  no new failure since check 2; Claude hook delivery verified (a Claude `session_end` hint on
+  2026-11-17), Codex still unverified (evidence 21, "Check 3"). Next checks about
+  2026-11-18T20:35Z, then about 2026-11-19T09:00Z.
   What the next session does, in order:
   1. Read `checks.log` (a check every 12 h; abort on any `mismatch` or an owner parked as
      `Foreign`), the daemon log and `status.json`; confirm the agent, sampler, `caffeinate` and

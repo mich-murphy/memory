@@ -256,3 +256,29 @@ of `footprint.tsv`, and the names and birth times of transcript files.
 - Next checks: the loop sleeps 12 h after each check ends, so about 08:09Z and 20:35Z on
   2026-11-18 and about 09:00Z on 2026-11-19. The run can end after the first clean check that ends
   after 2026-11-19T07:46Z.
+
+### Check 3 (recorded 2026-11-18 at 08:40Z)
+
+Commands as for check 2.
+
+- **Third `memory check`** (2026-11-18 08:08:57Z to 08:34:13Z, 25.3 minutes, exit 0):
+  `owners=1076 sources=6039 match=6039 behind=0 unsettled=0 mismatch=0 uncaptured=0 withheld=0
+  remote_only=0 parked=0 unknown_kind=19069 unknown_owner=0 deferred_snapshot=3123 unreadable=0
+  store_error=0 status=loaded`. Three consecutive clean checks.
+- **Daemon.** Same process since the start (one launchd run, never exited); 1,489 rounds (`start`
+  1, `timer` 56, `dir` 1,432); no `WARN` or `ERROR` line since check 2, and no round since check 2
+  has `parked`, `audit_mismatched` or `failed` above 0. `status.json` at 08:14:42Z: `parked` empty,
+  failures still `offline=9` only (no new failure since check 2), audit `matched=6055 mismatched=0
+  ineligible=49`.
+- **Hints.** The 2026-11-17 day file holds one Claude `session_end` record beside the Pi records,
+  so the Rust Claude hook delivered a hint (Claude hook delivery verified). The daemon log shows
+  captures of Claude owners in each hour from 18h to 22h on 2026-11-17. The 2026-11-18 day file
+  holds Pi records only. No Codex rollout was created since the run started, so Codex hint
+  delivery is still unverified.
+- **Footprint.** Peak unchanged at 1,254 MB (07:07Z on 2026-11-17). Hourly maxima of the current
+  footprint since check 2: 165 to 328 MB.
+- Merged into `main` since check 2, none of it installed for this run (which keeps its `a28bfa4`
+  binary): briefs 32 (`memory export`, consumer gate), 33 (`memory owners`) and 34 (streamed
+  `memory check`), and the Go `FuzzEditJSON` fix (PR #156).
+- Next checks: about 20:35Z on 2026-11-18, then about 09:00Z on 2026-11-19; the run can end after
+  the latter if both are clean.
