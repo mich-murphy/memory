@@ -31,6 +31,8 @@ pub enum Fault {
     HoldThenApply(Duration),
     /// Reply with this status and a body of this many bytes, without applying anything.
     StatusWithBody(u16, usize),
+    /// Answer a list request with status 200 and this body, without looking at the objects.
+    ListBody(&'static str),
 }
 
 /// What the server saw for one request.
@@ -192,6 +194,75 @@ fn percent_decode(raw: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+/// Percent-encode as S3 does for `encoding-type=url`: everything but unreserved and `/`.
+fn url_encode(raw: &str) -> String {
+    let mut out = String::new();
+    for byte in raw.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~' | b'/') {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// A ListObjectsV2 reply for the bucket at `bucket_path`: `prefix`, `continuation-token` (here
+/// `t<index>` into the sorted matching keys) and `max-keys` (default 1,000) are honoured.
+fn list_reply(
+    objects: &HashMap<String, (Vec<u8>, String)>,
+    bucket_path: &str,
+    query: &str,
+) -> Vec<u8> {
+    let mut prefix = String::new();
+    let mut start = 0_usize;
+    let mut max_keys = 1000_usize;
+    for pair in query.split('&') {
+        let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let value = percent_decode(value).unwrap_or_default();
+        match name {
+            "prefix" => prefix = value,
+            "continuation-token" => {
+                start = value
+                    .strip_prefix('t')
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or(0);
+            }
+            "max-keys" => max_keys = value.parse().unwrap_or(1000),
+            _ => {}
+        }
+    }
+    let base = format!("{}/", bucket_path.trim_end_matches('/'));
+    let mut keys: Vec<&str> = objects
+        .keys()
+        .filter_map(|p| p.strip_prefix(base.as_str()))
+        .filter(|k| k.starts_with(prefix.as_str()))
+        .collect();
+    keys.sort_unstable();
+    let page: Vec<&str> = keys.iter().copied().skip(start).take(max_keys).collect();
+    let end = start + page.len();
+    let truncated = end < keys.len();
+    let mut xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><EncodingType>url</EncodingType>",
+    );
+    xml.push_str(&format!("<MaxKeys>{}</MaxKeys>", max_keys.min(1000)));
+    for key in &page {
+        xml.push_str(&format!(
+            "<Contents><Key>{}</Key></Contents>",
+            url_encode(key)
+        ));
+    }
+    if truncated {
+        xml.push_str(&format!(
+            "<IsTruncated>true</IsTruncated><NextContinuationToken>t{end}</NextContinuationToken>"
+        ));
+    } else {
+        xml.push_str("<IsTruncated>false</IsTruncated>");
+    }
+    xml.push_str("</ListBucketResult>");
+    xml.into_bytes()
+}
+
 fn handle(stream: TcpStream, state: &Mutex<State>, keep_alive: bool) -> Option<()> {
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
@@ -212,7 +283,13 @@ fn exchange(
     reader.read_line(&mut line).ok().filter(|n| *n > 0)?;
     let mut parts = line.split_whitespace();
     let method = parts.next()?.to_owned();
-    let path = percent_decode(parts.next()?.split('?').next()?)?;
+    let target = parts.next()?;
+    let (raw_path, query) = target.split_once('?').unwrap_or((target, ""));
+    let path = percent_decode(raw_path)?;
+    let list_query = query
+        .split('&')
+        .any(|pair| pair == "list-type=2")
+        .then(|| query.to_owned());
     let mut headers: HashMap<String, String> = HashMap::new();
     loop {
         let mut l = String::new();
@@ -276,12 +353,23 @@ fn exchange(
         reply(w, code, "", &vec![b'x'; size], keep_alive);
         return Some(());
     }
+    if let (Some(Fault::ListBody(text)), Some(_)) = (fault, &list_query) {
+        g.seen.push(seen(200, body));
+        drop(g);
+        reply(w, 200, "", text.as_bytes(), keep_alive);
+        return Some(());
+    }
     if matches!(fault, Some(Fault::CorruptInFlight))
         && let Some(b) = body.first_mut()
     {
         *b ^= 0xff;
     }
     let (code, etag, payload): (u16, Option<String>, Vec<u8>) = match method.as_str() {
+        "GET" if list_query.is_some() => (
+            200,
+            None,
+            list_reply(&g.objects, &path, list_query.as_deref().unwrap_or("")),
+        ),
         "GET" => match g.objects.get(&path) {
             Some((b, e)) => (200, Some(e.clone()), b.clone()),
             None => (404, None, b"<Error><Code>NoSuchKey</Code></Error>".to_vec()),
