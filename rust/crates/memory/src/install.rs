@@ -1,5 +1,6 @@
 //! `memory install` and `memory uninstall` (brief 36): the launchd agent file, the Claude and
 //! Codex hook entries and the Pi extension for the running binary.
+pub mod files;
 pub mod json;
 pub mod merge;
 
@@ -12,6 +13,9 @@ pub enum Failure {
     /// A Codex `hooks.json` with a top-level key other than `description` and `hooks`.
     #[error("install_codex_schema")]
     CodexSchema,
+    /// A file could not be read, written or renamed; only the step fails.
+    #[error("install_io")]
+    Io,
 }
 
 impl Failure {
@@ -21,6 +25,7 @@ impl Failure {
         match self {
             Self::Unparsable => "install_unparsable",
             Self::CodexSchema => "install_codex_schema",
+            Self::Io => "install_io",
         }
     }
 }

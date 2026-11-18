@@ -444,3 +444,201 @@ fn merge_quote_forms() {
         );
     }
 }
+
+// ---- files ----
+
+use memory::install::files::{self, Outcome};
+use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
+
+fn temp(name: &str) -> std::io::Result<PathBuf> {
+    let dir = std::env::temp_dir().join(format!("memory-install-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+/// `<T>` stands for a tab.
+const GOLDEN_PI: &str = r#"// memory: managed by `memory install`; edits are overwritten.
+import { spawn } from "node:child_process";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+const BIN = "/opt/my bin/memory";
+
+function kick(event: string, ctx: any): void {
+<T>try {
+<T><T>const file = ctx.sessionManager.getSessionFile();
+<T><T>// No file for --no-session runs, or before the session's first message.
+<T><T>if (!file) return;
+<T><T>const payload = JSON.stringify({
+<T><T><T>event,
+<T><T><T>session_id: ctx.sessionManager.getSessionId(),
+<T><T><T>session_file: file,
+<T><T><T>cwd: ctx.cwd,
+<T><T>});
+<T><T>const child = spawn(BIN, ["hook", "pi"], {
+<T><T><T>detached: true,
+<T><T><T>stdio: ["pipe", "ignore", "ignore"],
+<T><T>});
+<T><T>child.on("error", () => {});
+<T><T>child.stdin.on("error", () => {});
+<T><T>child.stdin.end(payload);
+<T><T>child.unref();
+<T>} catch {
+<T><T>// Capture must never break the session.
+<T>}
+}
+
+export default function (pi: ExtensionAPI) {
+<T>pi.on("session_start", (_event, ctx) => kick("session_start", ctx));
+<T>pi.on("agent_settled", (_event, ctx) => kick("agent_settled", ctx));
+<T>pi.on("session_shutdown", (_event, ctx) => kick("session_shutdown", ctx));
+}
+"#;
+
+#[test]
+fn files_pi_extension_matches_golden_text() {
+    assert_eq!(
+        files::pi_extension("/opt/my bin/memory"),
+        GOLDEN_PI.replace("<T>", "\t")
+    );
+}
+
+const GOLDEN_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>memory</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/a&amp;b/memory</string>
+    <string>daemon</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key>
+  <dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>60</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>/dev/null</string>
+  <key>StandardErrorPath</key><string>/h/Library/Logs/memory/daemon.log</string>
+</dict>
+</plist>
+"#;
+
+#[test]
+fn files_plist_matches_golden_text_and_is_recognised_as_ours() {
+    let text = files::plist("/opt/a&b/memory", "/h/Library/Logs/memory/daemon.log");
+    assert_eq!(text, GOLDEN_PLIST);
+    assert!(files::plist_is_ours(&text));
+    assert!(!files::plist_is_ours(
+        &text.replace("<string>memory</string>", "<string>other</string>")
+    ));
+    assert!(!files::plist_is_ours(
+        &text.replace("/opt/a&amp;b/memory", "/opt/a/other")
+    ));
+}
+
+#[test]
+fn files_plist_macos_plutil_lint() -> R {
+    if !cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    let dir = temp("plutil").map_err(|e| e.to_string())?;
+    let path = dir.join("memory.plist");
+    std::fs::write(&path, files::plist("/opt/a&b/<x>/memory", "/h/l.log"))
+        .map_err(|e| e.to_string())?;
+    let out = std::process::Command::new("plutil")
+        .arg("-lint")
+        .arg(&path)
+        .output()
+        .map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_dir_all(&dir);
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err("plutil -lint failed".into())
+    }
+}
+
+#[test]
+fn files_utc_stamp_is_utc_basic_format() {
+    assert_eq!(files::utc_stamp(0), "19700101T000000Z");
+    assert_eq!(files::utc_stamp(951_782_400 + 86_399), "20000229T235959Z");
+    assert_eq!(files::utc_stamp(1_700_000_000), "20231114T221320Z");
+}
+
+fn mode(p: &std::path::Path) -> Result<u32, String> {
+    std::fs::metadata(p)
+        .map(|m| m.permissions().mode() & 0o7777)
+        .map_err(|x| x.to_string())
+}
+
+#[test]
+fn files_write_unchanged_backup_and_modes() -> R {
+    let dir = temp("write").map_err(|e| e.to_string())?;
+    let path = dir.join("f.json");
+    let e = |x: Failure| x.to_string();
+    let out = files::write_file(&path, None, "one\n", false, 0).map_err(e)?;
+    assert_eq!(out, Outcome::Wrote { backup: None });
+    assert_eq!(mode(&path)?, 0o644);
+    let out = files::write_file(&path, Some(b"one\n"), "one\n", false, 0).map_err(e)?;
+    assert_eq!(out, Outcome::Unchanged);
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+        .map_err(|x| x.to_string())?;
+    let out = files::write_file(&path, Some(b"one\n"), "two\n", false, 0).map_err(e)?;
+    let Outcome::Wrote { backup: Some(name) } = out else {
+        return Err("no backup".into());
+    };
+    assert_eq!(name, "f.json.memory-backup-19700101T000000Z");
+    let backup = dir.join(&name);
+    assert_eq!(std::fs::read(&backup).map_err(|x| x.to_string())?, b"one\n");
+    assert_eq!(mode(&backup)?, 0o600);
+    assert_eq!(mode(&path)?, 0o600);
+    assert_eq!(
+        std::fs::read_to_string(&path).map_err(|x| x.to_string())?,
+        "two\n"
+    );
+    let out = files::write_file(&path, Some(b"two\n"), "three\n", true, 5).map_err(e)?;
+    assert!(matches!(out, Outcome::Wrote { backup: Some(_) }));
+    assert_eq!(
+        std::fs::read_to_string(&path).map_err(|x| x.to_string())?,
+        "two\n"
+    );
+    assert_eq!(
+        std::fs::read_dir(&dir).map_err(|x| x.to_string())?.count(),
+        2
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
+
+#[test]
+fn files_pi_marker_decides_ownership() -> R {
+    let dir = temp("pi").map_err(|e| e.to_string())?;
+    let path = dir.join("ext").join("memory.ts");
+    let e = |x: Failure| x.to_string();
+    let out = files::pi_file(&path, Some("/x/memory"), false, 0).map_err(e)?;
+    assert_eq!(out, Outcome::Wrote { backup: None });
+    let out = files::pi_file(&path, Some("/x/memory"), false, 0).map_err(e)?;
+    assert_eq!(out, Outcome::Unchanged);
+    assert_eq!(
+        files::pi_file(&path, None, false, 0).map_err(e)?,
+        Outcome::Removed
+    );
+    assert!(!path.exists());
+    std::fs::write(&path, "// mine\n").map_err(|x| x.to_string())?;
+    assert_eq!(
+        files::pi_file(&path, Some("/x/memory"), false, 0).map_err(e)?,
+        Outcome::Kept
+    );
+    assert_eq!(
+        files::pi_file(&path, None, false, 0).map_err(e)?,
+        Outcome::Kept
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).map_err(|x| x.to_string())?,
+        "// mine\n"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
