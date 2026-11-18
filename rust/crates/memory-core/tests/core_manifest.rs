@@ -916,6 +916,7 @@ fn apply_transition_rules() -> R {
         swrite(name, true, epoch, off + 5, h(50), vec![piece(50, off, 5)])
     };
     let state = base_state()?;
+    let id = |s: &str| SourceId::try_from(s.to_owned());
     let check = |change: Change, want: ManifestError| -> R {
         let mut s = state.clone();
         assert_eq!(s.apply_changes(&[change]).err(), Some(want));
@@ -945,9 +946,27 @@ fn apply_transition_rules() -> R {
     let mut wrong_kind = ext("t", stamp(1, None), 10)?;
     wrong_kind.kind = SourceKind::ClaudeSubagent;
     check(Change::Extend(wrong_kind), ManifestError::SourceChanged)?;
-    let mut wrong_path = ext("t", stamp(1, None), 10)?;
-    wrong_path.path = "other".to_owned();
-    check(Change::Extend(wrong_path), ManifestError::SourceChanged)?;
+    // A snapshot replace must keep its path.
+    let mut moved_replace = swrite("c", false, stamp(2, None), 5, h(1), vec![piece(1, 0, 5)])?;
+    moved_replace.path = "other".to_owned();
+    check(Change::Replace(moved_replace), ManifestError::SourceChanged)?;
+    // An append source may move: Extend and Epoch apply and the fold stores the new path.
+    let mut moved_ext = ext("t", stamp(1, None), 10)?;
+    moved_ext.path = "archived/t".to_owned();
+    let mut s = state.clone();
+    s.apply_changes(&[Change::Extend(moved_ext)])?;
+    assert_eq!(s.sources.get(&id("t")?).ok_or("t")?.path, "archived/t");
+    let mut moved_epoch = swrite("t", true, stamp(2, None), 5, h(1), vec![piece(1, 0, 5)])?;
+    moved_epoch.path = "archived/t2".to_owned();
+    let mut s = state.clone();
+    s.apply_changes(&[Change::Epoch(moved_epoch)])?;
+    assert_eq!(s.sources.get(&id("t")?).ok_or("t")?.path, "archived/t2");
+    let mut wrong_kind_epoch = swrite("t", true, stamp(2, None), 5, h(1), vec![piece(1, 0, 5)])?;
+    wrong_kind_epoch.kind = SourceKind::ClaudeSubagent;
+    check(
+        Change::Epoch(wrong_kind_epoch),
+        ManifestError::SourceChanged,
+    )?;
     check(
         Change::Epoch(swrite(
             "t",
@@ -970,7 +989,6 @@ fn apply_transition_rules() -> R {
         )?),
         ManifestError::BadEpoch,
     )?;
-    let id = |s: &str| SourceId::try_from(s.to_owned());
     check(
         Change::Deleted {
             id: id("zz")?,
