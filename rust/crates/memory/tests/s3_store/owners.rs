@@ -71,7 +71,7 @@ fn owners_lists_exactly_the_local_walk_and_every_owner_exports() -> R {
 }
 
 #[test]
-fn owners_2500_keys_across_three_pages_sorted_with_colon_and_non_ascii() -> R {
+fn owners_2500_keys_across_three_pages_sorted_with_colon() -> R {
     let server = Fake::start()?;
     let rig = rig(&server, "own-pages")?;
     let mut want: Vec<String> = (0..2499)
@@ -89,6 +89,47 @@ fn owners_2500_keys_across_three_pages_sorted_with_colon_and_non_ascii() -> R {
     assert_eq!(text(&out.stderr), "memory: owners=2500\n");
     assert_eq!(server.count("GET"), 3, "three pages");
     no_leak(&out, &server, &[]);
+    Ok(())
+}
+
+/// Key order is not owner-text order: `-` sorts before `/`, so the server lists `s1-x/current.json`
+/// before `s1/current.json`, while the owner text `s1` sorts before `s1-x`. A key repeated on two
+/// pages is listed once.
+#[test]
+fn owners_sorts_by_owner_text_and_drops_a_repeated_key() -> R {
+    assert_eq!(PREFIX, "rust-acceptance/r1-test/", "the literal keys below");
+    let server = Fake::start()?;
+    let rig = rig(&server, "own-order")?;
+    server.queue(
+        "GET",
+        "",
+        Fault::ListBody(concat!(
+            "<?xml version=\"1.0\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+            "<EncodingType>url</EncodingType>",
+            "<Contents><Key>rust-acceptance/r1-test/sessions/a/m/claude/s1-x/current.json</Key></Contents>",
+            "<Contents><Key>rust-acceptance/r1-test/sessions/a/m/claude/s1/current.json</Key></Contents>",
+            "<IsTruncated>true</IsTruncated><NextContinuationToken>p2</NextContinuationToken>",
+            "</ListBucketResult>"
+        )),
+    );
+    server.queue(
+        "GET",
+        "",
+        Fault::ListBody(concat!(
+            "<?xml version=\"1.0\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+            "<EncodingType>url</EncodingType>",
+            "<Contents><Key>rust-acceptance/r1-test/sessions/a/m/claude/s1/current.json</Key></Contents>",
+            "<IsTruncated>false</IsTruncated></ListBucketResult>"
+        )),
+    );
+    let out = owners_cmd(&rig, &[])?;
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(
+        text(&out.stdout),
+        "sessions/a/m/claude/s1\nsessions/a/m/claude/s1-x\n"
+    );
+    assert_eq!(text(&out.stderr), "memory: owners=2\n");
+    assert_eq!(server.count("GET"), 2, "two pages");
     Ok(())
 }
 
