@@ -14,6 +14,7 @@ pub mod driver;
 pub mod environment;
 pub mod export;
 pub mod hook;
+pub mod install;
 pub mod log;
 pub mod owners;
 pub mod realfs;
