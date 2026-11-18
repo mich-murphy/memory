@@ -1,9 +1,13 @@
-//! A small ordered JSON type. Objects keep their file order, duplicate keys refuse the file, and
-//! the writer prints 2-space indentation with a trailing newline and non-ASCII text unescaped,
-//! the way `serde_json` pretty-prints, so a rewrite of a file that was written that way is
-//! byte-identical.
-use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
-use serde_json::Number;
+//! A small ordered JSON type. Objects keep their file order, duplicate keys refuse the file,
+//! numbers keep their exact text, and the writer prints 2-space indentation with a trailing
+//! newline and non-ASCII text unescaped, the way `serde_json` pretty-prints, so a rewrite of a
+//! file that was written that way is byte-identical.
+//!
+//! Parsing goes through `serde_json`'s `RawValue` (feature `raw_value`, already enabled): the
+//! document is validated whole, then each value's raw text is split by its first byte. No
+//! number is converted to a float, so no digit can change on a rewrite.
+use serde::de::{self, Deserialize, Deserializer, MapAccess, Visitor};
+use serde_json::value::RawValue;
 use std::collections::HashSet;
 use std::fmt;
 
@@ -17,8 +21,8 @@ pub enum Value {
     Null,
     /// `true` or `false`.
     Bool(bool),
-    /// A number, as `serde_json` reads it.
-    Number(Number),
+    /// A number, its exact text as validated by `serde_json`.
+    Number(String),
     /// A string.
     String(String),
     /// An array.
@@ -38,74 +42,70 @@ pub enum JsonError {
     NotObject,
 }
 
-struct ValueVisitor;
+/// An object's members as raw values, in file order; a duplicate key is an error.
+struct Members<'de>(Vec<(String, &'de RawValue)>);
 
-impl<'de> Visitor<'de> for ValueVisitor {
-    type Value = Value;
+struct MembersVisitor;
+
+impl<'de> Visitor<'de> for MembersVisitor {
+    type Value = Members<'de>;
 
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("a JSON value")
+        f.write_str("a JSON object")
     }
 
-    fn visit_bool<E: de::Error>(self, v: bool) -> Result<Value, E> {
-        Ok(Value::Bool(v))
-    }
-
-    fn visit_i64<E: de::Error>(self, v: i64) -> Result<Value, E> {
-        Ok(Value::Number(v.into()))
-    }
-
-    fn visit_u64<E: de::Error>(self, v: u64) -> Result<Value, E> {
-        Ok(Value::Number(v.into()))
-    }
-
-    fn visit_f64<E: de::Error>(self, v: f64) -> Result<Value, E> {
-        Number::from_f64(v)
-            .map(Value::Number)
-            .ok_or_else(|| E::custom("non-finite number"))
-    }
-
-    fn visit_str<E: de::Error>(self, v: &str) -> Result<Value, E> {
-        Ok(Value::String(v.to_owned()))
-    }
-
-    fn visit_string<E: de::Error>(self, v: String) -> Result<Value, E> {
-        Ok(Value::String(v))
-    }
-
-    fn visit_unit<E: de::Error>(self) -> Result<Value, E> {
-        Ok(Value::Null)
-    }
-
-    fn visit_none<E: de::Error>(self) -> Result<Value, E> {
-        Ok(Value::Null)
-    }
-
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
-        let mut items = Vec::new();
-        while let Some(item) = seq.next_element::<Value>()? {
-            items.push(item);
-        }
-        Ok(Value::Array(items))
-    }
-
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
-        let mut members: Object = Vec::new();
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Members<'de>, A::Error> {
+        let mut members = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
         while let Some(key) = map.next_key::<String>()? {
             if !seen.insert(key.clone()) {
                 return Err(de::Error::custom("duplicate key"));
             }
-            members.push((key, map.next_value::<Value>()?));
+            members.push((key, map.next_value::<&'de RawValue>()?));
         }
-        Ok(Value::Object(members))
+        Ok(Members(members))
     }
 }
 
-impl<'de> Deserialize<'de> for Value {
+impl<'de> Deserialize<'de> for Members<'de> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_any(ValueVisitor)
+        deserializer.deserialize_map(MembersVisitor)
     }
+}
+
+/// One value from its raw text, which `serde_json` has already validated as a whole document.
+fn from_raw(text: &str) -> Result<Value, serde_json::Error> {
+    let text = text.trim();
+    Ok(match text.as_bytes().first() {
+        Some(b'{') => {
+            let Members(raw) = serde_json::from_str::<Members<'_>>(text)?;
+            let mut members = Vec::with_capacity(raw.len());
+            for (key, value) in raw {
+                members.push((key, from_raw(value.get())?));
+            }
+            Value::Object(members)
+        }
+        Some(b'[') => {
+            let raw = serde_json::from_str::<Vec<&RawValue>>(text)?;
+            let mut items = Vec::with_capacity(raw.len());
+            for value in raw {
+                items.push(from_raw(value.get())?);
+            }
+            Value::Array(items)
+        }
+        Some(b'"') => Value::String(serde_json::from_str::<String>(text)?),
+        Some(b't' | b'f') => Value::Bool(serde_json::from_str::<bool>(text)?),
+        Some(b'n') => {
+            serde_json::from_str::<()>(text)?;
+            Value::Null
+        }
+        Some(b'-' | b'0'..=b'9') => {
+            // Validates the number's syntax without converting it.
+            serde_json::from_str::<&RawValue>(text)?;
+            Value::Number(text.to_owned())
+        }
+        _ => return Err(de::Error::custom("not a JSON value")),
+    })
 }
 
 /// Parse a document. Blank text is an empty object.
@@ -117,7 +117,9 @@ pub fn parse(text: &str) -> Result<Value, JsonError> {
     if text.trim().is_empty() {
         return Ok(Value::Object(Vec::new()));
     }
-    match serde_json::from_str::<Value>(text) {
+    // The whole document first: syntax, trailing text and depth are judged once here.
+    let whole = serde_json::from_str::<&RawValue>(text).map_err(|_| JsonError::Unparsable)?;
+    match from_raw(whole.get()) {
         Ok(value @ Value::Object(_)) => Ok(value),
         Ok(_) => Err(JsonError::NotObject),
         Err(_) => Err(JsonError::Unparsable),
@@ -144,7 +146,7 @@ fn write_value(out: &mut String, value: &Value, depth: usize) {
         Value::Null => out.push_str("null"),
         Value::Bool(true) => out.push_str("true"),
         Value::Bool(false) => out.push_str("false"),
-        Value::Number(number) => out.push_str(&number.to_string()),
+        Value::Number(number) => out.push_str(number),
         Value::String(text) => write_string(out, text),
         Value::Array(items) => {
             if items.is_empty() {

@@ -2,7 +2,7 @@
 //! files and the real binary under a temporary `HOME`.
 use memory::install::json::{self, Value};
 use proptest::prelude::*;
-use serde_json::Number;
+use proptest::test_runner::{Config as PropConfig, TestRunner};
 
 type R<T = ()> = Result<T, String>;
 
@@ -106,12 +106,18 @@ fn arb_value() -> impl Strategy<Value = Value> {
     let leaf = prop_oneof![
         Just(Value::Null),
         any::<bool>().prop_map(Value::Bool),
-        any::<i64>().prop_map(|n| Value::Number(n.into())),
-        any::<u64>().prop_map(|n| Value::Number(n.into())),
-        // Quarter steps are exact in binary; serde_json without `float_roundtrip` may misread
-        // 17-digit floats, and the brief forbids a feature change.
-        (-4_000_000_i32..4_000_000)
-            .prop_map(|n| Number::from_f64(f64::from(n) / 4.0).map_or(Value::Null, Value::Number)),
+        any::<i64>().prop_map(|n| Value::Number(n.to_string())),
+        any::<u64>().prop_map(|n| Value::Number(n.to_string())),
+        // Numbers keep their text, so any digits survive, including more than a float holds.
+        (
+            any::<i64>(),
+            "[0-9]{1,30}",
+            proptest::option::of(-400_i32..400)
+        )
+            .prop_map(|(int, frac, exp)| Value::Number(match exp {
+                Some(exp) => format!("{int}.{frac}e{exp}"),
+                None => format!("{int}.{frac}"),
+            })),
         arb_text().prop_map(Value::String),
     ];
     leaf.prop_recursive(4, 48, 4, |inner| {
@@ -142,14 +148,38 @@ fn arb_document() -> impl Strategy<Value = Value> {
     })
 }
 
-proptest! {
-    #[test]
-    fn proptest_json_write_parse_write_is_stable(doc in arb_document()) {
+#[test]
+fn proptest_json_write_parse_write_is_stable() {
+    let mut runner = TestRunner::new(PropConfig {
+        failure_persistence: None,
+        ..PropConfig::default()
+    });
+    let result = runner.run(&arb_document(), |doc| {
         let text = json::to_text(&doc);
         let back = json::parse(&text).map_err(|e| TestCaseError::fail(e.to_string()))?;
         prop_assert_eq!(&back, &doc);
         prop_assert_eq!(json::to_text(&back), text);
+        Ok(())
+    });
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn json_numbers_keep_their_exact_text() -> R {
+    // 17 and more significant digits, exponents and trailing zeros: none goes through a float.
+    round_trips(
+        "{\n  \"a\": 515164745.98312557,\n  \"b\": 0.1000000000000000055511151231257827,\n  \"c\": 1e400,\n  \"d\": -2.50E-3,\n  \"e\": 123456789012345678901234567890\n}\n",
+    )?;
+    for bad in [
+        "{\"a\": 01}",
+        "{\"a\": 1.}",
+        "{\"a\": -}",
+        "{\"a\": +1}",
+        "{\"a\": NaN}",
+    ] {
+        assert_eq!(json::parse(bad), Err(json::JsonError::Unparsable), "{bad}");
     }
+    Ok(())
 }
 
 // ---- merge ----
@@ -875,6 +905,30 @@ fn bin_install_refuses_state_dir_override_and_missing_config() -> R {
         err_text(&o)
     );
     assert!(!n.p(".claude").exists());
+    Ok(())
+}
+
+/// A binary not named `memory` is refused before any file is written: a later install or
+/// uninstall could not recognise its hook entries as ours. A copy, not a symlink, because Linux
+/// resolves `current_exe` through symlinks.
+#[test]
+fn bin_install_refuses_a_binary_not_named_memory() -> R {
+    let h = Home::new("bin-name", true)?;
+    let e = |x: std::io::Error| x.to_string();
+    let other = h.0.parent().ok_or("parent")?.join("memory-next");
+    std::fs::copy(BIN, &other).map_err(e)?;
+    std::fs::set_permissions(&other, std::fs::Permissions::from_mode(0o755)).map_err(e)?;
+    let mut cmd = Command::new(&other);
+    cmd.arg("install").env_clear().env("HOME", &h.0);
+    if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+        cmd.env("LLVM_PROFILE_FILE", profile);
+    }
+    let o = cmd.stdin(Stdio::null()).output().map_err(e)?;
+    assert_eq!(o.status.code(), Some(2));
+    assert_eq!(err_text(&o), "memory: install_binary_name\n");
+    assert!(out_text(&o).is_empty());
+    assert!(!h.p(".claude").exists());
+    assert!(!h.p("Library").exists());
     Ok(())
 }
 

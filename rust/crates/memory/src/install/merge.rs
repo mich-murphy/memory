@@ -4,7 +4,6 @@
 //! are dropped and an event with no group is deleted.
 use super::Failure;
 use super::json::{Object, Value};
-use serde_json::Number;
 
 /// Which agent a settings file belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,7 +157,7 @@ fn handler(event: &HookEvent, command: &str) -> Value {
     }
     members.push((
         "timeout".to_owned(),
-        Value::Number(Number::from(event.timeout)),
+        Value::Number(event.timeout.to_string()),
     ));
     Value::Object(members)
 }

@@ -129,13 +129,20 @@ pub fn main_entry(install: bool, args: impl Iterator<Item = OsString>) -> ExitCo
             return fail(error.code(), EXIT_CONFIG);
         }
     }
+    // The path as invoked, not canonicalized: on macOS `current_exe` keeps a symlink, so an
+    // upgrade behind a stable `memory` link keeps the hook command, and with it Codex's trust
+    // hash (which covers the command string). The name must be `memory`, or a later install
+    // or uninstall could not recognise the entries as ours.
     let exe = std::env::current_exe()
-        .and_then(std::fs::canonicalize)
         .ok()
         .and_then(|p| p.to_str().map(str::to_owned));
     let Some(exe) = exe else {
         return fail("install_io", EXIT_FAILED);
     };
+    let named = Path::new(&exe);
+    if install && (!named.is_absolute() || named.file_name().is_none_or(|name| name != "memory")) {
+        return fail("install_binary_name", EXIT_CONFIG);
+    }
     match run_steps(install, dry, &exe, &home) {
         Ok(next) => {
             let mut out = std::io::stdout().lock();

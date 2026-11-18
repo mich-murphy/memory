@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc bfa5ed750aac78231ca0acedc6ce8ed890afb6b050bcc7b5c26edc132a69ee17 # shrinks to doc = Object([("", Array([Array([Number(Number(515164745.98312557))])]))])
