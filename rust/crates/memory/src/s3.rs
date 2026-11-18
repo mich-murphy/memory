@@ -19,6 +19,8 @@ const MAX_GET_BODY: u64 = 64 << 20;
 /// body is read to the end, so a reply larger than this is not read and its connection is
 /// dropped.
 const MAX_PUT_REPLY_BODY: u64 = 64 << 10;
+/// Cap on a ListObjectsV2 reply body; a page of 1,000 keys is about 0.2 MB.
+pub const MAX_LIST_BODY: u64 = 4 << 20;
 /// Validity of one presigned request; it is used immediately.
 const SIGN_VALIDITY: Duration = Duration::from_secs(300);
 
@@ -132,6 +134,60 @@ pub fn map_transport(write: bool, error: &ureq::Error) -> StoreError {
     }
 }
 
+/// One ListObjectsV2 page: keys with the store prefix stripped, and the next token.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Page {
+    /// Keys under `prefix + under`, with `prefix` removed, in the order the server gave them.
+    pub keys: Vec<String>,
+    /// Keys the server returned that did not start with `prefix + under`; they are not in
+    /// `keys`. A caller treats any as a failure.
+    pub outside: usize,
+    /// Token for the next page; `None` when the listing is complete.
+    pub next: Option<String>,
+}
+
+/// Map one ListObjectsV2 reply to a [`Page`]. Pure. `full` is `prefix + under`, `prefix` the
+/// store prefix to strip.
+///
+/// # Errors
+/// The [`StoreError`] of a non-200 status; `Server` for a body over [`MAX_LIST_BODY`], not UTF-8
+/// or not a ListObjectsV2 document.
+pub fn map_list_reply(
+    prefix: &str,
+    full: &str,
+    status: u16,
+    body: &[u8],
+    retry_after: Option<&str>,
+) -> Result<Page, StoreError> {
+    if status != 200 {
+        return match map_reply(Operation::Get, status, None, retry_after) {
+            Err(error) => Err(error),
+            Ok(_) => Err(StoreError::Server),
+        };
+    }
+    if u64::try_from(body.len()).map_or(true, |n| n > MAX_LIST_BODY) {
+        return Err(StoreError::Server);
+    }
+    let text = std::str::from_utf8(body).map_err(|_| StoreError::Server)?;
+    let parsed =
+        rusty_s3::actions::ListObjectsV2::parse_response(text).map_err(|_| StoreError::Server)?;
+    let mut page = Page {
+        next: parsed.next_continuation_token,
+        ..Page::default()
+    };
+    for content in parsed.contents {
+        match content
+            .key
+            .strip_prefix(full)
+            .and_then(|_| content.key.strip_prefix(prefix))
+        {
+            Some(stripped) => page.keys.push(stripped.to_owned()),
+            None => page.outside += 1,
+        }
+    }
+    Ok(page)
+}
+
 /// The S3 (Cloudflare R2) object store.
 pub struct S3Store {
     agent: ureq::Agent,
@@ -198,6 +254,49 @@ impl S3Store {
             prefix: prefix.to_owned(),
             timeouts,
         })
+    }
+
+    /// One ListObjectsV2 exchange for `prefix + under`, continuing from `token`. No loop: the
+    /// caller follows [`Page::next`].
+    ///
+    /// # Errors
+    /// A [`StoreError`] as for `get`; `Server` for an oversized or unparsable body.
+    pub fn list_page(&mut self, under: &str, token: Option<&str>) -> Result<Page, StoreError> {
+        let full = format!("{}{under}", self.prefix);
+        let mut action = self.bucket.list_objects_v2(Some(&self.creds));
+        action.with_prefix(full.clone());
+        if let Some(token) = token {
+            action.with_continuation_token(token.to_owned());
+        }
+        let url = action.sign(SIGN_VALIDITY);
+        let response = self
+            .agent
+            .get(url.as_str())
+            .config()
+            .timeout_global(Some(self.timeouts.for_body(0)))
+            .build()
+            .call()
+            .map_err(|error| map_transport(false, &error))?;
+        let (parts, mut body) = response.into_parts();
+        let status = parts.status.as_u16();
+        let limit = if status == 200 {
+            MAX_LIST_BODY
+        } else {
+            MAX_PUT_REPLY_BODY
+        };
+        let bytes = body.with_config().limit(limit).read_to_vec();
+        if status != 200 {
+            let _ = bytes;
+            return map_list_reply(
+                &self.prefix,
+                &full,
+                status,
+                &[],
+                header(&parts, "retry-after"),
+            );
+        }
+        let bytes = bytes.map_err(|error| map_transport(false, &error))?;
+        map_list_reply(&self.prefix, &full, status, &bytes, None)
     }
 
     fn put(
@@ -299,5 +398,95 @@ impl Store for S3Store {
             .read_to_vec()
             .map_err(|error| map_transport(false, &error))?;
         Ok(Stored { body: bytes, etag })
+    }
+}
+
+#[cfg(test)]
+mod list_tests {
+    use super::*;
+
+    const P: &str = "run/";
+    const FULL: &str = "run/sessions/";
+
+    fn doc(keys: &[&str], token: Option<&str>) -> String {
+        let mut x = String::from(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><EncodingType>url</EncodingType>",
+        );
+        for k in keys {
+            x.push_str(&format!("<Contents><Key>{k}</Key></Contents>"));
+        }
+        match token {
+            Some(t) => x.push_str(&format!(
+                "<IsTruncated>true</IsTruncated><NextContinuationToken>{t}</NextContinuationToken>"
+            )),
+            None => x.push_str("<IsTruncated>false</IsTruncated>"),
+        }
+        x.push_str("</ListBucketResult>");
+        x
+    }
+
+    #[test]
+    fn ok_parses_strips_prefix_and_decodes() {
+        let body = doc(&["run/sessions/a%3Ab/current.json"], Some("t1"));
+        let page = map_list_reply(P, FULL, 200, body.as_bytes(), None);
+        assert_eq!(
+            page,
+            Ok(Page {
+                keys: vec!["sessions/a:b/current.json".to_owned()],
+                outside: 0,
+                next: Some("t1".to_owned())
+            })
+        );
+    }
+
+    #[test]
+    fn key_outside_prefix_is_counted_not_returned() {
+        let body = doc(&["other/sessions/x/current.json", "run/shared/x"], None);
+        let page = map_list_reply(P, FULL, 200, body.as_bytes(), None);
+        assert_eq!(
+            page,
+            Ok(Page {
+                keys: vec![],
+                outside: 2,
+                next: None
+            })
+        );
+    }
+
+    #[test]
+    fn oversized_body_is_server() {
+        let body = vec![b' '; usize::try_from(MAX_LIST_BODY).unwrap_or(0) + 1];
+        assert_eq!(
+            map_list_reply(P, FULL, 200, &body, None),
+            Err(StoreError::Server)
+        );
+    }
+
+    #[test]
+    fn unparsable_body_is_server() {
+        assert_eq!(
+            map_list_reply(P, FULL, 200, b"not xml", None),
+            Err(StoreError::Server)
+        );
+        assert_eq!(
+            map_list_reply(P, FULL, 200, &[0xff, 0xfe], None),
+            Err(StoreError::Server)
+        );
+    }
+
+    #[test]
+    fn statuses_map_as_get() {
+        assert_eq!(
+            map_list_reply(P, FULL, 403, b"", None),
+            Err(StoreError::Auth)
+        );
+        assert_eq!(
+            map_list_reply(P, FULL, 500, b"", None),
+            Err(StoreError::Server)
+        );
+        assert_eq!(
+            map_list_reply(P, FULL, 503, b"", Some("7")),
+            Err(StoreError::Throttled(Some(7)))
+        );
     }
 }

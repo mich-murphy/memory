@@ -95,11 +95,16 @@ from `main` alone.
      `session-reader/v2` envelope (streamed bodies, one envelope source per epoch, role from
      kind and path, `CodexCompressed` as an artifact), and gate `10-consumer` runs real writer
      output through it into the unchanged Python importer and report for Claude, Codex and Pi,
-     with a privacy canary scan. Full gates 14 of 14. If its stack is not yet merged, push and
-     merge it first. After the run ends: a short run with the streamed binary on real data that
+     with a privacy canary scan. Full gates 14 of 14. Merged as `714635b` (stack #151,
+     2026-11-18 01:45Z; the macOS analytics venv now uses a pinned Python 3.13, wheels only).
+  5. Brief 33 ([33-owner-listing.md](rust-rewrite/implementation/33-owner-listing.md),
+     [evidence 24](rust-rewrite/implementation/evidence/24-owners/)) is accepted locally as
+     `5d5366f`: `memory owners` lists every session owner with a `current.json` under the
+     prefix (ListObjectsV2, rusty-s3 feature `xml`), sorted, in the text `export` takes. If its
+     stack is not yet merged, push and merge it first. After the run ends: a short run with the streamed binary on real data that
      measures the peak and exports and imports every captured owner; then lifting the
      empty-prefix refusal and cutover (DESIGN 18). Open: recompressed Codex rollouts reach the
-     importer unparsed (Go decompressed them); no owner enumeration for export yet.
+     importer unparsed (Go decompressed them; this Mac had none on 2026-11-18).
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

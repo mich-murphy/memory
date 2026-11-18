@@ -15,6 +15,7 @@ pub mod environment;
 pub mod export;
 pub mod hook;
 pub mod log;
+pub mod owners;
 pub mod realfs;
 pub mod resolve;
 pub mod restore;
