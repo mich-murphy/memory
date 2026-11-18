@@ -1068,3 +1068,51 @@ fn read_dir_defers_snapshots_and_reports_a_truncated_walk() -> R {
     assert_eq!(w.read_dir(&t.root().join("debug")), (vec![], false));
     Ok(())
 }
+
+// ------------------------------------------------------------------ duplicate ids
+
+const ROLLOUT: &str = "rollout-2026-11-17T10-00-00-33333333-3333-4333-8333-333333333333.jsonl";
+
+#[test]
+fn two_files_with_one_id_yield_the_first_path_and_count_a_duplicate() -> R {
+    let t = Tmp::new()?;
+    let codex = t.0.join("codex");
+    let live = format!("sessions/2026/11/17/{ROLLOUT}");
+    let archived = format!("archived_sessions/{ROLLOUT}");
+    t.write(&format!("codex/{live}"), b"{}\n")?;
+    t.write(&format!("codex/{archived}"), b"{}\n")?;
+    let mut w = agent_walker(&codex, Agent::Codex)?;
+    let rows = w.enumerate();
+    assert_eq!(rows.len(), 1);
+    let (owner, source) = rows.first().ok_or("row")?;
+    assert_eq!(
+        source.path, archived,
+        "lexicographically first path is kept"
+    );
+    let c = w.counts();
+    assert_eq!((c.yielded, c.duplicate), (1, 1));
+    // `note` of the duplicate still names the owner; `of` yields only the kept source.
+    let mut w2 = agent_walker(&codex, Agent::Codex)?;
+    assert_eq!(w2.note(&codex.join(&live)), Some(owner.clone()));
+    assert_eq!(w2.note(&codex.join(&archived)), Some(owner.clone()));
+    let of = w2.of(owner);
+    assert_eq!(of.len(), 1);
+    assert_eq!(of.first().map(|s| s.path.clone()), Some(archived.clone()));
+    // After an enumerate, `of` agrees with it.
+    let of = w.of(owner);
+    assert_eq!(of.len(), 1);
+    assert_eq!(of.first().map(|s| s.path.clone()), Some(archived));
+    Ok(())
+}
+
+#[test]
+fn plain_and_zst_are_two_sources_and_no_duplicate() -> R {
+    let t = Tmp::new()?;
+    let codex = t.0.join("codex");
+    t.write(&format!("codex/sessions/2026/11/17/{ROLLOUT}"), b"{}\n")?;
+    t.write(&format!("codex/sessions/2026/11/17/{ROLLOUT}.zst"), b"x")?;
+    let mut w = agent_walker(&codex, Agent::Codex)?;
+    assert_eq!(w.enumerate().len(), 2);
+    assert_eq!((w.counts().yielded, w.counts().duplicate), (2, 0));
+    Ok(())
+}
