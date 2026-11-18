@@ -204,3 +204,8 @@ on the intended assertion, `scripts/gates.sh` on the combined tip.
   landed within two minutes. Hints: Pi only; no new Claude or Codex session. Brief 31 (streaming)
   merged as `2e5f193`; this run keeps its `a28bfa4` binary. Next checks about 2026-11-18T08:09Z and
   20:35Z, then about 2026-11-19T09:00Z, after which the run can end (evidence 21, "Check 2").
+- 2026-11-18 08:40Z (check 3): third `memory check` clean (6,039 of 6,039 sources match;
+  mismatch, uncaptured, parked 0). Daemon unchanged since the start, 1,489 rounds, no new failure
+  since check 2. Claude hook delivery verified (one Claude `session_end` hint on 2026-11-17); Codex
+  still unverified (no new rollout). Peak unchanged at 1,254 MB. Next checks about 20:35Z, then
+  about 2026-11-19T09:00Z (evidence 21, "Check 3").
