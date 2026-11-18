@@ -392,11 +392,17 @@ impl Store for S3Store {
                 return Err(error);
             }
         };
-        let bytes = body
-            .with_config()
-            .limit(MAX_GET_BODY)
-            .read_to_vec()
-            .map_err(|error| map_transport(false, &error))?;
+        // Exact allocation from `Content-Length` (capped at the body limit): `read_to_vec` grows
+        // its buffer by doubling, and the freed blocks kept a streamed `memory check` of one
+        // 100 MB source at 249 MB (brief 34). An over-limit body is still `BodyExceedsLimit`,
+        // which `ureq::Error::from` recovers from the reader's `io::Error`.
+        let reserve = body.content_length().unwrap_or(0).min(MAX_GET_BODY);
+        let mut bytes = Vec::with_capacity(usize::try_from(reserve).unwrap_or_default());
+        std::io::Read::read_to_end(
+            &mut body.with_config().limit(MAX_GET_BODY).reader(),
+            &mut bytes,
+        )
+        .map_err(|error| map_transport(false, &ureq::Error::from(error)))?;
         Ok(Stored { body: bytes, etag })
     }
 }

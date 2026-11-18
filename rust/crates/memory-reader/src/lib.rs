@@ -12,6 +12,9 @@ pub mod export;
 
 use std::io::Read;
 
+/// Most bytes [`decode_piece`] reserves up front: one capture piece (8 MiB).
+const PREALLOC_PIECE_BYTES: u64 = 8 * 1024 * 1024;
+
 /// Why a stored piece did not decode to the bytes its descriptor promises.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum DecodeError {
@@ -74,7 +77,12 @@ pub fn decode_piece(piece: &Piece, stored: &[u8]) -> Result<Vec<u8>, DecodeError
     }
     let bound = piece.len();
     let mut decoder = zstd::stream::read::Decoder::new(stored).map_err(|_| DecodeError::Zstd)?;
-    let mut out = Vec::new();
+    // Exact allocation from the descriptor, capped at one capture piece: a buffer grown by
+    // doubling leaves large freed blocks behind, which kept a streamed `memory check` of one
+    // 100 MB source at 249 MB (brief 34). `len` is only checked non-zero, hence the cap.
+    let mut out = Vec::with_capacity(
+        usize::try_from(bound.min(PREALLOC_PIECE_BYTES)).unwrap_or_default(),
+    );
     decoder
         .by_ref()
         .take(bound.saturating_add(1))
