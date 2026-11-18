@@ -211,7 +211,17 @@ pub fn write_file(
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or(Failure::Io)?;
-    let backup = old.map(|_| format!("{name}.memory-backup-{}", utc_stamp(now)));
+    // A second change within the same second gets a numeric suffix rather than failing.
+    let backup = old.map(|_| {
+        let base = format!("{name}.memory-backup-{}", utc_stamp(now));
+        let mut candidate = base.clone();
+        let mut n = 1_u32;
+        while path.with_file_name(&candidate).symlink_metadata().is_ok() {
+            candidate = format!("{base}-{n}");
+            n += 1;
+        }
+        candidate
+    });
     if dry {
         return Ok(Outcome::Wrote { backup });
     }

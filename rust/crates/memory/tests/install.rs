@@ -642,3 +642,351 @@ fn files_pi_marker_decides_ownership() -> R {
     let _ = std::fs::remove_dir_all(&dir);
     Ok(())
 }
+
+// ---- real binary ----
+
+use std::process::{Command, Output, Stdio};
+
+const BIN: &str = env!("CARGO_BIN_EXE_memory");
+
+struct Home(PathBuf);
+
+impl Home {
+    fn new(name: &str, with_config: bool) -> Result<Self, String> {
+        let e = |x: std::io::Error| x.to_string();
+        let base = temp(name).map_err(e)?;
+        let home = base.join("home");
+        let root = home.join(".local/state/memory");
+        std::fs::create_dir_all(&root).map_err(e)?;
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).map_err(e)?;
+        let token = base.join("token");
+        std::fs::write(&token, "access_key_id = \"k\"\nsecret_access_key = \"s\"\n").map_err(e)?;
+        std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).map_err(e)?;
+        if with_config {
+            std::fs::write(
+                root.join("config.toml"),
+                format!(
+                    "archive_id = \"a\"\nmachine_id = \"m\"\nendpoint = \"http://127.0.0.1:9\"\nbucket = \"bucket-1\"\nprefix = \"p/\"\ntoken_path = \"{}\"\n",
+                    token.display()
+                ),
+            )
+            .map_err(e)?;
+        }
+        Ok(Self(home))
+    }
+    fn p(&self, rel: &str) -> PathBuf {
+        self.0.join(rel)
+    }
+    fn run(&self, args: &[&str], extra: &[(&str, &str)]) -> Result<Output, String> {
+        let mut cmd = Command::new(BIN);
+        cmd.args(args).env_clear().env("HOME", &self.0);
+        if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+            cmd.env("LLVM_PROFILE_FILE", profile);
+        }
+        for (k, v) in extra {
+            cmd.env(k, v);
+        }
+        cmd.stdin(Stdio::null()).output().map_err(|x| x.to_string())
+    }
+    fn read(&self, rel: &str) -> Result<String, String> {
+        std::fs::read_to_string(self.p(rel)).map_err(|x| format!("{rel}: {x}"))
+    }
+    fn backups(&self) -> Result<usize, String> {
+        let mut n = 0;
+        for dir in [
+            ".claude",
+            ".codex",
+            ".pi/agent/extensions",
+            "Library/LaunchAgents",
+        ] {
+            if let Ok(rd) = std::fs::read_dir(self.p(dir)) {
+                n += rd
+                    .filter_map(Result::ok)
+                    .filter(|f| f.file_name().to_string_lossy().contains(".memory-backup-"))
+                    .count();
+            }
+        }
+        Ok(n)
+    }
+}
+
+impl Drop for Home {
+    fn drop(&mut self) {
+        if let Some(base) = self.0.parent() {
+            let _ = std::fs::remove_dir_all(base);
+        }
+    }
+}
+
+fn out_text(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stdout).into_owned()
+}
+fn err_text(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stderr).into_owned()
+}
+
+const FILES: [&str; 3] = [
+    ".claude/settings.json",
+    ".codex/hooks.json",
+    ".pi/agent/extensions/memory.ts",
+];
+
+#[test]
+fn bin_install_writes_files_and_second_run_is_unchanged() -> R {
+    let h = Home::new("bin-install", true)?;
+    let o = h.run(&["install"], &[])?;
+    assert_eq!(o.status.code(), Some(0), "{}", err_text(&o));
+    let text = out_text(&o);
+    for f in FILES {
+        assert!(
+            text.contains(&format!("wrote {}", h.p(f).display())),
+            "{text}"
+        );
+        assert!(h.p(f).exists());
+    }
+    if cfg!(target_os = "macos") {
+        assert!(h.p("Library/LaunchAgents/memory.plist").exists());
+        assert!(text.contains("next: launchctl bootstrap gui/$(id -u) "));
+        assert!(h.p("Library/Logs/memory").is_dir());
+    } else {
+        assert!(text.contains("launchd: skipped (not macOS)"));
+    }
+    assert!(text.contains("next: approve the memory hooks in Codex /hooks"));
+    assert_eq!(h.backups()?, 0);
+    let before: Vec<String> = FILES.iter().map(|f| h.read(f)).collect::<Result<_, _>>()?;
+    let o = h.run(&["install"], &[])?;
+    let text = out_text(&o);
+    assert_eq!(o.status.code(), Some(0));
+    for f in FILES {
+        assert!(
+            text.contains(&format!("unchanged {}", h.p(f).display())),
+            "{text}"
+        );
+    }
+    assert!(!text.contains("approve the memory hooks"));
+    assert_eq!(h.backups()?, 0);
+    let after: Vec<String> = FILES.iter().map(|f| h.read(f)).collect::<Result<_, _>>()?;
+    assert_eq!(before, after);
+    Ok(())
+}
+
+#[test]
+fn bin_install_backs_up_a_changed_file_once_with_old_bytes_and_mode() -> R {
+    let h = Home::new("bin-backup", true)?;
+    let e = |x: std::io::Error| x.to_string();
+    std::fs::create_dir_all(h.p(".claude")).map_err(e)?;
+    let old = "{\n  \"theme\": \"dark\"\n}\n";
+    let path = h.p(".claude/settings.json");
+    std::fs::write(&path, old).map_err(e)?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(e)?;
+    let o = h.run(&["install"], &[])?;
+    assert_eq!(o.status.code(), Some(0), "{}", err_text(&o));
+    assert!(out_text(&o).contains(&format!(
+        "wrote {} (backup settings.json.memory-backup-",
+        path.display()
+    )));
+    let backups: Vec<PathBuf> = std::fs::read_dir(h.p(".claude"))
+        .map_err(e)?
+        .filter_map(Result::ok)
+        .map(|f| f.path())
+        .filter(|p| p.to_string_lossy().contains(".memory-backup-"))
+        .collect();
+    assert_eq!(backups.len(), 1);
+    let b = backups.first().ok_or("none")?;
+    assert_eq!(std::fs::read_to_string(b).map_err(e)?, old);
+    assert_eq!(mode(b)?, 0o600);
+    assert_eq!(mode(&path)?, 0o600);
+    assert!(
+        h.read(".claude/settings.json")?
+            .contains("\"theme\": \"dark\"")
+    );
+    Ok(())
+}
+
+#[test]
+fn bin_install_dry_run_writes_nothing() -> R {
+    let h = Home::new("bin-dry", true)?;
+    let o = h.run(&["install", "--dry-run"], &[])?;
+    assert_eq!(o.status.code(), Some(0), "{}", err_text(&o));
+    assert!(out_text(&o).contains("wrote "));
+    for f in FILES {
+        assert!(!h.p(f).exists(), "{f}");
+    }
+    assert!(!h.p("Library").exists());
+    Ok(())
+}
+
+#[test]
+fn bin_install_unparsable_settings_refused_and_stops_later_files() -> R {
+    let h = Home::new("bin-unparsable", true)?;
+    let e = |x: std::io::Error| x.to_string();
+    std::fs::create_dir_all(h.p(".claude")).map_err(e)?;
+    std::fs::write(h.p(".claude/settings.json"), "{ nope").map_err(e)?;
+    let o = h.run(&["install"], &[])?;
+    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(err_text(&o), "memory: install_unparsable\n");
+    assert_eq!(h.read(".claude/settings.json")?, "{ nope");
+    assert!(!h.p(".codex/hooks.json").exists());
+    assert!(!h.p(".pi").exists());
+    assert_eq!(h.backups()?, 0);
+    Ok(())
+}
+
+#[test]
+fn bin_install_codex_unknown_key_refused() -> R {
+    let h = Home::new("bin-codex-schema", true)?;
+    let e = |x: std::io::Error| x.to_string();
+    std::fs::create_dir_all(h.p(".codex")).map_err(e)?;
+    std::fs::write(h.p(".codex/hooks.json"), "{\"zzz\": 1}").map_err(e)?;
+    let o = h.run(&["install"], &[])?;
+    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(err_text(&o), "memory: install_codex_schema\n");
+    assert_eq!(h.read(".codex/hooks.json")?, "{\"zzz\": 1}");
+    assert!(!h.p(".pi").exists());
+    Ok(())
+}
+
+#[test]
+fn bin_install_keeps_a_foreign_pi_extension() -> R {
+    let h = Home::new("bin-foreign-pi", true)?;
+    let e = |x: std::io::Error| x.to_string();
+    std::fs::create_dir_all(h.p(".pi/agent/extensions")).map_err(e)?;
+    std::fs::write(h.p(".pi/agent/extensions/memory.ts"), "// mine\n").map_err(e)?;
+    let o = h.run(&["install"], &[])?;
+    assert_eq!(o.status.code(), Some(0));
+    assert!(out_text(&o).contains(&format!("kept {} (not ours)", h.p(FILES[2]).display())));
+    assert_eq!(h.read(FILES[2])?, "// mine\n");
+    Ok(())
+}
+
+#[test]
+fn bin_install_refuses_state_dir_override_and_missing_config() -> R {
+    let h = Home::new("bin-refuse", true)?;
+    let o = h.run(&["install"], &[("MEMORY_STATE_DIR", "/nonexistent-x")])?;
+    assert_eq!(o.status.code(), Some(2));
+    assert_eq!(err_text(&o), "memory: install_state_dir_override\n");
+    assert!(!h.p(".claude").exists());
+    let n = Home::new("bin-noconfig", false)?;
+    let o = n.run(&["install"], &[])?;
+    assert_eq!(o.status.code(), Some(2));
+    assert!(
+        err_text(&o).starts_with("memory: config_"),
+        "{}",
+        err_text(&o)
+    );
+    assert!(!n.p(".claude").exists());
+    Ok(())
+}
+
+#[test]
+fn bin_install_extra_argument_is_usage() -> R {
+    let h = Home::new("bin-usage", true)?;
+    for args in [
+        &["install", "extra"][..],
+        &["uninstall", "--x"],
+        &["install", "--dry-run", "x"],
+    ] {
+        let o = h.run(args, &[])?;
+        assert_eq!(o.status.code(), Some(64), "{args:?}");
+        assert_eq!(err_text(&o), "memory: usage\n");
+    }
+    Ok(())
+}
+
+#[test]
+fn bin_uninstall_removes_ours_and_keeps_foreign() -> R {
+    let h = Home::new("bin-uninstall", true)?;
+    let e = |x: std::io::Error| x.to_string();
+    std::fs::create_dir_all(h.p(".claude")).map_err(e)?;
+    let foreign = "{\n  \"hooks\": {\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"foreign\"\n          }\n        ]\n      }\n    ]\n  }\n}\n";
+    std::fs::write(h.p(".claude/settings.json"), foreign).map_err(e)?;
+    assert_eq!(h.run(&["install"], &[])?.status.code(), Some(0));
+    let o = h.run(&["uninstall"], &[])?;
+    assert_eq!(o.status.code(), Some(0), "{}", err_text(&o));
+    let text = out_text(&o);
+    assert_eq!(h.read(".claude/settings.json")?, foreign);
+    assert!(
+        text.contains(&format!("removed {}", h.p(FILES[2]).display())),
+        "{text}"
+    );
+    assert!(!h.p(FILES[2]).exists());
+    if cfg!(target_os = "macos") {
+        assert!(!h.p("Library/LaunchAgents/memory.plist").exists());
+        assert!(text.contains("next: launchctl bootout gui/$(id -u)/memory"));
+    }
+    // Uninstall needs no config and a second run changes nothing.
+    let o = h.run(&["uninstall"], &[])?;
+    assert_eq!(o.status.code(), Some(0));
+    assert!(!out_text(&o).contains("removed"));
+    Ok(())
+}
+
+#[test]
+fn bin_hook_round_trip_appends_one_hint_per_agent() -> R {
+    let h = Home::new("bin-roundtrip", true)?;
+    assert_eq!(h.run(&["install"], &[])?.status.code(), Some(0));
+    let count = || -> usize {
+        let mut n = 0;
+        if let Ok(rd) = std::fs::read_dir(h.p(".local/state/memory/hints")) {
+            for f in rd.filter_map(Result::ok) {
+                n += std::fs::read_to_string(f.path()).map_or(0, |t| t.lines().count());
+            }
+        }
+        n
+    };
+    let run_cmd = |command: &str, payload: &str| -> R {
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .env_clear()
+            .env("HOME", &h.0)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|x| x.to_string())?;
+        {
+            use std::io::Write;
+            let mut stdin = child.stdin.take().ok_or("stdin")?;
+            stdin
+                .write_all(payload.as_bytes())
+                .map_err(|x| x.to_string())?;
+        }
+        child.wait().map_err(|x| x.to_string())?;
+        Ok(())
+    };
+    let mut expected = 0;
+    for (file, payload) in [
+        (
+            ".claude/settings.json",
+            r#"{"hook_event_name":"Stop","session_id":"s1","cwd":"/w","transcript_path":"/w/t.jsonl"}"#,
+        ),
+        (
+            ".codex/hooks.json",
+            r#"{"hook_event_name":"Stop","session_id":"s2","cwd":"/w","transcript_path":"/w/t.jsonl"}"#,
+        ),
+    ] {
+        let doc = parse(&h.read(file)?)?;
+        let Some(Value::String(command)) =
+            at(&doc, &["hooks", "Stop", "0", "hooks", "0", "command"])
+        else {
+            return Err(format!("no Stop command in {file}"));
+        };
+        run_cmd(command, payload)?;
+        expected += 1;
+        assert_eq!(count(), expected, "{file}");
+    }
+    let ts = h.read(FILES[2])?;
+    let bin_line = ts
+        .lines()
+        .find_map(|l| l.strip_prefix("const BIN = "))
+        .ok_or("no BIN")?;
+    let bin: String =
+        serde_json::from_str(bin_line.trim_end_matches(';')).map_err(|x| x.to_string())?;
+    run_cmd(
+        &format!("{} hook pi", memory::install::merge::quote(&bin)),
+        r#"{"event":"agent_settled","session_id":"s3","session_file":"/w/p.jsonl","cwd":"/w"}"#,
+    )?;
+    assert_eq!(count(), expected + 1);
+    Ok(())
+}
