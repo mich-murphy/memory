@@ -209,3 +209,8 @@ on the intended assertion, `scripts/gates.sh` on the combined tip.
   since check 2. Claude hook delivery verified (one Claude `session_end` hint on 2026-11-17); Codex
   still unverified (no new rollout). Peak unchanged at 1,254 MB. Next checks about 20:35Z, then
   about 2026-11-19T09:00Z (evidence 21, "Check 3").
+- 2026-11-18 21:26Z (check 4): fourth `memory check` clean (6,042 of 6,042 sources match;
+  mismatch, uncaptured, parked 0). Daemon unchanged since the start, 2,023 rounds, no `WARN` or
+  `ERROR` line, no new failure since check 2. Codex hint delivery still unverified (no new
+  rollout). Peak unchanged at 1,254 MB. Next check about 2026-11-19T09:00Z, after which the run
+  can end (evidence 21, "Check 4").

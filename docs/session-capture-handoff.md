@@ -73,8 +73,10 @@ from `main` alone.
   mismatch, uncaptured and parked 0; still no new Claude or Codex session (evidence 21,
   "Check 2"). Check 3 (2026-11-18 08:09Z to 08:34Z) clean: 6,039 of 6,039 sources match,
   no new failure since check 2; Claude hook delivery verified (a Claude `session_end` hint on
-  2026-11-17), Codex still unverified (evidence 21, "Check 3"). Next checks about
-  2026-11-18T20:35Z, then about 2026-11-19T09:00Z.
+  2026-11-17), Codex still unverified (evidence 21, "Check 3"). Check 4 (2026-11-18 20:34Z
+  to 20:55Z) clean: 6,042 of 6,042 sources match, 2,023 rounds, no `WARN` or `ERROR` line, no
+  new failure since check 2 (evidence 21, "Check 4"). Next check about 2026-11-19T09:00Z;
+  the run can end after it if it is clean.
   What the next session does, in order:
   1. Read `checks.log` (a check every 12 h; abort on any `mismatch` or an owner parked as
      `Foreign`), the daemon log and `status.json`; confirm the agent, sampler, `caffeinate` and

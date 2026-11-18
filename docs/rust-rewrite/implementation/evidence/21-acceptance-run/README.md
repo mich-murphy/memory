@@ -282,3 +282,26 @@ Commands as for check 2.
   `memory check`), and the Go `FuzzEditJSON` fix (PR #156).
 - Next checks: about 20:35Z on 2026-11-18, then about 09:00Z on 2026-11-19; the run can end after
   the latter if both are clean.
+
+### Check 4 (recorded 2026-11-18 at 21:26Z)
+
+Commands as for check 2.
+
+- **Fourth `memory check`** (2026-11-18 20:34:13Z to 20:55:16Z, 21.1 minutes, exit 0):
+  `owners=1076 sources=6042 match=6042 behind=0 unsettled=0 mismatch=0 uncaptured=0 withheld=0
+  remote_only=0 parked=0 unknown_kind=19069 unknown_owner=0 deferred_snapshot=3123 unreadable=0
+  store_error=0 status=loaded`. Four consecutive clean checks.
+- **Daemon.** Same process since the start (one launchd run, never exited); 2,023 rounds (`start`
+  1, `timer` 93, `dir` 1,929); no `WARN` or `ERROR` line in the whole log. Of the 538 rounds since
+  check 3, none has `failed`, `parked` or `audit_mismatched` above 0 and none has a non-zero failure
+  key. `status.json` at 21:25:48Z: `parked` empty, failures still `offline=9` only (no new failure
+  since check 2), audit `matched=6065 mismatched=0 ineligible=59`.
+- **Hints.** The 2026-11-18 day file holds Pi records only (`session_start` 5, `turn_end` 11,
+  `session_end` 6). One Claude transcript was created after check 3. No Codex rollout was created
+  since the run started, so Codex hint delivery is still unverified.
+- **Footprint.** Peak unchanged at 1,254 MB (07:07Z on 2026-11-17). Hourly maxima of the current
+  footprint since check 3: 124 to 269 MB.
+- Merged into `main` since check 3, none of it installed for this run (which keeps its `a28bfa4`
+  binary): briefs 35 (prefix guard), 36 (`memory install`) and 37 (`memory export` decompresses
+  recompressed Codex rollouts), and the Go `internal/syncer` timeout finding (PR #170).
+- Next check: about 09:00Z on 2026-11-19; the run can end after it if it is clean.
