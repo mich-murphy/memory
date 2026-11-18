@@ -24,6 +24,8 @@ use std::process::{Command, Output};
 const U1: &str = "11111111-1111-4111-8111-111111111111";
 const UR: &str = "22222222-2222-4222-8222-222222222222";
 const CX: &str = "33333333-3333-4333-8333-333333333333";
+const CZ: &str = "55555555-5555-4555-8555-555555555555";
+const CODEX_ZST: &str = "sessions/2026/11/17/rollout-2026-11-17T11-00-00-55555555-5555-4555-8555-555555555555.jsonl.zst";
 const PI: &str = "44444444-4444-4444-8444-444444444444";
 const CODEX_FILE: &str =
     "sessions/2026/11/17/rollout-2026-11-17T10-00-00-33333333-3333-4333-8333-333333333333.jsonl";
@@ -97,6 +99,18 @@ pub(super) fn fixture(server: &Fake, label: &str) -> R<Fixture> {
             r#"{"type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"files"}}"#,
         ]),
     )?;
+    let zst = jl(&[
+        r#"{"type":"session_meta","payload":{"id":"cz1"}}"#,
+        r#"{"type":"event_msg","payload":{"type":"user_message","message":"zst prompt"}}"#,
+        r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"zst prompt"}]}}"#,
+        r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"zst answer"}]}}"#,
+        r#"{"type":"response_item","payload":{"type":"function_call","name":"shell","call_id":"z1","arguments":"{\"cmd\":\"ls\"}"}}"#,
+        r#"{"type":"response_item","payload":{"type":"function_call_output","call_id":"z1","output":"files"}}"#,
+    ]);
+    let packed = zstd::bulk::compress(zst.as_bytes(), 3).map_err(e)?;
+    let at = codex.join(CODEX_ZST);
+    fs::create_dir_all(at.parent().ok_or("parent")?).map_err(e)?;
+    fs::write(&at, packed).map_err(e)?;
     put(
         &pi.join(format!("{PI_DIR}.jsonl")),
         &jl(&[
@@ -250,7 +264,11 @@ fn check_bodies(fx: &Fixture, agent: &str, dir: &Path, sources: usize) -> R {
             .find(|b| b["source_id"] == s["source_id"] && b["epoch_id"] == s["epoch_id"])
             .ok_or("body for source")?;
         let got = fs::read(dir.join(body["path"].as_str().ok_or("path")?)).map_err(e)?;
-        let disk = fs::read(root_of(fx, agent).join(s["path"].as_str().ok_or("p")?)).map_err(e)?;
+        let path = s["path"].as_str().ok_or("p")?;
+        let mut disk = fs::read(root_of(fx, agent).join(path)).map_err(e)?;
+        if path.ends_with(".zst") {
+            disk = zstd::stream::decode_all(disk.as_slice()).map_err(e)?;
+        }
         assert_eq!(got, disk, "export body equals disk for {}", s["path"]);
     }
     Ok(())
@@ -372,7 +390,7 @@ pub(super) fn captured(fx: &Fixture) -> R<memory::assemble::ProductionDaemon> {
     let mut daemon = start_from_config(&fx.rig.state, &fx.rig.cfg).map_err(e)?;
     let report = daemon.reconcile_once().map_err(e)?;
     assert_eq!((report.failed, report.parked), (0, 0));
-    assert_eq!(report.landed, 5, "five owners land");
+    assert_eq!(report.landed, 6, "six owners land");
     Ok(daemon)
 }
 
@@ -415,6 +433,15 @@ fn phase1() -> Vec<Want> {
             roles: json!({"main": 1}),
         },
         Want {
+            name: "codex-zst",
+            agent: "codex",
+            needle: CZ,
+            sources: 1,
+            events: 6,
+            issues: json!({}),
+            roles: json!({"main": 1}),
+        },
+        Want {
             name: "pi",
             agent: "pi",
             needle: PI,
@@ -433,7 +460,7 @@ fn consumer_gate_claude_codex_pi_export_imports_and_reports() -> R {
     let fx = fixture(&server, "gate")?;
     let mut daemon = captured(&fx)?;
     let all = owners(&fx.rig)?;
-    assert_eq!(all.len(), 5, "{all:?}");
+    assert_eq!(all.len(), 6, "{all:?}");
     let out = fx.rig.dir.join("exports");
     let mut dirs = Vec::new();
     let mut first = Vec::new();
