@@ -7,14 +7,15 @@
 //! the journey prints `consumer gate skipped` and returns.
 use super::assemble::{PREFIX, Rig};
 use super::fake::Fake;
-use super::{R, e};
+use super::{BUCKET, R, e};
 use memory::assemble::start_from_config;
 use memory::config::Config;
 use memory::daemon::Sources;
 use memory::realfs::WalkLimits;
 use memory::resolve::{SharedFs, WalkSources};
 use memory::roots::locator_roots;
-use memory_core::limits::owner_prefix;
+use memory_core::limits::{current_key, manifest_key, owner_prefix, parse_owner_prefix};
+use memory_core::manifest::{manifest_hash, parse_current};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -128,6 +129,16 @@ fn fixture(server: &Fake, label: &str) -> R<Fixture> {
         codex.join("sessions/2026/11/17/auth.json"),
     )?;
     plant("CANARY-PEM-e417b3", pi.join(format!("{PI_DIR}/key.pem")))?;
+    // Append-class folder (`tool-results`, admitted per file): only the credential denylist
+    // withholds these, so a skipped denylist reaches the export.
+    plant(
+        "CANARY-CRED-ENV-6a1d09",
+        p.join(format!("{U1}/tool-results/.env")),
+    )?;
+    plant(
+        "CANARY-CRED-RSA-b74e52",
+        p.join(format!("{U1}/tool-results/id_rsa")),
+    )?;
     let outside = rig.dir.join("outside/secret.txt");
     put(&outside, "CANARY-SYMLINK-c08f26\n")?;
     let link = p.join(format!("{U1}/link.txt"));
@@ -194,6 +205,26 @@ fn root_of<'a>(fx: &'a Fixture, agent: &str) -> &'a Path {
         "pi" => &fx.pi,
         _ => &fx.claude,
     }
+}
+
+/// The digest `current.json` names for `text`, checked against the stored manifest bytes.
+fn head_digest(server: &Fake, text: &str) -> R<String> {
+    let owner = parse_owner_prefix(text).map_err(e)?;
+    let key = |k: String| format!("/{BUCKET}/{PREFIX}{k}");
+    let (pointer, _) = server
+        .object(&key(current_key(&owner)))
+        .ok_or("current.json")?;
+    let current = parse_current(&pointer).map_err(e)?;
+    let (stored, _) = server
+        .object(&key(manifest_key(&current.manifest)))
+        .ok_or("head manifest")?;
+    let hex = String::from(current.manifest);
+    assert_eq!(
+        String::from(manifest_hash(&stored)),
+        hex,
+        "stored head bytes"
+    );
+    Ok(hex)
 }
 
 fn metadata(dir: &Path) -> R<Value> {
@@ -413,6 +444,31 @@ fn consumer_gate_claude_codex_pi_export_imports_and_reports() -> R {
         check_bodies(&fx, w.agent, &dir, w.sources)?;
         first.push(entry(w, text, &dir));
         dirs.push(dir);
+    }
+    // `manifest_sha256` and `publication_id` are the stored head's digest, and a second export
+    // of the same head is byte-identical.
+    for (i, w) in phase1().iter().enumerate() {
+        let text = find(&all, w)?;
+        let head = head_digest(&server, text)?;
+        let dir = out.join(format!("p1-{i}"));
+        let meta = metadata(&dir)?;
+        for ptr in ["/manifest_sha256", "/manifest/publication_id"] {
+            assert_eq!(
+                meta.pointer(ptr).and_then(Value::as_str),
+                Some(head.as_str()),
+                "{} {ptr}",
+                w.name
+            );
+        }
+        let again = out.join(format!("again-{i}"));
+        export(&fx, text, &again)?;
+        assert_eq!(
+            fs::read(again.join("metadata.json")).map_err(e)?,
+            fs::read(dir.join("metadata.json")).map_err(e)?,
+            "{}: a re-export of the same head differs",
+            w.name
+        );
+        dirs.push(again);
     }
 
     // Phase 2: an append to s1, and a truncate-and-rewrite of "rewrite".
