@@ -203,9 +203,15 @@ fn metadata(dir: &Path) -> R<Value> {
 /// Every active epoch body equals the file on disk; returns (source entries, roles).
 fn check_bodies(fx: &Fixture, agent: &str, dir: &Path, sources: usize) -> R {
     let meta = metadata(dir)?;
-    let list = meta["manifest"]["sources"].as_array().ok_or("sources")?;
+    let list = meta
+        .pointer("/manifest/sources")
+        .and_then(Value::as_array)
+        .ok_or("sources")?;
     assert_eq!(list.len(), sources, "{dir:?}");
-    let bodies = meta["bodies"].as_array().ok_or("bodies")?;
+    let bodies = meta
+        .pointer("/bodies")
+        .and_then(Value::as_array)
+        .ok_or("bodies")?;
     assert_eq!(bodies.len(), sources);
     for s in list.iter().filter(|s| s["state"] == "active") {
         let body = bodies
@@ -314,7 +320,7 @@ fn find<'a>(owners: &'a [String], w: &Want) -> R<&'a String> {
         .filter(|t| t.contains(w.needle) && t.split('/').nth(3) == Some(w.agent))
         .collect();
     assert_eq!(hits.len(), 1, "{}: {owners:?}", w.name);
-    Ok(hits[0])
+    hits.first().copied().ok_or_else(|| "owner".to_owned())
 }
 
 fn entry(w: &Want, text: &str, dir: &Path) -> Value {
@@ -440,9 +446,11 @@ fn consumer_gate_claude_codex_pi_export_imports_and_reports() -> R {
         export(&fx, text, &dir)?;
         check_bodies(&fx, w.agent, &dir, sources)?;
         let mut v = entry(w, text, &dir);
-        v["sources"] = json!(sources);
-        v["events"] = json!(events);
-        v["roles"] = roles;
+        if let Some(o) = v.as_object_mut() {
+            o.insert("sources".into(), json!(sources));
+            o.insert("events".into(), json!(events));
+            o.insert("roles".into(), roles);
+        }
         second.push(v);
         dirs.push(dir);
     }
