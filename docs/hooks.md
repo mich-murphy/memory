@@ -1,5 +1,12 @@
 # How agent-sessions hooks into each agent
 
+> **Rust `memory` (2026-11-18):** `memory install` (brief 36,
+> [evidence 27](rust-rewrite/implementation/evidence/27-install/)) writes the same Claude and
+> Codex events, async flags and timeouts as below, with the command `<path>/memory hook <agent>`,
+> and a Pi extension `extensions/memory.ts` that pipes `{event, session_id, session_file, cwd}` to
+> `memory hook pi`. It replaces only its own entries and leaves the `agent-sessions` entries in
+> place; the rest of this page describes the Go hooks.
+
 > **Scope (2026-10-23):** The hook protocols, trust and privacy constraints below remain relevant; detached sync/debounce/sweep behavior describes the existing implementation, not durable queue acceptance. Under the agreed [session-capture contract](session-capture-contract.md), hooks supply discovery hints; bytes count as locally accepted only when durably owned by the spool, with autonomous retry and per-source progress. The opt-in `capture-v1` candidate now implements durable hints, autonomous discovery/retry, native-context capture and independent enrichment; see [phase 3](session-capture-phase3.md) and [offline evidence](session-capture-offline-evidence.md). The commands and no-timer behavior below describe default legacy hooks, not the candidate. Actual native/installed candidate acceptance is still outstanding; no defaults were activated. Preserve learned nondefault roots and effective opt-outs at cutover; stop old hook launch paths and workers before switching writers.
 
 Checked on 2026-10-10 against:

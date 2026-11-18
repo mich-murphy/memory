@@ -1423,7 +1423,9 @@ source's whole range in memory, measured against the 128 MB target (section 7.4,
 1. No production bucket is created. Both hosts use the existing `agent-sessions` bucket (A2).
 2. Install `memory` and its hooks on one host. The Go capture daemons and the
    publication-refresh job are already stopped (A0). Remove the Go hooks' launch paths, then
-   repeat on the other host. One collector runs per host. [review, 04 M4]
+   repeat on the other host. One collector runs per host. [review, 04 M4] On macOS `memory
+   install` writes the launchd agent, the Claude and Codex hook entries and the Pi extension,
+   and `memory uninstall` removes them; neither touches the Go entries (brief 36).
 3. Remove the one existing session opt-out record from `~/.local/state/agent-sessions/exclusions`
    once the Go path is stopped. Before that, the Go path still honors it.
 4. Let the safety reconcile capture every available local source into the fresh archive.

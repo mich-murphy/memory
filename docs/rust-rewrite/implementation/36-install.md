@@ -129,3 +129,11 @@ range), hosted gates, merge.
 ## Ledger
 
 - 2026-11-18 11:10Z: brief written on `ae26e3e`.
+- 2026-11-18 11:43Z: INSTALL accepted locally at `f3b3deb` (worker 4 commits, parent 1). Changed
+  by the parent: numbers keep their exact text (the worker's `serde_json::Number` could change a
+  17-digit float); the binary path is used as invoked, not canonicalized, so an upgrade behind a
+  stable `memory` link keeps Codex's trust hash, and a binary not named `memory` is refused
+  (`install_binary_name`, exit 2). Teeth 10 of 10. Copies of this Mac's settings: foreign
+  handlers kept in place, uninstall byte-identical. Full gates on `f3b3deb`: 14 sub-gates 0, seed
+  4123598146, coverage 96.55 %. Record: [evidence 27](evidence/27-install/). Next: push, hosted
+  gates, merge.
