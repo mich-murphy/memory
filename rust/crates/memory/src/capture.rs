@@ -381,9 +381,13 @@ fn read_checked<F: FileSystem>(
     range: std::ops::Range<u64>,
 ) -> Result<Vec<u8>, SourceOutcome> {
     let want = range.end.saturating_sub(range.start);
-    let bytes = fs
-        .read(handle, range)
-        .map_err(|_| SourceOutcome::Unavailable)?;
+    let bytes = fs.read(handle, range).map_err(|e| {
+        if F::is_undecodable(&e) {
+            SourceOutcome::Withheld(WithholdReason::Undecodable)
+        } else {
+            SourceOutcome::Unavailable
+        }
+    })?;
     if u64::try_from(bytes.len()) == Ok(want) {
         Ok(bytes)
     } else {
@@ -472,8 +476,12 @@ fn step<F: FileSystem>(
         .then_some(env.context.rules)
         .flatten()
         .map(|r| RulesDigest::new(Sha256::from_bytes(r)));
-    let Ok(stat) = fs.stat(src.handle) else {
-        return SourceOutcome::Unavailable;
+    let stat = match fs.stat(src.handle) {
+        Ok(stat) => stat,
+        Err(e) if F::is_undecodable(&e) => {
+            return SourceOutcome::Withheld(WithholdReason::Undecodable);
+        }
+        Err(_) => return SourceOutcome::Unavailable,
     };
     let Some(stat) = stat else {
         let planning = absence_plan(src, local, recorded, rules, acc);
