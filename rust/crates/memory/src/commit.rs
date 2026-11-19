@@ -145,10 +145,10 @@ impl CommitEnd {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Failure {
     /// Nothing is referenced by `current.json`; retrying the capture is safe.
-    NotLanded(ErrorClass),
+    NotLanded(StoreError),
     /// The `current.json` write could not be verified; it may have landed. The caller
     /// must refresh its base from the store before the next commit.
-    LandingUnknown(ErrorClass),
+    LandingUnknown(StoreError),
     /// Nothing landed because the store throttled the request.
     Throttled {
         /// `Retry-After` of the reply, when present.
@@ -187,7 +187,7 @@ impl Failure {
     /// Attempt outcome for [`transition_paced`] (DESIGN.md 11.2, 11.4).
     pub fn outcome(&self) -> Outcome {
         match self {
-            Self::NotLanded(class) | Self::LandingUnknown(class) => Outcome::Failed(class.clone()),
+            Self::NotLanded(error) | Self::LandingUnknown(error) => Outcome::Failed(error.class()),
             Self::Throttled { .. } => Outcome::Failed(ErrorClass::Throttled),
             Self::BaseUnchanged => Outcome::Failed(ErrorClass::Transient),
             Self::Stopped => Outcome::Aborted,
@@ -206,6 +206,20 @@ impl Failure {
         match self {
             Self::Throttled { retry_after } => *retry_after,
             _ => None,
+        }
+    }
+    /// Closed code of the failure for logs: the store error's code for `NotLanded` and
+    /// `LandingUnknown`, else the variant name in snake case.
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::NotLanded(error) | Self::LandingUnknown(error) => error.code(),
+            Self::Throttled { .. } => "throttled",
+            Self::BaseUnchanged => "base_unchanged",
+            Self::Foreign { .. } => "foreign",
+            Self::NewerSchema => "newer_schema",
+            Self::Stopped => "stopped",
+            Self::Invalid(_) => "invalid",
+            Self::Corrupt => "corrupt",
         }
     }
     /// True when the caller's base may no longer match `current.json`.
@@ -270,7 +284,7 @@ fn not_landed(error: StoreError) -> Failure {
         StoreError::Throttled(_) => Failure::Throttled {
             retry_after: error.retry_after(),
         },
-        other => Failure::NotLanded(other.class()),
+        other => Failure::NotLanded(other),
     }
 }
 
@@ -474,7 +488,7 @@ fn verify<S: Store>(
                 return Ok(Some(verdict));
             }
             Err(StoreError::Auth) => {
-                return Err(Failure::LandingUnknown(ErrorClass::DestinationAuth));
+                return Err(Failure::LandingUnknown(StoreError::Auth));
             }
             Err(error) => last = error,
         }
@@ -485,7 +499,7 @@ fn verify<S: Store>(
     if last == StoreError::NotFound {
         Ok(None)
     } else {
-        Err(Failure::LandingUnknown(last.class()))
+        Err(Failure::LandingUnknown(last))
     }
 }
 
@@ -651,7 +665,7 @@ fn publish<S: Store>(
                 }));
             }
             Err(StoreError::Auth) => {
-                return Err(Failure::NotLanded(ErrorClass::DestinationAuth));
+                return Err(Failure::NotLanded(StoreError::Auth));
             }
             Err(_) => {}
         }
@@ -682,7 +696,7 @@ fn publish<S: Store>(
             None => {
                 // 404 is not final. Only a first write may retry step 3 (If-None-Match: *).
                 if fence.is_some() {
-                    return Err(Failure::LandingUnknown(ErrorClass::Offline));
+                    return Err(Failure::LandingUnknown(StoreError::NotFound));
                 }
                 absent = true;
             }
@@ -690,7 +704,7 @@ fn publish<S: Store>(
         rebases += 1;
         if rebases > REBASE_RETRIES {
             return Err(if absent {
-                Failure::LandingUnknown(ErrorClass::Offline)
+                Failure::LandingUnknown(StoreError::NotFound)
             } else {
                 Failure::BaseUnchanged
             });

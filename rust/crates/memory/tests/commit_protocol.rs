@@ -2032,7 +2032,7 @@ fn a_404_under_a_fence_is_landing_unknown() -> R {
     rig.store.mem.objects.remove(&key);
     let before = rig.store.count(Op::Put(Kind::Current));
     let (failure, pauses) = rig.failed()?;
-    assert_eq!(failure, Failure::LandingUnknown(ErrorClass::Offline));
+    assert_eq!(landing_class(&failure), Some((true, ErrorClass::Offline)));
     assert!(failure.base_may_be_stale());
     // Only a first write may retry step 3: under a fence there is exactly one PUT, then the
     // verification GETs (4 attempts, 3 pauses; amendment A13.5) and no second PUT.
@@ -2056,7 +2056,7 @@ fn a_persistent_404_on_the_first_write_gives_up_without_claiming_a_landing() -> 
         Effect::FailBefore(StoreError::Server),
     );
     let (failure, _) = rig.failed()?;
-    assert_eq!(failure, Failure::LandingUnknown(ErrorClass::Offline));
+    assert_eq!(landing_class(&failure), Some((true, ErrorClass::Offline)));
     Ok(())
 }
 
@@ -2075,7 +2075,7 @@ fn verification_that_cannot_read_is_landing_unknown_with_its_class() -> R {
         Effect::FailBefore(StoreError::Offline(Cause::Connect)),
     );
     let (failure, pauses) = rig.failed()?;
-    assert_eq!(failure, Failure::LandingUnknown(ErrorClass::Offline));
+    assert_eq!(landing_class(&failure), Some((true, ErrorClass::Offline)));
     // Amendment A13.5: 4 attempts leave 3 pauses between them.
     assert_eq!(pauses.len(), 3);
     assert_eq!(
@@ -2104,8 +2104,8 @@ fn auth_loss_during_verification_pauses_the_host() -> R {
     rig.store.arm(Op::Get(Kind::Current), Effect::Revoke);
     let (failure, _) = rig.failed()?;
     assert_eq!(
-        failure,
-        Failure::LandingUnknown(ErrorClass::DestinationAuth)
+        landing_class(&failure),
+        Some((true, ErrorClass::DestinationAuth))
     );
     Ok(())
 }
@@ -2115,7 +2115,7 @@ fn offline_store_lands_nothing_and_retries_as_offline() -> R {
     let mut rig = Rig::seeded(&[1, 2, 3, 4, 5])?;
     rig.store.offline = true;
     let (failure, _) = rig.failed()?;
-    assert_eq!(failure, Failure::NotLanded(ErrorClass::Offline));
+    assert_eq!(landing_class(&failure), Some((false, ErrorClass::Offline)));
     assert!(rig.store.mem.objects.is_empty());
     let (d, streak) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
     assert!(matches!(
@@ -2134,7 +2134,10 @@ fn revoked_token_pauses_the_host_and_lands_nothing() -> R {
     let mut rig = Rig::seeded(&[1, 2, 3, 4, 5])?;
     rig.store.revoked = true;
     let (failure, _) = rig.failed()?;
-    assert_eq!(failure, Failure::NotLanded(ErrorClass::DestinationAuth));
+    assert_eq!(
+        landing_class(&failure),
+        Some((false, ErrorClass::DestinationAuth))
+    );
     let (d, _) = disposition(&Err(failure), false, Duration::ZERO, &Streak::default());
     assert!(matches!(d, Disposition::PauseHost));
     assert!(rig.store.mem.objects.is_empty());
@@ -2148,7 +2151,10 @@ fn revocation_before_the_pointer_write_leaves_only_unreferenced_objects_then_rec
     let before = need(rig.base.clone(), "base")?;
     rig.store.arm(Op::Put(Kind::Current), Effect::Revoke);
     let (failure, _) = rig.failed()?;
-    assert_eq!(failure, Failure::NotLanded(ErrorClass::DestinationAuth));
+    assert_eq!(
+        landing_class(&failure),
+        Some((false, ErrorClass::DestinationAuth))
+    );
     assert_eq!(rig.store.count(Op::Put(Kind::Current)), 3);
     assert_eq!(
         need(read_chain(&rig.store, &rig.owner)?, "chain")?
@@ -2174,7 +2180,7 @@ fn ambiguous_piece_put_is_retried_as_412_success() -> R {
         },
     );
     let (failure, _) = rig.failed()?;
-    assert_eq!(failure, Failure::NotLanded(ErrorClass::Offline));
+    assert_eq!(landing_class(&failure), Some((false, ErrorClass::Offline)));
     assert!(rig.store.peek(&rig.current_key()).is_none());
     assert_eq!(rig.landed()?.how(), LandedHow::Committed);
     rig.assert_safe()
@@ -2191,7 +2197,7 @@ fn manifest_put_failure_lands_nothing_and_a_repeat_412_is_success() -> R {
         },
     );
     let (failure, _) = rig.failed()?;
-    assert_eq!(failure, Failure::NotLanded(ErrorClass::Offline));
+    assert_eq!(landing_class(&failure), Some((false, ErrorClass::Offline)));
     assert!(rig.store.peek(&rig.current_key()).is_none());
     rig.landed()?;
     rig.assert_safe()
@@ -2240,7 +2246,7 @@ fn a_failed_readback_after_412_lands_nothing() -> R {
         Effect::FailBefore(StoreError::Server),
     );
     let (failure, _) = rig.failed()?;
-    assert_eq!(failure, Failure::NotLanded(ErrorClass::Offline));
+    assert_eq!(landing_class(&failure), Some((false, ErrorClass::Offline)));
     Ok(())
 }
 
@@ -2327,17 +2333,17 @@ fn disposition_maps_every_commit_result() -> R {
     };
     for (failure, want, streak) in [
         (
-            Failure::NotLanded(ErrorClass::Throttled),
+            Failure::NotLanded(StoreError::Throttled(None)),
             retry(ErrorClass::Throttled),
             bumped.clone(),
         ),
         (
-            Failure::LandingUnknown(ErrorClass::Offline),
+            Failure::LandingUnknown(StoreError::Offline(Cause::Connect)),
             retry(ErrorClass::Offline),
             bumped.clone(),
         ),
         (
-            Failure::NotLanded(ErrorClass::DestinationAuth),
+            Failure::NotLanded(StoreError::Auth),
             Disposition::PauseHost,
             prior.clone(),
         ),
@@ -2363,7 +2369,7 @@ fn disposition_maps_every_commit_result() -> R {
         assert_eq!(next, streak, "{label}");
     }
     let (d, _) = disposition(
-        &Err(Failure::NotLanded(ErrorClass::Offline)),
+        &Err(Failure::NotLanded(StoreError::Offline(Cause::Connect))),
         true,
         Duration::ZERO,
         &prior,
@@ -2434,8 +2440,8 @@ fn a_throttled_reply_carries_its_retry_after_into_the_disposition() -> R {
         }
     );
     for other in [
-        Failure::NotLanded(ErrorClass::Offline),
-        Failure::LandingUnknown(ErrorClass::Throttled),
+        Failure::NotLanded(StoreError::Offline(Cause::Connect)),
+        Failure::LandingUnknown(StoreError::Throttled(None)),
         Failure::BaseUnchanged,
         Failure::Corrupt,
     ] {
@@ -2467,8 +2473,8 @@ fn recover_base_failures_are_classified() -> R {
     let mut store = clone_store(&rig.store);
     store.offline = true;
     assert_eq!(
-        recover(&mut store),
-        Err(Failure::NotLanded(ErrorClass::Offline))
+        recover(&mut store).map_err(|f| landing_class(&f)),
+        Err(Some((false, ErrorClass::Offline)))
     );
 
     let mut store = clone_store(&rig.store);
@@ -2485,8 +2491,8 @@ fn recover_base_failures_are_classified() -> R {
         Effect::FailBefore(StoreError::Server),
     );
     assert_eq!(
-        recover(&mut store),
-        Err(Failure::NotLanded(ErrorClass::Offline))
+        recover(&mut store).map_err(|f| landing_class(&f)),
+        Err(Some((false, ErrorClass::Offline)))
     );
 
     let mut store = clone_store(&rig.store);
@@ -3014,4 +3020,14 @@ fn a_stop_maps_to_a_cancelled_attempt_that_changes_nothing() {
     let (d, streak) = disposition_paced(&Err(stopped), false, Duration::ZERO, &prior, 0);
     assert_eq!(d, Disposition::Cancelled);
     assert_eq!(streak, prior);
+}
+
+/// Whether a failure is `LandingUnknown`, and its error class: what the tests that predate the
+/// cause payload asserted.
+fn landing_class(failure: &Failure) -> Option<(bool, ErrorClass)> {
+    match failure {
+        Failure::NotLanded(e) => Some((false, e.class())),
+        Failure::LandingUnknown(e) => Some((true, e.class())),
+        _ => None,
+    }
 }
