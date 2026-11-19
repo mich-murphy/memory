@@ -107,3 +107,18 @@ Script `causes_teeth.py` in the parent's scratchpad; each tooth replaced an exac
   round and loses nothing).
 - `export`, `restore` and `owners` still print the closed code `store` on a fetch failure.
 - Not run: 2,000 property cases, `cargo mutants` (operator decision).
+
+## Installed on this Mac (2026-11-19, after merge)
+
+- Stack #190 merged as `1b4f981`; post-merge Rust gates green, CI failed only in the two accepted
+  `govulncheck` steps.
+- Release build of `1b4f981` (sha256 prefix `cd5bfc25fe1406c5`) replaced
+  `~/.local/libexec/memory/memory` in place at 21:38:56Z (same path, so the plist, hooks and Pi
+  extension are unchanged). The previous `56c04aa` binary is kept as
+  `~/.local/state/memory-cutover/backup/memory-56c04aa`.
+- `launchctl kickstart -k gui/$(id -u)/memory`: the old process exited 0, `runs = 3`, the new
+  process logged `started` at 21:38:57Z, and its start round ended 21:43:11Z with `landed=1
+  failed=0`.
+- `memory check` with the new binary, 21:43:27Z to 22:06:23Z, exit 0: `owners=1076 sources=6046
+  match=6046`, `store_error=0`, every other failure count 0. No `WARN` or `ERROR` line and no
+  `retry` line yet.
