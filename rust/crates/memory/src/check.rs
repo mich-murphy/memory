@@ -197,8 +197,8 @@ pub enum Verdict {
     Uncaptured,
     /// Policy withholds the source, with the reason code.
     Withheld(String),
-    /// Fetching a stored object failed for a reason other than absence.
-    StoreFailed,
+    /// Fetching a stored object failed for a reason other than absence; carries the error.
+    StoreFailed(StoreError),
 }
 
 /// The snake-case code of a closed enum value: its string form, or the tag of a variant that
@@ -302,7 +302,7 @@ fn whole_admitted<F: FileSystem>(
             Compared::Mismatch => Verdict::Mismatch("bytes"),
         },
         Err(RestoreError::Fetch(StoreError::NotFound)) => Verdict::Mismatch("restore"),
-        Err(RestoreError::Fetch(_)) => Verdict::StoreFailed,
+        Err(RestoreError::Fetch(error)) => Verdict::StoreFailed(error),
         Err(_) => Verdict::Mismatch("restore"),
     }
 }
@@ -408,7 +408,7 @@ fn walk_stored<F: FileSystem>(
         let stored = match fetch(piece.object()) {
             Ok(stored) => stored,
             Err(StoreError::NotFound) => return Some(Verdict::Mismatch("restore")),
-            Err(_) => return Some(Verdict::StoreFailed),
+            Err(error) => return Some(Verdict::StoreFailed(error)),
         };
         let Ok(decoded) = decode_piece(piece, &stored) else {
             return Some(Verdict::Mismatch("restore"));
@@ -579,8 +579,12 @@ pub fn check(root: &Path) -> Result<Report, Refusal> {
         });
         let state = match folded {
             Ok(folded) => folded.map(|folded| folded.state),
-            Err(OwnerError::Fetch(_)) => {
+            Err(OwnerError::Fetch(error)) => {
                 tally.store_error += 1;
+                details.push(format!(
+                    "store_error owner={prefix} kind=chain cause={}",
+                    error.code()
+                ));
                 continue;
             }
             Err(OwnerError::NewerSchema | OwnerError::Corrupt(_)) => {
@@ -618,7 +622,13 @@ pub fn check(root: &Path) -> Result<Report, Refusal> {
                         "withheld owner={prefix} kind={kind} reason={reason}"
                     ));
                 }
-                Verdict::StoreFailed => tally.store_error += 1,
+                Verdict::StoreFailed(error) => {
+                    tally.store_error += 1;
+                    details.push(format!(
+                        "store_error owner={prefix} kind={kind} cause={}",
+                        error.code()
+                    ));
+                }
             }
         }
         if let Some(state) = &state {
