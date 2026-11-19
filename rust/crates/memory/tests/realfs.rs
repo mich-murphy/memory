@@ -198,11 +198,12 @@ fn read_exact_short_and_past_eof() -> TestResult {
 }
 
 /// One value per variant; the exhaustive match fails to compile when a variant is added.
-fn sample(kind: std::io::ErrorKind) -> [RealFsError; 4] {
+fn sample(kind: std::io::ErrorKind) -> [RealFsError; 5] {
     let all = [
         RealFsError::UnknownHandle,
         RealFsError::InvalidRange,
         RealFsError::Changed,
+        RealFsError::Undecodable,
         RealFsError::Io(kind),
     ];
     for error in &all {
@@ -210,6 +211,7 @@ fn sample(kind: std::io::ErrorKind) -> [RealFsError; 4] {
             RealFsError::UnknownHandle
             | RealFsError::InvalidRange
             | RealFsError::Changed
+            | RealFsError::Undecodable
             | RealFsError::Io(_) => {}
         }
     }
@@ -656,5 +658,126 @@ fn walk_under_examines_only_entries_of_that_directory() -> Result<(), Box<dyn st
     );
     fs::remove_dir_all(&dir)?;
     assert_eq!((found.entries, found.files.len()), (1, 1));
+    Ok(())
+}
+
+// ------------------------------------------------------------------ zstd handles
+
+fn decoded_sample(n: usize) -> Vec<u8> {
+    (0..n)
+        .map(|i| u8::try_from((i * 7 ^ (i >> 8)) % 251).unwrap_or(0))
+        .collect()
+}
+
+fn frame_with_window(descriptor: u8) -> Vec<u8> {
+    vec![0x28, 0xb5, 0x2f, 0xfd, 0x00, descriptor, 0x01, 0x00, 0x00]
+}
+
+fn zst_fs(path: &Path) -> (RealFs, u64) {
+    let mut fs = RealFs::new();
+    let h = fs.register_encoded(path, memory::realfs::Encoding::Zstd);
+    (fs, h)
+}
+
+#[test]
+fn zstd_stat_size_is_decoded_length_and_ranged_reads_equal_decoded_slices() -> TestResult {
+    let t = Tmp::new()?;
+    let data = decoded_sample(700_000);
+    let p = t.write("a.jsonl.zst", &zstd::encode_all(&data[..], 3)?)?;
+    let (mut fs, h) = zst_fs(&p);
+    let st = fs.stat(h)?.ok_or("absent")?;
+    ensure!(st.size == data.len() as u64, "size {}", st.size);
+    let physical = fs::metadata(&p)?.len();
+    ensure!(physical != st.size, "physical must differ");
+    // Sequential, then restarting, then past the end.
+    for (a, b) in [
+        (0usize, 1000usize),
+        (1000, 300_000),
+        (300_000, 700_000),
+        (5, 17),
+        (0, 700_000),
+    ] {
+        let got = fs.read(h, a as u64..b as u64)?;
+        ensure!(got == data.get(a..b).ok_or("slice")?, "range {a}..{b}");
+    }
+    let tail = fs.read(h, 699_990..800_000)?;
+    ensure!(tail == data.get(699_990..).ok_or("slice")?, "clipped tail");
+    Ok(())
+}
+
+#[test]
+fn zstd_two_concatenated_frames_decode() -> TestResult {
+    let t = Tmp::new()?;
+    let (a, b) = (decoded_sample(1000), decoded_sample(5000));
+    let mut z = zstd::encode_all(&a[..], 3)?;
+    z.extend(zstd::encode_all(&b[..], 3)?);
+    let p = t.write("two.jsonl.zst", &z)?;
+    let (mut fs, h) = zst_fs(&p);
+    ensure!(fs.stat(h)?.ok_or("absent")?.size == 6000, "size");
+    let all = [a, b].concat();
+    ensure!(fs.read(h, 0..6000)? == all, "bytes");
+    Ok(())
+}
+
+#[test]
+fn zstd_trailing_bytes_truncated_frame_garbage_and_big_window_are_undecodable() -> TestResult {
+    let t = Tmp::new()?;
+    let good = zstd::encode_all(&decoded_sample(4000)[..], 3)?;
+    let mut trailing = good.clone();
+    trailing.extend([0u8, 1, 2]);
+    let truncated = good.get(..good.len() - 4).ok_or("cut")?.to_vec();
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        ("trailing", trailing),
+        ("truncated", truncated),
+        ("garbage", b"not zstd at all".to_vec()),
+        ("window24", frame_with_window(0x70)),
+        ("empty", Vec::new()),
+    ];
+    for (name, body) in cases {
+        let p = t.write(&format!("{name}.jsonl.zst"), &body)?;
+        let (mut fs, h) = zst_fs(&p);
+        let err = fs.stat(h).err();
+        ensure!(err == Some(RealFsError::Undecodable), "{name}: {err:?}");
+        ensure!(
+            <RealFs as FileSystem>::is_undecodable(&RealFsError::Undecodable),
+            "classify"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn zstd_window_2_pow_23_is_accepted() -> TestResult {
+    let t = Tmp::new()?;
+    let p = t.write("w23.jsonl.zst", &frame_with_window(0x68))?;
+    let (mut fs, h) = zst_fs(&p);
+    ensure!(fs.stat(h)?.ok_or("absent")?.size == 0, "empty frame");
+    Ok(())
+}
+
+#[test]
+fn zstd_cached_length_is_recomputed_after_replacement() -> TestResult {
+    let t = Tmp::new()?;
+    let p = t.write(
+        "r.jsonl.zst",
+        &zstd::encode_all(&decoded_sample(3000)[..], 3)?,
+    )?;
+    let (mut fs, h) = zst_fs(&p);
+    ensure!(fs.stat(h)?.ok_or("absent")?.size == 3000, "first");
+    ensure!(fs.stat(h)?.ok_or("absent")?.size == 3000, "cached");
+    let tmp = t.write("r.tmp", &zstd::encode_all(&decoded_sample(9000)[..], 3)?)?;
+    fs::rename(&tmp, &p)?;
+    ensure!(fs.stat(h)?.ok_or("absent")?.size == 9000, "after replace");
+    ensure!(
+        fs.read(h, 8990..9000)? == decoded_sample(9000).get(8990..).ok_or("s")?,
+        "read"
+    );
+    // Replaced by garbage: undecodable again, not the stale length.
+    let bad = t.write("r.bad", b"garbage")?;
+    fs::rename(&bad, &p)?;
+    ensure!(
+        fs.stat(h).err() == Some(RealFsError::Undecodable),
+        "garbage"
+    );
     Ok(())
 }

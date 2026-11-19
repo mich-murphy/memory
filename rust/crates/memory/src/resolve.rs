@@ -244,6 +244,9 @@ impl FileSystem for SharedFs {
             .map_err(|_| RealFsError::Io(ErrorKind::WouldBlock))?
             .read(source, range)
     }
+    fn is_undecodable(error: &RealFsError) -> bool {
+        *error == RealFsError::Undecodable
+    }
 }
 
 /// Counts of the last enumeration. Withheld rows are counted, never yielded.

@@ -6,6 +6,7 @@
 //! symlinks entirely and counts them. No `unsafe`; open flags and errno come from `rustix`.
 
 use crate::environment::{FileSystem, Stat};
+use crate::zstd_stream::{Failure, Stream};
 use memory_core::domain::{Birth, FileId};
 use memory_core::locator::{ClaudeSessionIndex, Located, RootRelativePath, Roots, locate};
 use rustix::fs::{Mode, OFlags};
@@ -30,6 +31,10 @@ pub enum RealFsError {
     /// `Unavailable`, which is retried later (DESIGN.md 7.2, 8.2).
     #[error("source changed between stat and read")]
     Changed,
+    /// The file is registered as zstd and its bytes are not a valid stream of whole frames
+    /// within the window bound. Capture withholds the source (never uploads the raw bytes).
+    #[error("undecodable zstd stream")]
+    Undecodable,
     /// An operating-system error other than absence; only the kind is kept.
     #[error("io error: {0}")]
     Io(ErrorKind),
@@ -46,12 +51,60 @@ pub struct Counters {
     pub bytes_read: u64,
 }
 
+/// How the bytes of a registered file are encoded on disk. A fact of the physical file, never
+/// stored: capture sees only the logical (decoded) bytes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Encoding {
+    /// The file is the logical bytes.
+    #[default]
+    Plain,
+    /// One or more whole zstd frames; `stat` reports the decoded length and `read` decoded
+    /// ranges.
+    Zstd,
+}
+
+/// What a decoded length is valid for: the physical identity, size and modification time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Key {
+    id: FileId,
+    size: u64,
+    mtime_ns: i64,
+}
+
+fn key_of(meta: &fs::Metadata) -> Key {
+    Key {
+        id: file_id(meta),
+        size: meta.size(),
+        mtime_ns: meta
+            .mtime()
+            .saturating_mul(1_000_000_000)
+            .saturating_add(meta.mtime_nsec()),
+    }
+}
+
+/// The one live decoder of a [`RealFs`].
+#[derive(Debug)]
+struct Live {
+    handle: usize,
+    key: Key,
+    stream: Stream,
+}
+
 /// [`FileSystem`] over real paths. Handles are indices from [`RealFs::register`].
+///
+/// A handle registered with [`Encoding::Zstd`] is decoded on the fly. The decoded length is
+/// found by one streaming decode and cached per handle, keyed by the physical key (any change
+/// decodes again; undecodable is cached the same way). At most one streaming decoder is alive:
+/// a `read` starting at or after its position continues it, an earlier start restarts from 0.
 #[derive(Debug, Default)]
 pub struct RealFs {
     paths: Vec<PathBuf>,
-    /// Identity from the latest `stat` per handle; `read` must open the same file.
-    observed: Vec<Option<FileId>>,
+    encodings: Vec<Encoding>,
+    /// Physical observation from the latest `stat` per handle; `read` must open the same file.
+    observed: Vec<Option<Key>>,
+    /// Decoded length per zstd handle (`None` inside: undecodable), valid for its key.
+    lengths: Vec<Option<(Key, Option<u64>)>>,
+    live: Option<Live>,
     counters: Counters,
 }
 
@@ -61,10 +114,17 @@ impl RealFs {
         Self::default()
     }
 
-    /// Bind an absolute path to a new handle.
+    /// Bind an absolute path to a new handle (plain bytes).
     pub fn register(&mut self, path: impl Into<PathBuf>) -> u64 {
+        self.register_encoded(path, Encoding::Plain)
+    }
+
+    /// Bind an absolute path with the encoding of its bytes to a new handle.
+    pub fn register_encoded(&mut self, path: impl Into<PathBuf>, encoding: Encoding) -> u64 {
         self.paths.push(path.into());
+        self.encodings.push(encoding);
         self.observed.push(None);
+        self.lengths.push(None);
         (self.paths.len() - 1) as u64
     }
 
@@ -73,12 +133,121 @@ impl RealFs {
         self.counters
     }
 
+    fn index(handle: u64) -> Result<usize, RealFsError> {
+        usize::try_from(handle).map_err(|_| RealFsError::UnknownHandle)
+    }
+
     fn path(&self, handle: u64) -> Result<&Path, RealFsError> {
         usize::try_from(handle)
             .ok()
             .and_then(|i| self.paths.get(i))
             .map(PathBuf::as_path)
             .ok_or(RealFsError::UnknownHandle)
+    }
+
+    fn encoding(&self, i: usize) -> Encoding {
+        self.encodings.get(i).copied().unwrap_or_default()
+    }
+
+    /// Open without following a final symlink, then check the handle itself: a regular
+    /// file, and (when given) the file the last stat saw. Intermediate path components are
+    /// still resolved by the kernel: a directory component swapped for a symlink after
+    /// `resolve` is a residual race that DESIGN.md 8.2 does not address. `NONBLOCK` keeps a
+    /// FIFO swapped in after the stat from blocking the open; it does not change reads of
+    /// regular files.
+    fn open_checked(
+        &self,
+        source: u64,
+        expected: Option<&FileId>,
+    ) -> Result<(fs::File, fs::Metadata), RealFsError> {
+        let io = |e: std::io::Error| RealFsError::Io(e.kind());
+        let file = rustix::fs::open(
+            self.path(source)?,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map(fs::File::from)
+        .map_err(|e| {
+            if e == Errno::LOOP {
+                RealFsError::Changed
+            } else {
+                io(e.into())
+            }
+        })?;
+        let meta = file.metadata().map_err(io)?;
+        if !meta.is_file() || expected.is_some_and(|id| *id != file_id(&meta)) {
+            return Err(RealFsError::Changed);
+        }
+        Ok((file, meta))
+    }
+
+    /// Decoded length of a zstd handle for the physical `key`, from the cache or one decode.
+    fn decoded_len(&mut self, source: u64, key: &Key) -> Result<u64, RealFsError> {
+        let i = Self::index(source)?;
+        if let Some(Some((k, len))) = self.lengths.get(i)
+            && k == key
+        {
+            return len.ok_or(RealFsError::Undecodable);
+        }
+        // The transient decode takes the place of the live decoder.
+        self.live = None;
+        let (file, _) = self.open_checked(source, Some(&key.id))?;
+        let len = match Stream::new(file).and_then(|mut s| s.drain_len()) {
+            Ok(n) => Some(n),
+            Err(Failure::Undecodable) => None,
+            Err(Failure::Io(k)) => return Err(RealFsError::Io(k)),
+        };
+        if let Some(slot) = self.lengths.get_mut(i) {
+            *slot = Some((key.clone(), len));
+        }
+        len.ok_or(RealFsError::Undecodable)
+    }
+
+    fn read_decoded(
+        &mut self,
+        source: u64,
+        file: fs::File,
+        key: Key,
+        range: std::ops::Range<u64>,
+        len: u64,
+    ) -> Result<Vec<u8>, RealFsError> {
+        let i = Self::index(source)?;
+        let reuse = self
+            .live
+            .as_ref()
+            .is_some_and(|l| l.handle == i && l.key == key && l.stream.pos() <= range.start);
+        if !reuse {
+            self.live = None;
+            let stream = Stream::new(file).map_err(|f| match f {
+                Failure::Undecodable => RealFsError::Undecodable,
+                Failure::Io(k) => RealFsError::Io(k),
+            })?;
+            self.live = Some(Live {
+                handle: i,
+                key: key.clone(),
+                stream,
+            });
+        }
+        let known = self
+            .lengths
+            .get(i)
+            .and_then(Option::as_ref)
+            .filter(|(k, _)| *k == key)
+            .and_then(|(_, n)| *n);
+        let want = known.map_or(len.min(1 << 20), |n| n.saturating_sub(range.start).min(len));
+        let cap = usize::try_from(want).map_err(|_| RealFsError::InvalidRange)?;
+        let live = self.live.as_mut().ok_or(RealFsError::Changed)?;
+        match live.stream.take(range.start, len, cap) {
+            Ok(buf) => Ok(buf),
+            Err(Failure::Undecodable) => {
+                self.live = None;
+                Err(RealFsError::Undecodable)
+            }
+            Err(Failure::Io(k)) => {
+                self.live = None;
+                Err(RealFsError::Io(k))
+            }
+        }
     }
 }
 
@@ -105,24 +274,30 @@ impl FileSystem for RealFs {
     fn stat(&mut self, source: u64) -> Result<Option<Stat>, RealFsError> {
         self.counters.stats += 1;
         let result = fs::symlink_metadata(self.path(source)?);
-        let seen = result.as_ref().ok().map(file_id);
+        let key = result.as_ref().ok().map(key_of);
+        let regular = result.as_ref().is_ok_and(fs::Metadata::is_file);
         if let Some(slot) = usize::try_from(source)
             .ok()
             .and_then(|i| self.observed.get_mut(i))
         {
-            *slot = seen;
+            slot.clone_from(&key);
         }
-        match result {
-            Ok(m) => Ok(Some(Stat {
-                id: file_id(&m),
-                size: m.size(),
-                mtime_ns: m
-                    .mtime()
-                    .saturating_mul(1_000_000_000)
-                    .saturating_add(m.mtime_nsec()),
-            })),
-            Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(RealFsError::Io(e.kind())),
+        match (result, key) {
+            (Ok(_), Some(key)) => {
+                let size = if regular && self.encoding(Self::index(source)?) == Encoding::Zstd {
+                    self.decoded_len(source, &key)?
+                } else {
+                    key.size
+                };
+                Ok(Some(Stat {
+                    id: key.id,
+                    size,
+                    mtime_ns: key.mtime_ns,
+                }))
+            }
+            (Err(e), _) if e.kind() == ErrorKind::NotFound => Ok(None),
+            (Err(e), _) => Err(RealFsError::Io(e.kind())),
+            (Ok(_), None) => Ok(None),
         }
     }
 
@@ -132,32 +307,18 @@ impl FileSystem for RealFs {
             .checked_sub(range.start)
             .ok_or(RealFsError::InvalidRange)?;
         let io = |e: std::io::Error| RealFsError::Io(e.kind());
-        // Open without following a final symlink, then check the handle itself: a regular
-        // file, and the file the last stat saw. Intermediate path components are still
-        // resolved by the kernel: a directory component swapped for a symlink after
-        // `resolve` is a residual race that DESIGN.md 8.2 does not address.
-        // `NONBLOCK` keeps a FIFO swapped in after the stat from blocking the open; it
-        // does not change reads of regular files.
-        let mut file = rustix::fs::open(
-            self.path(source)?,
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
-            Mode::empty(),
-        )
-        .map(fs::File::from)
-        .map_err(|e| {
-            if e == Errno::LOOP {
-                RealFsError::Changed
-            } else {
-                io(e.into())
+        let i = Self::index(source)?;
+        let observed = self.observed.get(i).and_then(Option::as_ref).cloned();
+        let (mut file, meta) = self.open_checked(source, observed.as_ref().map(|k| &k.id))?;
+        if self.encoding(i) == Encoding::Zstd {
+            let key = key_of(&meta);
+            if observed.is_some_and(|k| k != key) {
+                return Err(RealFsError::Changed);
             }
-        })?;
-        let meta = file.metadata().map_err(io)?;
-        let expected = usize::try_from(source)
-            .ok()
-            .and_then(|i| self.observed.get(i))
-            .and_then(Option::as_ref);
-        if !meta.is_file() || expected.is_some_and(|id| *id != file_id(&meta)) {
-            return Err(RealFsError::Changed);
+            let buf = self.read_decoded(source, file, key, range, len)?;
+            self.counters.reads += 1;
+            self.counters.bytes_read += buf.len() as u64;
+            return Ok(buf);
         }
         file.seek(SeekFrom::Start(range.start)).map_err(io)?;
         let file_len = meta.len().saturating_sub(range.start);
@@ -169,6 +330,10 @@ impl FileSystem for RealFs {
         self.counters.reads += 1;
         self.counters.bytes_read += buf.len() as u64;
         Ok(buf)
+    }
+
+    fn is_undecodable(error: &RealFsError) -> bool {
+        *error == RealFsError::Undecodable
     }
 }
 
