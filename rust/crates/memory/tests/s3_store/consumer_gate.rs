@@ -278,6 +278,17 @@ fn check_bodies(fx: &Fixture, agent: &str, dir: &Path, sources: usize) -> R {
     Ok(())
 }
 
+/// Decoded bytes of a logical path: the plain file, or its `.zst` spelling.
+fn disk_logical(root: &Path, rel: &Path) -> R<Vec<u8>> {
+    let plain = root.join(rel);
+    if plain.exists() {
+        return fs::read(&plain).map_err(e);
+    }
+    let mut z = plain.into_os_string();
+    z.push(".zst");
+    zstd::stream::decode_all(fs::read(z).map_err(e)?.as_slice()).map_err(e)
+}
+
 fn walk(dir: &Path, base: &Path, out: &mut Vec<PathBuf>) -> R {
     for entry in fs::read_dir(dir).map_err(e)? {
         let p = entry.map_err(e)?.path();
@@ -571,7 +582,7 @@ fn consumer_gate_claude_codex_pi_export_imports_and_reports() -> R {
         for f in files {
             assert_eq!(
                 fs::read(dir.join(&f)).map_err(e)?,
-                fs::read(root_of(&fx, w.agent).join(&f)).map_err(e)?,
+                disk_logical(root_of(&fx, w.agent), &f)?,
                 "restore equals disk for {f:?}"
             );
         }
