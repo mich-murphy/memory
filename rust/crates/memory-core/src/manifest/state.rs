@@ -20,8 +20,10 @@ pub struct SourceEntry {
     pub deleted_at: Option<Timestamp>,
 }
 impl SourceEntry {
-    fn same_identity(&self, w: &SourceWrite) -> Result<(), ManifestError> {
-        if self.kind == w.kind && self.path == w.path && self.class == w.class {
+    /// Kind and class never change. The path may change only when `path_may_move`
+    /// (an append source is renamed, e.g. archived, between captures).
+    fn same_identity(&self, w: &SourceWrite, path_may_move: bool) -> Result<(), ManifestError> {
+        if self.kind == w.kind && (path_may_move || self.path == w.path) && self.class == w.class {
             Ok(())
         } else {
             Err(ManifestError::SourceChanged)
@@ -97,7 +99,8 @@ impl OwnerState {
                     .sources
                     .get_mut(&w.id)
                     .ok_or(ManifestError::MissingSource)?;
-                entry.same_identity(w)?;
+                entry.same_identity(w, true)?;
+                entry.path.clone_from(&w.path);
                 if entry.deleted_at.is_some() {
                     return Err(ManifestError::SourceDeleted);
                 }
@@ -123,7 +126,7 @@ impl OwnerState {
                         self.sources.insert(w.id.clone(), w.entry());
                     }
                     Some(entry) => {
-                        entry.same_identity(w)?;
+                        entry.same_identity(w, !replace)?;
                         let next = entry
                             .epochs
                             .last()
@@ -135,6 +138,7 @@ impl OwnerState {
                         if replace {
                             entry.epochs.clear();
                         }
+                        entry.path.clone_from(&w.path);
                         entry.epochs.push(w.record());
                         entry.deleted_at = None;
                     }

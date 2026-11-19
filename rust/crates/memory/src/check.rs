@@ -101,6 +101,8 @@ pub struct Tally {
     pub unknown_kind: u64,
     /// Walk: files with no unambiguous owner.
     pub unknown_owner: u64,
+    /// Walk: files duplicating another file's source id (not captured).
+    pub duplicate: u64,
     /// Walk: snapshot files deferred until slice 3.
     pub deferred_snapshot: u64,
     /// Walk: entries that could not be read.
@@ -149,7 +151,7 @@ impl Report {
     pub fn summary(&self) -> String {
         let t = &self.tally;
         format!(
-            "check owners={} sources={} match={} behind={} unsettled={} mismatch={} uncaptured={} withheld={} remote_only={} parked={} unknown_kind={} unknown_owner={} deferred_snapshot={} unreadable={} store_error={} status={}",
+            "check owners={} sources={} match={} behind={} unsettled={} mismatch={} uncaptured={} withheld={} remote_only={} parked={} unknown_kind={} unknown_owner={} duplicate={} deferred_snapshot={} unreadable={} store_error={} status={}",
             t.owners,
             t.sources,
             t.matched,
@@ -162,6 +164,7 @@ impl Report {
             t.parked,
             t.unknown_kind,
             t.unknown_owner,
+            t.duplicate,
             t.deferred_snapshot,
             t.unreadable,
             t.store_error,
@@ -552,6 +555,7 @@ pub fn check(root: &Path) -> Result<Report, Refusal> {
     let counts = walk.counts();
     tally.unknown_kind = counts.unknown_kind;
     tally.unknown_owner = counts.unknown_owner;
+    tally.duplicate = counts.duplicate;
     tally.deferred_snapshot = counts.deferred_snapshot;
     tally.unreadable = counts.unreadable;
     tally.sources = u64::try_from(rows.len()).unwrap_or(u64::MAX);

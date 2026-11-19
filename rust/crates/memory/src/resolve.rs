@@ -17,7 +17,7 @@
 use crate::capture::Source;
 use crate::environment::{FileSystem, Stat};
 use crate::realfs::{RealFs, RealFsError, WalkLimits, index_claude_sessions, walk, walk_under};
-use memory_core::domain::{Owner, SourceClass, SourceKind};
+use memory_core::domain::{Owner, SourceClass, SourceId, SourceKind};
 use memory_core::locator::{Located, RootRelativePath, Roots, locate};
 use memory_core::privacy::{Profile, ResolvedSourceFacts};
 use std::cell::RefCell;
@@ -255,6 +255,9 @@ pub struct Counts {
     pub unknown_kind: u64,
     /// Files with a known pattern but no unambiguous owner.
     pub unknown_owner: u64,
+    /// Files whose (owner, source id) another file with a lexicographically smaller
+    /// root-relative path already holds; not yielded.
+    pub duplicate: u64,
     /// Snapshot-class files located but withheld until slice 3 (DESIGN.md 17); neither
     /// yielded nor counted as unknown.
     pub deferred_snapshot: u64,
@@ -395,8 +398,44 @@ impl crate::daemon::Sources for WalkSources {
         counts.truncated = found.truncated;
         let mut out = Vec::new();
         self.known.clear();
+        // Per (root, owner, id), the lexicographically first root-relative path is kept.
+        let mut first: HashMap<(usize, Owner, SourceId), String> = HashMap::new();
+        for (index, (dir, _)) in self.roots.iter().enumerate() {
+            for (_, rel, located) in found.files.iter().filter(|f| f.0.starts_with(dir)) {
+                if let Located::Source {
+                    owner,
+                    id,
+                    class: SourceClass::Append,
+                    ..
+                } = located
+                {
+                    let key = rel.components().join("/");
+                    first
+                        .entry((index, owner.clone(), id.clone()))
+                        .and_modify(|k| {
+                            if key < *k {
+                                k.clone_from(&key);
+                            }
+                        })
+                        .or_insert(key);
+                }
+            }
+        }
         for (index, (dir, _)) in self.roots.iter().enumerate() {
             for (path, rel, located) in found.files.iter().filter(|f| f.0.starts_with(dir)) {
+                if let Located::Source {
+                    owner,
+                    id,
+                    class: SourceClass::Append,
+                    ..
+                } = located
+                    && first
+                        .get(&(index, owner.clone(), id.clone()))
+                        .is_some_and(|k| *k != rel.components().join("/"))
+                {
+                    counts.duplicate += 1;
+                    continue;
+                }
                 match located {
                     Located::UnknownKind => counts.unknown_kind += 1,
                     Located::UnknownOwner => counts.unknown_owner += 1,
@@ -506,7 +545,7 @@ impl crate::daemon::Sources for WalkSources {
         let Ok(mut fs) = self.fs.0.try_borrow_mut() else {
             return Vec::new();
         };
-        let mut out = Vec::new();
+        let mut live = Vec::new();
         for (index, path) in paths {
             let Some((dir, roots)) = self.roots.get(*index) else {
                 continue;
@@ -522,8 +561,34 @@ impl crate::daemon::Sources for WalkSources {
             // No snapshot row reaches `known`: `enumerate` and `note` both leave them out, and a
             // path's class depends on its pattern alone, not on the session index.
             let located = locate(&rel, roots);
+            live.push((*index, path, dir, rel, located));
+        }
+        // One source per (root, id): the lexicographically first root-relative path.
+        let mut first: HashMap<(usize, SourceId), String> = HashMap::new();
+        for (index, _, _, rel, located) in &live {
+            if let Located::Source { id, .. } = located {
+                let key = rel.components().join("/");
+                first
+                    .entry((*index, id.clone()))
+                    .and_modify(|k| {
+                        if key < *k {
+                            k.clone_from(&key);
+                        }
+                    })
+                    .or_insert(key);
+            }
+        }
+        let mut out = Vec::new();
+        for (index, path, dir, rel, located) in &live {
+            if let Located::Source { id, .. } = located
+                && first
+                    .get(&(*index, id.clone()))
+                    .is_some_and(|k| *k != rel.components().join("/"))
+            {
+                continue;
+            }
             if let Some((found, source)) =
-                to_source(&mut fs, &mut self.handles, path, dir, &rel, &located)
+                to_source(&mut fs, &mut self.handles, path, dir, rel, located)
                 && found == *owner
             {
                 out.push(source);

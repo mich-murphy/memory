@@ -554,7 +554,7 @@ fn codex_located(path: &str) -> Result<Located, Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn row7c_codex_sessions_archive_and_zst_share_one_owner_session_and_id() -> R {
+fn row7c_codex_plain_spellings_share_one_id_zst_spellings_another_all_one_owner() -> R {
     let uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     let stem = format!("rollout-2026-01-02T03-04-05-{uuid}");
     let name = format!("{stem}.jsonl");
@@ -590,14 +590,22 @@ fn row7c_codex_sessions_archive_and_zst_share_one_owner_session_and_id() -> R {
         };
         assert_eq!(session.as_str(), format!("r1:{stem}"));
         assert_eq!(agent, &Agent::Codex);
-        assert_eq!(id.as_str(), format!("r1:rollouts:{name}"));
+        let suffix = if *want_kind == SourceKind::CodexCompressed {
+            ".zst"
+        } else {
+            ""
+        };
+        assert_eq!(id.as_str(), format!("r1:rollouts:{name}{suffix}"));
         seen.push((owner, id));
     }
     let first = seen.first().ok_or("empty")?;
     assert!(
-        seen.iter().all(|s| s == first),
-        "one owner and id for every spelling"
+        seen.iter().all(|s| s.0 == first.0),
+        "one owner for every spelling"
     );
+    assert_eq!(seen.first().map(|s| &s.1), seen.get(1).map(|s| &s.1));
+    assert_eq!(seen.get(2).map(|s| &s.1), seen.get(3).map(|s| &s.1));
+    assert_ne!(seen.first().map(|s| &s.1), seen.get(2).map(|s| &s.1));
     // A different rollout UUID is a different owner (control).
     let other = "rollout-2026-01-02T03-04-05-bbbbbbbb-cccc-dddd-eeee-ffffffffffff.jsonl";
     let Located::Source { owner, .. } = codex_located(&format!("sessions/2026/01/02/{other}"))?
