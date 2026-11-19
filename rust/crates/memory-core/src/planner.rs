@@ -222,6 +222,9 @@ pub fn plan(input: &PlanInput) -> Planning {
             )
         }
         Strategy::Append(AppendBasis::Indexed { state, windows }) => {
+            // Capture does not hand over an indexed basis whose id changed: it verifies the
+            // content on the Unindexed basis instead (brief 39). This guard stays as the pure
+            // planner's contract for callers that do.
             if observed.id != state.observed.id {
                 return replay(ReplayReason::IdentityChanged);
             }

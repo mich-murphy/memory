@@ -1197,7 +1197,12 @@ fn append<F: FileSystem>(
     let index = local
         .index
         .clone()
-        .filter(|state| remote.as_ref() == Some(&state.position));
+        .filter(|state| remote.as_ref() == Some(&state.position))
+        // A new FileId is not new content (brief 39): drop the index entry so the planner takes
+        // the Unindexed basis, hashes `[0, captured_to)` and compares it with the remote whole
+        // digest. Equal continues the epoch and the stat refresh records the new id; different
+        // is a new epoch (AdoptMismatch). It also keeps the audit off the old basis.
+        .filter(|state| state.observed.id == job.observed.id);
     job.previous = index
         .as_ref()
         .map_or_else(audit::never, |state| state.audit.clone());
