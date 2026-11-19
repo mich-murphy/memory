@@ -75,8 +75,12 @@ from `main` alone.
   no new failure since check 2; Claude hook delivery verified (a Claude `session_end` hint on
   2026-11-17), Codex still unverified (evidence 21, "Check 3"). Check 4 (2026-11-18 20:34Z
   to 20:55Z) clean: 6,042 of 6,042 sources match, 2,023 rounds, no `WARN` or `ERROR` line, no
-  new failure since check 2 (evidence 21, "Check 4"). Next check about 2026-11-19T09:00Z;
-  the run can end after it if it is clean.
+  new failure since check 2 (evidence 21, "Check 4"). Check 5 (2026-11-19 08:55Z to
+  09:20Z) clean: 6,045 of 6,045 sources match. **The run passed and is torn down** (2026-11-19
+  09:20Z to 09:44Z): agent and helpers stopped, hooks and Codex `config.toml` restored to the
+  backups, Pi extension removed, prefix deleted and listed empty (evidence 21, "Check 5 and end
+  of run"). Steps 1 and 2 below are done; next is the short run with the current build on real
+  data, then cutover.
   What the next session does, in order:
   1. Read `checks.log` (a check every 12 h; abort on any `mismatch` or an owner parked as
      `Foreign`), the daemon log and `status.json`; confirm the agent, sampler, `caffeinate` and

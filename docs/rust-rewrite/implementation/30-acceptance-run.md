@@ -214,3 +214,10 @@ on the intended assertion, `scripts/gates.sh` on the combined tip.
   `ERROR` line, no new failure since check 2. Codex hint delivery still unverified (no new
   rollout). Peak unchanged at 1,254 MB. Next check about 2026-11-19T09:00Z, after which the run
   can end (evidence 21, "Check 4").
+- 2026-11-19 09:45Z (check 5, end): fifth `memory check` clean (6,045 of 6,045 sources match;
+  mismatch, uncaptured, parked 0), ending 09:19:35Z, after 2026-11-19T07:46Z: two consecutive
+  clean days, **RUN passed**. 2,533 rounds in one process, no `WARN` or `ERROR` line, failures
+  `offline=9` only. Torn down 09:20Z to 09:44Z: agent, plist and helpers stopped; hooks restored
+  byte-equal to the backups; Codex `config.toml` restored with them (its only change was the six
+  day-0 trust records of the acceptance hooks); Pi extension removed; prefix deleted (11,591
+  objects) and listed empty (evidence 21, "Check 5 and end of run").

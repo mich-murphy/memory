@@ -305,3 +305,49 @@ Commands as for check 2.
   binary): briefs 35 (prefix guard), 36 (`memory install`) and 37 (`memory export` decompresses
   recompressed Codex rollouts), and the Go `internal/syncer` timeout finding (PR #170).
 - Next check: about 09:00Z on 2026-11-19; the run can end after it if it is clean.
+
+### Check 5 and end of run (recorded 2026-11-19 at 09:45Z)
+
+Commands as for check 2, then the teardown of the run README.
+
+- **Fifth `memory check`** (2026-11-19 08:55:17Z to 09:19:35Z, 24.3 minutes, exit 0):
+  `owners=1076 sources=6045 match=6045 behind=0 unsettled=0 mismatch=0 uncaptured=0 withheld=0
+  remote_only=0 parked=0 unknown_kind=19069 unknown_owner=0 deferred_snapshot=3123 unreadable=0
+  store_error=0 status=loaded`. Five consecutive clean checks; the first clean check ending after
+  2026-11-19T07:46Z, so the end condition (two consecutive clean days) is met. No abort trigger
+  fired during the run.
+- **Daemon.** Same process for the whole run (one launchd run, pid unchanged, never exited);
+  2,533 rounds (`start` 1, `timer` 126, `dir` 2,406); no `WARN` or `ERROR` line in the whole log.
+  Of the 530 rounds since check 4, none has `failed`, `parked` or `audit_mismatched` above 0.
+  `status.json` at 09:19:52Z: `parked` empty, `host_paused` false, failures `offline=9` only (all
+  before check 2), audit `matched=6076 mismatched=0 ineligible=67`.
+- **Hints.** Day files for 2026-11-17 to 2026-11-19. Pi and Claude hook delivery verified; no
+  Codex rollout was created during the run, so Codex hint delivery stays unverified.
+- **Footprint.** 18,487 samples from 2026-11-17T05:36:24Z to 2026-11-19T09:20:17Z. Peak
+  (`phys_footprint_peak`) 1,254 MB, reached during the first full reconcile on 2026-11-17
+  (largest current sample 1,210 MB at 07:07:46Z); hourly maxima of the current footprint since
+  check 4: 95 to 312 MB. The run's `a28bfa4` binary predates streaming capture (brief 31), so
+  this peak is not the current build's; DESIGN D45 already records it.
+- **Teardown** (2026-11-19 09:20Z to 09:44Z):
+  - `launchctl bootout` of `memory-acceptance` (the daemon logged `stopped` at 09:20:15Z); plist
+    removed; sampler, `caffeinate` and check loop stopped; no `memory-acceptance` process left.
+  - Hooks: `~/.claude/settings.json` and `~/.codex/hooks.json` each equalled the backup plus
+    exactly the acceptance handlers (8 and 6; compared structurally after removing them), so the
+    backups were copied back; both now byte-equal the backups and hold no `memory-acceptance`
+    entry. The Pi extension `memory-acceptance.ts` was removed.
+  - `~/.codex/config.toml` differed from its backup, which the README said should not happen.
+    Compared by key path only: 5 trust records added and 1 changed, one per event of the six
+    acceptance handlers (`hooks.state[...].trusted_hash` for `session_start`, `stop`,
+    `interrupt`, `pre_compact`, `session_end`, `subagent_stop`), written when the operator
+    approved the hooks on day 0; nothing else. The backup was restored together with
+    `hooks.json` (the pair before the run); the teardown-time file is kept privately as
+    `backup/codex-config.toml.at-teardown-20261119` (mode 0600) in the run directory.
+  - Prefix `rust-acceptance/20261117-a28bfa4/`: listed 11,591 objects (`current` 1,076,
+    `manifests` 2,710, `objects` 7,805); deleted 11,591 in 11,591 delete requests; listed again:
+    0, `remaining_after` 0 (A2). The listing tool only accepts one run prefix, so other
+    `rust-acceptance/` prefixes were not listed here.
+  - Kept for evidence: `footprint.tsv`, `checks.log`, the daemon log (no paths or content).
+- **Result.** Run `20261117-a28bfa4` passed: two consecutive days with zero restore mismatches,
+  zero parked owners and zero uncaptured local sessions (DESIGN 17 slice 2b exit criterion), on
+  the `a28bfa4` build. Merged into `main` since check 4 and not part of this run: briefs 38 and
+  39 (Codex rollout identity, DESIGN D47 and D48; brief 37 reverted).
