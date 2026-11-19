@@ -659,6 +659,12 @@ fn fail(code: &str, exit: u8) -> ExitCode {
 /// Exit codes: 0 clean, 1 a mismatch, an uncaptured source or a parked owner, 2 config or token
 /// refusal, 3 the result is unknown (the unknown cases win over 1), 64 usage. A refusal writes
 /// one line `memory: <code>` to stderr; a result goes to stdout.
+///
+/// Detail lines follow the summary: `parked`, `mismatch`, `uncaptured`, `withheld` and, for each
+/// failed store request, `store_error owner=<prefix> kind=<kind> cause=<code>`. `kind` is the
+/// source kind, or `chain` when the owner's manifest chain could not be read (one line per
+/// owner); `cause` is the closed code of the store error (for example `refused`, `dns`,
+/// `timeout`, `server`). No path, key, endpoint or credential is printed.
 #[must_use]
 pub fn main_entry(mut args: impl Iterator<Item = std::ffi::OsString>) -> ExitCode {
     if args.next().is_some() {
