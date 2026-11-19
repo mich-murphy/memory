@@ -535,7 +535,7 @@ fn rows() -> Vec<Row> {
             A,
             R::Main,
             Some(&stem),
-            &format!("rollouts:{name}.zst"),
+            &format!("rollouts:{name}"),
         ),
     ));
     v.push(row(
