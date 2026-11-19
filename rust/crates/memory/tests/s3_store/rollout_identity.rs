@@ -1,4 +1,5 @@
-//! Brief 38: Codex rollouts keep one identity across archive, recompression and resume.
+//! Briefs 38/39: a Codex rollout keeps one logical identity across archive, recompression and
+//! resume; `.zst` is decoded at capture.
 //! Each scenario runs the daemon against the loopback fake, then `memory check` and
 //! `memory export` on the real binary.
 use super::assemble::{PREFIX, Rig, lines};
@@ -20,7 +21,7 @@ use std::process::Command;
 const NAME: &str = "rollout-2026-11-17T10-00-00-33333333-3333-4333-8333-333333333333.jsonl";
 
 struct Ctx {
-    _server: Fake,
+    server: Fake,
     rig: Rig,
     codex: PathBuf,
     daemon: ProductionDaemon,
@@ -36,6 +37,8 @@ struct Src {
 
 struct Done {
     check: String,
+    stdout: String,
+    code: Option<i32>,
     export_line: String,
     sources: Vec<Src>,
 }
@@ -55,7 +58,7 @@ fn ctx(label: &str) -> R<Ctx> {
     fs::copy(&rig.cfg, rig.state.join("config.toml")).map_err(e)?;
     let daemon = start_from_config(&rig.state, &rig.cfg).map_err(e)?;
     Ok(Ctx {
-        _server: server,
+        server,
         rig,
         codex,
         daemon,
@@ -91,8 +94,19 @@ impl Ctx {
         Ok(())
     }
     fn finish(self) -> R<Done> {
+        self.finish_with(true)
+    }
+    fn puts(&self) -> Vec<Vec<u8>> {
+        self.server
+            .requests()
+            .into_iter()
+            .filter(|r| r.method == "PUT" && r.path.contains("/objects/"))
+            .map(|r| zstd::decode_all(&r.body[..]).unwrap_or_default())
+            .collect()
+    }
+    fn finish_with(self, export: bool) -> R<Done> {
         let Self {
-            _server,
+            server: _server,
             rig,
             codex: _,
             daemon,
@@ -122,12 +136,22 @@ impl Ctx {
         };
         let out = run(&["check".as_ref()])?;
         let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-        assert_eq!(out.status.code(), Some(0), "{stdout}");
+        let code = out.status.code();
         let check = format!("{} ", stdout.lines().next().unwrap_or_default());
         assert!(
             check.contains(" mismatch=0 ") && check.contains(" uncaptured=0 "),
             "{check}"
         );
+        if !export {
+            return Ok(Done {
+                check,
+                stdout,
+                code,
+                export_line: String::new(),
+                sources: Vec::new(),
+            });
+        }
+        assert_eq!(code, Some(0), "{stdout}");
         let dest = rig.dir.join("out");
         let ex = run(&[
             "export".as_ref(),
@@ -142,6 +166,8 @@ impl Ctx {
         let sources = read_sources(&meta, &dest)?;
         Ok(Done {
             check,
+            stdout,
+            code,
             export_line,
             sources,
         })
@@ -201,97 +227,84 @@ fn archived_then_appended_lands_under_the_archived_path() -> R {
     Ok(())
 }
 
+fn zst_name() -> String {
+    format!("{NAME}.zst")
+}
+
+fn one_main(d: &Done, path: &str, body: &[u8]) {
+    assert_eq!(d.sources.len(), 1, "{}", d.export_line);
+    let s = &d.sources[0];
+    assert_eq!(s.path, path);
+    assert_eq!((s.state.as_str(), s.role.as_str()), ("active", "main"));
+    assert_eq!(s.body, body);
+}
+
 #[test]
-fn recompressed_rollout_lands_the_zst_beside_the_plain_source() -> R {
-    // Deletion of the vanished plain source is not detected by the walk (reported on brief 38).
+fn recompressed_rollout_puts_nothing_and_stays_one_plain_path_source() -> R {
     let mut c = ctx("ri-recompressed")?;
     let plain = lines(0..12);
     c.write(&live(NAME), plain.as_bytes())?;
     c.rounds(2)?;
+    let before = c.puts().len();
     c.remove(&live(NAME))?;
-    c.write(&live(&format!("{NAME}.zst")), &zst(plain.as_bytes())?)?;
-    c.rounds(5)?;
+    c.write(&live(&zst_name()), &zst(plain.as_bytes())?)?;
+    c.rounds(4)?;
+    assert_eq!(c.puts().len(), before, "no object PUT after recompression");
     let d = c.finish()?;
-    assert_eq!(d.sources.len(), 2, "{}", d.export_line);
-    assert!(d.sources.iter().any(|s| s.id.ends_with(".jsonl.zst")));
-    for s in &d.sources {
-        assert_eq!(s.role, "main");
-        assert_eq!(s.body, plain.as_bytes());
-    }
+    one_main(&d, &live(NAME), plain.as_bytes());
     Ok(())
 }
 
 #[test]
-fn resumed_rollout_lands_the_plain_source_beside_the_zst() -> R {
-    // Deletion of the vanished .zst source is not detected by the walk (reported on brief 38).
+fn zst_first_then_resumed_plain_extends_one_epoch_with_only_new_bytes() -> R {
     let mut c = ctx("ri-resumed")?;
     let old = lines(0..12);
-    c.write(&live(&format!("{NAME}.zst")), &zst(old.as_bytes())?)?;
+    c.write(&live(&zst_name()), &zst(old.as_bytes())?)?;
     c.rounds(2)?;
-    c.remove(&live(&format!("{NAME}.zst")))?;
+    let before = c.puts().len();
+    assert_eq!(c.puts().concat(), old.as_bytes());
+    c.remove(&live(&zst_name()))?;
     let new = lines(0..20);
     c.write(&live(NAME), new.as_bytes())?;
-    c.rounds(5)?;
+    c.rounds(4)?;
+    let puts = c.puts();
+    let added: Vec<u8> = puts.iter().skip(before).flatten().copied().collect();
+    assert_eq!(added, lines(12..20).as_bytes(), "only the new bytes");
     let d = c.finish()?;
-    assert_eq!(d.sources.len(), 2, "{}", d.export_line);
-    let s = d
-        .sources
-        .iter()
-        .find(|s| !s.id.ends_with(".zst"))
-        .ok_or("plain")?;
-    assert_eq!((s.state.as_str(), s.role.as_str()), ("active", "main"));
-    assert_eq!(s.body, new.as_bytes());
+    one_main(&d, &live(NAME), new.as_bytes());
     Ok(())
 }
 
 #[test]
-fn resumed_after_recompression_gives_the_plain_source_a_new_epoch() -> R {
+fn recompressed_then_resumed_is_still_one_epoch() -> R {
     let mut c = ctx("ri-resumed-twice")?;
     let old = lines(0..12);
     c.write(&live(NAME), old.as_bytes())?;
     c.rounds(2)?;
     c.remove(&live(NAME))?;
-    c.write(&live(&format!("{NAME}.zst")), &zst(old.as_bytes())?)?;
-    c.rounds(5)?;
-    c.remove(&live(&format!("{NAME}.zst")))?;
+    c.write(&live(&zst_name()), &zst(old.as_bytes())?)?;
+    c.rounds(3)?;
+    c.remove(&live(&zst_name()))?;
     let new = lines(0..20);
     c.write(&live(NAME), new.as_bytes())?;
-    c.rounds(5)?;
+    c.rounds(3)?;
+    let puts: Vec<u8> = c.puts().concat();
+    assert_eq!(puts, new.as_bytes(), "every byte uploaded once");
     let d = c.finish()?;
-    let plain: Vec<&Src> = d
-        .sources
-        .iter()
-        .filter(|s| !s.id.ends_with(".zst"))
-        .collect();
-    // Brief 39: the resumed plain file has a new inode but the same prefix, so it is verified
-    // by content and continues the one epoch (no sealed epoch beside it).
-    assert_eq!(plain.len(), 1, "{}", d.export_line);
-    assert_eq!(plain.first().map(|s| s.state.as_str()), Some("active"));
-    assert_eq!(
-        plain.first().map(|s| s.body.as_slice()),
-        Some(new.as_bytes())
-    );
+    one_main(&d, &live(NAME), new.as_bytes());
     Ok(())
 }
 
 #[test]
-fn plain_and_zst_at_once_both_land() -> R {
+fn plain_and_zst_at_once_land_one_source_with_one_duplicate() -> R {
     let mut c = ctx("ri-both")?;
     let body = lines(0..12);
     c.write(&live(NAME), body.as_bytes())?;
-    c.write(&live(&format!("{NAME}.zst")), &zst(body.as_bytes())?)?;
+    c.write(&archived(&zst_name()), &zst(body.as_bytes())?)?;
     c.rounds(3)?;
     let d = c.finish()?;
-    assert!(d.has("duplicate", 0), "{}", d.check);
-    assert_eq!(d.sources.len(), 2);
-    assert_ne!(
-        d.sources.first().map(|s| &s.id),
-        d.sources.last().map(|s| &s.id)
-    );
-    for s in &d.sources {
-        assert_eq!((s.state.as_str(), s.role.as_str()), ("active", "main"));
-        assert_eq!(s.body, body.as_bytes());
-    }
+    assert!(d.has("duplicate", 1), "{}", d.check);
+    one_main(&d, &live(NAME), body.as_bytes());
     Ok(())
 }
 
@@ -304,9 +317,25 @@ fn sessions_and_archived_copies_at_once_land_once() -> R {
     c.rounds(3)?;
     let d = c.finish()?;
     assert!(d.has("duplicate", 1), "{}", d.check);
-    assert_eq!(d.sources.len(), 1);
-    let s = d.sources.first().ok_or("source")?;
-    assert_eq!(s.path, archived(NAME));
-    assert_eq!(s.body, body.as_bytes());
+    one_main(&d, &archived(NAME), body.as_bytes());
+    Ok(())
+}
+
+#[test]
+fn undecodable_zst_is_withheld_with_no_put_and_check_says_why() -> R {
+    let mut c = ctx("ri-undecodable")?;
+    c.write(&live(&zst_name()), b"this is not zstd")?;
+    c.rounds(3)?;
+    assert!(c.puts().is_empty(), "no object PUT");
+    let d = c.finish_with(false)?;
+    assert!(d.has("withheld", 1), "{}", d.check);
+    assert!(d.check.contains(" mismatch=0 ") && d.check.contains(" uncaptured=0 "));
+    assert!(
+        d.stdout.contains("withheld ") && d.stdout.contains("reason=undecodable"),
+        "{}",
+        d.stdout
+    );
+    // Withheld is not a failure: check exits 0.
+    assert_eq!(d.code, Some(0));
     Ok(())
 }
