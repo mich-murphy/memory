@@ -3,7 +3,7 @@
 //! rejected, never the production line that the mutant changes.
 use memory::capture::{Published, Source};
 use memory::daemon::{Daemon, Parts, StartOptions};
-use memory::environment::{Store, StoreError, Stored};
+use memory::environment::{Cause, Store, StoreError, Stored};
 use memory::state::SyncPolicy;
 use memory_core::domain::{
     Agent, ArchiveId, ETag, MachineId, Owner, SessionId, SessionKey, SourceClass, SourceId,
@@ -83,7 +83,7 @@ struct Judged {
 impl Store for Judged {
     fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
         if self.fail_current && key.ends_with("current.json") {
-            return Err(StoreError::Offline);
+            return Err(StoreError::Offline(Cause::Connect));
         }
         self.inner.put_if_absent(key, body)
     }
@@ -95,7 +95,7 @@ impl Store for Judged {
     ) -> Result<ETag, StoreError> {
         let current = key.ends_with("current.json");
         if self.fail_current && current {
-            return Err(StoreError::Offline);
+            return Err(StoreError::Offline(Cause::Connect));
         }
         let result = self.inner.put_if_match(key, etag, body);
         if current && result == Err(StoreError::PreconditionFailed) {

@@ -12,7 +12,7 @@ use memory::commit::{
     Base, Commit, CommitEnd, Failure, KnownOurs, Landed, LandedHow, Upload, check_fence, commit,
     commit_known, commit_stoppable, disposition, disposition_paced, manifest_key, recover_base,
 };
-use memory::environment::{Store, StoreError, Stored};
+use memory::environment::{Cause, Store, StoreError, Stored};
 use memory_core::disposition::{Outcome, Streak};
 use memory_core::domain::{
     Agent, ArchiveId, CommitOutcome, Disposition, ETag, ErrorClass, Fault, MachineId, Offset,
@@ -254,7 +254,7 @@ impl FakeStore {
         if self.revoked {
             Err(StoreError::Auth)
         } else if self.offline {
-            Err(StoreError::Offline)
+            Err(StoreError::Offline(Cause::Connect))
         } else {
             Ok(())
         }
@@ -814,7 +814,7 @@ impl Sut {
                 self.store.arm(
                     Op::Put(Kind::Current),
                     Effect::LandThen {
-                        err: StoreError::Ambiguous,
+                        err: StoreError::Ambiguous(Cause::Reset),
                         then_offline: *then_offline,
                     },
                 );
@@ -1774,7 +1774,7 @@ fn lost_reply_after_landing_is_already_ours() -> R {
     rig.store.arm(
         Op::Put(Kind::Current),
         Effect::LandThen {
-            err: StoreError::Ambiguous,
+            err: StoreError::Ambiguous(Cause::Reset),
             then_offline: false,
         },
     );
@@ -2072,7 +2072,7 @@ fn verification_that_cannot_read_is_landing_unknown_with_its_class() -> R {
         Op::Get(Kind::Current),
         0,
         100,
-        Effect::FailBefore(StoreError::Offline),
+        Effect::FailBefore(StoreError::Offline(Cause::Connect)),
     );
     let (failure, pauses) = rig.failed()?;
     assert_eq!(failure, Failure::LandingUnknown(ErrorClass::Offline));
@@ -2169,7 +2169,7 @@ fn ambiguous_piece_put_is_retried_as_412_success() -> R {
     rig.store.arm(
         Op::Put(Kind::Object),
         Effect::LandThen {
-            err: StoreError::Ambiguous,
+            err: StoreError::Ambiguous(Cause::Reset),
             then_offline: false,
         },
     );
@@ -2382,8 +2382,8 @@ fn store_errors_classify() {
         (StoreError::Throttled(None), ErrorClass::Throttled),
         (StoreError::Throttled(Some(7)), ErrorClass::Throttled),
         (StoreError::Server, ErrorClass::Offline),
-        (StoreError::Offline, ErrorClass::Offline),
-        (StoreError::Ambiguous, ErrorClass::Offline),
+        (StoreError::Offline(Cause::Connect), ErrorClass::Offline),
+        (StoreError::Ambiguous(Cause::Reset), ErrorClass::Offline),
         (StoreError::NotFound, ErrorClass::Offline),
         (StoreError::PreconditionFailed, ErrorClass::Offline),
     ];
@@ -2684,13 +2684,13 @@ fn late_write(
     rig.put_file(0, &[1, 2, 3, 4, 5, 6, 7, 8]);
     rig.store.arm(
         Op::Put(Kind::Current),
-        Effect::FailBefore(StoreError::Offline),
+        Effect::FailBefore(StoreError::Offline(Cause::Connect)),
     );
     rig.store.arm_n(
         Op::Get(Kind::Current),
         0,
         4, // amendment A13.5: every one of the 4 verification GET attempts fails
-        Effect::FailBefore(StoreError::Offline),
+        Effect::FailBefore(StoreError::Offline(Cause::Connect)),
     );
     let request = rig.request()?;
     let a = commit_known(
@@ -2757,13 +2757,13 @@ fn known_ours_is_cleared_whenever_a_commit_lands() -> R {
         // Attempt 1 cannot reach the store at the pointer write, nor read it back.
         rig.store.arm(
             Op::Put(Kind::Current),
-            Effect::FailBefore(StoreError::Offline),
+            Effect::FailBefore(StoreError::Offline(Cause::Connect)),
         );
         rig.store.arm_n(
             Op::Get(Kind::Current),
             0,
             4, // amendment A13.5: every one of the 4 verification GET attempts fails
-            Effect::FailBefore(StoreError::Offline),
+            Effect::FailBefore(StoreError::Offline(Cause::Connect)),
         );
         let request = rig.request()?;
         let first = commit_known(
@@ -2786,7 +2786,7 @@ fn known_ours_is_cleared_whenever_a_commit_lands() -> R {
             rig.store.arm(
                 Op::Put(Kind::Current),
                 Effect::LandThen {
-                    err: StoreError::Ambiguous,
+                    err: StoreError::Ambiguous(Cause::Reset),
                     then_offline: false,
                 },
             );
@@ -2983,14 +2983,14 @@ fn a_stop_raised_during_a_verification_get_changes_nothing() -> R {
             s.arm(
                 Op::Put(Kind::Current),
                 Effect::LandThen {
-                    err: StoreError::Ambiguous,
+                    err: StoreError::Ambiguous(Cause::Reset),
                     then_offline: false,
                 },
             );
             if nth == 2 {
                 s.arm(
                     Op::Get(Kind::Current),
-                    Effect::FailBefore(StoreError::Offline),
+                    Effect::FailBefore(StoreError::Offline(Cause::Connect)),
                 );
             }
         })?;

@@ -8,7 +8,7 @@
 use memory::commit::{
     Commit, CommitEnd, Failure, KnownOurs, LandedHow, Upload, commit, commit_known,
 };
-use memory::environment::{Published, Store, StoreError};
+use memory::environment::{Cause, Published, Store, StoreError};
 use memory::s3::{Operation, S3ConfigError, S3Store, TimeoutPolicy, map_reply, map_transport};
 use memory_core::domain::{
     Agent, ArchiveId, ETag, MachineId, Offset, Owner, SessionId, SessionKey, SourceClass, SourceId,
@@ -241,7 +241,7 @@ fn a_500_after_a_landed_write_is_server_and_sent_once() -> R {
 }
 #[test]
 fn a_dropped_reply_is_ambiguous_and_sent_once() -> R {
-    one_put_after(Fault::ApplyThenDrop, StoreError::Ambiguous)
+    one_put_after(Fault::ApplyThenDrop, StoreError::Ambiguous(Cause::Reset))
 }
 #[test]
 fn a_redirect_is_not_followed() -> R {
@@ -253,22 +253,32 @@ fn a_hang_is_ambiguous_for_a_write_and_offline_for_a_read() -> R {
     let fake = Fake::start()?;
     let mut s = store_at(&fake.url(), "", short())?;
     fake.queue("PUT", "k", Fault::ApplyThenHang(Duration::from_secs(3)));
-    assert_eq!(s.put_if_absent("k", body(b"1")), Err(StoreError::Ambiguous));
+    // ureq 3.5.1 reports `Timeout::Global` (observed with a probe, not assumed) for a server that
+    // accepts and then hangs under a policy that sets only `timeout_global`, so the cause
+    // is `timeout`, not `recv_timeout`.
+    assert_eq!(
+        s.put_if_absent("k", body(b"1")),
+        Err(StoreError::Ambiguous(Cause::Timeout))
+    );
     assert_eq!(fake.count("PUT"), 1);
     fake.queue("GET", "k", Fault::ApplyThenHang(Duration::from_secs(3)));
-    assert_eq!(s.get("k").map(|g| g.body), Err(StoreError::Offline));
+    assert_eq!(
+        s.get("k").map(|g| g.body),
+        Err(StoreError::Offline(Cause::Timeout))
+    );
     assert_eq!(fake.count("GET"), 1);
     Ok(())
 }
 
 #[test]
-fn a_refused_connection_is_offline() -> R {
+fn a_refused_connection_is_offline_with_cause_refused() -> R {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(e)?;
     let url = format!("http://{}", listener.local_addr().map_err(e)?);
     drop(listener);
     let mut s = store_at(&url, "", short())?;
-    assert_eq!(s.put_if_absent("k", body(b"1")), Err(StoreError::Offline));
-    assert_eq!(s.get("k").map(|g| g.body), Err(StoreError::Offline));
+    let refused = StoreError::Offline(Cause::Refused);
+    assert_eq!(s.put_if_absent("k", body(b"1")), Err(refused));
+    assert_eq!(s.get("k").map(|g| g.body), Err(refused));
     Ok(())
 }
 
@@ -380,8 +390,20 @@ fn reply_mapping_table() -> R {
         (PutIfAbsent, 200, Some("\"abc\""), None, ok(&quoted)),
         (Get, 200, Some("\"abc\""), None, ok(&quoted)),
         (PutIfMatch, 200, Some("W/\"abc\""), None, ok(&weak)),
-        (PutIfAbsent, 200, None, None, Err(StoreError::Ambiguous)),
-        (Get, 200, Some(""), None, Err(StoreError::Ambiguous)),
+        (
+            PutIfAbsent,
+            200,
+            None,
+            None,
+            Err(StoreError::Ambiguous(Cause::NoEtag)),
+        ),
+        (
+            Get,
+            200,
+            Some(""),
+            None,
+            Err(StoreError::Ambiguous(Cause::NoEtag)),
+        ),
         (
             PutIfAbsent,
             412,
@@ -449,44 +471,84 @@ fn reply_mapping_table() -> R {
 
 #[test]
 fn transport_mapping_table() {
+    use Cause as C;
+    use std::io::{Error as IoError, ErrorKind as K};
     use ureq::{Error as E, Timeout as T};
-    let other = || E::Io(std::io::Error::other("x"));
-    let refused = || E::Io(std::io::Error::from(std::io::ErrorKind::ConnectionRefused));
-    let table: Vec<(E, StoreError, StoreError)> = vec![
-        (E::HostNotFound, StoreError::Offline, StoreError::Offline),
-        (
-            E::ConnectionFailed,
-            StoreError::Offline,
-            StoreError::Offline,
-        ),
-        (E::Tls("x"), StoreError::Offline, StoreError::Offline),
-        (
-            E::Timeout(T::Resolve),
-            StoreError::Offline,
-            StoreError::Offline,
-        ),
-        (
-            E::Timeout(T::Connect),
-            StoreError::Offline,
-            StoreError::Offline,
-        ),
-        (refused(), StoreError::Offline, StoreError::Offline),
-        (
-            E::Timeout(T::Global),
-            StoreError::Ambiguous,
-            StoreError::Offline,
-        ),
-        (
-            E::Timeout(T::RecvResponse),
-            StoreError::Ambiguous,
-            StoreError::Offline,
-        ),
-        (other(), StoreError::Ambiguous, StoreError::Offline),
+    let io = |kind| E::Io(IoError::from(kind));
+    // (error, cause, never_sent): a request that never reached the server is `Offline` even
+    // for a write; every other failure is `Ambiguous` for a write and `Offline` for a read.
+    let table: Vec<(E, Cause, bool)> = vec![
+        (E::HostNotFound, C::Dns, true),
+        (E::ConnectionFailed, C::Connect, true),
+        (E::Tls("x"), C::Tls, true),
+        (E::Timeout(T::Resolve), C::DnsTimeout, true),
+        (E::Timeout(T::Connect), C::ConnectTimeout, true),
+        (io(K::ConnectionRefused), C::Refused, true),
+        (E::Timeout(T::SendRequest), C::SendTimeout, false),
+        (E::Timeout(T::SendBody), C::SendTimeout, false),
+        (E::Timeout(T::Await100), C::SendTimeout, false),
+        (E::Timeout(T::PerWrite), C::SendTimeout, false),
+        (E::Timeout(T::RecvResponse), C::RecvTimeout, false),
+        (E::Timeout(T::RecvBody), C::RecvTimeout, false),
+        (E::Timeout(T::PerRead), C::RecvTimeout, false),
+        (E::Timeout(T::Global), C::Timeout, false),
+        (E::Timeout(T::PerCall), C::Timeout, false),
+        (io(K::ConnectionReset), C::Reset, false),
+        (io(K::ConnectionAborted), C::Reset, false),
+        (io(K::BrokenPipe), C::Reset, false),
+        (io(K::UnexpectedEof), C::Reset, false),
+        (io(K::PermissionDenied), C::Io, false),
+        (E::Io(IoError::other("x")), C::Io, false),
+        (E::BadUri("x".into()), C::Other, false),
     ];
-    for (error, on_write, on_read) in table {
+    for (error, cause, never_sent) in table {
+        let on_write = if never_sent {
+            StoreError::Offline(cause)
+        } else {
+            StoreError::Ambiguous(cause)
+        };
         assert_eq!(map_transport(true, &error), on_write, "write {error:?}");
-        assert_eq!(map_transport(false, &error), on_read, "read {error:?}");
+        assert_eq!(
+            map_transport(false, &error),
+            StoreError::Offline(cause),
+            "read {error:?}"
+        );
     }
+    assert!(matches!(
+        map_transport(true, &E::BodyExceedsLimit(1)),
+        StoreError::Server
+    ));
+    // Every code is a closed lowercase identifier.
+    for cause in [
+        C::Dns,
+        C::DnsTimeout,
+        C::Connect,
+        C::ConnectTimeout,
+        C::Refused,
+        C::Tls,
+        C::SendTimeout,
+        C::RecvTimeout,
+        C::Timeout,
+        C::Reset,
+        C::Io,
+        C::Protocol,
+        C::NoEtag,
+        C::Other,
+    ] {
+        assert_eq!(StoreError::Offline(cause).code(), cause.code());
+        assert_eq!(StoreError::Ambiguous(cause).code(), cause.code());
+        assert!(
+            cause
+                .code()
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b == b'_')
+        );
+    }
+    assert_eq!(StoreError::Throttled(Some(1)).code(), "throttled");
+    assert_eq!(StoreError::Server.code(), "server");
+    assert_eq!(StoreError::Auth.code(), "auth");
+    assert_eq!(StoreError::NotFound.code(), "not_found");
+    assert_eq!(StoreError::PreconditionFailed.code(), "precondition_failed");
 }
 
 #[test]
@@ -577,11 +639,11 @@ fn the_secret_and_the_access_key_never_appear_in_debug_or_error_text() -> R {
     for error in [
         StoreError::PreconditionFailed,
         StoreError::NotFound,
-        StoreError::Offline,
+        StoreError::Offline(Cause::Other),
         StoreError::Throttled(Some(3)),
         StoreError::Server,
         StoreError::Auth,
-        StoreError::Ambiguous,
+        StoreError::Ambiguous(Cause::Other),
     ] {
         texts.push(format!("{error:?} / {error}"));
     }

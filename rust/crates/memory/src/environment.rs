@@ -50,6 +50,62 @@ pub trait FileSystem {
     }
 }
 
+/// Why a transport request failed or a reply was unusable: a closed set of codes, safe to log
+/// (no path, key, endpoint or text from the transport).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Cause {
+    /// The host name did not resolve.
+    Dns,
+    /// The name lookup did not finish in time.
+    DnsTimeout,
+    /// The connection could not be made (not refused).
+    Connect,
+    /// The connection was not made in time.
+    ConnectTimeout,
+    /// The peer refused the connection.
+    Refused,
+    /// The TLS handshake or a certificate check failed.
+    Tls,
+    /// A timeout while sending the request (headers, body, or waiting for `100 Continue`).
+    SendTimeout,
+    /// A timeout while receiving the reply (response head or body).
+    RecvTimeout,
+    /// The whole-request timeout elapsed (the phase is not known).
+    Timeout,
+    /// The connection was reset, aborted, broken or closed early.
+    Reset,
+    /// Any other I/O error.
+    Io,
+    /// The peer broke the HTTP protocol.
+    Protocol,
+    /// A 200 reply carried no usable ETag.
+    NoEtag,
+    /// Anything else.
+    Other,
+}
+
+impl Cause {
+    /// Closed lowercase code for logs and `check` output.
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Dns => "dns",
+            Self::DnsTimeout => "dns_timeout",
+            Self::Connect => "connect",
+            Self::ConnectTimeout => "connect_timeout",
+            Self::Refused => "refused",
+            Self::Tls => "tls",
+            Self::SendTimeout => "send_timeout",
+            Self::RecvTimeout => "recv_timeout",
+            Self::Timeout => "timeout",
+            Self::Reset => "reset",
+            Self::Io => "io",
+            Self::Protocol => "protocol",
+            Self::NoEtag => "no_etag",
+            Self::Other => "other",
+        }
+    }
+}
+
 /// Closed failure vocabulary of the object store (DESIGN.md 7.4, 11.2).
 ///
 /// `Ambiguous` is a reply that never arrived or could not be interpreted: the request may or
@@ -65,7 +121,7 @@ pub enum StoreError {
     NotFound,
     /// Connect, DNS, TLS or timeout failure.
     #[error("offline")]
-    Offline,
+    Offline(Cause),
     /// HTTP 429 or 503 (DESIGN.md 11.2 `Throttled`), with the reply's `Retry-After` in whole
     /// seconds when it carried one (the adapter parses it).
     #[error("throttled")]
@@ -79,7 +135,7 @@ pub enum StoreError {
     Auth,
     /// The outcome of the request is unknown (lost reply).
     #[error("ambiguous reply")]
-    Ambiguous,
+    Ambiguous(Cause),
 }
 
 impl StoreError {
@@ -101,9 +157,21 @@ impl StoreError {
             Self::Throttled(_) => ErrorClass::Throttled,
             Self::PreconditionFailed
             | Self::NotFound
-            | Self::Offline
+            | Self::Offline(_)
             | Self::Server
-            | Self::Ambiguous => ErrorClass::Offline,
+            | Self::Ambiguous(_) => ErrorClass::Offline,
+        }
+    }
+    /// Closed code of the failure for logs and `check`: the cause's code for `Offline` and
+    /// `Ambiguous`, else the variant name in snake case.
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Offline(cause) | Self::Ambiguous(cause) => cause.code(),
+            Self::PreconditionFailed => "precondition_failed",
+            Self::NotFound => "not_found",
+            Self::Throttled(_) => "throttled",
+            Self::Server => "server",
+            Self::Auth => "auth",
         }
     }
 }

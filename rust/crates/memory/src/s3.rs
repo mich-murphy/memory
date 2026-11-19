@@ -4,7 +4,7 @@
 //! disabled and this module has no loop, so a `current.json` write is never resent behind the
 //! caller (prototype P2, reason 1). Errors leaving a `Store` call are [`StoreError`] values only;
 //! no text is built from a URL (a presigned URL carries the signature) or from a `ureq` error.
-use crate::environment::{Published, Store, StoreError, Stored};
+use crate::environment::{Cause, Published, Store, StoreError, Stored};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use md5::{Digest, Md5};
@@ -108,7 +108,7 @@ pub fn map_reply(
     match status {
         200 => etag
             .and_then(|value| ETag::try_from(value.to_owned()).ok())
-            .ok_or(StoreError::Ambiguous),
+            .ok_or(StoreError::Ambiguous(Cause::NoEtag)),
         412 => Err(StoreError::PreconditionFailed),
         404 if op == Operation::PutIfMatch => Err(StoreError::PreconditionFailed),
         404 => Err(StoreError::NotFound),
@@ -122,15 +122,40 @@ pub fn map_reply(
 
 /// Map a transport failure. Pure. `write` is true for a PUT, where a lost reply means the
 /// request may have landed.
+///
+/// Refused, DNS, connect and TLS failures and the resolve and connect timeouts never reached
+/// the server, so they are `Offline` even for a write; every other failure is `Ambiguous` for
+/// a write and `Offline` for a read. The cause says which failure it was.
 pub fn map_transport(write: bool, error: &ureq::Error) -> StoreError {
+    use std::io::ErrorKind as K;
     use ureq::{Error as E, Timeout as T};
-    match error {
-        E::HostNotFound | E::ConnectionFailed | E::Tls(_) | E::Rustls(_) => StoreError::Offline,
-        E::Timeout(T::Resolve | T::Connect) => StoreError::Offline,
-        E::Io(io) if io.kind() == std::io::ErrorKind::ConnectionRefused => StoreError::Offline,
-        E::BodyExceedsLimit(_) => StoreError::Server,
-        _ if write => StoreError::Ambiguous,
-        _ => StoreError::Offline,
+    // The flag is true when the request never reached the server.
+    let (cause, never_sent) = match error {
+        E::HostNotFound => (Cause::Dns, true),
+        E::ConnectionFailed => (Cause::Connect, true),
+        E::Tls(_) | E::Rustls(_) => (Cause::Tls, true),
+        E::Timeout(T::Resolve) => (Cause::DnsTimeout, true),
+        E::Timeout(T::Connect) => (Cause::ConnectTimeout, true),
+        E::Io(io) if io.kind() == K::ConnectionRefused => (Cause::Refused, true),
+        E::BodyExceedsLimit(_) => return StoreError::Server,
+        E::Timeout(T::SendRequest | T::SendBody | T::Await100 | T::PerWrite) => {
+            (Cause::SendTimeout, false)
+        }
+        E::Timeout(T::RecvResponse | T::RecvBody | T::PerRead) => (Cause::RecvTimeout, false),
+        E::Timeout(T::Global | T::PerCall) => (Cause::Timeout, false),
+        E::Io(io) => match io.kind() {
+            K::ConnectionReset | K::ConnectionAborted | K::BrokenPipe | K::UnexpectedEof => {
+                (Cause::Reset, false)
+            }
+            _ => (Cause::Io, false),
+        },
+        E::Protocol(_) => (Cause::Protocol, false),
+        _ => (Cause::Other, false),
+    };
+    if write && !never_sent {
+        StoreError::Ambiguous(cause)
+    } else {
+        StoreError::Offline(cause)
     }
 }
 
