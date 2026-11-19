@@ -781,3 +781,34 @@ fn zstd_cached_length_is_recomputed_after_replacement() -> TestResult {
     );
     Ok(())
 }
+
+/// An in-place rewrite keeps the inode but changes size (and mtime): the cached decoded length
+/// is keyed by the physical size and mtime too, so it is recomputed.
+#[test]
+fn zstd_cached_length_is_recomputed_after_an_in_place_rewrite() -> TestResult {
+    let t = Tmp::new()?;
+    let p = t.write(
+        "r.jsonl.zst",
+        &zstd::encode_all(&decoded_sample(3000)[..], 3)?,
+    )?;
+    let (mut fs, h) = zst_fs(&p);
+    let first = fs.stat(h)?.ok_or("absent")?;
+    ensure!(first.size == 3000, "first");
+    let bigger = zstd::encode_all(&decoded_sample(9000)[..], 3)?;
+    let mut f = fs::OpenOptions::new().write(true).truncate(true).open(&p)?;
+    f.write_all(&bigger)?;
+    f.sync_all()?;
+    drop(f);
+    let second = fs.stat(h)?.ok_or("absent")?;
+    ensure!(second.id == first.id, "same inode");
+    ensure!(
+        second.size == 9000,
+        "after in-place rewrite: {}",
+        second.size
+    );
+    ensure!(
+        fs.read(h, 8990..9000)? == decoded_sample(9000).get(8990..).ok_or("s")?,
+        "read"
+    );
+    Ok(())
+}
