@@ -1444,6 +1444,9 @@ source's whole range in memory, measured against the 128 MB target (section 7.4,
    `rust-acceptance/` prefix and verify that the bucket holds only `delivery-artifacts/` and
    data written by the accepted Rust writer.
 
+Done on this Mac on 2026-11-19 (evidence 31): steps 1 to 4 and 6, and step 5 except hook
+delivery and the 2-day criterion on the production install. BC-01 is not cut over yet.
+
 ## 19. Decisions
 
 Operator decisions, 2026-11-07:
