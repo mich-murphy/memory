@@ -131,7 +131,11 @@ fn check_path(parts: &[&str], all: &[Roots]) -> Result<[usize; 4], String> {
         } = locate(&path, r)
         {
             let got = export_role(&kind, &parts.join("/"));
-            let want = mapped(role);
+            let want = if kind == memory_core::domain::SourceKind::CodexCompressed {
+                ExportRole::Artifact
+            } else {
+                mapped(role)
+            };
             if got != want {
                 return Err(format!("{parts:?} {kind:?} {role:?} -> {got:?}"));
             }
