@@ -1186,3 +1186,49 @@ fn identity_change_shorter_file_is_an_epoch() -> R {
     assert_eq!(kinds(&changes), ["epoch"]);
     Ok(())
 }
+
+// ---- Undecodable sources are withheld, never silently retried
+
+struct Undecodable(MemFs, bool);
+impl FileSystem for Undecodable {
+    type Error = bool;
+    fn stat(&mut self, source: u64) -> Result<Option<Stat>, bool> {
+        if self.1 {
+            return Err(true);
+        }
+        self.0.stat(source).map_err(|_| false)
+    }
+    fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, bool> {
+        let _ = (source, range);
+        Err(true)
+    }
+    fn is_undecodable(error: &bool) -> bool {
+        *error
+    }
+}
+
+#[test]
+fn undecodable_stat_or_read_is_withheld_with_no_upload() -> R {
+    for on_stat in [true, false] {
+        let mut rig = rig()?;
+        transcript(&mut rig, b"0123456789");
+        let objects = rig.store.objects.len();
+        let mut fs = Undecodable(std::mem::take(&mut rig.fs), on_stat);
+        let empty = OwnerState::default();
+        let env = Env {
+            header: header()?,
+            context: &rig.context,
+            now_ns: 10_000_000_000,
+            piece_len: rig.piece_len,
+        };
+        let got = capture(&mut fs, &rig.sources, &rig.locals, &empty, &env);
+        assert_eq!(
+            got.outcomes.first().map(|o| &o.1),
+            Some(&SourceOutcome::Withheld(WithholdReason::Undecodable)),
+            "on_stat={on_stat}"
+        );
+        assert!(got.commit.is_none());
+        assert_eq!(rig.store.objects.len(), objects);
+    }
+    Ok(())
+}
