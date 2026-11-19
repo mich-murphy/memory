@@ -665,7 +665,7 @@ fn walk_under_examines_only_entries_of_that_directory() -> Result<(), Box<dyn st
 
 fn decoded_sample(n: usize) -> Vec<u8> {
     (0..n)
-        .map(|i| u8::try_from((i * 7 ^ (i >> 8)) % 251).unwrap_or(0))
+        .map(|i| u8::try_from(((i * 7) ^ (i >> 8)) % 251).unwrap_or(0))
         .collect()
 }
 

@@ -28,7 +28,6 @@ struct Ctx {
 }
 
 struct Src {
-    id: String,
     path: String,
     state: String,
     role: String,
@@ -190,7 +189,6 @@ fn read_sources(meta: &Value, dest: &Path) -> R<Vec<Src>> {
     let mut out = Vec::new();
     for (s, b) in sources.iter().zip(bodies) {
         out.push(Src {
-            id: text(s, "source_id")?,
             path: text(s, "path")?,
             state: text(s, "state")?,
             role: text(s, "role")?,
@@ -231,12 +229,13 @@ fn zst_name() -> String {
     format!("{NAME}.zst")
 }
 
-fn one_main(d: &Done, path: &str, body: &[u8]) {
+fn one_main(d: &Done, path: &str, body: &[u8]) -> R {
     assert_eq!(d.sources.len(), 1, "{}", d.export_line);
-    let s = &d.sources[0];
+    let s = d.sources.first().ok_or("source")?;
     assert_eq!(s.path, path);
     assert_eq!((s.state.as_str(), s.role.as_str()), ("active", "main"));
     assert_eq!(s.body, body);
+    Ok(())
 }
 
 #[test]
@@ -251,7 +250,7 @@ fn recompressed_rollout_puts_nothing_and_stays_one_plain_path_source() -> R {
     c.rounds(4)?;
     assert_eq!(c.puts().len(), before, "no object PUT after recompression");
     let d = c.finish()?;
-    one_main(&d, &live(NAME), plain.as_bytes());
+    one_main(&d, &live(NAME), plain.as_bytes())?;
     Ok(())
 }
 
@@ -271,7 +270,7 @@ fn zst_first_then_resumed_plain_extends_one_epoch_with_only_new_bytes() -> R {
     let added: Vec<u8> = puts.iter().skip(before).flatten().copied().collect();
     assert_eq!(added, lines(12..20).as_bytes(), "only the new bytes");
     let d = c.finish()?;
-    one_main(&d, &live(NAME), new.as_bytes());
+    one_main(&d, &live(NAME), new.as_bytes())?;
     Ok(())
 }
 
@@ -291,7 +290,7 @@ fn recompressed_then_resumed_is_still_one_epoch() -> R {
     let puts: Vec<u8> = c.puts().concat();
     assert_eq!(puts, new.as_bytes(), "every byte uploaded once");
     let d = c.finish()?;
-    one_main(&d, &live(NAME), new.as_bytes());
+    one_main(&d, &live(NAME), new.as_bytes())?;
     Ok(())
 }
 
@@ -304,7 +303,7 @@ fn plain_and_zst_at_once_land_one_source_with_one_duplicate() -> R {
     c.rounds(3)?;
     let d = c.finish()?;
     assert!(d.has("duplicate", 1), "{}", d.check);
-    one_main(&d, &live(NAME), body.as_bytes());
+    one_main(&d, &live(NAME), body.as_bytes())?;
     Ok(())
 }
 
@@ -317,7 +316,7 @@ fn sessions_and_archived_copies_at_once_land_once() -> R {
     c.rounds(3)?;
     let d = c.finish()?;
     assert!(d.has("duplicate", 1), "{}", d.check);
-    one_main(&d, &archived(NAME), body.as_bytes());
+    one_main(&d, &archived(NAME), body.as_bytes())?;
     Ok(())
 }
 

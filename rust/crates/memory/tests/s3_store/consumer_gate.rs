@@ -265,10 +265,14 @@ fn check_bodies(fx: &Fixture, agent: &str, dir: &Path, sources: usize) -> R {
             .ok_or("body for source")?;
         let got = fs::read(dir.join(body["path"].as_str().ok_or("path")?)).map_err(e)?;
         let path = s["path"].as_str().ok_or("p")?;
-        let mut disk = fs::read(root_of(fx, agent).join(path)).map_err(e)?;
-        if path.ends_with(".zst") {
-            disk = zstd::stream::decode_all(disk.as_slice()).map_err(e)?;
-        }
+        // The manifest path is logical: a `.zst` rollout is found by its physical spelling.
+        let plain = root_of(fx, agent).join(path);
+        let disk = if plain.exists() {
+            fs::read(&plain).map_err(e)?
+        } else {
+            let packed = fs::read(root_of(fx, agent).join(format!("{path}.zst"))).map_err(e)?;
+            zstd::stream::decode_all(packed.as_slice()).map_err(e)?
+        };
         assert_eq!(got, disk, "export body equals disk for {}", s["path"]);
     }
     Ok(())

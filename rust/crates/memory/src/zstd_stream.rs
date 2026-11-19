@@ -47,6 +47,9 @@ impl std::fmt::Debug for Stream {
 
 impl Stream {
     /// Start decoding `file` from its beginning (the caller positions nothing).
+    ///
+    /// # Errors
+    /// [`Failure::Io`] when the decoder cannot be created.
     pub fn new(file: File) -> Result<Self, Failure> {
         let mut decoder = Decoder::new().map_err(|e| Failure::Io(e.kind()))?;
         decoder
@@ -131,6 +134,9 @@ impl Stream {
     }
 
     /// Total decoded length of the rest of the stream; validates it to the end.
+    ///
+    /// # Errors
+    /// [`Failure::Undecodable`] for an invalid stream, [`Failure::Io`] for a read error.
     pub fn drain_len(&mut self) -> Result<u64, Failure> {
         let mut total = self.pos;
         // Whatever is buffered counts too.
@@ -145,6 +151,9 @@ impl Stream {
 
     /// Decoded bytes `[start, start + len)`, clipped at the end of the stream. `start` must
     /// not be before [`Stream::pos`]. `cap` is only the buffer's initial capacity.
+    ///
+    /// # Errors
+    /// [`Failure::Undecodable`] for an invalid stream, [`Failure::Io`] for a read error.
     pub fn take(&mut self, start: u64, len: u64, cap: usize) -> Result<Vec<u8>, Failure> {
         while self.pos < start {
             if self.out_start >= self.out.len() && !self.fill()? {
