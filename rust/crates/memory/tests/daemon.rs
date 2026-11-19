@@ -1281,6 +1281,24 @@ fn a_source_park_is_logged_with_its_reason() -> R {
         "INFO parked owner={} reason=repeated_schema_error scope=owner",
         memory_core::limits::owner_prefix(&o)
     );
+    // Each failed round also logs one `retry` line (attempts 1 and 2); the park line is unchanged.
+    let retries: Vec<usize> = seen
+        .iter()
+        .map(|l| {
+            l.iter()
+                .filter(|x| x.starts_with("INFO retry owner="))
+                .count()
+        })
+        .collect();
+    assert_eq!(retries, [1, 1, 0]);
+    let seen: Vec<Vec<String>> = seen
+        .into_iter()
+        .map(|l| {
+            l.into_iter()
+                .filter(|x| !x.starts_with("INFO retry owner="))
+                .collect()
+        })
+        .collect();
     assert_eq!(seen, [vec![], vec![], vec![want]]);
     d.clock_mut().mono = 3 * hour + 1;
     assert!(logged_round!(d).1.is_empty());

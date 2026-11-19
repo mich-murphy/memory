@@ -28,6 +28,7 @@
 //! | `capture` | `owner` `result` (`landed`, `unchanged`, `failed`, `stopped`) |
 //! | `stopped` | none |
 //! | `state_load` | `file` (`index` or `status`) `result` (`damaged` or `newer_schema`) |
+//! | `retry` | `owner` `class` (`offline throttled transient destination_auth local deterministic`) `cause` (a closed code: a transport cause such as `dns refused timeout reset`, or `server throttled auth not_found base_unchanged corrupt` and the like) `landing` (`unknown` or `no`) `attempt elapsed_ms after_ms` |
 //! | `parked` | `owner` `reason` `scope` (`owner` or `source`; reasons: `foreign_writer`, `newer_remote_schema`, `repeated_audit_mismatch`, `repeated_readback_mismatch`, `source_unstable`, `repeated_non_json_response`, `repeated_schema_error`) |
 //! | `host_paused` | none |
 //! | `host_resumed` | none |
@@ -48,10 +49,17 @@
 //! `host_paused`, then `capture ... result=failed`). `capture` is logged for the outcomes
 //! landed, unchanged, failed and stopped only; `Paused`, `Skipped` and `Deferred` write none.
 //!
+//! `retry` is logged once per failed attempt that will be retried, by the settle of the turn, so
+//! in a full round it comes before the `round` line and in a per-owner capture before its
+//! `capture` line. `attempt` counts failed attempts since the last success (1 for the first),
+//! `elapsed_ms` is the monotonic time from the turn's start, `after_ms` the retry delay.
+//! `landing=unknown` means the `current.json` write may have landed. It carries only the owner
+//! prefix, closed codes and integers.
+//!
 //! `memory hook` and `memory restore` never start the subscriber.
 use crate::daemon::{OwnerOutcome, ParkedReason, RoundReport, StateLoad};
 use crate::driver::Cause;
-use memory_core::domain::{Owner, OwnerParkReason, ParkReason};
+use memory_core::domain::{ErrorClass, Owner, OwnerParkReason, ParkReason};
 use memory_core::limits::owner_prefix;
 use std::fmt;
 use std::io::Write;
@@ -278,6 +286,47 @@ pub fn capture_outcome(owner: &Owner, outcome: OwnerOutcome) {
         OwnerOutcome::Deferred | OwnerOutcome::Skipped | OwnerOutcome::Paused => return,
     };
     capture(owner, result);
+}
+
+/// The closed identifier of an error class.
+const fn class_id(class: &ErrorClass) -> &'static str {
+    match class {
+        ErrorClass::Offline => "offline",
+        ErrorClass::Throttled => "throttled",
+        ErrorClass::Transient => "transient",
+        ErrorClass::DestinationAuth => "destination_auth",
+        ErrorClass::Local(_) => "local",
+        ErrorClass::Deterministic(_) => "deterministic",
+    }
+}
+
+fn millis(d: std::time::Duration) -> u64 {
+    u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// A failed attempt of `owner` will be retried: its error `class`, the closed `cause` code,
+/// whether the landing is unknown, the failed-attempt count, the time the turn took and the
+/// retry delay.
+pub fn retry(
+    owner: &Owner,
+    class: &ErrorClass,
+    cause: &'static str,
+    landing_unknown: bool,
+    attempt: u32,
+    elapsed: std::time::Duration,
+    after: std::time::Duration,
+) {
+    let prefix = owner_prefix(owner);
+    tracing::info!(
+        event = "retry",
+        owner = prefix.as_str(),
+        class = class_id(class),
+        cause = cause,
+        landing = if landing_unknown { "unknown" } else { "no" },
+        attempt = u64::from(attempt),
+        elapsed_ms = millis(elapsed),
+        after_ms = millis(after),
+    );
 }
 
 /// A requested stop and a successful shutdown, just before exit 0.
