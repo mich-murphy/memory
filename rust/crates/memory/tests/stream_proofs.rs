@@ -8,7 +8,7 @@ use memory::capture::{Env, Locals, Source, SourceOutcome, Update, capture, captu
 use memory::commit::{
     Base, Failure, Halted, KnownOurs, PieceSink, StoreSink, commit, commit_staged,
 };
-use memory::environment::{FileSystem, Published, Stat, Store, StoreError, Stored};
+use memory::environment::{Cause, FileSystem, Published, Stat, Store, StoreError, Stored};
 use memory_core::domain::{
     Agent, ArchiveId, ETag, MachineId, Owner, SessionId, SessionKey, Sha256, Sha256State,
     SourceClass, SourceId, SourceKind,
@@ -740,7 +740,7 @@ impl Store for FailPut {
     fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
         self.puts += 1;
         if self.puts == self.fail_at {
-            return Err(StoreError::Offline);
+            return Err(StoreError::Offline(Cause::Connect));
         }
         self.inner.put_if_absent(key, body)
     }

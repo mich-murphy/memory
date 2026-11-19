@@ -74,6 +74,15 @@ fn parse(line: &str) -> Result<&str, String> {
         "stopped" | "host_paused" | "host_resumed" => &[],
         "state_load" => &["file", "result"],
         "parked" => &["owner", "reason", "scope"],
+        "retry" => &[
+            "owner",
+            "class",
+            "cause",
+            "landing",
+            "attempt",
+            "elapsed_ms",
+            "after_ms",
+        ],
         other => return Err(format!("unknown event {other:?}")),
     };
     if keys != want {
@@ -94,7 +103,20 @@ fn parse(line: &str) -> Result<&str, String> {
                 "stopped",
             ]
             .contains(&value),
+            "cause" if event == "retry" => {
+                !value.is_empty() && value.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
+            }
             "cause" => ["start", "timer", "rescan", "wake", "dir"].contains(&value),
+            "class" => [
+                "offline",
+                "throttled",
+                "transient",
+                "destination_auth",
+                "local",
+                "deterministic",
+            ]
+            .contains(&value),
+            "landing" => ["unknown", "no"].contains(&value),
             "reason" => [
                 "foreign_writer",
                 "newer_remote_schema",
@@ -122,7 +144,7 @@ fn parse(line: &str) -> Result<&str, String> {
 }
 
 /// Every line of `stderr` is a known event with exactly its keys; the sequence is `started`,
-/// zero or more `state_load`, then any mix of `round`, `capture`, `parked`, `host_paused` and
+/// zero or more `state_load`, then any mix of `round`, `capture`, `retry`, `parked`, `host_paused` and
 /// `host_resumed` with at least `min_rounds` of `round`, then `stopped` last; no line holds a
 /// canary.
 pub fn assert_clean_log(stderr: &str, min_rounds: usize, canaries: &[&str]) {
@@ -145,8 +167,15 @@ pub fn assert_clean_log(stderr: &str, min_rounds: usize, canaries: &[&str]) {
     let loads = middle.iter().take_while(|e| **e == "state_load").count();
     let rest = middle.get(loads..).unwrap_or_default();
     assert!(
-        rest.iter()
-            .all(|e| ["round", "capture", "parked", "host_paused", "host_resumed"].contains(e)),
+        rest.iter().all(|e| [
+            "round",
+            "capture",
+            "retry",
+            "parked",
+            "host_paused",
+            "host_resumed"
+        ]
+        .contains(e)),
         "{stderr}"
     );
     assert!(

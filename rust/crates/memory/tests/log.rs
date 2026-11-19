@@ -260,3 +260,48 @@ fn capture_logs_four_outcomes_with_the_owner_prefix_and_nothing_else() -> Result
     }
     Ok(())
 }
+
+#[test]
+fn retry_renders_the_exact_line() -> Result<(), String> {
+    use memory_core::domain::ErrorClass;
+    use std::time::Duration;
+    let owner = owner()?;
+    let prefix = memory_core::limits::owner_prefix(&owner);
+    let text = render(|| {
+        memory::log::retry(
+            &owner,
+            &ErrorClass::Offline,
+            "dns",
+            false,
+            1,
+            Duration::from_millis(9_250),
+            Duration::from_millis(1_500),
+        );
+    });
+    let (_, rest) = split(only_line(&text)).unwrap_or_default();
+    assert_eq!(
+        rest,
+        format!(
+            "INFO retry owner={prefix} class=offline cause=dns landing=no attempt=1 elapsed_ms=9250 after_ms=1500"
+        )
+    );
+    let text = render(|| {
+        memory::log::retry(
+            &owner,
+            &ErrorClass::Throttled,
+            "server",
+            true,
+            3,
+            Duration::ZERO,
+            Duration::from_secs(7),
+        );
+    });
+    let (_, rest) = split(only_line(&text)).unwrap_or_default();
+    assert!(
+        rest.contains(
+            " class=throttled cause=server landing=unknown attempt=3 elapsed_ms=0 after_ms=7000"
+        ),
+        "{rest}"
+    );
+    Ok(())
+}

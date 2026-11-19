@@ -745,9 +745,11 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     }
 
     fn settle(
+        owner: &Owner,
         rt: &mut OwnerRt,
         result: &Result<CommitEnd, Failure>,
         at: Duration,
+        now: Duration,
         draw: u64,
         report: &mut RoundReport,
     ) -> bool {
@@ -767,6 +769,17 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             Disposition::Retry { after, class } => {
                 report.failed += 1;
                 report.failures.bump(&class);
+                if let Err(failure) = result {
+                    crate::log::retry(
+                        owner,
+                        &class,
+                        failure.code(),
+                        matches!(failure, Failure::LandingUnknown(_)),
+                        rt.streak.retries,
+                        now.saturating_sub(at),
+                        after,
+                    );
+                }
                 rt.turn = Turn::RetryAt(at.saturating_add(after));
                 false
             }
@@ -834,7 +847,16 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             }
             Err(failure) => {
                 let draw = self.next_draw();
-                ControlFlow::Break(Self::settle(rt, &Err(failure), at, draw, report))
+                let now = Duration::from_nanos(self.clock.monotonic_ns());
+                ControlFlow::Break(Self::settle(
+                    owner,
+                    rt,
+                    &Err(failure),
+                    at,
+                    now,
+                    draw,
+                    report,
+                ))
             }
         }
     }
@@ -966,7 +988,8 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         if let Some(failure) = failed {
             // A piece was not stored: the owner's commit is not built (as when its upload failed).
             let draw = self.next_draw();
-            return Self::settle(rt, &Err(failure), at, draw, report);
+            let now = Duration::from_nanos(self.clock.monotonic_ns());
+            return Self::settle(owner, rt, &Err(failure), at, now, draw, report);
         }
         let Some(mut request) = got.commit.take() else {
             self.apply(got.updates);
@@ -975,7 +998,8 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         Self::attach_pending(&mut request, hints, owner);
         let result = self.land(rt, base.as_ref(), request, (got, winners), hints, owner);
         let draw = self.next_draw();
-        Self::settle(rt, &result, at, draw, report)
+        let now = Duration::from_nanos(self.clock.monotonic_ns());
+        Self::settle(owner, rt, &result, at, now, draw, report)
     }
 
     fn advance_hints(&mut self, files: &[ScannedFile]) {

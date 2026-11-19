@@ -132,6 +132,66 @@ fn a_failed_capture_is_retried_at_its_deadline_without_a_round() -> R {
     Ok(())
 }
 
+/// The `retry` lines of the log.
+fn retry_lines(log: &str) -> Vec<&str> {
+    lines_with(log, "retry owner=")
+}
+
+fn position(log: &str, needle: &str) -> Option<usize> {
+    log.find(needle)
+}
+
+#[test]
+fn a_dropped_piece_put_logs_a_retry_with_its_cause_before_the_failed_capture() -> R {
+    let s = setup("loop-retry-cause")?;
+    with_window(&s, 1, 2)?;
+    let mut child = s.spawn_with(HOUR)?;
+    let first = s.wait_commit(&mut child, None)?;
+    s.server.queue("PUT", ".zst", Fault::ApplyThenDrop);
+    s.append(12..20)?;
+    s.wait_commit(&mut child, Some(&first))?;
+    let log = stop(&s, child)?;
+    let retries = retry_lines(&log);
+    assert_eq!(retries.len(), 1, "{log}");
+    let line = retries.first().copied().unwrap_or_default();
+    assert!(
+        line.contains(" class=offline cause=reset landing=no attempt=1 elapsed_ms="),
+        "{log}"
+    );
+    assert!(line.contains(" after_ms="), "{log}");
+    let at = position(&log, line).ok_or("no retry")?;
+    let failed = position(&log, " result=failed").ok_or("no failed capture")?;
+    let landed = log.rfind(" result=landed").ok_or("no landed capture")?;
+    assert!(at < failed && failed < landed, "{log}");
+    super::log_lines::assert_clean_log(&log, 1, &[]);
+    Ok(())
+}
+
+#[test]
+fn a_lost_current_reply_that_cannot_be_verified_logs_landing_unknown() -> R {
+    let s = setup("loop-retry-unknown")?;
+    with_window(&s, 1, 2)?;
+    let mut child = s.spawn_with(HOUR)?;
+    let first = s.wait_commit(&mut child, None)?;
+    s.server.queue("PUT", "current.json", Fault::ApplyThenDrop);
+    for _ in 0..memory::commit::GET_ATTEMPTS {
+        s.server
+            .queue("GET", "current.json", Fault::Status(500, None));
+    }
+    s.append(12..20)?;
+    s.wait_commit(&mut child, Some(&first))?;
+    let log = stop(&s, child)?;
+    let retries = retry_lines(&log);
+    assert!(
+        retries
+            .iter()
+            .any(|l| l.contains(" cause=server landing=unknown attempt=1 ")),
+        "{log}"
+    );
+    super::log_lines::assert_clean_log(&log, 1, &[]);
+    Ok(())
+}
+
 /// Append one session-end hint for the setup's session file, as the hook does.
 fn hint_session_end(s: &Setup) -> R {
     let body = format!(

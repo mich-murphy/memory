@@ -1030,7 +1030,14 @@ fn a_park_is_recorded_when_the_owners_commit_fails() -> R {
     r.mismatch_round(SECOND + H3)?;
     assert_eq!((r.last.parked, r.last.landed, r.last.failed), (1, 0, 1));
     assert_eq!(r.disk_status()?.parked.len(), 1);
-    assert_eq!(r.log, [r.park_line()]);
+    // The failed commit also logs one `retry` line, before the park line's round ends.
+    let (retries, rest): (Vec<_>, Vec<_>) = r
+        .log
+        .iter()
+        .cloned()
+        .partition(|l| l.starts_with("INFO retry owner="));
+    assert_eq!(retries.len(), 1, "{:?}", r.log);
+    assert_eq!(rest, [r.park_line()]);
     r.d()?.store_mut().fail_puts = false;
     r.round(SECOND + H3 + 120 * SECOND)?;
     assert_eq!(r.last.landed, 1);

@@ -9,7 +9,7 @@ use hegel::{TestCase, generators as gs};
 use memory::audit::{AUDIT_INTERVAL_NS, due};
 use memory::capture::{Captured, Env, Local, Locals, Published, Source, SourceOutcome, capture};
 use memory::commit::{Base, CommitEnd, Failure, LandedHow, commit, manifest_key, recover_base};
-use memory::environment::{Store, StoreError, Stored};
+use memory::environment::{Cause, Store, StoreError, Stored};
 use memory_core::domain::{
     Agent, ArchiveId, ETag, MachineId, Owner, SessionId, SessionKey, Sha256, SourceClass, SourceId,
     SourceKind,
@@ -244,7 +244,7 @@ impl FakeStore {
         if self.revoked {
             Err(StoreError::Auth)
         } else if self.offline {
-            Err(StoreError::Offline)
+            Err(StoreError::Offline(Cause::Connect))
         } else {
             Ok(())
         }
@@ -863,7 +863,7 @@ impl Sut {
                 self.store.arm(
                     Op::Put(Kind::Current),
                     Effect::LandThen {
-                        err: StoreError::Ambiguous,
+                        err: StoreError::Ambiguous(Cause::Reset),
                         then_offline: *then_offline,
                     },
                 );

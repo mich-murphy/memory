@@ -299,6 +299,15 @@ fn an_unreachable_store_makes_the_result_unknown() -> R {
     let ran = run(&s)?;
     assert_eq!(ran.code, 3, "{}{}", ran.out, ran.err);
     assert!(ran.has("store_error", 1));
+    let lines = store_error_lines(&ran.out);
+    assert_eq!(lines.len(), 1, "{}", ran.out);
+    assert!(
+        lines
+            .iter()
+            .all(|l| l.contains(" kind=chain cause=refused")),
+        "{}",
+        ran.out
+    );
     Ok(())
 }
 
@@ -310,7 +319,42 @@ fn a_store_fault_on_a_get_makes_the_result_unknown() -> R {
         .queue("GET", "current.json", super::fake::Fault::Status(500, None));
     let ran = run(&s)?;
     assert_eq!(ran.code, 3, "{}{}", ran.out, ran.err);
+    let lines = store_error_lines(&ran.out);
+    assert_eq!(lines.len(), 1, "{}", ran.out);
+    assert!(
+        lines
+            .iter()
+            .all(|l| l.ends_with(" kind=chain cause=server")),
+        "{}",
+        ran.out
+    );
     Ok(())
+}
+
+#[test]
+fn a_piece_get_fault_names_the_source_kind_and_cause() -> R {
+    let s = setup("check-piece-fault")?;
+    capture(&s)?;
+    s.server
+        .queue("GET", ".zst", super::fake::Fault::Status(500, None));
+    let ran = run(&s)?;
+    assert_eq!(ran.code, 3, "{}{}", ran.out, ran.err);
+    let lines = store_error_lines(&ran.out);
+    assert_eq!(lines.len(), 1, "{}", ran.out);
+    assert!(
+        lines.iter().all(|l| l.contains(" kind=")
+            && !l.contains("kind=chain")
+            && l.ends_with(" cause=server")),
+        "{}",
+        ran.out
+    );
+    Ok(())
+}
+
+fn store_error_lines(out: &str) -> Vec<&str> {
+    out.lines()
+        .filter(|l| l.starts_with("store_error owner="))
+        .collect()
 }
 
 #[test]

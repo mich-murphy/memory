@@ -1,7 +1,7 @@
 //! Daemon skeleton tests: temp dirs, in-memory filesystem, fake store. No real adapters.
 use memory::capture::{Published, Source};
 use memory::daemon::{Daemon, Parts, StartError, StartOptions};
-use memory::environment::{Store, StoreError, Stored};
+use memory::environment::{Cause, Store, StoreError, Stored};
 use memory::state::{DaemonLock, EXIT_LOCK_HELD, SyncPolicy};
 use memory_core::domain::{
     Agent, ArchiveId, ETag, MachineId, Owner, SessionId, SessionKey, SourceClass, SourceId,
@@ -358,11 +358,11 @@ impl FStore {
     }
     fn gate(&self) -> Result<(), StoreError> {
         if self.crashed.is_some() || self.blackout {
-            Err(StoreError::Offline)
+            Err(StoreError::Offline(Cause::Connect))
         } else if self.revoked {
             Err(StoreError::Auth)
         } else if self.offline {
-            Err(StoreError::Offline)
+            Err(StoreError::Offline(Cause::Connect))
         } else {
             Ok(())
         }
@@ -410,7 +410,7 @@ impl FStore {
             });
             self.blackout = true;
             self.stall = false;
-            return Err(StoreError::Offline);
+            return Err(StoreError::Offline(Cause::Connect));
         }
         let tag = MemStore::tag(self.store.write(key, body.as_ref().to_vec()))?;
         match effect {
@@ -726,7 +726,7 @@ fn lost_reply_converges_without_duplicate_epoch() -> R {
     let cfg = tmp.config(true)?;
     let list = vec![src_of("s1", 1)?];
     let mut store = FStore::default();
-    store.arm(None, Effect::LandThen(StoreError::Ambiguous));
+    store.arm(None, Effect::LandThen(StoreError::Ambiguous(Cause::Reset)));
     let mut d = boot(&tmp, &cfg, files_with(b"hello\n"), store, &list, WALL)?;
     d.reconcile_once().map_err(e)?;
     assert_eq!(d.store_mut().lost_fired, 1, "the reply was lost once");
@@ -1281,6 +1281,24 @@ fn a_source_park_is_logged_with_its_reason() -> R {
         "INFO parked owner={} reason=repeated_schema_error scope=owner",
         memory_core::limits::owner_prefix(&o)
     );
+    // Each failed round also logs one `retry` line (attempts 1 and 2); the park line is unchanged.
+    let retries: Vec<usize> = seen
+        .iter()
+        .map(|l| {
+            l.iter()
+                .filter(|x| x.starts_with("INFO retry owner="))
+                .count()
+        })
+        .collect();
+    assert_eq!(retries, [1, 1, 0]);
+    let seen: Vec<Vec<String>> = seen
+        .into_iter()
+        .map(|l| {
+            l.into_iter()
+                .filter(|x| !x.starts_with("INFO retry owner="))
+                .collect()
+        })
+        .collect();
     assert_eq!(seen, [vec![], vec![], vec![want]]);
     d.clock_mut().mono = 3 * hour + 1;
     assert!(logged_round!(d).1.is_empty());
@@ -1840,7 +1858,7 @@ impl Sut {
                 shapes.hit("restart");
             }
             Step::LostReply { dark } => {
-                let lost = StoreError::Ambiguous;
+                let lost = StoreError::Ambiguous(Cause::Reset);
                 let effect = if *dark {
                     Effect::LandThenDark(lost)
                 } else {
@@ -2834,7 +2852,7 @@ struct Ghost {
 impl Store for Ghost {
     fn put_if_absent(&mut self, key: &str, body: Published) -> Result<ETag, StoreError> {
         if self.drop_current && key.ends_with("current.json") {
-            return Err(StoreError::Ambiguous);
+            return Err(StoreError::Ambiguous(Cause::Reset));
         }
         self.inner.put_if_absent(key, body)
     }
@@ -2845,7 +2863,7 @@ impl Store for Ghost {
         body: Published,
     ) -> Result<ETag, StoreError> {
         if self.drop_current && key.ends_with("current.json") {
-            return Err(StoreError::Ambiguous);
+            return Err(StoreError::Ambiguous(Cause::Reset));
         }
         self.inner.put_if_match(key, etag, body)
     }
@@ -3115,8 +3133,10 @@ fn an_unverifiable_landing_resets_the_base_so_the_next_round_writes_nothing() ->
     )?;
     assert_eq!(round_at(&mut d, 0)?.0.landed, 1);
     bytes_in(&mut d, 1, b"hello\nworld\n");
-    d.store_mut()
-        .arm(None, Effect::LandThenDark(StoreError::Ambiguous));
+    d.store_mut().arm(
+        None,
+        Effect::LandThenDark(StoreError::Ambiguous(Cause::Reset)),
+    );
     let (report, _) = round_at(&mut d, 61)?;
     assert_eq!((report.landed, report.failed), (0, 1));
     assert_eq!(report.failures.offline, 1);
@@ -4246,8 +4266,10 @@ fn verification_pauses_sleep_once_each_within_the_ceiling_and_a_healthy_commit_n
     assert_eq!(round_at(&mut d, 0)?.0.landed, 1);
     assert!(slept.borrow().is_empty(), "a healthy commit does not sleep");
     bytes_in(&mut d, 1, b"hello\nworld\n");
-    d.store_mut()
-        .arm(None, Effect::LandThenDark(StoreError::Ambiguous));
+    d.store_mut().arm(
+        None,
+        Effect::LandThenDark(StoreError::Ambiguous(Cause::Reset)),
+    );
     let (report, _) = round_at(&mut d, 61)?;
     assert_eq!(report.failed, 1);
     let got = slept.borrow().clone();
