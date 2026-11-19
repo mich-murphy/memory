@@ -187,7 +187,10 @@ from `main` alone.
      keeps a closed cause (`dns`, `connect`, `refused`, `tls`, `timeout`, `reset`, `server`, ...),
      the daemon logs `retry owner class cause landing attempt elapsed_ms after_ms` per retried
      failure, and `memory check` prints `store_error owner kind cause` per failed fetch. No
-     class, backoff, timeout or exit code changed. Next: install the merged build on this Mac.
+     class, backoff, timeout or exit code changed. Merged as `1b4f981` and installed on this
+     Mac at 21:38Z (in place; `runs = 3`; `memory check` 6,046 of 6,046 match, evidence 32,
+     "Installed on this Mac"). Open: Codex `/hooks` approval, hint delivery from each agent, the
+     12-hourly production checks for two days (`~/.local/state/memory-cutover/checks.log`), BC-01.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
