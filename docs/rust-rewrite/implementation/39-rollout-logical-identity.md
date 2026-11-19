@@ -167,3 +167,12 @@ set; docs (DESIGN sections 5, 6.2, 7.2, 7.3 memory bound, D46 and D47 marked sup
 ## Ledger
 
 - 2026-11-19 06:50Z: brief written on `6302a39`.
+- 2026-11-19 07:02Z: VERIFY accepted locally at `f162fbe` (worker 4 commits). The rule is one
+  filter in `capture::append`; the planner's `IdentityChanged` guard stays as its contract.
+  Teeth 3 of 3; workspace nextest 777 passed.
+- 2026-11-19 07:45Z: ZST accepted locally at `61260d5` (worker 9 commits, parent 1). Deviation
+  accepted: `memory check` reports an undecodable source as `withheld … reason=undecodable`
+  (exit 0). The tooth "length cache keyed by `FileId` only" first survived; the parent added an
+  in-place rewrite test. Teeth 8 of 8. Full gates on `61260d5`: 14 sub-gates 0, seed
+  2026967693, coverage 96.37 %; 100 MB `.zst` peak 22.2 MB capture, 20.8 MB audit. Record:
+  [evidence 30](evidence/30-rollout-logical-identity/). Next: push, hosted gates, merge.

@@ -148,6 +148,17 @@ from `main` alone.
      an append source may change path; the walk keeps one file per source id and `memory check`
      prints `duplicate=N`. Open (slice 3, existing): deleted files are never recorded as deleted,
      so after a recompression or resume the export holds both spellings as live `main` sources.
+     (Later, 2026-11-19: the own-source id and brief 37's export decompression are superseded
+     by brief 39.)
+  11. Brief 39 ([39-rollout-logical-identity.md](rust-rewrite/implementation/39-rollout-logical-identity.md),
+     [evidence 30](rust-rewrite/implementation/evidence/30-rollout-logical-identity/)) is
+     accepted locally as `61260d5` (DESIGN D48, operator: follow DDIA): every rollout spelling
+     has one source id; a `.jsonl.zst` is decoded at capture (window at most 2^23, otherwise
+     withheld `undecodable`) and stored as the plain logical rollout; plain wins over `.zst`; an
+     append source with a new inode is verified by content (Adopt) instead of replayed, so
+     recompression uploads nothing and a resume uploads only the new bytes; `memory export`
+     streams stored bytes again (brief 37 reverted). Deletions (slice 3) are no longer needed for
+     Codex rollouts.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
