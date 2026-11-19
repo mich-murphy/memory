@@ -16,7 +16,9 @@
 
 use crate::capture::Source;
 use crate::environment::{FileSystem, Stat};
-use crate::realfs::{RealFs, RealFsError, WalkLimits, index_claude_sessions, walk, walk_under};
+use crate::realfs::{
+    Encoding, RealFs, RealFsError, WalkLimits, index_claude_sessions, walk, walk_under,
+};
 use memory_core::domain::{Owner, SourceClass, SourceId, SourceKind};
 use memory_core::locator::{Located, RootRelativePath, Roots, locate};
 use memory_core::privacy::{Profile, ResolvedSourceFacts};
@@ -86,6 +88,7 @@ fn profile_of(kind: &SourceKind) -> Profile {
         SourceKind::ClaudeTranscript
         | SourceKind::ClaudeSubagent
         | SourceKind::CodexRollout
+        | SourceKind::CodexCompressed
         | SourceKind::PiSession => Profile::Transcript,
         SourceKind::ClaudeConfig
         | SourceKind::CodexConfig
@@ -102,7 +105,6 @@ fn profile_of(kind: &SourceKind) -> Profile {
         | SourceKind::ClaudeFileHistory
         | SourceKind::ClaudeDebug
         | SourceKind::ClaudeHistory
-        | SourceKind::CodexCompressed
         | SourceKind::CodexStore
         | SourceKind::CodexHistory
         | SourceKind::PiSnapshot
@@ -114,6 +116,19 @@ fn profile_of(kind: &SourceKind) -> Profile {
         | SourceKind::PiLog
         | SourceKind::PiAux => Profile::OtherKnown,
     }
+}
+
+/// Precedence among files with one (root, owner, id): plain before `.zst`, then the
+/// lexicographically first root-relative path. The smaller rank wins.
+fn rank(located: &Located, rel: &RootRelativePath) -> (bool, String) {
+    let zst = matches!(
+        located,
+        Located::Source {
+            kind: SourceKind::CodexCompressed,
+            ..
+        }
+    );
+    (zst, rel.components().join("/"))
 }
 
 /// Facts plus the path capture should read (canonical final when resolved).
@@ -199,17 +214,28 @@ pub fn to_source(
     };
     let (facts, final_path) = resolve(path, root, located);
     let target = final_path.unwrap_or_else(|| path.to_path_buf());
-    let handle = *handles
-        .entry(target.clone())
-        .or_insert_with(|| fs.register(target));
+    // A `.zst` rollout is captured as the logical rollout: plain kind and path, decoded bytes.
+    let zst = *kind == SourceKind::CodexCompressed;
+    let handle = *handles.entry(target.clone()).or_insert_with(|| {
+        let encoding = if zst { Encoding::Zstd } else { Encoding::Plain };
+        fs.register_encoded(target, encoding)
+    });
+    let mut path_string = rel.components().join("/");
+    if zst && let Some(plain) = path_string.strip_suffix(".zst") {
+        path_string = plain.to_owned();
+    }
     Some((
         owner.clone(),
         Source {
             handle,
             id: id.clone(),
-            kind: kind.clone(),
+            kind: if zst {
+                SourceKind::CodexRollout
+            } else {
+                kind.clone()
+            },
             class: class.clone(),
-            path: rel.components().join("/"),
+            path: path_string,
             facts,
         },
     ))
@@ -402,7 +428,7 @@ impl crate::daemon::Sources for WalkSources {
         let mut out = Vec::new();
         self.known.clear();
         // Per (root, owner, id), the lexicographically first root-relative path is kept.
-        let mut first: HashMap<(usize, Owner, SourceId), String> = HashMap::new();
+        let mut first: HashMap<(usize, Owner, SourceId), (bool, String)> = HashMap::new();
         for (index, (dir, _)) in self.roots.iter().enumerate() {
             for (_, rel, located) in found.files.iter().filter(|f| f.0.starts_with(dir)) {
                 if let Located::Source {
@@ -412,7 +438,7 @@ impl crate::daemon::Sources for WalkSources {
                     ..
                 } = located
                 {
-                    let key = rel.components().join("/");
+                    let key = rank(located, rel);
                     first
                         .entry((index, owner.clone(), id.clone()))
                         .and_modify(|k| {
@@ -434,7 +460,7 @@ impl crate::daemon::Sources for WalkSources {
                 } = located
                     && first
                         .get(&(index, owner.clone(), id.clone()))
-                        .is_some_and(|k| *k != rel.components().join("/"))
+                        .is_some_and(|k| *k != rank(located, rel))
                 {
                     counts.duplicate += 1;
                     continue;
@@ -567,10 +593,10 @@ impl crate::daemon::Sources for WalkSources {
             live.push((*index, path, dir, rel, located));
         }
         // One source per (root, id): the lexicographically first root-relative path.
-        let mut first: HashMap<(usize, SourceId), String> = HashMap::new();
+        let mut first: HashMap<(usize, SourceId), (bool, String)> = HashMap::new();
         for (index, _, _, rel, located) in &live {
             if let Located::Source { id, .. } = located {
-                let key = rel.components().join("/");
+                let key = rank(located, rel);
                 first
                     .entry((*index, id.clone()))
                     .and_modify(|k| {
@@ -586,7 +612,7 @@ impl crate::daemon::Sources for WalkSources {
             if let Located::Source { id, .. } = located
                 && first
                     .get(&(*index, id.clone()))
-                    .is_some_and(|k| *k != rel.components().join("/"))
+                    .is_some_and(|k| *k != rank(located, rel))
             {
                 continue;
             }

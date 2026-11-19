@@ -4,7 +4,7 @@ use memory::commit::{Base, commit};
 use memory::daemon::Sources;
 use memory::realfs::{RealFs, WalkLimits, walk};
 use memory::resolve::{MAX_HOPS, SharedFs, WalkSources, resolve_facts, to_source};
-use memory_core::domain::{Agent, ArchiveId, MachineId, Owner};
+use memory_core::domain::{Agent, ArchiveId, MachineId, Owner, SourceKind};
 use memory_core::locator::{Located, RootLayout, RootNamespace, RootRelativePath, Roots, locate};
 use memory_core::manifest::{Header, OwnerState, Timestamp, Writer};
 use memory_core::privacy::{Admission, PolicyContext, Reason, UnknownReason, admit, rules_digest};
@@ -1106,13 +1106,72 @@ fn two_files_with_one_id_yield_the_first_path_and_count_a_duplicate() -> R {
 }
 
 #[test]
-fn plain_and_zst_are_two_sources_and_no_duplicate() -> R {
+fn plain_and_zst_yield_the_plain_file_and_one_duplicate() -> R {
     let t = Tmp::new()?;
     let codex = t.0.join("codex");
-    t.write(&format!("codex/sessions/2026/11/17/{ROLLOUT}"), b"{}\n")?;
+    let plain = format!("sessions/2026/11/17/{ROLLOUT}");
+    let zst = format!("archived_sessions/{ROLLOUT}.zst");
+    t.write(&format!("codex/{plain}"), b"{}\n")?;
+    // The .zst path sorts first, so only the encoding rule can keep the plain file.
+    t.write(&format!("codex/{zst}"), b"x")?;
+    let mut w = agent_walker(&codex, Agent::Codex)?;
+    let rows = w.enumerate();
+    assert_eq!(rows.len(), 1);
+    let (owner, source) = rows.first().ok_or("row")?;
+    assert_eq!(source.path, plain);
+    assert_eq!(source.kind, SourceKind::CodexRollout);
+    assert_eq!((w.counts().yielded, w.counts().duplicate), (1, 1));
+    let mut w2 = agent_walker(&codex, Agent::Codex)?;
+    assert_eq!(w2.note(&codex.join(&zst)), Some(owner.clone()));
+    assert_eq!(w2.note(&codex.join(&plain)), Some(owner.clone()));
+    let of = w2.of(owner);
+    assert_eq!(of.len(), 1);
+    assert_eq!(of.first().map(|s| s.path.clone()), Some(plain));
+    Ok(())
+}
+
+#[test]
+fn zst_copies_in_sessions_and_archive_yield_the_first_path_logically() -> R {
+    let t = Tmp::new()?;
+    let codex = t.0.join("codex");
+    let live = format!("sessions/2026/11/17/{ROLLOUT}.zst");
+    let archived = format!("archived_sessions/{ROLLOUT}.zst");
+    t.write(&format!("codex/{live}"), b"x")?;
+    t.write(&format!("codex/{archived}"), b"x")?;
+    let mut w = agent_walker(&codex, Agent::Codex)?;
+    let rows = w.enumerate();
+    assert_eq!(rows.len(), 1);
+    let (owner, source) = rows.first().ok_or("row")?;
+    assert_eq!(source.path, format!("archived_sessions/{ROLLOUT}"));
+    assert_eq!((w.counts().yielded, w.counts().duplicate), (1, 1));
+    let of = w.of(owner);
+    assert_eq!(
+        of.first().map(|s| s.path.clone()),
+        Some(source.path.clone())
+    );
+    Ok(())
+}
+
+#[test]
+fn a_lone_zst_is_a_codex_rollout_source_with_the_logical_path_and_transcript_profile() -> R {
+    let t = Tmp::new()?;
+    let codex = t.0.join("codex");
     t.write(&format!("codex/sessions/2026/11/17/{ROLLOUT}.zst"), b"x")?;
     let mut w = agent_walker(&codex, Agent::Codex)?;
-    assert_eq!(w.enumerate().len(), 2);
-    assert_eq!((w.counts().yielded, w.counts().duplicate), (2, 0));
+    let rows = w.enumerate();
+    let (owner, source) = rows.first().ok_or("row")?;
+    assert_eq!(source.kind, SourceKind::CodexRollout);
+    assert_eq!(source.path, format!("sessions/2026/11/17/{ROLLOUT}"));
+    assert_eq!(
+        source.facts.profile,
+        memory_core::privacy::Profile::Transcript
+    );
+    assert_eq!(w.counts().duplicate, 0);
+    let of = w.of(owner);
+    assert_eq!(of.len(), 1);
+    assert_eq!(
+        of.first().map(|s| (s.kind.clone(), s.path.clone())),
+        Some((source.kind.clone(), source.path.clone()))
+    );
     Ok(())
 }
