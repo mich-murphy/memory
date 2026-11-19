@@ -263,13 +263,12 @@ fn resumed_after_recompression_gives_the_plain_source_a_new_epoch() -> R {
         .iter()
         .filter(|s| !s.id.ends_with(".zst"))
         .collect();
-    // The vanished plain source is never marked deleted (the walk does not see it), so its
-    // new epoch is exported beside the sealed old one.
-    assert_eq!(plain.len(), 2, "{}", d.export_line);
-    assert_eq!(plain.first().map(|s| s.state.as_str()), Some("sealed"));
-    assert_eq!(plain.last().map(|s| s.state.as_str()), Some("active"));
+    // Brief 39: the resumed plain file has a new inode but the same prefix, so it is verified
+    // by content and continues the one epoch (no sealed epoch beside it).
+    assert_eq!(plain.len(), 1, "{}", d.export_line);
+    assert_eq!(plain.first().map(|s| s.state.as_str()), Some("active"));
     assert_eq!(
-        plain.last().map(|s| s.body.as_slice()),
+        plain.first().map(|s| s.body.as_slice()),
         Some(new.as_bytes())
     );
     Ok(())
