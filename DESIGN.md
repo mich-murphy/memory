@@ -442,6 +442,9 @@ Rules applied:
   means the object is already stored, which is success.
   - Keying by the hash of the transformed bytes means a zstd upgrade changes no keys, and the
     key is known before compression. This is how git and restic key objects. [review, 02 M4]
+  - A Codex `.jsonl.zst` rollout is decoded before the transform: capture, audit and `check` see
+    only the logical JSONL, so recompression changes no key, digest or source id (D48,
+    2026-11-19).
   - After a scrub-rule fix the same input scrubs differently, so the key and the manifest
     change. Hashing the raw bytes would give the old key, a 412, and adoption of the old, less
     scrubbed object. The previously uploaded object stays in the bucket, unreferenced, until
@@ -602,7 +605,7 @@ Planner rules for class `append`. The function is pure, total and property-teste
 | None, and no remote epoch | any | `Replay{FirstCapture}` |
 | None, and a remote epoch at size N | size ≥ N | `Adopt`: hash [0, N) locally; equal digest rebuilds the state, then `Append` if larger; a different digest is `Replay{AdoptMismatch}` |
 | None, and a remote epoch at size N | size < N | `Replay{Truncated}` |
-| Some | identity differs | `Replay{IdentityChanged}` |
+| Some | identity differs | treated as no index entry: `Adopt` against the remote epoch as above (D48, 2026-11-19; was `Replay{IdentityChanged}`) |
 | Some | size < `captured_to` | `Replay{Truncated}` |
 | Some | size = `captured_to`, mtime equal, `Settled` | `Unchanged` |
 | Some | size = `captured_to`, mtime changed or `Racy` | check the windows; a match is `Unchanged` with the stat updated, a mismatch is `Replay{WindowMismatch}` |
@@ -694,6 +697,10 @@ built daemon's `phys_footprint_peak` reached 1,254 MB, and 431 MB during the fir
 reconcile. A capture and an audit each hold a source's whole range in memory, and local files
 reach 98 MB. The operator decided on 2026-11-17 that streaming capture is required before the
 first production write (D45, section 18). [measured 2026-11-17]
+
+Decoding a `.jsonl.zst` rollout (D48) adds at most one live decoder: an 8 MiB window bound plus
+64 KiB of input and 128 KiB of output. A 100 MB JSONL as `.jsonl.zst` peaked at 22.2 MB in
+capture and 20.8 MB in audit (brief 39, evidence 30). [measured 2026-11-19]
 
 ### 7.4 Commit protocol
 
@@ -1513,8 +1520,9 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D43 | 2026-11-17: no wake stagger; a wake gap sets the reconcile flag only, because captures are serial | brief 29; 7.1 |
 | D44 | 2026-11-17: commit pauses are full jitter, `uniform(0, ceiling)`, ceilings 1 s, 2 s, 4 s, then 4 s; a stop does not cut a pause inside the publish part | brief 30; 7.4 |
 | D45 | 2026-11-17: streaming capture is required before the first production write (measured peak 1,254 MB against 128 MB) | brief 30, evidence 21; 7.4, 18 |
-| D46 | 2026-11-18: recompressed Codex rollouts (`CodexCompressed`) are stored as their on-disk bytes and decompressed by `memory export` (role `main`, window at most 2^27, whole frames only); operator decision | brief 37, evidence 28; 17 slice 2b |
-| D47 | 2026-11-18: a Codex `.jsonl.zst` rollout is its own source (`rollouts:<name>.jsonl.zst`) in the same owner as the plain rollout; an append source may change path on `Extend` and `Epoch` (kind and class may not); the walk yields one file per (owner, source id), the lexicographically first path, and counts the rest as `duplicate` | brief 38, evidence 29; 5, 7.2 |
+| D46 | 2026-11-18: recompressed Codex rollouts (`CodexCompressed`) are stored as their on-disk bytes and decompressed by `memory export` (role `main`, window at most 2^27, whole frames only); operator decision. Superseded by D48 on 2026-11-19 | brief 37, evidence 28; 17 slice 2b |
+| D47 | 2026-11-18: a Codex `.jsonl.zst` rollout is its own source (`rollouts:<name>.jsonl.zst`) in the same owner as the plain rollout; an append source may change path on `Extend` and `Epoch` (kind and class may not); the walk yields one file per (owner, source id), the lexicographically first path, and counts the rest as `duplicate`. The own-source id and the path-only precedence are superseded by D48 on 2026-11-19; the path change stays | brief 38, evidence 29; 5, 7.2 |
+| D48 | 2026-11-19: one logical identity for a Codex rollout (operator: follow DDIA). All four spellings share `rollouts:<name>.jsonl`; a `.jsonl.zst` is decoded at capture (window at most 2^23, whole frames only, otherwise withheld `undecodable`) and recorded as `CodexRollout` with the logical path; plain wins over `.zst`; an append source whose file identity changed is verified by content (Adopt) instead of replayed; `memory export` streams stored bytes again | brief 39, evidence 30; 5, 6.2, 7.2, 7.3 |
 
 Finding-to-section map for the challenge review:
 

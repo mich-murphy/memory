@@ -447,8 +447,10 @@ fn streamed<F: FileSystem>(
     chunk: usize,
     entry: Option<&SourceEntry>,
 ) -> Verdict {
-    let Some(before) = local.fs.stat(local.handle).ok().flatten() else {
-        return Verdict::Unsettled;
+    let before = match local.fs.stat(local.handle) {
+        Ok(Some(before)) => before,
+        Err(e) if F::is_undecodable(&e) => return Verdict::Withheld("undecodable".to_owned()),
+        _ => return Verdict::Unsettled,
     };
     local.size = before.size;
     let prospective = if let Err(code) = &local.empty {

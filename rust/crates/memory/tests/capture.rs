@@ -1107,3 +1107,128 @@ fn a_non_prefix_stable_prefix_difference_restarts_without_a_failure() -> R {
     }
     Ok(())
 }
+
+// ---- identity change is verified by content (brief 39)
+
+/// A captured source replaced by a new FileId with the same bytes is Unchanged, the new id is
+/// recorded, and the next round reads nothing.
+#[test]
+fn identity_change_same_bytes_is_unchanged_and_records_the_new_id() -> R {
+    let mut rig = rig()?;
+    transcript(&mut rig, b"0123456789");
+    rig.cycle()?;
+    let old = index_of(&rig)?.observed.id;
+    rig.fs.replace(1, b"0123456789", 1);
+    let (outcomes, changes) = rig.cycle()?;
+    assert!(changes.is_empty());
+    assert_eq!(outcomes, [SourceOutcome::Unchanged]);
+    let new = index_of(&rig)?.observed.id;
+    assert_ne!(new, old, "the stat refresh records the new id");
+    // The adopted entry has never been audited, so the next round audits once (existing rule)
+    // and finds the epoch unchanged; the round after that reads nothing.
+    let (outcomes, changes) = rig.cycle()?;
+    assert!(changes.is_empty());
+    assert_eq!(outcomes, [SourceOutcome::Unchanged]);
+    assert_eq!(index_of(&rig)?.observed.id, new);
+    let mut spy = Spy {
+        inner: std::mem::take(&mut rig.fs),
+        ..Spy::default()
+    };
+    let got = run_spy(&mut rig, &mut spy)?;
+    assert!(kinds_of(&got).is_empty());
+    assert!(spy.reads.is_empty(), "nothing read again: {:?}", spy.reads);
+    assert_eq!(
+        got.outcomes.first().map(|o| &o.1),
+        Some(&SourceOutcome::Unchanged)
+    );
+    Ok(())
+}
+
+/// Same prefix, more bytes, new id: one Extend that reads only from captured_to.
+#[test]
+fn identity_change_same_prefix_more_bytes_is_one_extend_from_captured_to() -> R {
+    let mut rig = rig()?;
+    transcript(&mut rig, b"0123456789");
+    rig.cycle()?;
+    rig.fs.replace(1, b"0123456789abcdef", 1);
+    let mut spy = Spy {
+        inner: std::mem::take(&mut rig.fs),
+        ..Spy::default()
+    };
+    let got = run_spy(&mut rig, &mut spy)?;
+    assert_eq!(kinds_of(&got), ["extend"]);
+    let tail = spy.reads.iter().skip_while(|r| r.start < 10 && r.end <= 10);
+    assert_eq!(tail.map(|r| r.start).min(), Some(10));
+    assert_eq!(spy.reads.last().map(|r| r.end), Some(16));
+    Ok(())
+}
+
+/// Same size, different prefix, new id: a new epoch.
+#[test]
+fn identity_change_different_prefix_is_an_epoch() -> R {
+    let mut rig = rig()?;
+    transcript(&mut rig, b"0123456789");
+    rig.cycle()?;
+    rig.fs.replace(1, b"X123456789abcdef", 1);
+    let (_, changes) = rig.cycle()?;
+    assert_eq!(kinds(&changes), ["epoch"]);
+    Ok(())
+}
+
+/// A shorter file with a new id is an Epoch (Truncated), not an adopt.
+#[test]
+fn identity_change_shorter_file_is_an_epoch() -> R {
+    let mut rig = rig()?;
+    transcript(&mut rig, b"0123456789");
+    rig.cycle()?;
+    rig.fs.replace(1, b"01234", 1);
+    let (_, changes) = rig.cycle()?;
+    assert_eq!(kinds(&changes), ["epoch"]);
+    Ok(())
+}
+
+// ---- Undecodable sources are withheld, never silently retried
+
+struct Undecodable(MemFs, bool);
+impl FileSystem for Undecodable {
+    type Error = bool;
+    fn stat(&mut self, source: u64) -> Result<Option<Stat>, bool> {
+        if self.1 {
+            return Err(true);
+        }
+        self.0.stat(source).map_err(|_| false)
+    }
+    fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, bool> {
+        let _ = (source, range);
+        Err(true)
+    }
+    fn is_undecodable(error: &bool) -> bool {
+        *error
+    }
+}
+
+#[test]
+fn undecodable_stat_or_read_is_withheld_with_no_upload() -> R {
+    for on_stat in [true, false] {
+        let mut rig = rig()?;
+        transcript(&mut rig, b"0123456789");
+        let objects = rig.store.objects.len();
+        let mut fs = Undecodable(std::mem::take(&mut rig.fs), on_stat);
+        let empty = OwnerState::default();
+        let env = Env {
+            header: header()?,
+            context: &rig.context,
+            now_ns: 10_000_000_000,
+            piece_len: rig.piece_len,
+        };
+        let got = capture(&mut fs, &rig.sources, &rig.locals, &empty, &env);
+        assert_eq!(
+            got.outcomes.first().map(|o| &o.1),
+            Some(&SourceOutcome::Withheld(WithholdReason::Undecodable)),
+            "on_stat={on_stat}"
+        );
+        assert!(got.commit.is_none());
+        assert_eq!(rig.store.objects.len(), objects);
+    }
+    Ok(())
+}

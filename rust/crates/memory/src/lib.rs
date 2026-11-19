@@ -27,3 +27,4 @@ pub mod state;
 pub mod token;
 pub mod watch;
 pub mod wired;
+pub mod zstd_stream;

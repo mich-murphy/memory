@@ -5,10 +5,19 @@
 //! Only the daemon is measured: on macOS it runs under `/usr/bin/time -l` and the `peak memory
 //! footprint` line is parsed; elsewhere `VmHWM` is read from `/proc/<pid>/status` before the
 //! stop. The fake server's memory is in the test process, not the daemon's.
-use super::daemon_restore::{Guard, Setup, setup};
-use super::{R, e};
+use super::assemble::Rig;
+use super::daemon_restore::{Guard, PREFIX, Setup, setup};
+use super::fake::Fake;
+use super::{BUCKET, R, e};
+use memory::config::Config;
+use memory::daemon::Sources;
+use memory::realfs::WalkLimits;
+use memory::resolve::{SharedFs, WalkSources};
+use memory::roots::locator_roots;
+use memory_core::limits::current_key;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -232,5 +241,61 @@ fn an_owner_of_more_than_256_mb_stays_under_128_mb() -> R {
     let mut files: Vec<(&str, u64, bool)> = vec![(main.as_str(), 60, false)];
     files.extend(subs.iter().map(|p| (p.as_str(), 60, false)));
     within("peak-b", measure("peak-b", &files, 30)?);
+    Ok(())
+}
+
+/// A 100 MB JSONL written as `.jsonl.zst` (streamed through the encoder) is decoded at capture
+/// and audit with bounded buffers.
+#[test]
+fn one_100_mb_zst_rollout_stays_under_128_mb() -> R {
+    let server = Fake::start()?;
+    let rig = Rig::new("peak-zst", &server.url(), PREFIX, false)?;
+    let codex = rig.add_root("codex")?;
+    fs::create_dir_all(&rig.state).map_err(e)?;
+    fs::set_permissions(&rig.state, fs::Permissions::from_mode(0o700)).map_err(e)?;
+    fs::copy(&rig.cfg, rig.state.join("config.toml")).map_err(e)?;
+    let name = "rollout-2026-11-17T10-00-00-33333333-3333-4333-8333-333333333333.jsonl.zst";
+    let path = codex.join("sessions/2026/11/17").join(name);
+    fs::create_dir_all(path.parent().ok_or("parent")?).map_err(e)?;
+    let mut enc =
+        zstd::stream::write::Encoder::new(fs::File::create(&path).map_err(e)?, 3).map_err(e)?;
+    let mut n = 0_u64;
+    let mut written = 0_u64;
+    while written < 100 * MIB {
+        let mut chunk = Vec::with_capacity(1 << 20);
+        while chunk.len() < 1 << 20 {
+            n += 1;
+            chunk.extend_from_slice(
+                format!("{{\"role\":\"user\",\"n\":{n},\"text\":\"synthetic line\"}}\n").as_bytes(),
+            );
+        }
+        enc.write_all(&chunk).map_err(e)?;
+        written += chunk.len() as u64;
+    }
+    enc.finish().map_err(e)?;
+    let config = Config::load(&rig.cfg).map_err(e)?;
+    let owner = WalkSources::new(
+        locator_roots(&config).map_err(e)?,
+        WalkLimits::default(),
+        SharedFs::new(),
+    )
+    .enumerate()
+    .first()
+    .ok_or("no source")?
+    .0
+    .clone();
+    let current = format!("/{BUCKET}/{PREFIX}{}", current_key(&owner));
+    let s = Setup {
+        server,
+        rig,
+        owner,
+        file: path,
+        current,
+    };
+    let (capture_peak, _) = run_daemon(&s, &|_| s.etag().is_some())?;
+    let (audit_peak, log) = run_daemon(&s, &|l| l.contains(" INFO round cause=start"))?;
+    eprintln!("PEAK peak-zst: capture={capture_peak} audit={audit_peak}");
+    assert!(audit_matched(&log) >= 1, "{log}");
+    within("peak-zst", (capture_peak, audit_peak));
     Ok(())
 }

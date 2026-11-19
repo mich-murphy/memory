@@ -38,6 +38,8 @@ mod event_loop;
 mod export;
 #[path = "common/s3_fake.rs"]
 mod fake;
+#[path = "s3_store/identity_verify.rs"]
+mod identity_verify;
 #[path = "common/log_lines.rs"]
 mod log_lines;
 #[path = "s3_store/owners.rs"]

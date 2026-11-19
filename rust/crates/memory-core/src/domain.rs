@@ -628,6 +628,8 @@ pub enum WithholdReason {
     KeyTooLong,
     /// SourceLimit withheld and counted.
     SourceLimit,
+    /// The source's on-disk encoding (zstd) cannot be decoded; nothing is uploaded.
+    Undecodable,
 }
 
 /// Pure requested work; no I/O is performed.

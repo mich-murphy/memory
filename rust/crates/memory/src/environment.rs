@@ -43,6 +43,11 @@ pub trait FileSystem {
     /// # Errors
     /// Returns the adapter's error for unavailable or invalid ranges.
     fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, Self::Error>;
+    /// Whether `error` says the source's bytes cannot be decoded (a damaged or unsupported
+    /// encoding). Such a source is withheld, not retried. Default: no error is.
+    fn is_undecodable(_error: &Self::Error) -> bool {
+        false
+    }
 }
 
 /// Closed failure vocabulary of the object store (DESIGN.md 7.4, 11.2).
