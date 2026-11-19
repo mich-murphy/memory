@@ -828,19 +828,19 @@ impl Sut {
             }
             Step::MidRewrite { src, .. } => self.mid_rewrite(*src, after, shapes)?,
             Step::RenameReplace { src, same, .. } => {
-                // Directed: for a settled, indexed, committed source a new file at the path
-                // (new bytes or the same bytes) starts a new epoch at once (DESIGN.md 7.2: an
-                // identity change replays). Same bytes cannot reveal it any other way.
+                // Directed (brief 39): a new file at the path is verified by content. The same
+                // bytes continue the epoch; other bytes follow the file (an epoch, or an extend
+                // when they happen to share the committed prefix).
                 let before = self.settled_epochs(*src)?;
                 self.sync_file(*src, after);
                 if let Some(before) = before {
                     self.reconcile()?;
                     self.follows(*src, &after.files)?;
-                    ensure(
-                        self.epoch_count(*src)? > before,
-                        "a new file at the same path did not start a new epoch",
-                    )?;
                     if *same {
+                        ensure(
+                            self.epoch_count(*src)? == before,
+                            "the same bytes under a new file id started a new epoch",
+                        )?;
                         bump(&shapes.identity_checked);
                     }
                 }
@@ -1993,7 +1993,7 @@ fn window_and_identity_shapes_arise_from_a_scripted_run() -> R {
             Step::Reconcile,
             app(0, 1, 3000),
             Step::Reconcile,
-            // Same bytes, new file at the path: must start a new epoch at once.
+            // Same bytes, new file at the path: verified by content, the epoch continues.
             Step::RenameReplace {
                 src: 0,
                 seed: 0,
@@ -2013,8 +2013,8 @@ fn window_and_identity_shapes_arise_from_a_scripted_run() -> R {
         )?;
     }
     ensure(
-        sut.epoch_count(0)? == 2,
-        "one rename-replace, so two epochs",
+        sut.epoch_count(0)? == 1,
+        "a rename-replace with the same bytes continues the one epoch",
     )
 }
 
