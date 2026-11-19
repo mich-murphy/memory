@@ -132,3 +132,10 @@ push, hosted gates, merge. Installing the new build on this Mac is a separate st
 ## Ledger
 
 - 2026-11-19 20:00Z: brief written on `29b8144`, with the review of the three failures.
+- 2026-11-19 20:41Z: CAUSES accepted locally at `a8ca4da` (worker 5 commits; it hit its turn
+  limit once after step 1 and was resumed). Deviations accepted: `settle` also takes `now`; two
+  whole-log asserts separate the `retry` lines and count them. ureq 3.5.1 reports a hang under
+  `timeout_global` as `Timeout(Global)` (`cause=timeout`). Teeth 8 of 8. Full gates on
+  `a8ca4da`: 14 sub-gates 0, seed 3820085030, coverage 96.33 %. Record:
+  [evidence 32](evidence/32-store-causes/). Next: push, hosted gates, merge, then install the
+  new build on this Mac.

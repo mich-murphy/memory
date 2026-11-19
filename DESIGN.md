@@ -1162,6 +1162,11 @@ Neither check trusts the index, the planner or the hasher it is checking.
 - `tracing` writes to stderr, and the supervisor owns retention.
 - Info level logs owner ids, kinds and classes. Paths appear only at debug. Content never
   appears. [review, 05 m5]
+- Every failed attempt that will be retried logs one `retry` line: owner, class, a closed cause
+  (`dns`, `connect`, `refused`, `tls`, `timeout`, `reset`, `server` and the like), whether the
+  landing is unknown, the attempt number, the time the attempt took and the retry delay.
+  `memory check` prints one `store_error` detail line per failed fetch, with the source kind (or
+  `chain`) and the cause (D49, 2026-11-19).
 - launchd uses `KeepAlive` with `SuccessfulExit=false`. systemd uses `Restart=on-failure` with a
   start limit.
 - Exit codes: 0 only on a requested stop, and distinct codes for "lock held" and "config
@@ -1526,6 +1531,7 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D46 | 2026-11-18: recompressed Codex rollouts (`CodexCompressed`) are stored as their on-disk bytes and decompressed by `memory export` (role `main`, window at most 2^27, whole frames only); operator decision. Superseded by D48 on 2026-11-19 | brief 37, evidence 28; 17 slice 2b |
 | D47 | 2026-11-18: a Codex `.jsonl.zst` rollout is its own source (`rollouts:<name>.jsonl.zst`) in the same owner as the plain rollout; an append source may change path on `Extend` and `Epoch` (kind and class may not); the walk yields one file per (owner, source id), the lexicographically first path, and counts the rest as `duplicate`. The own-source id and the path-only precedence are superseded by D48 on 2026-11-19; the path change stays | brief 38, evidence 29; 5, 7.2 |
 | D48 | 2026-11-19: one logical identity for a Codex rollout (operator: follow DDIA). All four spellings share `rollouts:<name>.jsonl`; a `.jsonl.zst` is decoded at capture (window at most 2^23, whole frames only, otherwise withheld `undecodable`) and recorded as `CodexRollout` with the logical path; plain wins over `.zst`; an append source whose file identity changed is verified by content (Adopt) instead of replayed; `memory export` streams stored bytes again | brief 39, evidence 30; 5, 6.2, 7.2, 7.3 |
+| D49 | 2026-11-19: a store failure keeps its cause: `StoreError::{Offline, Ambiguous}` carry a closed `Cause` (DNS, connect, refused, TLS, the timeout phases, reset, I/O, protocol, missing ETag), `Failure` keeps the `StoreError`, the daemon logs a `retry` line per retried failure and `memory check` a `store_error` detail line per failed fetch. Classes, backoff, timeouts and exit codes unchanged | brief 40, evidence 32; 11.5 |
 
 Finding-to-section map for the challenge review:
 

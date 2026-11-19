@@ -177,7 +177,17 @@ from `main` alone.
      Open: the operator approves the six `memory hook codex` entries in Codex `/hooks`; verify
      a hint from Claude, Codex and Pi once new sessions start; a `memory check` every 12 h on the
      production install for two days (slice 2b on this build); `check` does not say which class
-     a `store_error` had; BC-01 (slice 3).
+     a `store_error` had; BC-01 (slice 3). (Later, 2026-11-19: the `store_error` point is
+     resolved by brief 40, item 13.)
+  13. Brief 40 ([40-store-failure-causes.md](rust-rewrite/implementation/40-store-failure-causes.md),
+     [evidence 32](rust-rewrite/implementation/evidence/32-store-causes/)) is accepted locally as
+     `a8ca4da` (DESIGN D49). Review of the three production `offline` failures: each was retried
+     with backoff and landed, nothing parked or paused, the next check matched all sources; the
+     first waited for the 43-minute start round to end (driver design). Fix: a store failure
+     keeps a closed cause (`dns`, `connect`, `refused`, `tls`, `timeout`, `reset`, `server`, ...),
+     the daemon logs `retry owner class cause landing attempt elapsed_ms after_ms` per retried
+     failure, and `memory check` prints `store_error owner kind cause` per failed fetch. No
+     class, backoff, timeout or exit code changed. Next: install the merged build on this Mac.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
