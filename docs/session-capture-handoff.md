@@ -80,7 +80,7 @@ from `main` alone.
   09:20Z to 09:44Z): agent and helpers stopped, hooks and Codex `config.toml` restored to the
   backups, Pi extension removed, prefix deleted and listed empty (evidence 21, "Check 5 and end
   of run"). Steps 1 and 2 below are done; next is the short run with the current build on real
-  data, then cutover.
+  data, then cutover. (Later, 2026-11-19: both done; see item 12.)
   What the next session does, in order:
   1. Read `checks.log` (a check every 12 h; abort on any `mismatch` or an owner parked as
      `Foreign`), the daemon log and `status.json`; confirm the agent, sampler, `caffeinate` and
@@ -163,6 +163,21 @@ from `main` alone.
      recompression uploads nothing and a resume uploads only the new bytes; `memory export`
      streams stored bytes again (brief 37 reverted). Deletions (slice 3) are no longer needed for
      Codex rollouts.
+  12. Short run and cutover on this Mac, 2026-11-19 ([evidence 31](rust-rewrite/implementation/evidence/31-short-run-and-cutover/)),
+     both on a release build of `56c04aa`. Short run `20261119-56c04aa`: first full reconcile
+     1,076 owners landed, 0 failed; peak 103 MB (under 128 MB, D45); `memory check` 6,045 of
+     6,045 match (a first check had 2 transient `store_error`); all 1,074 session owners
+     exported, imported and reimported `unchanged`; prefix deleted and listed empty. Cutover:
+     bucket held only `delivery-artifacts/`; Go capture-v1 hooks, Pi extension and service plist
+     removed (the Go service uninstall fails on an unloaded label, so the plist was removed by
+     hand as Go's `removeServicePlan` would); `memory install` with `prefix = ""` and the Go
+     archive and machine ids; launchd agent `memory` running; opt-out record moved to
+     `~/.local/state/memory-cutover/backup/`. Production `memory check` 6,045 of 6,045 match,
+     restart resumed from the index, export and import of all 1,074 owners clean, peak 76 MB.
+     Open: the operator approves the six `memory hook codex` entries in Codex `/hooks`; verify
+     a hint from Claude, Codex and Pi once new sessions start; a `memory check` every 12 h on the
+     production install for two days (slice 2b on this build); `check` does not say which class
+     a `store_error` had; BC-01 (slice 3).
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
