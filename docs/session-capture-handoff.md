@@ -229,6 +229,13 @@ from `main` alone.
      `memory status` exit 0, 6,052 of 6,052 current. Next: the Linux install for dev-01 (blocked:
      the dev-01 server does not accept `~/.ssh/dev-01`), the `Ignored` verdict and the Codex
      plugins rule from the uncaptured-files review, then slice 3 snapshots.
+  17. Brief 44 ([44-linux-install.md](rust-rewrite/implementation/44-linux-install.md),
+     [evidence 36](rust-rewrite/implementation/evidence/36-linux-install/)) is accepted locally as
+     `d278d23` (DESIGN D53): on Linux `memory install` writes a systemd user unit and prints the
+     `systemctl --user` and `loginctl enable-linger` commands; uninstall removes only our unit.
+     The Linux tests and teeth ran in a local Ubuntu 24.04 container (47 of 47). Next: deploy on
+     dev-01 once the server accepts `~/.ssh/dev-01` (`memory install`, the printed commands, then
+     a first round and `memory status`).
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

@@ -1175,7 +1175,9 @@ Neither check trusts the index, the planner or the hasher it is checking.
   `memory check` prints one `store_error` detail line per failed fetch, with the source kind (or
   `chain`) and the cause (D49, 2026-11-19).
 - launchd uses `KeepAlive` with `SuccessfulExit=false`. systemd uses `Restart=on-failure` with a
-  start limit.
+  start limit. On Linux `memory install` writes a systemd user unit (`Restart=on-failure`,
+  `RestartSec=60`, stderr to the journal) and prints the `systemctl --user` and
+  `loginctl enable-linger` commands without running them (D53, 2026-11-20).
 - Exit codes: 0 only on a requested stop, and distinct codes for "lock held" and "config
   invalid".
 - A corrupt index is rebuilt, never a crash loop. [review, 03 m3]
@@ -1444,7 +1446,8 @@ source's whole range in memory, measured against the 128 MB target (section 7.4,
    publication-refresh job are already stopped (A0). Remove the Go hooks' launch paths, then
    repeat on the other host. One collector runs per host. [review, 04 M4] On macOS `memory
    install` writes the launchd agent, the Claude and Codex hook entries and the Pi extension,
-   and `memory uninstall` removes them; neither touches the Go entries (brief 36).
+   and `memory uninstall` removes them; neither touches the Go entries (brief 36). On Linux it
+   writes `~/.config/systemd/user/memory.service` instead of the launchd agent (brief 44, D53).
 3. Remove the one existing session opt-out record from `~/.local/state/agent-sessions/exclusions`
    once the Go path is stopped. Before that, the Go path still honors it.
 4. Let the safety reconcile capture every available local source into the fresh archive.
@@ -1542,6 +1545,7 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D50 | 2026-11-20: the daemon rotates its own log when stderr is a regular file (launchd's `StandardErrorPath`): at 8 MiB the file moves to `.1` (3 generations kept), a new 0600 file takes fd 2 and starts with `log_rotated`; path and inode are checked first and any failure turns rotation off without a log line; a pipe or socket is never touched | brief 41, evidence 33; 11.5 |
 | D51 | 2026-11-20: `memory status` is two tiers, read-only and offline (no lock, no write, no request); `--verify` is not built, `memory check` is the verified view. `memory unpark <owner-prefix>\|--all` and `memory reconcile` take the daemon lock and refuse beside a daemon (exit 75); `reconcile` logs `round cause=manual` | brief 42, evidence 34; 11.3, 13 |
 | D52 | 2026-11-20: deletions are recorded. Only a full round after a complete walk observes absence: stored live append entries the walk did not yield and that are not parked are probed by `stat` (no read, no admission); the second consecutive miss commits `deleted`. A missing root, a truncated or busy walk and a stat error never count. `index.json` keeps the owner set. Export keeps a deleted source, every epoch `sealed`; restore skips it; bytes are never purged | brief 43, evidence 35; 6, 9.1 |
+| D53 | 2026-11-20: on Linux `memory install` writes a systemd user unit at `$XDG_CONFIG_HOME/systemd/user/memory.service` (absolute only) or `~/.config/systemd/user/memory.service`: first line is our marker, `ExecStart="<exe>" daemon` (quoted with `\`, `"`, `%`, `$` escaped), `Restart=on-failure`, `RestartSec=60`, `StandardError=journal`, `WantedBy=default.target`. Uninstall removes only our unit. The binary prints `systemctl --user daemon-reload`, `enable --now` and `loginctl enable-linger $USER` and runs none of them. A control character in the exe path is refused | brief 44, evidence 36; 11.5, 17 |
 
 Finding-to-section map for the challenge review:
 

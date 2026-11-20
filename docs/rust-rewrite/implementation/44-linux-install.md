@@ -91,3 +91,9 @@ this Mac (no plist change expected: `memory install` reports `unchanged`).
 ## Ledger
 
 - 2026-11-20 10:25Z: brief written on `765a463`.
+- 2026-11-20 11:30Z: SYSTEMD accepted locally at `d278d23` (worker `f00ed33`, `2034c99`,
+  `55d6219`; parent `d278d23` gives `systemd-analyze --user verify` a private runtime directory,
+  found by running the Linux tests in a local Ubuntu 24.04 container). Teeth 10 of 10 (6 on Linux
+  only, run in the container); gates 14/14, seed 2642077723, nextest 830, coverage 95.62 %.
+  [Evidence 36](evidence/36-linux-install/). Next: hosted gates (Ubuntu jobs), merge, install in
+  place on this Mac. Deployment on dev-01 waits for the SSH key.
