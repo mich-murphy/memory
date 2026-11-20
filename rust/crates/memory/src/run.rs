@@ -194,7 +194,8 @@ fn refuse(code: &str, exit: u8) -> ExitCode {
 /// stop requested at any point after the lock file appears is kept and forwarded as soon as the
 /// thread starts. Every refusal and fatal error writes exactly one line, `memory: <closed
 /// code>`, to stderr (the last one: after the subscriber starts, [`crate::log`] lines may
-/// precede it); stdout stays empty.
+/// precede it); stdout stays empty. When stderr is a regular file the log rotates it by size
+/// ([`crate::log`]), so that line lands in the newest file.
 #[must_use]
 pub fn main_entry() -> ExitCode {
     let Ok(signals) = SignalSource::install() else {

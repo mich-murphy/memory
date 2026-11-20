@@ -57,6 +57,17 @@
 //! `landing=unknown` means the `current.json` write may have landed. It carries only the owner
 //! prefix, closed codes and integers.
 //!
+//! # Rotation
+//!
+//! When fd 2 is a regular file (launchd's `StandardErrorPath`), the daemon rotates it itself: before
+//! a line is written, a file of at least 8 MiB is renamed to `<path>.1` (older ones shift to `.2`
+//! and `.3`, the oldest is dropped), a new mode 0600 file takes fd 2, and its first line is
+//! `log_rotated` (no keys), followed by the line that triggered it. A line is never split. A pipe,
+//! socket, tty or `/dev/null` is never touched. If the path no longer names the file behind fd 2,
+//! or any step fails, rotation is off for the life of the process and nothing is written about it.
+//! Under the `sim` feature `MEMORY_SIM_LOG_CAP=<bytes>` replaces the cap; the release binary never
+//! reads it. See [`rotate`].
+//!
 //! `memory hook` and `memory restore` never start the subscriber.
 use crate::daemon::{OwnerOutcome, ParkedReason, RoundReport, StateLoad};
 use crate::driver::Cause;
