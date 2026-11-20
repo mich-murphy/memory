@@ -137,6 +137,14 @@ memory unpark <owner-prefix>        # or: memory unpark --all
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/memory.plist
 ```
 
+On Linux (systemd user unit) the same sequence is:
+
+```sh
+systemctl --user stop memory.service
+memory unpark <owner-prefix>        # or: memory unpark --all
+systemctl --user start memory.service
+```
+
 It removes every entry of that owner (owner-wide and per-source) and keeps every other field.
 Exit 1 (`not_parked`) when nothing matches, 2 for a damaged or newer-schema `status.json` (the
 file is left untouched), 64 for bad arguments. No network.
@@ -146,3 +154,18 @@ beside a running daemon), logs a `round` line with `cause=manual` to stderr and 
 `reconcile landed=<n> failed=<n> parked=<n> skipped=<n> deferred=<n>`. Exit 0 when nothing
 failed and nothing was parked, 1 otherwise, 2 config, 130 when stopped by SIGINT or SIGTERM
 before the round ended.
+
+### Linux (systemd user unit)
+
+On Linux `memory install` writes `$XDG_CONFIG_HOME/systemd/user/memory.service` (when
+`XDG_CONFIG_HOME` is set, non-empty and absolute; otherwise `~/.config/systemd/user/memory.service`)
+and prints the commands it does not run: `systemctl --user daemon-reload`,
+`systemctl --user enable --now memory.service` and `loginctl enable-linger $USER` (without
+linger a server reached over SSH stops the user manager at logout). `memory uninstall` removes
+only a unit that carries our first line and runs `memory daemon`; it then prints
+`systemctl --user disable --now memory.service` and `systemctl --user daemon-reload`. A path with
+a control character is refused (`install_binary_name`, exit 2).
+
+Logs go to the journal: `journalctl --user -u memory`; journald's own limits apply, and the
+daemon's log rotation does not act on it. On a busy host check `fs.inotify.max_user_watches`
+first if watching fails or sources lag.
