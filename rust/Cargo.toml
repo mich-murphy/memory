@@ -26,8 +26,8 @@ proptest = "1"
 proptest-state-machine = "0.8"
 # Source read before pinning: crates.io notify-8.2.0/Cargo.toml.
 notify = "=8.2.0"
-# Already in the lockfile via notify; same version, so no new crate enters it. `fs` only.
-rustix = { version = "=1.1.6", default-features = false, features = ["std", "fs"] }
+# Already in the lockfile via notify; same version, so no new crate enters it. `fs` and `stdio` (safe `dup2_stderr`) only.
+rustix = { version = "=1.1.6", default-features = false, features = ["std", "fs", "stdio"] }
 # S3 client chosen by prototype P2 (docs/rust-rewrite/prototypes/P2-s3-client.md): blocking, and
 # neither crate retries, so a `current.json` write is never resent behind the caller.
 rusty-s3 = { version = "=0.11.0", default-features = false, features = ["rustcrypto", "xml"] }

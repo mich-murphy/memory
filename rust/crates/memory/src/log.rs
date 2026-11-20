@@ -27,6 +27,7 @@
 //! | `progress` | `done total landed failed elapsed_s` |
 //! | `capture` | `owner` `result` (`landed`, `unchanged`, `failed`, `stopped`) |
 //! | `stopped` | none |
+//! | `log_rotated` | none |
 //! | `state_load` | `file` (`index` or `status`) `result` (`damaged` or `newer_schema`) |
 //! | `retry` | `owner` `class` (`offline throttled transient destination_auth local deterministic`) `cause` (a closed code: a transport cause such as `dns refused timeout reset`, or `server throttled auth not_found base_unchanged corrupt` and the like) `landing` (`unknown` or `no`) `attempt elapsed_ms after_ms` |
 //! | `parked` | `owner` `reason` `scope` (`owner` or `source`; reasons: `foreign_writer`, `newer_remote_schema`, `repeated_audit_mismatch`, `repeated_readback_mismatch`, `source_unstable`, `repeated_non_json_response`, `repeated_schema_error`) |
@@ -156,12 +157,83 @@ where
         .finish()
 }
 
+/// The rotation cap. Under `sim`, `MEMORY_SIM_LOG_CAP=<bytes>` (above zero) replaces it.
+#[cfg(feature = "sim")]
+fn log_cap() -> u64 {
+    std::env::var("MEMORY_SIM_LOG_CAP")
+        .ok()
+        .and_then(|text| text.parse::<u64>().ok())
+        .filter(|cap| *cap > 0)
+        .unwrap_or(rotate::LOG_CAP_BYTES)
+}
+
+/// Without `sim` the variable is never read.
+#[cfg(not(feature = "sim"))]
+const fn log_cap() -> u64 {
+    rotate::LOG_CAP_BYTES
+}
+
+#[cfg(target_os = "macos")]
+fn stderr_path(fd: std::os::fd::BorrowedFd<'_>) -> Option<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let path = rustix::fs::getpath(fd).ok()?;
+    Some(std::path::PathBuf::from(std::ffi::OsStr::from_bytes(
+        path.to_bytes(),
+    )))
+}
+
+#[cfg(target_os = "linux")]
+fn stderr_path(_fd: std::os::fd::BorrowedFd<'_>) -> Option<std::path::PathBuf> {
+    std::fs::read_link("/proc/self/fd/2").ok()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn stderr_path(_fd: std::os::fd::BorrowedFd<'_>) -> Option<std::path::PathBuf> {
+    None
+}
+
+/// The first line of a file the daemon rotated into.
+fn rotated_line() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    format!("{} INFO log_rotated\n", format_utc(secs))
+}
+
+/// Writes each line to fd 2, rotating the file behind it first when it is due. The lock is held
+/// from the check through the write, so a line is never split across files.
+#[derive(Clone)]
+struct Rotating(Arc<Mutex<rotate::Rotator>>);
+
+impl Write for Rotating {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        let mut stderr = std::io::stderr();
+        let mut guard = self.0.lock().ok();
+        if let Some(rotator) = guard.as_mut()
+            && let Some(fresh) = rotator.before_line(&stderr, stderr_path)
+        {
+            if rustix::stdio::dup2_stderr(&fresh).is_ok() {
+                let _ = stderr.write_all(rotated_line().as_bytes());
+            } else {
+                rotator.disable();
+            }
+        }
+        stderr.write_all(data)?;
+        Ok(data.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// Install the stderr subscriber for the process.
 ///
 /// # Errors
 /// A global subscriber is already set.
 pub fn start() -> Result<(), Unavailable> {
-    tracing::subscriber::set_global_default(subscriber(std::io::stderr)).map_err(|_| Unavailable)
+    let writer = Rotating(Arc::new(Mutex::new(rotate::Rotator::new(log_cap()))));
+    tracing::subscriber::set_global_default(subscriber(move || writer.clone()))
+        .map_err(|_| Unavailable)
 }
 
 #[derive(Clone)]
