@@ -1390,6 +1390,11 @@ impl Reference {
                 self.record(*src);
             }
             Step::RemoveSource { src } => {
+                // A file created at the path later is a new file (a new inode or birth time on
+                // APFS and on ext4 with statx), not the old one edited between its windows.
+                if self.files.contains_key(src) {
+                    *self.generation.entry(*src).or_default() += 1;
+                }
                 self.destroy(*src);
                 self.files.remove(src);
             }
@@ -2231,4 +2236,31 @@ fn oracle_detects_tampered_store_contents() -> R {
     reference.files.insert(1, vec![2]);
     assert!(sut.liveness(&reference.files, &reference.history).is_err());
     Ok(())
+}
+
+/// A source removed and later created again at its path is a new file (a new `FileId`), so
+/// capture verifies its content (brief 39) and follows it. While `RemoveSource` kept the
+/// identity, the re-created file looked like the old one edited between its windows and the
+/// store held the old prefix spliced to the new tail (Hegel, seed 1848172391, 2026-11-20).
+#[test]
+fn a_source_created_again_after_removal_is_verified_as_a_new_file() -> R {
+    let shapes = Shapes::new();
+    let floor = u32::try_from(HEAD_WINDOW + TAIL_WINDOW).unwrap_or(0);
+    let (reference, sut) = drive(
+        &[
+            app(0, 15, floor + 1),
+            Step::Reconcile,
+            Step::MidRewrite {
+                src: 0,
+                pos: 0,
+                byte: 0,
+                grow: None,
+            },
+            Step::RemoveSource { src: 0 },
+            app(0, 15, floor + 2001),
+            Step::Reconcile,
+        ],
+        &shapes,
+    )?;
+    sut.follows(0, &reference.files)
 }
