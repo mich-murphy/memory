@@ -267,6 +267,13 @@ from `main` alone.
      Codex `/hooks` approval on dev-01, the 2-day criterion on both hosts, then slice 3 (Codex
      databases first, the `Ignored` verdict, the Codex `plugins/**` rule, file-history behind a
      content scan, images, attachments and paste-cache).
+  20. D55 (2026-11-21, [evidence 38](rust-rewrite/implementation/evidence/38-snapshot-scope/)):
+     after an evidence check the operator dropped Codex `generated_images`, Codex `attachments`
+     and Claude `paste-cache` from slice 3 (they become `Ignored`). Pastes (59 of 59) are in the
+     transcripts and generated images (4 of 4) in `thread_history_1.sqlite`; the 5 attachment
+     screenshots exist nowhere else and are given up. The operator approved the Codex hooks on
+     dev-01. Slice 3 order now: Codex databases (consistent snapshot), the `Ignored` verdict with
+     the narrowed Codex `plugins/**` rule, then file-history behind the content scan.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
