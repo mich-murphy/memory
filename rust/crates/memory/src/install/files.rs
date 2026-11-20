@@ -148,6 +148,110 @@ pub fn plist_is_ours(text: &str) -> bool {
         && path.file_name().is_some_and(|name| name == "memory")
 }
 
+/// First line of the systemd user unit we manage.
+pub const UNIT_MARKER: &str = "# Managed by memory install; memory uninstall removes it.";
+
+/// `exe` as one systemd `ExecStart=` word: double-quoted, with `\`, `"`, `%` and `$` escaped.
+#[must_use]
+pub fn systemd_quote(exe: &str) -> String {
+    let mut out = String::with_capacity(exe.len() + 2);
+    out.push('"');
+    for c in exe.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '%' => out.push_str("%%"),
+            '$' => out.push_str("$$"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The systemd user unit for `exe`.
+#[must_use]
+pub fn systemd_unit(exe: &str) -> String {
+    let exe = systemd_quote(exe);
+    format!(
+        "{UNIT_MARKER}
+[Unit]
+Description=memory: session capture
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={exe} daemon
+Restart=on-failure
+RestartSec=60
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+"
+    )
+}
+
+/// The first word of an `ExecStart=` value, unquoted, and the rest after it.
+fn exec_first_word(value: &str) -> Option<(String, &str)> {
+    let value = value.trim_start();
+    let mut word = String::new();
+    if let Some(rest) = value.strip_prefix('"') {
+        let mut it = rest.char_indices();
+        while let Some((i, c)) = it.next() {
+            match c {
+                '"' => return Some((word, &rest[i + 1..])),
+                '\\' => match it.next()? {
+                    (_, e @ ('\\' | '"')) => word.push(e),
+                    _ => return None,
+                },
+                '%' => match it.next()? {
+                    (_, '%') => word.push('%'),
+                    _ => return None,
+                },
+                '$' => match it.next()? {
+                    (_, '$') => word.push('$'),
+                    _ => return None,
+                },
+                c => word.push(c),
+            }
+        }
+        return None;
+    }
+    for (i, c) in value.char_indices() {
+        if c.is_whitespace() {
+            return Some((word, &value[i..]));
+        }
+        word.push(c);
+    }
+    Some((word, ""))
+}
+
+/// Whether a unit is ours: our first line and an `ExecStart=` naming a `memory` binary followed
+/// by `daemon`.
+#[must_use]
+pub fn unit_is_ours(text: &str) -> bool {
+    let mut lines = text.lines();
+    if lines.next() != Some(UNIT_MARKER) {
+        return false;
+    }
+    lines.any(|line| {
+        let Some(value) = line.strip_prefix("ExecStart=") else {
+            return false;
+        };
+        let Some((first, rest)) = exec_first_word(value) else {
+            return false;
+        };
+        let path = Path::new(&first);
+        path.is_absolute()
+            && !first.ends_with('/')
+            && path.file_name().is_some_and(|name| name == "memory")
+            && rest.trim() == "daemon"
+    })
+}
+
 /// `YYYYMMDDTHHMMSSZ` for a Unix time.
 #[must_use]
 pub fn utc_stamp(secs: u64) -> String {
@@ -349,6 +453,25 @@ pub fn plist_file(
         (None, None) => Ok(Outcome::Unchanged),
         (None, Some(bytes)) => {
             if std::str::from_utf8(&bytes).is_ok_and(plist_is_ours) {
+                remove_file(path, dry)
+            } else {
+                Ok(Outcome::Kept)
+            }
+        }
+    }
+}
+
+/// Install (`exe` given) or remove the systemd user unit. A file that is not ours is kept.
+///
+/// # Errors
+/// [`Failure::Io`].
+pub fn unit_file(path: &Path, exe: Option<&str>, dry: bool, now: u64) -> Result<Outcome, Failure> {
+    let old = read_existing(path)?;
+    match (exe, old) {
+        (Some(exe), old) => write_file(path, old.as_deref(), &systemd_unit(exe), dry, now),
+        (None, None) => Ok(Outcome::Unchanged),
+        (None, Some(bytes)) => {
+            if std::str::from_utf8(&bytes).is_ok_and(unit_is_ours) {
                 remove_file(path, dry)
             } else {
                 Ok(Outcome::Kept)

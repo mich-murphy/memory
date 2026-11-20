@@ -1,4 +1,4 @@
-//! `memory install` and `memory uninstall` (brief 36): the launchd agent file, the Claude and
+//! `memory install` and `memory uninstall` (briefs 36, 44): the launchd agent file or systemd user unit, the Claude and
 //! Codex hook entries and the Pi extension for the running binary.
 pub mod files;
 pub mod json;
@@ -52,6 +52,15 @@ fn dir_from(var: &str, home: &Path, default: &str) -> PathBuf {
     }
 }
 
+/// The systemd user unit path: under `XDG_CONFIG_HOME` when it is set, non-empty and absolute.
+fn unit_path(home: &Path) -> PathBuf {
+    let base = match std::env::var_os("XDG_CONFIG_HOME") {
+        Some(dir) if !dir.is_empty() && Path::new(&dir).is_absolute() => PathBuf::from(dir),
+        _ => home.join(".config"),
+    };
+    base.join("systemd/user/memory.service")
+}
+
 fn report(out: &mut impl Write, path: &Path, outcome: &Outcome) -> bool {
     let line = match outcome {
         Outcome::Wrote { backup: Some(name) } => {
@@ -82,8 +91,23 @@ fn run_steps(install: bool, dry: bool, exe: &str, home: &Path) -> Result<Vec<Str
         } else {
             "launchctl bootout gui/$(id -u)/memory".to_owned()
         });
+    } else if cfg!(target_os = "linux") {
+        let unit = unit_path(home);
+        say(
+            &mut out,
+            &unit,
+            &files::unit_file(&unit, install.then_some(exe), dry, now)?,
+        );
+        if install {
+            next.push("systemctl --user daemon-reload".to_owned());
+            next.push("systemctl --user enable --now memory.service".to_owned());
+            next.push("loginctl enable-linger $USER".to_owned());
+        } else {
+            next.push("systemctl --user disable --now memory.service".to_owned());
+            next.push("systemctl --user daemon-reload".to_owned());
+        }
     } else {
-        let _ = writeln!(out, "launchd: skipped (not macOS)");
+        let _ = writeln!(out, "service: skipped (unsupported)");
     }
     let claude = dir_from("CLAUDE_CONFIG_DIR", home, ".claude").join("settings.json");
     let codex = dir_from("CODEX_HOME", home, ".codex").join("hooks.json");
@@ -141,6 +165,9 @@ pub fn main_entry(install: bool, args: impl Iterator<Item = OsString>) -> ExitCo
     };
     let named = Path::new(&exe);
     if install && (!named.is_absolute() || named.file_name().is_none_or(|name| name != "memory")) {
+        return fail("install_binary_name", EXIT_CONFIG);
+    }
+    if install && cfg!(target_os = "linux") && exe.chars().any(char::is_control) {
         return fail("install_binary_name", EXIT_CONFIG);
     }
     match run_steps(install, dry, &exe, &home) {
