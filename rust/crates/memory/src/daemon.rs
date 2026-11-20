@@ -41,7 +41,7 @@ use crate::state::{
 use memory_core::coalescer::Signal;
 use memory_core::disposition::Streak;
 use memory_core::domain::{
-    Agent, Disposition, ErrorClass, Owner, OwnerParkReason, ParkReason, RulesDigest,
+    Agent, Disposition, ErrorClass, LocalError, Owner, OwnerParkReason, ParkReason, RulesDigest,
     SnapshotFingerprint, SourceClass, SourceId, SourceState,
 };
 use memory_core::hint::{
@@ -1105,9 +1105,16 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         report.audit.add(&got.audit);
         // A source park takes effect whether or not the owner's commit lands.
         for (id, outcome) in &got.outcomes {
-            if let SourceOutcome::Parked(reason) = outcome {
-                rt.parked_sources.insert(id.clone(), reason.clone());
-                report.parked += 1;
+            match outcome {
+                SourceOutcome::Parked(reason) => {
+                    rt.parked_sources.insert(id.clone(), reason.clone());
+                    report.parked += 1;
+                }
+                // Counted under `Local`; no owner retry or park: the source is tried next round.
+                SourceOutcome::BackupFailed => report
+                    .failures
+                    .bump(&ErrorClass::Local(LocalError::BackupFailed)),
+                _ => {}
             }
         }
         if let Some(failure) = failed {

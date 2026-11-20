@@ -130,3 +130,49 @@ fn a_codex_store_is_captured_checked_and_restored() -> R {
     assert!(!dest.join("logs_2.sqlite").exists());
     Ok(())
 }
+
+/// A Codex root with a file named like a store that is not a database.
+fn broken_store(label: &str) -> R<(Fake, Rig)> {
+    let server = Fake::start()?;
+    let rig = Rig::new(label, &server.url(), "rust-acceptance/b45-test/", false)?;
+    let codex = rig.add_root("codex")?;
+    fs::create_dir_all(&rig.state).map_err(e)?;
+    fs::set_permissions(&rig.state, fs::Permissions::from_mode(0o700)).map_err(e)?;
+    fs::copy(&rig.cfg, rig.state.join("config.toml")).map_err(e)?;
+    fs::write(codex.join("state_5.sqlite"), vec![b'x'; 4096]).map_err(e)?;
+    Ok((server, rig))
+}
+
+#[test]
+fn a_failed_backup_is_counted_as_local_and_nothing_lands() -> R {
+    let (server, rig) = broken_store("codex-backup-fail")?;
+    let mut daemon = start_from_config(&rig.state, &rig.cfg).map_err(e)?;
+    let report = daemon.reconcile_once().map_err(e)?;
+    assert_eq!((report.landed, report.parked), (0, 0));
+    assert_eq!(report.failures.local, 1);
+    // The next round tries again and counts again.
+    let again = daemon.reconcile_once().map_err(e)?;
+    assert_eq!(again.failures.local, 1);
+    daemon.shutdown().map_err(e)?;
+    assert_eq!(server.count("PUT"), 0);
+    assert_eq!(fs::read_dir(rig.state.join("tmp")).map_err(e)?.count(), 0);
+    Ok(())
+}
+
+#[test]
+fn reconcile_reports_local_one_for_a_failed_backup() -> R {
+    let (server, rig) = broken_store("codex-backup-reconcile")?;
+    let (code, out, err) = run(&rig, &["reconcile"])?;
+    assert!(
+        err.contains(" round cause=manual ") && err.contains(" local=1 "),
+        "{err}"
+    );
+    assert!(out.contains("landed=0"), "{out}");
+    // Contract: exit 1 only when an owner failed or parked; a local backup failure is counted
+    // (`local=1`) without an owner retry, so the exit is 0 and `failed=0`.
+    assert!(out.contains("failed=0"), "{out}");
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(server.count("PUT"), 0);
+    assert_eq!(fs::read_dir(rig.state.join("tmp")).map_err(e)?.count(), 0);
+    Ok(())
+}
