@@ -209,6 +209,12 @@ from `main` alone.
      unchanged). Installed on this Mac at 05:30:33Z in place (`runs = 4`; the old binary is
      `~/.local/state/memory-cutover/backup/memory-1b4f981`). Next: brief 42, `memory status`,
      `unpark` and `reconcile`.
+  15. Brief 42 ([42-operations-commands.md](rust-rewrite/implementation/42-operations-commands.md),
+     [evidence 34](rust-rewrite/implementation/evidence/34-operations/)) is accepted locally as
+     `4d5e1d6` (DESIGN D51): `memory status` (offline, read-only, two tiers), `memory unpark
+     <owner-prefix>|--all` and `memory reconcile` (both under the daemon lock, exit 75 beside a
+     daemon). Next: deletions (slice 3), then the Linux install for dev-01 (SSH key not yet
+     authorized there).
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

@@ -109,3 +109,8 @@ place and run `memory status` against production read-only.
 ## Ledger
 
 - 2026-11-20 06:20Z: brief written on `c986828`.
+- 2026-11-20 07:10Z: OPS accepted locally at `4d5e1d6` (worker 5 commits, parent 1: tests for
+  `status` beside a held lock and `reconcile` exit 130 on SIGTERM, which the worker had left
+  unproven). Teeth 13 of 13. Full gates on `4d5e1d6`: 14 sub-gates 0, seed 4231285103, coverage
+  96.00 %. Record: [evidence 34](evidence/34-operations/). Next: push, hosted gates, merge,
+  install in place, `memory status` against production.
