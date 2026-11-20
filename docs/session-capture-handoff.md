@@ -235,7 +235,10 @@ from `main` alone.
      `systemctl --user` and `loginctl enable-linger` commands; uninstall removes only our unit.
      The Linux tests and teeth ran in a local Ubuntu 24.04 container (47 of 47). Next: deploy on
      dev-01 once the server accepts `~/.ssh/dev-01` (`memory install`, the printed commands, then
-     a first round and `memory status`).
+     a first round and `memory status`). Merged as `ecc0489` (stack #211; the hosted Ubuntu gates
+     passed) and installed on this Mac at 11:31:26Z in place (`runs = 7`; the old binary is
+     `~/.local/state/memory-cutover/backup/memory-94230d2`); `memory status` exit 0, 6,053 of
+     6,053 current; `memory install --dry-run` reports every file `unchanged`.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

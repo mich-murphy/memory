@@ -74,6 +74,22 @@ sub-gates 0, seed 2642077723. nextest 830 passed (74 skipped by the gate filter)
 coverage gate 899 passed, lines 95.62 % (floor 80). The hosted Ubuntu gates (x86_64 and arm64) are
 the second Linux proof; see the PR.
 
+## Hosted gates, merge, install on this Mac
+
+- Stack #211 (PRs #208 to #210): Rust gates green on all three branches, including
+  `Rust gates (ubuntu-24.04)` and `Rust gates (ubuntu-24.04-arm)` on `d278d23` (the hosted Linux
+  proof); CI failed only in the two `govulncheck` steps. Merged as `ecc0489`.
+- 2026-11-20 11:31:26Z: release build of `ecc0489` (sha256 prefix `b9d9df7e07e4478c`) put in place
+  at `~/.local/libexec/memory/memory` by an atomic rename; the `94230d2` binary is kept as
+  `~/.local/state/memory-cutover/backup/memory-94230d2`. `launchctl kickstart -k`: `runs = 7`.
+- Start round (11:36:07Z): landed 1, failed 0, parked 0, `deleted=0 absence_skipped=0`; no WARN or
+  ERROR line in the daemon log.
+- `memory status` against production, exit 0: `rounds=87`; sources `total=6053 current=6053
+  behind=0`; failures `offline=4`, all other classes 0; audit `matched=6054 mismatched=0`; nothing
+  parked.
+- `memory install --dry-run` (exit 0): the plist, the Claude and Codex hook files and the Pi
+  extension are all `unchanged`, so the macOS branch is unaffected.
+
 ## Limits
 
 - Not deployed: dev-01 refuses the key. `systemctl --user enable --now`, linger and a real round

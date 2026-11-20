@@ -97,3 +97,7 @@ this Mac (no plist change expected: `memory install` reports `unchanged`).
   only, run in the container); gates 14/14, seed 2642077723, nextest 830, coverage 95.62 %.
   [Evidence 36](evidence/36-linux-install/). Next: hosted gates (Ubuntu jobs), merge, install in
   place on this Mac. Deployment on dev-01 waits for the SSH key.
+- 2026-11-20 11:45Z: stack #211 merged as `ecc0489` (hosted Ubuntu x86_64 and arm64 gates green);
+  installed on this Mac at 11:31:26Z (`runs = 7`); start round clean, `memory status` exit 0,
+  6,053 of 6,053 current; `memory install --dry-run` reports every file `unchanged`. Closed except
+  for the dev-01 deployment.
