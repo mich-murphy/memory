@@ -109,3 +109,40 @@ Linux/macOS. Unsupported/malformed identities and Unicode U+2028/U+2029 separato
 fail closed as not verified; they are never claimed trusted based on a nonempty
 stored hash. A changed command invalidates existing approval. Re-review in Codex
 `/hooks` after changes. Future Codex algorithm changes may require collector updates.
+
+## Operations (Rust `memory` binary)
+
+Three day-to-day commands. Output is closed: counts, owner prefixes and reason codes, never a
+path, a source id, content or a credential.
+
+**`memory status`** is the local health view. It takes no lock, writes nothing under the state
+root and makes no network request. It reads `config.toml`, `status.json` and `index.json`,
+walks the configured roots and stats each source (no source byte is read). Line 1 gives
+`as_of`, `age_s`, `rounds`, `host_paused` and how `status.json` and `index.json` loaded; line 2
+counts sources as `current`, `behind`, `changed` or `unindexed`, plus `withheld`,
+`oldest_behind_s` and the walk counts; line 3 gives failure and audit counts; then one `parked`
+line per parked entry. Exit 0, or 1 when anything is parked, the host is paused or
+`status.json` is not `loaded`; 2 config; 64 usage. `index.json` is written at most every 60 s,
+so a source captured in the last minute may show as `behind`. It never claims everything is
+captured: `memory check` is the verified view (it fetches every piece, about 23 minutes on a
+large archive), and `status --verify` exits 64.
+
+**`memory unpark <owner-prefix>|--all`** clears parked entries from `status.json`. The daemon is
+the only writer of that file and reads it once at start, so `unpark` takes the daemon lock and
+refuses beside a running daemon (`memory: lock_held`, exit 75). With launchd:
+
+```sh
+launchctl bootout gui/$(id -u)/memory
+memory unpark <owner-prefix>        # or: memory unpark --all
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/memory.plist
+```
+
+It removes every entry of that owner (owner-wide and per-source) and keeps every other field.
+Exit 1 (`not_parked`) when nothing matches, 2 for a damaged or newer-schema `status.json` (the
+file is left untouched), 64 for bad arguments. No network.
+
+**`memory reconcile`** runs one full round now and exits. It takes the daemon lock (exit 75
+beside a running daemon), logs a `round` line with `cause=manual` to stderr and prints
+`reconcile landed=<n> failed=<n> parked=<n> skipped=<n> deferred=<n>`. Exit 0 when nothing
+failed and nothing was parked, 1 otherwise, 2 config, 130 when stopped by SIGINT or SIGTERM
+before the round ended.
