@@ -59,7 +59,7 @@ use memory_core::domain::{
 };
 use memory_core::manifest::{
     Change, EpochStamp, EpochWriter, Header, LaunchRecord, OwnerState, Piece, SourceWrite,
-    manifest_hash,
+    StoredEncoding, manifest_hash,
 };
 use memory_core::planner::{
     AppendBasis, AuditEvidence, HEAD_WINDOW_BYTES, Observation, PlanInput, Planning, Strategy,
@@ -102,6 +102,10 @@ pub struct Local {
     pub missing: u32,
     /// Last captured snapshot fingerprint and rules.
     pub snapshot: Option<(SnapshotFingerprint, Option<RulesDigest>)>,
+    /// Pieces of the last landed snapshot epoch: a new piece with an equal digest reuses one.
+    pub snapshot_pieces: Vec<Piece>,
+    /// Wall time of the last landed snapshot (the 6 h interval of SQLite stores).
+    pub snapshot_at_ns: Option<i64>,
     /// A deletion was committed for the current absence.
     pub deletion_recorded: bool,
 }
@@ -119,8 +123,14 @@ pub enum Update {
     Deleted(SourceId),
     /// New append index.
     Index(SourceId, Box<SourceState>),
-    /// New snapshot fingerprint.
-    Snapshot(SourceId, SnapshotFingerprint, Option<RulesDigest>),
+    /// New snapshot fingerprint, rules, the epoch's pieces and the wall time of the capture.
+    Snapshot(
+        SourceId,
+        SnapshotFingerprint,
+        Option<RulesDigest>,
+        Vec<Piece>,
+        i64,
+    ),
 }
 impl Update {
     /// Apply to the local state.
@@ -137,10 +147,25 @@ impl Update {
                 local.deletion_recorded = true;
                 local.index = None;
                 local.snapshot = None;
+                local.snapshot_pieces.clear();
+                local.snapshot_at_ns = None;
             }
             Self::Index(id, state) => locals.entry(id).or_default().index = Some(*state),
-            Self::Snapshot(id, fp, rules) => {
-                locals.entry(id).or_default().snapshot = Some((fp, rules))
+            Self::Snapshot(id, fp, rules, pieces, at) => {
+                let local = locals.entry(id).or_default();
+                local.snapshot = Some((fp, rules));
+                local.snapshot_pieces = pieces;
+                local.snapshot_at_ns = Some(at);
+            }
+        }
+    }
+    /// Record the encodings that won an `If-None-Match` race in the pieces a snapshot keeps.
+    pub fn adopt(&mut self, winners: &crate::commit::Winners) {
+        if let Self::Snapshot(_, _, _, pieces, _) = self {
+            for piece in pieces.iter_mut() {
+                if let Some(won) = winners.get(piece.object()) {
+                    *piece = piece.clone().adopt_stored(won);
+                }
             }
         }
     }
@@ -159,6 +184,9 @@ pub enum SourceOutcome {
     Raced,
     /// The seam failed or evidence could not be completed; not an absence.
     Unavailable,
+    /// A SQLite store changed but its last snapshot landed less than the interval ago; it is
+    /// tried again in a later round.
+    Deferred,
     /// The consistent copy of a snapshot source could not be made (error class `Local`,
     /// `BackupFailed`); nothing was uploaded and the source is tried again next round.
     BackupFailed,
@@ -601,6 +629,11 @@ fn step<F: FileSystem>(
         rules,
         next_epoch,
         previous: audit::never(),
+        reuse: if src.class == SourceClass::Snapshot {
+            &local.snapshot_pieces
+        } else {
+            &[]
+        },
     };
     match src.class {
         SourceClass::Snapshot => {
@@ -622,6 +655,25 @@ fn step<F: FileSystem>(
         }
     }
 }
+
+/// Least time between two landed snapshots of a changing SQLite store (default, unmeasured:
+/// a 615 MB backup per 15-minute round would write about 2.4 GB/h locally). Under `sim`,
+/// `MEMORY_SIM_SNAPSHOT_INTERVAL=<seconds>` replaces it (zero turns the interval off).
+#[cfg(feature = "sim")]
+fn snapshot_interval_ns() -> i64 {
+    std::env::var("MEMORY_SIM_SNAPSHOT_INTERVAL")
+        .ok()
+        .and_then(|text| text.parse::<u32>().ok())
+        .map_or(SNAPSHOT_INTERVAL_NS, |s| i64::from(s) * 1_000_000_000)
+}
+
+/// Without `sim` the variable is never read.
+#[cfg(not(feature = "sim"))]
+const fn snapshot_interval_ns() -> i64 {
+    SNAPSHOT_INTERVAL_NS
+}
+
+const SNAPSHOT_INTERVAL_NS: i64 = 6 * 3600 * 1_000_000_000;
 
 /// A snapshot source: replace the stored object when its fingerprint or the rules changed.
 ///
@@ -661,6 +713,19 @@ fn snapshot<F: FileSystem>(
         Planning::Ready { .. } => return SourceOutcome::Unchanged,
         Planning::NeedWindows | Planning::NeedAuditRecheck => return SourceOutcome::Unavailable,
     }
+    let rules_same = local
+        .snapshot
+        .as_ref()
+        .is_some_and(|(_, r)| *r == job.rules);
+    let since = local
+        .snapshot_at_ns
+        .map(|at| job.env.now_ns.saturating_sub(at));
+    if matches!(fp, SnapshotFingerprint::Sqlite { .. })
+        && rules_same
+        && since.is_some_and(|elapsed| (0..snapshot_interval_ns()).contains(&elapsed))
+    {
+        return SourceOutcome::Deferred;
+    }
     let len = match fs.begin_snapshot(handle) {
         Ok(len) => len,
         Err(Backup::Changed) => return SourceOutcome::Raced,
@@ -682,8 +747,17 @@ fn snapshot<F: FileSystem>(
     };
     let outcome = match job.write(fs, Mode::Replace, acc) {
         Ok(()) => {
-            acc.updates
-                .push(Update::Snapshot(job.src.id.clone(), fp, job.rules));
+            let pieces = match acc.changes.last() {
+                Some(Change::Replace(w)) => w.pieces.clone(),
+                _ => Vec::new(),
+            };
+            acc.updates.push(Update::Snapshot(
+                job.src.id.clone(),
+                fp,
+                job.rules,
+                pieces,
+                job.env.now_ns,
+            ));
             SourceOutcome::Planned
         }
         Err(outcome) => outcome,
@@ -738,6 +812,8 @@ struct Job<'a> {
     next_epoch: u32,
     /// Audit bookkeeping of the index this capture continues (append sources).
     previous: AuditState,
+    /// Pieces of the last landed epoch of a snapshot source; matched by digest only.
+    reuse: &'a [Piece],
 }
 
 impl Job<'_> {
@@ -886,15 +962,29 @@ impl Job<'_> {
                 .extend(body.bytes())
                 .map_err(|_| SourceOutcome::Raced)?;
             edges.push(body.bytes());
-            let (piece, stored) = Published::piece(&body, 0, len).map_err(|e| match e {
-                PieceError::Range => SourceOutcome::Raced,
-                PieceError::Encode => SourceOutcome::Unavailable,
-            })?;
-            let described = Piece::from_authorized(&body, Offset::new(at), 0, len, &stored)
-                .map_err(|_| SourceOutcome::Raced)?;
-            acc.sink
-                .put(described.object(), piece)
-                .map_err(|_| SourceOutcome::Unavailable)?;
+            // A piece whose transformed digest equals one of the last epoch's is already stored:
+            // its encoding is reused and nothing is encoded or put. Digest only, never offset.
+            let digest = manifest_hash(body.bytes());
+            let previous = self.reuse.iter().find(|p| p.sha256() == digest);
+            let described = if let Some(previous) = previous {
+                let stored = StoredEncoding {
+                    encoded_len: previous.encoded_len(),
+                    encoded_sha256: previous.encoded_sha256(),
+                };
+                Piece::from_authorized(&body, Offset::new(at), 0, len, &stored)
+                    .map_err(|_| SourceOutcome::Raced)?
+            } else {
+                let (piece, stored) = Published::piece(&body, 0, len).map_err(|e| match e {
+                    PieceError::Range => SourceOutcome::Raced,
+                    PieceError::Encode => SourceOutcome::Unavailable,
+                })?;
+                let described = Piece::from_authorized(&body, Offset::new(at), 0, len, &stored)
+                    .map_err(|_| SourceOutcome::Raced)?;
+                acc.sink
+                    .put(described.object(), piece)
+                    .map_err(|_| SourceOutcome::Unavailable)?;
+                described
+            };
             pieces.push(described);
             at = end;
         }

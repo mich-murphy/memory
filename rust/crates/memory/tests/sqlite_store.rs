@@ -78,6 +78,8 @@ struct Rig {
     locals: Locals,
     base: Option<Base>,
     context: PolicyContext,
+    now_ns: i64,
+    piece_len: usize,
 }
 
 impl Rig {
@@ -106,6 +108,8 @@ impl Rig {
             },
             locals: Locals::new(),
             base: None,
+            now_ns: 10_000_000_000,
+            piece_len: 8 * 1024 * 1024,
             context: PolicyContext {
                 valid: true,
                 revision: "r".to_owned(),
@@ -115,14 +119,18 @@ impl Rig {
             },
         })
     }
+    /// Move the clock past the snapshot interval.
+    fn later(&mut self) {
+        self.now_ns += 7 * 3600 * 1_000_000_000;
+    }
     fn cycle(&mut self) -> R<SourceOutcome> {
         let empty = OwnerState::default();
         let state = self.base.as_ref().map_or(&empty, |b| &b.state);
         let env = Env {
             header: header()?,
             context: &self.context,
-            now_ns: 10_000_000_000,
-            piece_len: 8 * 1024 * 1024,
+            now_ns: self.now_ns,
+            piece_len: self.piece_len,
         };
         let got = capture(
             &mut self.fs,
@@ -222,7 +230,8 @@ fn a_shm_change_alone_is_unchanged_and_a_wal_change_is_a_new_snapshot() -> R {
         .map_err(e)?;
     assert_eq!(rig.cycle()?, SourceOutcome::Unchanged);
     assert_eq!(dir.tmp_entries(), 0);
-    // A new row grows the `-wal`: a new snapshot with the row.
+    // A new row grows the `-wal`: a new snapshot with the row, once the interval has passed.
+    rig.later();
     writer
         .execute("insert into t values (99, 'new')", [])
         .map_err(e)?;
@@ -355,7 +364,7 @@ fn simulated_store_reads_the_copy_not_the_live_bytes_and_releases_it() -> R {
         let env = Env {
             header: header()?,
             context: &rig.context,
-            now_ns: 10_000_000_000,
+            now_ns: rig.now_ns,
             piece_len: 8 * 1024 * 1024,
         };
         let got = capture(
@@ -384,22 +393,110 @@ fn simulated_store_reads_the_copy_not_the_live_bytes_and_releases_it() -> R {
     assert_eq!((sim.begun, sim.ended), (1, 1));
     assert_eq!(rig.stored_image()?, b"SQLite format 3\0body");
     // The live bytes moved (size changed), so the next round copies again.
+    rig.later();
     assert_eq!(run(&mut rig, &mut sim)?, SourceOutcome::Planned);
     // Same fingerprint, no copy is made.
     sim.mutate_after_copy = false;
+    rig.later();
     assert_eq!(run(&mut rig, &mut sim)?, SourceOutcome::Planned);
     let begun = sim.begun;
     assert_eq!(run(&mut rig, &mut sim)?, SourceOutcome::Unchanged);
     assert_eq!(sim.begun, begun);
     // A -wal change alone is a new snapshot.
     sim.wal_mtime = 9;
+    rig.later();
     assert_eq!(run(&mut rig, &mut sim)?, SourceOutcome::Planned);
     // Failures map to the closed outcomes and the copy is released each time.
     sim.wal_mtime = 10;
+    rig.later();
     sim.fail = Some(Backup::Changed);
     assert_eq!(run(&mut rig, &mut sim)?, SourceOutcome::Raced);
     sim.fail = Some(Backup::Failed);
     assert_eq!(run(&mut rig, &mut sim)?, SourceOutcome::BackupFailed);
     assert!(sim.copy.is_none());
+    Ok(())
+}
+
+fn big_db(path: &Path) -> R<Connection> {
+    let conn = Connection::open(path).map_err(e)?;
+    conn.pragma_update(None, "journal_mode", "wal").map_err(e)?;
+    conn.pragma_update(None, "wal_autocheckpoint", 0)
+        .map_err(e)?;
+    conn.execute("create table t (n integer primary key, s text)", [])
+        .map_err(e)?;
+    for n in 0..600_u32 {
+        let text = format!(
+            "{n:08}-{}",
+            format!("{:x}", u64::from(n).wrapping_mul(0x9e37_79b9_7f4a_7c15)).repeat(40)
+        );
+        conn.execute("insert into t values (?1, ?2)", rusqlite::params![n, text])
+            .map_err(e)?;
+    }
+    Ok(conn)
+}
+
+fn objects(rig: &Rig) -> std::collections::BTreeSet<String> {
+    rig.store
+        .objects
+        .keys()
+        .filter(|k| k.starts_with("objects/"))
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn a_resnapshot_after_one_row_changes_stores_only_the_changed_pieces() -> R {
+    let dir = Dir::new()?;
+    let writer = big_db(&dir.db())?;
+    let mut rig = Rig::new(&dir, RealFs::with_tmp(dir.tmp()))?;
+    rig.piece_len = 16 * 1024;
+    assert_eq!(rig.cycle()?, SourceOutcome::Planned);
+    let first = objects(&rig);
+    assert!(first.len() > 8, "need many pieces, got {}", first.len());
+    writer
+        .execute("update t set s = 'changed' where n = 300", [])
+        .map_err(e)?;
+    rig.later();
+    assert_eq!(rig.cycle()?, SourceOutcome::Planned);
+    let new: Vec<_> = objects(&rig).difference(&first).cloned().collect();
+    assert!(
+        !new.is_empty() && new.len() <= 3,
+        "new objects: {}",
+        new.len()
+    );
+    assert_eq!(dir.tmp_entries(), 0);
+    Ok(())
+}
+
+#[test]
+fn a_lost_index_stores_nothing_new_for_the_same_bytes() -> R {
+    let dir = Dir::new()?;
+    let _writer = big_db(&dir.db())?;
+    let mut rig = Rig::new(&dir, RealFs::with_tmp(dir.tmp()))?;
+    rig.piece_len = 16 * 1024;
+    assert_eq!(rig.cycle()?, SourceOutcome::Planned);
+    let first = objects(&rig);
+    // The index is lost: every piece is encoded and put again; each put meets its stored twin.
+    rig.locals = Locals::new();
+    assert_eq!(rig.cycle()?, SourceOutcome::Planned);
+    assert_eq!(objects(&rig), first);
+    Ok(())
+}
+
+#[test]
+fn inside_the_interval_a_changed_store_is_deferred_and_after_it_lands() -> R {
+    let dir = Dir::new()?;
+    let writer = wal_db(&dir.db(), 3)?;
+    let mut rig = Rig::new(&dir, RealFs::with_tmp(dir.tmp()))?;
+    assert_eq!(rig.cycle()?, SourceOutcome::Planned);
+    writer
+        .execute("insert into t values (7, 'x')", [])
+        .map_err(e)?;
+    rig.now_ns += 3600 * 1_000_000_000;
+    assert_eq!(rig.cycle()?, SourceOutcome::Deferred);
+    assert_eq!(dir.tmp_entries(), 0);
+    rig.now_ns += 6 * 3600 * 1_000_000_000;
+    assert_eq!(rig.cycle()?, SourceOutcome::Planned);
+    assert_eq!(count_in(&rig.stored_image()?, &dir.0.join("i.sqlite"))?, 4);
     Ok(())
 }
