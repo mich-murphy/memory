@@ -598,6 +598,38 @@ fn round_line(err: &str) -> R<String> {
         .ok_or_else(|| format!("no round line: {err}"))
 }
 
+/// A configured root that is gone (unmounted or moved) never deletes: the real resolver skips
+/// its stored sources (`absence_skipped`) over three rounds, and the entry stays live.
+#[test]
+fn a_missing_root_deletes_nothing_on_the_real_binary() -> R {
+    let s = setup("check-noroot")?;
+    capture(&s)?;
+    let moved = s.rig.dir.join("claude-moved");
+    fs::rename(&s.rig.root, &moved).map_err(e)?;
+    for _ in 0..3 {
+        let (code, _, err) = reconcile(&s)?;
+        assert_eq!(code, 0, "{err}");
+        let line = round_line(&err)?;
+        assert!(line.contains(" deleted=0 "), "{line}");
+        assert!(line.ends_with(" absence_skipped=1"), "{line}");
+    }
+    fs::rename(&moved, &s.rig.root).map_err(e)?;
+    let mut store = store_at(&s.server.url(), PREFIX, TimeoutPolicy::PRODUCTION)?;
+    let folded = read_owner(&s.owner, |key| match store.get(key) {
+        Ok(stored) => Ok(Some(stored.body)),
+        Err(StoreError::NotFound) => Ok(None),
+        Err(other) => Err(other),
+    })
+    .map_err(e)?
+    .ok_or("absent")?;
+    let entry = folded.state.sources.values().next().ok_or("no source")?;
+    assert!(
+        entry.deleted_at.is_none(),
+        "a missing root recorded a deletion"
+    );
+    Ok(())
+}
+
 #[test]
 fn a_deleted_file_is_recorded_on_the_second_reconcile_and_restore_skips_it() -> R {
     let s = setup("check-deleted")?;
