@@ -224,6 +224,11 @@ from `main` alone.
      rounds is recorded deleted (`stat`-only probe; a missing root, a truncated walk, a stat
      error or a parked source never count); `index.json` keeps the owner set; export keeps
      deleted sources, all `sealed`; the `round` line gains `deleted` and `absence_skipped`.
+     Merged as `94230d2` (stack #206) and installed on this Mac at 09:43:44Z in place
+     (`runs = 6`; the old binary is `~/.local/state/memory-cutover/backup/memory-1c5618b`);
+     `memory status` exit 0, 6,052 of 6,052 current. Next: the Linux install for dev-01 (blocked:
+     the dev-01 server does not accept `~/.ssh/dev-01`), the `Ignored` verdict and the Codex
+     plugins rule from the uncaptured-files review, then slice 3 snapshots.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
