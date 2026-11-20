@@ -1122,10 +1122,14 @@ before it lands.
 1. Local view: sources with size greater than `captured_to`, and the oldest age. Always
    available.
 2. `status.json` fields.
-3. `--verify`: GET each owner's `current.json` and compare its ETag with the index.
+3. `--verify`: GET each owner's `current.json` and compare its ETag with the index. (Amended
+   2026-11-20, D51: not built; `memory check` is the verified view, and `status` makes no
+   network request.)
 
 It says "up to date as of <time>", never "all captured". `memory unpark <source|owner>` clears
-a parked entry.
+a parked entry. (Amended 2026-11-20, D51: `memory unpark <owner-prefix>|--all`, since source ids
+are never printed; it takes the daemon lock like `reconcile`, because the daemon is the only
+writer of `status.json` and reads it only at start.)
 
 ### 11.4 Bugs in this writer (D10, revised)
 
@@ -1536,6 +1540,7 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D48 | 2026-11-19: one logical identity for a Codex rollout (operator: follow DDIA). All four spellings share `rollouts:<name>.jsonl`; a `.jsonl.zst` is decoded at capture (window at most 2^23, whole frames only, otherwise withheld `undecodable`) and recorded as `CodexRollout` with the logical path; plain wins over `.zst`; an append source whose file identity changed is verified by content (Adopt) instead of replayed; `memory export` streams stored bytes again | brief 39, evidence 30; 5, 6.2, 7.2, 7.3 |
 | D49 | 2026-11-19: a store failure keeps its cause: `StoreError::{Offline, Ambiguous}` carry a closed `Cause` (DNS, connect, refused, TLS, the timeout phases, reset, I/O, protocol, missing ETag), `Failure` keeps the `StoreError`, the daemon logs a `retry` line per retried failure and `memory check` a `store_error` detail line per failed fetch. Classes, backoff, timeouts and exit codes unchanged | brief 40, evidence 32; 11.5 |
 | D50 | 2026-11-20: the daemon rotates its own log when stderr is a regular file (launchd's `StandardErrorPath`): at 8 MiB the file moves to `.1` (3 generations kept), a new 0600 file takes fd 2 and starts with `log_rotated`; path and inode are checked first and any failure turns rotation off without a log line; a pipe or socket is never touched | brief 41, evidence 33; 11.5 |
+| D51 | 2026-11-20: `memory status` is two tiers, read-only and offline (no lock, no write, no request); `--verify` is not built, `memory check` is the verified view. `memory unpark <owner-prefix>\|--all` and `memory reconcile` take the daemon lock and refuse beside a daemon (exit 75); `reconcile` logs `round cause=manual` | brief 42, evidence 34; 11.3, 13 |
 
 Finding-to-section map for the challenge review:
 
