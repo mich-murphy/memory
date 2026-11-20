@@ -719,6 +719,10 @@ fn codex_top<'a>(name: &str, parts: &[&'a str]) -> Res<'a> {
         return asset(SourceKind::CodexConfig, a, parts);
     }
     let lower = name.to_ascii_lowercase();
+    // Codex's log database is high-churn and not a record of sessions (brief 46 ignores it).
+    if lower.starts_with("logs_") && lower.ends_with(".sqlite") {
+        return Err(Miss::Kind);
+    }
     if [".sqlite", ".sqlite3", ".db"]
         .iter()
         .any(|s| lower.ends_with(s))

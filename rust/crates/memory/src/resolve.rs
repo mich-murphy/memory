@@ -288,7 +288,7 @@ pub struct Counts {
     /// Files whose (owner, source id) another file with a lexicographically smaller
     /// root-relative path already holds; not yielded.
     pub duplicate: u64,
-    /// Snapshot-class files located but withheld until slice 3 (DESIGN.md 17); neither
+    /// Snapshot-class files other than Codex stores, located but withheld (DESIGN.md 17); neither
     /// yielded nor counted as unknown.
     pub deferred_snapshot: u64,
     /// Yielded sources whose facts are unresolved (capture will block them).
@@ -471,8 +471,9 @@ impl crate::daemon::Sources for WalkSources {
                     Located::UnknownOwner => counts.unknown_owner += 1,
                     Located::Source {
                         class: SourceClass::Snapshot,
+                        kind,
                         ..
-                    } => {
+                    } if *kind != SourceKind::CodexStore => {
                         counts.deferred_snapshot += 1;
                         continue;
                     }

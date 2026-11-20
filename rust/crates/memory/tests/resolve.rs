@@ -940,8 +940,11 @@ fn snapshot_files_are_deferred_not_yielded_and_not_unknown() -> R {
 
     let codex = t.0.join("codex");
     t.write("codex/state.sqlite", b"x")?;
+    t.write("codex/logs_2.sqlite", b"x")?;
+    t.write("codex/config.toml", b"x")?;
     let mut w = agent_walker(&codex, Agent::Codex)?;
-    assert!(w.enumerate().is_empty());
+    // The store is yielded; the log database is unknown; other snapshot kinds stay deferred.
+    assert_eq!(w.enumerate().len(), 1);
     let c = w.counts();
     assert_eq!(
         (
@@ -950,9 +953,10 @@ fn snapshot_files_are_deferred_not_yielded_and_not_unknown() -> R {
             c.unknown_owner,
             c.unknown_kind
         ),
-        (0, 1, 0, 0)
+        (1, 1, 0, 1)
     );
-    assert_eq!(w.note(&codex.join("state.sqlite")), None);
+    assert_eq!(w.note(&codex.join("logs_2.sqlite")), None);
+    assert_eq!(w.note(&codex.join("config.toml")), None);
 
     let pi = t.0.join("pi");
     t.write("pi/settings.json", b"{}")?;
