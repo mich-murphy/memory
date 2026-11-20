@@ -60,7 +60,7 @@ pub struct Sources {
     pub unknown_owner: u64,
     /// Walk: duplicates of another source id.
     pub duplicate: u64,
-    /// Walk: snapshot files deferred.
+    /// Walk: snapshot files other than Codex SQLite stores, withheld.
     pub deferred_snapshot: u64,
     /// Walk entries or stats that failed.
     pub unreadable: u64,

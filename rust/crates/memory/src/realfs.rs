@@ -4,6 +4,12 @@
 //! Stat observation follows DESIGN.md 7.1 and 7.2: `symlink_metadata`, so a symlink is
 //! reported as itself (its own inode, size and times) and never followed. `walk` skips
 //! symlinks entirely and counts them. No `unsafe`; open flags and errno come from `rustix`.
+//!
+//! A handle registered with [`Encoding::Sqlite`] is a Codex store: capture reads a consistent
+//! backup, never the live file. `begin_snapshot` opens the source read-only (never `immutable`,
+//! 5 s busy timeout), runs SQLite's backup in one step into a new 0600 file under the state
+//! root's `tmp/`, and `end_snapshot` removes it (after every attempt). The fingerprint is the
+//! database plus its `-wal` (or absence), never `-shm`, which a read-only open touches.
 
 use crate::environment::{Backup, FileSystem, Stat};
 use crate::zstd_stream::{Failure, Stream};

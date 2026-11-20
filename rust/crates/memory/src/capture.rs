@@ -46,6 +46,16 @@
 //! file that exists resets the count. [`capture_into`] never probes absence for sources the
 //! walk did not yield; the daemon calls the probe only from `reconcile_once`.
 //!
+//! # Snapshot sources
+//!
+//! A snapshot is fingerprinted first (a SQLite store: database plus `-wal`); an unchanged
+//! fingerprint and rules end there without opening the content. A changed SQLite store is
+//! deferred until 6 h after its last landed snapshot (`MEMORY_SIM_SNAPSHOT_INTERVAL` under `sim`).
+//! Otherwise the seam makes a stable copy (`begin_snapshot`, released by `end_snapshot` on every
+//! outcome) and the source is replaced from it. A piece whose transformed digest equals one of the
+//! last landed epoch's reuses that descriptor with no PUT (digest only, never offset).
+//! `SourceChanged` is [`SourceOutcome::Raced`]; a failed copy is [`SourceOutcome::BackupFailed`].
+//!
 //! Limitations: the whole-stream digest resumes from the index's `Sha256State` for
 //! prefix-stable sources (otherwise it is recomputed from a fresh read of `[0, to)`). Snapshot
 //! and missing-source planning never carry audit evidence (`NotDue`).

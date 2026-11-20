@@ -11,6 +11,11 @@
 //! `remote_only`. Cost per run: for each owner one GET of `current.json`, at most 64 manifest
 //! GETs, and one GET per piece of each local source's latest epoch.
 //!
+//! A Codex SQLite store is not compared byte for byte (a backup is not a copy of the live file):
+//! the stored epoch is fetched and verified (every piece digest and the whole digest), then the
+//! local fingerprint (db plus `-wal`) is compared with the one indexed for that epoch: `match`
+//! when equal, `behind` when the store changed since, `unsettled` without an index entry.
+//!
 //! Output is a closed vocabulary: counts, then one line per mismatch, uncaptured, withheld or
 //! parked item with the owner prefix, the source kind and a reason code. Never a path, a source
 //! id, file content or a credential.
@@ -103,7 +108,7 @@ pub struct Tally {
     pub unknown_owner: u64,
     /// Walk: files duplicating another file's source id (not captured).
     pub duplicate: u64,
-    /// Walk: snapshot files deferred until slice 3.
+    /// Walk: snapshot files other than Codex SQLite stores, withheld.
     pub deferred_snapshot: u64,
     /// Walk: entries that could not be read.
     pub unreadable: u64,
