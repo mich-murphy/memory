@@ -285,8 +285,8 @@ fn a_new_daemon_starts_after_a_clean_stop() -> std::io::Result<()> {
 
 #[test]
 fn an_unimplemented_command_still_exits_78() -> std::io::Result<()> {
-    let setup = Setup::new("status", "rust-acceptance/t/", true)?;
-    let done = setup.spawn(&["status"], None)?.finish(BOUND)?;
+    let setup = Setup::new("unknown", "rust-acceptance/t/", true)?;
+    let done = setup.spawn(&["frobnicate"], None)?.finish(BOUND)?;
     assert_eq!(done.code, Some(78));
     assert!(done.stdout.is_empty());
     assert!(done.stderr.is_empty());
