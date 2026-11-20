@@ -115,3 +115,6 @@ next `memory check` against production read-only.
   resolver; a real-binary test now covers it). Teeth 10 of 10. Full gates on `9a71407`: 14
   sub-gates 0, seed 4141271690, coverage 95.86 %. Record:
   [evidence 35](evidence/35-deletions/). Next: push, hosted gates, merge, install in place.
+- 2026-11-20 09:55Z: stack #206 merged as `94230d2`; installed on this Mac at 09:43:44Z
+  (`runs = 6`); start round `deleted=0 absence_skipped=0`, `memory status` exit 0, 6,052 of
+  6,052 sources current. Brief closed.

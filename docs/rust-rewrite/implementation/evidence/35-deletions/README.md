@@ -71,6 +71,20 @@ and restored.
   scripts/gates.sh'`: all 14 sub-gates 0, seed 4141271690; 04-nextest 822 passed, 05-hegel 32,
   06-proptest 34, 10-consumer 3; coverage 95.86 % (10,686 of 11,147 lines).
 
+## Hosted gates, merge, install
+
+- Stack #206 (PRs #203 to #205): Rust gates green on all three branches; CI failed only in the
+  two `govulncheck` steps. Merged as `94230d2`.
+- 2026-11-20 09:43:44Z: release build of `94230d2` (sha256 prefix `c79c522f18ae46ce`) put in
+  place at `~/.local/libexec/memory/memory` by an atomic rename; the `1c5618b` binary is kept as
+  `~/.local/state/memory-cutover/backup/memory-1c5618b`. `launchctl kickstart -k`: `runs = 6`.
+- Start round (09:47:38Z): landed 1, failed 0, parked 0, `deleted=0 absence_skipped=0`; no WARN
+  or ERROR line. `index.json` now lists 1,078 owners (it loaded as `loaded`: the old index had no
+  `owners` field).
+- `memory status` against production, exit 0: `state=loaded index=loaded rounds=80`; sources
+  `total=6052 current=6052 behind=0 changed=0 unindexed=0`; failures `offline=4`, all other
+  classes 0; audit `matched=6053 mismatched=0 ineligible=21`; nothing parked.
+
 ## Limits
 
 - Owners deleted before this build, or while `index.json` was lost, are not found (the store has
