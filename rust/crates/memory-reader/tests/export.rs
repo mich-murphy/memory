@@ -214,9 +214,8 @@ fn fixture() -> R<Fx> {
             epochs.push(epoch(*n, chunks, &mut objects)?);
         }
         entries.push((id, entry(kind, path, epochs, deleted)?));
-        if !deleted {
-            live.push((id, role, path, spec));
-        }
+        // A deleted source is exported too (sessions are never deleted), all `sealed`.
+        live.push((id, role, path, spec));
     }
     Ok(Fx {
         head: head(entries, 4)?,
@@ -238,7 +237,7 @@ fn flat(fx: &Fx) -> Vec<Flat> {
     let mut v = Vec::new();
     for (id, role, path, spec) in &fx.live {
         for (i, (n, chunks)) in spec.iter().enumerate() {
-            let state = if i + 1 == spec.len() {
+            let state = if i + 1 == spec.len() && *id != "c" {
                 "active"
             } else {
                 "sealed"
@@ -300,14 +299,14 @@ fn unit_identity_digest_sequence_times_and_coverage() -> R {
 }
 
 #[test]
-fn sources_one_per_epoch_ordered_deleted_skipped_with_role_state_revision() -> R {
+fn sources_one_per_epoch_ordered_deleted_sealed_with_role_state_revision() -> R {
     let (fx, base, _out, m) = exported()?;
     let want = flat(&fx);
     let got = m
         .pointer("/manifest/sources")
         .and_then(Value::as_array)
         .ok_or("sources")?;
-    assert_eq!(got.len(), 5, "a/0, b/0, b/1, d/0, e/0");
+    assert_eq!(got.len(), 6, "a/0, b/0, b/1, c/0, d/0, e/0");
     assert_eq!(got.len(), want.len());
     for (g, (id, role, path, state, n, _)) in got.iter().zip(&want) {
         assert_eq!(at(g, "source_id"), *id);
@@ -329,16 +328,18 @@ fn sources_one_per_epoch_ordered_deleted_skipped_with_role_state_revision() -> R
             ("a", "active"),
             ("b", "sealed"),
             ("b", "active"),
+            ("c", "sealed"),
             ("d", "active"),
             ("e", "active")
         ]
     );
     assert!(
-        got.iter().all(|g| at(g, "source_id") != "c"),
-        "deleted source exported"
+        got.iter()
+            .all(|g| at(g, "source_id") != "c" || at(g, "state") == "sealed"),
+        "a deleted source is never active"
     );
     let env = build_envelope::<()>(&fx.head, 1 << 30).map_err(bad)?;
-    assert_eq!((env.sources, env.skipped_deleted), (5, 1));
+    assert_eq!((env.sources, env.deleted), (6, 1));
     let total: u64 = want
         .iter()
         .map(|w| w.5.iter().map(|c| c.len() as u64).sum::<u64>())

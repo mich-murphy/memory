@@ -71,8 +71,8 @@ impl Failure {
 pub struct Report {
     /// Epoch bodies written.
     pub sources: usize,
-    /// Deleted sources skipped.
-    pub skipped_deleted: usize,
+    /// Deleted sources exported (every epoch `sealed`).
+    pub deleted: usize,
     /// Body bytes.
     pub bytes: u64,
 }
@@ -123,7 +123,7 @@ pub fn export_owner<E>(
     write_export(&envelope, &mut fetch, out).map_err(|e| code(&e))?;
     Ok(Report {
         sources: envelope.sources,
-        skipped_deleted: envelope.skipped_deleted,
+        deleted: envelope.deleted,
         bytes: envelope.bytes,
     })
 }
@@ -207,9 +207,9 @@ pub fn main_entry(args: impl Iterator<Item = OsString>) -> ExitCode {
         Ok(report) => {
             let _ = writeln!(
                 std::io::stderr(),
-                "memory: exported sources={} skipped_deleted={} bytes={}",
+                "memory: exported sources={} deleted={} bytes={}",
                 report.sources,
-                report.skipped_deleted,
+                report.deleted,
                 report.bytes
             );
             ExitCode::SUCCESS

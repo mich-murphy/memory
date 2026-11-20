@@ -90,7 +90,7 @@ fn the_binary_exports_a_session_and_its_exit_table() -> R {
     assert_eq!(
         line,
         format!(
-            "memory: exported sources=1 skipped_deleted=0 bytes={}\n",
+            "memory: exported sources=1 deleted=0 bytes={}\n",
             want.len()
         )
     );
