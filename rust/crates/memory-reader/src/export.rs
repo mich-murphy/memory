@@ -80,8 +80,8 @@ pub struct Envelope<'a> {
     pub epochs: Vec<&'a EpochRecord>,
     /// Live sources exported (epochs).
     pub sources: usize,
-    /// Deleted sources skipped.
-    pub skipped_deleted: usize,
+    /// Deleted sources exported (every epoch `sealed`).
+    pub deleted: usize,
     /// Sum of the epoch sizes.
     pub bytes: u64,
 }
@@ -144,12 +144,12 @@ pub fn build_envelope<E>(head: &OwnerHead, max_bytes: u64) -> Result<Envelope<'_
     let mut sources: Vec<Value> = Vec::new();
     let mut bodies: Vec<Value> = Vec::new();
     let mut bytes: u64 = 0;
-    let mut skipped_deleted = 0;
+    let mut deleted = 0;
     for (id, entry) in &head.folded.state.sources {
-        if entry.deleted_at.is_some() {
-            skipped_deleted += 1;
-            continue;
-        }
+        // Sessions are never deleted from the store: a deleted source's epochs are still
+        // exported, none of them `active`.
+        let gone = entry.deleted_at.is_some();
+        deleted += usize::from(gone);
         let role = export_role(&entry.kind, &entry.path).as_str();
         let count = entry.epochs.len();
         for (index, record) in entry.epochs.iter().enumerate() {
@@ -165,7 +165,7 @@ pub fn build_envelope<E>(head: &OwnerHead, max_bytes: u64) -> Result<Envelope<'_
                 "epoch_id": n.to_string(),
                 "role": role,
                 "path": entry.path,
-                "state": if last { "active" } else { "sealed" },
+                "state": if last && !gone { "active" } else { "sealed" },
                 "revision": revision,
                 "observed_at_ns": captured,
                 "captured_at_ns": captured,
@@ -222,7 +222,7 @@ pub fn build_envelope<E>(head: &OwnerHead, max_bytes: u64) -> Result<Envelope<'_
         metadata,
         sources: epochs.len(),
         epochs,
-        skipped_deleted,
+        deleted,
         bytes,
     })
 }

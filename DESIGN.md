@@ -610,7 +610,7 @@ Planner rules for class `append`. The function is pure, total and property-teste
 | Some | size = `captured_to`, mtime equal, `Settled` | `Unchanged` |
 | Some | size = `captured_to`, mtime changed or `Racy` | check the windows; a match is `Unchanged` with the stat updated, a mismatch is `Replay{WindowMismatch}` |
 | Some | size > `captured_to` | check the windows; a match is `Append{captured_to, size}`, a mismatch is `Replay{WindowMismatch}` |
-| Some | missing on two consecutive reconciles | `Deleted` [review, 01 m3] |
+| Some | missing on two consecutive reconciles | `Deleted` [review, 01 m3] (D52: only full rounds after a complete walk count; a stored live append entry the walk did not yield is probed by `stat` alone; a missing root, a truncated or busy walk and a stat error never count) |
 
 The window check re-reads the head window `[0, min(4 KiB, captured_to))` and the tail window
 `[captured_to - 64 KiB, captured_to)` from disk, about 68 KiB, and compares them with the
@@ -938,7 +938,7 @@ dataflows]
 | Token file | System of record | Operator | 0600. Excluded from capture |
 | `state/roots.json` | System of record | Daemon | Learned custom roots. Monotonic union: a root is never removed automatically |
 | `state/hints/YYYY-MM-DD.jsonl` | System of record for launch evidence | `memory hook` | Directory 0700, files 0600. Kept for 7 days [default, unmeasured] and until every launch record in the file is committed |
-| `state/index.json` | Derived cache | Daemon | Holds `SourceState`, hint offsets, ETags and pending launch digests. May be deleted |
+| `state/index.json` | Derived cache | Daemon | Holds `SourceState`, hint offsets, ETags and pending launch digests, and (D52) the owners with a live append source, so an owner whose every file is gone is still visited. May be deleted |
 | `state/status.json` | System of record for the parked list and counters | Daemon | Section 11.3 |
 | `state/daemon.lock` | Lock | Daemon | `flock`, section 12 |
 | `state/tmp/` | Transient | Daemon | SQLite backups only. Emptied at start |
@@ -1541,6 +1541,7 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D49 | 2026-11-19: a store failure keeps its cause: `StoreError::{Offline, Ambiguous}` carry a closed `Cause` (DNS, connect, refused, TLS, the timeout phases, reset, I/O, protocol, missing ETag), `Failure` keeps the `StoreError`, the daemon logs a `retry` line per retried failure and `memory check` a `store_error` detail line per failed fetch. Classes, backoff, timeouts and exit codes unchanged | brief 40, evidence 32; 11.5 |
 | D50 | 2026-11-20: the daemon rotates its own log when stderr is a regular file (launchd's `StandardErrorPath`): at 8 MiB the file moves to `.1` (3 generations kept), a new 0600 file takes fd 2 and starts with `log_rotated`; path and inode are checked first and any failure turns rotation off without a log line; a pipe or socket is never touched | brief 41, evidence 33; 11.5 |
 | D51 | 2026-11-20: `memory status` is two tiers, read-only and offline (no lock, no write, no request); `--verify` is not built, `memory check` is the verified view. `memory unpark <owner-prefix>\|--all` and `memory reconcile` take the daemon lock and refuse beside a daemon (exit 75); `reconcile` logs `round cause=manual` | brief 42, evidence 34; 11.3, 13 |
+| D52 | 2026-11-20: deletions are recorded. Only a full round after a complete walk observes absence: stored live append entries the walk did not yield and that are not parked are probed by `stat` (no read, no admission); the second consecutive miss commits `deleted`. A missing root, a truncated or busy walk and a stat error never count. `index.json` keeps the owner set. Export keeps a deleted source, every epoch `sealed`; restore skips it; bytes are never purged | brief 43, evidence 35; 6, 9.1 |
 
 Finding-to-section map for the challenge review:
 

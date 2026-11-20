@@ -570,3 +570,107 @@ fn checking_one_100_mb_incompressible_source_stays_under_128_mb() -> R {
     assert!(peak < LIMIT, "check peak {peak}");
     Ok(())
 }
+
+/// One `memory reconcile` on the real binary: exit code, stdout and the stderr log lines.
+fn reconcile(s: &Setup) -> R<(i32, String, String)> {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_memory"));
+    cmd.env_clear()
+        .env("MEMORY_STATE_DIR", &s.rig.state)
+        .arg("reconcile");
+    if let Some(v) = std::env::var_os("LLVM_PROFILE_FILE") {
+        cmd.env("LLVM_PROFILE_FILE", v);
+    }
+    let output = cmd.output().map_err(e)?;
+    Ok((
+        output.status.code().ok_or("signal")?,
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    ))
+}
+
+fn round_line(err: &str) -> R<String> {
+    for line in err.lines() {
+        super::log_lines::parse(line)?;
+    }
+    err.lines()
+        .find(|l| l.contains(" INFO round "))
+        .map(str::to_owned)
+        .ok_or_else(|| format!("no round line: {err}"))
+}
+
+/// A configured root that is gone (unmounted or moved) never deletes: the real resolver skips
+/// its stored sources (`absence_skipped`) over three rounds, and the entry stays live.
+#[test]
+fn a_missing_root_deletes_nothing_on_the_real_binary() -> R {
+    let s = setup("check-noroot")?;
+    capture(&s)?;
+    let moved = s.rig.dir.join("claude-moved");
+    fs::rename(&s.rig.root, &moved).map_err(e)?;
+    for _ in 0..3 {
+        let (code, _, err) = reconcile(&s)?;
+        assert_eq!(code, 0, "{err}");
+        let line = round_line(&err)?;
+        assert!(line.contains(" deleted=0 "), "{line}");
+        assert!(line.ends_with(" absence_skipped=1"), "{line}");
+    }
+    fs::rename(&moved, &s.rig.root).map_err(e)?;
+    let mut store = store_at(&s.server.url(), PREFIX, TimeoutPolicy::PRODUCTION)?;
+    let folded = read_owner(&s.owner, |key| match store.get(key) {
+        Ok(stored) => Ok(Some(stored.body)),
+        Err(StoreError::NotFound) => Ok(None),
+        Err(other) => Err(other),
+    })
+    .map_err(e)?
+    .ok_or("absent")?;
+    let entry = folded.state.sources.values().next().ok_or("no source")?;
+    assert!(
+        entry.deleted_at.is_none(),
+        "a missing root recorded a deletion"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_deleted_file_is_recorded_on_the_second_reconcile_and_restore_skips_it() -> R {
+    let s = setup("check-deleted")?;
+    capture(&s)?;
+    fs::remove_file(&s.file).map_err(e)?;
+    let (code, _, err) = reconcile(&s)?;
+    assert_eq!(code, 0, "{err}");
+    let line = round_line(&err)?;
+    assert!(line.contains(" deleted=0 "), "{line}");
+    let (code, _, err) = reconcile(&s)?;
+    assert_eq!(code, 0, "{err}");
+    let line = round_line(&err)?;
+    assert!(line.contains(" deleted=1 "), "{line}");
+    let mut store = store_at(&s.server.url(), PREFIX, TimeoutPolicy::PRODUCTION)?;
+    let folded = read_owner(&s.owner, |key| match store.get(key) {
+        Ok(stored) => Ok(Some(stored.body)),
+        Err(StoreError::NotFound) => Ok(None),
+        Err(other) => Err(other),
+    })
+    .map_err(e)?
+    .ok_or("absent")?;
+    let entry = folded.state.sources.values().next().ok_or("no source")?;
+    assert!(entry.deleted_at.is_some(), "no deleted_at");
+    let ran = run(&s)?;
+    assert!(ran.has("remote_only", 0), "{}", ran.out);
+    // A third round records nothing more.
+    let (_, _, err) = reconcile(&s)?;
+    assert!(round_line(&err)?.contains(" deleted=0 "));
+    let out = s.rig.dir.join("out-deleted");
+    let result = Command::new(env!("CARGO_BIN_EXE_memory"))
+        .env_clear()
+        .env("MEMORY_STATE_DIR", &s.rig.state)
+        .arg("restore")
+        .arg(memory_core::limits::owner_prefix(&s.owner))
+        .arg("--out")
+        .arg(&out)
+        .output()
+        .map_err(e)?;
+    let err = String::from_utf8_lossy(&result.stderr).into_owned();
+    assert_eq!(result.status.code(), Some(0), "{err}");
+    assert!(err.contains("skipped_deleted=1"), "{err}");
+    assert!(!out.join(SESSION).exists());
+    Ok(())
+}

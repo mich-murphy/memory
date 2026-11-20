@@ -636,3 +636,61 @@ fn consumer_gate_withheld_canaries_never_reach_an_export() -> R {
     }
     scan(&fx, &dirs)
 }
+
+/// A deleted source is still exported (every epoch `sealed`, none `active`) and the unchanged
+/// importer accepts it.
+#[test]
+fn consumer_gate_deleted_source_exports_sealed_and_imports() -> R {
+    let Some(py) = python()? else { return Ok(()) };
+    let server = Fake::start()?;
+    let fx = fixture(&server, "gate-deleted")?;
+    let mut daemon = captured(&fx)?;
+    let all = owners(&fx.rig)?;
+    let want = phase1();
+    let w = want.iter().find(|w| w.name == "rewrite").ok_or("want")?;
+    let text = find(&all, w)?.clone();
+    fs::remove_file(fx.claude.join(format!("projects/-p/{UR}.jsonl"))).map_err(e)?;
+    let first = daemon.reconcile_once().map_err(e)?;
+    assert_eq!(first.deleted, 0);
+    let second = daemon.reconcile_once().map_err(e)?;
+    assert_eq!((second.failed, second.parked, second.deleted), (0, 0, 1));
+    daemon.shutdown().map_err(e)?;
+    let dir = fx.rig.dir.join("exports/deleted");
+    export(&fx, &text, &dir)?;
+    let meta = metadata(&dir)?;
+    let states: Vec<&str> = meta
+        .pointer("/manifest/sources")
+        .and_then(Value::as_array)
+        .ok_or("sources")?
+        .iter()
+        .filter_map(|s| s.get("state").and_then(Value::as_str))
+        .collect();
+    assert_eq!(states, ["sealed"], "a deleted source is never active");
+    let tools = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tools/analytics");
+    let db = fx.rig.dir.join("deleted.duckdb");
+    let script = "import sys, duckdb\nsys.path.insert(0, sys.argv[1])\nimport publications\n\
+r = publications.import_export(sys.argv[2], sys.argv[3])\n\
+assert r['status'] == 'imported', r\n\
+c = duckdb.connect(sys.argv[3], read_only=True)\n\
+states = [x[0] for x in c.execute('SELECT state FROM sources').fetchall()]\n\
+assert states and set(states) == {'sealed'}, states\n";
+    let o = Command::new(&py)
+        .current_dir(&tools)
+        .env_clear()
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .arg("-I")
+        .arg("-c")
+        .arg(script)
+        .arg(&tools)
+        .arg(&dir)
+        .arg(&db)
+        .output()
+        .map_err(e)?;
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    Ok(())
+}

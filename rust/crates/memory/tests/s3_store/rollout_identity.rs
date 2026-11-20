@@ -221,7 +221,7 @@ fn archived_then_appended_lands_under_the_archived_path() -> R {
     assert_eq!(s.path, archived(NAME));
     assert_eq!((s.state.as_str(), s.role.as_str()), ("active", "main"));
     assert_eq!(s.body, want);
-    assert!(d.export_line.contains("skipped_deleted=0"));
+    assert!(d.export_line.contains("deleted=0"));
     Ok(())
 }
 

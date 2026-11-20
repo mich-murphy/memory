@@ -218,6 +218,12 @@ from `main` alone.
      in place (`runs = 5`; the old binary is
      `~/.local/state/memory-cutover/backup/memory-a47eb19`); `memory status` against production:
      exit 0, 6,051 of 6,051 sources current, nothing parked.
+  16. Brief 43 ([43-deletions.md](rust-rewrite/implementation/43-deletions.md),
+     [evidence 35](rust-rewrite/implementation/evidence/35-deletions/)) is accepted locally as
+     `9a71407` (DESIGN D52): a stored append source missing on two consecutive complete full
+     rounds is recorded deleted (`stat`-only probe; a missing root, a truncated walk, a stat
+     error or a parked source never count); `index.json` keeps the owner set; export keeps
+     deleted sources, all `sealed`; the `round` line gains `deleted` and `absence_skipped`.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

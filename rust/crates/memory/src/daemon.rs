@@ -13,12 +13,20 @@
 //!    file is treated as missing (9.2); the result is kept as a [`StateLoad`] on the daemon
 //!    and logged by `run.rs` as a `state_load` event.
 //!
+//! Deleted sources (brief 43): only a full round observes absence, and only after a complete
+//! walk (not truncated, not busy). Per visited owner, stored live append entries that the walk
+//! did not yield and that are not parked are probed with `stat` through
+//! [`Sources::locate_absent`]; a missing root, an unknown namespace or a bad path is counted as
+//! `absence_skipped` and never deletes. `index.json` keeps `owners` (`#[serde(default)]`) so an
+//! owner whose every file is gone is still visited; it leaves the set once no live append entry
+//! remains. `capture_owner` never counts absence.
+//!
 //! The commit base (`current.json` ETag, owner state) is never persisted: every owner
 //! recovers it from the store on its first round after a start (`recover_base`).
 use crate::audit::AuditCounts;
 use crate::capture::{
-    Captured, Env, Local, Locals, MAX_PIECE_BYTES, Source, SourceOutcome, Update, attach_launches,
-    capture_into,
+    Candidate, Captured, Env, Local, Locals, MAX_PIECE_BYTES, Source, SourceOutcome, Update,
+    absent_into, attach_launches, capture_into,
 };
 use crate::commit::{
     Base, Commit, CommitEnd, Failure, KnownOurs, Landed, StoreSink, Winners, commit_staged,
@@ -34,17 +42,17 @@ use memory_core::coalescer::Signal;
 use memory_core::disposition::Streak;
 use memory_core::domain::{
     Agent, Disposition, ErrorClass, Owner, OwnerParkReason, ParkReason, RulesDigest,
-    SnapshotFingerprint, SourceId, SourceState,
+    SnapshotFingerprint, SourceClass, SourceId, SourceState,
 };
 use memory_core::hint::{
     HintEvent, HintScan, LaunchHint, PathHint, RetentionFacts, past_retention, removable, scan,
 };
-use memory_core::manifest::{Header, ManifestError, OwnerState, Timestamp, Writer};
+use memory_core::manifest::{Change, Header, ManifestError, OwnerState, Timestamp, Writer};
 use memory_core::pause::pause_for;
 use memory_core::privacy::{PolicyContext, SanitizedLaunch, sanitize_launch};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -123,6 +131,11 @@ pub struct IndexBody {
     pub sources: BTreeMap<SourceId, SourceIndex>,
     /// Hint day file name to the offset consumed so far.
     pub hints: BTreeMap<String, u64>,
+    /// Owners with a live append source, so an owner whose every file is gone is still visited
+    /// by a full round. A list (sorted by its debug form) because `Owner` is not ordered. An
+    /// index written before this field existed loads with an empty list.
+    #[serde(default)]
+    pub owners: Vec<Owner>,
 }
 
 /// Why an owner or source is parked.
@@ -249,6 +262,20 @@ pub struct RoundReport {
     /// Hint day files past the 7-day age that were kept (pending records, torn tail, cut
     /// read or a failed removal).
     pub hints_kept_old: usize,
+    /// Deletions in commits that landed in this round.
+    pub deleted: usize,
+    /// Absence candidates not probed: unknown namespace, bad path or missing root.
+    pub absence_skipped: usize,
+}
+
+/// How an absence candidate can be probed ([`Sources::locate_absent`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Probe {
+    /// Stat this handle through the filesystem seam.
+    Handle(u64),
+    /// Not probed: unknown namespace, unparsable path, a root that is not a directory, or no
+    /// resolver. Never counts toward deletion.
+    Skip,
 }
 
 /// Monotonic time between `progress` log lines of a running round.
@@ -268,6 +295,17 @@ pub trait Sources {
     /// nothing is found.
     fn read_dir(&mut self, _path: &Path) -> (Vec<Owner>, bool) {
         (Vec::new(), false)
+    }
+    /// Whether the last [`Sources::enumerate`] saw everything it could: not cut short by its
+    /// entry bound and not refused as busy. Absence is only observed after a complete walk.
+    /// Default: complete.
+    fn walk_complete(&self) -> bool {
+        true
+    }
+    /// Resolve a stored source (id and root-relative path) that the walk did not yield to a
+    /// handle for a `stat`-only absence probe. Default: [`Probe::Skip`].
+    fn locate_absent(&mut self, _id: &SourceId, _path: &str) -> Probe {
+        Probe::Skip
     }
     /// The current sources of one owner. Default: [`Sources::enumerate`] filtered.
     fn of(&mut self, owner: &Owner) -> Vec<Source> {
@@ -497,6 +535,8 @@ pub struct Daemon<F, S, C, E> {
     context: PolicyContext,
     locals: Locals,
     hints: BTreeMap<String, u64>,
+    /// Owners a full round visits even when the walk yields none of their files.
+    known: HashSet<Owner>,
     files: Vec<ScannedFile>,
     seen: BTreeMap<String, u64>,
     owners: HashMap<Owner, OwnerRt>,
@@ -507,6 +547,8 @@ pub struct Daemon<F, S, C, E> {
     last_index: Option<Duration>,
     last_status: Option<Duration>,
     draws: u64,
+    /// True only while a full round runs: the one place absence is observed.
+    absence: bool,
     stop: Box<dyn Fn() -> bool>,
     sleep: Box<dyn FnMut(Duration)>,
 }
@@ -613,6 +655,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             context: parts.context,
             locals,
             hints: opened.index.hints,
+            known: opened.index.owners.into_iter().collect(),
             files: Vec::new(),
             seen: BTreeMap::new(),
             owners,
@@ -623,6 +666,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             last_index: None,
             last_status: None,
             draws: 0,
+            absence: false,
             stop: Box::new(|| false),
             sleep: Box::new(std::thread::sleep),
         })
@@ -885,6 +929,57 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         (got, staged.winners, staged.failed)
     }
 
+    /// Stored live append entries of the owner that the walk did not yield and that are not
+    /// parked, resolved for the absence probe, and the count of those that could not be.
+    fn candidates(
+        &mut self,
+        walked: &[Source],
+        rt: &OwnerRt,
+        base: Option<&Base>,
+    ) -> (Vec<Candidate>, usize) {
+        let Some(base) = base else {
+            return (Vec::new(), 0);
+        };
+        let mut found = Vec::new();
+        let mut skipped = 0;
+        for (id, entry) in &base.state.sources {
+            if entry.deleted_at.is_some()
+                || entry.class != SourceClass::Append
+                || rt.parked_sources.contains_key(id)
+                || walked.iter().any(|s| s.id == *id)
+            {
+                continue;
+            }
+            match self.sources.locate_absent(id, &entry.path) {
+                Probe::Handle(handle) => found.push(Candidate {
+                    handle,
+                    id: id.clone(),
+                }),
+                Probe::Skip => skipped += 1,
+            }
+        }
+        (found, skipped)
+    }
+
+    /// The `stat`-only absence probe of the candidates against the remote state of the base.
+    fn absence_probe(
+        &mut self,
+        owner: &Owner,
+        candidates: &[Candidate],
+        base: Option<&Base>,
+        when: &Timestamp,
+    ) -> Captured {
+        let env = Env {
+            header: header_of(owner, when),
+            context: &self.context,
+            now_ns: i64::try_from(self.clock.wall_ns()).unwrap_or(i64::MAX),
+            piece_len: MAX_PIECE_BYTES,
+        };
+        let empty = OwnerState::default();
+        let remote = base.map_or(&empty, |b| &b.state);
+        absent_into(&mut self.fs, candidates, &self.locals, remote, &env)
+    }
+
     /// Attach the owner's pending launch records (DESIGN.md 7.6).
     fn attach_pending(request: &mut Commit, hints: &[ScannedFile], owner: &Owner) {
         let launches: Vec<SanitizedLaunch> = hints
@@ -964,6 +1059,12 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             ControlFlow::Break(pause) => return pause,
             ControlFlow::Continue(base) => base,
         };
+        let (candidates, skipped) = if self.absence {
+            self.candidates(sources, rt, base.as_ref())
+        } else {
+            (Vec::new(), 0)
+        };
+        report.absence_skipped += skipped;
         // Only an owner with a parked source pays for a filtered copy of its list.
         let live: Vec<Source>;
         let sources = if rt.parked_sources.is_empty() {
@@ -977,6 +1078,17 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             &live
         };
         let (mut got, winners, failed) = self.capture_sources(owner, sources, base.as_ref(), when);
+        if !candidates.is_empty() {
+            let gone = self.absence_probe(owner, &candidates, base.as_ref(), when);
+            got.updates.extend(gone.updates);
+            got.outcomes.extend(gone.outcomes);
+            if let Some(extra) = gone.commit {
+                match &mut got.commit {
+                    Some(commit) => commit.changes.extend(extra.changes),
+                    None => got.commit = Some(extra),
+                }
+            }
+        }
         report.audit.add(&got.audit);
         // A source park takes effect whether or not the owner's commit lands.
         for (id, outcome) in &got.outcomes {
@@ -996,7 +1108,15 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             return false;
         };
         Self::attach_pending(&mut request, hints, owner);
+        let deleted = request
+            .changes
+            .iter()
+            .filter(|c| matches!(c, Change::Deleted { .. }))
+            .count();
         let result = self.land(rt, base.as_ref(), request, (got, winners), hints, owner);
+        if matches!(result, Ok(CommitEnd::Landed(_))) {
+            report.deleted += deleted;
+        }
         let draw = self.next_draw();
         let now = Duration::from_nanos(self.clock.monotonic_ns());
         Self::settle(owner, rt, &result, at, now, draw, report)
@@ -1076,6 +1196,11 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 })
                 .collect(),
             hints: self.hints.clone(),
+            owners: {
+                let mut owners: Vec<Owner> = self.known.iter().cloned().collect();
+                owners.sort_by_key(|o| format!("{o:?}"));
+                owners
+            },
         }
     }
 
@@ -1103,12 +1228,33 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         let before = (self.status.host_paused, self.status.parked.clone());
         let mut groups: Vec<(Owner, Vec<Source>)> = Vec::new();
         let mut group_of: HashMap<Owner, usize> = HashMap::new();
-        for (owner, source) in self.sources.enumerate() {
+        let walked = self.sources.enumerate();
+        // Absence is observed only after a complete walk (DESIGN.md 6).
+        self.absence = self.sources.walk_complete();
+        for (owner, source) in walked {
             let index = *group_of.entry(owner.clone()).or_insert(groups.len());
             match groups.get_mut(index) {
                 Some((_, list)) => list.push(source),
                 None => groups.push((owner, vec![source])),
             }
+        }
+        let walked: HashSet<Owner> = groups.iter().map(|(o, _)| o.clone()).collect();
+        for owner in &walked {
+            if self.known.insert(owner.clone()) {
+                self.dirty = true;
+            }
+        }
+        // Owners whose files are all gone are visited with an empty list, so their stored
+        // entries can be probed. Only after a complete walk: otherwise nothing is observed.
+        if self.absence {
+            let mut extra: Vec<Owner> = self
+                .known
+                .iter()
+                .filter(|o| !walked.contains(*o))
+                .cloned()
+                .collect();
+            extra.sort_by_key(|o| format!("{o:?}"));
+            groups.extend(extra.into_iter().map(|o| (o, Vec::new())));
         }
         self.rescan_hints();
         let mut files = std::mem::take(&mut self.files);
@@ -1130,6 +1276,9 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             let known: Vec<SourceId> = rt.parked_sources.keys().cloned().collect();
             let pause = self.run_owner(owner, sources, &mut rt, &mut files, &when, &mut report);
             Self::log_parks(owner, &rt, was_parked, &known);
+            if sources.is_empty() && self.absence && Self::all_gone(&rt) {
+                self.dirty |= self.known.remove(owner);
+            }
             self.owners.insert(owner.clone(), rt);
             let now_ns = self.clock.monotonic_ns();
             if now_ns.saturating_sub(last_progress_ns) >= PROGRESS_EVERY_NS {
@@ -1147,6 +1296,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 break;
             }
         }
+        self.absence = false;
         if self.status.host_paused != before.0 {
             if before.0 {
                 crate::log::host_resumed();
@@ -1169,6 +1319,19 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             .map_err(RoundError::State)?;
         self.write_index(false).map_err(RoundError::State)?;
         Ok(report)
+    }
+
+    /// The owner's recovered state has no live append entry left.
+    fn all_gone(rt: &OwnerRt) -> bool {
+        match &rt.base {
+            RemoteBase::Known(base) => !base
+                .state
+                .sources
+                .values()
+                .any(|e| e.deleted_at.is_none() && e.class == SourceClass::Append),
+            RemoteBase::Absent => true,
+            RemoteBase::Unknown => false,
+        }
     }
 
     /// Log the parks this turn caused: the owner once, each newly parked source once.

@@ -38,6 +38,14 @@
 //! before `from` would not reassemble to the digest the new manifest commits, and a new epoch
 //! starts instead.
 //!
+//! # Absence
+//!
+//! [`absent_into`] is the probe of a full round for stored append sources the walk did not
+//! yield: `stat` only, no read and no admission. A miss is counted; the second consecutive miss
+//! with a live remote entry commits `Change::Deleted`. A seam error is not an absence, and a
+//! file that exists resets the count. [`capture_into`] never probes absence for sources the
+//! walk did not yield; the daemon calls the probe only from `reconcile_once`.
+//!
 //! Limitations: the whole-stream digest resumes from the index's `Sha256State` for
 //! prefix-stable sources (otherwise it is recomputed from a fresh read of `[0, to)`). Snapshot
 //! and missing-source planning never carry audit evidence (`NotDue`).
@@ -248,6 +256,78 @@ pub fn capture_into<F: FileSystem>(
     }
 }
 
+/// A stored append source the walk did not yield: probed for absence only.
+#[derive(Debug, Clone)]
+pub struct Candidate {
+    /// Handle understood by the [`FileSystem`] seam.
+    pub handle: u64,
+    /// Locator id.
+    pub id: SourceId,
+}
+
+/// The absence probe of a full round: per candidate, `stat` only (no read, no admission:
+/// nothing leaves the host but the stored id, kind and a timestamp, all already in the
+/// manifest). A candidate whose remote entry is not live is skipped. `None` counts the absence
+/// as `step` does, and at the second consecutive miss records [`Change::Deleted`]; a seam
+/// error is not an absence and changes nothing; a file that exists resets the count.
+pub fn absent_into<F: FileSystem>(
+    fs: &mut F,
+    candidates: &[Candidate],
+    locals: &Locals,
+    remote: &OwnerState,
+    env: &Env<'_>,
+) -> Captured {
+    let mut changes = Vec::new();
+    let mut updates = Vec::new();
+    let mut outcomes = Vec::new();
+    let none = Local::default();
+    for c in candidates {
+        let local = locals.get(&c.id).unwrap_or(&none);
+        let Some(entry) = remote.sources.get(&c.id).filter(|e| e.deleted_at.is_none()) else {
+            continue;
+        };
+        let outcome = match fs.stat(c.handle) {
+            Err(_) => SourceOutcome::Unavailable,
+            Ok(Some(_)) => {
+                if local.missing > 0 || local.deletion_recorded {
+                    updates.push(Update::Present(c.id.clone()));
+                }
+                SourceOutcome::Unchanged
+            }
+            Ok(None) => {
+                let planning = absence_plan(&c.id, local, false, None, &mut updates);
+                if let Planning::Ready {
+                    plan: Plan::Deleted,
+                    ..
+                } = planning
+                {
+                    changes.push(Change::Deleted {
+                        id: c.id.clone(),
+                        kind: entry.kind.clone(),
+                        deleted_at: env.header.captured_at.clone(),
+                    });
+                    updates.push(Update::Deleted(c.id.clone()));
+                    SourceOutcome::Planned
+                } else {
+                    SourceOutcome::Unchanged
+                }
+            }
+        };
+        outcomes.push((c.id.clone(), outcome));
+    }
+    let commit = (!changes.is_empty()).then(|| Commit {
+        header: env.header.clone(),
+        changes,
+        uploads: Vec::new(),
+    });
+    Captured {
+        commit,
+        updates,
+        outcomes,
+        audit: AuditCounts::default(),
+    }
+}
+
 /// Attach sanitized launch evidence to a commit header (DESIGN.md 6.3, 8.4).
 ///
 /// Only a [`SanitizedLaunch`] can become a `LaunchRecord` (`from_sanitized`), so raw argv or
@@ -431,18 +511,17 @@ fn stream_span<F: FileSystem>(
 /// Planner input for a source whose stat found nothing; counts the absence unless its
 /// deletion was already committed.
 fn absence_plan(
-    src: &Source,
+    id: &SourceId,
     local: &Local,
     recorded: bool,
     rules: Option<RulesDigest>,
-    acc: &mut Acc<'_>,
+    updates: &mut Vec<Update>,
 ) -> Planning {
     let observation = if recorded {
         Observation::DeletionRecorded
     } else {
         let consecutive = local.missing.saturating_add(1);
-        acc.updates
-            .push(Update::Missing(src.id.clone(), consecutive));
+        updates.push(Update::Missing(id.clone(), consecutive));
         Observation::missing(consecutive)
     };
     plan(&PlanInput {
@@ -484,7 +563,7 @@ fn step<F: FileSystem>(
         Err(_) => return SourceOutcome::Unavailable,
     };
     let Some(stat) = stat else {
-        let planning = absence_plan(src, local, recorded, rules, acc);
+        let planning = absence_plan(&src.id, local, recorded, rules, &mut acc.updates);
         if let Planning::Ready {
             plan: Plan::Deleted,
             ..

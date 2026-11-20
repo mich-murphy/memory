@@ -3,6 +3,10 @@
 //!
 //! Read-only towards the bucket (GET only), no daemon lock, nothing under the state root.
 //! Every failure is a closed code on one stderr line; no key, path, endpoint or owner text.
+//!
+//! Sessions are never deleted from the store, so a deleted source's epochs are exported too, every
+//! one `sealed` (none `active`). The success line is `memory: exported sources=<n> deleted=<n>
+//! bytes=<n>`, `deleted` counting the deleted sources exported.
 use crate::assemble::build_store;
 use crate::config::Config;
 use crate::daemon::EXIT_CONFIG;
@@ -71,8 +75,8 @@ impl Failure {
 pub struct Report {
     /// Epoch bodies written.
     pub sources: usize,
-    /// Deleted sources skipped.
-    pub skipped_deleted: usize,
+    /// Deleted sources exported (every epoch `sealed`).
+    pub deleted: usize,
     /// Body bytes.
     pub bytes: u64,
 }
@@ -123,7 +127,7 @@ pub fn export_owner<E>(
     write_export(&envelope, &mut fetch, out).map_err(|e| code(&e))?;
     Ok(Report {
         sources: envelope.sources,
-        skipped_deleted: envelope.skipped_deleted,
+        deleted: envelope.deleted,
         bytes: envelope.bytes,
     })
 }
@@ -207,9 +211,9 @@ pub fn main_entry(args: impl Iterator<Item = OsString>) -> ExitCode {
         Ok(report) => {
             let _ = writeln!(
                 std::io::stderr(),
-                "memory: exported sources={} skipped_deleted={} bytes={}",
+                "memory: exported sources={} deleted={} bytes={}",
                 report.sources,
-                report.skipped_deleted,
+                report.deleted,
                 report.bytes
             );
             ExitCode::SUCCESS
