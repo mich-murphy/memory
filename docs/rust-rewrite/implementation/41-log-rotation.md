@@ -107,3 +107,6 @@ merge, then install the build on this Mac in place.
   third rotation, the fourth is proven by a unit test. Teeth 6 of 6. Full gates on `9f85a2b`: 14
   sub-gates 0, seed 181026750, coverage 96.27 %. Record:
   [evidence 33](evidence/33-log-rotation/). Next: push, hosted gates, merge, install in place.
+- 2026-11-20 05:40Z: hosted Hegel found a test-model gap on the docs-only branch (a removed
+  source kept its `FileId`); fixed in PR #196 (`4110ee1`). Stack #195 rebased and merged as
+  `a47eb19`; installed on this Mac at 05:30:33Z (`runs = 4`). Brief closed.
