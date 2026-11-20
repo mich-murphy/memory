@@ -239,6 +239,22 @@ from `main` alone.
      passed) and installed on this Mac at 11:31:26Z in place (`runs = 7`; the old binary is
      `~/.local/state/memory-cutover/backup/memory-94230d2`); `memory status` exit 0, 6,053 of
      6,053 current; `memory install --dry-run` reports every file `unchanged`.
+  18. Finding, 2026-11-20 (metadata and counts only, no content read): Codex's `state_5.sqlite`
+     lists 902 threads, but only 29 rollout files exist (28 in `sessions/`, 1 in
+     `archived_sessions/`). 873 threads, created 2026-03 to 2026-10 (most in June to August), have
+     no rollout file on disk, so the Rust capture (which reads rollouts) never saw them. Their turns
+     survive in `~/.codex/thread_history_1.sqlite` (615 MB; 899 threads with items, 66,764 items,
+     a projection with a rollout byte offset per thread), which is a deferred snapshot (slice 3)
+     and is not captured. Why the rollouts are gone is not established; Codex's state records a
+     `legacy_to_paginated_v1` rollout migration (2026-09-25) and a `rollout-maintenance.lock`
+     (2026-09-13). The uncaptured-files review missed this database. Copies: the retired Go
+     directory `~/.local/state/agent-sessions-retired-20261120/state/agent-sessions/exports/codex/`
+     holds Go-exported copies of `state_5` and `thread_history_1` that cover all 873 (the Go spool
+     names only 10 of them); a consistent local copy (SQLite backup API, `integrity_check` ok) of
+     the five live Codex databases is in `~/.local/state/codex-preserved-20261120/` (0700, files
+     0600). Consequences: do not delete the retired Go directory or the preserved copy until the
+     Codex databases are captured; slice 3 starts with a consistent snapshot of `state_5` and
+     `thread_history_1` (backup API, not a file copy), before the other snapshot kinds.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
