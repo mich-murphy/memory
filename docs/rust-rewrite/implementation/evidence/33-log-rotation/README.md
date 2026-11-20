@@ -67,6 +67,34 @@ rotation tests and restored.
   scripts/gates.sh'`: all 14 sub-gates 0, seed 181026750; 04-nextest 790 passed, 05-hegel 32,
   06-proptest 34, 10-consumer 2; coverage 96.27 % (10,280 of 10,678 lines).
 
+## Hosted gates, a model finding, merge
+
+- Stack #195 (PRs #192 to #194). First push: the code branch's Rust gates passed, but Hegel
+  property 4 failed on the docs-only bottom branch (CI run 44666459304, ubuntu-24.04, seed
+  1848172391): `1a violated: committed bytes were never held by the source`. Reproduced locally
+  with that seed on `main`'s code and shrunk to a script. Cause, in the test model, not in
+  capture: `RemoveSource` kept the in-memory file's `FileId`, so a file re-created with the same
+  leading bytes looked like the old file edited between its windows (which only the audit
+  certifies, DESIGN 11.4), and the store's spliced bytes were not in the model's history. On
+  APFS and ext4 with statx a re-created file has a new identity. Fixed in PR #196 (`5d103aa`,
+  merged as `4110ee1`): the model bumps the generation on removal; regression test
+  `a_source_created_again_after_removal_is_verified_as_a_new_file` fails without the change.
+  `binary(capture_property)` at 500 cases passed for seeds 1848172391 and 2026112001. One macOS
+  coverage job of #196 failed fetching from cache.nixos.org (no test ran) and passed on rerun.
+- The stack was rebased on `4110ee1` and pushed again: Rust gates green on all three branches;
+  CI failed only in the two `govulncheck` steps. Merged as `a47eb19`.
+
+## Installed on this Mac
+
+- 2026-11-20 05:30:33Z: release build of `a47eb19` (sha256 prefix `7c754c88442be51f`) put in
+  place at `~/.local/libexec/memory/memory` by an atomic rename; the `1b4f981` binary is kept as
+  `~/.local/state/memory-cutover/backup/memory-1b4f981`. `launchctl kickstart -k`: `runs = 4`.
+- Start round (05:37:01Z): landed 1, failed 1 (`offline`), parked 0. The one `retry` line was
+  `class=offline cause=io landing=no attempt=1 elapsed_ms=45493 after_ms=1000`; the owner came
+  back `unchanged` on its next capture. No WARN or ERROR line.
+- The live log is 41 KB, far below the cap, so no production rotation has happened yet; the
+  rotation itself is proven by the real-binary test above.
+
 ## Limits
 
 - No compression of rotated files and no time-based rotation (out of scope).

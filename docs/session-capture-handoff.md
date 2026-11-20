@@ -204,6 +204,11 @@ from `main` alone.
      `memory`'s R2 token, deleted). Brief 41 ([41-log-rotation.md](rust-rewrite/implementation/41-log-rotation.md),
      [evidence 33](rust-rewrite/implementation/evidence/33-log-rotation/)) is accepted locally as
      `9f85a2b` (DESIGN D50): the daemon rotates its stderr file at 8 MiB, 3 generations.
+     Merged as `a47eb19` (stack #195) after PR #196 (`4110ee1`) fixed a gap in the capture
+     property's model that hosted Hegel found (a removed source kept its `FileId`; capture
+     unchanged). Installed on this Mac at 05:30:33Z in place (`runs = 4`; the old binary is
+     `~/.local/state/memory-cutover/backup/memory-1b4f981`). Next: brief 42, `memory status`,
+     `unpark` and `reconcile`.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
