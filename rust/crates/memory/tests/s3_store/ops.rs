@@ -1,7 +1,8 @@
 //! `memory status`, `memory unpark` and `memory reconcile` on the real binary beside the local
 //! server. Every run clears the environment and sets `MEMORY_STATE_DIR` to a temporary directory.
 use super::assemble::{MARKER, SESSION, lines};
-use super::daemon_restore::{Setup, setup};
+use super::daemon_restore::{BOUND, Guard, Setup, setup};
+use super::fake::Fault;
 use super::{R, e};
 use memory::assemble::start_from_config;
 use memory::config::Config;
@@ -12,9 +13,11 @@ use memory::roots::locator_roots;
 use memory::state::{DaemonLock, StateDir, StateFile};
 use memory_core::domain::{Owner, ParkReason};
 use std::fs;
+use std::io::Read;
 use std::net::TcpListener;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 struct Ran {
     code: i32,
@@ -197,6 +200,18 @@ fn status_without_a_status_file_says_missing_and_exits_1() -> R {
     let ran = status(&s, &[])?;
     assert_eq!(ran.code, 1, "{}{}", ran.out, ran.err);
     assert!(ran.has("status ", "state", "missing"));
+    Ok(())
+}
+
+#[test]
+fn status_runs_beside_a_held_lock() -> R {
+    let s = setup("status-locked")?;
+    capture(&s)?;
+    let lock = DaemonLock::acquire(&s.rig.state).map_err(e)?;
+    let ran = status(&s, &[])?;
+    drop(lock);
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    assert!(ran.has("sources ", "current", "1"));
     Ok(())
 }
 
@@ -440,6 +455,64 @@ fn reconcile_captures_a_new_file_then_lands_nothing_with_zero_puts() -> R {
         again.out
     );
     assert_eq!(s.server.count("PUT"), puts, "an unchanged disk made a PUT");
+    Ok(())
+}
+
+#[test]
+fn reconcile_stopped_by_sigterm_during_a_held_put_exits_130() -> R {
+    let s = setup("reconcile-signal")?;
+    s.server
+        .queue("PUT", ".zst", Fault::HoldThenApply(Duration::from_secs(2)));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_memory"));
+    cmd.env_clear()
+        .env("MEMORY_STATE_DIR", &s.rig.state)
+        .arg("reconcile")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(v) = std::env::var_os("LLVM_PROFILE_FILE") {
+        cmd.env("LLVM_PROFILE_FILE", v);
+    }
+    let mut child = Guard(cmd.spawn().map_err(e)?);
+    let start = Instant::now();
+    while s.server.held() == 0 {
+        if let Some(status) = child.0.try_wait().map_err(e)? {
+            return Err(format!("reconcile exited early: {status}"));
+        }
+        if start.elapsed() > BOUND {
+            return Err("no piece PUT reached the server".to_owned());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let killed = Command::new("/bin/kill")
+        .arg("-TERM")
+        .arg(child.0.id().to_string())
+        .status()
+        .map_err(e)?;
+    assert!(killed.success());
+    let start = Instant::now();
+    let code = loop {
+        if let Some(status) = child.0.try_wait().map_err(e)? {
+            break status.code();
+        }
+        if start.elapsed() > BOUND {
+            return Err("reconcile did not exit after SIGTERM".to_owned());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(code, Some(130));
+    let mut out = String::new();
+    if let Some(mut pipe) = child.0.stdout.take() {
+        pipe.read_to_string(&mut out).map_err(e)?;
+    }
+    assert!(out.is_empty(), "{out}");
+    let pointers = s
+        .server
+        .requests()
+        .iter()
+        .filter(|r| r.method == "PUT" && r.path.ends_with("current.json"))
+        .count();
+    assert_eq!(pointers, 0, "a stopped reconcile moved current.json");
     Ok(())
 }
 
