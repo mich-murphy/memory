@@ -102,3 +102,8 @@ merge, then install the build on this Mac in place.
 ## Ledger
 
 - 2026-11-20 03:00Z: brief written on `2518aaa`.
+- 2026-11-20 03:13Z: ROTATE accepted locally at `9f85a2b` (worker 3 commits). Deviations
+  accepted: std `rename`/`OpenOptions` with the brief's flags; the real-binary test stops at the
+  third rotation, the fourth is proven by a unit test. Teeth 6 of 6. Full gates on `9f85a2b`: 14
+  sub-gates 0, seed 181026750, coverage 96.27 %. Record:
+  [evidence 33](evidence/33-log-rotation/). Next: push, hosted gates, merge, install in place.
