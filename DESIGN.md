@@ -1462,6 +1462,10 @@ source's whole range in memory, measured against the 128 MB target (section 7.4,
 Done on this Mac on 2026-11-19 (evidence 31): steps 1 to 4 and 6, and step 5 except hook
 delivery and the 2-day criterion on the production install. BC-01 is not cut over yet.
 
+BC-01 is replaced by dev-01 (operator, 2026-11-20). Done on dev-01 on 2026-11-20 (evidence 37):
+steps 2 to 4, and step 5 except hook delivery, restore and analytics on its owners, and the 2-day
+criterion. Both hosts write the same archive id.
+
 ## 19. Decisions
 
 Operator decisions, 2026-11-07:
@@ -1481,7 +1485,8 @@ Defaults adopted. Each applies unless the operator says otherwise:
 2. **Credentials.** One Object Read and Write token per host, scoped to the bucket. The
    alternative is short-lived prefix- and action-scoped credentials minted off the host.
 3. **Low-value kinds.** `ClaudeDebug` and file-history are captured, for the holistic view
-   the operator asked for. [`07-ddia-crosscheck.md` callout 6]
+   the operator asked for. [`07-ddia-crosscheck.md` callout 6] File-history only behind a
+   fail-closed content scan (D54).
 4. **Removing a leaked secret.** This is the only planned deletion. With a global `objects/`
    namespace it needs a reference check over every manifest chain before an object is deleted.
    The tool belongs to the reader project. [review, 02 M3, 05 M6]
@@ -1546,6 +1551,7 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D51 | 2026-11-20: `memory status` is two tiers, read-only and offline (no lock, no write, no request); `--verify` is not built, `memory check` is the verified view. `memory unpark <owner-prefix>\|--all` and `memory reconcile` take the daemon lock and refuse beside a daemon (exit 75); `reconcile` logs `round cause=manual` | brief 42, evidence 34; 11.3, 13 |
 | D52 | 2026-11-20: deletions are recorded. Only a full round after a complete walk observes absence: stored live append entries the walk did not yield and that are not parked are probed by `stat` (no read, no admission); the second consecutive miss commits `deleted`. A missing root, a truncated or busy walk and a stat error never count. `index.json` keeps the owner set. Export keeps a deleted source, every epoch `sealed`; restore skips it; bytes are never purged | brief 43, evidence 35; 6, 9.1 |
 | D53 | 2026-11-20: on Linux `memory install` writes a systemd user unit at `$XDG_CONFIG_HOME/systemd/user/memory.service` (absolute only) or `~/.config/systemd/user/memory.service`: first line is our marker, `ExecStart="<exe>" daemon` (quoted with `\`, `"`, `%`, `$` escaped), `Restart=on-failure`, `RestartSec=60`, `StandardError=journal`, `WantedBy=default.target`. Uninstall removes only our unit. The binary prints `systemctl --user daemon-reload`, `enable --now` and `loginctl enable-linger $USER` and runs none of them. A control character in the exe path is refused | brief 44, evidence 36; 11.5, 17 |
+| D54 | 2026-11-21, operator answers to the uncaptured-files review: the `~/.claude/skills` folder and Pi `pi-terminology/` are not captured; Codex `generated_images`/`attachments` and Claude `paste-cache` are captured (slice 3); known non-session files get an `Ignored` verdict, counted apart from `UnknownKind` and never captured. Claude `file-history` (operator: research and decide): captured in slice 3 only behind a content scan that withholds the whole file, with a recorded reason, on a secret match, binary or non-UTF-8 content, an oversize file or a scanner error; the local file is never touched. Reason: the transcript stays the record of what a session did, file-history adds the exact pre-edit file state at about 10 MB per host, and it is a raw copy of project files that no path denylist can see (names are hashes) | research report (Anthropic `claude-directory` and `checkpointing` docs), evidence 37; 5, 8, 19 |
 
 Finding-to-section map for the challenge review:
 
