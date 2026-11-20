@@ -16,11 +16,11 @@
 
 use crate::capture::Source;
 use crate::daemon::Probe;
-use crate::environment::{FileSystem, Stat};
+use crate::environment::{Backup, FileSystem, Stat};
 use crate::realfs::{
     Encoding, RealFs, RealFsError, WalkLimits, index_claude_sessions, walk, walk_under,
 };
-use memory_core::domain::{Owner, SourceClass, SourceId, SourceKind};
+use memory_core::domain::{Owner, SnapshotFingerprint, SourceClass, SourceId, SourceKind};
 use memory_core::locator::{Located, RootRelativePath, Roots, locate};
 use memory_core::privacy::{Profile, ResolvedSourceFacts};
 use std::cell::RefCell;
@@ -218,7 +218,13 @@ pub fn to_source(
     // A `.zst` rollout is captured as the logical rollout: plain kind and path, decoded bytes.
     let zst = *kind == SourceKind::CodexCompressed;
     let handle = *handles.entry(target.clone()).or_insert_with(|| {
-        let encoding = if zst { Encoding::Zstd } else { Encoding::Plain };
+        let encoding = if zst {
+            Encoding::Zstd
+        } else if *kind == SourceKind::CodexStore {
+            Encoding::Sqlite
+        } else {
+            Encoding::Plain
+        };
         fs.register_encoded(target, encoding)
     });
     let mut path_string = rel.components().join("/");
@@ -251,6 +257,10 @@ impl SharedFs {
     pub fn new() -> Self {
         Self::default()
     }
+    /// Adapter that makes SQLite backups under `tmp` (the state root's `tmp/`).
+    pub fn with_tmp(tmp: impl Into<PathBuf>) -> Self {
+        Self(Rc::new(RefCell::new(RealFs::with_tmp(tmp))))
+    }
     /// The shared cell.
     pub fn cell(&self) -> Rc<RefCell<RealFs>> {
         Rc::clone(&self.0)
@@ -273,6 +283,26 @@ impl FileSystem for SharedFs {
     }
     fn is_undecodable(error: &RealFsError) -> bool {
         *error == RealFsError::Undecodable
+    }
+    fn snapshot_fingerprint(
+        &mut self,
+        source: u64,
+    ) -> Result<Option<SnapshotFingerprint>, RealFsError> {
+        self.0
+            .try_borrow_mut()
+            .map_err(|_| RealFsError::Io(ErrorKind::WouldBlock))?
+            .snapshot_fingerprint(source)
+    }
+    fn begin_snapshot(&mut self, source: u64) -> Result<Option<u64>, Backup> {
+        self.0
+            .try_borrow_mut()
+            .map_err(|_| Backup::Failed)?
+            .begin_snapshot(source)
+    }
+    fn end_snapshot(&mut self, source: u64) {
+        if let Ok(mut fs) = self.0.try_borrow_mut() {
+            fs.end_snapshot(source);
+        }
     }
 }
 

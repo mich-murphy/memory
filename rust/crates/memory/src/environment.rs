@@ -26,6 +26,15 @@ pub struct Stat {
     pub mtime_ns: i64,
 }
 
+/// Why a consistent copy of a snapshot source could not be made: closed, no path or text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backup {
+    /// The source vanished or is not the file the last stat observed (`SourceChanged`, a retry).
+    Changed,
+    /// The copy failed: SQLite error, no space, no temp directory (`BackupFailed`, class `Local`).
+    Failed,
+}
+
 /// Minimal filesystem seam; production metadata types arrive in a later slice.
 pub trait FileSystem {
     /// Adapter's closed error type.
@@ -48,6 +57,28 @@ pub trait FileSystem {
     fn is_undecodable(_error: &Self::Error) -> bool {
         false
     }
+    /// The fingerprint of a snapshot source whose physical inputs are more than its own file
+    /// (a SQLite database and its `-wal`). `None`: the source is a plain file and the caller
+    /// fingerprints its stat. Never opens the source's content.
+    ///
+    /// # Errors
+    /// The adapter's error when the inputs cannot be examined.
+    fn snapshot_fingerprint(
+        &mut self,
+        _source: u64,
+    ) -> Result<Option<memory_core::domain::SnapshotFingerprint>, Self::Error> {
+        Ok(None)
+    }
+    /// Make the stable byte stream of a snapshot source readable and return its length
+    /// (`None`: the source's bytes are read as they are). Pair with [`Self::end_snapshot`].
+    ///
+    /// # Errors
+    /// [`Backup::Changed`] or [`Backup::Failed`].
+    fn begin_snapshot(&mut self, _source: u64) -> Result<Option<u64>, Backup> {
+        Ok(None)
+    }
+    /// Release what [`Self::begin_snapshot`] made (idempotent; called after every attempt).
+    fn end_snapshot(&mut self, _source: u64) {}
 }
 
 /// Why a transport request failed or a reply was unusable: a closed set of codes, safe to log

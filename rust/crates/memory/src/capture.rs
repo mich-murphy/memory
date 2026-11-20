@@ -51,7 +51,7 @@
 //! and missing-source planning never carry audit evidence (`NotDue`).
 use crate::audit::{self, AuditCounts};
 use crate::commit::{Collect, Commit, PieceSink};
-use crate::environment::{FileSystem, PieceError};
+use crate::environment::{Backup, FileSystem, PieceError};
 use memory_core::domain::{
     AuditState, EpochPosition, Fingerprint, Observed, Offset, ParkReason, Plan, ReplayReason,
     RulesDigest, Sha256, Sha256State, SnapshotFingerprint, SourceClass, SourceId, SourceKind,
@@ -159,6 +159,9 @@ pub enum SourceOutcome {
     Raced,
     /// The seam failed or evidence could not be completed; not an absence.
     Unavailable,
+    /// The consistent copy of a snapshot source could not be made (error class `Local`,
+    /// `BackupFailed`); nothing was uploaded and the source is tried again next round.
+    BackupFailed,
     /// A change and its pieces are in the commit.
     Planned,
     /// The audit keeps failing: nothing was uploaded and the index entry is unchanged. The
@@ -601,12 +604,12 @@ fn step<F: FileSystem>(
     };
     match src.class {
         SourceClass::Snapshot => {
-            let fp = SnapshotFingerprint::Plain(Fingerprint {
+            let plain = Fingerprint {
                 id: stat.id,
                 size: stat.size,
                 mtime_ns: stat.mtime_ns,
-            });
-            snapshot(fs, &job, local, fp, acc)
+            };
+            snapshot(fs, job, local, plain, acc)
         }
         SourceClass::Append => {
             let remote_pos = live.and_then(|e| e.epochs.last()).map(|l| EpochPosition {
@@ -621,13 +624,24 @@ fn step<F: FileSystem>(
 }
 
 /// A snapshot source: replace the stored object when its fingerprint or the rules changed.
+///
+/// The fingerprint is taken before anything is opened (the seam gives a SQLite store's database
+/// plus `-wal`, else `plain`); an unchanged one ends here. Otherwise the seam makes the stable
+/// byte stream (`begin_snapshot`), whose length replaces the observed size, and releases it
+/// after the source, landed or not. The fingerprint recorded is the one taken before the copy.
 fn snapshot<F: FileSystem>(
     fs: &mut F,
-    job: &Job<'_>,
+    job: Job<'_>,
     local: &Local,
-    fp: SnapshotFingerprint,
+    plain: Fingerprint,
     acc: &mut Acc<'_>,
 ) -> SourceOutcome {
+    let handle = job.src.handle;
+    let fp = match fs.snapshot_fingerprint(handle) {
+        Ok(Some(fp)) => fp,
+        Ok(None) => SnapshotFingerprint::Plain(plain),
+        Err(_) => return SourceOutcome::Unavailable,
+    };
     let planning = plan(&PlanInput {
         withheld: None,
         observation: Observation::Present(job.observed.clone()),
@@ -643,17 +657,39 @@ fn snapshot<F: FileSystem>(
         Planning::Ready {
             plan: Plan::Snapshot | Plan::Replay { .. },
             ..
-        } => match job.write(fs, Mode::Replace, acc) {
-            Ok(()) => {
-                acc.updates
-                    .push(Update::Snapshot(job.src.id.clone(), fp, job.rules));
-                SourceOutcome::Planned
-            }
-            Err(outcome) => outcome,
-        },
-        Planning::Ready { .. } => SourceOutcome::Unchanged,
-        Planning::NeedWindows | Planning::NeedAuditRecheck => SourceOutcome::Unavailable,
+        } => {}
+        Planning::Ready { .. } => return SourceOutcome::Unchanged,
+        Planning::NeedWindows | Planning::NeedAuditRecheck => return SourceOutcome::Unavailable,
     }
+    let len = match fs.begin_snapshot(handle) {
+        Ok(len) => len,
+        Err(Backup::Changed) => return SourceOutcome::Raced,
+        Err(Backup::Failed) => return SourceOutcome::BackupFailed,
+    };
+    let backed;
+    let job = match len {
+        Some(size) => {
+            backed = Observed {
+                size,
+                ..job.observed.clone()
+            };
+            Job {
+                observed: &backed,
+                ..job
+            }
+        }
+        None => job,
+    };
+    let outcome = match job.write(fs, Mode::Replace, acc) {
+        Ok(()) => {
+            acc.updates
+                .push(Update::Snapshot(job.src.id.clone(), fp, job.rules));
+            SourceOutcome::Planned
+        }
+        Err(outcome) => outcome,
+    };
+    fs.end_snapshot(handle);
+    outcome
 }
 
 /// A fresh stat as an [`Observed`], or `None` when the source is absent or unreadable.

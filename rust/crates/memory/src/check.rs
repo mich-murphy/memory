@@ -231,6 +231,7 @@ fn outcome_code(outcome: &SourceOutcome) -> String {
         SourceOutcome::Unchanged
         | SourceOutcome::Raced
         | SourceOutcome::Unavailable
+        | SourceOutcome::BackupFailed
         | SourceOutcome::Planned
         | SourceOutcome::Parked(_) => "withheld".to_owned(),
     }
