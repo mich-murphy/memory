@@ -568,6 +568,123 @@ fn files_plist_matches_golden_text_and_is_recognised_as_ours() {
     ));
 }
 
+const GOLDEN_UNIT: &str = "# Managed by memory install; memory uninstall removes it.
+[Unit]
+Description=memory: session capture
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=\"/opt/my bin/memory\" daemon
+Restart=on-failure
+RestartSec=60
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+";
+
+#[test]
+fn files_systemd_unit_matches_golden_text_and_is_recognised_as_ours() {
+    let text = files::systemd_unit("/opt/my bin/memory");
+    assert_eq!(text, GOLDEN_UNIT);
+    assert!(files::unit_is_ours(&text));
+}
+
+#[test]
+fn files_systemd_quote_escapes_and_round_trips() {
+    assert_eq!(
+        files::systemd_quote("/a b/\"q\"/b\\s/100%/$x/memory"),
+        "\"/a b/\\\"q\\\"/b\\\\s/100%%/$$x/memory\""
+    );
+    for exe in [
+        "/a b/memory",
+        "/a\"b/memory",
+        "/a\\b/memory",
+        "/a%b/memory",
+        "/a$b/memory",
+    ] {
+        assert!(files::unit_is_ours(&files::systemd_unit(exe)), "{exe}");
+    }
+}
+
+#[test]
+fn files_unit_is_ours_rules() {
+    let ours = files::systemd_unit("/opt/bin/memory");
+    assert!(files::unit_is_ours(&ours));
+    assert!(!files::unit_is_ours(
+        &ours.replace("/opt/bin/memory", "/opt/bin/other")
+    ));
+    assert!(!files::unit_is_ours(&ours.replace("\" daemon", "\" hook")));
+    assert!(!files::unit_is_ours(
+        &ours.replace("\" daemon", "\" daemon x")
+    ));
+    assert!(!files::unit_is_ours(
+        &ours.replace("/opt/bin/memory", "bin/memory")
+    ));
+    let no_marker = ours.lines().skip(1).collect::<Vec<_>>().join("\n");
+    assert!(!files::unit_is_ours(&no_marker));
+    assert!(!files::unit_is_ours(&format!("\n{ours}")));
+}
+
+#[test]
+fn files_unit_file_install_reinstall_change_uninstall_and_dry() -> R {
+    let dir = temp("unit").map_err(|e| e.to_string())?;
+    let path = dir.join("systemd/user/memory.service");
+    let e = |x: Failure| x.to_string();
+    let dry = files::unit_file(&path, Some("/x/memory"), true, 0).map_err(e)?;
+    assert_eq!(dry, Outcome::Wrote { backup: None });
+    assert!(!dir.join("systemd").exists());
+    assert_eq!(
+        files::unit_file(&path, Some("/x/memory"), false, 0).map_err(e)?,
+        Outcome::Wrote { backup: None }
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).map_err(|x| x.to_string())?,
+        files::systemd_unit("/x/memory")
+    );
+    assert_eq!(
+        files::unit_file(&path, Some("/x/memory"), false, 0).map_err(e)?,
+        Outcome::Unchanged
+    );
+    let changed = files::unit_file(&path, Some("/y/memory"), false, 0).map_err(e)?;
+    assert_eq!(
+        changed,
+        Outcome::Wrote {
+            backup: Some("memory.service.memory-backup-19700101T000000Z".into())
+        }
+    );
+    let backup = path.with_file_name("memory.service.memory-backup-19700101T000000Z");
+    assert_eq!(
+        std::fs::read_to_string(&backup).map_err(|x| x.to_string())?,
+        files::systemd_unit("/x/memory")
+    );
+    assert_eq!(
+        files::unit_file(&path, None, true, 0).map_err(e)?,
+        Outcome::Removed
+    );
+    assert!(path.exists());
+    assert_eq!(
+        files::unit_file(&path, None, false, 0).map_err(e)?,
+        Outcome::Removed
+    );
+    assert!(!path.exists());
+    assert_eq!(
+        files::unit_file(&path, None, false, 0).map_err(e)?,
+        Outcome::Unchanged
+    );
+    std::fs::write(&path, "[Service]\nExecStart=/bin/true\n").map_err(|x| x.to_string())?;
+    assert_eq!(
+        files::unit_file(&path, None, false, 0).map_err(e)?,
+        Outcome::Kept
+    );
+    assert!(path.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
+
 #[test]
 fn files_plist_macos_plutil_lint() -> R {
     if !cfg!(target_os = "macos") {
