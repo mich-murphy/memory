@@ -203,7 +203,7 @@ pub enum Verdict {
 
 /// The snake-case code of a closed enum value: its string form, or the tag of a variant that
 /// carries data (the data is never printed).
-fn code_of<T: Serialize>(value: &T) -> String {
+pub fn code_of<T: Serialize>(value: &T) -> String {
     match serde_json::to_value(value) {
         Ok(serde_json::Value::String(text)) => text,
         Ok(serde_json::Value::Object(map)) => map
@@ -505,10 +505,15 @@ fn judge(
     )
 }
 
-fn read_status(root: &Path) -> (Option<StatusBody>, &'static str) {
-    let file = StateFile::Status;
+/// Read one state file under `root` without a lock: the parsed body and the state code
+/// (`loaded`, `missing`, `damaged` or `newer_schema`).
+#[must_use]
+pub fn read_state<T: serde::de::DeserializeOwned>(
+    root: &Path,
+    file: StateFile,
+) -> (Option<T>, &'static str) {
     match read_durable(&root.join(file.name()), file.schema()) {
-        Loaded::Present(stored) => match serde_json::from_slice::<StatusBody>(&stored.body) {
+        Loaded::Present(stored) => match serde_json::from_slice::<T>(&stored.body) {
             Ok(body) => (Some(body), "loaded"),
             Err(_) => (None, "damaged"),
         },
@@ -516,6 +521,25 @@ fn read_status(root: &Path) -> (Option<StatusBody>, &'static str) {
         Loaded::Missing(MissingReason::NewerSchema) => (None, "newer_schema"),
         Loaded::Missing(_) => (None, "damaged"),
     }
+}
+
+/// [`read_state`] of `status.json`.
+#[must_use]
+pub fn read_status(root: &Path) -> (Option<StatusBody>, &'static str) {
+    read_state(root, StateFile::Status)
+}
+
+/// The closed line printed for a parked entry: owner prefix, reason code and scope.
+#[must_use]
+pub fn parked_line(entry: &crate::daemon::ParkedEntry) -> String {
+    let (scope, reason) = match &entry.reason {
+        ParkedReason::Owner(reason) => ("owner", code_of(reason)),
+        ParkedReason::Source(reason) => ("source", code_of(reason)),
+    };
+    format!(
+        "parked owner={} reason={reason} scope={scope}",
+        owner_prefix(&entry.owner)
+    )
 }
 
 /// Run the check against the state root `root` (holding `config.toml` and, once the daemon has
@@ -539,15 +563,8 @@ pub fn check(root: &Path) -> Result<Report, Refusal> {
     let (status_body, status) = read_status(root);
     if let Some(body) = &status_body {
         for entry in &body.parked {
-            let (scope, reason) = match &entry.reason {
-                ParkedReason::Owner(reason) => ("owner", code_of(reason)),
-                ParkedReason::Source(reason) => ("source", code_of(reason)),
-            };
             tally.parked += 1;
-            details.push(format!(
-                "parked owner={} reason={reason} scope={scope}",
-                owner_prefix(&entry.owner)
-            ));
+            details.push(parked_line(entry));
         }
     }
 

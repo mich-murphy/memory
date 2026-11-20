@@ -42,6 +42,8 @@ mod fake;
 mod identity_verify;
 #[path = "common/log_lines.rs"]
 mod log_lines;
+#[path = "s3_store/ops.rs"]
+mod ops;
 #[path = "s3_store/owners.rs"]
 mod owners;
 #[path = "s3_store/peak_memory.rs"]

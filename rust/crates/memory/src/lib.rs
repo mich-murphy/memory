@@ -24,6 +24,7 @@ pub mod roots;
 pub mod run;
 pub mod s3;
 pub mod state;
+pub mod status;
 pub mod token;
 pub mod watch;
 pub mod wired;
