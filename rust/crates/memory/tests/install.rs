@@ -845,6 +845,7 @@ impl Home {
             ".codex",
             ".pi/agent/extensions",
             "Library/LaunchAgents",
+            ".config/systemd/user",
         ] {
             if let Ok(rd) = std::fs::read_dir(self.p(dir)) {
                 n += rd
@@ -895,8 +896,25 @@ fn bin_install_writes_files_and_second_run_is_unchanged() -> R {
         assert!(h.p("Library/LaunchAgents/memory.plist").exists());
         assert!(text.contains("next: launchctl bootstrap gui/$(id -u) "));
         assert!(h.p("Library/Logs/memory").is_dir());
+    } else if cfg!(target_os = "linux") {
+        let unit = h.p(".config/systemd/user/memory.service");
+        assert!(
+            text.contains(&format!("wrote {}", unit.display())),
+            "{text}"
+        );
+        assert_eq!(
+            h.read(".config/systemd/user/memory.service")?,
+            files::systemd_unit(BIN)
+        );
+        for line in [
+            "next: systemctl --user daemon-reload",
+            "next: systemctl --user enable --now memory.service",
+            "next: loginctl enable-linger $USER",
+        ] {
+            assert!(text.contains(line), "{line}");
+        }
     } else {
-        assert!(text.contains("launchd: skipped (not macOS)"));
+        assert!(text.contains("service: skipped (unsupported)"));
     }
     assert!(text.contains("next: approve the memory hooks in Codex /hooks"));
     assert_eq!(h.backups()?, 0);
@@ -911,6 +929,13 @@ fn bin_install_writes_files_and_second_run_is_unchanged() -> R {
         );
     }
     assert!(!text.contains("approve the memory hooks"));
+    if cfg!(target_os = "linux") {
+        let unit = h.p(".config/systemd/user/memory.service");
+        assert!(
+            text.contains(&format!("unchanged {}", unit.display())),
+            "{text}"
+        );
+    }
     assert_eq!(h.backups()?, 0);
     let after: Vec<String> = FILES.iter().map(|f| h.read(f)).collect::<Result<_, _>>()?;
     assert_eq!(before, after);
@@ -1084,6 +1109,15 @@ fn bin_uninstall_removes_ours_and_keeps_foreign() -> R {
     if cfg!(target_os = "macos") {
         assert!(!h.p("Library/LaunchAgents/memory.plist").exists());
         assert!(text.contains("next: launchctl bootout gui/$(id -u)/memory"));
+    } else if cfg!(target_os = "linux") {
+        assert!(!h.p(".config/systemd/user/memory.service").exists());
+        assert!(text.contains(&format!(
+            "removed {}",
+            h.p(".config/systemd/user/memory.service").display()
+        )));
+        let a = text.find("next: systemctl --user disable --now memory.service");
+        let b = text.find("next: systemctl --user daemon-reload");
+        assert!(a.is_some() && b.is_some() && a < b, "{text}");
     }
     // Uninstall needs no config and a second run changes nothing.
     let o = h.run(&["uninstall"], &[])?;
@@ -1160,4 +1194,98 @@ fn bin_hook_round_trip_appends_one_hint_per_agent() -> R {
     )?;
     assert_eq!(count(), expected + 1);
     Ok(())
+}
+
+#[test]
+fn bin_uninstall_keeps_a_foreign_unit_on_linux() -> R {
+    if !cfg!(target_os = "linux") {
+        return Ok(());
+    }
+    let h = Home::new("bin-foreign-unit", true)?;
+    let e = |x: std::io::Error| x.to_string();
+    std::fs::create_dir_all(h.p(".config/systemd/user")).map_err(e)?;
+    let path = h.p(".config/systemd/user/memory.service");
+    std::fs::write(&path, "[Service]\nExecStart=/bin/true\n").map_err(e)?;
+    let o = h.run(&["uninstall"], &[])?;
+    assert_eq!(o.status.code(), Some(0), "{}", err_text(&o));
+    assert!(out_text(&o).contains(&format!("kept {} (not ours)", path.display())));
+    assert_eq!(
+        h.read(".config/systemd/user/memory.service")?,
+        "[Service]\nExecStart=/bin/true\n"
+    );
+    Ok(())
+}
+
+#[test]
+fn bin_install_honours_absolute_xdg_config_home_on_linux() -> R {
+    if !cfg!(target_os = "linux") {
+        return Ok(());
+    }
+    let h = Home::new("bin-xdg", true)?;
+    let xdg = h.0.parent().ok_or("parent")?.join("xdg");
+    let xdg_s = xdg.to_str().ok_or("utf8")?;
+    let o = h.run(&["install"], &[("XDG_CONFIG_HOME", xdg_s)])?;
+    assert_eq!(o.status.code(), Some(0), "{}", err_text(&o));
+    assert!(xdg.join("systemd/user/memory.service").exists());
+    assert!(!h.p(".config").exists());
+    let o = h.run(&["install"], &[("XDG_CONFIG_HOME", "relative")])?;
+    assert_eq!(o.status.code(), Some(0), "{}", err_text(&o));
+    assert!(h.p(".config/systemd/user/memory.service").exists());
+    Ok(())
+}
+
+#[test]
+fn bin_install_refuses_a_control_character_in_the_path_on_linux() -> R {
+    if !cfg!(target_os = "linux") {
+        return Ok(());
+    }
+    let h = Home::new("bin-ctl", true)?;
+    let e = |x: std::io::Error| x.to_string();
+    let dir = h.0.parent().ok_or("parent")?.join("bad\ndir");
+    std::fs::create_dir_all(&dir).map_err(e)?;
+    let other = dir.join("memory");
+    std::fs::copy(BIN, &other).map_err(e)?;
+    std::fs::set_permissions(&other, std::fs::Permissions::from_mode(0o755)).map_err(e)?;
+    let mut cmd = Command::new(&other);
+    cmd.arg("install").env_clear().env("HOME", &h.0);
+    if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+        cmd.env("LLVM_PROFILE_FILE", profile);
+    }
+    let o = cmd.stdin(Stdio::null()).output().map_err(e)?;
+    assert_eq!(o.status.code(), Some(2));
+    assert_eq!(err_text(&o), "memory: install_binary_name\n");
+    assert!(!h.p(".config").exists());
+    assert!(!h.p(".claude").exists());
+    Ok(())
+}
+
+/// Linux only (fails there when `systemd-analyze` is missing): `verify` accepts the unit.
+#[test]
+fn systemd_analyze_verify_accepts_the_generated_unit() -> R {
+    if !cfg!(target_os = "linux") {
+        return Ok(());
+    }
+    let e = |x: std::io::Error| x.to_string();
+    let dir = temp("verify").map_err(e)?;
+    let exe = dir.join("memory");
+    std::fs::copy(BIN, &exe).map_err(e)?;
+    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).map_err(e)?;
+    let unit = dir.join("memory.service");
+    std::fs::write(&unit, files::systemd_unit(exe.to_str().ok_or("utf8")?)).map_err(e)?;
+    let out = Command::new("systemd-analyze")
+        .args(["--user", "verify"])
+        .arg(&unit)
+        .env_clear()
+        .env("HOME", &dir)
+        .env("PATH", "/usr/bin:/bin:/usr/local/bin")
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|x| format!("systemd-analyze: {x}"))?;
+    let msg = format!("{}{}", out_text(&out), err_text(&out));
+    let _ = std::fs::remove_dir_all(&dir);
+    if out.status.success() && !msg.contains("memory.service") {
+        Ok(())
+    } else {
+        Err(format!("verify failed: {msg}"))
+    }
 }
