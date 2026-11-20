@@ -3,6 +3,10 @@
 //!
 //! Read-only towards the bucket (GET only), no daemon lock, nothing under the state root.
 //! Every failure is a closed code on one stderr line; no key, path, endpoint or owner text.
+//!
+//! Sessions are never deleted from the store, so a deleted source's epochs are exported too, every
+//! one `sealed` (none `active`). The success line is `memory: exported sources=<n> deleted=<n>
+//! bytes=<n>`, `deleted` counting the deleted sources exported.
 use crate::assemble::build_store;
 use crate::config::Config;
 use crate::daemon::EXIT_CONFIG;

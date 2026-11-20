@@ -38,6 +38,14 @@
 //! before `from` would not reassemble to the digest the new manifest commits, and a new epoch
 //! starts instead.
 //!
+//! # Absence
+//!
+//! [`absent_into`] is the probe of a full round for stored append sources the walk did not
+//! yield: `stat` only, no read and no admission. A miss is counted; the second consecutive miss
+//! with a live remote entry commits `Change::Deleted`. A seam error is not an absence, and a
+//! file that exists resets the count. [`capture_into`] never probes absence for sources the
+//! walk did not yield; the daemon calls the probe only from `reconcile_once`.
+//!
 //! Limitations: the whole-stream digest resumes from the index's `Sha256State` for
 //! prefix-stable sources (otherwise it is recomputed from a fresh read of `[0, to)`). Snapshot
 //! and missing-source planning never carry audit evidence (`NotDue`).
@@ -260,7 +268,7 @@ pub struct Candidate {
 /// The absence probe of a full round: per candidate, `stat` only (no read, no admission:
 /// nothing leaves the host but the stored id, kind and a timestamp, all already in the
 /// manifest). A candidate whose remote entry is not live is skipped. `None` counts the absence
-/// as [`step`] does, and at the second consecutive miss records [`Change::Deleted`]; a seam
+/// as `step` does, and at the second consecutive miss records [`Change::Deleted`]; a seam
 /// error is not an absence and changes nothing; a file that exists resets the count.
 pub fn absent_into<F: FileSystem>(
     fs: &mut F,

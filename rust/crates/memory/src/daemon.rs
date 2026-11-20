@@ -13,6 +13,14 @@
 //!    file is treated as missing (9.2); the result is kept as a [`StateLoad`] on the daemon
 //!    and logged by `run.rs` as a `state_load` event.
 //!
+//! Deleted sources (brief 43): only a full round observes absence, and only after a complete
+//! walk (not truncated, not busy). Per visited owner, stored live append entries that the walk
+//! did not yield and that are not parked are probed with `stat` through
+//! [`Sources::locate_absent`]; a missing root, an unknown namespace or a bad path is counted as
+//! `absence_skipped` and never deletes. `index.json` keeps `owners` (`#[serde(default)]`) so an
+//! owner whose every file is gone is still visited; it leaves the set once no live append entry
+//! remains. `capture_owner` never counts absence.
+//!
 //! The commit base (`current.json` ETag, owner state) is never persisted: every owner
 //! recovers it from the store on its first round after a start (`recover_base`).
 use crate::audit::AuditCounts;
