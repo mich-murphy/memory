@@ -44,7 +44,7 @@ use memory_core::pause::pause_for;
 use memory_core::privacy::{PolicyContext, SanitizedLaunch, sanitize_launch};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -123,6 +123,11 @@ pub struct IndexBody {
     pub sources: BTreeMap<SourceId, SourceIndex>,
     /// Hint day file name to the offset consumed so far.
     pub hints: BTreeMap<String, u64>,
+    /// Owners with a live append source, so an owner whose every file is gone is still visited
+    /// by a full round. A list (sorted by its debug form) because `Owner` is not ordered. An
+    /// index written before this field existed loads with an empty list.
+    #[serde(default)]
+    pub owners: Vec<Owner>,
 }
 
 /// Why an owner or source is parked.
@@ -522,6 +527,8 @@ pub struct Daemon<F, S, C, E> {
     context: PolicyContext,
     locals: Locals,
     hints: BTreeMap<String, u64>,
+    /// Owners a full round visits even when the walk yields none of their files.
+    known: HashSet<Owner>,
     files: Vec<ScannedFile>,
     seen: BTreeMap<String, u64>,
     owners: HashMap<Owner, OwnerRt>,
@@ -640,6 +647,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             context: parts.context,
             locals,
             hints: opened.index.hints,
+            known: opened.index.owners.into_iter().collect(),
             files: Vec::new(),
             seen: BTreeMap::new(),
             owners,
@@ -1180,6 +1188,11 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 })
                 .collect(),
             hints: self.hints.clone(),
+            owners: {
+                let mut owners: Vec<Owner> = self.known.iter().cloned().collect();
+                owners.sort_by_key(|o| format!("{o:?}"));
+                owners
+            },
         }
     }
 
@@ -1217,6 +1230,24 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 None => groups.push((owner, vec![source])),
             }
         }
+        let walked: HashSet<Owner> = groups.iter().map(|(o, _)| o.clone()).collect();
+        for owner in &walked {
+            if self.known.insert(owner.clone()) {
+                self.dirty = true;
+            }
+        }
+        // Owners whose files are all gone are visited with an empty list, so their stored
+        // entries can be probed. Only after a complete walk: otherwise nothing is observed.
+        if self.absence {
+            let mut extra: Vec<Owner> = self
+                .known
+                .iter()
+                .filter(|o| !walked.contains(*o))
+                .cloned()
+                .collect();
+            extra.sort_by_key(|o| format!("{o:?}"));
+            groups.extend(extra.into_iter().map(|o| (o, Vec::new())));
+        }
         self.rescan_hints();
         let mut files = std::mem::take(&mut self.files);
         let mut report = RoundReport::default();
@@ -1237,6 +1268,9 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             let known: Vec<SourceId> = rt.parked_sources.keys().cloned().collect();
             let pause = self.run_owner(owner, sources, &mut rt, &mut files, &when, &mut report);
             Self::log_parks(owner, &rt, was_parked, &known);
+            if sources.is_empty() && self.absence && Self::all_gone(&rt) {
+                self.dirty |= self.known.remove(owner);
+            }
             self.owners.insert(owner.clone(), rt);
             let now_ns = self.clock.monotonic_ns();
             if now_ns.saturating_sub(last_progress_ns) >= PROGRESS_EVERY_NS {
@@ -1277,6 +1311,19 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             .map_err(RoundError::State)?;
         self.write_index(false).map_err(RoundError::State)?;
         Ok(report)
+    }
+
+    /// The owner's recovered state has no live append entry left.
+    fn all_gone(rt: &OwnerRt) -> bool {
+        match &rt.base {
+            RemoteBase::Known(base) => !base
+                .state
+                .sources
+                .values()
+                .any(|e| e.deleted_at.is_none() && e.class == SourceClass::Append),
+            RemoteBase::Absent => true,
+            RemoteBase::Unknown => false,
+        }
     }
 
     /// Log the parks this turn caused: the owner once, each newly parked source once.

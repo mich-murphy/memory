@@ -4708,3 +4708,71 @@ fn capture_owner_never_counts_absence() -> R {
     assert!(!deleted_and_epochs(&mut r.d)?.0);
     Ok(())
 }
+
+#[test]
+fn an_owner_whose_every_file_is_gone_is_recorded_deleted_then_leaves_the_set() -> R {
+    let mut r = rig()?;
+    remove_file(&mut r, 1);
+    remove_file(&mut r, 2);
+    let first = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((first.landed, first.deleted), (0, 0));
+    let second = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((second.landed, second.deleted), (1, 2));
+    assert!(deleted_and_epochs(&mut r.d)?.0);
+    let (tmp, d) = (r.tmp, r.d);
+    d.shutdown().map_err(e)?;
+    let index = need(index_of(&tmp)?, "no index")?;
+    assert!(index.owners.is_empty(), "{:?}", index.owners);
+    Ok(())
+}
+
+#[test]
+fn the_owner_set_survives_a_restart() -> R {
+    let r = rig()?;
+    let (tmp, cfg, gate, fail) = (r.tmp, r.cfg, r.gate, r.fail);
+    let mut d = r.d;
+    let fs = std::mem::take(d.fs_mut());
+    let store = std::mem::take(d.store_mut());
+    d.shutdown().map_err(e)?;
+    let index = need(index_of(&tmp)?, "no index")?;
+    assert_eq!(index.owners, [owner_of("s1")?]);
+    // Restart with both files gone: the owner is still visited and recorded deleted.
+    let mut fs = fs;
+    fs.mem.files.clear();
+    if let Ok(mut list) = gate.list.lock() {
+        list.clear();
+    }
+    let d = start_ad(&tmp, &cfg, fs, store, &gate)?;
+    let mut r = Rig {
+        tmp,
+        cfg,
+        d,
+        gate,
+        fail,
+    };
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 0);
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 2);
+    Ok(())
+}
+
+#[test]
+fn an_index_without_owners_still_loads() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    {
+        let lock = DaemonLock::acquire(&tmp.root()).map_err(e)?;
+        let state = StateDir::prepare(&lock).map_err(e)?;
+        state
+            .write(StateFile::Index, br#"{"sources":{},"hints":{}}"#)
+            .map_err(e)?;
+    }
+    let gate = Gate {
+        list: Arc::new(Mutex::new(Vec::new())),
+        complete: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        root: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+    };
+    let d = start_ad(&tmp, &cfg, FlakyFs::default(), FStore::default(), &gate)?;
+    assert_eq!(d.index_load(), StateLoad::Loaded);
+    assert!(!d.rebuilt());
+    Ok(())
+}
