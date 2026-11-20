@@ -110,3 +110,8 @@ next `memory check` against production read-only.
 ## Ledger
 
 - 2026-11-20 08:15Z: brief written on `4d3bcba`.
+- 2026-11-20 09:20Z: DELETE accepted locally at `9a71407` (worker 5 commits, parent 1: the
+  missing-root guard in `resolve.rs` survived its tooth because the daemon tests use a test
+  resolver; a real-binary test now covers it). Teeth 10 of 10. Full gates on `9a71407`: 14
+  sub-gates 0, seed 4141271690, coverage 95.86 %. Record:
+  [evidence 35](evidence/35-deletions/). Next: push, hosted gates, merge, install in place.
