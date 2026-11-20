@@ -4447,3 +4447,264 @@ fn progress_is_spaced_60_seconds_from_the_last_line_not_the_round_start() -> R {
     );
     Ok(())
 }
+
+// ---------------------------------------------------------------- absence (brief 43)
+
+/// `MemFs` whose `stat` can be made to fail with a non-`NotFound` error.
+#[derive(Default)]
+struct FlakyFs {
+    mem: MemFs,
+    fail: Arc<std::sync::atomic::AtomicBool>,
+}
+impl memory::environment::FileSystem for FlakyFs {
+    type Error = ();
+    fn stat(&mut self, source: u64) -> Result<Option<memory::environment::Stat>, ()> {
+        if self.fail.load(Ordering::SeqCst) {
+            return Err(());
+        }
+        memory::environment::FileSystem::stat(&mut self.mem, source)
+    }
+    fn read(&mut self, source: u64, range: std::ops::Range<u64>) -> Result<Vec<u8>, ()> {
+        memory::environment::FileSystem::read(&mut self.mem, source, range)
+    }
+}
+
+/// A walk that can report itself incomplete or its root as missing; resolves `src<n>` to handle n.
+#[derive(Clone)]
+struct Gate {
+    list: Shared,
+    complete: Arc<std::sync::atomic::AtomicBool>,
+    root: Arc<std::sync::atomic::AtomicBool>,
+}
+impl memory::daemon::Sources for Gate {
+    fn enumerate(&mut self) -> Vec<(Owner, Source)> {
+        self.list.lock().map(|g| g.clone()).unwrap_or_default()
+    }
+    fn walk_complete(&self) -> bool {
+        self.complete.load(Ordering::SeqCst)
+    }
+    fn locate_absent(&mut self, id: &SourceId, _path: &str) -> memory::daemon::Probe {
+        if !self.root.load(Ordering::SeqCst) {
+            return memory::daemon::Probe::Skip;
+        }
+        id.as_str()
+            .strip_prefix("src")
+            .and_then(|n| n.parse::<u64>().ok())
+            .map_or(memory::daemon::Probe::Skip, memory::daemon::Probe::Handle)
+    }
+}
+type AD = Daemon<FlakyFs, FStore, TestClock, Gate>;
+
+struct Rig {
+    tmp: Tmp,
+    cfg: PathBuf,
+    d: AD,
+    gate: Gate,
+    fail: Arc<std::sync::atomic::AtomicBool>,
+}
+
+const HELLO: &[u8] = b"hello\n";
+const WORLD: &[u8] = b"world\n";
+const FRESH: &[u8] = b"fresh\n";
+
+fn start_ad(tmp: &Tmp, cfg: &Path, fs: FlakyFs, store: FStore, gate: &Gate) -> R<AD> {
+    let parts = Parts {
+        fs,
+        store,
+        clock: TestClock::at(0),
+        sources: gate.clone(),
+        context: PolicyContext {
+            valid: true,
+            revision: "r".to_owned(),
+            rules: Some(rules_digest()),
+            collector_paths: vec![],
+            collector_identities: vec![],
+        },
+    };
+    let mut d = Daemon::start(&tmp.root(), cfg, parts).map_err(|x| x.code().to_owned())?;
+    d.set_sleep(|_| {});
+    Ok(d)
+}
+
+/// Owner `s1` with two captured files (handles 1 and 2); the first round has landed.
+fn rig() -> R<Rig> {
+    use std::sync::atomic::AtomicBool;
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let fail = Arc::new(AtomicBool::new(false));
+    let mut fs = FlakyFs {
+        fail: Arc::clone(&fail),
+        ..FlakyFs::default()
+    };
+    fs.mem.files.insert(1, HELLO.to_vec());
+    fs.mem.files.insert(2, WORLD.to_vec());
+    let gate = Gate {
+        list: Arc::new(Mutex::new(vec![src_of("s1", 1)?, src_of("s1", 2)?])),
+        complete: Arc::new(AtomicBool::new(true)),
+        root: Arc::new(AtomicBool::new(true)),
+    };
+    let mut d = start_ad(&tmp, &cfg, fs, FStore::default(), &gate)?;
+    assert_eq!(d.reconcile_once().map_err(e)?.landed, 1);
+    Ok(Rig {
+        tmp,
+        cfg,
+        d,
+        gate,
+        fail,
+    })
+}
+fn remove_file(r: &mut Rig, handle: u64) {
+    r.d.fs_mut().mem.files.remove(&handle);
+    if let Ok(mut list) = r.gate.list.lock() {
+        list.retain(|(_, s)| s.handle != handle);
+    }
+}
+fn deleted_and_epochs(d: &mut AD) -> R<(bool, usize)> {
+    let history = [HELLO.to_vec(), WORLD.to_vec(), FRESH.to_vec()];
+    let seen = need(
+        observe(d.store_mut(), &owner_of("s1")?, &history)?,
+        "no chain",
+    )?;
+    Ok((seen.deleted, seen.epochs))
+}
+fn rounds_never_delete(r: &mut Rig, n: usize) -> R<usize> {
+    let mut skipped = 0;
+    for _ in 0..n {
+        let report = r.d.reconcile_once().map_err(e)?;
+        assert_eq!(report.deleted, 0);
+        skipped += report.absence_skipped;
+        assert!(
+            !deleted_and_epochs(&mut r.d)?.0,
+            "deleted by a guarded round"
+        );
+    }
+    Ok(skipped)
+}
+
+#[test]
+fn a_deleted_file_is_recorded_on_the_second_full_round_only() -> R {
+    let mut r = rig()?;
+    remove_file(&mut r, 1);
+    let first = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((first.landed, first.deleted), (0, 0));
+    assert!(!deleted_and_epochs(&mut r.d)?.0);
+    let second = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((second.landed, second.deleted), (1, 1));
+    assert!(deleted_and_epochs(&mut r.d)?.0);
+    let third = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((third.landed, third.deleted), (0, 0), "recorded once");
+    Ok(())
+}
+
+#[test]
+fn a_file_back_before_the_second_round_is_not_deleted() -> R {
+    let mut r = rig()?;
+    remove_file(&mut r, 1);
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 0);
+    r.d.fs_mut().mem.files.insert(1, HELLO.to_vec());
+    if let Ok(mut list) = r.gate.list.lock() {
+        list.push(src_of("s1", 1)?);
+    }
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 0);
+    remove_file(&mut r, 1);
+    // The count restarted: one absent round is not two.
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 0);
+    assert!(!deleted_and_epochs(&mut r.d)?.0);
+    Ok(())
+}
+
+#[test]
+fn a_missing_root_deletes_nothing() -> R {
+    let mut r = rig()?;
+    r.gate.root.store(false, Ordering::SeqCst);
+    remove_file(&mut r, 1);
+    assert_eq!(rounds_never_delete(&mut r, 3)?, 3);
+    Ok(())
+}
+
+#[test]
+fn a_truncated_or_busy_walk_deletes_nothing() -> R {
+    let mut r = rig()?;
+    r.gate.complete.store(false, Ordering::SeqCst);
+    remove_file(&mut r, 1);
+    rounds_never_delete(&mut r, 3)?;
+    Ok(())
+}
+
+#[test]
+fn a_stat_error_is_not_an_absence() -> R {
+    let mut r = rig()?;
+    remove_file(&mut r, 1);
+    r.fail.store(true, Ordering::SeqCst);
+    rounds_never_delete(&mut r, 3)?;
+    Ok(())
+}
+
+#[test]
+fn a_parked_source_is_never_a_candidate() -> R {
+    let mut r = rig()?;
+    let (tmp, cfg, gate) = (r.tmp, r.cfg, r.gate);
+    let fs = std::mem::take(r.d.fs_mut());
+    let store = std::mem::take(r.d.store_mut());
+    r.d.shutdown().map_err(e)?;
+    {
+        let lock = DaemonLock::acquire(&tmp.root()).map_err(e)?;
+        let state = StateDir::prepare(&lock).map_err(e)?;
+        let body = StatusBody {
+            parked: vec![memory::daemon::ParkedEntry {
+                owner: owner_of("s1")?,
+                reason: ParkedReason::Source(ParkReason::RepeatedAuditMismatch),
+                source: Some(SourceId::try_from("src1".to_owned()).map_err(e)?),
+            }],
+            ..StatusBody::default()
+        };
+        state
+            .write(StateFile::Status, &serde_json::to_vec(&body).map_err(e)?)
+            .map_err(e)?;
+    }
+    let d = start_ad(&tmp, &cfg, fs, store, &gate)?;
+    let mut r = Rig {
+        tmp,
+        cfg,
+        d,
+        gate,
+        fail: r.fail,
+    };
+    assert_eq!(r.d.status().parked.len(), 1);
+    remove_file(&mut r, 1);
+    rounds_never_delete(&mut r, 3)?;
+    Ok(())
+}
+
+#[test]
+fn a_file_recreated_after_its_deletion_is_a_new_live_epoch() -> R {
+    let mut r = rig()?;
+    remove_file(&mut r, 1);
+    r.d.reconcile_once().map_err(e)?;
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 1);
+    assert_eq!(deleted_and_epochs(&mut r.d)?, (true, 2));
+    r.d.fs_mut().mem.files.insert(1, FRESH.to_vec());
+    if let Ok(mut list) = r.gate.list.lock() {
+        list.push(src_of("s1", 1)?);
+    }
+    let back = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((back.landed, back.deleted), (1, 0));
+    assert_eq!(deleted_and_epochs(&mut r.d)?, (false, 3));
+    Ok(())
+}
+
+#[test]
+fn capture_owner_never_counts_absence() -> R {
+    let mut r = rig()?;
+    remove_file(&mut r, 1);
+    let owner = owner_of("s1")?;
+    for _ in 0..3 {
+        r.d.capture_owner(&owner).map_err(e)?;
+    }
+    assert!(!deleted_and_epochs(&mut r.d)?.0);
+    // Had the captures counted, this first full round would be the second miss.
+    let first = r.d.reconcile_once().map_err(e)?;
+    assert_eq!(first.deleted, 0);
+    assert!(!deleted_and_epochs(&mut r.d)?.0);
+    Ok(())
+}

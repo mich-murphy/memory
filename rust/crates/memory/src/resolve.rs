@@ -15,6 +15,7 @@
 //! * No `unsafe`, no new dependencies, no panics; any I/O failure clears a resolved flag.
 
 use crate::capture::Source;
+use crate::daemon::Probe;
 use crate::environment::{FileSystem, Stat};
 use crate::realfs::{
     Encoding, RealFs, RealFsError, WalkLimits, index_claude_sessions, walk, walk_under,
@@ -492,6 +493,43 @@ impl crate::daemon::Sources for WalkSources {
         }
         self.counts = counts;
         out
+    }
+
+    fn walk_complete(&self) -> bool {
+        !self.counts.truncated && !self.counts.busy
+    }
+
+    fn locate_absent(&mut self, id: &SourceId, path: &str) -> Probe {
+        let namespace = id.as_str().split(':').next().unwrap_or_default();
+        let Some((dir, _)) = self.roots.iter().find(|(_, r)| r.namespace() == namespace) else {
+            return Probe::Skip;
+        };
+        // An unmounted or moved root never deletes.
+        if !fs::metadata(dir).is_ok_and(|m| m.is_dir()) {
+            return Probe::Skip;
+        }
+        let Ok(rel) = RootRelativePath::parse(path) else {
+            return Probe::Skip;
+        };
+        let plain = dir.join(rel.components().join("/"));
+        // A `.zst` rollout is stored under its logical (plain) path.
+        let mut packed = plain.clone().into_os_string();
+        packed.push(".zst");
+        let packed = PathBuf::from(packed);
+        let (target, encoding) =
+            if fs::symlink_metadata(&plain).is_err() && fs::symlink_metadata(&packed).is_ok() {
+                (packed, Encoding::Zstd)
+            } else {
+                (plain, Encoding::Plain)
+            };
+        let Ok(mut shared) = self.fs.0.try_borrow_mut() else {
+            return Probe::Skip;
+        };
+        let handle = *self
+            .handles
+            .entry(target.clone())
+            .or_insert_with(|| shared.register_encoded(target, encoding));
+        Probe::Handle(handle)
     }
 
     fn note(&mut self, path: &Path) -> Option<Owner> {

@@ -57,6 +57,8 @@ fn round_has_every_count_in_order() {
         },
         hints_removed: 12,
         hints_kept_old: 13,
+        deleted: 0,
+        absence_skipped: 0,
     };
     let text = render(|| round(Cause::Timer, &report));
     let (_, rest) = split(only_line(&text)).unwrap_or_default();

@@ -220,6 +220,11 @@ impl Roots {
         }
     }
 
+    /// The root's namespace: every source id of this root starts with it and a `:`.
+    pub fn namespace(&self) -> &str {
+        self.namespace.as_str()
+    }
+
     /// Attach Claude UUID → slug ownership facts.
     #[must_use]
     pub fn with_claude_sessions(mut self, index: ClaudeSessionIndex) -> Self {
