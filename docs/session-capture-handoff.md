@@ -255,6 +255,18 @@ from `main` alone.
      0600). Consequences: do not delete the retired Go directory or the preserved copy until the
      Codex databases are captured; slice 3 starts with a consistent snapshot of `state_5` and
      `thread_history_1` (backup API, not a file copy), before the other snapshot kinds.
+  19. dev-01 is cut over ([evidence 37](rust-rewrite/implementation/evidence/37-dev-01-cutover/),
+     2026-11-20): the key was added through Azure run-command (SSH works with
+     `-o IdentityAgent=none`; the 1Password agent otherwise waits for an approval); `769e689`
+     built on dev-01 with its Nix store dependencies pinned as GC roots; the Go hooks and unit
+     uninstalled and the Go files (5.8 GB) moved to
+     `~/.local/state/agent-sessions-retired-20261120/`; `memory install` wrote the systemd user
+     unit and the hooks. First round `landed=445 failed=0`; `memory check` exit 0,
+     4,291 of 4,291 match; a restart resumed (`landed=0`, audit 4,291 matched). Check loop:
+     transient unit `memory-check-loop.service`. Operator decisions on the review are D54. Next:
+     Codex `/hooks` approval on dev-01, the 2-day criterion on both hosts, then slice 3 (Codex
+     databases first, the `Ignored` verdict, the Codex `plugins/**` rule, file-history behind a
+     content scan, images, attachments and paste-cache).
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
