@@ -1159,7 +1159,10 @@ Neither check trusts the index, the planner or the hasher it is checking.
 
 ### 11.5 Logs and supervision
 
-- `tracing` writes to stderr, and the supervisor owns retention.
+- `tracing` writes to stderr, and the supervisor owns retention. launchd does not rotate
+  `StandardErrorPath`, so when stderr is a regular file the daemon rotates it itself at 8 MiB,
+  keeping 3 generations (`.1` to `.3`), and the new file starts with `log_rotated`. A pipe or
+  socket (journald) is never touched (D50, 2026-11-20).
 - Info level logs owner ids, kinds and classes. Paths appear only at debug. Content never
   appears. [review, 05 m5]
 - Every failed attempt that will be retried logs one `retry` line: owner, class, a closed cause
@@ -1532,6 +1535,7 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D47 | 2026-11-18: a Codex `.jsonl.zst` rollout is its own source (`rollouts:<name>.jsonl.zst`) in the same owner as the plain rollout; an append source may change path on `Extend` and `Epoch` (kind and class may not); the walk yields one file per (owner, source id), the lexicographically first path, and counts the rest as `duplicate`. The own-source id and the path-only precedence are superseded by D48 on 2026-11-19; the path change stays | brief 38, evidence 29; 5, 7.2 |
 | D48 | 2026-11-19: one logical identity for a Codex rollout (operator: follow DDIA). All four spellings share `rollouts:<name>.jsonl`; a `.jsonl.zst` is decoded at capture (window at most 2^23, whole frames only, otherwise withheld `undecodable`) and recorded as `CodexRollout` with the logical path; plain wins over `.zst`; an append source whose file identity changed is verified by content (Adopt) instead of replayed; `memory export` streams stored bytes again | brief 39, evidence 30; 5, 6.2, 7.2, 7.3 |
 | D49 | 2026-11-19: a store failure keeps its cause: `StoreError::{Offline, Ambiguous}` carry a closed `Cause` (DNS, connect, refused, TLS, the timeout phases, reset, I/O, protocol, missing ETag), `Failure` keeps the `StoreError`, the daemon logs a `retry` line per retried failure and `memory check` a `store_error` detail line per failed fetch. Classes, backoff, timeouts and exit codes unchanged | brief 40, evidence 32; 11.5 |
+| D50 | 2026-11-20: the daemon rotates its own log when stderr is a regular file (launchd's `StandardErrorPath`): at 8 MiB the file moves to `.1` (3 generations kept), a new 0600 file takes fd 2 and starts with `log_rotated`; path and inode are checked first and any failure turns rotation off without a log line; a pipe or socket is never touched | brief 41, evidence 33; 11.5 |
 
 Finding-to-section map for the challenge review:
 

@@ -191,6 +191,19 @@ from `main` alone.
      Mac at 21:38Z (in place; `runs = 3`; `memory check` 6,046 of 6,046 match, evidence 32,
      "Installed on this Mac"). Open: Codex `/hooks` approval, hint delivery from each agent, the
      12-hourly production checks for two days (`~/.local/state/memory-cutover/checks.log`), BC-01.
+     (Later, 2026-11-20: Claude and Codex hooks approved by the operator; Claude hints verified;
+     BC-01 is replaced by dev-01.)
+  14. 2026-11-20, operator decisions: dev-01 replaces BC-01 and is the busier test host (SSH
+     with `~/.ssh/dev-01` is refused by the server: its `authorized_keys` lacks that key); build
+     the day-to-day commands (`status`, `unpark`, `reconcile`), deletions (slice 3) and the Linux
+     install; review uncaptured files (done by a fresh-context subagent: no missed session
+     source; proposals for an `Ignored` verdict and slice 3 snapshot scope); analytics only as
+     tested workflows; the Go leftovers are retired (dashboard agent booted out; plists, Go
+     binaries, analytics runtime, Go state and release state moved to
+     `~/.local/state/agent-sessions-retired-20261120/`, 47 GB; `config.env`, a duplicate of
+     `memory`'s R2 token, deleted). Brief 41 ([41-log-rotation.md](rust-rewrite/implementation/41-log-rotation.md),
+     [evidence 33](rust-rewrite/implementation/evidence/33-log-rotation/)) is accepted locally as
+     `9f85a2b` (DESIGN D50): the daemon rotates its stderr file at 8 MiB, 3 generations.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

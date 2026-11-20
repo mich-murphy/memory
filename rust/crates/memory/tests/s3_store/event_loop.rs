@@ -1,7 +1,7 @@
 //! LOOP-2b: `memory daemon` runs the event loop on the real binary against the local server.
 //! The reconcile interval is one hour in every test here, so only the watcher, a hint or a
 //! stop can make anything happen after the start round. Every wait is bounded.
-use super::daemon_restore::{BOUND, PREFIX, Setup, restore, setup, stop};
+use super::daemon_restore::{BOUND, Guard, PREFIX, Setup, restore, setup, stop};
 use super::fake::Fault;
 use super::{BUCKET, R, e};
 use memory::assemble::start_wired;
@@ -419,5 +419,99 @@ fn a_directory_moved_into_a_root_with_a_transcript_is_captured() -> R {
     }
     let log = stop(&s, child)?;
     assert_eq!(lines_with(&log, "round").len(), 1, "{log}");
+    Ok(())
+}
+
+/// Spawn the daemon with the given stderr, a rotation cap and a 200 ms round interval.
+fn spawn_logging(s: &Setup, stderr: Stdio, cap: &str) -> R<Guard> {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_memory"));
+    cmd.arg("daemon")
+        .env_clear()
+        .env("MEMORY_STATE_DIR", &s.rig.state)
+        .env("MEMORY_SIM_TIMING", "0,200")
+        .env("MEMORY_SIM_LOG_CAP", cap)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(stderr);
+    if let Some(v) = std::env::var_os("LLVM_PROFILE_FILE") {
+        cmd.env("LLVM_PROFILE_FILE", v);
+    }
+    Ok(Guard(cmd.spawn().map_err(e)?))
+}
+
+fn sigterm_and_wait(child: &mut Guard) -> R {
+    let status = Command::new("/bin/kill")
+        .arg("-TERM")
+        .arg(child.0.id().to_string())
+        .status()
+        .map_err(e)?;
+    assert!(status.success());
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.0.try_wait().map_err(e)? {
+            assert_eq!(status.code(), Some(0));
+            return Ok(());
+        }
+        if start.elapsed() > Duration::from_secs(10) {
+            return Err("daemon did not exit within 10s of SIGTERM".to_owned());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn a_daemon_logging_to_a_file_rotates_it_into_three_generations() -> R {
+    const CAP: u64 = 2_000;
+    let s = setup("loop-rotate")?;
+    let dir = s.rig.dir.join("logs");
+    fs::create_dir_all(&dir).map_err(e)?;
+    let live = dir.join("daemon.log");
+    let file = fs::File::create(&live).map_err(e)?;
+    let mut child = spawn_logging(&s, Stdio::from(file), &CAP.to_string())?;
+    let third = dir.join("daemon.log.3");
+    let start = Instant::now();
+    while !third.exists() {
+        if let Some(status) = child.0.try_wait().map_err(e)? {
+            return Err(format!("daemon exited early: {status}"));
+        }
+        if start.elapsed() > BOUND {
+            return Err("three rotations did not happen in time".to_owned());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    sigterm_and_wait(&mut child)?;
+    assert!(!dir.join("daemon.log.4").exists());
+    let names = ["daemon.log.3", "daemon.log.2", "daemon.log.1", "daemon.log"];
+    let mut all = String::new();
+    for (i, name) in names.iter().enumerate() {
+        let text = fs::read_to_string(dir.join(name)).map_err(e)?;
+        let newest = i == names.len() - 1;
+        if !newest {
+            let len = u64::try_from(text.len()).map_err(e)?;
+            assert!((CAP..=CAP + 512).contains(&len), "{name}: {len} bytes");
+        }
+        for line in text.lines() {
+            let parsed = super::log_lines::parse(line);
+            assert!(parsed.is_ok(), "{name}: {parsed:?}");
+        }
+        if i > 0 {
+            let first = text.lines().next().unwrap_or_default();
+            assert!(first.contains(" INFO log_rotated"), "{name}: {first:?}");
+            assert!(!first.contains("log_rotated "), "{name}: {first:?}");
+        }
+        all.push_str(&text);
+    }
+    super::log_lines::assert_clean_log(&all, 1, &[]);
+    assert_eq!(lines_with(&all, "log_rotated").len(), 3, "{all}");
+    Ok(())
+}
+
+#[test]
+fn a_daemon_logging_to_a_pipe_never_rotates() -> R {
+    let s = setup("loop-norotate")?;
+    let mut child = spawn_logging(&s, Stdio::piped(), "1")?;
+    s.wait_commit(&mut child, None)?;
+    let log = stop(&s, child)?;
+    assert!(lines_with(&log, "log_rotated").is_empty(), "{log}");
     Ok(())
 }

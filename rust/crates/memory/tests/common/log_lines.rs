@@ -50,7 +50,7 @@ fn timestamp_ok(text: &str) -> bool {
 }
 
 /// The event name of a valid line, or what is wrong with it.
-fn parse(line: &str) -> Result<&str, String> {
+pub fn parse(line: &str) -> Result<&str, String> {
     if !line.is_ascii() || line.bytes().any(|b| b.is_ascii_control()) {
         return Err(format!("not plain ASCII: {line:?}"));
     }
@@ -71,7 +71,7 @@ fn parse(line: &str) -> Result<&str, String> {
         "round" => &ROUND_KEYS,
         "progress" => &["done", "total", "landed", "failed", "elapsed_s"],
         "capture" => &["owner", "result"],
-        "stopped" | "host_paused" | "host_resumed" => &[],
+        "stopped" | "host_paused" | "host_resumed" | "log_rotated" => &[],
         "state_load" => &["file", "result"],
         "parked" => &["owner", "reason", "scope"],
         "retry" => &[
@@ -152,7 +152,8 @@ pub fn assert_clean_log(stderr: &str, min_rounds: usize, canaries: &[&str]) {
     for line in stderr.lines() {
         let parsed = parse(line);
         assert!(parsed.is_ok(), "{parsed:?}");
-        events.extend(parsed.ok());
+        // `log_rotated` opens a rotated-into file; it is allowed anywhere after `started`.
+        events.extend(parsed.ok().filter(|event| *event != "log_rotated"));
         for canary in canaries {
             assert!(
                 canary.is_empty() || !line.contains(canary),
