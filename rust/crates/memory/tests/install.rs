@@ -1272,11 +1272,17 @@ fn systemd_analyze_verify_accepts_the_generated_unit() -> R {
     std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).map_err(e)?;
     let unit = dir.join("memory.service");
     std::fs::write(&unit, files::systemd_unit(exe.to_str().ok_or("utf8")?)).map_err(e)?;
+    // `--user` needs a runtime directory; a private one keeps the test off the real session.
+    // `verify` exits 0 on a parse warning ("ignoring"), which names the unit: hence the text check.
+    let runtime = dir.join("run");
+    std::fs::create_dir(&runtime).map_err(e)?;
+    std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o700)).map_err(e)?;
     let out = Command::new("systemd-analyze")
         .args(["--user", "verify"])
         .arg(&unit)
         .env_clear()
         .env("HOME", &dir)
+        .env("XDG_RUNTIME_DIR", &runtime)
         .env("PATH", "/usr/bin:/bin:/usr/local/bin")
         .stdin(Stdio::null())
         .output()
