@@ -47,6 +47,8 @@ pub enum Cause {
     Wake,
     /// A directory read was cut short.
     Dir,
+    /// An operator ran `memory reconcile`.
+    Manual,
 }
 
 /// The durations of the loop.

@@ -23,7 +23,7 @@
 //! | event | keys |
 //! |---|---|
 //! | `started` | `version` |
-//! | `round` | `cause` (`start`, `timer`, `rescan`, `wake`, `dir`) `landed failed skipped parked deferred offline throttled transient destination_auth local deterministic hints_removed hints_kept_old audit_matched audit_mismatched audit_ineligible` |
+//! | `round` | `cause` (`start`, `timer`, `rescan`, `wake`, `dir`, `manual`) `landed failed skipped parked deferred offline throttled transient destination_auth local deterministic hints_removed hints_kept_old audit_matched audit_mismatched audit_ineligible` |
 //! | `progress` | `done total landed failed elapsed_s` |
 //! | `capture` | `owner` `result` (`landed`, `unchanged`, `failed`, `stopped`) |
 //! | `stopped` | none |
@@ -293,6 +293,7 @@ const fn cause_id(cause: Cause) -> &'static str {
         Cause::Rescan => "rescan",
         Cause::Wake => "wake",
         Cause::Dir => "dir",
+        Cause::Manual => "manual",
     }
 }
 

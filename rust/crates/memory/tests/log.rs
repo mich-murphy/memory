@@ -223,6 +223,7 @@ fn round_names_every_cause() {
         (Cause::Rescan, "rescan"),
         (Cause::Wake, "wake"),
         (Cause::Dir, "dir"),
+        (Cause::Manual, "manual"),
     ] {
         let text = render(|| round(cause, &RoundReport::default()));
         let (_, rest) = split(only_line(&text)).unwrap_or_default();

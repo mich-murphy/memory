@@ -18,6 +18,7 @@ pub mod install;
 pub mod log;
 pub mod owners;
 pub mod realfs;
+pub mod reconcile;
 pub mod resolve;
 pub mod restore;
 pub mod roots;

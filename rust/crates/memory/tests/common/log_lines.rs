@@ -106,7 +106,7 @@ pub fn parse(line: &str) -> Result<&str, String> {
             "cause" if event == "retry" => {
                 !value.is_empty() && value.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
             }
-            "cause" => ["start", "timer", "rescan", "wake", "dir"].contains(&value),
+            "cause" => ["start", "timer", "rescan", "wake", "dir", "manual"].contains(&value),
             "class" => [
                 "offline",
                 "throttled",

@@ -12,6 +12,7 @@ use memory::roots::locator_roots;
 use memory::state::{DaemonLock, StateDir, StateFile};
 use memory_core::domain::{Owner, ParkReason};
 use std::fs;
+use std::net::TcpListener;
 use std::path::Path;
 use std::process::Command;
 
@@ -373,4 +374,95 @@ fn a_daemon_started_after_unpark_captures_the_owner() -> R {
     let report = daemon.reconcile_once().map_err(e)?;
     assert_eq!((report.landed, report.skipped), (1, 0));
     daemon.shutdown().map_err(e)
+}
+
+// ------------------------------------------------------------------ reconcile
+
+fn reconcile(s: &Setup) -> R<Ran> {
+    let ran = command(s, &["reconcile"])?;
+    leak_free(
+        s,
+        &Ran {
+            out: ran.out.clone(),
+            err: ran.err.clone(),
+            code: ran.code,
+        },
+    )?;
+    Ok(ran)
+}
+
+#[test]
+fn reconcile_beside_a_held_lock_refuses_with_75_and_no_request() -> R {
+    let s = setup("reconcile-lock")?;
+    let lock = DaemonLock::acquire(&s.rig.state).map_err(e)?;
+    let requests = s.server.requests().len();
+    let ran = command(&s, &["reconcile"])?;
+    drop(lock);
+    assert_eq!(ran.code, 75, "{}", ran.out);
+    assert_eq!(ran.err, "memory: lock_held\n");
+    assert!(ran.out.is_empty());
+    assert_eq!(s.server.requests().len(), requests);
+    Ok(())
+}
+
+#[test]
+fn reconcile_captures_a_new_file_then_lands_nothing_with_zero_puts() -> R {
+    let s = setup("reconcile-capture")?;
+    let ran = reconcile(&s)?;
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    assert_eq!(
+        ran.out,
+        "reconcile landed=1 failed=0 parked=0 skipped=0 deferred=0\n"
+    );
+    let round = ran
+        .err
+        .lines()
+        .find(|l| l.contains(" INFO round "))
+        .ok_or("no round line")?;
+    assert!(round.contains(" cause=manual "), "{round}");
+    for line in ran.err.lines() {
+        assert!(!super::log_lines::parse(line).map_err(e)?.is_empty());
+    }
+    let out = s.rig.dir.join("restored");
+    let out_text = out.display().to_string();
+    let restored = command(&s, &["restore", &prefix(&s.owner), "--out", &out_text])?;
+    assert_eq!(restored.code, 0, "{}{}", restored.out, restored.err);
+    assert_eq!(
+        fs::read(out.join(SESSION)).map_err(e)?,
+        fs::read(&s.file).map_err(e)?
+    );
+    let puts = s.server.count("PUT");
+    let again = reconcile(&s)?;
+    assert_eq!(again.code, 0, "{}{}", again.out, again.err);
+    assert!(
+        again.out.starts_with("reconcile landed=0 failed=0 "),
+        "{}",
+        again.out
+    );
+    assert_eq!(s.server.count("PUT"), puts, "an unchanged disk made a PUT");
+    Ok(())
+}
+
+#[test]
+fn reconcile_with_an_unreachable_store_fails_with_exit_1() -> R {
+    let s = setup("reconcile-down")?;
+    let port = {
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(e)?;
+        listener.local_addr().map_err(e)?.port()
+    };
+    let path = s.rig.state.join("config.toml");
+    let text = fs::read_to_string(&path).map_err(e)?;
+    fs::write(
+        &path,
+        text.replace(&s.server.url(), &format!("http://127.0.0.1:{port}")),
+    )
+    .map_err(e)?;
+    let ran = reconcile(&s)?;
+    assert_eq!(ran.code, 1, "{}{}", ran.out, ran.err);
+    assert!(
+        ran.out.starts_with("reconcile landed=0 failed=1 "),
+        "{}",
+        ran.out
+    );
+    Ok(())
 }
