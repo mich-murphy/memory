@@ -70,6 +70,8 @@ use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields, MakeWriter};
 use tracing_subscriber::registry::LookupSpan;
 
+pub mod rotate;
+
 /// The subscriber could not be installed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Unavailable;
