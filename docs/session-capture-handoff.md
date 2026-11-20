@@ -214,7 +214,10 @@ from `main` alone.
      `4d5e1d6` (DESIGN D51): `memory status` (offline, read-only, two tiers), `memory unpark
      <owner-prefix>|--all` and `memory reconcile` (both under the daemon lock, exit 75 beside a
      daemon). Next: deletions (slice 3), then the Linux install for dev-01 (SSH key not yet
-     authorized there).
+     authorized there). Merged as `1c5618b` (stack #201) and installed on this Mac at 07:25:20Z
+     in place (`runs = 5`; the old binary is
+     `~/.local/state/memory-cutover/backup/memory-a47eb19`); `memory status` against production:
+     exit 0, 6,051 of 6,051 sources current, nothing parked.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

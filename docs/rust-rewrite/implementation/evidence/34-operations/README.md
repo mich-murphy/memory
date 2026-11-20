@@ -68,6 +68,21 @@ Script `ops_teeth.py` in the parent's scratchpad; each tooth replaced exact anch
   scripts/gates.sh'`: all 14 sub-gates 0, seed 4231285103; 04-nextest 809 passed, 05-hegel 32,
   06-proptest 34, 10-consumer 2; coverage 96.00 % (10,518 of 10,956 lines).
 
+## Hosted gates, merge, install
+
+- Stack #201 (PRs #198 to #200): Rust gates green on all three branches; CI failed only in the
+  two `govulncheck` steps. Merged as `1c5618b`.
+- 2026-11-20 07:25:20Z: release build of `1c5618b` (sha256 prefix `1d704ce29a285bb4`) put in
+  place at `~/.local/libexec/memory/memory` by an atomic rename; the `a47eb19` binary is kept as
+  `~/.local/state/memory-cutover/backup/memory-a47eb19`. `launchctl kickstart -k`: `runs = 5`.
+- Start round (07:30:03Z): landed 1, failed 0, parked 0; no WARN or ERROR line.
+- `memory status` against production (read-only, offline), exit 0:
+  `state=loaded index=loaded rounds=71 host_paused=false`; sources `total=6051 current=6051
+  behind=0 changed=0 unindexed=0 withheld=0 oldest_behind_s=0 unknown_kind=19223
+  unknown_owner=0 duplicate=0 deferred_snapshot=3122 unreadable=0`; failures `offline=4`, all
+  other classes 0; audit `matched=6052 mismatched=0 ineligible=11`; no parked line. The state
+  directory listing was unchanged by it.
+
 ## Limits
 
 - `status --verify` is not built; `memory check` is the verified view (DESIGN 11.3, D51).
