@@ -26,6 +26,7 @@ pub mod s3;
 pub mod state;
 pub mod status;
 pub mod token;
+pub mod unpark;
 pub mod watch;
 pub mod wired;
 pub mod zstd_stream;

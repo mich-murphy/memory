@@ -1,5 +1,5 @@
 //! Command entry point. `memory hook <agent>`, `memory restore <owner> --out DIR`, `memory export`,
-//! `memory owners` (list captured owners), `memory check` (read-only acceptance measure), `memory status` (offline local health view) and
+//! `memory owners` (list captured owners), `memory check` (read-only acceptance measure), `memory status` (offline local health view), `memory unpark` (clear parked owners) and
 //! `memory install` / `memory uninstall` and `memory daemon` (the run loop) are wired; everything else exits 78.
 use std::process::ExitCode;
 
@@ -21,6 +21,7 @@ fn main() -> ExitCode {
         Some(word) if word == "owners" => memory::owners::main_entry(args),
         Some(word) if word == "restore" => memory::restore::main_entry(args),
         Some(word) if word == "status" => memory::status::main_entry(args),
+        Some(word) if word == "unpark" => memory::unpark::main_entry(args),
         // Fail explicitly rather than simulate successful capture or restore.
         _ => ExitCode::from(78),
     }
