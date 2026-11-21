@@ -111,3 +111,6 @@ expected 0, since every captured snapshot file still exists) and `memory check`.
   walked). Teeth 10 of 10; gates 14/14, seed 1340466347, nextest 879, coverage 95.58 %; Linux
   container capture and daemon tests passed. [Evidence 42](evidence/42-snapshot-deletions/).
   Next: hosted gates, merge, install on both hosts, two full rounds and `memory check`.
+- 2026-11-21 11:06Z to 12:36Z: merged as `87795f3` (stack #235) and installed on this Mac and
+  dev-01. Two full rounds on each host with `deleted=0`; `memory check` exit 0 on both with
+  `remote_only=0`. Exit criteria met. Details in evidence 42.

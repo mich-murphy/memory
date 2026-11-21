@@ -53,6 +53,29 @@ epochs. Its bytes are still in `objects/` (nothing is purged).
   coverage 95.58 %.
 - Linux container (Ubuntu 24.04): `memory` `capture` 35 and `daemon` 95, all passed.
 
+## Merge, install on both hosts, two full rounds
+
+- Stack #235 (PRs #232 to #234) merged as `87795f3`. Rust gates passed on all three PRs. CI failed
+  only in the two accepted `govulncheck` steps.
+- This Mac: installed in place at 11:06:04Z (sha256 prefix `58ccbc7209aea599`, `runs = 12`). The
+  `36adb8c` binary is kept as `backup/memory-36adb8c`. Start round at 11:09:26Z: `landed=1
+  failed=0 local=0 deleted=0 withheld=0`, `tmp/` empty, no WARN or ERROR line, peak footprint
+  76 MB. Timer round at 11:24:31Z: `landed=0 deleted=0`.
+- dev-01: `87795f3` built on the host (sha256 prefix `7a3998b1cbeee5a4`). Both Nix store
+  dependencies are the pinned GC roots. Installed in place at 11:14:33Z, with the `36adb8c` binary
+  kept as `backup/memory-36adb8c`. Start round at 11:15:35Z: `landed=2 failed=0 deleted=0`,
+  `VmHWM` 103 MB, `NRestarts=0`, no WARN or ERROR line. Timer round at 11:30:39Z: `landed=3
+  deleted=0`.
+- Two consecutive full rounds with `deleted=0` on each host, as expected: every captured snapshot
+  file still exists.
+- `memory check`, exit 0 on both hosts, `remote_only=0`, 0 mismatch, 0 uncaptured, 0
+  `store_error`. This Mac (12:13Z to 12:36Z): 1,080 owners, 7,012 sources, 6,871 `match`, 141
+  `withheld`. dev-01 (11:31Z to 11:35Z): 450 owners, 4,838 sources, 4,739 `match`, 4 `behind`
+  (sessions active during the check), 95 `withheld`. Every `withheld` line reads
+  `kind=claude.file_history reason=secret_in_text`.
+- A first Mac check started in the background was killed with its process group when an unrelated
+  SSH call timed out; it was rerun in the foreground. No result was lost or substituted.
+
 ## Limits
 
 - Bytes of deleted sources are never purged (DESIGN 19, default 4).

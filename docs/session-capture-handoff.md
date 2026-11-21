@@ -315,7 +315,10 @@ from `main` alone.
      [evidence 42](rust-rewrite/implementation/evidence/42-snapshot-deletions/)) is accepted
      locally as `3e1a51a` (DESIGN D59): D52 deletions now cover snapshot entries (Codex stores,
      file-history); a withheld-only local record is dropped after two misses. Next: merge,
-     install on both hosts, two full rounds and `memory check`.
+     install on both hosts, two full rounds and `memory check`. Merged as `87795f3` and installed
+     on both hosts on 2026-11-21 (this Mac 11:06Z, `runs = 12`; dev-01 11:14Z). Two full rounds
+     each with `deleted=0`; `memory check` exit 0 on both with `remote_only=0` (evidence 42).
+     Still deferred: Claude aux and memory, Pi aux, config assets (about 1,200 files here).
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
