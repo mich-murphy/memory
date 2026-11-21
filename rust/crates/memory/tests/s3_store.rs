@@ -60,6 +60,8 @@ mod rollout_identity;
 mod skeleton;
 #[path = "s3_store/snapshot_deletions.rs"]
 mod snapshot_deletions;
+#[path = "s3_store/snapshot_kinds.rs"]
+mod snapshot_kinds;
 use fake::{Fake, Fault, content_md5_of, etag_of};
 
 type R<T = ()> = Result<T, String>;

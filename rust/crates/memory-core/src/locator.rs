@@ -909,7 +909,8 @@ const CLAUDE_IGNORED_FILES: [&str; 4] = [
     ".last-update-result.json",
 ];
 /// Codex directories of temporary files, caches, vendored packages, generated media (D55) and
-/// lock/handshake state.
+/// lock/handshake state. Brief 49 adds `skills/.system/**` (Codex's own pack) in `codex_ignored`;
+/// other `skills/**` files stay `CodexConfig` assets.
 const CODEX_IGNORED_DIRS: [&str; 9] = [
     ".tmp",
     "tmp",
@@ -974,6 +975,8 @@ fn codex_plugin_ignored(parts: &[&str]) -> bool {
 fn codex_ignored(parts: &[&str]) -> bool {
     match parts {
         ["plugins", _, ..] => codex_plugin_ignored(parts),
+        // Brief 49: `skills/.system/**` is a pack Codex installs itself; user skills stay assets.
+        ["skills", ".system", _, ..] => true,
         [dir, _, ..] => {
             CODEX_IGNORED_DIRS.contains(dir)
                 || dir.starts_with("app-server-")

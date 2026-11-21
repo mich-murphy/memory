@@ -248,7 +248,10 @@ fn a_deleted_sibling_is_remote_only() -> R {
 fn a_deferred_snapshot_is_counted_apart() -> R {
     let s = setup("check-deferred")?;
     capture(&s)?;
-    fs::write(s.rig.root.join("settings.json"), "{}\n").map_err(e)?;
+    // Brief 49: settings.json is captured now; session-env is the deferred snapshot kind.
+    let env = s.rig.root.join("session-env").join(UUID);
+    fs::create_dir_all(&env).map_err(e)?;
+    fs::write(env.join("e"), "x\n").map_err(e)?;
     let ran = run(&s)?;
     assert_eq!(ran.code, 0, "{}", ran.out);
     assert!(ran.has("deferred_snapshot", 1) && ran.has("uncaptured", 0) && ran.has("sources", 1));
