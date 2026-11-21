@@ -388,8 +388,18 @@ impl FileSystem for RealFs {
             // Only the backup is ever read; without one the store has not been made stable.
             let backup = self.backups.get(&i).ok_or(RealFsError::Changed)?;
             let mut file = fs::File::open(backup).map_err(io)?;
+            let file_len = file
+                .metadata()
+                .map_err(io)?
+                .len()
+                .saturating_sub(range.start);
             file.seek(SeekFrom::Start(range.start)).map_err(io)?;
-            let mut buf = Vec::new();
+            // Exact allocation, as for plain files: a buffer grown by `read_to_end` doubles past
+            // the piece and left about one freed 8 MiB block per piece behind (561 MB peak on a
+            // 615 MB store, measured 2026-11-21).
+            let mut buf = Vec::with_capacity(
+                usize::try_from(file_len.min(len)).map_err(|_| RealFsError::InvalidRange)?,
+            );
             file.take(len).read_to_end(&mut buf).map_err(io)?;
             self.counters.reads += 1;
             self.counters.bytes_read += buf.len() as u64;

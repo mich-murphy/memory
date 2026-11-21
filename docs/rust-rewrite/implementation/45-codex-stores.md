@@ -134,3 +134,7 @@ temp directory with `integrity_check` and row counts against the preserved copie
   coverage 95.46 %; Linux container 154 store and locator tests passed.
   [Evidence 39](evidence/39-codex-stores/). Next: hosted gates, merge, install on both hosts, the
   first snapshot measured, restore of the shared owner checked against the preserved copies.
+- 2026-11-21 01:19Z: merged as `b20ee05` and installed on this Mac; the first store snapshot landed,
+  but the footprint peaked at 561 MB. Cause: the SQLite read grew its buffer with `read_to_end`.
+  Fixed in `90029c4` (exact-size buffer; probe 327 MB to 25.6 MB), with a regression test; dev-01
+  waits for the fixed build. Details in evidence 39.
