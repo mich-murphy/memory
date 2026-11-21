@@ -40,8 +40,8 @@
 //!
 //! # Absence
 //!
-//! [`absent_into`] is the probe of a full round for stored append sources the walk did not
-//! yield: `stat` only, no read and no admission. A miss is counted; the second consecutive miss
+//! [`absent_into`] is the probe of a full round for stored live sources (append or snapshot,
+//! brief 48) the walk did not yield: `stat` only, no read and no admission. A miss is counted; the second consecutive miss
 //! with a live remote entry commits `Change::Deleted`. A seam error is not an absence, and a
 //! file that exists resets the count. [`capture_into`] never probes absence for sources the
 //! walk did not yield; the daemon calls the probe only from `reconcile_once`.
@@ -307,7 +307,7 @@ pub fn capture_into<F: FileSystem>(
     }
 }
 
-/// A stored append source the walk did not yield: probed for absence only.
+/// A stored live source (append or snapshot, brief 48) the walk did not yield: probed for absence only.
 #[derive(Debug, Clone)]
 pub struct Candidate {
     /// Handle understood by the [`FileSystem`] seam.
