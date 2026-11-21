@@ -1953,3 +1953,148 @@ fn ignored_near_misses_keep_their_verdict() -> TestResult {
     }
     Ok(())
 }
+
+/// Brief 46 property. Oracle (the simpler one, no frozen copy of the old locator): a path may
+/// be `Ignored` only if it is outside every session-owned layout, stated independently per
+/// agent as first-component and name tests; a custom Pi root never yields `Ignored`.
+fn prop_ignored_never_session_owned(e: &[u8]) -> TestResult {
+    let mut p = Pick { bytes: e, at: 0 };
+    let heads = [
+        "projects",
+        "file-history",
+        "session-env",
+        "debug",
+        "todos",
+        "tasks",
+        "history.jsonl",
+        "sessions",
+        "archived_sessions",
+        "session_index.jsonl",
+        "memories",
+        "log",
+        "skills",
+        "paste-cache",
+        "plugins",
+        "cache",
+        "tmp",
+        ".tmp",
+        "packages",
+        "git",
+        "npm",
+        "install",
+        "backups",
+        "settings.json",
+        "settings.json.bak",
+        "state.sqlite",
+        "state.sqlite-wal",
+        "logs_2.sqlite",
+        "x.lock",
+        "x-debug.jsonl",
+        "config.toml",
+        "models.json",
+        "extensions",
+        "app-server-x",
+        "a-locks",
+        "version.json",
+        "x",
+        U1,
+    ];
+    let tails = [
+        "a",
+        "a.md",
+        "a.json",
+        "a.bin",
+        "x.jsonl",
+        "memory",
+        "subagents",
+        "tool-results",
+        "rollout-2026-01-02T03-04-05-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl",
+        "11111111-2222-3333-4444-555555555555.jsonl",
+        "--c--",
+        "2026-01-02T03-04-05.000Z_11111111-2222-3333-4444-555555555555.jsonl",
+    ];
+    let n = 1 + p.below(4);
+    let mut parts = vec![
+        heads
+            .get(p.below(heads.len()))
+            .copied()
+            .unwrap_or("x")
+            .to_owned(),
+    ];
+    for _ in 1..n {
+        parts.push(
+            tails
+                .get(p.below(tails.len()))
+                .copied()
+                .unwrap_or("a")
+                .to_owned(),
+        );
+    }
+    let path = parts.join("/");
+    let rel = RootRelativePath::parse(&path)?;
+    let first = parts.first().map_or("", String::as_str);
+    let last = parts.last().map_or("", String::as_str);
+    for home in [Home::Claude, Home::Codex, Home::Pi] {
+        let got = locate(&rel, &make_roots(home, "r1", &p.noise(), false)?);
+        if got == Located::Ignored {
+            ensure!(
+                got.withhold_reason() == Some(WithholdReason::Ignored),
+                "reason"
+            );
+            let lower = last.to_ascii_lowercase();
+            let store = [".sqlite", ".sqlite3", ".db"]
+                .iter()
+                .any(|x| lower.ends_with(x))
+                && !lower.starts_with("logs_");
+            let session_root = match home {
+                Home::Claude => [
+                    "projects",
+                    "file-history",
+                    "session-env",
+                    "debug",
+                    "todos",
+                    "tasks",
+                    "history.jsonl",
+                ]
+                .contains(&first),
+                Home::Codex => [
+                    "sessions",
+                    "archived_sessions",
+                    "history.jsonl",
+                    "session_index.jsonl",
+                    "memories",
+                    "log",
+                ]
+                .contains(&first),
+                _ => first == "sessions",
+            };
+            ensure!(
+                !session_root && !store,
+                "{home:?} {path}: ignored but session-owned or a store"
+            );
+            if parts.len() > 1 && home == Home::Claude {
+                ensure!(first != "projects", "{path}");
+            }
+        }
+    }
+    for home in [Home::PiCustom, Home::ClaudePrimary] {
+        let got = locate(&rel, &make_roots(home, "r1", &[], false)?);
+        ensure!(got != Located::Ignored, "{home:?} {path}: ignored");
+    }
+    Ok(())
+}
+
+#[hegel::test]
+fn hegel_ignored_never_session_owned(tc: TestCase) {
+    let e: Vec<u8> = tc.draw(gs::vecs(gs::integers::<u8>()));
+    let r = prop_ignored_never_session_owned(&e);
+    assert!(r.is_ok(), "{r:?}");
+}
+
+proptest! {
+    #[test]
+    fn proptest_ignored_never_session_owned(e in prop::collection::vec(any::<u8>(), 0..96)) {
+        let r = prop_ignored_never_session_owned(&e);
+        prop_assert!(r.is_ok(), "{:?}", r);
+    }
+}
