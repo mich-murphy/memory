@@ -129,3 +129,10 @@ compared by size and SHA-256 with the local files (counts only).
 ## Ledger
 
 - 2026-11-21 05:20Z: brief written on `6f5139f`.
+- 2026-11-21: FILEHISTORY accepted locally at `68043e3` (5 worker commits, 3 parent commits). The
+  parent found three gaps: a cached withhold skipped the absence-count reset (`1359290`), a secret
+  assignment nested in another value was never judged (`6e70050`), and no test pinned the reused
+  shell guard (`68043e3`). Teeth 23 of 23; gates 14/14, seed 3887993034, nextest 869, coverage
+  95.58 %; Linux container privacy, capture, daemon and resolve tests passed.
+  [Evidence 41](evidence/41-file-history/). Next: hosted gates, merge, install on both hosts, the
+  first round measured, `memory check`, restore of one session compared with the local files.
