@@ -294,7 +294,11 @@ from `main` alone.
      as `3b55337` (DESIGN D57): known non-session files in agent directories are `Ignored`, counted
      as `ignored=` apart from `unknown_kind` and never captured; Claude `skills/` and
      `paste-cache/` and the Codex `plugins/` binaries leave the snapshot set. Next: merge, install
-     on both hosts, census before and after; then file-history behind the content scan.
+     on both hosts, census before and after; then file-history behind the content scan. Merged
+     as `89b155e` and installed on both hosts on 2026-11-21 (this Mac at 04:15Z, `runs = 10`;
+     dev-01 at 04:23Z). The start rounds were clean. `unknown_kind` went from 19,192 to 29 and
+     from 48,198 to 117. `ignored` is 20,123 and 48,564 (evidence 40). Next: file-history behind
+     the fail-closed content scan (D54).
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
