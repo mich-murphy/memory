@@ -99,11 +99,12 @@ fn profile_of(kind: &SourceKind) -> Profile {
         SourceKind::ClaudeMemory | SourceKind::CodexMemory | SourceKind::ClaudePlan => {
             Profile::TextAsset
         }
+        // D54, brief 47: whole-file content scan; published whole or withheld whole.
+        SourceKind::ClaudeFileHistory => Profile::Scanned,
         SourceKind::ClaudeToolResults
         | SourceKind::ClaudeTodos
         | SourceKind::ClaudeTasks
         | SourceKind::ClaudeTeams
-        | SourceKind::ClaudeFileHistory
         | SourceKind::ClaudeDebug
         | SourceKind::ClaudeHistory
         | SourceKind::CodexStore
@@ -509,7 +510,11 @@ impl crate::daemon::Sources for WalkSources {
                         class: SourceClass::Snapshot,
                         kind,
                         ..
-                    } if *kind != SourceKind::CodexStore => {
+                    } if !matches!(
+                        kind,
+                        SourceKind::CodexStore | SourceKind::ClaudeFileHistory
+                    ) =>
+                    {
                         counts.deferred_snapshot += 1;
                         continue;
                     }

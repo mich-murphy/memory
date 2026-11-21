@@ -1232,3 +1232,51 @@ fn undecodable_stat_or_read_is_withheld_with_no_upload() -> R {
     }
     Ok(())
 }
+
+// ---- D54, brief 47: scanned snapshot (Claude file-history)
+
+fn scanned() -> R<Source> {
+    let mut s = source(
+        1,
+        "file-history/s1/0123456789abcdef@v1",
+        SourceClass::Snapshot,
+        Profile::Scanned,
+    )?;
+    s.kind = SourceKind::ClaudeFileHistory;
+    Ok(s)
+}
+
+#[test]
+fn a_clean_scanned_file_lands_and_a_secret_or_binary_one_puts_nothing() -> R {
+    let mut rig = Rig::new(vec![scanned()?]);
+    rig.fs.set(1, b"fn main() {}\n");
+    let (outcomes, changes) = rig.cycle()?;
+    assert_eq!(outcomes, [SourceOutcome::Planned]);
+    assert_eq!(kinds(&changes), ["replace"]);
+
+    let secret: &[u8] = concat!("key = ", "AKIA", "EXAMPLEEXAMPLE00", "\n").as_bytes();
+    for (bytes, reason) in [
+        (secret, WithholdReason::SecretInText),
+        (&b"ab\0cd"[..], WithholdReason::Binary),
+        (&[0x66_u8, 0xff][..], WithholdReason::Binary),
+    ] {
+        let got = withheld_for(scanned()?, bytes, |_| {})?;
+        assert_eq!(got, SourceOutcome::Withheld(reason));
+    }
+    Ok(())
+}
+
+#[test]
+fn an_oversize_scanned_file_is_withheld_before_any_read() -> R {
+    let mut rig = Rig::new(vec![scanned()?]);
+    let mut spy = Spy::default();
+    spy.inner.set(1, &vec![b'a'; 1024 * 1024 + 1]);
+    let got = run_spy(&mut rig, &mut spy)?;
+    assert_eq!(
+        got.outcomes.first().map(|(_, o)| o),
+        Some(&SourceOutcome::Withheld(WithholdReason::SourceLimit))
+    );
+    assert!(got.commit.is_none());
+    assert!(spy.reads.is_empty(), "no read: {:?}", spy.reads);
+    Ok(())
+}

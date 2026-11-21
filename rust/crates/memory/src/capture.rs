@@ -625,6 +625,11 @@ fn step<F: FileSystem>(
         }
         return SourceOutcome::Unchanged;
     };
+    // D54, brief 47: a scanned file over the cap is withheld from its stat, before any read.
+    if src.facts.profile == Profile::Scanned && stat.size > memory_core::privacy::MAX_SCANNED_BYTES
+    {
+        return SourceOutcome::Withheld(WithholdReason::SourceLimit);
+    }
     let observed = Observed {
         id: stat.id.clone(),
         size: stat.size,
