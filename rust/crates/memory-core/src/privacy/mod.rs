@@ -23,6 +23,11 @@
 //! let _: memory_core::privacy::AuthorizedBody = serde_json::from_str("{}").unwrap();
 //! ```
 
+//! `Profile::Scanned` (D54, brief 47) is a whole-file content scan (`scan.rs`): the file is
+//! published byte for byte or withheld whole (`SourceLimit`, `Binary`, `SecretInText`,
+//! `ScrubFailed`). It is never prefix-stable and needs the current rules digest, which covers
+//! the scanner table and size cap.
+
 mod document;
 mod launch;
 mod names;

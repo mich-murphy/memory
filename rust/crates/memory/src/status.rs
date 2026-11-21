@@ -13,6 +13,9 @@
 //! failure and audit counts and the parked entries. The verified view, which fetches every piece
 //! from the store, is `memory check`; `status --verify` is a usage error.
 //!
+//! A source with a recorded withhold in `index.json` (a scanned file, D54, brief 47) counts as
+//! `withheld`, as does one that admission denies.
+//!
 //! Output is a closed vocabulary: counts, owner prefixes and reason codes. Never a path, a
 //! source id, content or a credential, and never a claim that everything is captured.
 use crate::assemble::policy_context;

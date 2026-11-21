@@ -12,6 +12,9 @@
 //! * Hop bound: [`MAX_HOPS`] (40) links on the last component; more, or a loop, is
 //!   unresolved. Directory-component links are resolved by `canonicalize`, which also
 //!   rejects loops.
+//! * Snapshot kinds: `CodexStore` and (D54, brief 47) `ClaudeFileHistory` are yielded; the latter
+//!   has profile `Scanned` (whole-file content scan). Every other snapshot kind is counted as
+//!   `deferred_snapshot`. `note` still routes append sources only.
 //! * No `unsafe`, no new dependencies, no panics; any I/O failure clears a resolved flag.
 
 use crate::capture::Source;

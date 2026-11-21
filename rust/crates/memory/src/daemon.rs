@@ -21,6 +21,12 @@
 //! owner whose every file is gone is still visited; it leaves the set once no live append entry
 //! remains. `capture_owner` never counts absence.
 //!
+//! Withheld scanned files (D54, brief 47): `SourceIndex.withheld` (`#[serde(default)]`) records the
+//! fingerprint, rules and reason of a withhold of a `Profile::Scanned` file (Claude file-history).
+//! The same pair gives `Unchanged` without a read; a new fingerprint or rules judge again; a file
+//! that later lands clears it. `RoundReport.withheld` counts judgements made in the round, not
+//! cached ones. The manifest never records a withheld file.
+//!
 //! The commit base (`current.json` ETag, owner state) is never persisted: every owner
 //! recovers it from the store on its first round after a start (`recover_base`).
 use crate::audit::AuditCounts;
