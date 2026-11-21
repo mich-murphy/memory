@@ -12,11 +12,13 @@
 //! * Hop bound: [`MAX_HOPS`] (40) links on the last component; more, or a loop, is
 //!   unresolved. Directory-component links are resolved by `canonicalize`, which also
 //!   rejects loops.
-//! * Snapshot kinds: `CodexStore` and (D54, brief 47) `ClaudeFileHistory` are yielded; the latter
-//!   has profile `Scanned` (whole-file content scan). Every other snapshot kind is counted as
-//!   `deferred_snapshot`. `note` still routes append sources only. `locate_absent` (D52, brief 48) resolves
-//!   stored snapshot entries too; a Codex store is probed by its database file only, so a missing
-//!   `-wal` or `-shm` is never an absence.
+//! * Snapshot kinds (brief 49): every snapshot kind is yielded except `ClaudeSessionEnv`,
+//!   `ClaudeUsage` and `ClaudePaste`, which are counted as `deferred_snapshot`. Every yielded
+//!   snapshot kind but `CodexStore` has profile `Scanned` (whole-file content scan; recognized
+//!   config documents are scrubbed first). `CodexStore` keeps `OtherKnown`; append kinds keep
+//!   their profiles. `note` still routes append sources only. `locate_absent` (D52, brief 48)
+//!   resolves stored snapshot entries too; a Codex store is probed by its database file only,
+//!   so a missing `-wal` or `-shm` is never an absence.
 //! * No `unsafe`, no new dependencies, no panics; any I/O failure clears a resolved flag.
 
 use crate::capture::Source;
@@ -328,8 +330,8 @@ pub struct Counts {
     /// Files whose (owner, source id) another file with a lexicographically smaller
     /// root-relative path already holds; not yielded.
     pub duplicate: u64,
-    /// Snapshot-class files other than Codex stores, located but withheld (DESIGN.md 17); neither
-    /// yielded nor counted as unknown.
+    /// Session-env, usage-data and paste-cache snapshot files (brief 49), located but not yielded
+    /// (DESIGN.md 17); neither counted as unknown.
     pub deferred_snapshot: u64,
     /// Yielded sources whose facts are unresolved (capture will block them).
     pub unresolved: u64,
