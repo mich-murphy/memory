@@ -4919,6 +4919,22 @@ fn a_withheld_only_record_is_dropped_after_two_misses_and_builds_no_change() -> 
     Ok(())
 }
 
+/// A walked withheld file whose stat fails is present, not absent (D52): its record is kept over
+/// rounds where the step returns before `Present` resets the count (parent finding, brief 48).
+#[test]
+fn a_walked_withheld_file_with_a_stat_error_keeps_its_record() -> R {
+    let r = withheld_rig()?;
+    r.fail.store(true, Ordering::SeqCst);
+    let mut r = r;
+    for _ in 0..3 {
+        let round = r.d.reconcile_once().map_err(e)?;
+        assert_eq!(round.deleted, 0);
+    }
+    r.fail.store(false, Ordering::SeqCst);
+    assert!(rig_index_has(r, "src4")?, "dropped while walked");
+    Ok(())
+}
+
 #[test]
 fn a_withheld_file_back_before_the_second_round_keeps_its_record() -> R {
     let mut r = withheld_rig()?;
