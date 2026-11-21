@@ -6,6 +6,13 @@
 //! cannot be derived from the path or an unambiguous shell fact is `UnknownOwner`. Both are
 //! withheld and counted by the caller, never uploaded.
 //!
+//! A fourth verdict, `Ignored` (D54, D55, brief 46), marks known non-session files (vendor code,
+//! caches, backups, generated media) so `UnknownKind` stays the list of files nobody has
+//! classified. The ignore rules apply to agent-dir layouts only, and only where the result
+//! would otherwise be `UnknownKind` or a config/paste snapshot: a session-owned source never
+//! becomes `Ignored`, a custom Pi root keeps its own rules, and credential files keep their
+//! verdict. Ignored files are counted by the walk and never yielded, hinted or captured.
+//!
 //! Identifiers are content-independent and derived only from the root namespace and the
 //! path itself, so an unrelated sibling appearing elsewhere never changes a result.
 use crate::domain::{
