@@ -319,6 +319,12 @@ from `main` alone.
      on both hosts on 2026-11-21 (this Mac 11:06Z, `runs = 12`; dev-01 11:14Z). Two full rounds
      each with `deleted=0`; `memory check` exit 0 on both with `remote_only=0` (evidence 42).
      Still deferred: Claude aux and memory, Pi aux, config assets (about 1,200 files here).
+  25. Brief 49 ([49-deferred-snapshots.md](rust-rewrite/implementation/49-deferred-snapshots.md),
+     [evidence 43](rust-rewrite/implementation/evidence/43-deferred-snapshots/)) is accepted
+     locally as `b9ef539` (DESIGN D60): every snapshot kind but session-env, usage-data and
+     paste-cache is captured behind the fail-closed `Scanned` profile; Codex `skills/.system/` is
+     ignored. Next: merge, install on both hosts, before and after counts, `memory check`, restore
+     of the shared Claude owner.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

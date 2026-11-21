@@ -21,7 +21,7 @@ ran the real `admit` and `transform` in memory over every deferred file on both 
 
 | Profile today | Kinds | Under that profile | Under `Scanned` |
 |---|---|---|---|
-| `OtherKnown` (no text check) | `ClaudeAux`, `PiAux` | every file publishes | Mac: 5 of 1,018 withheld (`SecretInText`). dev-01: 71 of 1,072 withheld, 40 of them Pi `subagent-artifacts/*.jsonl` run logs (30 `SecretInText`, 10 over 1 MiB) |
+| `OtherKnown` (no text check) | `ClaudeAux`, `PiAux` | every file publishes | Mac: 5 of 1,018 withheld (`SecretInText`). dev-01: 41 of 1,057 withheld (corrected at acceptance; first written as 71 of 1,072), 40 of them Pi `subagent-artifacts/*.jsonl` run logs (30 `SecretInText`, 10 over 1 MiB) |
 | `TextAsset` (fails open on binary, non-UTF-8, over 1 MiB, code extensions) | `ClaudeMemory`, `ClaudePlan` | every file publishes | Mac: 3 of 127 withheld. dev-01: 4 of 52 |
 | `Config` (document scrub, then the fail-open text check) | Claude, Codex and Pi config assets | every file publishes | 4 `png` (`Binary`), 3 `py` (`SecretInText`) in Codex's vendored `skills/.system/`, and 1 Pi extension `ts` per host |
 
@@ -123,3 +123,9 @@ check`, and a restore of the shared Claude owner compared by SHA-256 with `trans
 ## Ledger
 
 - 2026-11-21 13:30Z: brief written on `9884ac2`.
+- 2026-11-21: SNAPKINDS accepted locally at `b9ef539` (5 worker commits, 1 parent commit). The
+  parent found that no test pinned Pi aux at `Scanned` and added a Pi walk to the profile test
+  (`b9ef539`). Teeth 12 of 12; gates 14/14, seed 1051600503, nextest 887, coverage 95.58 %; Linux
+  container core_locator, capture, daemon and resolve passed.
+  [Evidence 43](evidence/43-deferred-snapshots/). Next: hosted gates, merge, install on both
+  hosts, before and after counts, `memory check` and a restore of the shared Claude owner.
