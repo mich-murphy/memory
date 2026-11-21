@@ -99,6 +99,8 @@ enum Exp {
     },
     Kind,
     Owner,
+    /// Brief 46: a known non-session file.
+    Ignored,
 }
 
 struct Row {
@@ -144,7 +146,9 @@ fn eid(path: &str) -> String {
 
 fn matches(got: &Located, exp: &Exp, agent: &Agent) -> bool {
     match (got, exp) {
-        (Located::UnknownKind, Exp::Kind) | (Located::UnknownOwner, Exp::Owner) => true,
+        (Located::UnknownKind, Exp::Kind)
+        | (Located::UnknownOwner, Exp::Owner)
+        | (Located::Ignored, Exp::Ignored) => true,
         (
             Located::Source {
                 owner,
@@ -411,7 +415,6 @@ fn rows() -> Vec<Row> {
     for (path, kind, class) in [
         ("teams/t/config.json", K::ClaudeTeams, S),
         ("plans/p.md", K::ClaudePlan, S),
-        ("paste-cache/x", K::ClaudePaste, S),
         ("usage-data/u.json", K::ClaudeUsage, S),
         ("agent-memory/a/m.md", K::ClaudeMemory, S),
         ("history.jsonl", K::ClaudeHistory, A),
@@ -445,7 +448,6 @@ fn rows() -> Vec<Row> {
     }
     for (dir, a) in [
         ("rules", C::Rule),
-        ("skills", C::Skill),
         ("agents", C::Agent),
         ("commands", C::Command),
         ("output-styles", C::OutputStyle),
@@ -472,9 +474,6 @@ fn rows() -> Vec<Row> {
         "skills",
         "teams",
         "file-history",
-        "plugins/cache/x",
-        "plugins/installed_plugins.json.bak",
-        "backups/.claude.json",
         ".claude.json",
         ".credentials.json",
         "settings.json/x",
@@ -484,6 +483,23 @@ fn rows() -> Vec<Row> {
     ] {
         v.push(row(cl, p, Exp::Kind));
     }
+    // Brief 46: `plugins/**` other than the two top-level assets is Ignored (was UnknownKind).
+    for p in [
+        "plugins/installed_plugins.json.bak",
+        "plugins/cache/x",
+        "backups/.claude.json",
+    ] {
+        v.push(row(cl, p, Exp::Ignored));
+    }
+    // Brief 46: a Pi agent-dir config backup is Ignored (was UnknownKind); custom roots keep it.
+    v.push(row(Home::Pi, "models.json.bak", Exp::Ignored));
+    // D55: paste-cache was a ClaudePaste snapshot.
+    v.push(row(cl, "paste-cache/x", Exp::Ignored));
+    // Brief 46: log database and store sidecars (the latter were UnknownKind).
+    for p in ["logs_2.sqlite", "LOGS_1.SQLITE", "state.sqlite-wal"] {
+        v.push(row(Home::Codex, p, Exp::Ignored));
+    }
+    v.push(row(Home::Codex, "plugins/cache/x", Exp::Ignored));
 
     // ---- Claude primary home: only the exact file ----
     let ph = Home::ClaudePrimary;
@@ -611,8 +627,6 @@ fn rows() -> Vec<Row> {
     }
     for p in [
         "sessions".to_owned(),
-        "logs_2.sqlite".to_owned(),
-        "LOGS_1.SQLITE".to_owned(),
         "sessions/x.jsonl".to_owned(),
         format!("sessions/rollout-2026-01-02T03-04-05-{UA}.json"),
         format!("sessions/{name}.zst.zst"),
@@ -623,8 +637,6 @@ fn rows() -> Vec<Row> {
         name.clone(),
         "sessions/extra/dir".to_owned(),
         "plugins".to_owned(),
-        "plugins/cache/x".to_owned(),
-        "state.sqlite-wal".to_owned(),
         "unknown.txt".to_owned(),
         "memories".to_owned(),
         "log".to_owned(),
@@ -983,7 +995,6 @@ fn rows() -> Vec<Row> {
         ".log".to_owned(),
         "sub/a.log".to_owned(),
         "settings.json/x".to_owned(),
-        "models.json.bak".to_owned(),
         "unknown.txt".to_owned(),
         "migration-backups/x".to_owned(),
         "bin/x".to_owned(),
@@ -1061,8 +1072,10 @@ fn every_kind_but_generated_snapshot_and_every_asset_is_reachable() -> TestResul
         &serde_json::to_value(schemars::schema_for!(SourceKind))?,
         &mut expected,
     );
-    expected.retain(|name| name != "pi.snapshot");
-    ensure!(expected.len() >= 29, "schema walk found {expected:?}");
+    // D55: `paste-cache/**` is Ignored, so `claude.paste` is no longer a path kind.
+    expected.retain(|name| name != "pi.snapshot" && name != "claude.paste");
+    // 29 kinds before D55 removed `claude.paste` from the path kinds.
+    ensure!(expected.len() >= 28, "schema walk found {expected:?}");
     for k in &expected {
         ensure!(
             kinds.contains(&format!("\"{k}\"")),
@@ -1760,4 +1773,183 @@ fn ignored_verdict_is_withheld_with_its_own_reason() {
         Some(WithholdReason::Ignored)
     );
     assert_ne!(Located::Ignored, Located::UnknownKind);
+}
+
+// ---- brief 46 / D54 / D55: the Ignored verdict ----
+
+fn verdict(home: Home, path: &str) -> Result<Located, Box<dyn std::error::Error>> {
+    Ok(locate(
+        &RootRelativePath::parse(path)?,
+        &make_roots(home, "r1", &[], false)?,
+    ))
+}
+
+fn is_src(l: &Located) -> bool {
+    matches!(l, Located::Source { .. })
+}
+
+#[test]
+fn ignored_rules_ignore_known_non_session_files() -> TestResult {
+    let claude = [
+        "skills/a/b.md",
+        "paste-cache/x",
+        "plugins/cache/x",
+        "plugins/a/b.json",
+        "telemetry/t.json",
+        "backups/.claude.json",
+        "cache/c",
+        "shell-snapshots/s.sh",
+        "moshi-plugin/m",
+        "jobs/j",
+        "state/s",
+        "daemon/d",
+        "downloads/d",
+        "stats-cache.json",
+        "mcp-needs-auth-cache.json",
+        ".last-cleanup",
+        ".last-update-result.json",
+        "settings.json.memory-backup-1",
+        "remote-settings.json.synced-at",
+    ];
+    for p in claude {
+        let got = verdict(Home::Claude, p)?;
+        ensure!(got == Located::Ignored, "claude {p}: {got:?}");
+    }
+    let codex = [
+        ".tmp/a",
+        "tmp/a",
+        "cache/a",
+        "packages/a",
+        "computer-use/a",
+        "generated_images/a.png",
+        "attachments/a",
+        "shell_snapshots/a",
+        "tui-thread-reference-capabilities/a",
+        "app-server-x/a",
+        "foo-locks/a",
+        "plugins/cache/x",
+        "plugins/.x/a.json",
+        "plugins/p/bin",
+        "plugins/p/x.js",
+        "logs_2.sqlite",
+        "LOGS_1.SQLITE",
+        "state.sqlite-wal",
+        "state.sqlite3-shm",
+        "a.db-journal",
+        "x.lock",
+        "models_cache.json",
+        "version.json",
+        "installation_id",
+        "chrome-native-hosts-1.json",
+        "hooks.json.memory-backup-1",
+    ];
+    for p in codex {
+        let got = verdict(Home::Codex, p)?;
+        ensure!(got == Located::Ignored, "codex {p}: {got:?}");
+    }
+    let pi = [
+        "git/a",
+        "npm/a",
+        "install/a",
+        "pi-terminology/a",
+        "web-search-cache/a",
+        "pi-extensions-pre-1/a",
+        "extensions-update-backup-1/a",
+        "x-debug.jsonl",
+        "settings.json.bak-1",
+        "settings.json.before-x",
+    ];
+    for p in pi {
+        let got = verdict(Home::Pi, p)?;
+        ensure!(got == Located::Ignored, "pi {p}: {got:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn ignored_near_misses_keep_their_verdict() -> TestResult {
+    // Claude: assets and sources next to ignored names.
+    for p in [
+        "plugins/installed_plugins.json",
+        "plugins/known_marketplaces.json",
+        "settings.json",
+        "history.jsonl",
+        "agents/a/b.md",
+    ] {
+        ensure!(is_src(&verdict(Home::Claude, p)?), "claude {p}");
+    }
+    for p in [
+        "sessions/x",
+        "settings.json.",
+        "stats-cache.json.x",
+        "cachex/a",
+    ] {
+        ensure!(
+            verdict(Home::Claude, p)? == Located::UnknownKind,
+            "claude {p}"
+        );
+    }
+    // Codex: stores, plugins assets, near-miss names.
+    for p in [
+        "state_5.sqlite",
+        "logs.sqlite3",
+        "a.db",
+        "history.jsonl",
+        "session_index.jsonl",
+        "config.toml",
+        "plugins/p/plugin.json",
+        "plugins/p/a.toml",
+        "plugins/p/a.md",
+        &format!("sessions/2026/01/02/rollout-2026-01-02T03-04-05-{UA}.jsonl"),
+        &format!("sessions/rollout-2026-01-02T03-04-05-{UA}.jsonl.zst"),
+    ] {
+        ensure!(is_src(&verdict(Home::Codex, p)?), "codex {p}");
+    }
+    for p in [
+        "outputs/a",
+        "tools/a",
+        "sqlite/a",
+        "browser/a",
+        "automations/a",
+        ".codex-global-state.json",
+        "hooks.json.",
+    ] {
+        ensure!(
+            verdict(Home::Codex, p)? == Located::UnknownKind,
+            "codex {p}"
+        );
+    }
+    // Pi: sessions and config assets.
+    for p in [
+        "settings.json",
+        "models.json",
+        "extensions/a/b.ts",
+        "sessions/--c--/2026-01-02T03-04-05.000Z_11111111-2222-3333-4444-555555555555.jsonl",
+    ] {
+        ensure!(is_src(&verdict(Home::Pi, p)?), "pi {p}");
+    }
+    for p in [
+        "missions/a",
+        "pi-peers/a",
+        "machines-backups/a",
+        "debug.jsonl",
+    ] {
+        ensure!(verdict(Home::Pi, p)? == Located::UnknownKind, "pi {p}");
+    }
+    // Session-owned Claude sources never become ignored.
+    for p in [
+        format!("projects/-p/{U1}.jsonl"),
+        format!("projects/-p/{U1}/subagents/a.jsonl"),
+        format!("projects/-p/{U1}/tool-results/a"),
+        format!("file-history/{U1}/f@v1"),
+        "projects/-p/memory/m.md".to_owned(),
+    ] {
+        ensure!(is_src(&verdict(Home::Claude, &p)?), "claude {p}");
+    }
+    // A custom Pi root keeps its rules: the same paths are not ignored.
+    for p in ["git/a", "npm/a", "pi-terminology/a", "x-debug.jsonl"] {
+        let got = verdict(Home::PiCustom, p)?;
+        ensure!(got != Located::Ignored, "custom {p}: {got:?}");
+    }
+    Ok(())
 }

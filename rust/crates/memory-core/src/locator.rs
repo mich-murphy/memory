@@ -264,7 +264,7 @@ pub enum ConfigAsset {
     OutputStyle,
     /// Claude `hooks/**`.
     HookDir,
-    /// Claude `plugins/installed_plugins.json`, Codex `plugins/**` (not `cache`).
+    /// Claude `plugins/installed_plugins.json` and `known_marketplaces.json`, Codex `plugins/**` (not `cache`).
     Plugin,
     /// Codex/Pi `prompts/**`.
     Prompt,
@@ -484,7 +484,6 @@ enum OwnerSpec<'a> {
 enum Miss {
     Kind,
     Owner,
-    #[expect(dead_code, reason = "constructed by the brief 46 rules (step 2)")]
     Ignored,
 }
 
@@ -592,9 +591,10 @@ fn claude<'a>(parts: &[&'a str], roots: &'a Roots) -> Res<'a> {
         ["agent-memory", _, ..] => {
             shared(SourceKind::ClaudeMemory, Snapshot, Role::Artifact, parts)
         }
-        ["plugins", "installed_plugins.json"] => {
-            asset(SourceKind::ClaudeConfig, ConfigAsset::Plugin, parts)
-        }
+        [
+            "plugins",
+            "installed_plugins.json" | "known_marketplaces.json",
+        ] => asset(SourceKind::ClaudeConfig, ConfigAsset::Plugin, parts),
         _ => Err(Miss::Kind),
     }
 }
@@ -875,6 +875,159 @@ fn pi_session<'a>(rest: &[&'a str], mode: PiMode, parts: &[&'a str]) -> Res<'a> 
     }
 }
 
+// ---- ignore rules (D54, D55, brief 46) ---------------------------------------------------
+
+/// Claude directories holding vendor code, caches, telemetry or machine state, never sessions.
+/// `skills` (D54) and `paste-cache` (D55) were config/paste snapshots; `plugins` is handled
+/// separately because two top-level files stay assets.
+const CLAUDE_IGNORED_DIRS: [&str; 12] = [
+    "skills",
+    "paste-cache",
+    "plugins",
+    "telemetry",
+    "backups",
+    "cache",
+    "shell-snapshots",
+    "moshi-plugin",
+    "jobs",
+    "state",
+    "daemon",
+    "downloads",
+];
+/// Claude top-level files that are caches or update markers.
+const CLAUDE_IGNORED_FILES: [&str; 4] = [
+    "stats-cache.json",
+    "mcp-needs-auth-cache.json",
+    ".last-cleanup",
+    ".last-update-result.json",
+];
+/// Codex directories of temporary files, caches, vendored packages, generated media (D55) and
+/// lock/handshake state.
+const CODEX_IGNORED_DIRS: [&str; 9] = [
+    ".tmp",
+    "tmp",
+    "cache",
+    "packages",
+    "computer-use",
+    "generated_images",
+    "attachments",
+    "shell_snapshots",
+    "tui-thread-reference-capabilities",
+];
+/// Codex top-level files that are caches or install identity.
+const CODEX_IGNORED_FILES: [&str; 3] = ["models_cache.json", "version.json", "installation_id"];
+/// Pi directories of vendored code, package caches and D54's `pi-terminology`.
+const PI_IGNORED_DIRS: [&str; 5] = [
+    "git",
+    "npm",
+    "install",
+    "pi-terminology",
+    "web-search-cache",
+];
+/// Pi directory name prefixes of extension backups.
+const PI_IGNORED_DIR_PREFIXES: [&str; 2] = ["pi-extensions-pre-", "extensions-update-backup-"];
+
+/// `<known>.<suffix>` with a non-empty suffix: an editor or tool backup of a config file.
+fn backup_of(name: &str, known: &[&str]) -> bool {
+    known.iter().any(|k| {
+        name.strip_prefix(k)
+            .and_then(|r| r.strip_prefix('.'))
+            .is_some_and(|suffix| !suffix.is_empty())
+    })
+}
+
+fn names<'a, const N: usize>(table: &[(&'a str, ConfigAsset); N]) -> Vec<&'a str> {
+    table.iter().map(|(n, _)| *n).collect()
+}
+
+fn claude_ignored(parts: &[&str]) -> bool {
+    match parts {
+        [name] => CLAUDE_IGNORED_FILES.contains(name) || backup_of(name, &names(&CLAUDE_FILES)),
+        [
+            "plugins",
+            "installed_plugins.json" | "known_marketplaces.json",
+        ] => false,
+        [dir, _, ..] => CLAUDE_IGNORED_DIRS.contains(dir),
+        [] => false,
+    }
+}
+
+/// Codex `plugins/`: `cache/**` and dot directories are vendor code; elsewhere only
+/// `json`, `toml` and `md` files are assets, a binary or script is not.
+fn codex_plugin_ignored(parts: &[&str]) -> bool {
+    let [_, sub, ..] = parts else { return false };
+    if *sub == "cache" || sub.starts_with('.') {
+        return true;
+    }
+    let last = parts.last().copied().unwrap_or("");
+    let ext = last.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    !matches!(ext.as_deref(), Some("json" | "toml" | "md"))
+}
+
+fn codex_ignored(parts: &[&str]) -> bool {
+    match parts {
+        ["plugins", _, ..] => codex_plugin_ignored(parts),
+        [dir, _, ..] => {
+            CODEX_IGNORED_DIRS.contains(dir)
+                || dir.starts_with("app-server-")
+                || dir.ends_with("-locks")
+        }
+        [name] => {
+            let lower = name.to_ascii_lowercase();
+            let db = |b: &str| {
+                [".sqlite", ".sqlite3", ".db"]
+                    .iter()
+                    .any(|e| b.ends_with(e))
+            };
+            let sidecar = ["-wal", "-shm", "-journal"]
+                .iter()
+                .any(|e| lower.strip_suffix(e).is_some_and(db));
+            (lower.starts_with("logs_") && lower.ends_with(".sqlite"))
+                || sidecar
+                || lower.ends_with(".lock")
+                || CODEX_IGNORED_FILES.contains(name)
+                || (name.starts_with("chrome-native-hosts") && name.ends_with(".json"))
+                || backup_of(name, &names(&CODEX_FILES))
+        }
+        [] => false,
+    }
+}
+
+fn pi_ignored(parts: &[&str]) -> bool {
+    match parts {
+        [name] => {
+            let mut known = names(&PI_FILES);
+            known.extend(["settings.json", "models.json"]);
+            name.ends_with("-debug.jsonl") || backup_of(name, &known)
+        }
+        [dir, _, ..] => {
+            PI_IGNORED_DIRS.contains(dir)
+                || PI_IGNORED_DIR_PREFIXES.iter().any(|p| dir.starts_with(p))
+        }
+        [] => false,
+    }
+}
+
+/// Apply the ignore rules to an agent-dir result. Only a miss or a config/paste snapshot can
+/// become `Ignored`, so a session-owned source never does and a credential keeps its verdict.
+fn apply_ignored<'a>(res: Res<'a>, agent: &Agent, parts: &[&str]) -> Res<'a> {
+    let eligible = match &res {
+        Err(Miss::Kind) => true,
+        Ok(hit) => matches!(
+            hit.kind,
+            SourceKind::ClaudeConfig | SourceKind::ClaudePaste | SourceKind::CodexConfig
+        ),
+        Err(_) => false,
+    };
+    let hit = eligible
+        && match agent {
+            Agent::Claude => claude_ignored(parts),
+            Agent::Codex => codex_ignored(parts),
+            Agent::Pi => pi_ignored(parts),
+        };
+    if hit { Err(Miss::Ignored) } else { res }
+}
+
 /// Role of one exported source in the `session-reader/v2` envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExportRole {
@@ -964,9 +1117,11 @@ pub fn locate(path: &RootRelativePath, roots: &Roots) -> Located {
             }
         }
         (RootLayout::PiCustomRoot, _) => Err(Miss::Kind),
-        (RootLayout::AgentDir, Agent::Claude) => claude(&parts, roots),
-        (RootLayout::AgentDir, Agent::Codex) => codex(&parts),
-        (RootLayout::AgentDir, Agent::Pi) => pi(&parts),
+        (RootLayout::AgentDir, Agent::Claude) => {
+            apply_ignored(claude(&parts, roots), &Agent::Claude, &parts)
+        }
+        (RootLayout::AgentDir, Agent::Codex) => apply_ignored(codex(&parts), &Agent::Codex, &parts),
+        (RootLayout::AgentDir, Agent::Pi) => apply_ignored(pi(&parts), &Agent::Pi, &parts),
     };
     match res {
         Err(Miss::Kind) => Located::UnknownKind,
