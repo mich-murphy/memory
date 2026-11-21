@@ -974,6 +974,8 @@ fn codex_plugin_ignored(parts: &[&str]) -> bool {
 fn codex_ignored(parts: &[&str]) -> bool {
     match parts {
         ["plugins", _, ..] => codex_plugin_ignored(parts),
+        // Brief 49: `skills/.system/**` is a pack Codex installs itself; user skills stay assets.
+        ["skills", ".system", _, ..] => true,
         [dir, _, ..] => {
             CODEX_IGNORED_DIRS.contains(dir)
                 || dir.starts_with("app-server-")

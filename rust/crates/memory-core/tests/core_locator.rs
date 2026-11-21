@@ -1866,6 +1866,39 @@ fn ignored_rules_ignore_known_non_session_files() -> TestResult {
     Ok(())
 }
 
+/// Brief 49: Codex's vendored `skills/.system/**` is Ignored in an agent dir; a user skill beside
+/// it stays a `CodexConfig` asset; a custom root is not affected.
+#[test]
+fn codex_system_skills_are_ignored_and_user_skills_are_assets() -> TestResult {
+    for p in ["skills/.system/a.png", "skills/.system/x/y.py"] {
+        let got = verdict(Home::Codex, p)?;
+        ensure!(got == Located::Ignored, "codex {p}: {got:?}");
+    }
+    for p in [
+        "skills/mine/SKILL.md",
+        "skills/.systemx/a.md",
+        "skills/.system",
+    ] {
+        let got = verdict(Home::Codex, p)?;
+        ensure!(
+            matches!(
+                &got,
+                Located::Source {
+                    kind: SourceKind::CodexConfig,
+                    ..
+                }
+            ),
+            "codex {p}: {got:?}"
+        );
+    }
+    let custom = verdict(Home::CodexOnCustom, "skills/.system/a.md");
+    ensure!(
+        custom.is_ok_and(|g| g != Located::Ignored),
+        "custom root ignored"
+    );
+    Ok(())
+}
+
 #[test]
 fn ignored_near_misses_keep_their_verdict() -> TestResult {
     // Claude: assets and sources next to ignored names.
