@@ -9,8 +9,10 @@ use memory_core::domain::{
     Agent, ArchiveId, Birth, FileId, Fingerprint, MachineId, Owner, SnapshotFingerprint,
     SourceClass, SourceId, SourceKind, WalFingerprint,
 };
+use memory_core::manifest::manifest_hash;
 use memory_core::manifest::{Header, OwnerState, Timestamp, Writer};
 use memory_core::privacy::{PolicyContext, Profile, ResolvedSourceFacts, rules_digest};
+use proptest::prelude::*;
 use rusqlite::Connection;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -499,4 +501,144 @@ fn inside_the_interval_a_changed_store_is_deferred_and_after_it_lands() -> R {
     assert_eq!(rig.cycle()?, SourceOutcome::Planned);
     assert_eq!(count_in(&rig.stored_image()?, &dir.0.join("i.sqlite"))?, 4);
     Ok(())
+}
+
+#[derive(Clone, Debug)]
+enum Op {
+    /// A reader touches the `-shm` only: not part of the fingerprint.
+    Shm,
+    /// A write: bytes change and the `-wal` moves.
+    Write(usize, u8),
+    /// Only the `-wal` moves (a frame with the same bytes in the copy).
+    Wal,
+    /// The clock moves by an hour or by seven hours.
+    Tick(bool),
+    Capture,
+}
+
+fn op() -> impl Strategy<Value = Op> {
+    prop_oneof![
+        Just(Op::Shm),
+        (0..4000_usize, any::<u8>()).prop_map(|(p, b)| Op::Write(p, b)),
+        Just(Op::Wal),
+        any::<bool>().prop_map(Op::Tick),
+        Just(Op::Capture),
+        Just(Op::Capture),
+    ]
+}
+
+/// The bytes the latest stored epoch reassembles to, each piece checked against its digest.
+fn reassembled(rig: &Rig) -> R<Vec<u8>> {
+    let base = rig.base.as_ref().ok_or("no base")?;
+    let entry = base.state.sources.values().next().ok_or("no source")?;
+    let record = entry.epochs.last().ok_or("no epoch")?;
+    let mut out = Vec::new();
+    for piece in &record.pieces {
+        let (body, _) = rig
+            .store
+            .objects
+            .get(piece.object())
+            .ok_or("piece missing")?;
+        let raw = zstd::decode_all(body.as_slice()).map_err(e)?;
+        if manifest_hash(&raw) != piece.sha256() || raw.len() as u64 != piece.len() {
+            return Err("descriptor digest differs from the stored bytes".to_owned());
+        }
+        out.extend_from_slice(&raw);
+    }
+    Ok(out)
+}
+
+fn model(initial: &[u8], ops: &[Op]) -> R {
+    let dir = Dir::new()?;
+    let mut rig = Rig::new(&dir, RealFs::new())?;
+    rig.piece_len = 64;
+    let mut sim = SimFs {
+        live: initial.to_vec(),
+        wal_mtime: 1,
+        ..SimFs::default()
+    };
+    // Model: the fingerprint last landed and when.
+    let mut landed: Option<((i64, usize), i64)> = None;
+    for op in ops {
+        match op {
+            Op::Shm => {}
+            Op::Write(pos, byte) => {
+                let at = pos % sim.live.len();
+                if let Some(b) = sim.live.get_mut(at) {
+                    *b ^= byte | 1;
+                }
+                sim.wal_mtime += 1;
+            }
+            Op::Wal => sim.wal_mtime += 1,
+            Op::Tick(long) => rig.now_ns += if *long { 7 } else { 1 } * 3600 * 1_000_000_000,
+            Op::Capture => {
+                let fp = (sim.wal_mtime, sim.live.len());
+                let want = match landed {
+                    None => SourceOutcome::Planned,
+                    Some((last, _)) if last == fp => SourceOutcome::Unchanged,
+                    Some((_, at)) if rig.now_ns - at < 6 * 3600 * 1_000_000_000 => {
+                        SourceOutcome::Deferred
+                    }
+                    Some(_) => SourceOutcome::Planned,
+                };
+                let got = capture_sim(&mut rig, &mut sim)?;
+                if got != want {
+                    return Err(format!("expected {want:?}, got {got:?}"));
+                }
+                if got == SourceOutcome::Planned {
+                    landed = Some((fp, rig.now_ns));
+                    if reassembled(&rig)? != sim.live {
+                        return Err("stored epoch differs from the copy".to_owned());
+                    }
+                }
+            }
+        }
+    }
+    if sim.begun != sim.ended {
+        return Err("a copy was not released".to_owned());
+    }
+    Ok(())
+}
+
+fn capture_sim(rig: &mut Rig, sim: &mut SimFs) -> R<SourceOutcome> {
+    let empty = OwnerState::default();
+    let state = rig.base.as_ref().map_or(&empty, |b| &b.state);
+    let env = Env {
+        header: header()?,
+        context: &rig.context,
+        now_ns: rig.now_ns,
+        piece_len: rig.piece_len,
+    };
+    let got = capture(
+        sim,
+        std::slice::from_ref(&rig.source),
+        &rig.locals,
+        state,
+        &env,
+    );
+    if let Some(mut request) = got.commit {
+        attach_launches(&mut request, &[]);
+        let landed = commit(&mut rig.store, rig.base.as_ref(), request, &mut |_| {}).map_err(e)?;
+        rig.base = Some(landed.base());
+    }
+    for update in got.updates {
+        update.apply(&mut rig.locals);
+    }
+    got.outcomes
+        .into_iter()
+        .next()
+        .map(|(_, o)| o)
+        .ok_or_else(|| "none".to_owned())
+}
+
+proptest! {
+    /// A `-shm` touch is Unchanged, a `-wal` move is a new snapshot once the interval allows
+    /// it, and every stored epoch (with pieces reused by digest) reassembles to the copy.
+    #[test]
+    fn proptest_sqlite_fingerprint_interval_and_reuse(
+        initial in proptest::collection::vec(any::<u8>(), 200..1200),
+        ops in proptest::collection::vec(op(), 1..40),
+    ) {
+        model(&initial, &ops).map_err(TestCaseError::fail)?;
+    }
 }
