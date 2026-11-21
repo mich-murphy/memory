@@ -304,7 +304,13 @@ from `main` alone.
      `68043e3` (DESIGN D58): Claude file-history is captured behind a whole-file content scan;
      a withheld file is recorded in `index.json`, read once, counted as `withheld=` in the round
      line and `memory status`, and never published. Next: merge, install on both hosts, first round
-     measured, `memory check`, restore of one session compared with the local files.
+     measured, `memory check`, restore of one session compared with the local files. Merged as
+     `36adb8c` and installed on both hosts on 2026-11-21 (this Mac 06:53Z, `runs = 11`; dev-01
+     07:04Z). First round: 805 of 946 and 419 of 514 files landed, 141 and 95 withheld (all
+     `secret_in_text`); `memory check` exit 0 on both; a restore of three sessions matched by
+     SHA-256. Open question for the operator: every withhold came from the generic assignment
+     rule or the shell guard, and more than half look like code-shaped false positives
+     (evidence 41); keep fail-closed as is, or narrow the rule to literal-shaped values.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

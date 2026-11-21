@@ -136,3 +136,9 @@ compared by size and SHA-256 with the local files (counts only).
   95.58 %; Linux container privacy, capture, daemon and resolve tests passed.
   [Evidence 41](evidence/41-file-history/). Next: hosted gates, merge, install on both hosts, the
   first round measured, `memory check`, restore of one session compared with the local files.
+- 2026-11-21 06:53Z to 07:28Z: merged as `36adb8c` (stack #230) and installed on this Mac and
+  dev-01. First round: 805 of 946 and 419 of 514 file-history files landed; 141 and 95 withheld,
+  all `secret_in_text`; `deleted=0`. `memory check` exit 0 on both hosts. Restore of three
+  sessions: 57 of 58 files equal by size and SHA-256, the missing one withheld. Exit criteria met.
+  Finding: no withhold came from a fixed pattern, and more than half look like code-shaped false
+  positives (evidence 41); narrowing the rule is an operator decision.
