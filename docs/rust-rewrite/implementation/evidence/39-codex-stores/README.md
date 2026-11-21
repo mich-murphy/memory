@@ -99,6 +99,39 @@ the mutated runs wrote were deleted, not committed.
   nextest 845, coverage 95.46 %.
 - dev-01 was not updated with `b20ee05`; it gets the fixed build.
 
+## The fixed build on both hosts and the restore check
+
+- PR #220 merged as `d5f6bab` (Rust gates green on all three runners; CI failed only in the two
+  accepted `govulncheck` steps).
+- This Mac: installed in place at 02:15:42Z (sha256 prefix `eae961dc4d76f5a6`; the `b20ee05`
+  binary kept as `backup/memory-b20ee05`; `runs = 9`). Start round at 02:19:23Z: `landed=1
+  failed=0 local=0`, `tmp/` empty, no WARN or ERROR line. Peak footprint of the new process 76 MB,
+  but the stores had not changed since 01:24Z, so this round proves nothing about the fix.
+- dev-01: `d5f6bab` built on the host (sha256 prefix `54580210dbc5877f`); its two Nix store
+  dependencies are the pinned GC roots. Installed in place at 02:22:24Z (the `769e689` binary kept
+  as `backup/memory-769e689`). The start round took the first store snapshot there (a 232 MB
+  `thread_history_1.sqlite` with an uncheckpointed `-wal`): `landed=1 failed=0 local=0` at
+  02:23:55Z, `VmHWM` **103 MB** (under the 128 MB target), `tmp/` peak 226 MB and empty afterwards,
+  `NRestarts=0`, no WARN or ERROR line. systemd's 161.9 MB "memory peak" counts page cache.
+- Restore of the shared Codex owner into a private temporary directory, then compared with the
+  preserved copies of 2026-11-20 (every database opened `immutable=1`; counts only):
+
+  | Host | Restore | Files | Stores with `integrity_check` ok | Tables with another row count | Threads with items |
+  |---|---|---|---|---|---|
+  | this Mac | exit 0, 65 s, 688 MB | 8 | 5 of 5 | 0 | 899 |
+  | dev-01 | exit 0, 5 s, 233 MB | 8 | 5 of 5 | 0 | 137 |
+
+  The 8 files are the five stores plus the shared append sources `history.jsonl`,
+  `session_index.jsonl` and `log/codex-login.log`. No `logs_*` store and no `-wal` or `-shm` was
+  restored. Bytes differ from the preserved copies (a backup taken at another time; on this Mac
+  73 of 74 8 MiB pieces of `thread_history_1` are equal), row counts do not.
+- A first comparison script on this Mac opened one restored database without `immutable` and so
+  created its `-wal` and `-shm`; they came from the check, not from the restore. The restored
+  directories were removed.
+- With this, the 873 threads that exist only in `thread_history_1.sqlite` on this Mac are in the
+  archive and restorable. Deleting the retired Go directories and the preserved copies is now an
+  operator decision; nothing was deleted.
+
 ## Limits
 
 - `generated_images` and `attachments` are not captured (D55).
