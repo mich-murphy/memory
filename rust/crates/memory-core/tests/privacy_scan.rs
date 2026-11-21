@@ -151,6 +151,28 @@ fn an_assignment_nested_in_a_value_is_withheld() {
     assert_eq!(scan(clean.as_bytes()), Ok(clean.as_bytes().to_vec()));
 }
 
+/// The reused shell-assignment guard is the only rule for a short literal and for fish's
+/// `set -gx NAME value` (no `=` or `:`), so dropping it must be seen (parent finding, brief 47).
+#[test]
+fn the_shell_guard_catches_short_and_fish_assignments() {
+    for text in [
+        format!("export DB_{}=abc12", "PASSWORD"),
+        format!("set -gx API_{} literalvalue123", "TOKEN"),
+    ] {
+        let input = format!("{text}\n");
+        assert_eq!(
+            scan(input.as_bytes()).err(),
+            Some(Reason::SecretInText),
+            "shell assignment not withheld"
+        );
+    }
+    let clean = format!(
+        "export DB_{}=${{DB_PASSWORD}}\nset -gx EDITOR vim\n",
+        "PASSWORD"
+    );
+    assert_eq!(scan(clean.as_bytes()), Ok(clean.clone().into_bytes()));
+}
+
 #[test]
 fn size_cap_is_exact() {
     let cap = usize::try_from(MAX_SCANNED_BYTES).unwrap_or(usize::MAX);
