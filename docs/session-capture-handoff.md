@@ -311,6 +311,11 @@ from `main` alone.
      SHA-256. Open question for the operator: every withhold came from the generic assignment
      rule or the shell guard, and more than half look like code-shaped false positives
      (evidence 41); keep fail-closed as is, or narrow the rule to literal-shaped values.
+  24. Brief 48 ([48-snapshot-deletions.md](rust-rewrite/implementation/48-snapshot-deletions.md),
+     [evidence 42](rust-rewrite/implementation/evidence/42-snapshot-deletions/)) is accepted
+     locally as `3e1a51a` (DESIGN D59): D52 deletions now cover snapshot entries (Codex stores,
+     file-history); a withheld-only local record is dropped after two misses. Next: merge,
+     install on both hosts, two full rounds and `memory check`.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

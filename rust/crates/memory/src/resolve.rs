@@ -14,7 +14,9 @@
 //!   rejects loops.
 //! * Snapshot kinds: `CodexStore` and (D54, brief 47) `ClaudeFileHistory` are yielded; the latter
 //!   has profile `Scanned` (whole-file content scan). Every other snapshot kind is counted as
-//!   `deferred_snapshot`. `note` still routes append sources only.
+//!   `deferred_snapshot`. `note` still routes append sources only. `locate_absent` (D52, brief 48) resolves
+//!   stored snapshot entries too; a Codex store is probed by its database file only, so a missing
+//!   `-wal` or `-shm` is never an absence.
 //! * No `unsafe`, no new dependencies, no panics; any I/O failure clears a resolved flag.
 
 use crate::capture::Source;

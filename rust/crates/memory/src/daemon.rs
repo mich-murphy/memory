@@ -14,12 +14,13 @@
 //!    and logged by `run.rs` as a `state_load` event.
 //!
 //! Deleted sources (brief 43): only a full round observes absence, and only after a complete
-//! walk (not truncated, not busy). Per visited owner, stored live append entries that the walk
-//! did not yield and that are not parked are probed with `stat` through
+//! walk (not truncated, not busy). Per visited owner, stored live entries (append or snapshot,
+//! brief 48) that the walk did not yield and that are not parked are probed with `stat` through
 //! [`Sources::locate_absent`]; a missing root, an unknown namespace or a bad path is counted as
 //! `absence_skipped` and never deletes. `index.json` keeps `owners` (`#[serde(default)]`) so an
-//! owner whose every file is gone is still visited; it leaves the set once no live append entry
-//! remains. `capture_owner` never counts absence.
+//! owner whose every file is gone is still visited; it leaves the set once no live entry
+//! remains. `capture_owner` never counts absence. A local record holding only a withheld
+//! judgement is dropped after two consecutive complete walks that did not yield it (brief 48).
 //!
 //! Withheld scanned files (D54, brief 47): `SourceIndex.withheld` (`#[serde(default)]`) records the
 //! fingerprint, rules and reason of a withhold of a `Profile::Scanned` file (Claude file-history).
@@ -48,7 +49,7 @@ use memory_core::coalescer::Signal;
 use memory_core::disposition::Streak;
 use memory_core::domain::{
     Agent, Disposition, ErrorClass, Fingerprint, LocalError, Owner, OwnerParkReason, ParkReason,
-    RulesDigest, SnapshotFingerprint, SourceClass, SourceId, SourceState, WithholdReason,
+    RulesDigest, SnapshotFingerprint, SourceId, SourceState, WithholdReason,
 };
 use memory_core::hint::{
     HintEvent, HintScan, LaunchHint, PathHint, RetentionFacts, past_retention, removable, scan,
@@ -950,8 +951,9 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         (got, staged.winners, staged.failed)
     }
 
-    /// Stored live append entries of the owner that the walk did not yield and that are not
-    /// parked, resolved for the absence probe, and the count of those that could not be.
+    /// Stored live entries of the owner, append or snapshot (brief 48), that the walk did not
+    /// yield and that are not parked, resolved for the absence probe, and the count of those that
+    /// could not be.
     fn candidates(
         &mut self,
         walked: &[Source],
@@ -965,7 +967,6 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         let mut skipped = 0;
         for (id, entry) in &base.state.sources {
             if entry.deleted_at.is_some()
-                || entry.class != SourceClass::Append
                 || rt.parked_sources.contains_key(id)
                 || walked.iter().any(|s| s.id == *id)
             {
@@ -1279,6 +1280,29 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 None => groups.push((owner, vec![source])),
             }
         }
+        // Brief 48: a local record that only holds a withheld judgement (never published, so
+        // never a candidate) is dropped after two consecutive full rounds that did not walk
+        // it. No manifest change is built: the file was never in R2.
+        if self.absence {
+            let seen: HashSet<&SourceId> = groups
+                .iter()
+                .flat_map(|(_, list)| list.iter().map(|s| &s.id))
+                .collect();
+            let mut touched = false;
+            self.locals.retain(|id, l| {
+                if l.withheld.is_none()
+                    || l.snapshot.is_some()
+                    || l.index.is_some()
+                    || seen.contains(id)
+                {
+                    return true;
+                }
+                touched = true;
+                l.missing = l.missing.saturating_add(1);
+                l.missing < 2
+            });
+            self.dirty |= touched;
+        }
         let walked: HashSet<Owner> = groups.iter().map(|(o, _)| o.clone()).collect();
         for owner in &walked {
             if self.known.insert(owner.clone()) {
@@ -1365,11 +1389,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     /// The owner's recovered state has no live append entry left.
     fn all_gone(rt: &OwnerRt) -> bool {
         match &rt.base {
-            RemoteBase::Known(base) => !base
-                .state
-                .sources
-                .values()
-                .any(|e| e.deleted_at.is_none() && e.class == SourceClass::Append),
+            RemoteBase::Known(base) => !base.state.sources.values().any(|e| e.deleted_at.is_none()),
             RemoteBase::Absent => true,
             RemoteBase::Unknown => false,
         }

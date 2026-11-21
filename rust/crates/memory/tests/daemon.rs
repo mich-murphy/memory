@@ -4506,6 +4506,7 @@ struct Rig {
 const HELLO: &[u8] = b"hello\n";
 const WORLD: &[u8] = b"world\n";
 const FRESH: &[u8] = b"fresh\n";
+const SNAP: &[u8] = b"snap\n";
 
 fn start_ad(tmp: &Tmp, cfg: &Path, fs: FlakyFs, store: FStore, gate: &Gate) -> R<AD> {
     let parts = Parts {
@@ -4560,7 +4561,13 @@ fn remove_file(r: &mut Rig, handle: u64) {
     }
 }
 fn deleted_and_epochs(d: &mut AD) -> R<(bool, usize)> {
-    let history = [HELLO.to_vec(), WORLD.to_vec(), FRESH.to_vec()];
+    // Brief 48: SNAP is the bytes of the snapshot sources below.
+    let history = [
+        HELLO.to_vec(),
+        WORLD.to_vec(),
+        FRESH.to_vec(),
+        SNAP.to_vec(),
+    ];
     let seen = need(
         observe(d.store_mut(), &owner_of("s1")?, &history)?,
         "no chain",
@@ -4723,6 +4730,225 @@ fn an_owner_whose_every_file_is_gone_is_recorded_deleted_then_leaves_the_set() -
     d.shutdown().map_err(e)?;
     let index = need(index_of(&tmp)?, "no index")?;
     assert!(index.owners.is_empty(), "{:?}", index.owners);
+    Ok(())
+}
+
+// ---------------------------------------------------------------- snapshot absence (brief 48)
+
+/// A Claude file-history snapshot source (handle 3) of owner `s1`.
+fn snap_of(handle: u64) -> R<(Owner, Source)> {
+    let (owner, mut s) = src_of("s1", handle)?;
+    s.kind = SourceKind::ClaudeFileHistory;
+    s.class = SourceClass::Snapshot;
+    s.path = format!("file-history/s1/{handle:016x}@v1");
+    s.facts.profile = Profile::Scanned;
+    s.facts.identities = vec![s.path.clone()];
+    Ok((owner, s))
+}
+
+/// Owner `s1` holding only one captured snapshot file (handle 3); the first round has landed.
+fn snap_rig() -> R<Rig> {
+    use std::sync::atomic::AtomicBool;
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let fail = Arc::new(AtomicBool::new(false));
+    let mut fs = FlakyFs {
+        fail: Arc::clone(&fail),
+        ..FlakyFs::default()
+    };
+    fs.mem.files.insert(3, SNAP.to_vec());
+    let gate = Gate {
+        list: Arc::new(Mutex::new(vec![snap_of(3)?])),
+        complete: Arc::new(AtomicBool::new(true)),
+        root: Arc::new(AtomicBool::new(true)),
+    };
+    let mut d = start_ad(&tmp, &cfg, fs, FStore::default(), &gate)?;
+    assert_eq!(d.reconcile_once().map_err(e)?.landed, 1);
+    assert!(!deleted_and_epochs(&mut d)?.0);
+    Ok(Rig {
+        tmp,
+        cfg,
+        d,
+        gate,
+        fail,
+    })
+}
+
+#[test]
+fn a_deleted_snapshot_is_recorded_on_the_second_full_round_only() -> R {
+    // Brief 48: D52 applies to snapshot entries unchanged.
+    let mut r = snap_rig()?;
+    remove_file(&mut r, 3);
+    let first = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((first.landed, first.deleted), (0, 0));
+    assert!(!deleted_and_epochs(&mut r.d)?.0);
+    let second = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((second.landed, second.deleted), (1, 1));
+    assert!(deleted_and_epochs(&mut r.d)?.0);
+    let third = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((third.landed, third.deleted), (0, 0), "recorded once");
+    Ok(())
+}
+
+#[test]
+fn a_snapshot_back_before_the_second_round_is_not_deleted() -> R {
+    let mut r = snap_rig()?;
+    remove_file(&mut r, 3);
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 0);
+    r.d.fs_mut().mem.files.insert(3, SNAP.to_vec());
+    if let Ok(mut list) = r.gate.list.lock() {
+        list.push(snap_of(3)?);
+    }
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 0);
+    remove_file(&mut r, 3);
+    assert_eq!(
+        r.d.reconcile_once().map_err(e)?.deleted,
+        0,
+        "count restarted"
+    );
+    assert!(!deleted_and_epochs(&mut r.d)?.0);
+    Ok(())
+}
+
+#[test]
+fn a_snapshot_is_not_deleted_by_a_guarded_round() -> R {
+    // Incomplete walk, missing root and stat error each delete nothing.
+    let mut r = snap_rig()?;
+    remove_file(&mut r, 3);
+    r.gate.complete.store(false, Ordering::SeqCst);
+    rounds_never_delete(&mut r, 3)?;
+    r.gate.complete.store(true, Ordering::SeqCst);
+    r.gate.root.store(false, Ordering::SeqCst);
+    assert_eq!(rounds_never_delete(&mut r, 3)?, 3);
+    r.gate.root.store(true, Ordering::SeqCst);
+    r.fail.store(true, Ordering::SeqCst);
+    rounds_never_delete(&mut r, 3)?;
+    Ok(())
+}
+
+#[test]
+fn an_owner_with_only_snapshots_stays_in_the_set_until_they_are_deleted() -> R {
+    let mut r = snap_rig()?;
+    remove_file(&mut r, 3);
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 0);
+    let (tmp, d) = (r.tmp, r.d);
+    d.shutdown().map_err(e)?;
+    let index = need(index_of(&tmp)?, "no index")?;
+    assert_eq!(index.owners, [owner_of("s1")?], "left the set while live");
+
+    let mut r = snap_rig()?;
+    remove_file(&mut r, 3);
+    r.d.reconcile_once().map_err(e)?;
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 1);
+    let (tmp, d) = (r.tmp, r.d);
+    d.shutdown().map_err(e)?;
+    let index = need(index_of(&tmp)?, "no index")?;
+    assert!(index.owners.is_empty(), "{:?}", index.owners);
+    Ok(())
+}
+
+#[test]
+fn capture_owner_never_counts_absence_for_a_snapshot() -> R {
+    let mut r = snap_rig()?;
+    remove_file(&mut r, 3);
+    let owner = owner_of("s1")?;
+    for _ in 0..3 {
+        r.d.capture_owner(&owner).map_err(e)?;
+    }
+    assert!(!deleted_and_epochs(&mut r.d)?.0);
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 0);
+    assert!(!deleted_and_epochs(&mut r.d)?.0);
+    Ok(())
+}
+
+#[test]
+fn a_recreated_snapshot_is_a_new_live_epoch() -> R {
+    // Brief 48: the next epoch after a deletion, with a full upload (local pieces were cleared).
+    let mut r = snap_rig()?;
+    remove_file(&mut r, 3);
+    r.d.reconcile_once().map_err(e)?;
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 1);
+    assert_eq!(deleted_and_epochs(&mut r.d)?, (true, 1));
+    r.d.fs_mut().mem.files.insert(3, FRESH.to_vec());
+    if let Ok(mut list) = r.gate.list.lock() {
+        list.push(snap_of(3)?);
+    }
+    let back = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((back.landed, back.deleted), (1, 0));
+    assert_eq!(deleted_and_epochs(&mut r.d)?, (false, 1));
+    // `Replace` clears the old epochs and takes the next epoch number.
+    Ok(())
+}
+
+/// Owner `s1` with one scanned file (handle 3) that the privacy judgement withholds.
+fn withheld_rig() -> R<Rig> {
+    let mut r = snap_rig()?;
+    // Reuse the rig plumbing with a new owner state: a fresh file that is withheld.
+    let secret: &[u8] = concat!("key = ", "AKIA", "EXAMPLEEXAMPLE00", "\n").as_bytes();
+    r.d.fs_mut().mem.files.insert(4, secret.to_vec());
+    if let Ok(mut list) = r.gate.list.lock() {
+        list.push(snap_of(4)?);
+    }
+    let first = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((first.landed, first.withheld), (0, 1));
+    Ok(r)
+}
+
+fn rig_index_has(r: Rig, id: &str) -> R<bool> {
+    let (tmp, d) = (r.tmp, r.d);
+    d.shutdown().map_err(e)?;
+    let index = need(index_of(&tmp)?, "no index")?;
+    Ok(index.sources.keys().any(|k| k.as_str() == id))
+}
+
+#[test]
+fn a_withheld_only_record_is_dropped_after_two_misses_and_builds_no_change() -> R {
+    let mut r = withheld_rig()?;
+    remove_file(&mut r, 4);
+    let first = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((first.landed, first.deleted), (0, 0));
+    assert!(rig_index_has(r, "src4")?, "dropped after one miss");
+
+    let mut r = withheld_rig()?;
+    remove_file(&mut r, 4);
+    r.d.reconcile_once().map_err(e)?;
+    let second = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((second.landed, second.deleted), (0, 0), "no change built");
+    assert!(!deleted_and_epochs(&mut r.d)?.0);
+    assert!(!rig_index_has(r, "src4")?, "kept forever");
+    Ok(())
+}
+
+/// A walked withheld file whose stat fails is present, not absent (D52): its record is kept over
+/// rounds where the step returns before `Present` resets the count (parent finding, brief 48).
+#[test]
+fn a_walked_withheld_file_with_a_stat_error_keeps_its_record() -> R {
+    let r = withheld_rig()?;
+    r.fail.store(true, Ordering::SeqCst);
+    let mut r = r;
+    for _ in 0..3 {
+        let round = r.d.reconcile_once().map_err(e)?;
+        assert_eq!(round.deleted, 0);
+    }
+    r.fail.store(false, Ordering::SeqCst);
+    assert!(rig_index_has(r, "src4")?, "dropped while walked");
+    Ok(())
+}
+
+#[test]
+fn a_withheld_file_back_before_the_second_round_keeps_its_record() -> R {
+    let mut r = withheld_rig()?;
+    let secret: Vec<u8> = r.d.fs_mut().mem.files.get(&4).cloned().unwrap_or_default();
+    remove_file(&mut r, 4);
+    r.d.reconcile_once().map_err(e)?;
+    r.d.fs_mut().mem.files.insert(4, secret);
+    if let Ok(mut list) = r.gate.list.lock() {
+        list.push(snap_of(4)?);
+    }
+    r.d.reconcile_once().map_err(e)?;
+    remove_file(&mut r, 4);
+    r.d.reconcile_once().map_err(e)?;
+    assert!(rig_index_has(r, "src4")?, "count did not restart");
     Ok(())
 }
 
