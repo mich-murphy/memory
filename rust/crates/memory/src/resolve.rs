@@ -12,6 +12,9 @@
 //! * Hop bound: [`MAX_HOPS`] (40) links on the last component; more, or a loop, is
 //!   unresolved. Directory-component links are resolved by `canonicalize`, which also
 //!   rejects loops.
+//! * Snapshot kinds: `CodexStore` and (D54, brief 47) `ClaudeFileHistory` are yielded; the latter
+//!   has profile `Scanned` (whole-file content scan). Every other snapshot kind is counted as
+//!   `deferred_snapshot`. `note` still routes append sources only.
 //! * No `unsafe`, no new dependencies, no panics; any I/O failure clears a resolved flag.
 
 use crate::capture::Source;
@@ -99,11 +102,12 @@ fn profile_of(kind: &SourceKind) -> Profile {
         SourceKind::ClaudeMemory | SourceKind::CodexMemory | SourceKind::ClaudePlan => {
             Profile::TextAsset
         }
+        // D54, brief 47: whole-file content scan; published whole or withheld whole.
+        SourceKind::ClaudeFileHistory => Profile::Scanned,
         SourceKind::ClaudeToolResults
         | SourceKind::ClaudeTodos
         | SourceKind::ClaudeTasks
         | SourceKind::ClaudeTeams
-        | SourceKind::ClaudeFileHistory
         | SourceKind::ClaudeDebug
         | SourceKind::ClaudeHistory
         | SourceKind::CodexStore
@@ -509,7 +513,11 @@ impl crate::daemon::Sources for WalkSources {
                         class: SourceClass::Snapshot,
                         kind,
                         ..
-                    } if *kind != SourceKind::CodexStore => {
+                    } if !matches!(
+                        kind,
+                        SourceKind::CodexStore | SourceKind::ClaudeFileHistory
+                    ) =>
+                    {
                         counts.deferred_snapshot += 1;
                         continue;
                     }

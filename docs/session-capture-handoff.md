@@ -299,6 +299,12 @@ from `main` alone.
      dev-01 at 04:23Z). The start rounds were clean. `unknown_kind` went from 19,192 to 29 and
      from 48,198 to 117. `ignored` is 20,123 and 48,564 (evidence 40). Next: file-history behind
      the fail-closed content scan (D54).
+  23. Brief 47 ([47-file-history.md](rust-rewrite/implementation/47-file-history.md),
+     [evidence 41](rust-rewrite/implementation/evidence/41-file-history/)) is accepted locally as
+     `68043e3` (DESIGN D58): Claude file-history is captured behind a whole-file content scan;
+     a withheld file is recorded in `index.json`, read once, counted as `withheld=` in the round
+     line and `memory status`, and never published. Next: merge, install on both hosts, first round
+     measured, `memory check`, restore of one session compared with the local files.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

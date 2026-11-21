@@ -820,6 +820,13 @@ in an agent directory (vendor code, caches, backups, SQLite sidecars, the D54 an
 result that would otherwise be `UnknownKind` or a config or paste snapshot can become `Ignored`, so
 no session-owned source can; a custom Pi root keeps its own rules (D57).
 
+Claude file-history (`Profile::Scanned`, D58) is judged whole by a content scan before anything
+leaves the host: over 1 MiB (from the stat, never read), binary or non-UTF-8, a fixed secret
+pattern, the shell-assignment guard, or a secret-named literal assignment withhold the whole file
+with a closed reason code (`source_limit`, `binary`, `secret_in_text`, `scrub_failed` on a scanner
+error). A clean file is published byte for byte. The scanner table and cap are part of the rules
+digest. The local file is never touched.
+
 Hint paths are untrusted input. A hint's `transcript_path` or `cwd` is used only if `locate`
 maps it under a configured or learned root. It then passes the same admission check. [review,
 05 M4]
@@ -950,7 +957,7 @@ dataflows]
 | Token file | System of record | Operator | 0600. Excluded from capture |
 | `state/roots.json` | System of record | Daemon | Learned custom roots. Monotonic union: a root is never removed automatically |
 | `state/hints/YYYY-MM-DD.jsonl` | System of record for launch evidence | `memory hook` | Directory 0700, files 0600. Kept for 7 days [default, unmeasured] and until every launch record in the file is committed |
-| `state/index.json` | Derived cache | Daemon | Holds `SourceState`, hint offsets, ETags and pending launch digests, and (D52) the owners with a live append source, so an owner whose every file is gone is still visited. May be deleted |
+| `state/index.json` | Derived cache | Daemon | Holds `SourceState`, hint offsets, ETags and pending launch digests, and (D52) the owners with a live append source, so an owner whose every file is gone is still visited, and (D58) per scanned file the fingerprint, rules and reason of its last withhold, so it is not read again until one of them changes. May be deleted |
 | `state/status.json` | System of record for the parked list and counters | Daemon | Section 11.3 |
 | `state/daemon.lock` | Lock | Daemon | `flock`, section 12 |
 | `state/tmp/` | Transient | Daemon | SQLite backups only. Emptied at start |
@@ -1498,7 +1505,7 @@ Defaults adopted. Each applies unless the operator says otherwise:
    alternative is short-lived prefix- and action-scoped credentials minted off the host.
 3. **Low-value kinds.** `ClaudeDebug` and file-history are captured, for the holistic view
    the operator asked for. [`07-ddia-crosscheck.md` callout 6] File-history only behind a
-   fail-closed content scan (D54).
+   fail-closed content scan (D54; built in brief 47, D58). `ClaudeDebug` is not yet captured.
 4. **Removing a leaked secret.** This is the only planned deletion. With a global `objects/`
    namespace it needs a reference check over every manifest chain before an object is deleted.
    The tool belongs to the reader project. [review, 02 M3, 05 M6]
@@ -1565,6 +1572,7 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D53 | 2026-11-20: on Linux `memory install` writes a systemd user unit at `$XDG_CONFIG_HOME/systemd/user/memory.service` (absolute only) or `~/.config/systemd/user/memory.service`: first line is our marker, `ExecStart="<exe>" daemon` (quoted with `\`, `"`, `%`, `$` escaped), `Restart=on-failure`, `RestartSec=60`, `StandardError=journal`, `WantedBy=default.target`. Uninstall removes only our unit. The binary prints `systemctl --user daemon-reload`, `enable --now` and `loginctl enable-linger $USER` and runs none of them. A control character in the exe path is refused | brief 44, evidence 36; 11.5, 17 |
 | D54 | 2026-11-21, operator answers to the uncaptured-files review: the `~/.claude/skills` folder and Pi `pi-terminology/` are not captured; Codex `generated_images`/`attachments` and Claude `paste-cache` are captured (slice 3; superseded by D55: none of the three is captured); known non-session files get an `Ignored` verdict, counted apart from `UnknownKind` and never captured. Claude `file-history` (operator: research and decide): captured in slice 3 only behind a content scan that withholds the whole file, with a recorded reason, on a secret match, binary or non-UTF-8 content, an oversize file or a scanner error; the local file is never touched. Reason: the transcript stays the record of what a session did, file-history adds the exact pre-edit file state at about 10 MB per host, and it is a raw copy of project files that no path denylist can see (names are hashes) | research report (Anthropic `claude-directory` and `checkpointing` docs), evidence 37; 5, 8, 19 |
 | D55 | 2026-11-21, operator after an evidence check of D54: Codex `generated_images`, Codex `attachments` and Claude `paste-cache` are not captured (they become `Ignored`). Measured on this Mac (byte and hash comparison, counts only): all 59 `paste-cache` files occur in captured Claude transcripts, since the cache only backs `history.jsonl` recall; all 4 generated images occur as base64 in Codex `thread_history_1.sqlite`, which slice 3 captures first; the 5 attachment screenshots and the attachment JSON index exist nowhere else and are given up (operator choice; the conversation text is intact). Reason: data minimisation in an archive that never deletes, and an image cannot be scanned for secrets | evidence 38; 5, 19 |
+| D58 | 2026-11-21: Claude file-history is captured as session-owned snapshots with `Profile::Scanned`: a whole-file scan (1 MiB cap checked on the stat, binary or non-UTF-8, fixed secret patterns, the shell guard, secret-named literal assignments including ones nested in another value) withholds the whole file with a closed reason; a clean file is published byte for byte; the table is in the rules digest; `index.json` keeps the last withhold per file (fingerprint, rules, reason) so it is read once; the round line and `memory status` count `withheld`; the manifest does not record withheld versions; no interval, no deletion. Reason: D54, and the names are hashes, so only content can show a secret | brief 47, evidence 41; 8, 9, 19 |
 | D57 | 2026-11-21: the `Ignored` verdict (D54) for agent-dir layouts: Claude `skills/`, `paste-cache/`, `plugins/` (except `installed_plugins.json` and `known_marketplaces.json`), telemetry, backups, caches and machine state; Codex `.tmp/`, `tmp/`, `cache/`, `packages/`, `computer-use/`, `generated_images/`, `attachments/`, lock and app-server directories, `logs_*.sqlite`, SQLite sidecars, locks, caches and config backups, and every `plugins/` file except `json`, `toml` and `md` outside `cache/` and dot directories; Pi `git/`, `npm/`, `install/`, `pi-terminology/`, `web-search-cache/`, extension backups, `*-debug.jsonl` and config backups. Only a `Miss::Kind` or a `ClaudeConfig`/`ClaudePaste`/`CodexConfig` hit can become `Ignored`; the walk still descends into ignored directories. Reason: `unknown_kind` (19,192 files here, 48,198 on dev-01) said nothing while it mixed vendor code with unclassified files | brief 46, evidence 40; 5, 8 |
 | D56 | 2026-11-21: Codex SQLite stores (top-level `*.sqlite` other than `logs_*`) are captured as shared snapshots: fingerprint db plus `-wal`, never `-shm`; a read-only backup in one step into `state/tmp/` inside the filesystem seam; pieces reused by digest from the last landed epoch; a changed store at most once per 6 h; a failed backup counts as `local` with no owner retry; `memory check` verifies the stored epoch and compares fingerprints, never live bytes; restore writes a standalone database. Reason: 873 Codex threads on this Mac exist only in `thread_history_1.sqlite`; 65 of 74 pieces of it were unchanged over a month | brief 45, evidence 39; 7.2, 7.3, 13 |
 

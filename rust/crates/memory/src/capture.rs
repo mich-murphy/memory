@@ -118,6 +118,9 @@ pub struct Local {
     pub snapshot_at_ns: Option<i64>,
     /// A deletion was committed for the current absence.
     pub deletion_recorded: bool,
+    /// Last judgement that withheld a scanned file: the fingerprint and rules it was made
+    /// under, and the reason (D54, brief 47). The same pair gives `Unchanged` without a read.
+    pub withheld: Option<(Fingerprint, Option<RulesDigest>, WithholdReason)>,
 }
 /// Local knowledge per source.
 pub type Locals = BTreeMap<SourceId, Local>;
@@ -141,6 +144,8 @@ pub enum Update {
         Vec<Piece>,
         i64,
     ),
+    /// A scanned file was judged and withheld under this fingerprint and rules.
+    Withheld(SourceId, Fingerprint, Option<RulesDigest>, WithholdReason),
 }
 impl Update {
     /// Apply to the local state.
@@ -159,6 +164,7 @@ impl Update {
                 local.snapshot = None;
                 local.snapshot_pieces.clear();
                 local.snapshot_at_ns = None;
+                local.withheld = None;
             }
             Self::Index(id, state) => locals.entry(id).or_default().index = Some(*state),
             Self::Snapshot(id, fp, rules, pieces, at) => {
@@ -166,6 +172,10 @@ impl Update {
                 local.snapshot = Some((fp, rules));
                 local.snapshot_pieces = pieces;
                 local.snapshot_at_ns = Some(at);
+                local.withheld = None;
+            }
+            Self::Withheld(id, fp, rules, reason) => {
+                locals.entry(id).or_default().withheld = Some((fp, rules, reason));
             }
         }
     }
@@ -400,6 +410,7 @@ fn withhold_of(reason: Reason) -> WithholdReason {
         Reason::MalformedProtected => WithholdReason::MalformedProtected,
         Reason::SecretInText => WithholdReason::SecretInText,
         Reason::SourceLimit => WithholdReason::SourceLimit,
+        Reason::Binary => WithholdReason::Binary,
         Reason::ScrubFailed | Reason::ContextChanged => WithholdReason::ScrubFailed,
     }
 }
@@ -592,10 +603,13 @@ fn step<F: FileSystem>(
     // can be stale after a lost reply, so it counts only when the remote has no entry.
     let recorded = entry.map_or(local.deletion_recorded, |e| e.deleted_at.is_some());
     let live = entry.filter(|e| e.deleted_at.is_none());
-    let rules = matches!(src.facts.profile, Profile::Config | Profile::TextAsset)
-        .then_some(env.context.rules)
-        .flatten()
-        .map(|r| RulesDigest::new(Sha256::from_bytes(r)));
+    let rules = matches!(
+        src.facts.profile,
+        Profile::Config | Profile::TextAsset | Profile::Scanned
+    )
+    .then_some(env.context.rules)
+    .flatten()
+    .map(|r| RulesDigest::new(Sha256::from_bytes(r)));
     let stat = match fs.stat(src.handle) {
         Ok(stat) => stat,
         Err(e) if F::is_undecodable(&e) => {
@@ -621,13 +635,42 @@ fn step<F: FileSystem>(
         }
         return SourceOutcome::Unchanged;
     };
+    // A present file resets the absence count before any early return below, so a cached
+    // withhold never leaves an earlier miss standing (a later single miss would delete).
+    acc.updates.push(Update::Present(src.id.clone()));
+    // D54, brief 47: a scanned file is judged once per fingerprint and rules; a cached
+    // withhold costs no read. Over the cap it is withheld from its stat, before any read.
+    let scanned = src.facts.profile == Profile::Scanned;
+    let judged = Fingerprint {
+        id: stat.id.clone(),
+        size: stat.size,
+        mtime_ns: stat.mtime_ns,
+    };
+    if scanned {
+        if local
+            .withheld
+            .as_ref()
+            .is_some_and(|(f, r, _)| *f == judged && *r == rules)
+        {
+            return SourceOutcome::Unchanged;
+        }
+        if stat.size > memory_core::privacy::MAX_SCANNED_BYTES {
+            let reason = WithholdReason::SourceLimit;
+            acc.updates.push(Update::Withheld(
+                src.id.clone(),
+                judged,
+                rules,
+                reason.clone(),
+            ));
+            return SourceOutcome::Withheld(reason);
+        }
+    }
     let observed = Observed {
         id: stat.id.clone(),
         size: stat.size,
         mtime_ns: stat.mtime_ns,
         observed_at_ns: env.now_ns,
     };
-    acc.updates.push(Update::Present(src.id.clone()));
     let next_epoch = entry
         .and_then(|e| e.epochs.last())
         .map_or(0, |l| l.epoch.n.saturating_add(1));
@@ -652,7 +695,16 @@ fn step<F: FileSystem>(
                 size: stat.size,
                 mtime_ns: stat.mtime_ns,
             };
-            snapshot(fs, job, local, plain, acc)
+            let outcome = snapshot(fs, job, local, plain, acc);
+            if scanned && let SourceOutcome::Withheld(reason) = &outcome {
+                acc.updates.push(Update::Withheld(
+                    src.id.clone(),
+                    judged,
+                    rules,
+                    reason.clone(),
+                ));
+            }
+            outcome
         }
         SourceClass::Append => {
             let remote_pos = live.and_then(|e| e.epochs.last()).map(|l| EpochPosition {

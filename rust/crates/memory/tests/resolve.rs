@@ -923,7 +923,8 @@ fn snapshot_files_are_deferred_not_yielded_and_not_unknown() -> R {
     let history = t.write(&format!("claude/file-history/{U1}/f@v1"), b"x")?;
     let mut w = walker(&t.root(), WalkLimits::default())?;
     let owner = owner_at(&format!("projects/-p/{U1}.jsonl"))?;
-    assert_eq!(w.enumerate().len(), 1);
+    // D54, brief 47: file-history is yielded (profile Scanned); settings stays deferred.
+    assert_eq!(w.enumerate().len(), 2);
     let c = w.counts();
     assert_eq!(
         (
@@ -932,11 +933,12 @@ fn snapshot_files_are_deferred_not_yielded_and_not_unknown() -> R {
             c.unknown_owner,
             c.unknown_kind
         ),
-        (1, 2, 0, 0)
+        (2, 1, 0, 0)
     );
     assert_eq!(w.note(&settings), None);
+    // `note` routes watcher events for append sources only; file-history waits for the reconcile.
     assert_eq!(w.note(&history), None);
-    assert_eq!(w.of(&owner).len(), 1);
+    assert_eq!(w.of(&owner).len(), 2);
 
     let codex = t.0.join("codex");
     t.write("codex/state.sqlite", b"x")?;

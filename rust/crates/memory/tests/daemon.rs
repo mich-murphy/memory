@@ -4776,3 +4776,12 @@ fn an_index_without_owners_still_loads() -> R {
     assert!(!d.rebuilt());
     Ok(())
 }
+
+/// D54, brief 47: an index written before `withheld` existed loads with `None`.
+#[test]
+fn an_index_without_the_withheld_field_loads() -> Result<(), serde_json::Error> {
+    let old = r#"{"sources":{"s":{"index":null,"missing":0,"snapshot":null,"deletion_recorded":false}},"hints":{}}"#;
+    let body: memory::daemon::IndexBody = serde_json::from_str(old)?;
+    assert!(body.sources.values().all(|s| s.withheld.is_none()));
+    Ok(())
+}

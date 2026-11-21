@@ -625,7 +625,8 @@ fn a_missing_root_deletes_nothing_on_the_real_binary() -> R {
         assert_eq!(code, 0, "{err}");
         let line = round_line(&err)?;
         assert!(line.contains(" deleted=0 "), "{line}");
-        assert!(line.ends_with(" absence_skipped=1"), "{line}");
+        // Brief 47: the round line ends with `withheld=<n>` now.
+        assert!(line.ends_with(" absence_skipped=1 withheld=0"), "{line}");
     }
     fs::rename(&moved, &s.rig.root).map_err(e)?;
     let mut store = store_at(&s.server.url(), PREFIX, TimeoutPolicy::PRODUCTION)?;

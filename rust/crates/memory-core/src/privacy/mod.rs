@@ -23,14 +23,21 @@
 //! let _: memory_core::privacy::AuthorizedBody = serde_json::from_str("{}").unwrap();
 //! ```
 
+//! `Profile::Scanned` (D54, brief 47) is a whole-file content scan (`scan.rs`): the file is
+//! published byte for byte or withheld whole (`SourceLimit`, `Binary`, `SecretInText`,
+//! `ScrubFailed`). It is never prefix-stable and needs the current rules digest, which covers
+//! the scanner table and size cap.
+
 mod document;
 mod launch;
 mod names;
+mod scan;
 mod text;
 
 pub(crate) use launch::{LAUNCH_ARGV_MAX, LAUNCH_ENV_MAX};
 pub use launch::{SanitizedLaunch, sanitize_launch};
 pub use names::{basename, is_credential, is_secret_name};
+pub use scan::MAX_SCANNED_BYTES;
 
 use sha2::{Digest, Sha256};
 
@@ -66,6 +73,9 @@ pub enum Reason {
     /// Whole protected document exceeds the bound.
     #[error("source_limit")]
     SourceLimit,
+    /// Binary or non-UTF-8 content in a scanned file (D54, brief 47).
+    #[error("binary")]
+    Binary,
     /// Capability and current context do not match.
     #[error("context_changed")]
     ContextChanged,
@@ -93,6 +103,9 @@ pub enum Profile {
     Config,
     /// Known small non-transcript assets subject to assignment guard.
     TextAsset,
+    /// Whole-file content scan (D54, brief 47): published whole or withheld whole, never
+    /// prefix-stable, bound to the rules digest.
+    Scanned,
     /// Other explicitly known safe source.
     OtherKnown,
     /// Unknown kind cannot take a raw route.
@@ -161,7 +174,10 @@ impl AdmittedSource {
             .identities
             .iter()
             .any(|name| document::recognizes(name))
-            && !matches!(self.facts.profile, Profile::Config | Profile::TextAsset)
+            && !matches!(
+                self.facts.profile,
+                Profile::Config | Profile::TextAsset | Profile::Scanned
+            )
     }
 }
 
@@ -208,6 +224,7 @@ pub fn rules_digest() -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(TRANSFORM_VERSION.as_bytes());
     document::digest_rules(&mut h);
+    scan::digest_rules(&mut h);
     h.finalize().into()
 }
 
@@ -276,6 +293,7 @@ fn binding(context: &PolicyContext, facts: &ResolvedSourceFacts) -> [u8; 32] {
         Profile::TextAsset => 2,
         Profile::OtherKnown => 3,
         Profile::Unknown => 4,
+        Profile::Scanned => 5,
     }]);
     h.finalize().into()
 }
@@ -291,8 +309,10 @@ pub fn admit(context: &PolicyContext, facts: ResolvedSourceFacts) -> Admission {
     if !facts.path_resolved || facts.identities.is_empty() || facts.file_identity.is_none() {
         return Admission::Unknown(UnknownReason::PathUnresolvable);
     }
-    if (matches!(facts.profile, Profile::Config | Profile::TextAsset)
-        || facts.identities.iter().any(|p| document::recognizes(p)))
+    if (matches!(
+        facts.profile,
+        Profile::Config | Profile::TextAsset | Profile::Scanned
+    ) || facts.identities.iter().any(|p| document::recognizes(p)))
         && context.rules != Some(rules_digest())
     {
         return Admission::Unknown(UnknownReason::RulesUnavailable);
@@ -359,6 +379,9 @@ pub fn transform_owned(source: &AdmittedSource, bytes: Vec<u8>) -> Result<Redact
     }
     if matches!(source.facts.profile, Profile::Config | Profile::TextAsset) {
         text::check(&source.facts.identities, &out)?;
+    }
+    if source.facts.profile == Profile::Scanned {
+        scan::check(&out)?;
     }
     Ok(RedactedBytes {
         bytes: out,

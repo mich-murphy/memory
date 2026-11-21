@@ -21,6 +21,12 @@
 //! owner whose every file is gone is still visited; it leaves the set once no live append entry
 //! remains. `capture_owner` never counts absence.
 //!
+//! Withheld scanned files (D54, brief 47): `SourceIndex.withheld` (`#[serde(default)]`) records the
+//! fingerprint, rules and reason of a withhold of a `Profile::Scanned` file (Claude file-history).
+//! The same pair gives `Unchanged` without a read; a new fingerprint or rules judge again; a file
+//! that later lands clears it. `RoundReport.withheld` counts judgements made in the round, not
+//! cached ones. The manifest never records a withheld file.
+//!
 //! The commit base (`current.json` ETag, owner state) is never persisted: every owner
 //! recovers it from the store on its first round after a start (`recover_base`).
 use crate::audit::AuditCounts;
@@ -41,8 +47,8 @@ use crate::state::{
 use memory_core::coalescer::Signal;
 use memory_core::disposition::Streak;
 use memory_core::domain::{
-    Agent, Disposition, ErrorClass, LocalError, Owner, OwnerParkReason, ParkReason, RulesDigest,
-    SnapshotFingerprint, SourceClass, SourceId, SourceState,
+    Agent, Disposition, ErrorClass, Fingerprint, LocalError, Owner, OwnerParkReason, ParkReason,
+    RulesDigest, SnapshotFingerprint, SourceClass, SourceId, SourceState, WithholdReason,
 };
 use memory_core::hint::{
     HintEvent, HintScan, LaunchHint, PathHint, RetentionFacts, past_retention, removable, scan,
@@ -127,6 +133,10 @@ pub struct SourceIndex {
     pub snapshot_at_ns: Option<i64>,
     /// A deletion was committed for the current absence.
     pub deletion_recorded: bool,
+    /// Withheld scanned file: fingerprint, rules and reason of the judgement (D54, brief 47).
+    /// An index written before this field loads with `None`.
+    #[serde(default)]
+    pub withheld: Option<(Fingerprint, Option<RulesDigest>, WithholdReason)>,
 }
 
 /// `index.json` body (schema `memory.index/1`): a derived cache.
@@ -272,6 +282,8 @@ pub struct RoundReport {
     pub deleted: usize,
     /// Absence candidates not probed: unknown namespace, bad path or missing root.
     pub absence_skipped: usize,
+    /// Scanned files judged and withheld in this round (a cached withhold is not counted again).
+    pub withheld: usize,
 }
 
 /// How an absence candidate can be probed ([`Sources::locate_absent`]).
@@ -637,6 +649,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                     snapshot_pieces: s.snapshot_pieces,
                     snapshot_at_ns: s.snapshot_at_ns,
                     deletion_recorded: s.deletion_recorded,
+                    withheld: s.withheld,
                 };
                 (id, local)
             })
@@ -1103,6 +1116,11 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             }
         }
         report.audit.add(&got.audit);
+        report.withheld += got
+            .updates
+            .iter()
+            .filter(|u| matches!(u, Update::Withheld(..)))
+            .count();
         // A source park takes effect whether or not the owner's commit lands.
         for (id, outcome) in &got.outcomes {
             match outcome {
@@ -1213,6 +1231,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                         snapshot_pieces: l.snapshot_pieces.clone(),
                         snapshot_at_ns: l.snapshot_at_ns,
                         deletion_recorded: l.deletion_recorded,
+                        withheld: l.withheld.clone(),
                     };
                     (id.clone(), entry)
                 })

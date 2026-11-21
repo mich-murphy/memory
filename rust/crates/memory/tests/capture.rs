@@ -1232,3 +1232,142 @@ fn undecodable_stat_or_read_is_withheld_with_no_upload() -> R {
     }
     Ok(())
 }
+
+// ---- D54, brief 47: scanned snapshot (Claude file-history)
+
+fn scanned() -> R<Source> {
+    let mut s = source(
+        1,
+        "file-history/s1/0123456789abcdef@v1",
+        SourceClass::Snapshot,
+        Profile::Scanned,
+    )?;
+    s.kind = SourceKind::ClaudeFileHistory;
+    Ok(s)
+}
+
+#[test]
+fn a_clean_scanned_file_lands_and_a_secret_or_binary_one_puts_nothing() -> R {
+    let mut rig = Rig::new(vec![scanned()?]);
+    rig.fs.set(1, b"fn main() {}\n");
+    let (outcomes, changes) = rig.cycle()?;
+    assert_eq!(outcomes, [SourceOutcome::Planned]);
+    assert_eq!(kinds(&changes), ["replace"]);
+
+    let secret: &[u8] = concat!("key = ", "AKIA", "EXAMPLEEXAMPLE00", "\n").as_bytes();
+    for (bytes, reason) in [
+        (secret, WithholdReason::SecretInText),
+        (&b"ab\0cd"[..], WithholdReason::Binary),
+        (&[0x66_u8, 0xff][..], WithholdReason::Binary),
+    ] {
+        let got = withheld_for(scanned()?, bytes, |_| {})?;
+        assert_eq!(got, SourceOutcome::Withheld(reason));
+    }
+    Ok(())
+}
+
+#[test]
+fn an_oversize_scanned_file_is_withheld_before_any_read() -> R {
+    let mut rig = Rig::new(vec![scanned()?]);
+    let mut spy = Spy::default();
+    spy.inner.set(1, &vec![b'a'; 1024 * 1024 + 1]);
+    let got = run_spy(&mut rig, &mut spy)?;
+    assert_eq!(
+        got.outcomes.first().map(|(_, o)| o),
+        Some(&SourceOutcome::Withheld(WithholdReason::SourceLimit))
+    );
+    assert!(got.commit.is_none());
+    assert!(spy.reads.is_empty(), "no read: {:?}", spy.reads);
+    Ok(())
+}
+
+fn round_spy(rig: &mut Rig, spy: &mut Spy) -> R<(Vec<SourceOutcome>, Vec<Change>)> {
+    let got = run_spy(rig, spy)?;
+    let changes = got.commit.as_ref().map_or(vec![], |c| c.changes.clone());
+    if let Some(request) = got.commit {
+        let landed = commit(&mut rig.store, rig.base.as_ref(), request, &mut |_| {}).map_err(e)?;
+        rig.base = Some(landed.base());
+    }
+    for update in got.updates {
+        update.apply(&mut rig.locals);
+    }
+    Ok((got.outcomes.into_iter().map(|(_, o)| o).collect(), changes))
+}
+
+#[test]
+fn a_withheld_scanned_file_is_read_once_over_three_rounds() -> R {
+    let mut rig = Rig::new(vec![scanned()?]);
+    let mut spy = Spy::default();
+    spy.inner.set(1, b"ab\0cd");
+    let (first, _) = round_spy(&mut rig, &mut spy)?;
+    assert_eq!(first, [SourceOutcome::Withheld(WithholdReason::Binary)]);
+    let reads = spy.reads.len();
+    assert!(reads > 0);
+    for _ in 0..2 {
+        let (again, changes) = round_spy(&mut rig, &mut spy)?;
+        assert_eq!(again, [SourceOutcome::Unchanged]);
+        assert!(changes.is_empty());
+    }
+    assert_eq!(spy.reads.len(), reads, "a cached withhold costs no read");
+
+    // A changed fingerprint is judged again; a clean result lands and clears the record.
+    spy.inner.set(1, b"now clean text\n");
+    let (third, changes) = round_spy(&mut rig, &mut spy)?;
+    assert_eq!(third, [SourceOutcome::Planned]);
+    assert_eq!(kinds(&changes), ["replace"]);
+    assert!(rig.locals.values().all(|l| l.withheld.is_none()));
+
+    // Changed again, withheld for a different reason: judged again, new record.
+    spy.inner.set(1, &[0x66, 0xff]);
+    let (fourth, _) = round_spy(&mut rig, &mut spy)?;
+    assert_eq!(fourth, [SourceOutcome::Withheld(WithholdReason::Binary)]);
+    assert!(rig.locals.values().all(|l| l.withheld.is_some()));
+    Ok(())
+}
+
+/// A landed scanned file that turns secret, misses one round and comes back with the same
+/// fingerprint hits the cached withhold. Its return must still reset the absence count, or the
+/// next single miss would count as the second and delete the live entry (D52, brief 47).
+#[test]
+fn a_cached_withhold_still_resets_the_absence_count() -> R {
+    let mut rig = Rig::new(vec![scanned()?]);
+    rig.fs.set(1, b"fn main() {}\n");
+    let (landed, _) = rig.cycle()?;
+    assert_eq!(landed, [SourceOutcome::Planned]);
+    rig.fs.set(1, b"ab\0cd");
+    let (withheld, _) = rig.cycle()?;
+    assert_eq!(withheld, [SourceOutcome::Withheld(WithholdReason::Binary)]);
+    let (files, mtimes) = (rig.fs.files.clone(), rig.fs.mtimes.clone());
+    rig.fs.files.clear();
+    let (_, one) = rig.cycle()?;
+    assert!(one.is_empty());
+    // Back with the same identity, size and mtime: the cached withhold answers.
+    rig.fs.files = files;
+    rig.fs.mtimes = mtimes;
+    let (back, changes) = rig.cycle()?;
+    assert_eq!(back, [SourceOutcome::Unchanged]);
+    assert!(changes.is_empty());
+    rig.fs.files.clear();
+    let (_, again) = rig.cycle()?;
+    assert!(
+        again.is_empty(),
+        "a single miss deleted: {:?}",
+        kinds(&again)
+    );
+    Ok(())
+}
+
+#[test]
+fn new_rules_judge_a_withheld_file_again() -> R {
+    let mut rig = Rig::new(vec![scanned()?]);
+    let mut spy = Spy::default();
+    spy.inner.set(1, b"ab\0cd");
+    round_spy(&mut rig, &mut spy)?;
+    let reads = spy.reads.len();
+    rig.context.rules = Some([9; 32]);
+    let (out, _) = round_spy(&mut rig, &mut spy)?;
+    // Unknown rules fail closed and read nothing; the record is not trusted for other rules.
+    assert!(matches!(out.as_slice(), [SourceOutcome::Blocked(_)]));
+    assert_eq!(spy.reads.len(), reads);
+    Ok(())
+}
