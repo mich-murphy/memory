@@ -19,7 +19,8 @@
 //! [`Sources::locate_absent`]; a missing root, an unknown namespace or a bad path is counted as
 //! `absence_skipped` and never deletes. `index.json` keeps `owners` (`#[serde(default)]`) so an
 //! owner whose every file is gone is still visited; it leaves the set once no live entry
-//! remains. `capture_owner` never counts absence.
+//! remains. `capture_owner` never counts absence. A local record holding only a withheld
+//! judgement is dropped after two consecutive complete walks that did not yield it (brief 48).
 //!
 //! Withheld scanned files (D54, brief 47): `SourceIndex.withheld` (`#[serde(default)]`) records the
 //! fingerprint, rules and reason of a withhold of a `Profile::Scanned` file (Claude file-history).
@@ -1278,6 +1279,29 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 Some((_, list)) => list.push(source),
                 None => groups.push((owner, vec![source])),
             }
+        }
+        // Brief 48: a local record that only holds a withheld judgement (never published, so
+        // never a candidate) is dropped after two consecutive full rounds that did not walk
+        // it. No manifest change is built: the file was never in R2.
+        if self.absence {
+            let seen: HashSet<&SourceId> = groups
+                .iter()
+                .flat_map(|(_, list)| list.iter().map(|s| &s.id))
+                .collect();
+            let mut touched = false;
+            self.locals.retain(|id, l| {
+                if l.withheld.is_none()
+                    || l.snapshot.is_some()
+                    || l.index.is_some()
+                    || seen.contains(id)
+                {
+                    return true;
+                }
+                touched = true;
+                l.missing = l.missing.saturating_add(1);
+                l.missing < 2
+            });
+            self.dirty |= touched;
         }
         let walked: HashSet<Owner> = groups.iter().map(|(o, _)| o.clone()).collect();
         for owner in &walked {

@@ -4862,6 +4862,81 @@ fn capture_owner_never_counts_absence_for_a_snapshot() -> R {
 }
 
 #[test]
+fn a_recreated_snapshot_is_a_new_live_epoch() -> R {
+    // Brief 48: the next epoch after a deletion, with a full upload (local pieces were cleared).
+    let mut r = snap_rig()?;
+    remove_file(&mut r, 3);
+    r.d.reconcile_once().map_err(e)?;
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 1);
+    assert_eq!(deleted_and_epochs(&mut r.d)?, (true, 1));
+    r.d.fs_mut().mem.files.insert(3, FRESH.to_vec());
+    if let Ok(mut list) = r.gate.list.lock() {
+        list.push(snap_of(3)?);
+    }
+    let back = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((back.landed, back.deleted), (1, 0));
+    assert_eq!(deleted_and_epochs(&mut r.d)?, (false, 1));
+    // `Replace` clears the old epochs and takes the next epoch number.
+    Ok(())
+}
+
+/// Owner `s1` with one scanned file (handle 3) that the privacy judgement withholds.
+fn withheld_rig() -> R<Rig> {
+    let mut r = snap_rig()?;
+    // Reuse the rig plumbing with a new owner state: a fresh file that is withheld.
+    let secret: &[u8] = concat!("key = ", "AKIA", "EXAMPLEEXAMPLE00", "\n").as_bytes();
+    r.d.fs_mut().mem.files.insert(4, secret.to_vec());
+    if let Ok(mut list) = r.gate.list.lock() {
+        list.push(snap_of(4)?);
+    }
+    let first = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((first.landed, first.withheld), (0, 1));
+    Ok(r)
+}
+
+fn rig_index_has(r: Rig, id: &str) -> R<bool> {
+    let (tmp, d) = (r.tmp, r.d);
+    d.shutdown().map_err(e)?;
+    let index = need(index_of(&tmp)?, "no index")?;
+    Ok(index.sources.keys().any(|k| k.as_str() == id))
+}
+
+#[test]
+fn a_withheld_only_record_is_dropped_after_two_misses_and_builds_no_change() -> R {
+    let mut r = withheld_rig()?;
+    remove_file(&mut r, 4);
+    let first = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((first.landed, first.deleted), (0, 0));
+    assert!(rig_index_has(r, "src4")?, "dropped after one miss");
+
+    let mut r = withheld_rig()?;
+    remove_file(&mut r, 4);
+    r.d.reconcile_once().map_err(e)?;
+    let second = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((second.landed, second.deleted), (0, 0), "no change built");
+    assert!(!deleted_and_epochs(&mut r.d)?.0);
+    assert!(!rig_index_has(r, "src4")?, "kept forever");
+    Ok(())
+}
+
+#[test]
+fn a_withheld_file_back_before_the_second_round_keeps_its_record() -> R {
+    let mut r = withheld_rig()?;
+    let secret: Vec<u8> = r.d.fs_mut().mem.files.get(&4).cloned().unwrap_or_default();
+    remove_file(&mut r, 4);
+    r.d.reconcile_once().map_err(e)?;
+    r.d.fs_mut().mem.files.insert(4, secret);
+    if let Ok(mut list) = r.gate.list.lock() {
+        list.push(snap_of(4)?);
+    }
+    r.d.reconcile_once().map_err(e)?;
+    remove_file(&mut r, 4);
+    r.d.reconcile_once().map_err(e)?;
+    assert!(rig_index_has(r, "src4")?, "count did not restart");
+    Ok(())
+}
+
+#[test]
 fn the_owner_set_survives_a_restart() -> R {
     let r = rig()?;
     let (tmp, cfg, gate, fail) = (r.tmp, r.cfg, r.gate, r.fail);
