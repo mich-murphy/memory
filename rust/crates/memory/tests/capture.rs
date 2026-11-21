@@ -1325,6 +1325,38 @@ fn a_withheld_scanned_file_is_read_once_over_three_rounds() -> R {
     Ok(())
 }
 
+/// A landed scanned file that turns secret, misses one round and comes back with the same
+/// fingerprint hits the cached withhold. Its return must still reset the absence count, or the
+/// next single miss would count as the second and delete the live entry (D52, brief 47).
+#[test]
+fn a_cached_withhold_still_resets_the_absence_count() -> R {
+    let mut rig = Rig::new(vec![scanned()?]);
+    rig.fs.set(1, b"fn main() {}\n");
+    let (landed, _) = rig.cycle()?;
+    assert_eq!(landed, [SourceOutcome::Planned]);
+    rig.fs.set(1, b"ab\0cd");
+    let (withheld, _) = rig.cycle()?;
+    assert_eq!(withheld, [SourceOutcome::Withheld(WithholdReason::Binary)]);
+    let (files, mtimes) = (rig.fs.files.clone(), rig.fs.mtimes.clone());
+    rig.fs.files.clear();
+    let (_, one) = rig.cycle()?;
+    assert!(one.is_empty());
+    // Back with the same identity, size and mtime: the cached withhold answers.
+    rig.fs.files = files;
+    rig.fs.mtimes = mtimes;
+    let (back, changes) = rig.cycle()?;
+    assert_eq!(back, [SourceOutcome::Unchanged]);
+    assert!(changes.is_empty());
+    rig.fs.files.clear();
+    let (_, again) = rig.cycle()?;
+    assert!(
+        again.is_empty(),
+        "a single miss deleted: {:?}",
+        kinds(&again)
+    );
+    Ok(())
+}
+
 #[test]
 fn new_rules_judge_a_withheld_file_again() -> R {
     let mut rig = Rig::new(vec![scanned()?]);

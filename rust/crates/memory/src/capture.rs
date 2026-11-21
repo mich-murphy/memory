@@ -635,6 +635,9 @@ fn step<F: FileSystem>(
         }
         return SourceOutcome::Unchanged;
     };
+    // A present file resets the absence count before any early return below, so a cached
+    // withhold never leaves an earlier miss standing (a later single miss would delete).
+    acc.updates.push(Update::Present(src.id.clone()));
     // D54, brief 47: a scanned file is judged once per fingerprint and rules; a cached
     // withhold costs no read. Over the cap it is withheld from its stat, before any read.
     let scanned = src.facts.profile == Profile::Scanned;
@@ -668,7 +671,6 @@ fn step<F: FileSystem>(
         mtime_ns: stat.mtime_ns,
         observed_at_ns: env.now_ns,
     };
-    acc.updates.push(Update::Present(src.id.clone()));
     let next_epoch = entry
         .and_then(|e| e.epochs.last())
         .map_or(0, |l| l.epoch.n.saturating_add(1));
