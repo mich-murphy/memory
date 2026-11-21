@@ -284,6 +284,32 @@ fn without_a_temp_directory_the_backup_fails_closed() -> R {
     Ok(())
 }
 
+/// A read of the copy allocates exactly what it returns. A buffer grown by `read_to_end`
+/// overshot each piece and left freed blocks behind: 561 MB peak on a 615 MB store
+/// (2026-11-21); with exact buffers a 308 MB synthetic store peaked at 26 MB.
+#[test]
+fn a_read_of_the_copy_allocates_exactly_the_bytes_it_returns() -> R {
+    let dir = Dir::new()?;
+    let _writer = big_db(&dir.db())?;
+    let mut rig = Rig::new(&dir, RealFs::with_tmp(dir.tmp()))?;
+    let handle = rig.source.handle;
+    rig.fs.stat(handle).map_err(e)?;
+    let len = rig
+        .fs
+        .begin_snapshot(handle)
+        .map_err(e)?
+        .ok_or("no copy length")?;
+    assert!(len > 100_000, "store too small to show growth: {len}");
+    for range in [0..len, 0..len / 3, len / 3..len, len - 1..len + 4096] {
+        let buf = rig.fs.read(handle, range.clone()).map_err(e)?;
+        assert!(!buf.is_empty(), "{range:?}");
+        assert_eq!(buf.capacity(), buf.len(), "{range:?}");
+    }
+    rig.fs.end_snapshot(handle);
+    assert_eq!(dir.tmp_entries(), 0);
+    Ok(())
+}
+
 /// Simulated seam: the live bytes move after the copy is made; reads see only the copy.
 #[derive(Default)]
 struct SimFs {
