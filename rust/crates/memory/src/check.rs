@@ -11,20 +11,25 @@
 //! `remote_only`. Cost per run: for each owner one GET of `current.json`, at most 64 manifest
 //! GETs, and one GET per piece of each local source's latest epoch.
 //!
+//! A Codex SQLite store is not compared byte for byte (a backup is not a copy of the live file):
+//! the stored epoch is fetched and verified (every piece digest and the whole digest), then the
+//! local fingerprint (db plus `-wal`) is compared with the one indexed for that epoch: `match`
+//! when equal, `behind` when the store changed since, `unsettled` without an index entry.
+//!
 //! Output is a closed vocabulary: counts, then one line per mismatch, uncaptured, withheld or
 //! parked item with the owner prefix, the source kind and a reason code. Never a path, a source
 //! id, file content or a credential.
 use crate::assemble::{build_store, policy_context};
 use crate::capture::{MAX_PIECE_BYTES, Source, SourceOutcome, publishable, publishable_owned};
 use crate::config::Config;
-use crate::daemon::{EXIT_CONFIG, ParkedReason, Sources, StatusBody};
+use crate::daemon::{EXIT_CONFIG, IndexBody, ParkedReason, Sources, StatusBody};
 use crate::environment::{FileSystem, Stat, Store, StoreError};
 use crate::realfs::WalkLimits;
 use crate::resolve::{SharedFs, WalkSources};
 use crate::roots::locator_roots;
 use crate::s3::S3Store;
 use crate::state::{Loaded, MissingReason, StateFile, default_root, read_durable};
-use memory_core::domain::{Owner, Sha256, SourceId};
+use memory_core::domain::{Owner, Sha256, SnapshotFingerprint, SourceId, SourceKind};
 use memory_core::limits::owner_prefix;
 use memory_core::manifest::{EpochRecord, OwnerState, SourceEntry};
 use memory_core::privacy::{Admission, AdmittedSource, PolicyContext, UnknownReason, admit};
@@ -103,7 +108,7 @@ pub struct Tally {
     pub unknown_owner: u64,
     /// Walk: files duplicating another file's source id (not captured).
     pub duplicate: u64,
-    /// Walk: snapshot files deferred until slice 3.
+    /// Walk: snapshot files other than Codex SQLite stores, withheld.
     pub deferred_snapshot: u64,
     /// Walk: entries that could not be read.
     pub unreadable: u64,
@@ -231,6 +236,8 @@ fn outcome_code(outcome: &SourceOutcome) -> String {
         SourceOutcome::Unchanged
         | SourceOutcome::Raced
         | SourceOutcome::Unavailable
+        | SourceOutcome::BackupFailed
+        | SourceOutcome::Deferred
         | SourceOutcome::Planned
         | SourceOutcome::Parked(_) => "withheld".to_owned(),
     }
@@ -488,6 +495,61 @@ fn drained<F: FileSystem>(
     }
 }
 
+/// A SQLite store: the stored epoch is fetched and verified piece by piece (every piece digest,
+/// the length and the whole digest, as restore does). The local file is never compared byte for
+/// byte (a backup is not a copy of it); `Match` when the local fingerprint equals the one
+/// indexed for the stored epoch, `Behind` when it moved since, `Unsettled` without an index entry.
+fn judge_store(
+    fs: &mut SharedFs,
+    store: &mut S3Store,
+    context: &PolicyContext,
+    state: Option<&OwnerState>,
+    indexed: Option<&SnapshotFingerprint>,
+    source: &Source,
+) -> Verdict {
+    if let Err(verdict) = admit_source(context, source) {
+        return verdict;
+    }
+    let Some(entry) = live_entry(state, source) else {
+        return Verdict::Uncaptured;
+    };
+    let Some(record) = entry.epochs.last() else {
+        return Verdict::Mismatch("restore");
+    };
+    let mut hasher = sha2::Sha256::new();
+    let mut restored: u64 = 0;
+    for piece in &record.pieces {
+        if restored != piece.offset().get() {
+            return Verdict::Mismatch("restore");
+        }
+        let stored = match store.get(piece.object()) {
+            Ok(stored) => stored.body,
+            Err(StoreError::NotFound) => return Verdict::Mismatch("restore"),
+            Err(error) => return Verdict::StoreFailed(error),
+        };
+        let Ok(decoded) = decode_piece(piece, &stored) else {
+            return Verdict::Mismatch("restore");
+        };
+        hasher.update(&decoded);
+        restored = restored.saturating_add(u64::try_from(decoded.len()).unwrap_or(u64::MAX));
+    }
+    if restored != record.size || Sha256::from_bytes(hasher.finalize().into()) != record.sha256 {
+        return Verdict::Mismatch("restore");
+    }
+    let local = match (
+        fs.stat(source.handle),
+        fs.snapshot_fingerprint(source.handle),
+    ) {
+        (Ok(Some(_)), Ok(Some(fp))) => fp,
+        _ => return Verdict::Unsettled,
+    };
+    match indexed {
+        Some(fp) if *fp == local => Verdict::Match,
+        Some(_) => Verdict::Behind,
+        None => Verdict::Unsettled,
+    }
+}
+
 fn judge(
     fs: &mut SharedFs,
     store: &mut S3Store,
@@ -568,6 +630,7 @@ pub fn check(root: &Path) -> Result<Report, Refusal> {
         }
     }
 
+    let (index, _) = read_state::<IndexBody>(root, StateFile::Index);
     let mut fs = SharedFs::new();
     let mut walk = WalkSources::new(roots, WalkLimits::default(), fs.clone());
     let rows = walk.enumerate();
@@ -617,7 +680,24 @@ pub fn check(root: &Path) -> Result<Report, Refusal> {
         };
         for source in sources {
             let kind = code_of(&source.kind);
-            match judge(&mut fs, &mut store, &context, state.as_ref(), source) {
+            let verdict = if source.kind == SourceKind::CodexStore {
+                let indexed = index
+                    .as_ref()
+                    .and_then(|i| i.sources.get(&source.id))
+                    .and_then(|e| e.snapshot.as_ref())
+                    .map(|(fp, _)| fp);
+                judge_store(
+                    &mut fs,
+                    &mut store,
+                    &context,
+                    state.as_ref(),
+                    indexed,
+                    source,
+                )
+            } else {
+                judge(&mut fs, &mut store, &context, state.as_ref(), source)
+            };
+            match verdict {
                 Verdict::Match => tally.matched += 1,
                 Verdict::Behind => tally.behind += 1,
                 Verdict::Unsettled => tally.unsettled += 1,

@@ -274,6 +274,14 @@ from `main` alone.
      screenshots exist nowhere else and are given up. The operator approved the Codex hooks on
      dev-01. Slice 3 order now: Codex databases (consistent snapshot), the `Ignored` verdict with
      the narrowed Codex `plugins/**` rule, then file-history behind the content scan.
+  21. Brief 45 ([45-codex-stores.md](rust-rewrite/implementation/45-codex-stores.md),
+     [evidence 39](rust-rewrite/implementation/evidence/39-codex-stores/)) is accepted locally as
+     `79fcad1` (DESIGN D56): Codex SQLite stores other than `logs_*` are captured as shared
+     snapshots from a read-only backup (fingerprint db plus `-wal`, pieces reused by digest, a
+     changed store at most once per 6 h, a failed backup counted as `local`). Next: install on
+     both hosts, measure the first snapshot, restore the shared Codex owner and compare it with
+     `~/.local/state/codex-preserved-20261120/`; only then may the retired Go directories and the
+     preserved copies be considered for deletion (operator decision).
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

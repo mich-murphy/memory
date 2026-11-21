@@ -611,6 +611,8 @@ fn rows() -> Vec<Row> {
     }
     for p in [
         "sessions".to_owned(),
+        "logs_2.sqlite".to_owned(),
+        "LOGS_1.SQLITE".to_owned(),
         "sessions/x.jsonl".to_owned(),
         format!("sessions/rollout-2026-01-02T03-04-05-{UA}.json"),
         format!("sessions/{name}.zst.zst"),

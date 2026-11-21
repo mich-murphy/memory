@@ -45,6 +45,11 @@ signal-hook = { version = "=0.4.6", default-features = false, features = ["itera
 tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["fmt", "std"] }
 
+# Consistent snapshots of Codex's SQLite stores (DESIGN.md 7.3, 13; brief 45). `bundled` compiles SQLite in;
+# `backup` is the online-backup API (its own cargo feature: `bundled` alone does not expose it). No default
+# features (`cache`, wasm). `memory` only: `memory-core` keeps its I/O ban.
+rusqlite = { version = "=0.43.0", default-features = false, features = ["bundled", "backup"] }
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"

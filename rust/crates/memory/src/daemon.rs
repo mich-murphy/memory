@@ -41,13 +41,13 @@ use crate::state::{
 use memory_core::coalescer::Signal;
 use memory_core::disposition::Streak;
 use memory_core::domain::{
-    Agent, Disposition, ErrorClass, Owner, OwnerParkReason, ParkReason, RulesDigest,
+    Agent, Disposition, ErrorClass, LocalError, Owner, OwnerParkReason, ParkReason, RulesDigest,
     SnapshotFingerprint, SourceClass, SourceId, SourceState,
 };
 use memory_core::hint::{
     HintEvent, HintScan, LaunchHint, PathHint, RetentionFacts, past_retention, removable, scan,
 };
-use memory_core::manifest::{Change, Header, ManifestError, OwnerState, Timestamp, Writer};
+use memory_core::manifest::{Change, Header, ManifestError, OwnerState, Piece, Timestamp, Writer};
 use memory_core::pause::pause_for;
 use memory_core::privacy::{PolicyContext, SanitizedLaunch, sanitize_launch};
 use serde::de::DeserializeOwned;
@@ -119,6 +119,12 @@ pub struct SourceIndex {
     pub missing: u32,
     /// Last snapshot fingerprint and rules.
     pub snapshot: Option<(SnapshotFingerprint, Option<RulesDigest>)>,
+    /// Pieces of the last landed snapshot epoch (reuse by digest).
+    #[serde(default)]
+    pub snapshot_pieces: Vec<Piece>,
+    /// Wall time of the last landed snapshot.
+    #[serde(default)]
+    pub snapshot_at_ns: Option<i64>,
     /// A deletion was committed for the current absence.
     pub deletion_recorded: bool,
 }
@@ -628,6 +634,8 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                     index: s.index,
                     missing: s.missing,
                     snapshot: s.snapshot,
+                    snapshot_pieces: s.snapshot_pieces,
+                    snapshot_at_ns: s.snapshot_at_ns,
                     deletion_recorded: s.deletion_recorded,
                 };
                 (id, local)
@@ -1003,6 +1011,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         owner: &Owner,
     ) -> Result<CommitEnd, Failure> {
         let (got, winners) = staged;
+        let adopted = winners.clone();
         let stop = &self.stop;
         let (sleep, draws, clock) = (&mut self.sleep, &mut self.draws, &self.clock);
         let result = commit_staged(
@@ -1020,7 +1029,11 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             // base, apply nothing, and the next round captures again.
             rt.base = RemoteBase::Known(end.base());
             if let CommitEnd::Landed(landed) = end {
-                self.apply_landed(landed, got.updates, hints, owner);
+                let mut updates = got.updates;
+                for update in &mut updates {
+                    update.adopt(&adopted);
+                }
+                self.apply_landed(landed, updates, hints, owner);
             }
         }
         result
@@ -1092,9 +1105,16 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         report.audit.add(&got.audit);
         // A source park takes effect whether or not the owner's commit lands.
         for (id, outcome) in &got.outcomes {
-            if let SourceOutcome::Parked(reason) = outcome {
-                rt.parked_sources.insert(id.clone(), reason.clone());
-                report.parked += 1;
+            match outcome {
+                SourceOutcome::Parked(reason) => {
+                    rt.parked_sources.insert(id.clone(), reason.clone());
+                    report.parked += 1;
+                }
+                // Counted under `Local`; no owner retry or park: the source is tried next round.
+                SourceOutcome::BackupFailed => report
+                    .failures
+                    .bump(&ErrorClass::Local(LocalError::BackupFailed)),
+                _ => {}
             }
         }
         if let Some(failure) = failed {
@@ -1190,6 +1210,8 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                         index: l.index.clone(),
                         missing: l.missing,
                         snapshot: l.snapshot.clone(),
+                        snapshot_pieces: l.snapshot_pieces.clone(),
+                        snapshot_at_ns: l.snapshot_at_ns,
                         deletion_recorded: l.deletion_recorded,
                     };
                     (id.clone(), entry)
