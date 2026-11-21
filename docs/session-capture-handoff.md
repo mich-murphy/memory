@@ -281,7 +281,10 @@ from `main` alone.
      changed store at most once per 6 h, a failed backup counted as `local`). Next: install on
      both hosts, measure the first snapshot, restore the shared Codex owner and compare it with
      `~/.local/state/codex-preserved-20261120/`; only then may the retired Go directories and the
-     preserved copies be considered for deletion (operator decision).
+     preserved copies be considered for deletion (operator decision). Merged as `b20ee05` and
+     installed on this Mac 2026-11-21 01:19Z (`runs = 8`): the first store snapshot landed, but the
+     footprint peaked at 561 MB because the SQLite read grew its buffer; fixed in `90029c4`
+     (exact-size buffer, regression test). Install the fixed build on both hosts next.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

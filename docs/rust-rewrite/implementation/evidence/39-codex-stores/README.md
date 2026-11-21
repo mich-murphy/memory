@@ -75,6 +75,30 @@ the mutated runs wrote were deleted, not committed.
 - `cargo deny check`: advisories, bans, licenses, sources ok; no licence added. memory-core bans
   ok (`rusqlite` is in `memory` only).
 
+## Install on this Mac and a memory finding
+
+- Stack #219 (PRs #216 to #218) merged as `b20ee05`; Rust gates green on all three runners. The
+  release build (sha256 prefix `f0cd8270f255e1ec`) was installed in place at 01:19:17Z
+  (`runs = 8`; the `ecc0489` binary kept as `backup/memory-ecc0489`).
+- Start round (01:24:27Z): `landed=2 failed=0 local=0`; `tmp/` held at most 606 MB during the copy
+  and was empty afterwards. No WARN or ERROR line.
+- Finding: the footprint sampler showed `phys_footprint` rising from 42 MB to **561 MB** over about
+  80 s of the snapshot, then back to about 40 MB. The 128 MB target (DESIGN 7.3) was exceeded.
+- Diagnosis by measurement, not by reading:
+  - The SQLite backup alone (rusqlite 0.43.0, the same flags, a copy of the preserved store) peaked
+    at 6.5 MB, in one step and in 2,048-page steps alike.
+  - An uncommitted probe captured a 308 MB synthetic store through `RealFs` into a sink that drops
+    every piece: 327 MB peak through the SQLite read path, 21 MB through the plain read path.
+  - The only difference: the SQLite branch of `RealFs::read` read into `Vec::new()` grown by
+    `read_to_end`, while the plain branch allocates the exact size (its comment already warned that
+    a growing buffer leaves large freed blocks behind). With an exact-size buffer the probe peaked
+    at 25.6 MB.
+- Fix `90029c4`: exact-size buffer for the copy. Test
+  `a_read_of_the_copy_allocates_exactly_the_bytes_it_returns` (capacity equals length for four
+  ranges) fails without the fix and passes with it. Gates 14/14 on `90029c4`, seed 211066811,
+  nextest 845, coverage 95.46 %.
+- dev-01 was not updated with `b20ee05`; it gets the fixed build.
+
 ## Limits
 
 - `generated_images` and `attachments` are not captured (D55).
