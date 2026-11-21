@@ -23,7 +23,7 @@
 //! | event | keys |
 //! |---|---|
 //! | `started` | `version` |
-//! | `round` | `cause` (`start`, `timer`, `rescan`, `wake`, `dir`, `manual`) `landed failed skipped parked deferred offline throttled transient destination_auth local deterministic hints_removed hints_kept_old audit_matched audit_mismatched audit_ineligible deleted absence_skipped` |
+//! | `round` | `cause` (`start`, `timer`, `rescan`, `wake`, `dir`, `manual`) `landed failed skipped parked deferred offline throttled transient destination_auth local deterministic hints_removed hints_kept_old audit_matched audit_mismatched audit_ineligible deleted absence_skipped withheld` |
 //! | `progress` | `done total landed failed elapsed_s` |
 //! | `capture` | `owner` `result` (`landed`, `unchanged`, `failed`, `stopped`) |
 //! | `stopped` | none |
@@ -321,6 +321,7 @@ pub fn round(cause: Cause, report: &RoundReport) {
         audit_ineligible = report.audit.ineligible,
         deleted = count(report.deleted),
         absence_skipped = count(report.absence_skipped),
+        withheld = count(report.withheld),
     );
 }
 

@@ -59,12 +59,13 @@ fn round_has_every_count_in_order() {
         hints_kept_old: 13,
         deleted: 17,
         absence_skipped: 18,
+        withheld: 19,
     };
     let text = render(|| round(Cause::Timer, &report));
     let (_, rest) = split(only_line(&text)).unwrap_or_default();
     assert_eq!(
         rest,
-        "INFO round cause=timer landed=1 failed=2 skipped=3 parked=4 deferred=5 offline=6 throttled=7 transient=8 destination_auth=9 local=10 deterministic=11 hints_removed=12 hints_kept_old=13 audit_matched=14 audit_mismatched=15 audit_ineligible=16 deleted=17 absence_skipped=18"
+        "INFO round cause=timer landed=1 failed=2 skipped=3 parked=4 deferred=5 offline=6 throttled=7 transient=8 destination_auth=9 local=10 deterministic=11 hints_removed=12 hints_kept_old=13 audit_matched=14 audit_mismatched=15 audit_ineligible=16 deleted=17 absence_skipped=18 withheld=19"
     );
 }
 

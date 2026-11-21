@@ -241,6 +241,11 @@ fn classify(
         return;
     };
     let entry = index.sources.get(&source.id);
+    // D54, brief 47: a recorded withhold of a scanned file counts as withheld.
+    if entry.is_some_and(|e| e.withheld.is_some()) {
+        s.withheld += 1;
+        return;
+    }
     let tier = match source.class {
         SourceClass::Append => append_tier(entry, &stat),
         SourceClass::Snapshot => snapshot_tier(entry, &stat),
