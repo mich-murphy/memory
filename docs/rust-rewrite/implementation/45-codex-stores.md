@@ -138,3 +138,7 @@ temp directory with `integrity_check` and row counts against the preserved copie
   but the footprint peaked at 561 MB. Cause: the SQLite read grew its buffer with `read_to_end`.
   Fixed in `90029c4` (exact-size buffer; probe 327 MB to 25.6 MB), with a regression test; dev-01
   waits for the fixed build. Details in evidence 39.
+- 2026-11-21 02:15Z to 02:24Z: `d5f6bab` (the fix, PR #220) installed on this Mac and dev-01. The
+  first store snapshot on dev-01 peaked at 103 MB `VmHWM`. Restore of the shared Codex owner on
+  both hosts: 5 of 5 stores pass `integrity_check`, 0 tables differ in row count from the
+  preserved copies (899 and 137 threads). Exit criteria met.

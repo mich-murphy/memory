@@ -284,7 +284,11 @@ from `main` alone.
      preserved copies be considered for deletion (operator decision). Merged as `b20ee05` and
      installed on this Mac 2026-11-21 01:19Z (`runs = 8`): the first store snapshot landed, but the
      footprint peaked at 561 MB because the SQLite read grew its buffer; fixed in `90029c4`
-     (exact-size buffer, regression test). Install the fixed build on both hosts next.
+     (exact-size buffer, regression test). The fix merged as `d5f6bab` and is installed on both
+     hosts (this Mac 02:15Z, `runs = 9`; dev-01 02:22Z). dev-01's first store snapshot peaked at
+     103 MB. Restore of the shared Codex owner passes on both hosts: 5 of 5 stores
+     `integrity_check` ok, row counts equal to the preserved copies (evidence 39). The retired Go
+     directories and the preserved copies may now be deleted on an operator decision.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
