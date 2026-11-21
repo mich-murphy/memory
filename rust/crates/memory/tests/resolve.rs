@@ -1030,6 +1030,26 @@ fn yielded_snapshot_kinds_are_scanned_and_append_kinds_keep_their_profile() -> R
     assert_eq!(prof("state.sqlite"), Some(Profile::OtherKnown));
     assert_eq!(prof("config.toml"), Some(Profile::Scanned));
     assert_eq!(prof("history.jsonl"), Some(Profile::OtherKnown));
+    // Pi session aux is Scanned; the Pi transcript keeps `Transcript` (parent finding, brief 49).
+    let pi = t.0.join("pi");
+    let stem = format!("2026-11-21T10-00-00-000Z_{U1}");
+    let aux = format!("sessions/--p--/{stem}/notes.md");
+    let main = format!("sessions/--p--/{stem}.jsonl");
+    t.write(&format!("pi/{aux}"), b"# notes\n")?;
+    t.write(&format!("pi/{main}"), b"{}\n")?;
+    let mut w = agent_walker(&pi, Agent::Pi)?;
+    let found = w.enumerate();
+    let prof = |p: &str| {
+        found
+            .iter()
+            .find(|(_, s)| s.path == p)
+            .map(|(_, s)| (s.kind.clone(), s.facts.profile))
+    };
+    assert_eq!(prof(&aux), Some((SourceKind::PiAux, Profile::Scanned)));
+    assert_eq!(
+        prof(&main),
+        Some((SourceKind::PiSession, Profile::Transcript))
+    );
     Ok(())
 }
 
