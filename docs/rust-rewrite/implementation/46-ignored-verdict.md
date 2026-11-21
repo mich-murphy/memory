@@ -141,3 +141,7 @@ and after, and that the start round lands with `deleted=0`.
   14/14, seed 270570902, nextest 851, coverage 95.47 %; Linux container locator and resolve tests
   passed. [Evidence 40](evidence/40-ignored-verdict/). Next: hosted gates, merge, install on both
   hosts, census before and after.
+- 2026-11-21 04:15Z to 04:24Z: merged as `89b155e` (stack #225) and installed on this Mac and
+  dev-01. The start rounds were clean (`deleted=0`). `unknown_kind` went from 19,192 to 29 here
+  and from 48,198 to 117 on dev-01. `ignored` is 20,123 and 48,564. `deferred_snapshot` went
+  from 3,122 to 2,156 and from 2,171 to 1,688. Exit criteria met. Details in evidence 40.

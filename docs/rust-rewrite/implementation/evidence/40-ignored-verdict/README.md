@@ -84,6 +84,32 @@ stores it (grep), so the new variant changes no persisted format.
   coverage 95.47 %.
 - Linux container (Ubuntu 24.04): `core_locator` 21, `resolve` 23, `realfs` 36, all passed.
 
+## Merge, install on both hosts, counts before and after
+
+- Stack #225 (PRs #222 to #224) merged as `89b155e`. Rust gates passed on all three PRs. CI failed
+  only in the two accepted `govulncheck` steps.
+- This Mac: installed in place at 04:14:57Z (sha256 prefix `d28d38e67b1cb4de`, `runs = 10`). The
+  `d5f6bab` binary is kept as `backup/memory-d5f6bab`. Start round at 04:20:01Z: `landed=1
+  failed=0 local=0 deleted=0`, `tmp/` empty, no WARN or ERROR line, peak footprint 78 MB.
+- dev-01: `89b155e` built on the host (sha256 prefix `f0fb39c2d10e1620`). Both Nix store
+  dependencies are the pinned GC roots. Installed in place at 04:22:57Z, with the `d5f6bab` binary
+  kept as `backup/memory-d5f6bab`. Start round at 04:24:11Z: `landed=0 failed=0 deleted=0`,
+  `VmHWM` 98 MB, `NRestarts=0`, no WARN or ERROR line.
+- `memory status`, sources line (every source `current` on both hosts):
+
+  | Host | `unknown_kind` before / after | `ignored` after | `deferred_snapshot` before / after |
+  |---|---|---|---|
+  | this Mac | 19,192 (census) / 29 | 20,123 | 3,122 / 2,156 |
+  | dev-01 | 48,198 / 117 | 48,564 | 2,171 / 1,688 |
+
+  The sums agree with the census. On this Mac, 19,163 files left `unknown_kind` and 961 left
+  the snapshot set (Claude `skills/` 900, `paste-cache/` 59, the 2 Codex `plugins/` binaries),
+  giving 20,124, against 20,123 measured. On dev-01, 48,081 plus 484 (`skills/` 458,
+  `paste-cache/` 26) gives 48,565, against 48,564 measured. Files changed between the census and
+  the status reads, which explains the difference of one.
+- No source lost its index entry, and no deletion was recorded (`deleted=0` on both hosts). The
+  kinds that became `Ignored` were never captured, so no owner was missing from the walk.
+
 ## Limits
 
 - The walk still descends into ignored directories. dev-01 enumerates about 30,000 Pi `install/`
