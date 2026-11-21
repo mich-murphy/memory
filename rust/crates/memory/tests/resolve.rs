@@ -339,15 +339,15 @@ fn end_to_end_commits_transcript_and_never_a_symlinked_credential() -> R {
 fn shared_owner_and_profiles_are_literal() -> R {
     use memory_core::privacy::Profile;
     let t = Tmp::new()?;
-    // A plan is a shared (sessionless) artifact with the text-asset profile.
+    // A plan is a shared (sessionless) artifact. Brief 49: yielded snapshot kinds are Scanned.
     let plan = t.write("claude/plans/p.md", b"plan")?;
     let facts = resolve_facts(&plan, &t.root(), &located("plans/p.md")?);
     assert_eq!(facts.owner.as_deref(), Some("a/m/Claude"));
-    assert_eq!(facts.profile, Profile::TextAsset);
-    // settings.json is structured config.
+    assert_eq!(facts.profile, Profile::Scanned);
+    // settings.json is structured config (brief 49: scrubbed, then scanned).
     let cfg = t.write("claude/settings.json", b"{}")?;
     let facts = resolve_facts(&cfg, &t.root(), &located("settings.json")?);
-    assert_eq!(facts.profile, Profile::Config);
+    assert_eq!(facts.profile, Profile::Scanned);
     assert_eq!(facts.owner.as_deref(), Some("a/m/Claude"));
     // An unlocated row has no owner and the unknown profile.
     let facts = resolve_facts(&cfg, &t.root(), &Located::UnknownKind);
@@ -920,11 +920,12 @@ fn snapshot_files_are_deferred_not_yielded_and_not_unknown() -> R {
     let t = Tmp::new()?;
     t.write(&format!("claude/projects/-p/{U1}.jsonl"), b"{}\n")?;
     let settings = t.write("claude/settings.json", b"{}")?;
+    t.write(&format!("claude/session-env/{U1}/e"), b"x")?;
     let history = t.write(&format!("claude/file-history/{U1}/f@v1"), b"x")?;
     let mut w = walker(&t.root(), WalkLimits::default())?;
     let owner = owner_at(&format!("projects/-p/{U1}.jsonl"))?;
-    // D54, brief 47: file-history is yielded (profile Scanned); settings stays deferred.
-    assert_eq!(w.enumerate().len(), 2);
+    // Brief 49: settings and file-history are yielded; only session-env stays deferred.
+    assert_eq!(w.enumerate().len(), 3);
     let c = w.counts();
     assert_eq!(
         (
@@ -933,7 +934,7 @@ fn snapshot_files_are_deferred_not_yielded_and_not_unknown() -> R {
             c.unknown_owner,
             c.unknown_kind
         ),
-        (2, 1, 0, 0)
+        (3, 1, 0, 0)
     );
     assert_eq!(w.note(&settings), None);
     // `note` routes watcher events for append sources only; file-history waits for the reconcile.
@@ -945,8 +946,8 @@ fn snapshot_files_are_deferred_not_yielded_and_not_unknown() -> R {
     t.write("codex/logs_2.sqlite", b"x")?;
     t.write("codex/config.toml", b"x")?;
     let mut w = agent_walker(&codex, Agent::Codex)?;
-    // The store is yielded; the log database is ignored; other snapshot kinds stay deferred.
-    assert_eq!(w.enumerate().len(), 1);
+    // Brief 49: the store and `config.toml` are yielded; the log database is ignored.
+    assert_eq!(w.enumerate().len(), 2);
     let c = w.counts();
     assert_eq!(
         (
@@ -956,7 +957,7 @@ fn snapshot_files_are_deferred_not_yielded_and_not_unknown() -> R {
             c.unknown_kind
         ),
         // Brief 46 / D54: `logs_*.sqlite` is Ignored, no longer unknown_kind.
-        (1, 1, 0, 0)
+        (2, 0, 0, 0)
     );
     assert_eq!(w.note(&codex.join("logs_2.sqlite")), None);
     assert_eq!(w.note(&codex.join("config.toml")), None);
@@ -964,7 +965,8 @@ fn snapshot_files_are_deferred_not_yielded_and_not_unknown() -> R {
     let pi = t.0.join("pi");
     t.write("pi/settings.json", b"{}")?;
     let mut w = agent_walker(&pi, Agent::Pi)?;
-    assert!(w.enumerate().is_empty());
+    // Brief 49: Pi settings are yielded.
+    assert_eq!(w.enumerate().len(), 1);
     let c = w.counts();
     assert_eq!(
         (
@@ -973,8 +975,61 @@ fn snapshot_files_are_deferred_not_yielded_and_not_unknown() -> R {
             c.unknown_owner,
             c.unknown_kind
         ),
-        (0, 1, 0, 0)
+        (1, 0, 0, 0)
     );
+    Ok(())
+}
+
+/// Brief 49: every yielded snapshot kind is `Scanned`; append kinds and Codex stores keep theirs.
+#[test]
+fn yielded_snapshot_kinds_are_scanned_and_append_kinds_keep_their_profile() -> R {
+    use memory_core::privacy::Profile;
+    let t = Tmp::new()?;
+    t.write(&format!("claude/projects/-p/{U1}.jsonl"), b"{}\n")?;
+    let files: [(&str, Profile); 11] = [
+        (&format!("projects/-p/{U1}/aux.json"), Profile::Scanned),
+        ("projects/-p/memory/n.md", Profile::Scanned),
+        ("plans/p.md", Profile::Scanned),
+        ("settings.json", Profile::Scanned),
+        (&format!("todos/{U1}-agent.json"), Profile::Scanned),
+        (&format!("file-history/{U1}/f@v1"), Profile::Scanned),
+        ("agent-memory/a/n.md", Profile::Scanned),
+        (
+            &format!("projects/-p/{U1}/tool-results/r.txt"),
+            Profile::OtherKnown,
+        ),
+        (&format!("debug/{U1}.txt"), Profile::OtherKnown),
+        ("history.jsonl", Profile::OtherKnown),
+        (&format!("projects/-p/{U1}.jsonl"), Profile::Transcript),
+    ];
+    for (rel, _) in &files {
+        if !rel.ends_with(&format!("{U1}.jsonl")) || rel.contains("tool-results") {
+            t.write(&format!("claude/{rel}"), b"{}\n")?;
+        }
+    }
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    let found = w.enumerate();
+    assert_eq!(found.len(), files.len());
+    for (rel, want) in &files {
+        let hit = found.iter().find(|(_, s)| s.path == *rel);
+        let got = hit.map(|(_, s)| s.facts.profile);
+        assert_eq!(got, Some(*want), "{rel}");
+    }
+    let codex = t.0.join("codex");
+    t.write("codex/state.sqlite", b"x")?;
+    t.write("codex/config.toml", b"x")?;
+    t.write("codex/history.jsonl", b"{}\n")?;
+    let mut w = agent_walker(&codex, Agent::Codex)?;
+    let found = w.enumerate();
+    let prof = |p: &str| {
+        found
+            .iter()
+            .find(|(_, s)| s.path == p)
+            .map(|(_, s)| s.facts.profile)
+    };
+    assert_eq!(prof("state.sqlite"), Some(Profile::OtherKnown));
+    assert_eq!(prof("config.toml"), Some(Profile::Scanned));
+    assert_eq!(prof("history.jsonl"), Some(Profile::OtherKnown));
     Ok(())
 }
 
@@ -992,7 +1047,8 @@ fn of_over_every_owner_equals_enumerate_on_a_mixed_tree() -> R {
     let found = w.enumerate();
     let mut walked: Vec<String> = found.iter().map(|(o, s)| key_of(o, s)).collect();
     walked.sort();
-    assert_eq!(walked.len(), 4, "{walked:?}");
+    // Brief 49: todos and settings are yielded too; only session-env stays deferred.
+    assert_eq!(walked.len(), 6, "{walked:?}");
     let mut owners: Vec<Owner> = Vec::new();
     for (o, _) in &found {
         if !owners.contains(o) {
@@ -1005,7 +1061,7 @@ fn of_over_every_owner_equals_enumerate_on_a_mixed_tree() -> R {
         .collect();
     got.sort();
     assert_eq!(got, walked);
-    assert_eq!(w.counts().deferred_snapshot, 3);
+    assert_eq!(w.counts().deferred_snapshot, 1);
     Ok(())
 }
 

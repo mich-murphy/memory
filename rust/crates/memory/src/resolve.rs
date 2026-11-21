@@ -96,32 +96,34 @@ fn profile_of(kind: &SourceKind) -> Profile {
         | SourceKind::CodexRollout
         | SourceKind::CodexCompressed
         | SourceKind::PiSession => Profile::Transcript,
+        // Brief 49: every yielded snapshot kind is judged whole by the content scan (recognized
+        // config documents are still scrubbed first by `transform`).
         SourceKind::ClaudeConfig
         | SourceKind::CodexConfig
         | SourceKind::PiConfig
         | SourceKind::PiSettings
-        | SourceKind::PiModels => Profile::Config,
-        SourceKind::ClaudeMemory | SourceKind::CodexMemory | SourceKind::ClaudePlan => {
-            Profile::TextAsset
-        }
-        // D54, brief 47: whole-file content scan; published whole or withheld whole.
-        SourceKind::ClaudeFileHistory => Profile::Scanned,
-        SourceKind::ClaudeToolResults
+        | SourceKind::PiModels
+        | SourceKind::ClaudeMemory
+        | SourceKind::CodexMemory
+        | SourceKind::ClaudePlan
+        | SourceKind::ClaudeFileHistory
         | SourceKind::ClaudeTodos
         | SourceKind::ClaudeTasks
         | SourceKind::ClaudeTeams
+        | SourceKind::ClaudeAux
+        | SourceKind::PiAux
+        | SourceKind::PiSnapshot => Profile::Scanned,
+        // Append kinds, Codex stores and the three kinds still deferred keep `OtherKnown`.
+        SourceKind::ClaudeToolResults
         | SourceKind::ClaudeDebug
         | SourceKind::ClaudeHistory
         | SourceKind::CodexStore
         | SourceKind::CodexHistory
-        | SourceKind::PiSnapshot
         | SourceKind::ClaudeSessionEnv
         | SourceKind::ClaudePaste
         | SourceKind::ClaudeUsage
-        | SourceKind::ClaudeAux
         | SourceKind::CodexLog
-        | SourceKind::PiLog
-        | SourceKind::PiAux => Profile::OtherKnown,
+        | SourceKind::PiLog => Profile::OtherKnown,
     }
 }
 
@@ -513,13 +515,12 @@ impl crate::daemon::Sources for WalkSources {
                     }
                     Located::Source {
                         class: SourceClass::Snapshot,
-                        kind,
+                        kind:
+                            SourceKind::ClaudeSessionEnv
+                            | SourceKind::ClaudeUsage
+                            | SourceKind::ClaudePaste,
                         ..
-                    } if !matches!(
-                        kind,
-                        SourceKind::CodexStore | SourceKind::ClaudeFileHistory
-                    ) =>
-                    {
+                    } => {
                         counts.deferred_snapshot += 1;
                         continue;
                     }
