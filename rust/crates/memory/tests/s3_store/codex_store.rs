@@ -18,10 +18,15 @@ use std::path::Path;
 use std::process::Command;
 
 fn run(rig: &Rig, args: &[&str]) -> R<(i32, String, String)> {
+    run_env(rig, args, &[])
+}
+
+fn run_env(rig: &Rig, args: &[&str], envs: &[(&str, &str)]) -> R<(i32, String, String)> {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_memory"));
     cmd.env_clear()
         .env("MEMORY_STATE_DIR", &rig.state)
         .args(args);
+    cmd.envs(envs.iter().copied());
     if let Some(v) = std::env::var_os("LLVM_PROFILE_FILE") {
         cmd.env("LLVM_PROFILE_FILE", v);
     }
@@ -174,5 +179,108 @@ fn reconcile_reports_local_one_for_a_failed_backup() -> R {
     assert_eq!(code, 0, "{out}{err}");
     assert_eq!(server.count("PUT"), 0);
     assert_eq!(fs::read_dir(rig.state.join("tmp")).map_err(e)?.count(), 0);
+    Ok(())
+}
+
+/// A store of about 20 MiB (three 8 MiB pieces) of incompressible rows, in WAL mode.
+fn big_store(label: &str) -> R<(Fake, Rig, Connection)> {
+    let server = Fake::start()?;
+    let rig = Rig::new(label, &server.url(), "rust-acceptance/b45-test/", false)?;
+    let codex = rig.add_root("codex")?;
+    fs::create_dir_all(&rig.state).map_err(e)?;
+    fs::set_permissions(&rig.state, fs::Permissions::from_mode(0o700)).map_err(e)?;
+    fs::copy(&rig.cfg, rig.state.join("config.toml")).map_err(e)?;
+    let writer = Connection::open(codex.join("thread_history_1.sqlite")).map_err(e)?;
+    writer
+        .pragma_update(None, "journal_mode", "wal")
+        .map_err(e)?;
+    writer
+        .pragma_update(None, "wal_autocheckpoint", 0)
+        .map_err(e)?;
+    writer
+        .execute_batch(
+            "create table t (n integer primary key, s blob);
+             with recursive c(n) as (select 1 union all select n + 1 from c where n < 20000)
+             insert into t select n, randomblob(1000) from c;",
+        )
+        .map_err(e)?;
+    Ok((server, rig, writer))
+}
+
+fn puts_and_gets(server: &Fake) -> (Vec<String>, Vec<String>) {
+    let seen = server.requests();
+    let by = |m: &str| {
+        seen.iter()
+            .filter(|r| r.method == m)
+            .map(|r| r.path.clone())
+            .collect::<Vec<_>>()
+    };
+    (by("PUT"), by("GET"))
+}
+
+#[test]
+fn a_resnapshot_puts_only_the_changed_pieces_and_gets_no_reused_one() -> R {
+    let started = std::time::Instant::now();
+    let (server, rig, writer) = big_store("codex-put-count")?;
+    let sim = [("MEMORY_SIM_SNAPSHOT_INTERVAL", "0")];
+    let (code, out, err) = run_env(&rig, &["reconcile"], &sim)?;
+    assert_eq!(code, 0, "{out}{err}");
+    let (first_puts, first_gets) = puts_and_gets(&server);
+    let first_objects = first_puts
+        .iter()
+        .filter(|p| p.contains("/objects/"))
+        .count();
+    assert!(
+        first_objects >= 3,
+        "need several pieces, got {first_objects}"
+    );
+    writer
+        .execute("update t set s = randomblob(1000) where n = 15000", [])
+        .map_err(e)?;
+    let (code, out, err) = run_env(&rig, &["reconcile"], &sim)?;
+    assert_eq!(code, 0, "{out}{err}");
+    let (all_puts, all_gets) = puts_and_gets(&server);
+    let second: Vec<_> = all_puts.iter().skip(first_puts.len()).cloned().collect();
+    let objects = second.iter().filter(|p| p.contains("/objects/")).count();
+    let others = second.len() - objects;
+    assert!(
+        (1..first_objects).contains(&objects),
+        "changed pieces only: {objects} of {first_objects}"
+    );
+    assert_eq!(others, 2, "manifest and current.json only: {second:?}");
+    let new_object_gets = all_gets
+        .iter()
+        .skip(first_gets.len())
+        .filter(|p| p.contains("/objects/"))
+        .count();
+    assert_eq!(new_object_gets, 0, "reused or new pieces were read back");
+    eprintln!("put-count test took {:?}", started.elapsed());
+    Ok(())
+}
+
+#[test]
+fn the_sim_interval_override_lands_the_second_snapshot_and_its_absence_defers_it() -> R {
+    let (server, rig, writer) = big_store("codex-interval")?;
+    let (code, out, err) = run(&rig, &["reconcile"])?;
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("landed=1"), "{out}");
+    let puts = server.count("PUT");
+    writer
+        .execute("update t set s = randomblob(1000) where n = 5", [])
+        .map_err(e)?;
+    // The test binary is built with `sim` (self dev-dependency), so the variable is read;
+    // without it the 6 h default defers the changed store and nothing is put.
+    let (code, out, err) = run(&rig, &["reconcile"])?;
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("landed=0"), "deferred: {out}");
+    assert_eq!(server.count("PUT"), puts);
+    let (code, out, err) = run_env(
+        &rig,
+        &["reconcile"],
+        &[("MEMORY_SIM_SNAPSHOT_INTERVAL", "0")],
+    )?;
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("landed=1"), "{out}");
+    assert!(server.count("PUT") > puts);
     Ok(())
 }
