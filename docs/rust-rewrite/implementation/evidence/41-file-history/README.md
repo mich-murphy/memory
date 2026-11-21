@@ -99,6 +99,55 @@ re-judges every scanned file, withheld ones included, at the next round.
 - Linux container (Ubuntu 24.04): `memory-core` `privacy_scan` and `privacy_port`, and `memory`
   `capture`, `daemon` and `resolve`. Five binaries, 16 + 11 and 35 + 86 + 36 tests, all passed.
 
+## Merge, install on both hosts, first round
+
+- Stack #230 (PRs #227 to #229) merged as `36adb8c`. Rust gates passed on all three PRs. CI failed
+  only in the two accepted `govulncheck` steps.
+- This Mac: installed in place at 06:53:32Z (sha256 prefix `309ecb69070e1928`, `runs = 11`). The
+  `89b155e` binary is kept as `backup/memory-89b155e`. Start round at 06:59:59Z: `landed=76
+  failed=0 local=0 deleted=0 withheld=141`. `tmp/` was empty afterwards, there was no WARN or ERROR
+  line, and the peak footprint was 81 MB.
+- dev-01: `36adb8c` built on the host (sha256 prefix `c187441b018cfef7`). Both Nix store
+  dependencies are the pinned GC roots. Installed in place at 07:03:37Z, with the `89b155e` binary
+  kept as `backup/memory-89b155e`. Start round at 07:05:56Z: `landed=30 failed=0 deleted=0
+  withheld=95`. `VmHWM` was 103 MB, `NRestarts=0`, and there was no WARN or ERROR line.
+- File-history after the first round (from `memory status` and `index.json`, counts only):
+
+  | Host | Files | Landed | Withheld (all `secret_in_text`) | Withheld size range | `deferred_snapshot` before / after |
+  |---|---|---|---|---|---|
+  | this Mac | 946 | 805 | 141 | 540 B to 152 KB | 2,156 / 1,210 |
+  | dev-01 | 514 | 419 | 95 | 2.4 KB to 244 KB | 1,688 / 1,174 |
+
+  The drop in `deferred_snapshot` equals the file-history count on each host. No file was
+  withheld as `binary`, `source_limit` or `scrub_failed`.
+- `memory check`, exit 0 on both hosts. This Mac (07:00Z to 07:23Z): 1,079 owners, 7,010
+  sources, 6,869 `match`, 141 `withheld`, 0 mismatch, 0 uncaptured, 0 `store_error`. dev-01 (07:23Z
+  to 07:28Z): 449 owners, 4,830 sources, 4,735 `match`, 95 `withheld`, 0 mismatch, 0 uncaptured.
+  Every `withheld` line reads `kind=claude.file_history reason=secret_in_text`.
+- Restore of three Mac sessions with 26, 19 and 13 file-history files into a private temporary
+  directory: restore exit 0 each, the transcript restored each time, 57 of 58 files restored and
+  equal to the local file by size and SHA-256. The one file not restored is a withheld one (matched
+  through `index.json`). The restored copies were deleted.
+
+## Finding: most withholds look like false positives
+
+On this Mac, 141 of 141 withholds come from the generic assignment rule or the shell guard; none
+matched a fixed secret pattern (an in-memory reimplementation of the table, counts only). A second
+in-memory pass sorted each value that made the generic rule fire into heuristic shape classes
+(no value printed):
+
+| Host | Files where every hit is code-shaped (call, member access, env or vault lookup, identifier, path) | Files with another value shape | Shell guard only | Files with a high-entropy value |
+|---|---|---|---|---|
+| this Mac | 79 | 43 | 15 | 4 |
+| dev-01 | 55 | 29 | 8 | 3 |
+
+So more than half of the withheld pre-edit copies are probably source code such as
+`apiKey: getKey()` or `token = process.env.X`, not secrets. The behaviour is as designed (the brief
+accepts false positives, and the loss is a pre-edit copy that the transcript and git usually
+hold). Narrowing the generic rule to literal-shaped values is a privacy-rule change and is left
+for an operator decision; the classes above are a heuristic, not proof that a file holds no
+secret.
+
 ## Limits
 
 - The manifest does not record a withheld version; only the local index and `memory check` know
