@@ -329,6 +329,12 @@ from `main` alone.
      150 here and 141 on dev-01; `memory check` exit 0 on both; the shared Claude owner restores
      equal to `transform(local)` (evidence 43). Open operator question unchanged: the scanner's
      code-shaped false positives (evidence 41) now also withhold some memory notes and aux files.
+  26. 2026-11-21, [evidence 44](rust-rewrite/implementation/evidence/44-archive-analytics/):
+     the whole archive (1,618 session owners, both hosts) exports, imports and reports with the
+     installed `30002d9` binary: 1,618 of 1,618 exports exit 0, 1,618 imported, a second import
+     1,618 `unchanged`, 13,299 sources and 1,770,753 events queryable, `report()` 0 failures;
+     file-history (1,224) and subagent aux `json` (1,694) reach the projection. Limit: shared
+     owners (stores, memory notes, config) are restorable but not in the analytics projection.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
