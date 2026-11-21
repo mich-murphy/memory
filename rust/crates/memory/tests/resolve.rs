@@ -1180,3 +1180,26 @@ fn a_lone_zst_is_a_codex_rollout_source_with_the_logical_path_and_transcript_pro
     );
     Ok(())
 }
+
+#[test]
+fn ignored_files_are_counted_not_yielded_and_never_hints() -> R {
+    // Brief 46 / D54: known non-session files are counted as `ignored`, not `unknown_kind`.
+    let t = Tmp::new()?;
+    t.write(&format!("claude/projects/-p/{U1}.jsonl"), b"{}\n")?;
+    let skill = t.write("claude/skills/a/b.md", b"x")?;
+    let cache = t.write("claude/cache/c", b"x")?;
+    t.write("claude/mystery.txt", b"x")?;
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    assert_eq!(w.enumerate().len(), 1);
+    let c = w.counts();
+    assert_eq!(
+        (c.yielded, c.ignored, c.unknown_kind, c.deferred_snapshot),
+        (1, 2, 1, 0)
+    );
+    assert_eq!(w.note(&skill), None);
+    assert_eq!(w.note(&cache), None);
+    let (owners, _) = w.read_dir(&t.root().join("skills/a"));
+    assert!(owners.is_empty());
+    assert_eq!(w.enumerate().len(), 1);
+    Ok(())
+}

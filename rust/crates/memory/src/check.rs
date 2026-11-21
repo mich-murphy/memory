@@ -106,6 +106,8 @@ pub struct Tally {
     pub unknown_kind: u64,
     /// Walk: files with no unambiguous owner.
     pub unknown_owner: u64,
+    /// Walk: known non-session files (brief 46).
+    pub ignored: u64,
     /// Walk: files duplicating another file's source id (not captured).
     pub duplicate: u64,
     /// Walk: snapshot files other than Codex SQLite stores, withheld.
@@ -156,7 +158,7 @@ impl Report {
     pub fn summary(&self) -> String {
         let t = &self.tally;
         format!(
-            "check owners={} sources={} match={} behind={} unsettled={} mismatch={} uncaptured={} withheld={} remote_only={} parked={} unknown_kind={} unknown_owner={} duplicate={} deferred_snapshot={} unreadable={} store_error={} status={}",
+            "check owners={} sources={} match={} behind={} unsettled={} mismatch={} uncaptured={} withheld={} remote_only={} parked={} unknown_kind={} ignored={} unknown_owner={} duplicate={} deferred_snapshot={} unreadable={} store_error={} status={}",
             t.owners,
             t.sources,
             t.matched,
@@ -168,6 +170,7 @@ impl Report {
             t.remote_only,
             t.parked,
             t.unknown_kind,
+            t.ignored,
             t.unknown_owner,
             t.duplicate,
             t.deferred_snapshot,
@@ -637,6 +640,7 @@ pub fn check(root: &Path) -> Result<Report, Refusal> {
     let counts = walk.counts();
     tally.unknown_kind = counts.unknown_kind;
     tally.unknown_owner = counts.unknown_owner;
+    tally.ignored = counts.ignored;
     tally.duplicate = counts.duplicate;
     tally.deferred_snapshot = counts.deferred_snapshot;
     tally.unreadable = counts.unreadable;

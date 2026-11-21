@@ -315,6 +315,8 @@ pub struct Counts {
     pub unknown_kind: u64,
     /// Files with a known pattern but no unambiguous owner.
     pub unknown_owner: u64,
+    /// Known non-session files (D54, brief 46); never yielded, never hints.
+    pub ignored: u64,
     /// Files whose (owner, source id) another file with a lexicographically smaller
     /// root-relative path already holds; not yielded.
     pub duplicate: u64,
@@ -499,7 +501,10 @@ impl crate::daemon::Sources for WalkSources {
                 match located {
                     Located::UnknownKind => counts.unknown_kind += 1,
                     Located::UnknownOwner => counts.unknown_owner += 1,
-                    Located::Ignored => continue,
+                    Located::Ignored => {
+                        counts.ignored += 1;
+                        continue;
+                    }
                     Located::Source {
                         class: SourceClass::Snapshot,
                         kind,

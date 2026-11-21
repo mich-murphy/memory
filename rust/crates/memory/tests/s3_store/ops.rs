@@ -154,6 +154,20 @@ fn status_after_a_capture_is_all_current() -> R {
 }
 
 #[test]
+fn status_counts_an_ignored_file_apart_from_unknown_kind() -> R {
+    // Brief 46 / D54: `ignored=` follows `unknown_kind=`.
+    let s = setup("status-ignored")?;
+    capture(&s)?;
+    fs::create_dir_all(s.rig.root.join("cache")).map_err(e)?;
+    fs::write(s.rig.root.join("cache/c"), "x\n").map_err(e)?;
+    let ran = status(&s, &[])?;
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    assert!(ran.has("sources ", "ignored", "1") && ran.has("sources ", "unknown_kind", "0"));
+    assert!(ran.out.contains(" unknown_kind=0 ignored=1 unknown_owner="));
+    Ok(())
+}
+
+#[test]
 fn status_shows_an_appended_transcript_as_behind() -> R {
     let s = setup("status-behind")?;
     capture(&s)?;
