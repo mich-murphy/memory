@@ -128,3 +128,9 @@ temp directory with `integrity_check` and row counts against the preserved copie
 ## Ledger
 
 - 2026-11-20 23:40Z: brief written on `648c25a`.
+- 2026-11-21: STORES accepted locally at `79fcad1` (9 worker commits; the parent found that a
+  failed backup was counted nowhere, fixed in `dab21d0`, and asked for the PUT count, the `sim`
+  override test and property coverage). Teeth 11 of 11; gates 14/14, seed 3074996175, nextest 844,
+  coverage 95.46 %; Linux container 154 store and locator tests passed.
+  [Evidence 39](evidence/39-codex-stores/). Next: hosted gates, merge, install on both hosts, the
+  first snapshot measured, restore of the shared owner checked against the preserved copies.

@@ -634,7 +634,8 @@ The system model states the guarantee honestly. [DDIA ch. 9, System Model and Re
 
 Class `snapshot` uses a fingerprint, not windows. A plain file's fingerprint is identity, size
 and mtime. A SQLite store's fingerprint is the identity, size and mtime of the db, plus those of
-its `-wal`. An unchanged fingerprint is `Unchanged` without opening the store. A changed one is
+its `-wal`, never of its `-shm`, which a read-only open touches (measured 2026-11-20, brief 45).
+An unchanged fingerprint is `Unchanged` without opening the store. A changed one is
 `Snapshot`. [review, 01 M3; prototype P9] A changed `RulesDigest` on a protected kind is
 `Replay{RulesChanged}`.
 
@@ -677,7 +678,13 @@ SQLite snapshot:
 
 - Open read-only, never with `immutable=1`, which ignores the WAL. [review, 05-history D7]
 - Run the backup API with all pages in one step into a 0600 temporary file under `state/tmp/`.
-  Pieces are read from that file, which is deleted after the commit.
+  Pieces are read from that file, which is deleted after the source's capture ends, landed or
+  not. The copy is made inside the filesystem seam, like the `.jsonl.zst` decode (D48).
+- A piece whose transformed digest equals one of the last landed epoch's reuses that descriptor
+  with no PUT and no GET (the index keeps the epoch's pieces). Matched by digest, never offset.
+- A changed store is snapshotted at most once per 6 h after its last landed snapshot [default,
+  unmeasured]; inside the interval it is deferred and `memory check` reports it `behind` (D56).
+- `logs_*.sqlite` is not a store (brief 45).
 - Two errors stay distinct, as Go's `ErrSQLiteSourceChanged` was: `SourceChanged` is a retry,
   and `BackupFailed` is `Local`. [review, 05-history D8]
 
@@ -1222,7 +1229,7 @@ Workspace:
 | `sha2` 0.11.1 | Digests and resumable state | `SerializableState` has an internal format; the index stores the crate version and re-hashes on mismatch |
 | `serde`, `serde_json`, `schemars`, `toml` | Schemas and config | A duplicate-key-rejecting JSON path for scrubbing |
 | `tracing`, `tracing-subscriber`, `clap`, `thiserror` | Logs, CLI, errors | `clap` is not used by `memory hook` |
-| `rusqlite` bundled | SQLite backup API | Slice 3 |
+| `rusqlite` `=0.43.0`, features `bundled` and `backup` | SQLite backup API | `memory` only (brief 45) |
 | `rustix`, direct dependency of `memory`, features `std` and `fs` | Named open flags and errno values in the source read | Pinned to the version in the lockfile (A12.4) |
 | `hegeltest` `=0.52.0`, `static-engine` | Property tests, dev only | 255 releases since 2026-03-16. Pinned exactly [review, 06 F4] |
 | `proptest`, `proptest-state-machine` | Standing cross-check of properties 1 and 4 | |
@@ -1553,6 +1560,7 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D53 | 2026-11-20: on Linux `memory install` writes a systemd user unit at `$XDG_CONFIG_HOME/systemd/user/memory.service` (absolute only) or `~/.config/systemd/user/memory.service`: first line is our marker, `ExecStart="<exe>" daemon` (quoted with `\`, `"`, `%`, `$` escaped), `Restart=on-failure`, `RestartSec=60`, `StandardError=journal`, `WantedBy=default.target`. Uninstall removes only our unit. The binary prints `systemctl --user daemon-reload`, `enable --now` and `loginctl enable-linger $USER` and runs none of them. A control character in the exe path is refused | brief 44, evidence 36; 11.5, 17 |
 | D54 | 2026-11-21, operator answers to the uncaptured-files review: the `~/.claude/skills` folder and Pi `pi-terminology/` are not captured; Codex `generated_images`/`attachments` and Claude `paste-cache` are captured (slice 3; superseded by D55: none of the three is captured); known non-session files get an `Ignored` verdict, counted apart from `UnknownKind` and never captured. Claude `file-history` (operator: research and decide): captured in slice 3 only behind a content scan that withholds the whole file, with a recorded reason, on a secret match, binary or non-UTF-8 content, an oversize file or a scanner error; the local file is never touched. Reason: the transcript stays the record of what a session did, file-history adds the exact pre-edit file state at about 10 MB per host, and it is a raw copy of project files that no path denylist can see (names are hashes) | research report (Anthropic `claude-directory` and `checkpointing` docs), evidence 37; 5, 8, 19 |
 | D55 | 2026-11-21, operator after an evidence check of D54: Codex `generated_images`, Codex `attachments` and Claude `paste-cache` are not captured (they become `Ignored`). Measured on this Mac (byte and hash comparison, counts only): all 59 `paste-cache` files occur in captured Claude transcripts, since the cache only backs `history.jsonl` recall; all 4 generated images occur as base64 in Codex `thread_history_1.sqlite`, which slice 3 captures first; the 5 attachment screenshots and the attachment JSON index exist nowhere else and are given up (operator choice; the conversation text is intact). Reason: data minimisation in an archive that never deletes, and an image cannot be scanned for secrets | evidence 38; 5, 19 |
+| D56 | 2026-11-21: Codex SQLite stores (top-level `*.sqlite` other than `logs_*`) are captured as shared snapshots: fingerprint db plus `-wal`, never `-shm`; a read-only backup in one step into `state/tmp/` inside the filesystem seam; pieces reused by digest from the last landed epoch; a changed store at most once per 6 h; a failed backup counts as `local` with no owner retry; `memory check` verifies the stored epoch and compares fingerprints, never live bytes; restore writes a standalone database. Reason: 873 Codex threads on this Mac exist only in `thread_history_1.sqlite`; 65 of 74 pieces of it were unchanged over a month | brief 45, evidence 39; 7.2, 7.3, 13 |
 
 Finding-to-section map for the challenge review:
 
