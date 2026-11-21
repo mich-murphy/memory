@@ -333,6 +333,9 @@ pub enum Located {
     UnknownKind,
     /// Known pattern, but no unambiguous owner.
     UnknownOwner,
+    /// A known non-session file (vendor code, cache, backup; D54/D55, brief 46): never
+    /// captured, counted apart from `UnknownKind`.
+    Ignored,
 }
 
 impl Located {
@@ -342,6 +345,7 @@ impl Located {
             Self::Source { .. } => None,
             Self::UnknownKind => Some(WithholdReason::UnknownKind),
             Self::UnknownOwner => Some(WithholdReason::UnknownOwner),
+            Self::Ignored => Some(WithholdReason::Ignored),
         }
     }
 }
@@ -480,6 +484,8 @@ enum OwnerSpec<'a> {
 enum Miss {
     Kind,
     Owner,
+    #[expect(dead_code, reason = "constructed by the brief 46 rules (step 2)")]
+    Ignored,
 }
 
 type Res<'a> = Result<Hit<'a>, Miss>;
@@ -965,6 +971,7 @@ pub fn locate(path: &RootRelativePath, roots: &Roots) -> Located {
     match res {
         Err(Miss::Kind) => Located::UnknownKind,
         Err(Miss::Owner) => Located::UnknownOwner,
+        Err(Miss::Ignored) => Located::Ignored,
         Ok(hit) => finish(hit, roots),
     }
 }

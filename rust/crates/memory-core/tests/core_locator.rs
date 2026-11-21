@@ -1497,6 +1497,10 @@ fn prop_total(e: &[u8]) -> TestResult {
             got.withhold_reason() == Some(WithholdReason::UnknownOwner),
             "owner counted"
         ),
+        Located::Ignored => ensure!(
+            got.withhold_reason() == Some(WithholdReason::Ignored),
+            "ignored counted"
+        ),
     }
     Ok(())
 }
@@ -1747,4 +1751,13 @@ fn malformed_pi_stems_and_cwd_directories_are_not_sessions() -> TestResult {
         "a 4-byte `----` is not a cwd directory"
     );
     Ok(())
+}
+
+#[test]
+fn ignored_verdict_is_withheld_with_its_own_reason() {
+    assert_eq!(
+        Located::Ignored.withhold_reason(),
+        Some(WithholdReason::Ignored)
+    );
+    assert_ne!(Located::Ignored, Located::UnknownKind);
 }

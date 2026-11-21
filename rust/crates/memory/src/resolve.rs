@@ -499,6 +499,7 @@ impl crate::daemon::Sources for WalkSources {
                 match located {
                     Located::UnknownKind => counts.unknown_kind += 1,
                     Located::UnknownOwner => counts.unknown_owner += 1,
+                    Located::Ignored => continue,
                     Located::Source {
                         class: SourceClass::Snapshot,
                         kind,

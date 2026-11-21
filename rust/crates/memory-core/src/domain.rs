@@ -630,6 +630,8 @@ pub enum WithholdReason {
     SourceLimit,
     /// The source's on-disk encoding (zstd) cannot be decoded; nothing is uploaded.
     Undecodable,
+    /// A known non-session file (D54, brief 46); never captured.
+    Ignored,
 }
 
 /// Pure requested work; no I/O is performed.
