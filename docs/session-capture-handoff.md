@@ -324,7 +324,11 @@ from `main` alone.
      locally as `b9ef539` (DESIGN D60): every snapshot kind but session-env, usage-data and
      paste-cache is captured behind the fail-closed `Scanned` profile; Codex `skills/.system/` is
      ignored. Next: merge, install on both hosts, before and after counts, `memory check`, restore
-     of the shared Claude owner.
+     of the shared Claude owner. Merged as `30002d9` and installed on both hosts on 2026-11-21
+     (this Mac 14:48Z, `runs = 13`; dev-01 14:59Z). `deferred_snapshot` is 0 on both; `withheld`
+     150 here and 141 on dev-01; `memory check` exit 0 on both; the shared Claude owner restores
+     equal to `transform(local)` (evidence 43). Open operator question unchanged: the scanner's
+     code-shaped false positives (evidence 41) now also withhold some memory notes and aux files.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

@@ -129,3 +129,7 @@ check`, and a restore of the shared Claude owner compared by SHA-256 with `trans
   container core_locator, capture, daemon and resolve passed.
   [Evidence 43](evidence/43-deferred-snapshots/). Next: hosted gates, merge, install on both
   hosts, before and after counts, `memory check` and a restore of the shared Claude owner.
+- 2026-11-21 14:48Z to 15:33Z: merged as `30002d9` (stack #240) and installed on this Mac and
+  dev-01. `deferred_snapshot` 1,211 → 0 and 1,174 → 0; first rounds landed 176 and 57, withheld
+  9 and 46; `memory check` exit 0 on both; the restored shared Claude owner equals
+  `transform(local)` (132 of 132, 55 of 55). Exit criteria met. Details in evidence 43.

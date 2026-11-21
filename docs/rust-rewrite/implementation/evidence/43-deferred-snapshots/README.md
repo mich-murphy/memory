@@ -73,6 +73,46 @@ in `memory-core` but no located kind maps to them any more.
 - Linux container (Ubuntu 24.04): `memory-core` `core_locator` 22, `memory` `capture` 40,
   `daemon` 95, `resolve` 37, all passed.
 
+## Merge, install on both hosts
+
+- Stack #240 (PRs #237 to #239) merged as `30002d9`. Rust gates passed on all three PRs. CI failed
+  only in the two accepted `govulncheck` steps.
+- This Mac: installed in place at 14:48:07Z (sha256 prefix `d211bb3230c08c6a`, `runs = 13`). The
+  `87795f3` binary is kept as `backup/memory-87795f3`. Start round at 14:56:00Z: `landed=176
+  failed=0 local=0 deleted=0 withheld=9`, `tmp/` empty, no WARN or ERROR line, peak footprint
+  88 MB.
+- dev-01: `30002d9` built on the host (sha256 prefix `65f7797aa74896f1`). Both Nix store
+  dependencies are the pinned GC roots. Installed in place at 14:58:55Z, with the `87795f3` binary
+  kept as `backup/memory-87795f3`. Start round at 15:01:41Z: `landed=57 failed=0 deleted=0
+  withheld=46`, `VmHWM` 108 MB, `NRestarts=0`, `tmp/` empty, no WARN or ERROR line.
+
+`memory status`, before and after the first round:
+
+| | This Mac before | after | dev-01 before | after |
+|---|---|---|---|---|
+| `total` | 7,013 | 8,175 | 4,842 | 5,967 |
+| `current` | 6,871 | 8,025 | 4,747 | 5,826 |
+| `withheld` | 141 | 150 | 95 | 141 |
+| `ignored` | 20,171 | 20,220 | 48,587 | 48,636 |
+| `deferred_snapshot` | 1,211 | 0 | 1,174 | 0 |
+
+The new withholds match the probe minus the 7 Codex `skills/.system/` files, which are now
+`Ignored` (49 more `ignored` on each host): 16 − 7 = 9 here, 53 − 7 = 46 on dev-01.
+
+`memory check`, exit 0 on both hosts, with `uncaptured=0`, `mismatch=0`, `remote_only=0`,
+`deferred_snapshot=0` and `store_error=0`:
+
+| | This Mac (15:07Z to 15:29Z) | dev-01 (15:02Z to 15:07Z) |
+|---|---|---|
+| Owners, sources, `match` | 1,170, 8,175, 8,025 | 454, 5,967, 5,826 |
+| `withheld` lines by kind and reason | file_history 141, claude.aux 2, claude.memory 3, pi.aux 3, pi.config 1 (all `secret_in_text`) | file_history 95, claude.memory 4, pi.aux 31, pi.config 1 (`secret_in_text`); pi.aux 10 (`source_limit`) |
+
+Restore of the shared Claude owner into a private scratch directory, compared by SHA-256 with
+`transform(local)` (a scratch crate running the real `admit`, `transform` and `authorize` in
+memory; counts only), then removed: this Mac 132 files written, 132 equal; dev-01 55 written, 55
+equal. Against the raw local files the Mac had 131 equal and 1 different, `settings.json`, which
+`transform` scrubs.
+
 ## Limits
 
 - The scanner's code-shaped false positives (evidence 41) now also withhold some memory notes, aux
