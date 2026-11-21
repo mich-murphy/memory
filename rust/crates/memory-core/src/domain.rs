@@ -632,6 +632,8 @@ pub enum WithholdReason {
     Undecodable,
     /// A known non-session file (D54, brief 46); never captured.
     Ignored,
+    /// Binary or non-UTF-8 content in a scanned file (D54, brief 47).
+    Binary,
 }
 
 /// Pure requested work; no I/O is performed.

@@ -400,6 +400,7 @@ fn withhold_of(reason: Reason) -> WithholdReason {
         Reason::MalformedProtected => WithholdReason::MalformedProtected,
         Reason::SecretInText => WithholdReason::SecretInText,
         Reason::SourceLimit => WithholdReason::SourceLimit,
+        Reason::Binary => WithholdReason::Binary,
         Reason::ScrubFailed | Reason::ContextChanged => WithholdReason::ScrubFailed,
     }
 }
@@ -592,10 +593,13 @@ fn step<F: FileSystem>(
     // can be stale after a lost reply, so it counts only when the remote has no entry.
     let recorded = entry.map_or(local.deletion_recorded, |e| e.deleted_at.is_some());
     let live = entry.filter(|e| e.deleted_at.is_none());
-    let rules = matches!(src.facts.profile, Profile::Config | Profile::TextAsset)
-        .then_some(env.context.rules)
-        .flatten()
-        .map(|r| RulesDigest::new(Sha256::from_bytes(r)));
+    let rules = matches!(
+        src.facts.profile,
+        Profile::Config | Profile::TextAsset | Profile::Scanned
+    )
+    .then_some(env.context.rules)
+    .flatten()
+    .map(|r| RulesDigest::new(Sha256::from_bytes(r)));
     let stat = match fs.stat(src.handle) {
         Ok(stat) => stat,
         Err(e) if F::is_undecodable(&e) => {
