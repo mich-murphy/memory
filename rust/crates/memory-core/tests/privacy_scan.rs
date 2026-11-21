@@ -131,6 +131,26 @@ fn near_misses_pass_byte_for_byte() {
     }
 }
 
+/// A secret assignment inside another assignment's value is judged too (parent finding,
+/// brief 47): a non-overlapping search took `args`/`url` as the name and never saw the inner one.
+#[test]
+fn an_assignment_nested_in_a_value_is_withheld() {
+    for text in [
+        format!("args: --{}=literalvalue123", "token"),
+        format!("url=https://h/p?api_{}=literalvalue123", "key"),
+        format!("opts = \"x client_{}: literalvalue123\"", "secret"),
+    ] {
+        let input = format!("{text}\n");
+        assert_eq!(
+            scan(input.as_bytes()).err(),
+            Some(Reason::SecretInText),
+            "nested assignment not withheld"
+        );
+    }
+    let clean = "args: --verbose=enabled12\nurl=https://h/p?page=123456789\n";
+    assert_eq!(scan(clean.as_bytes()), Ok(clean.as_bytes().to_vec()));
+}
+
 #[test]
 fn size_cap_is_exact() {
     let cap = usize::try_from(MAX_SCANNED_BYTES).unwrap_or(usize::MAX);

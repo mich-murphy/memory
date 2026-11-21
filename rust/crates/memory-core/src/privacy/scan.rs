@@ -99,7 +99,10 @@ pub(super) fn check(bytes: &[u8]) -> Result<(), Reason> {
     }
     // The shell-assignment guard, with no extension exemption.
     text::check(&[], bytes)?;
-    for found in table.assignment.captures_iter(source) {
+    // Each search restarts at the start of the last value, not after it: a value may itself
+    // hold an assignment (`args: --token=…`, `url=…?api_key=…`) whose name must be judged too.
+    let mut at = 0;
+    while let Some(found) = table.assignment.captures_at(source, at) {
         let (Some(name), Some(value)) = (found.get(1), found.get(2)) else {
             return Err(Reason::ScrubFailed);
         };
@@ -109,6 +112,10 @@ pub(super) fn check(bytes: &[u8]) -> Result<(), Reason> {
         {
             return Err(Reason::SecretInText);
         }
+        if value.start() <= at {
+            return Err(Reason::ScrubFailed);
+        }
+        at = value.start();
     }
     Ok(())
 }
