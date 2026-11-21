@@ -1371,3 +1371,104 @@ fn new_rules_judge_a_withheld_file_again() -> R {
     assert_eq!(spy.reads.len(), reads);
     Ok(())
 }
+
+// ---- Brief 49: remaining snapshot kinds behind the fail-closed scan
+
+fn scanned_kind(handle: u64, path: &str, kind: SourceKind) -> R<Source> {
+    let mut s = source(handle, path, SourceClass::Snapshot, Profile::Scanned)?;
+    s.kind = kind;
+    Ok(s)
+}
+
+#[test]
+fn memory_note_session_aux_and_settings_land() -> R {
+    let mut rig = Rig::new(vec![
+        scanned_kind(1, "projects/-p/memory/n.md", SourceKind::ClaudeMemory)?,
+        scanned_kind(2, "projects/-p/s1/aux.json", SourceKind::ClaudeAux)?,
+        scanned_kind(3, "settings.json", SourceKind::ClaudeConfig)?,
+    ]);
+    rig.fs.set(1, b"# note\nremember this\n");
+    rig.fs.set(2, b"{\"a\":1}\n");
+    rig.fs.set(3, b"{\"theme\":\"dark\"}\n");
+    let (outcomes, changes) = rig.cycle()?;
+    assert_eq!(
+        outcomes,
+        [
+            SourceOutcome::Planned,
+            SourceOutcome::Planned,
+            SourceOutcome::Planned
+        ]
+    );
+    assert_eq!(kinds(&changes), ["replace"; 3]);
+    Ok(())
+}
+
+#[test]
+fn a_memory_note_with_a_secret_is_withheld_and_not_read_again() -> R {
+    let mut rig = Rig::new(vec![scanned_kind(
+        1,
+        "projects/-p/memory/n.md",
+        SourceKind::ClaudeMemory,
+    )?]);
+    let mut spy = Spy::default();
+    let secret = concat!("key = ", "AKIA", "EXAMPLEEXAMPLE00", "\n");
+    spy.inner.set(1, secret.as_bytes());
+    let (first, changes) = round_spy(&mut rig, &mut spy)?;
+    assert_eq!(
+        first,
+        [SourceOutcome::Withheld(WithholdReason::SecretInText)]
+    );
+    assert!(changes.is_empty());
+    let reads = spy.reads.len();
+    assert!(reads > 0);
+    let (again, _) = round_spy(&mut rig, &mut spy)?;
+    assert_eq!(again, [SourceOutcome::Unchanged]);
+    assert_eq!(spy.reads.len(), reads, "a cached withhold costs no read");
+    Ok(())
+}
+
+#[test]
+fn a_png_config_asset_is_withheld_binary() -> R {
+    let got = withheld_for(
+        scanned_kind(1, "skills/mine/icon.png", SourceKind::CodexConfig)?,
+        &[0x89, b'P', b'N', b'G', 0, 1, 2, 3],
+        |_| {},
+    )?;
+    assert_eq!(got, SourceOutcome::Withheld(WithholdReason::Binary));
+    Ok(())
+}
+
+#[test]
+fn a_two_mib_pi_aux_file_is_withheld_source_limit_without_a_read() -> R {
+    let mut rig = Rig::new(vec![scanned_kind(1, "x/run.jsonl", SourceKind::PiAux)?]);
+    let mut spy = Spy::default();
+    spy.inner.set(1, &vec![b'a'; 2 * 1024 * 1024]);
+    let got = run_spy(&mut rig, &mut spy)?;
+    assert_eq!(
+        got.outcomes.first().map(|(_, o)| o),
+        Some(&SourceOutcome::Withheld(WithholdReason::SourceLimit))
+    );
+    assert!(got.commit.is_none());
+    assert!(spy.reads.is_empty(), "no read: {:?}", spy.reads);
+    Ok(())
+}
+
+#[test]
+fn settings_with_a_token_field_land_scrubbed() -> R {
+    let token = concat!("tok-", "not-a-real-value-12345");
+    let mut rig = Rig::new(vec![scanned_kind(
+        1,
+        "settings.json",
+        SourceKind::ClaudeConfig,
+    )?]);
+    let doc = format!("{{\"env\":{{\"API_TOKEN\":\"{token}\"}},\"theme\":\"dark\"}}\n");
+    // One piece holds the whole document, so a plaintext search sees the token if it were stored.
+    rig.piece_len = 1 << 20;
+    rig.fs.set(1, doc.as_bytes());
+    let (outcomes, changes) = rig.cycle()?;
+    assert_eq!(outcomes, [SourceOutcome::Planned]);
+    assert_eq!(kinds(&changes), ["replace"]);
+    assert!(!rig.find(token.as_bytes()), "token stored");
+    assert!(rig.find(b"theme"), "document stored");
+    Ok(())
+}
