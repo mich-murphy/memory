@@ -332,7 +332,8 @@ pub struct SessionKey { archive: ArchiveId, machine: MachineId, agent: Agent, se
 pub enum Owner { Session(SessionKey), Shared { archive: ArchiveId, machine: MachineId, agent: Agent } }
 
 // Pure locator, one per agent. A path that maps to nothing is counted, never uploaded.
-pub enum Located { Source { owner: Owner, kind: SourceKind, id: SourceId }, UnknownKind, UnknownOwner }
+pub enum Located { Source { owner: Owner, kind: SourceKind, id: SourceId }, UnknownKind, UnknownOwner,
+    Ignored }                                 // Ignored: known non-session file (D57)
 pub fn locate(path: &RootRelativePath, roots: &Roots) -> Located;
 
 pub enum SourceClass { Append, Snapshot }     // JSONL transcripts against SQLite stores and config
@@ -376,7 +377,7 @@ pub enum Plan {
 pub enum ReplayReason { FirstCapture, IdentityChanged, Truncated, WindowMismatch,
     AdoptMismatch, AuditMismatch, RulesChanged }
 pub enum WithholdReason { Credential, CollectorState, UnknownKind, UnknownOwner,
-    MalformedProtected, ScrubFailed, SecretInText, KeyTooLong, SourceLimit }
+    MalformedProtected, ScrubFailed, SecretInText, KeyTooLong, SourceLimit, Undecodable, Ignored }
 
 // Privacy is a capability (section 8). Only transform::apply constructs Redacted,
 // and only policy::authorize constructs Authorized. The store accepts nothing else.
@@ -813,7 +814,11 @@ The credential denylist is checked against every identity in the chain:
 Collector state is excluded by filesystem identity: the config, the token file, and the state
 directory with all its files. A path that `locate` maps to no kind is `UnknownKind`, and one
 with no derivable owner is `UnknownOwner`. Both are withheld and counted, never passed through.
-Go's pass-through of unrecognised names is not ported. [review, 05 m2]
+Go's pass-through of unrecognised names is not ported. [review, 05 m2] A known non-session file
+in an agent directory (vendor code, caches, backups, SQLite sidecars, the D54 and D55 folders) is
+`Ignored`: never captured, counted apart as `ignored=` in `memory status` and `memory check`. Only a
+result that would otherwise be `UnknownKind` or a config or paste snapshot can become `Ignored`, so
+no session-owned source can; a custom Pi root keeps its own rules (D57).
 
 Hint paths are untrusted input. A hint's `transcript_path` or `cwd` is used only if `locate`
 maps it under a configured or learned root. It then passes the same admission check. [review,
@@ -1560,6 +1565,7 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D53 | 2026-11-20: on Linux `memory install` writes a systemd user unit at `$XDG_CONFIG_HOME/systemd/user/memory.service` (absolute only) or `~/.config/systemd/user/memory.service`: first line is our marker, `ExecStart="<exe>" daemon` (quoted with `\`, `"`, `%`, `$` escaped), `Restart=on-failure`, `RestartSec=60`, `StandardError=journal`, `WantedBy=default.target`. Uninstall removes only our unit. The binary prints `systemctl --user daemon-reload`, `enable --now` and `loginctl enable-linger $USER` and runs none of them. A control character in the exe path is refused | brief 44, evidence 36; 11.5, 17 |
 | D54 | 2026-11-21, operator answers to the uncaptured-files review: the `~/.claude/skills` folder and Pi `pi-terminology/` are not captured; Codex `generated_images`/`attachments` and Claude `paste-cache` are captured (slice 3; superseded by D55: none of the three is captured); known non-session files get an `Ignored` verdict, counted apart from `UnknownKind` and never captured. Claude `file-history` (operator: research and decide): captured in slice 3 only behind a content scan that withholds the whole file, with a recorded reason, on a secret match, binary or non-UTF-8 content, an oversize file or a scanner error; the local file is never touched. Reason: the transcript stays the record of what a session did, file-history adds the exact pre-edit file state at about 10 MB per host, and it is a raw copy of project files that no path denylist can see (names are hashes) | research report (Anthropic `claude-directory` and `checkpointing` docs), evidence 37; 5, 8, 19 |
 | D55 | 2026-11-21, operator after an evidence check of D54: Codex `generated_images`, Codex `attachments` and Claude `paste-cache` are not captured (they become `Ignored`). Measured on this Mac (byte and hash comparison, counts only): all 59 `paste-cache` files occur in captured Claude transcripts, since the cache only backs `history.jsonl` recall; all 4 generated images occur as base64 in Codex `thread_history_1.sqlite`, which slice 3 captures first; the 5 attachment screenshots and the attachment JSON index exist nowhere else and are given up (operator choice; the conversation text is intact). Reason: data minimisation in an archive that never deletes, and an image cannot be scanned for secrets | evidence 38; 5, 19 |
+| D57 | 2026-11-21: the `Ignored` verdict (D54) for agent-dir layouts: Claude `skills/`, `paste-cache/`, `plugins/` (except `installed_plugins.json` and `known_marketplaces.json`), telemetry, backups, caches and machine state; Codex `.tmp/`, `tmp/`, `cache/`, `packages/`, `computer-use/`, `generated_images/`, `attachments/`, lock and app-server directories, `logs_*.sqlite`, SQLite sidecars, locks, caches and config backups, and every `plugins/` file except `json`, `toml` and `md` outside `cache/` and dot directories; Pi `git/`, `npm/`, `install/`, `pi-terminology/`, `web-search-cache/`, extension backups, `*-debug.jsonl` and config backups. Only a `Miss::Kind` or a `ClaudeConfig`/`ClaudePaste`/`CodexConfig` hit can become `Ignored`; the walk still descends into ignored directories. Reason: `unknown_kind` (19,192 files here, 48,198 on dev-01) said nothing while it mixed vendor code with unclassified files | brief 46, evidence 40; 5, 8 |
 | D56 | 2026-11-21: Codex SQLite stores (top-level `*.sqlite` other than `logs_*`) are captured as shared snapshots: fingerprint db plus `-wal`, never `-shm`; a read-only backup in one step into `state/tmp/` inside the filesystem seam; pieces reused by digest from the last landed epoch; a changed store at most once per 6 h; a failed backup counts as `local` with no owner retry; `memory check` verifies the stored epoch and compares fingerprints, never live bytes; restore writes a standalone database. Reason: 873 Codex threads on this Mac exist only in `thread_history_1.sqlite`; 65 of 74 pieces of it were unchanged over a month | brief 45, evidence 39; 7.2, 7.3, 13 |
 
 Finding-to-section map for the challenge review:

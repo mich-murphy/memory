@@ -135,3 +135,9 @@ and after, and that the start round lands with `deleted=0`.
 ## Ledger
 
 - 2026-11-21 03:00Z: brief written on `95f9511`.
+- 2026-11-21: IGNORED accepted locally at `3b55337` (5 worker commits). Two teeth of the list above
+  could not be built as written (`to_source` and `note()` keep only `Located::Source`); three teeth
+  that remove the eligibility guard and ignore a session root replace them. Teeth 15 of 15; gates
+  14/14, seed 270570902, nextest 851, coverage 95.47 %; Linux container locator and resolve tests
+  passed. [Evidence 40](evidence/40-ignored-verdict/). Next: hosted gates, merge, install on both
+  hosts, census before and after.
