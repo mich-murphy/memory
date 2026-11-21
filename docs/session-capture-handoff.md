@@ -289,6 +289,12 @@ from `main` alone.
      103 MB. Restore of the shared Codex owner passes on both hosts: 5 of 5 stores
      `integrity_check` ok, row counts equal to the preserved copies (evidence 39). The retired Go
      directories and the preserved copies may now be deleted on an operator decision.
+  22. Brief 46 ([46-ignored-verdict.md](rust-rewrite/implementation/46-ignored-verdict.md),
+     [evidence 40](rust-rewrite/implementation/evidence/40-ignored-verdict/)) is accepted locally
+     as `3b55337` (DESIGN D57): known non-session files in agent directories are `Ignored`, counted
+     as `ignored=` apart from `unknown_kind` and never captured; Claude `skills/` and
+     `paste-cache/` and the Codex `plugins/` binaries leave the snapshot set. Next: merge, install
+     on both hosts, census before and after; then file-history behind the content scan.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

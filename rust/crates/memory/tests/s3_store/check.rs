@@ -256,6 +256,20 @@ fn a_deferred_snapshot_is_counted_apart() -> R {
 }
 
 #[test]
+fn an_ignored_file_is_counted_apart_from_unknown_kind() -> R {
+    // Brief 46 / D54: `ignored=` follows `unknown_kind=` and nothing is uncaptured.
+    let s = setup("check-ignored")?;
+    capture(&s)?;
+    fs::create_dir_all(s.rig.root.join("cache")).map_err(e)?;
+    fs::write(s.rig.root.join("cache/c"), "x\n").map_err(e)?;
+    let ran = run(&s)?;
+    assert_eq!(ran.code, 0, "{}", ran.out);
+    assert!(ran.has("ignored", 1) && ran.has("unknown_kind", 0) && ran.has("uncaptured", 0));
+    assert!(ran.out.contains(" unknown_kind=0 ignored=1 unknown_owner="));
+    Ok(())
+}
+
+#[test]
 fn a_withheld_source_is_withheld_not_uncaptured() -> R {
     let server = Fake::start()?;
     let rig = super::assemble::Rig::new("check-withheld", &server.url(), PREFIX, true)?;

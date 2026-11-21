@@ -943,7 +943,7 @@ fn snapshot_files_are_deferred_not_yielded_and_not_unknown() -> R {
     t.write("codex/logs_2.sqlite", b"x")?;
     t.write("codex/config.toml", b"x")?;
     let mut w = agent_walker(&codex, Agent::Codex)?;
-    // The store is yielded; the log database is unknown; other snapshot kinds stay deferred.
+    // The store is yielded; the log database is ignored; other snapshot kinds stay deferred.
     assert_eq!(w.enumerate().len(), 1);
     let c = w.counts();
     assert_eq!(
@@ -953,7 +953,8 @@ fn snapshot_files_are_deferred_not_yielded_and_not_unknown() -> R {
             c.unknown_owner,
             c.unknown_kind
         ),
-        (1, 1, 0, 1)
+        // Brief 46 / D54: `logs_*.sqlite` is Ignored, no longer unknown_kind.
+        (1, 1, 0, 0)
     );
     assert_eq!(w.note(&codex.join("logs_2.sqlite")), None);
     assert_eq!(w.note(&codex.join("config.toml")), None);
@@ -1177,5 +1178,28 @@ fn a_lone_zst_is_a_codex_rollout_source_with_the_logical_path_and_transcript_pro
         of.first().map(|s| (s.kind.clone(), s.path.clone())),
         Some((source.kind.clone(), source.path.clone()))
     );
+    Ok(())
+}
+
+#[test]
+fn ignored_files_are_counted_not_yielded_and_never_hints() -> R {
+    // Brief 46 / D54: known non-session files are counted as `ignored`, not `unknown_kind`.
+    let t = Tmp::new()?;
+    t.write(&format!("claude/projects/-p/{U1}.jsonl"), b"{}\n")?;
+    let skill = t.write("claude/skills/a/b.md", b"x")?;
+    let cache = t.write("claude/cache/c", b"x")?;
+    t.write("claude/mystery.txt", b"x")?;
+    let mut w = walker(&t.root(), WalkLimits::default())?;
+    assert_eq!(w.enumerate().len(), 1);
+    let c = w.counts();
+    assert_eq!(
+        (c.yielded, c.ignored, c.unknown_kind, c.deferred_snapshot),
+        (1, 2, 1, 0)
+    );
+    assert_eq!(w.note(&skill), None);
+    assert_eq!(w.note(&cache), None);
+    let (owners, _) = w.read_dir(&t.root().join("skills/a"));
+    assert!(owners.is_empty());
+    assert_eq!(w.enumerate().len(), 1);
     Ok(())
 }

@@ -58,6 +58,8 @@ pub struct Sources {
     pub unknown_kind: u64,
     /// Walk: files with no unambiguous owner.
     pub unknown_owner: u64,
+    /// Walk: known non-session files (brief 46).
+    pub ignored: u64,
     /// Walk: duplicates of another source id.
     pub duplicate: u64,
     /// Walk: snapshot files other than Codex SQLite stores, withheld.
@@ -150,6 +152,7 @@ pub fn status(root: &Path) -> Result<Report, Refusal> {
         total: u64::try_from(rows.len()).unwrap_or(u64::MAX),
         unknown_kind: counts.unknown_kind,
         unknown_owner: counts.unknown_owner,
+        ignored: counts.ignored,
         duplicate: counts.duplicate,
         deferred_snapshot: counts.deferred_snapshot,
         unreadable: counts.unreadable,
@@ -184,7 +187,7 @@ pub fn status(root: &Path) -> Result<Report, Refusal> {
             body.rounds, body.host_paused
         ),
         format!(
-            "sources total={} current={} behind={} changed={} unindexed={} withheld={} oldest_behind_s={} unknown_kind={} unknown_owner={} duplicate={} deferred_snapshot={} unreadable={}",
+            "sources total={} current={} behind={} changed={} unindexed={} withheld={} oldest_behind_s={} unknown_kind={} ignored={} unknown_owner={} duplicate={} deferred_snapshot={} unreadable={}",
             s.total,
             s.current,
             s.behind,
@@ -193,6 +196,7 @@ pub fn status(root: &Path) -> Result<Report, Refusal> {
             s.withheld,
             s.oldest_behind_s,
             s.unknown_kind,
+            s.ignored,
             s.unknown_owner,
             s.duplicate,
             s.deferred_snapshot,
