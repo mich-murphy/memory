@@ -105,3 +105,9 @@ expected 0, since every captured snapshot file still exists) and `memory check`.
 ## Ledger
 
 - 2026-11-21 08:00Z: brief written on `9353b4c`.
+- 2026-11-21: SNAPDEL accepted locally at `3e1a51a` (4 worker commits, 1 parent commit). The parent
+  found that the walk guard of the withheld-only drop survived every test and pinned it with a
+  stat-error test (`3e1a51a`). The listed `-wal` tooth cannot be built (a present store is always
+  walked). Teeth 10 of 10; gates 14/14, seed 1340466347, nextest 879, coverage 95.58 %; Linux
+  container capture and daemon tests passed. [Evidence 42](evidence/42-snapshot-deletions/).
+  Next: hosted gates, merge, install on both hosts, two full rounds and `memory check`.
