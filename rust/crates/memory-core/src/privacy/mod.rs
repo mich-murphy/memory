@@ -29,6 +29,11 @@
 //! the scanner table and size cap.
 
 mod document;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "wired into scan in brief 50 step 2")
+)]
+mod gitleaks;
 mod launch;
 mod names;
 mod scan;
