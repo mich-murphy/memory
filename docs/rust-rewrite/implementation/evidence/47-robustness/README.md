@@ -113,13 +113,15 @@ Changed existing expectations (each commented with brief 52):
   `cargo deny` ok and nextest 911 passed. Merged as `4d6729f`, and the stack was rebased onto it.
 - Full gates on `034be38`: 14 of 14. Seed 2084831141, nextest 933 passed, Hegel 33, proptest 36,
   consumer 3, line coverage 95.68 %. Clippy `-Dwarnings` passes with and without `memory/sim`.
-  (Corrected 2026-11-23: wrong. Both clippy runs, like every gate, built `memory` with `sim`,
+  (Corrected 2026-11-22: wrong. Both clippy runs, like every gate, built `memory` with `sim`,
   because the dev-dependency `memory = { features = ["sim"] }` turns it on under
   `--all-targets`. The non-`sim` `phase_enum!()` did not compile, so `main` `25fae57` passed
   every gate and hosted CI but failed `cargo build --release`. Nothing was installed from it.
   Fixed in the follow-up below.)
+- Linux container (Ubuntu 24.04), `cargo test -p memory`, all passed: lib 10, `s3_store` 146
+  (1 ignored), `daemon` 105.
 
-## Follow-up, 2026-11-23: the release build
+## Follow-up, 2026-11-22: the release build
 
 - Cause: `macro_rules! phase_enum { ($vis:vis) => … }` invoked as `phase_enum!()`. An empty
   `vis` fragment at the end of the input does not match. With the macro fixed, clippy's
@@ -129,5 +131,26 @@ Changed existing expectations (each commented with brief 52):
 - Gate: `02-clippy` also runs `cargo clippy --workspace --lib --bins --locked -- -Dwarnings`.
   With resolver 2 that pass builds without dev-dependency features, as the release build does.
   It failed on `25fae57` (exit 101) and passes on the fix. The gate count stays 14.
-- Linux container (Ubuntu 24.04), `cargo test -p memory`, all passed: lib 10, `s3_store` 146
-  (1 ignored), `daemon` 105.
+- Full gates on `89b77d2`: 14 of 14. Seed 840169793, nextest 933 passed, Hegel 33, proptest 36,
+  consumer 3, line coverage 95.68 %. Linux container: release build and `s3_store` `check::`
+  29 passed. PR #259: Rust gates passed, and CI failed only in the two accepted `govulncheck`
+  steps. Merged as `94833f6`.
+
+## Merge, install on both hosts
+
+- This Mac: `94833f6` installed in place at 14:40:14Z (sha256 prefix `3f11281ac4eb777b`,
+  `runs = 16`, pid 8523), with the `ecb1d74` binary kept as `backup/memory-ecb1d74`. Start round
+  at 14:44:02Z: `landed=2 failed=0 deferred=0`, no WARN or ERROR line, `tmp/` empty.
+  `memory check` 14:44Z to 15:09Z: exit 0, 1,170 owners, 8,187 sources, 8,184 match,
+  0 mismatch, 0 uncaptured, `remote_only=0`, `store_error=0`; withheld file_history 2,
+  claude.memory 1 (`secret_in_text`). Peak footprint over the start round and the check: 90 MB
+  (173 samples; 82 MB on `ecb1d74`), below the 128 MB target.
+- dev-01: `94833f6` built on the host (sha256 prefix `7482b128a9dd97a8`); both Nix store
+  dependencies are the pinned GC roots. Installed at 15:13:40Z with `backup/memory-ecb1d74`.
+  Start round at 15:15:17Z: `landed=2 failed=0`, `NRestarts=0`, `tmp/` empty, no WARN or ERROR
+  line. `memory check` 15:15Z to 15:20Z: exit 0, 459 owners, 5,989 sources, 5,963 match, all
+  other counts 0; withheld file_history 4, pi.aux 12 (`secret_in_text`), pi.aux 10
+  (`source_limit`). `VmHWM` after the check: 109,188 kB.
+
+Exit criteria met. The retry budget and the check confirmation stayed quiet on both hosts: no
+retry was needed and no anomaly needed confirming.

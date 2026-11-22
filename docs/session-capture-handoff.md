@@ -382,8 +382,11 @@ from `main` alone.
      analytics uses, and analytics must describe the agent setup (model, harness, extensions,
      skills, tool calls). Research done (analytics report); briefs to follow after an R1
      amendment. Merged as `25fae57`, whose release build failed (the non-`sim` `Phase` macro;
-     every gate built `memory` with `sim`). Follow-up 2026-11-23 fixes it and adds a
-     libs-and-bins clippy pass without dev features to gate `02-clippy`.
+     every gate built `memory` with `sim`). Follow-up 2026-11-22 fixes it and adds a
+     libs-and-bins clippy pass without dev features to gate `02-clippy`; merged as `94833f6` and
+     installed on both hosts on 2026-11-22 (this Mac 14:40Z, `runs = 16`; dev-01 15:14Z):
+     `memory check` exit 0 on both, `remote_only=0`, withheld 3 and 26; peak 90 MB here,
+     dev-01 `VmHWM` 109 MB.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

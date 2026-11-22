@@ -164,5 +164,8 @@ both hosts; first rounds, `memory status`, `memory check`, peak memory.
   in evidence 47.
 - 2026-11-22: merged as `25fae57` (stack #258). The release build of `main` failed: the non-`sim`
   `Phase` macro did not compile, and no gate built `memory` without `sim`. Nothing installed.
-- 2026-11-23: follow-up fixes the macro and the variant names, and gate `02-clippy` gains a
-  libs-and-bins pass without dev features (evidence 47, follow-up).
+- 2026-11-22: follow-up fixes the macro and the variant names, and gate `02-clippy` gains a
+  libs-and-bins pass without dev features (evidence 47, follow-up). Merged as `94833f6` (PR #259).
+- 2026-11-22 14:40Z to 15:20Z: `94833f6` installed on this Mac and dev-01. `memory check` exit 0
+  on both, `remote_only=0`, withheld 3 and 26; peak 90 MB here, dev-01 `VmHWM` 109 MB. Exit
+  criteria met. Details in evidence 47.
