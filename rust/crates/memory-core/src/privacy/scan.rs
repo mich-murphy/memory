@@ -20,26 +20,29 @@ pub const MAX_SCANNED_BYTES: u64 = 1024 * 1024;
 const TABLE_VERSION: &str = "scan/2";
 
 /// Fixed secret shapes. Each hit withholds the whole file (false positives are accepted).
+/// Provider shapes start at a word boundary, as gitleaks' provider rules do: measured before
+/// brief 50's install, every unanchored `sk-` hit (2 files here, 17 on dev-01) sat inside a
+/// longer identifier (`…task-…`), never at a word start.
 const PATTERNS: &[&str] = &[
     // PEM, OpenSSH and PGP private-key headers.
     r"-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----",
     // AWS access key ids.
-    r"(AKIA|ASIA)[A-Z0-9]{16}",
+    r"\b(AKIA|ASIA)[A-Z0-9]{16}",
     // GitHub tokens (classic prefixes and fine-grained).
-    r"gh[pousr]_[A-Za-z0-9]{20,}",
-    r"github_pat_[A-Za-z0-9_]{20,}",
+    r"\bgh[pousr]_[A-Za-z0-9]{20,}",
+    r"\bgithub_pat_[A-Za-z0-9_]{20,}",
     // Slack tokens.
-    r"xox[abprs]-[A-Za-z0-9-]{10,}",
+    r"\bxox[abprs]-[A-Za-z0-9-]{10,}",
     // Anthropic and OpenAI keys.
-    r"sk-ant-[A-Za-z0-9_-]{16,}",
-    r"sk-proj-[A-Za-z0-9_-]{16,}",
-    r"sk-[A-Za-z0-9_-]{32,}",
+    r"\bsk-ant-[A-Za-z0-9_-]{16,}",
+    r"\bsk-proj-[A-Za-z0-9_-]{16,}",
+    r"\bsk-[A-Za-z0-9_-]{32,}",
     // Google API keys.
-    r"AIza[0-9A-Za-z_-]{35}",
+    r"\bAIza[0-9A-Za-z_-]{35}",
     // Stripe live keys.
-    r"(sk|rk)_live_[0-9A-Za-z]{16,}",
+    r"\b(sk|rk)_live_[0-9A-Za-z]{16,}",
     // JSON web tokens (header and payload segments).
-    r"eyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.",
+    r"\beyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.",
     // Credentials embedded in a URL: scheme://user:password@host.
     r"://[^\s/:@]+:[^\s/@]+@",
 ];

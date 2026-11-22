@@ -132,6 +132,37 @@ fn near_misses_pass_byte_for_byte() {
     }
 }
 
+/// Brief 50 (parent): a provider prefix inside a longer identifier is not a token.
+#[test]
+fn provider_prefixes_inside_an_identifier_pass() {
+    let tail = "abcdefgh-ijklmnop-qrstuvwx-yzabcdef-ghij";
+    for text in [
+        format!("run: ta{}{tail}", "sk-"),
+        format!("id: di{}{tail}", "sk-"),
+        format!("x{}{}", "AIza", "B".repeat(35)),
+        format!("my{}{}", "ghp_", "abcdefghijklmnopqrstuvwxyz"),
+    ] {
+        let input = format!("{text}\n");
+        assert_eq!(
+            scan(input.as_bytes()),
+            Ok(input.clone().into_bytes()),
+            "embedded prefix {text:?} withheld"
+        );
+    }
+    // At a word start the same shapes are withheld.
+    for text in [
+        format!("run: {}{tail}", "sk-"),
+        format!("key=\"{}{}\"", "AIza", "B".repeat(35)),
+    ] {
+        let input = format!("{text}\n");
+        assert_eq!(
+            scan(input.as_bytes()).err(),
+            Some(Reason::SecretInText),
+            "word-start token {text:?} published"
+        );
+    }
+}
+
 /// Brief 50: the generic rule matches an assignment wherever it sits in a line, including
 /// inside another assignment's value.
 #[test]
