@@ -831,7 +831,10 @@ hold a backslash, on a JSON-unescaped copy. Path and commit allowlists never app
 `gitleaks:allow` is never honoured; an unknown key or a pattern that does not compile is a table
 failure (`scrub_failed`). The name-only assignment rule and the shell guard no longer run in the
 scan. A clean file is published byte for byte. The patterns, the vendored file, the escape pass and
-the cap are part of the rules digest. The local file is never touched.
+the cap are part of the rules digest. The local file is never touched. Since brief 51 a gitleaks rule regex is
+compiled only at the first text holding one of its keywords (each is validated at load; a later
+compile failure withholds with `scrub_failed`), the keyword prefilter uses `memchr::memmem`, and
+each lazy-DFA cache is capped at 256 KiB. None of this changes a verdict or the digest.
 
 Since D60 (brief 49) every captured snapshot kind except Codex stores has this profile: config
 assets, Claude and Codex memory notes, plans, Claude per-session aux, todos, tasks, teams, Pi aux

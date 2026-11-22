@@ -20,6 +20,8 @@ thiserror = "2"
 toml = "1"
 sha2 = "=0.11.1"
 regex = "1"
+# Already in the lockfile via regex; keyword prefilter (brief 51).
+memchr = "2"
 url = "2"
 hegel = { package = "hegeltest", version = "=0.52.0", features = ["static-engine"] }
 proptest = "1"
