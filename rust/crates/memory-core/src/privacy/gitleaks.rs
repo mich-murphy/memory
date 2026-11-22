@@ -357,7 +357,7 @@ fn entropy(secret: &[u8]) -> f64 {
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
-    !needle.is_empty() && haystack.windows(needle.len()).any(|w| w == needle)
+    !needle.is_empty() && memchr::memmem::find(haystack, needle).is_some()
 }
 
 impl Table {
@@ -601,6 +601,27 @@ mod tests {
         assert!(!hit(doc, "tok=abcd"));
         assert!(hit(doc, "tok=abcd ZZZ"));
         assert!(hit(doc, "tok=abcd zzz"));
+    }
+
+    #[test]
+    fn contains_finds_start_end_and_never_empty() {
+        assert!(contains(b"abcdef", b"abc"));
+        assert!(contains(b"abcdef", b"def"));
+        assert!(contains(b"abcdef", b"cd"));
+        assert!(!contains(b"abcdef", b"xyz"));
+        assert!(!contains(b"abcdef", b""));
+        assert!(!contains(b"", b""));
+        assert!(!contains(b"ab", b"abc"));
+    }
+
+    #[test]
+    fn keyword_at_start_end_and_mixed_case() {
+        let doc = "[[rules]]\nid='x'\nregex='tok=(\\w+)'\nkeywords=['Key']\n";
+        assert!(hit(doc, "KEY tok=abcd"));
+        assert!(hit(doc, "tok=abcd kEy"));
+        assert!(!hit(doc, "tok=abcd ke"));
+        let empty = "[[rules]]\nid='x'\nregex='tok=(\\w+)'\nkeywords=['']\n";
+        assert!(!hit(empty, "tok=abcd"));
     }
 
     #[test]

@@ -729,6 +729,7 @@ name = "memory-core"
 version = "0.1.0"
 dependencies = [
  "hegeltest",
+ "memchr",
  "proptest",
  "proptest-state-machine",
  "regex",
