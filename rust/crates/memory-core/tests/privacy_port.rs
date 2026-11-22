@@ -577,8 +577,9 @@ fn rule_digest_golden_requires_explicit_semantic_review() {
         privacy::rules_digest(),
         [
             // D54, brief 47: the scanner table and cap joined the digest (was 165, 111, 102, ...).
-            223, 26, 99, 231, 255, 225, 11, 174, 228, 75, 77, 105, 94, 14, 197, 219, 37, 2, 143,
-            164, 171, 54, 156, 54, 57, 231, 77, 232, 81, 132, 206, 217
+            // Brief 50: scan/2 on the vendored gitleaks v8.30.1 rules moved the digest (was 223, 26, 99, ...).
+            136, 128, 227, 142, 197, 246, 43, 218, 98, 16, 111, 183, 2, 87, 23, 48, 178, 4, 56, 19,
+            98, 8, 26, 5, 213, 78, 184, 121, 12, 58, 226, 28
         ]
     );
 }
