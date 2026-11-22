@@ -693,7 +693,8 @@ fn a_deleted_file_is_recorded_on_the_second_reconcile_and_restore_skips_it() -> 
     Ok(())
 }
 
-// ---- Brief 52, CHECKCONFIRM: a concurrent writer must not cause a false alarm nor hide a defect ----
+// ---- Brief 52, CHECKCONFIRM: a concurrent writer must not cause a false alarm nor hide a
+// defect ----
 
 fn debug_file(s: &Setup) -> R<std::path::PathBuf> {
     let debug = s.rig.root.join(format!("debug/{UUID}.txt"));
