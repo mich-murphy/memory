@@ -692,3 +692,162 @@ fn a_deleted_file_is_recorded_on_the_second_reconcile_and_restore_skips_it() -> 
     assert!(!out.join(SESSION).exists());
     Ok(())
 }
+
+// ---- Brief 52, CHECKCONFIRM: a concurrent writer must not cause a false alarm nor hide a defect ----
+
+fn debug_file(s: &Setup) -> R<std::path::PathBuf> {
+    let debug = s.rig.root.join(format!("debug/{UUID}.txt"));
+    fs::create_dir_all(debug.parent().ok_or("parent")?).map_err(e)?;
+    Ok(debug)
+}
+
+/// Run the in-process check; `act` is the concurrent writer, called once at `at`.
+fn raced(s: &Setup, at: memory::check::Phase, mut act: impl FnMut()) -> R<memory::check::Report> {
+    let mut done = false;
+    let report = memory::check::check_with(&s.rig.state, &mut |p| {
+        if p == at && !done {
+            done = true;
+            act();
+        }
+    })
+    .map_err(|r| r.code)?;
+    assert!(done, "hook never ran");
+    Ok(report)
+}
+
+#[test]
+fn a_commit_between_walk_and_fetch_is_not_remote_only() -> R {
+    use memory::check::Phase;
+    let s = setup("race-remote")?;
+    capture(&s)?;
+    let debug = debug_file(&s)?;
+    let r = raced(&s, Phase::AfterWalk, || {
+        let _ = fs::write(&debug, "debug line\n");
+        let _ = capture(&s);
+    })?;
+    assert_eq!(r.tally.remote_only, 0, "{:?}", r.details);
+    assert_eq!(r.tally.mismatch + r.tally.uncaptured, 0);
+    assert_eq!(r.exit(), 0);
+    Ok(())
+}
+
+#[test]
+fn a_commit_between_fetch_and_judge_is_not_uncaptured() -> R {
+    use memory::check::Phase;
+    let s = setup("race-uncap")?;
+    capture(&s)?;
+    fs::write(debug_file(&s)?, "debug line\n").map_err(e)?; // seen by the walk, not yet captured
+    let r = raced(&s, Phase::AfterFetch, || {
+        let _ = capture(&s);
+    })?;
+    assert_eq!(r.tally.uncaptured, 0, "{:?}", r.details);
+    assert_eq!(r.tally.matched, 2);
+    assert_eq!(r.exit(), 0);
+    Ok(())
+}
+
+#[test]
+fn a_file_deleted_after_the_walk_is_never_a_failure() -> R {
+    use memory::check::Phase;
+    let s = setup("race-del")?;
+    let debug = debug_file(&s)?;
+    fs::write(&debug, "debug line\n").map_err(e)?;
+    capture(&s)?;
+    let r = raced(&s, Phase::AfterFetch, || {
+        let _ = fs::remove_file(&debug);
+    })?;
+    assert_eq!(r.tally.mismatch + r.tally.uncaptured, 0, "{:?}", r.details);
+    assert_eq!(r.exit(), 0);
+    Ok(())
+}
+
+#[test]
+fn a_file_really_gone_locally_is_still_remote_only() -> R {
+    use memory::check::Phase;
+    let s = setup("race-real-gone")?;
+    let debug = debug_file(&s)?;
+    fs::write(&debug, "debug line\n").map_err(e)?;
+    capture(&s)?;
+    fs::remove_file(&debug).map_err(e)?;
+    let r = raced(&s, Phase::AfterWalk, || {})?;
+    assert_eq!(r.tally.remote_only, 1);
+    Ok(())
+}
+
+#[test]
+fn a_never_captured_file_is_still_uncaptured_and_exits_one() -> R {
+    use memory::check::Phase;
+    let s = setup("race-real-uncap")?;
+    capture(&s)?;
+    fs::write(debug_file(&s)?, "debug line\n").map_err(e)?;
+    let r = raced(&s, Phase::AfterFetch, || {})?;
+    assert_eq!((r.tally.uncaptured, r.exit()), (1, 1));
+    // The real binary agrees.
+    let ran = run(&s)?;
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(ran.has("uncaptured", 1));
+    Ok(())
+}
+
+#[test]
+fn a_corrupted_piece_is_still_a_mismatch_even_when_the_owner_moved() -> R {
+    use memory::check::Phase;
+    let s = setup("race-real-piece")?;
+    capture(&s)?;
+    let mut store = store_at(&s.server.url(), PREFIX, TimeoutPolicy::PRODUCTION)?;
+    let folded = read_owner(&s.owner, |k| match store.get(k) {
+        Ok(x) => Ok(Some(x.body)),
+        Err(StoreError::NotFound) => Ok(None),
+        Err(o) => Err(o),
+    })
+    .map_err(e)?
+    .ok_or("absent")?;
+    let piece = folded
+        .state
+        .sources
+        .values()
+        .next()
+        .and_then(|x| x.epochs.last())
+        .and_then(|r| r.pieces.first())
+        .ok_or("piece")?;
+    let path = format!("/{BUCKET}/{PREFIX}{}", piece.object());
+    let (mut body, _) = s.server.object(&path).ok_or("absent")?;
+    *body.first_mut().ok_or("empty")? ^= 0xff;
+    s.server.seed(&path, &body);
+    // Quiet: one mismatch, and the real binary exits 1.
+    let ran = run(&s)?;
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(ran.has("mismatch", 1));
+    // The owner moves between fetch and judge (an append is captured): still a mismatch.
+    let r = raced(&s, Phase::AfterFetch, || {
+        let _ = s.append(12..14);
+        let _ = capture(&s);
+    })?;
+    assert_eq!(r.tally.mismatch, 1, "{:?}", r.details);
+    Ok(())
+}
+
+fn gets(s: &Setup) -> usize {
+    s.server.count("GET")
+}
+
+#[test]
+fn a_quiet_owner_costs_no_extra_request() -> R {
+    let s = setup("race-cost")?;
+    capture(&s)?;
+    let before = gets(&s);
+    let ran = run(&s)?;
+    assert_eq!(ran.code, 0, "{}", ran.out);
+    // current.json, one manifest, one piece: nothing more.
+    assert_eq!(gets(&s) - before, 3);
+    // An anomaly with an unchanged head costs exactly one more current.json GET.
+    fs::write(debug_file(&s)?, "debug line\n").map_err(e)?;
+    let before = gets(&s);
+    let ran = run(&s)?;
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    // 3 as above for the match, 1 for the uncaptured judge (none), +1 confirmation.
+    let extra = gets(&s) - before;
+    eprintln!("anomalous owner GETs={extra} (quiet=3)");
+    assert_eq!(extra, 4);
+    Ok(())
+}
