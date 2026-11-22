@@ -120,7 +120,8 @@ struct Allow {
     regexes: Vec<Regex>,
     stopwords: Vec<String>,
     and: bool,
-    has_paths: bool,
+    /// `paths` or `commits` present: checks that are never satisfied (no path, no commit).
+    unmatchable: bool,
 }
 
 impl Allow {
@@ -139,7 +140,7 @@ impl Allow {
             return regex || stop;
         }
         let mut checks = Vec::new();
-        if self.has_paths {
+        if self.unmatchable {
             checks.push(false);
         }
         if !self.regexes.is_empty() {
@@ -164,7 +165,40 @@ struct Rule {
 pub(super) struct Table {
     rules: Vec<Rule>,
     global: Vec<Allow>,
+    #[cfg_attr(not(test), expect(dead_code, reason = "read only by the load tests"))]
     skipped: Vec<String>,
+}
+
+/// Keys this port understands. Any other key is a table failure, so a semantic field added
+/// upstream (as `required` was) cannot be ignored silently.
+const RULE_KEYS: &[&str] = &[
+    "id",
+    "description",
+    "regex",
+    "path",
+    "keywords",
+    "entropy",
+    "secretGroup",
+    "allowlists",
+    "allowlist",
+    "tags",
+];
+const ALLOW_KEYS: &[&str] = &[
+    "description",
+    "condition",
+    "regexTarget",
+    "regexes",
+    "stopwords",
+    "paths",
+    "commits",
+];
+const TOP_KEYS: &[&str] = &["title", "minVersion", "allowlist", "allowlists", "rules"];
+
+fn known(table: &toml::Table, keys: &[&str], what: &str) -> Result<(), String> {
+    match table.keys().find(|k| !keys.contains(&k.as_str())) {
+        None => Ok(()),
+        Some(k) => Err(format!("unknown {what} key {k:?}")),
+    }
 }
 
 fn strings(table: &toml::Table, key: &str) -> Vec<String> {
@@ -180,6 +214,7 @@ fn strings(table: &toml::Table, key: &str) -> Vec<String> {
 }
 
 fn allow(table: &toml::Table) -> Result<Allow, String> {
+    known(table, ALLOW_KEYS, "allowlist")?;
     let target = match table.get("regexTarget").and_then(toml::Value::as_str) {
         None => Target::Secret,
         Some("match") => Target::Matched,
@@ -192,18 +227,26 @@ fn allow(table: &toml::Table) -> Result<Allow, String> {
         Some(s) if s.eq_ignore_ascii_case("and") => true,
         Some(other) => return Err(format!("unknown condition {other:?}")),
     };
+    let regexes: Vec<Regex> = strings(table, "regexes")
+        .iter()
+        .map(|p| compile(p))
+        .collect::<Result<_, _>>()?;
+    let stopwords: Vec<String> = strings(table, "stopwords")
+        .into_iter()
+        .map(|s| s.to_lowercase())
+        .collect();
+    let unmatchable = !strings(table, "paths").is_empty() || !strings(table, "commits").is_empty();
+    // gitleaks `Validate`: an allowlist needs at least one check. Without this an empty AND
+    // allowlist would allow every finding.
+    if regexes.is_empty() && stopwords.is_empty() && !unmatchable {
+        return Err("allowlist without a check".to_owned());
+    }
     Ok(Allow {
         target,
-        regexes: strings(table, "regexes")
-            .iter()
-            .map(|p| compile(p))
-            .collect::<Result<_, _>>()?,
-        stopwords: strings(table, "stopwords")
-            .into_iter()
-            .map(|s| s.to_lowercase())
-            .collect(),
+        regexes,
+        stopwords,
         and,
-        has_paths: !strings(table, "paths").is_empty(),
+        unmatchable,
     })
 }
 
@@ -226,6 +269,7 @@ fn allowlists(table: &toml::Table, plural: &str, singular: &str) -> Result<Vec<A
 /// Parse and compile a gitleaks rule file.
 fn load(source: &str) -> Result<Table, String> {
     let doc: toml::Table = toml::from_str(source).map_err(|e| e.to_string())?;
+    known(&doc, TOP_KEYS, "top-level")?;
     let global = allowlists(&doc, "allowlists", "allowlist")?;
     let mut rules = Vec::new();
     let mut skipped = Vec::new();
@@ -236,6 +280,7 @@ fn load(source: &str) -> Result<Table, String> {
         .flatten()
     {
         let rule = item.as_table().ok_or("rule is not a table")?;
+        known(rule, RULE_KEYS, "rule")?;
         let id = rule
             .get("id")
             .and_then(toml::Value::as_str)
@@ -448,6 +493,27 @@ mod tests {
         assert!(load("[[rules]]\nid = 'x'\nregex = '(' \n").is_err());
         assert!(load("[[rules]]\nid = 'x'\n").is_err());
         assert!(load("[[rules]]\nid = 'x'\nregex = 'a'\nsecretGroup = -1\n").is_err());
+        // Parent, brief 50: an allowlist without a check, and unknown keys, are table failures.
+        assert!(
+            load("[[rules]]\nid='x'\nregex='a'\n[[rules.allowlists]]\ncondition='AND'\n").is_err()
+        );
+        assert!(
+            load("[[rules]]\nid='x'\nregex='a'\n[[rules.allowlists]]\ndescription='d'\n").is_err()
+        );
+        assert!(load("[[rules]]\nid='x'\nregex='a'\nrequired=[]\n").is_err());
+        assert!(
+            load("[[rules]]\nid='x'\nregex='a'\n[[rules.allowlists]]\nregexes=['b']\nnew=1\n")
+                .is_err()
+        );
+        assert!(load("future = 1\n[[rules]]\nid='x'\nregex='a'\n").is_err());
+    }
+
+    #[test]
+    fn a_commits_only_and_allowlist_never_allows() {
+        let doc = "[[rules]]\nid='x'\nregex='tok=(\\w+)'\n[[rules.allowlists]]\ncondition='AND'\ncommits=['abc']\n";
+        assert!(hit(doc, "tok=abcd"));
+        let or = "[[rules]]\nid='x'\nregex='tok=(\\w+)'\n[[rules.allowlists]]\ncommits=['abc']\n";
+        assert!(hit(or, "tok=abcd"));
     }
 
     #[test]
