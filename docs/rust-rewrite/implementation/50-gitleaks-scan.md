@@ -120,3 +120,11 @@ DESIGN (8, D61), the handoff; merge; install on both hosts; the first round's `l
 ## Ledger
 
 - 2026-11-22 12:10Z: brief written on `62f852f`.
+- 2026-11-22: GITLEAKS accepted locally at `cd6910d` (5 worker commits, 4 parent commits). Parent
+  findings: an AND allowlist without a check allowed every finding and unknown keys were ignored
+  (`c4e55f1`); the table-failure branch was untested (`daff8a7`); two tests shared a rig label and
+  failed under `cargo test` on Linux (`d9cdd73`); the own `sk-` and Google patterns matched inside
+  identifiers, 2 files here and 17 on dev-01 (`cd6910d`). Teeth 29 of 29; gates 14/14 on `cd6910d`,
+  seed 3449721935, nextest 906, coverage 95.64 %; Linux container passed. Replay with the built
+  scanner: 150 → 3 withheld here, 141 → 26 on dev-01. [Evidence 45](evidence/45-gitleaks-scan/).
+  Next: hosted gates, merge, install on both hosts, first round, `memory status`, `memory check`.

@@ -350,6 +350,12 @@ from `main` alone.
      in analytics: research and counts (this Mac: 899 threads in `thread_history_1.sqlite`, 872
      with no local rollout; `Replace` keeps only the newest config version) are reported to the
      operator; the decision whether restore counts as a use is open.
+  28. 2026-11-22, brief 50 (D61), [evidence 45](rust-rewrite/implementation/evidence/45-gitleaks-scan/):
+     the `Scanned` content scan runs the vendored gitleaks v8.30.1 rules plus our provider, PEM and
+     URL-credential patterns, on the bytes and a JSON-unescaped copy; the name-only assignment rule
+     and the shell guard leave the scan. Accepted locally at `cd6910d`: teeth 29 of 29, gates 14/14,
+     Linux container passed. Replay with the built scanner: withheld 150 → 3 here, 141 → 26 on
+     dev-01. Next: hosted gates, merge, install on both hosts.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
