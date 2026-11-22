@@ -365,8 +365,7 @@ fn parse_args(args: impl Iterator<Item = OsString>) -> Option<Args> {
 /// Exit codes: 0 restored, 2 config or token refusal, 64 usage or unparsable owner, 66 owner
 /// absent, 75 a transient store failure (retry), 77 the store refused the credential, 1 anything
 /// else. A store failure prints `memory: store cause=<code>`. Failure writes one line
-/// `memory: <code>` to stderr, success one line
-/// of counts. Nothing goes to stdout.
+/// `memory: <code>` to stderr, success one line of counts. Nothing goes to stdout.
 #[must_use]
 pub fn main_entry(args: impl Iterator<Item = OsString>) -> ExitCode {
     let Some(args) = parse_args(args) else {

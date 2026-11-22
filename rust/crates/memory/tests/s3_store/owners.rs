@@ -226,7 +226,8 @@ fn owners_unparsable_body_fails_as_store() -> R {
     let server = Fake::start()?;
     let rig = rig(&server, "own-garbage")?;
     server.queue("GET", "", Fault::ListBody("this is not xml"));
-    // Brief 52: an unusable 200 list body is `Offline(Protocol)`, retryable (75), no longer `server`.
+    // Brief 52: an unusable 200 list body is `Offline(Protocol)`, retryable (75), no longer
+    // `server`.
     failing(&server, &rig, "store cause=protocol", 75)
 }
 

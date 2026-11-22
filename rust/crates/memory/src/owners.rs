@@ -4,8 +4,8 @@
 //! stdout: owner texts, sorted and deduplicated, one per line, in the form `memory export` and
 //! `memory restore` take. stderr: `memory: owners=N` or one closed `memory: <code>` line; no
 //! endpoint, key, token or prefix. A store failure is `memory: store cause=<code>` (the closed
-//! `StoreError` codes, brief 52) and exits 75 when a retry may help, 77 on auth. The paging loop lives here, so `s3.rs` keeps one exchange per
-//! call.
+//! `StoreError` codes, brief 52) and exits 75 when a retry may help, 77 on auth. The paging loop
+//! lives here, so `s3.rs` keeps one exchange per call.
 use crate::assemble::build_store;
 use crate::config::Config;
 use crate::daemon::EXIT_CONFIG;
@@ -96,8 +96,7 @@ fn fail(code: &str, exit: u8) -> ExitCode {
 ///
 /// Exit codes: 0 listed (also none), 1 failed, 2 config or token, 64 usage, 75 a transient store
 /// failure (retry), 77 the store refused the credential. A store failure prints
-/// `memory: store cause=<code>`. Nothing is printed
-/// on stdout unless the whole listing succeeded.
+/// `memory: store cause=<code>`. Nothing is printed on stdout unless the whole listing succeeded.
 #[must_use]
 pub fn main_entry(mut args: impl Iterator<Item = OsString>) -> ExitCode {
     if args.next().is_some() {
