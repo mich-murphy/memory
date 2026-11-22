@@ -138,7 +138,9 @@ fn file_history_lands_clean_and_withholds_secret_and_binary() -> R {
 /// a high-entropy literal in a generic assignment (a gitleaks rule, no own pattern) is withheld.
 #[test]
 fn file_history_lands_code_with_token_names_and_withholds_a_literal() -> R {
-    let s = setup("file-history")?;
+    // Own label: `Rig::new` keys its directory by pid and label, and `cargo test` runs tests as
+    // threads of one process (parent, brief 50).
+    let s = setup("file-history-literal")?;
     let fh = s.rig.root.join("file-history").join(UUID);
     fs::create_dir_all(&fh).map_err(e)?;
     let code = "token = getToken()\nlet key = lookup(name);\n";
