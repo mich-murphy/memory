@@ -5266,3 +5266,88 @@ fn a_new_daemon_starts_with_a_full_bucket() -> R {
     assert_eq!(requests(&mut d) - before, 10);
     Ok(())
 }
+
+/// Parent (brief 52 teeth): a denied retry is deferred by a jittered 1 to 30 s, not a fixed
+/// 30 s, so twenty denied owners do not all come back together.
+#[test]
+fn denied_retries_are_spread_over_the_deferral_window() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let (fs, list) = crowd(30)?;
+    let shared: Shared = Arc::new(Mutex::new(list));
+    let mut d = boot_listed(&tmp, &cfg, fs, FStore::default(), &shared)?;
+    d.store_mut().offline = true;
+    assert_eq!(d.reconcile_once().map_err(e)?.failed, 30);
+    at_secs(&mut d, 2);
+    let mut denied = Vec::new();
+    for owner in d.retries_due() {
+        if d.capture_owner(&owner).map_err(e)? == OwnerOutcome::Deferred {
+            denied.push(owner);
+        }
+    }
+    assert_eq!(denied.len(), 20);
+    let due_of = |d: &D| {
+        let due = d.retries_due();
+        denied.iter().filter(|o| due.contains(o)).count()
+    };
+    at_secs(&mut d, 31);
+    assert!(
+        due_of(&d) > 0,
+        "no denied owner is due before the 30 s ceiling: the deferral is not jittered"
+    );
+    at_secs(&mut d, 32);
+    assert_eq!(due_of(&d), 20, "every denial ends within 30 s");
+    Ok(())
+}
+
+/// Parent (brief 52 teeth): in a full round with an empty bucket, an owner whose own deadline
+/// (here a 300 s `Retry-After`) has not passed keeps it; the budget never rewrites it to a
+/// sooner deferral.
+#[test]
+fn a_full_round_with_an_empty_bucket_keeps_a_later_retry_after() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let (mut d, shared) = exhausted(&tmp, &cfg, FStore::default())?;
+    shared.lock().map_err(e)?.push(src_of("s31", 31)?);
+    let s31 = owner_of("s31")?;
+    d.store_mut().offline = false;
+    d.store_mut().throttle = Some(Some(300));
+    assert_eq!(d.capture_owner(&s31).map_err(e)?, OwnerOutcome::Failed);
+    d.store_mut().throttle = None;
+    // Still t = 2 s and no token: a full round reaches s31 before its deadline.
+    d.store_mut().offline = true;
+    d.reconcile_once().map_err(e)?;
+    at_secs(&mut d, 60);
+    assert!(
+        !d.retries_due().contains(&s31),
+        "the 300 s Retry-After was shortened"
+    );
+    at_secs(&mut d, 302);
+    assert!(d.retries_due().contains(&s31));
+    Ok(())
+}
+
+/// Parent (brief 52 teeth): a parked owner with a failure streak stays parked through a full
+/// round with an empty bucket; the budget never turns a park into a retry.
+#[test]
+fn a_parked_owner_with_a_streak_stays_parked_when_the_bucket_is_empty() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let (mut d, _shared) = exhausted(&tmp, &cfg, FStore::default())?;
+    let s5 = owner_of("s5")?;
+    // t = 33 s: every deadline has passed and the bucket has refilled a little. s5 (streak > 0,
+    // base unknown) finds a newer remote schema and parks.
+    at_secs(&mut d, 33);
+    d.store_mut().offline = false;
+    d.store_mut().store.write(&current_key(&s5), NEWER.to_vec());
+    d.capture_owner(&s5).map_err(e)?;
+    let parked = |d: &D| d.status().parked.iter().any(|p| p.owner == s5);
+    assert!(parked(&d), "s5 parked");
+    // Drain the bucket with the other due owners, then run a full round.
+    d.store_mut().offline = true;
+    run_due(&mut d)?;
+    d.reconcile_once().map_err(e)?;
+    assert!(parked(&d), "a full round unparked s5");
+    assert!(!d.retries_due().contains(&s5));
+    Ok(())
+}
