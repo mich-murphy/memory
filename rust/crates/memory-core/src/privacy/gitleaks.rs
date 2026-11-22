@@ -22,6 +22,11 @@ const RULES_TOML: &str = include_str!("../../data/gitleaks-v8.30.1/gitleaks.toml
 /// only bounds a pathological pattern.
 const REGEX_SIZE_LIMIT: usize = 1 << 27;
 
+/// Lazy-DFA cache cap per regex (256 KiB). The default cache (2 MiB) is allocated per regex on
+/// first search; with 221 rules that is most of the scan's memory. Not semantic: a smaller
+/// cache only makes a search recompute states.
+const DFA_SIZE_LIMIT: usize = 256 * 1024;
+
 /// Go RE2 reads a `{` that does not start `{n}`, `{n,}` or `{n,m}` as a literal; Rust rejects it.
 fn go_braces(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
@@ -104,6 +109,7 @@ fn compile(pattern: &str) -> Result<Regex, String> {
     RegexBuilder::new(&go_braces(pattern))
         .unicode(false)
         .size_limit(REGEX_SIZE_LIMIT)
+        .dfa_size_limit(DFA_SIZE_LIMIT)
         .build()
         .map_err(|e| format!("pattern {pattern:?}: {e}"))
 }
@@ -154,7 +160,10 @@ impl Allow {
 }
 
 struct Rule {
-    regex: Regex,
+    /// Validated at load, compiled again at the first text whose keywords match (or the first
+    /// text at all if the rule has no keywords). `None` inside records a failed compile.
+    pattern: String,
+    regex: OnceLock<Option<Regex>>,
     keywords: Vec<String>,
     entropy: f64,
     group: usize,
@@ -307,8 +316,11 @@ fn load(source: &str) -> Result<Table, String> {
                 .and_then(|i| usize::try_from(i).ok())
                 .ok_or("secretGroup is not a count")?,
         };
+        // Compile once to validate, then drop: the regex is rebuilt only if the rule is reached.
+        drop(compile(pattern).map_err(|e| format!("rule {id}: {e}"))?);
         rules.push(Rule {
-            regex: compile(pattern).map_err(|e| format!("rule {id}: {e}"))?,
+            pattern: pattern.to_owned(),
+            regex: OnceLock::new(),
             keywords: strings(rule, "keywords")
                 .into_iter()
                 .map(|k| k.to_lowercase())
@@ -329,6 +341,16 @@ fn load(source: &str) -> Result<Table, String> {
 pub(super) fn table() -> Option<&'static Table> {
     static TABLE: OnceLock<Option<Table>> = OnceLock::new();
     TABLE.get_or_init(|| load(RULES_TOML).ok()).as_ref()
+}
+
+/// Test-only: a table whose one rule validated at load but fails to compile when reached.
+#[cfg(test)]
+pub(super) fn failing_table() -> Option<Table> {
+    let mut t = load("[[rules]]\nid='a'\nregex='aa=(\\w+)'\nkeywords=['aa']\n").ok()?;
+    for rule in &mut t.rules {
+        rule.pattern = "(".to_owned();
+    }
+    Some(t)
 }
 
 /// The vendored file's bytes, for `rules_digest`.
@@ -360,21 +382,52 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     !needle.is_empty() && memchr::memmem::find(haystack, needle).is_some()
 }
 
+/// The outcome of a scan. `Failed` (a rule regex that could not be compiled) is closed: the
+/// caller withholds.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Detect {
+    Found,
+    Clean,
+    Failed,
+}
+
 impl Table {
-    /// True if any rule finds a secret in `text`.
-    pub(super) fn detect(&self, text: &[u8]) -> bool {
+    /// Whether any rule finds a secret in `text`.
+    pub(super) fn detect(&self, text: &[u8]) -> Detect {
         let lower = text.to_ascii_lowercase();
-        self.rules.iter().any(|rule| rule.finds(self, text, &lower))
+        for rule in &self.rules {
+            match rule.finds(self, text, &lower) {
+                Detect::Clean => {}
+                other => return other,
+            }
+        }
+        Detect::Clean
+    }
+
+    /// Rules currently holding a compiled regex.
+    #[cfg(test)]
+    fn compiled(&self) -> usize {
+        self.rules
+            .iter()
+            .filter(|r| r.regex.get().is_some())
+            .count()
     }
 }
 
 impl Rule {
-    fn finds(&self, table: &Table, text: &[u8], lower: &[u8]) -> bool {
+    fn finds(&self, table: &Table, text: &[u8], lower: &[u8]) -> Detect {
         if !self.keywords.is_empty() && !self.keywords.iter().any(|k| contains(lower, k.as_bytes()))
         {
-            return false;
+            return Detect::Clean;
         }
-        for found in self.regex.find_iter(text) {
+        let Some(regex) = self
+            .regex
+            .get_or_init(|| compile(&self.pattern).ok())
+            .as_ref()
+        else {
+            return Detect::Failed;
+        };
+        for found in regex.find_iter(text) {
             let bytes = found.as_bytes();
             let lead = bytes.iter().take_while(|c| **c == b'\n').count();
             let tail = bytes.iter().rev().take_while(|c| **c == b'\n').count();
@@ -385,7 +438,7 @@ impl Rule {
             };
             let start = found.start() + lead;
             let mut secret = matched;
-            if let Some(caps) = self.regex.captures(matched)
+            if let Some(caps) = regex.captures(matched)
                 && caps.len() >= 2
             {
                 if self.group > 0 {
@@ -423,9 +476,9 @@ impl Rule {
             {
                 continue;
             }
-            return true;
+            return Detect::Found;
         }
-        false
+        Detect::Clean
     }
 }
 
@@ -435,7 +488,7 @@ mod tests {
     use sha2::Digest;
 
     fn hit(rule: &str, text: &str) -> bool {
-        load(rule).is_ok_and(|t| t.detect(text.as_bytes()))
+        load(rule).is_ok_and(|t| t.detect(text.as_bytes()) == Detect::Found)
     }
 
     #[test]
@@ -472,8 +525,14 @@ mod tests {
             return;
         };
         let token = format!("{}{}", "ghp_", "aZ3kQ9xLm2Pv7Rt1Yb6Nc8Wd4Fe5Gh0JsKuA");
-        assert!(table.detect(format!("export X={token}\n").as_bytes()));
-        assert!(!table.detect(b"token = getToken()\nlet key = lookup(name);\n"));
+        assert_eq!(
+            table.detect(format!("export X={token}\n").as_bytes()),
+            Detect::Found
+        );
+        assert_eq!(
+            table.detect(b"token = getToken()\nlet key = lookup(name);\n"),
+            Detect::Clean
+        );
     }
 
     #[test]
@@ -622,6 +681,48 @@ mod tests {
         assert!(!hit(doc, "tok=abcd ke"));
         let empty = "[[rules]]\nid='x'\nregex='tok=(\\w+)'\nkeywords=['']\n";
         assert!(!hit(empty, "tok=abcd"));
+    }
+
+    #[test]
+    fn rules_compile_only_when_reached() {
+        let doc = "[[rules]]\nid='a'\nregex='aa=(\\w+)'\nkeywords=['aa']\n\
+                   [[rules]]\nid='b'\nregex='bb=(\\w+)'\nkeywords=['bb']\n\
+                   [[rules]]\nid='c'\nregex='cc=(\\w+)'\n";
+        assert!(load(doc).is_ok(), "load failed");
+        let Ok(t) = load(doc) else {
+            return;
+        };
+        assert_eq!(t.compiled(), 0);
+        // Only rule a's keyword occurs; rule c has no keywords and runs on every text.
+        assert_eq!(t.detect(b"XX aa=1"), Detect::Found);
+        assert_eq!(t.compiled(), 1);
+        assert_eq!(t.detect(b"nothing here"), Detect::Clean);
+        assert_eq!(t.compiled(), 2);
+        assert!(
+            t.rules
+                .iter()
+                .any(|r| r.pattern.starts_with("cc") && r.regex.get().is_some())
+        );
+        assert!(
+            t.rules
+                .iter()
+                .any(|r| r.pattern.starts_with("bb") && r.regex.get().is_none())
+        );
+    }
+
+    #[test]
+    fn a_lazy_compile_failure_is_failed_not_clean() {
+        let doc = "[[rules]]\nid='a'\nregex='aa=(\\w+)'\nkeywords=['aa']\n";
+        assert!(load(doc).is_ok(), "load failed");
+        let Ok(mut t) = load(doc) else {
+            return;
+        };
+        for rule in &mut t.rules {
+            rule.pattern = "(".to_owned();
+        }
+        assert_eq!(t.detect(b"nothing"), Detect::Clean);
+        assert_eq!(t.detect(b"aa=1"), Detect::Failed);
+        assert_eq!(t.detect(b"aa=1"), Detect::Failed);
     }
 
     #[test]

@@ -112,8 +112,15 @@ fn unescape(source: &str) -> String {
     out
 }
 
-fn finds(own: &Table, rules: &gitleaks::Table, text: &str) -> bool {
-    own.patterns.iter().any(|re| re.is_match(text)) || rules.detect(text.as_bytes())
+fn finds(own: &Table, rules: &gitleaks::Table, text: &str) -> Result<(), Reason> {
+    if own.patterns.iter().any(|re| re.is_match(text)) {
+        return Err(Reason::SecretInText);
+    }
+    match rules.detect(text.as_bytes()) {
+        gitleaks::Detect::Found => Err(Reason::SecretInText),
+        gitleaks::Detect::Clean => Ok(()),
+        gitleaks::Detect::Failed => Err(Reason::ScrubFailed),
+    }
 }
 
 /// First hit wins: size, binary, secret pattern, internal error.
@@ -135,11 +142,9 @@ fn judge(bytes: &[u8], tables: Option<(&Table, &gitleaks::Table)>) -> Result<(),
     let Some((own, rules)) = tables else {
         return Err(Reason::ScrubFailed);
     };
-    if finds(own, rules, source) {
-        return Err(Reason::SecretInText);
-    }
-    if source.contains('\\') && finds(own, rules, &unescape(source)) {
-        return Err(Reason::SecretInText);
+    finds(own, rules, source)?;
+    if source.contains('\\') {
+        finds(own, rules, &unescape(source))?;
     }
     Ok(())
 }
@@ -156,5 +161,17 @@ mod tests {
             judge(b"clean text\n", table().zip(gitleaks::table())),
             Ok(())
         );
+    }
+
+    /// Brief 51: a rule regex that fails to compile when reached withholds with `ScrubFailed`.
+    #[test]
+    fn a_lazy_compile_failure_withholds_scrub_failed() {
+        let failing = gitleaks::failing_table();
+        assert!(failing.is_some());
+        let (Some(own), Some(bad)) = (table(), failing.as_ref()) else {
+            return;
+        };
+        assert_eq!(judge(b"clean text\n", Some((own, bad))), Ok(()));
+        assert_eq!(judge(b"aa=1\n", Some((own, bad))), Err(Reason::ScrubFailed));
     }
 }
