@@ -30,8 +30,8 @@ use crate::roots::locator_roots;
 use crate::s3::S3Store;
 use crate::state::{Loaded, MissingReason, StateFile, default_root, read_durable};
 use memory_core::domain::{Owner, Sha256, SnapshotFingerprint, SourceId, SourceKind};
-use memory_core::limits::owner_prefix;
-use memory_core::manifest::{EpochRecord, OwnerState, SourceEntry};
+use memory_core::limits::{current_key, owner_prefix};
+use memory_core::manifest::{EpochRecord, OwnerState, SourceEntry, parse_current};
 use memory_core::privacy::{Admission, AdmittedSource, PolicyContext, UnknownReason, admit};
 use memory_reader::{OwnerError, RestoreError, decode_piece, read_owner, restore_source};
 use serde::Serialize;
@@ -607,12 +607,148 @@ pub fn parked_line(entry: &crate::daemon::ParkedEntry) -> String {
     )
 }
 
+macro_rules! phase_enum {
+    ($vis:vis) => {
+        /// Where the check calls its hook (a test injects a concurrent writer here).
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        $vis enum Phase {
+            /// The local walk finished; no store read has happened.
+            AfterWalk,
+            /// One owner's chain was read; none of its sources is judged yet.
+            AfterFetch,
+            /// Every owner is judged; the `remote_only` confirmation has not started.
+            AfterJudge,
+        }
+    };
+}
+#[cfg(feature = "sim")]
+phase_enum!(pub);
+#[cfg(not(feature = "sim"))]
+phase_enum!();
+
+/// One owner as read from the store: the folded state and the manifest hash of its head.
+struct Head {
+    state: OwnerState,
+    manifest: Sha256,
+}
+
+fn read_head(
+    store: &mut S3Store,
+    owner: &Owner,
+    cached_current: Option<(String, Vec<u8>)>,
+) -> Result<Option<Head>, OwnerError<StoreError>> {
+    let folded = read_owner(owner, |key| {
+        if let Some((cached_key, body)) = &cached_current
+            && cached_key == key
+        {
+            return Ok(Some(body.clone()));
+        }
+        match store.get(key) {
+            Ok(stored) => Ok(Some(stored.body)),
+            Err(StoreError::NotFound) => Ok(None),
+            Err(other) => Err(other),
+        }
+    })?;
+    Ok(folded.map(|folded| Head {
+        manifest: folded.position.manifest,
+        state: folded.state,
+    }))
+}
+
+/// The confirmation read: `current.json` once more. `Some(fresh)` only when the head moved and
+/// the fresh chain was read; any failure keeps the first read (one confirmation, no retry).
+fn moved_head(store: &mut S3Store, owner: &Owner, first: Option<&Head>) -> Option<Option<Head>> {
+    let key = current_key(owner);
+    let body = store.get(&key).ok()?.body;
+    let fresh = parse_current(&body).ok()?.manifest;
+    if first.is_some_and(|head| head.manifest == fresh) {
+        return None;
+    }
+    read_head(store, owner, Some((key, body))).ok()
+}
+
+fn judge_source(
+    fs: &mut SharedFs,
+    store: &mut S3Store,
+    context: &PolicyContext,
+    index: Option<&IndexBody>,
+    state: Option<&OwnerState>,
+    source: &Source,
+) -> Verdict {
+    if source.kind == SourceKind::CodexStore {
+        let indexed = index
+            .and_then(|i| i.sources.get(&source.id))
+            .and_then(|e| e.snapshot.as_ref())
+            .map(|(fp, _)| fp);
+        judge_store(fs, store, context, state, indexed, source)
+    } else {
+        judge(fs, store, context, state, source)
+    }
+}
+
+fn tally_verdict(
+    tally: &mut Tally,
+    details: &mut Vec<String>,
+    prefix: &str,
+    kind: &str,
+    verdict: Verdict,
+) {
+    match verdict {
+        Verdict::Match => tally.matched += 1,
+        Verdict::Behind => tally.behind += 1,
+        Verdict::Unsettled => tally.unsettled += 1,
+        Verdict::Mismatch(reason) => {
+            tally.mismatch += 1;
+            details.push(format!(
+                "mismatch owner={prefix} kind={kind} reason={reason}"
+            ));
+        }
+        Verdict::Uncaptured => {
+            tally.uncaptured += 1;
+            details.push(format!(
+                "uncaptured owner={prefix} kind={kind} reason=no_live_entry"
+            ));
+        }
+        Verdict::Withheld(reason) => {
+            tally.withheld += 1;
+            details.push(format!(
+                "withheld owner={prefix} kind={kind} reason={reason}"
+            ));
+        }
+        Verdict::StoreFailed(error) => {
+            tally.store_error += 1;
+            details.push(format!(
+                "store_error owner={prefix} kind={kind} cause={}",
+                error.code()
+            ));
+        }
+    }
+}
+
 /// Run the check against the state root `root` (holding `config.toml` and, once the daemon has
 /// run, `status.json`).
 ///
 /// # Errors
 /// A [`Refusal`] for a config, roots or token refusal.
 pub fn check(root: &Path) -> Result<Report, Refusal> {
+    check_inner(root, &mut |_| {})
+}
+
+/// [`check`] with a hook called at each [`Phase`]: tests inject a concurrent daemon commit at an
+/// exact point. Exists only with the `sim` feature.
+///
+/// # Errors
+/// As [`check`].
+#[cfg(feature = "sim")]
+pub fn check_with(root: &Path, hook: &mut dyn FnMut(Phase)) -> Result<Report, Refusal> {
+    check_inner(root, hook)
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "one linear pass: walk, read, judge, confirm"
+)]
+fn check_inner(root: &Path, hook: &mut dyn FnMut(Phase)) -> Result<Report, Refusal> {
     let refuse = |code: &str, exit: u8| Refusal {
         code: code.to_owned(),
         exit,
@@ -635,7 +771,7 @@ pub fn check(root: &Path) -> Result<Report, Refusal> {
 
     let (index, _) = read_state::<IndexBody>(root, StateFile::Index);
     let mut fs = SharedFs::new();
-    let mut walk = WalkSources::new(roots, WalkLimits::default(), fs.clone());
+    let mut walk = WalkSources::new(roots.clone(), WalkLimits::default(), fs.clone());
     let rows = walk.enumerate();
     let counts = walk.counts();
     tally.unknown_kind = counts.unknown_kind;
@@ -654,15 +790,13 @@ pub fn check(root: &Path) -> Result<Report, Refusal> {
             .push(source);
     }
     tally.owners = u64::try_from(groups.len()).unwrap_or(u64::MAX);
+    hook(Phase::AfterWalk);
 
+    // Live stored entries with no local row in the first walk: confirmed after the last read.
+    let mut candidates: Vec<SourceId> = Vec::new();
     for (prefix, (owner, sources)) in &groups {
-        let folded = read_owner(owner, |key| match store.get(key) {
-            Ok(stored) => Ok(Some(stored.body)),
-            Err(StoreError::NotFound) => Ok(None),
-            Err(other) => Err(other),
-        });
-        let state = match folded {
-            Ok(folded) => folded.map(|folded| folded.state),
+        let mut head = match read_head(&mut store, owner, None) {
+            Ok(head) => head,
             Err(OwnerError::Fetch(error)) => {
                 tally.store_error += 1;
                 details.push(format!(
@@ -682,66 +816,71 @@ pub fn check(root: &Path) -> Result<Report, Refusal> {
                 continue;
             }
         };
-        for source in sources {
-            let kind = code_of(&source.kind);
-            let verdict = if source.kind == SourceKind::CodexStore {
-                let indexed = index
-                    .as_ref()
-                    .and_then(|i| i.sources.get(&source.id))
-                    .and_then(|e| e.snapshot.as_ref())
-                    .map(|(fp, _)| fp);
-                judge_store(
+        hook(Phase::AfterFetch);
+        let mut verdicts: Vec<Verdict> = sources
+            .iter()
+            .map(|source| {
+                judge_source(
                     &mut fs,
                     &mut store,
                     &context,
-                    state.as_ref(),
-                    indexed,
+                    index.as_ref(),
+                    head.as_ref().map(|h| &h.state),
                     source,
                 )
-            } else {
-                judge(&mut fs, &mut store, &context, state.as_ref(), source)
-            };
-            match verdict {
-                Verdict::Match => tally.matched += 1,
-                Verdict::Behind => tally.behind += 1,
-                Verdict::Unsettled => tally.unsettled += 1,
-                Verdict::Mismatch(reason) => {
-                    tally.mismatch += 1;
-                    details.push(format!(
-                        "mismatch owner={prefix} kind={kind} reason={reason}"
-                    ));
-                }
-                Verdict::Uncaptured => {
-                    tally.uncaptured += 1;
-                    details.push(format!(
-                        "uncaptured owner={prefix} kind={kind} reason=no_live_entry"
-                    ));
-                }
-                Verdict::Withheld(reason) => {
-                    tally.withheld += 1;
-                    details.push(format!(
-                        "withheld owner={prefix} kind={kind} reason={reason}"
-                    ));
-                }
-                Verdict::StoreFailed(error) => {
-                    tally.store_error += 1;
-                    details.push(format!(
-                        "store_error owner={prefix} kind={kind} cause={}",
-                        error.code()
-                    ));
+            })
+            .collect();
+        // Brief 52: confirm only the anomalies. Pieces and manifests are immutable and only
+        // `current.json` moves, so an owner whose head did not move cannot have raced; when it
+        // moved, the anomalous sources are judged again against the fresh chain, which replaces
+        // the first verdict. One confirmation.
+        let anomalous = |v: &Verdict| matches!(v, Verdict::Uncaptured | Verdict::Mismatch(_));
+        if verdicts.iter().any(anomalous)
+            && let Some(fresh) = moved_head(&mut store, owner, head.as_ref())
+        {
+            for (verdict, source) in verdicts.iter_mut().zip(sources) {
+                if anomalous(verdict) {
+                    *verdict = judge_source(
+                        &mut fs,
+                        &mut store,
+                        &context,
+                        index.as_ref(),
+                        fresh.as_ref().map(|h| &h.state),
+                        source,
+                    );
                 }
             }
+            head = fresh;
         }
-        if let Some(state) = &state {
+        for (verdict, source) in verdicts.into_iter().zip(sources) {
+            tally_verdict(
+                &mut tally,
+                &mut details,
+                prefix,
+                &code_of(&source.kind),
+                verdict,
+            );
+        }
+        if let Some(head) = &head {
             let local: BTreeSet<&SourceId> = sources.iter().map(|s| &s.id).collect();
-            let extra = state
-                .sources
-                .iter()
-                .filter(|(id, entry)| entry.deleted_at.is_none() && !local.contains(id))
-                .count();
-            tally.remote_only += u64::try_from(extra).unwrap_or(u64::MAX);
+            candidates.extend(
+                head.state
+                    .sources
+                    .iter()
+                    .filter(|(id, entry)| entry.deleted_at.is_none() && !local.contains(id))
+                    .map(|(id, _)| id.clone()),
+            );
         }
     }
+    hook(Phase::AfterJudge);
+    if !candidates.is_empty() {
+        // Brief 52: an entry stored live existed locally before the store was read, so a walk
+        // made after the last read sees it unless it is really gone.
+        let mut again = WalkSources::new(roots, WalkLimits::default(), SharedFs::new());
+        let seen: BTreeSet<SourceId> = again.enumerate().into_iter().map(|(_, s)| s.id).collect();
+        candidates.retain(|id| !seen.contains(id));
+    }
+    tally.remote_only += u64::try_from(candidates.len()).unwrap_or(u64::MAX);
     Ok(Report {
         tally,
         status,
