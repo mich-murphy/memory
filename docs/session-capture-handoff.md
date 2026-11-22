@@ -360,6 +360,12 @@ from `main` alone.
      Finding: the Mac daemon peaked at 130 MB against the 128 MB target; the gitleaks table and
      its match caches add 21.9 MB and the naive keyword search 11 s of CPU per full judgement
      (evidence 45). Brief 51 fixes it.
+  29. 2026-11-22, brief 51, [evidence 46](rust-rewrite/implementation/evidence/46-scan-cost/): the
+     gitleaks keyword prefilter uses `memchr::memmem`, rule regexes compile at their first keyword
+     hit (validated at load), and the lazy-DFA cache is 256 KiB per pattern. Verdicts are unchanged
+     (no digest move). Accepted locally at `1b1d5e8`: teeth 10 of 10, gates 14/14, Linux container
+     passed; this Mac +12.6 MB and 1.0 s per full judgement (was +22.0 MB, 12 s), dev-01 +19.6 MB
+     and 6.0 s (was +29.6 MB, 43.5 s). Next: hosted gates, merge, install, peak below 128 MB.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

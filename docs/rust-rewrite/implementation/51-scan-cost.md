@@ -95,3 +95,9 @@ dev-01, under 128 MB.
 ## Ledger
 
 - 2026-11-22 05:00Z: brief written on `6510ff7`.
+- 2026-11-22: SCANCOST accepted locally at `1b1d5e8` (3 worker commits). The worker's DFA cap also
+  reaches the allowlist regexes (accepted: not semantic). Teeth 10 of 10; gates 14/14, seed
+  3088399108, nextest 911, coverage 95.64 %; Linux container passed. Verdicts equal `6510ff7` file
+  for file on both hosts; this Mac +22.0 → +12.6 MB and 12 → 1.0 s, dev-01 +29.6 → +19.6 MB and
+  43.5 → 6.0 s. [Evidence 46](evidence/46-scan-cost/). Next: hosted gates, merge, install on both
+  hosts, the daemon's peak below 128 MB.
