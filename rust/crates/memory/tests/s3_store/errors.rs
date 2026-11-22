@@ -4,6 +4,8 @@ use super::assemble::{PREFIX, Rig};
 use super::export::capture;
 use super::fake::{Fake, Fault};
 use super::{BUCKET, R, e};
+use memory::environment::{Cause, StoreError};
+use memory::restore::{RestoreError, store_exit};
 use std::net::TcpListener;
 use std::process::{Command, Output};
 
@@ -117,4 +119,104 @@ fn a_refused_connection_is_transient_for_all_three_commands() -> R {
         expect(&cmd(&dead, &owner, which, n)?, 75, "store cause=refused");
     }
     Ok(())
+}
+
+/// Every cause. The witness match has no wildcard arm: a new `Cause` fails to compile here.
+fn causes() -> Vec<Cause> {
+    let all = vec![
+        Cause::Dns,
+        Cause::DnsTimeout,
+        Cause::Connect,
+        Cause::ConnectTimeout,
+        Cause::Refused,
+        Cause::Tls,
+        Cause::SendTimeout,
+        Cause::RecvTimeout,
+        Cause::Timeout,
+        Cause::Reset,
+        Cause::Io,
+        Cause::Protocol,
+        Cause::NoEtag,
+        Cause::Other,
+    ];
+    for c in &all {
+        match c {
+            Cause::Dns
+            | Cause::DnsTimeout
+            | Cause::Connect
+            | Cause::ConnectTimeout
+            | Cause::Refused
+            | Cause::Tls
+            | Cause::SendTimeout
+            | Cause::RecvTimeout
+            | Cause::Timeout
+            | Cause::Reset
+            | Cause::Io
+            | Cause::Protocol
+            | Cause::NoEtag
+            | Cause::Other => {}
+        }
+    }
+    all
+}
+
+/// Every store error with its expected exit (brief 52). The witness match has no wildcard arm.
+fn store_errors() -> Vec<(StoreError, u8)> {
+    let mut all = vec![
+        (StoreError::PreconditionFailed, 1),
+        (StoreError::NotFound, 1),
+        (StoreError::Throttled(None), 75),
+        (StoreError::Throttled(Some(7)), 75),
+        (StoreError::Server, 75),
+        (StoreError::Auth, 77),
+    ];
+    for c in causes() {
+        all.push((StoreError::Offline(c), 75));
+        all.push((StoreError::Ambiguous(c), 75));
+    }
+    for (e, _) in &all {
+        match e {
+            StoreError::PreconditionFailed
+            | StoreError::NotFound
+            | StoreError::Offline(_)
+            | StoreError::Throttled(_)
+            | StoreError::Server
+            | StoreError::Auth
+            | StoreError::Ambiguous(_) => {}
+        }
+    }
+    all
+}
+
+#[test]
+fn the_exit_mapping_covers_every_store_error_variant() {
+    assert_eq!(store_exit(None), 1);
+    for (error, exit) in store_errors() {
+        assert_eq!(store_exit(Some(error)), exit, "{error:?}");
+        assert_eq!(RestoreError::Store(Some(error)).exit_code(), exit);
+        assert_eq!(
+            memory::export::Failure::Store(Some(error)).exit_code(),
+            exit
+        );
+    }
+}
+
+#[test]
+fn every_cause_line_is_closed_text_without_input() {
+    for (error, _) in store_errors() {
+        let want = format!("store cause={}", error.code());
+        let lines = [
+            RestoreError::Store(Some(error)).to_string(),
+            memory::export::Failure::Store(Some(error)).to_string(),
+            memory::owners::Failure::Store(Some(error)).to_string(),
+        ];
+        for text in lines {
+            assert_eq!(text, want);
+            assert!(
+                text.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b == b'_' || b == b' ' || b == b'='),
+                "{text}"
+            );
+        }
+    }
 }
