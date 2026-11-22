@@ -852,3 +852,22 @@ fn a_quiet_owner_costs_no_extra_request() -> R {
     assert_eq!(extra, 4);
     Ok(())
 }
+
+/// Parent (brief 52 teeth): a file rewritten shorter and captured between fetch and judge is
+/// judged against the first (older) epoch as a `mismatch`; the confirmation sees the moved head
+/// and the fresh epoch matches, so it is neither a mismatch nor a failure.
+#[test]
+fn a_rewrite_captured_between_fetch_and_judge_is_not_a_mismatch() -> R {
+    use memory::check::Phase;
+    let s = setup("race-rewrite")?;
+    let debug = debug_file(&s)?;
+    fs::write(&debug, "a longer first debug line\n").map_err(e)?;
+    capture(&s)?;
+    fs::write(&debug, "short\n").map_err(e)?;
+    let r = raced(&s, Phase::AfterFetch, || {
+        let _ = capture(&s);
+    })?;
+    assert_eq!(r.tally.mismatch + r.tally.uncaptured, 0, "{:?}", r.details);
+    assert_eq!(r.exit(), 0);
+    Ok(())
+}
