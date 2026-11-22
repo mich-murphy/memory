@@ -9,7 +9,17 @@
 //! Only owners that have at least one local row are fetched: the store has no LIST, so an owner
 //! whose every file is gone cannot be found, and its stored sources are not reported as
 //! `remote_only`. Cost per run: for each owner one GET of `current.json`, at most 64 manifest
-//! GETs, and one GET per piece of each local source's latest epoch.
+//! GETs, and one GET per piece of each local source's latest epoch (plus the confirmation below).
+//!
+//! Confirmation (brief 52): the walk, the owner reads and the judgement happen at different
+//! instants while the daemon keeps committing. Pieces and manifests are immutable and only
+//! `current.json` moves, so after the judge an owner with an `uncaptured` or `mismatch` verdict
+//! has `current.json` read once more; if the head moved, only those sources are judged again
+//! against the fresh chain (at most 64 manifests) and the fresh verdict replaces the first. A
+//! `remote_only` candidate is confirmed by a second walk after the last owner read: an id that
+//! walk sees is not `remote_only`. One confirmation only; what survives is reported as before.
+//! A quiet owner costs no extra request; an anomalous owner costs one `current.json` GET (plus
+//! the chain and the re-judged pieces only when its head moved).
 //!
 //! A Codex SQLite store is not compared byte for byte (a backup is not a copy of the live file):
 //! the stored epoch is fetched and verified (every piece digest and the whole digest), then the
