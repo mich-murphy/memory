@@ -617,17 +617,19 @@ pub fn parked_line(entry: &crate::daemon::ParkedEntry) -> String {
     )
 }
 
+// `$($vis:tt)*`, not `$vis:vis`: an empty `vis` at the end of the input does not match, and the
+// release build (no `sim`) invokes it with nothing (brief 52 follow-up).
 macro_rules! phase_enum {
-    ($vis:vis) => {
+    ($($vis:tt)*) => {
         /// Where the check calls its hook (a test injects a concurrent writer here).
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        $vis enum Phase {
+        $($vis)* enum Phase {
             /// The local walk finished; no store read has happened.
-            AfterWalk,
+            Walked,
             /// One owner's chain was read; none of its sources is judged yet.
-            AfterFetch,
+            Fetched,
             /// Every owner is judged; the `remote_only` confirmation has not started.
-            AfterJudge,
+            Judged,
         }
     };
 }
@@ -800,7 +802,7 @@ fn check_inner(root: &Path, hook: &mut dyn FnMut(Phase)) -> Result<Report, Refus
             .push(source);
     }
     tally.owners = u64::try_from(groups.len()).unwrap_or(u64::MAX);
-    hook(Phase::AfterWalk);
+    hook(Phase::Walked);
 
     // Live stored entries with no local row in the first walk: confirmed after the last read.
     let mut candidates: Vec<SourceId> = Vec::new();
@@ -826,7 +828,7 @@ fn check_inner(root: &Path, hook: &mut dyn FnMut(Phase)) -> Result<Report, Refus
                 continue;
             }
         };
-        hook(Phase::AfterFetch);
+        hook(Phase::Fetched);
         let mut verdicts: Vec<Verdict> = sources
             .iter()
             .map(|source| {
@@ -882,7 +884,7 @@ fn check_inner(root: &Path, hook: &mut dyn FnMut(Phase)) -> Result<Report, Refus
             );
         }
     }
-    hook(Phase::AfterJudge);
+    hook(Phase::Judged);
     if !candidates.is_empty() {
         // Brief 52: an entry stored live existed locally before the store was read, so a walk
         // made after the last read sees it unless it is really gone.
