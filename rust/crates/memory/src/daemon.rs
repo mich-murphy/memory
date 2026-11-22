@@ -28,6 +28,14 @@
 //! that later lands clears it. `RoundReport.withheld` counts judgements made in the round, not
 //! cached ones. The manifest never records a withheld file.
 //!
+//! Host retry budget (brief 52, DESIGN.md 11.2): a token bucket in memory, capacity 10, one token
+//! back per 15 s of the monotonic clock and one per landed commit. A first attempt (no failure
+//! streak) never needs a token; a retry takes one, and without one the owner is deferred to now
+//! plus a jittered 1 to 30 s (the D44 draw), counted as `deferred`, logged nowhere. A
+//! `LandingUnknown` verify is never charged. The bucket only delays an owner that is already
+//! due: it never shortens an owner's own `RetryAt`, `Retry-After` included. Auth pausing,
+//! per-owner backoff and parking are unchanged. A new daemon starts full.
+//!
 //! The commit base (`current.json` ETag, owner state) is never persisted: every owner
 //! recovers it from the store on its first round after a start (`recover_base`).
 use crate::audit::AuditCounts;
