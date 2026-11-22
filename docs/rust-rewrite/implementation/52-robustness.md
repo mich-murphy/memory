@@ -162,3 +162,7 @@ both hosts; first rounds, `memory status`, `memory check`, peak memory.
   `RUSTSEC-2026-0592` (`url` 2.5.8, also on `main`), fixed by PR #252 (`4d6729f`); the stack was
   rebased onto it. Accepted locally at `034be38`: gates 14/14, Linux container passed. Details
   in evidence 47.
+- 2026-11-22: merged as `25fae57` (stack #258). The release build of `main` failed: the non-`sim`
+  `Phase` macro did not compile, and no gate built `memory` without `sim`. Nothing installed.
+- 2026-11-23: follow-up fixes the macro and the variant names, and gate `02-clippy` gains a
+  libs-and-bins pass without dev features (evidence 47, follow-up).

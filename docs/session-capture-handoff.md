@@ -381,7 +381,9 @@ from `main` alone.
      Operator answer 2026-11-22 on shared owners: restore is not a use; capture only what
      analytics uses, and analytics must describe the agent setup (model, harness, extensions,
      skills, tool calls). Research done (analytics report); briefs to follow after an R1
-     amendment.
+     amendment. Merged as `25fae57`, whose release build failed (the non-`sim` `Phase` macro;
+     every gate built `memory` with `sim`). Follow-up 2026-11-23 fixes it and adds a
+     libs-and-bins clippy pass without dev features to gate `02-clippy`.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
