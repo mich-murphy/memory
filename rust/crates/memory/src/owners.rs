@@ -3,7 +3,8 @@
 //!
 //! stdout: owner texts, sorted and deduplicated, one per line, in the form `memory export` and
 //! `memory restore` take. stderr: `memory: owners=N` or one closed `memory: <code>` line; no
-//! endpoint, key, token or prefix. The paging loop lives here, so `s3.rs` keeps one exchange per
+//! endpoint, key, token or prefix. A store failure is `memory: store cause=<code>` (the closed
+//! `StoreError` codes, brief 52) and exits 75 when a retry may help, 77 on auth. The paging loop lives here, so `s3.rs` keeps one exchange per
 //! call.
 use crate::assemble::build_store;
 use crate::config::Config;

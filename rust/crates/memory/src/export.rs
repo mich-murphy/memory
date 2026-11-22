@@ -2,7 +2,8 @@
 //! `session-reader/v2` directory through `memory-reader`'s export library.
 //!
 //! Read-only towards the bucket (GET only), no daemon lock, nothing under the state root.
-//! Every failure is a closed code on one stderr line; no key, path, endpoint or owner text.
+//! Every failure is a closed code on one stderr line; no key, path, endpoint or owner text. A
+//! store failure is `store cause=<code>` and exits 75 (transient) or 77 (auth), as in `restore`.
 //!
 //! Sessions are never deleted from the store, so a deleted source's epochs are exported too, every
 //! one `sealed` (none `active`). The success line is `memory: exported sources=<n> deleted=<n>

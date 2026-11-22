@@ -3,7 +3,8 @@
 //!
 //! Read-only towards the bucket (GET only), takes no daemon lock and writes nothing under the
 //! state root. Every error is a closed code; none carries a manifest path, a key, the endpoint,
-//! the bucket or a credential.
+//! the bucket or a credential. A store failure prints `store cause=<code>` (brief 52) and exits
+//! 75 (transient, retry), 77 (auth) or 1 (see `store_exit`).
 //!
 //! The library takes a fetch closure, not a `Store`: the reader already takes one, so a test
 //! (or another caller) supplies a closure without implementing the trait's write methods.
