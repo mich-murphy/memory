@@ -28,6 +28,14 @@
 //! that later lands clears it. `RoundReport.withheld` counts judgements made in the round, not
 //! cached ones. The manifest never records a withheld file.
 //!
+//! Host retry budget (brief 52, DESIGN.md 11.2): a token bucket in memory, capacity 10, one token
+//! back per 15 s of the monotonic clock and one per landed commit. A first attempt (no failure
+//! streak) never needs a token; a retry takes one, and without one the owner is deferred to now
+//! plus a jittered 1 to 30 s (the D44 draw), counted as `deferred`, logged nowhere. A
+//! `LandingUnknown` verify is never charged. The bucket only delays an owner that is already
+//! due: it never shortens an owner's own `RetryAt`, `Retry-After` included. Auth pausing,
+//! per-owner backoff and parking are unchanged. A new daemon starts full.
+//!
 //! The commit base (`current.json` ETag, owner state) is never persisted: every owner
 //! recovers it from the store on its first round after a start (`recover_base`).
 use crate::audit::AuditCounts;
@@ -46,7 +54,7 @@ use crate::state::{
     DaemonLock, Loaded, MissingReason, StateDir, StateError, StateFile, SyncPolicy, WRITER_VERSION,
 };
 use memory_core::coalescer::Signal;
-use memory_core::disposition::Streak;
+use memory_core::disposition::{Streak, jittered};
 use memory_core::domain::{
     Agent, Disposition, ErrorClass, Fingerprint, LocalError, Owner, OwnerParkReason, ParkReason,
     RulesDigest, SnapshotFingerprint, SourceId, SourceState, WithholdReason,
@@ -445,6 +453,57 @@ enum RemoteBase {
     Known(Base),
 }
 
+/// Host-level retry budget (brief 52, DESIGN.md 11.2): a token bucket in memory. A retry (an
+/// owner with a failure streak) takes one token; a landed commit gives one back; one more
+/// returns every [`RETRY_REFILL`]. It only delays: it acts on owners already due.
+struct RetryBucket {
+    tokens: u32,
+    /// Monotonic instant up to which refills have been credited.
+    credited: Duration,
+}
+
+/// Capacity of the retry bucket, and its starting level.
+const RETRY_CAPACITY: u32 = 10;
+/// One token returns this often (monotonic).
+const RETRY_REFILL: Duration = Duration::from_secs(15);
+/// Longest deferral of a retry denied for want of a token.
+const RETRY_DEFER_MAX: Duration = Duration::from_secs(30);
+
+impl RetryBucket {
+    const fn full() -> Self {
+        Self {
+            tokens: RETRY_CAPACITY,
+            credited: Duration::ZERO,
+        }
+    }
+    /// Credit the refills up to `now`.
+    fn refill(&mut self, now: Duration) {
+        let elapsed = now.saturating_sub(self.credited);
+        let whole = u32::try_from(elapsed.as_nanos() / RETRY_REFILL.as_nanos()).unwrap_or(u32::MAX);
+        self.tokens = self.tokens.saturating_add(whole).min(RETRY_CAPACITY);
+        self.credited = if self.tokens == RETRY_CAPACITY {
+            now
+        } else {
+            self.credited
+                .saturating_add(RETRY_REFILL.saturating_mul(whole))
+        };
+    }
+    /// Take a token if there is one.
+    fn take(&mut self, now: Duration) -> bool {
+        self.refill(now);
+        if self.tokens == 0 {
+            return false;
+        }
+        self.tokens -= 1;
+        true
+    }
+    /// A commit landed.
+    fn landed(&mut self, now: Duration) {
+        self.refill(now);
+        self.tokens = self.tokens.saturating_add(1).min(RETRY_CAPACITY);
+    }
+}
+
 /// Whether the owner takes a turn.
 enum Turn {
     /// Runs at the next round.
@@ -461,6 +520,8 @@ struct OwnerRt {
     turn: Turn,
     /// Manifests built since the last landed commit (A6); memory only.
     known_ours: KnownOurs,
+    /// The last attempt ended `LandingUnknown`: its verify GET never waits for a retry token.
+    unknown_landing: bool,
     /// Sources parked alone; the owner's other sources keep flowing.
     parked_sources: BTreeMap<SourceId, ParkReason>,
 }
@@ -473,6 +534,7 @@ impl OwnerRt {
             streak: Streak::default(),
             turn: parked.map_or(Turn::Ready, Turn::Parked),
             known_ours: KnownOurs::new(),
+            unknown_landing: false,
         }
     }
 }
@@ -566,6 +628,8 @@ pub struct Daemon<F, S, C, E> {
     last_index: Option<Duration>,
     last_status: Option<Duration>,
     draws: u64,
+    /// Host-level retry budget; memory only, a new daemon starts full.
+    bucket: RetryBucket,
     /// True only while a full round runs: the one place absence is observed.
     absence: bool,
     stop: Box<dyn Fn() -> bool>,
@@ -688,6 +752,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             last_index: None,
             last_status: None,
             draws: 0,
+            bucket: RetryBucket::full(),
             absence: false,
             stop: Box::new(|| false),
             sleep: Box::new(std::thread::sleep),
@@ -821,6 +886,9 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     ) -> bool {
         let (disp, streak) = disposition_paced(result, false, at, &rt.streak, draw);
         rt.streak = streak;
+        if !matches!(disp, Disposition::Cancelled) {
+            rt.unknown_landing = matches!(result, Err(Failure::LandingUnknown(_)));
+        }
         if let Err(failure) = result
             && (failure.base_may_be_stale() || matches!(failure, Failure::BaseUnchanged))
         {
@@ -1068,9 +1136,50 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         }
     }
 
-    /// One owner's turn: gate, recover, capture, attach launches, commit, settle. Returns true
-    /// when uploads must pause (host-scoped failure).
+    /// Retry budget (brief 52): true when the owner, otherwise due, is a retry that finds the
+    /// bucket empty; it is then deferred to now plus a jittered 1 to 30 s, counted as deferred.
+    /// A first attempt, a parked owner, an owner whose own deadline has not passed and a
+    /// `LandingUnknown` verify are never charged, so the budget cannot shorten a deadline.
+    fn denied(&mut self, rt: &mut OwnerRt, report: &mut RoundReport) -> bool {
+        let now = Duration::from_nanos(self.clock.monotonic_ns());
+        match &rt.turn {
+            Turn::Parked(_) => return false,
+            Turn::RetryAt(t) if now < *t => return false,
+            _ => {}
+        }
+        if rt.streak.retries == 0 || rt.unknown_landing || self.bucket.take(now) {
+            return false;
+        }
+        let wait = jittered(RETRY_DEFER_MAX, self.next_draw());
+        rt.turn = Turn::RetryAt(now.saturating_add(wait));
+        report.deferred += 1;
+        true
+    }
+
+    /// One owner's turn: budget, gate, recover, capture, attach launches, commit, settle.
+    /// Returns true when uploads must pause (host-scoped failure).
     fn run_owner(
+        &mut self,
+        owner: &Owner,
+        sources: &[Source],
+        rt: &mut OwnerRt,
+        hints: &mut [ScannedFile],
+        when: &Timestamp,
+        report: &mut RoundReport,
+    ) -> bool {
+        if self.denied(rt, report) {
+            return false;
+        }
+        let landed = report.landed;
+        let pause = self.run_owner_turn(owner, sources, rt, hints, when, report);
+        if report.landed > landed {
+            let now = Duration::from_nanos(self.clock.monotonic_ns());
+            self.bucket.landed(now);
+        }
+        pause
+    }
+
+    fn run_owner_turn(
         &mut self,
         owner: &Owner,
         sources: &[Source],
@@ -1565,6 +1674,8 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         self.write_index(false).map_err(RoundError::State)?;
         Ok(if report.stopped > 0 {
             OwnerOutcome::Stopped
+        } else if report.deferred > 0 {
+            OwnerOutcome::Deferred
         } else if report.landed > 0 {
             OwnerOutcome::Landed
         } else if report.failed > 0 || report.parked > 0 {

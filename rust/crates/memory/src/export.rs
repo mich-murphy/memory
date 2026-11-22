@@ -2,7 +2,8 @@
 //! `session-reader/v2` directory through `memory-reader`'s export library.
 //!
 //! Read-only towards the bucket (GET only), no daemon lock, nothing under the state root.
-//! Every failure is a closed code on one stderr line; no key, path, endpoint or owner text.
+//! Every failure is a closed code on one stderr line; no key, path, endpoint or owner text. A
+//! store failure is `store cause=<code>` and exits 75 (transient) or 77 (auth), as in `restore`.
 //!
 //! Sessions are never deleted from the store, so a deleted source's epochs are exported too, every
 //! one `sealed` (none `active`). The success line is `memory: exported sources=<n> deleted=<n>
@@ -11,7 +12,7 @@ use crate::assemble::build_store;
 use crate::config::Config;
 use crate::daemon::EXIT_CONFIG;
 use crate::environment::{Store, StoreError};
-use crate::restore::{EXIT_ABSENT, EXIT_FAILED, EXIT_USAGE};
+use crate::restore::{EXIT_ABSENT, EXIT_FAILED, EXIT_USAGE, StoreFault, store_exit, store_line};
 use memory_core::domain::Owner;
 use memory_core::limits::parse_owner_prefix;
 use memory_reader::export::{ExportError, build_envelope, write_export};
@@ -38,8 +39,8 @@ pub enum Failure {
     #[error("output_exists")]
     OutputExists,
     /// The store failed.
-    #[error("store")]
-    Store,
+    #[error("{}", store_line(*.0))]
+    Store(Option<StoreError>),
     /// The manifest was written by a newer schema.
     #[error("newer_schema")]
     NewerSchema,
@@ -65,6 +66,7 @@ impl Failure {
             Self::Absent => EXIT_ABSENT,
             Self::TooLarge => EXIT_TOO_LARGE,
             Self::Shared => EXIT_USAGE,
+            Self::Store(e) => store_exit(e),
             _ => EXIT_FAILED,
         }
     }
@@ -81,11 +83,11 @@ pub struct Report {
     pub bytes: u64,
 }
 
-fn code<E>(error: &ExportError<E>) -> Failure {
+fn code<E: StoreFault>(error: &ExportError<E>) -> Failure {
     match error {
         ExportError::TooLarge => Failure::TooLarge,
         ExportError::DestinationExists => Failure::OutputExists,
-        ExportError::Fetch(_) => Failure::Store,
+        ExportError::Fetch(f) => Failure::Store(f.store_error()),
         ExportError::Shared => Failure::Shared,
         ExportError::Overflow => Failure::Export("export_overflow"),
         ExportError::BadTime => Failure::Export("export_bad_time"),
@@ -102,7 +104,7 @@ fn code<E>(error: &ExportError<E>) -> Failure {
 ///
 /// # Errors
 /// A closed [`Failure`].
-pub fn export_owner<E>(
+pub fn export_owner<E: StoreFault>(
     owner: &Owner,
     mut fetch: impl FnMut(&str) -> Result<Option<Vec<u8>>, E>,
     out: &Path,
@@ -119,7 +121,7 @@ pub fn export_owner<E>(
     let head = match read_owner_head(owner, &mut fetch) {
         Ok(Some(head)) => head,
         Ok(None) => return Err(Failure::Absent),
-        Err(OwnerError::Fetch(_)) => return Err(Failure::Store),
+        Err(OwnerError::Fetch(f)) => return Err(Failure::Store(f.store_error())),
         Err(OwnerError::NewerSchema) => return Err(Failure::NewerSchema),
         Err(OwnerError::Corrupt(_)) => return Err(Failure::ChainCorrupt),
     };
@@ -179,7 +181,9 @@ fn parse_args(args: impl Iterator<Item = OsString>) -> Option<Args> {
 /// Entry of `memory export`; `args` follow the word `export`.
 ///
 /// Exit codes: 0 exported, 1 failed, 2 config or token, 4 too large, 64 usage, owner text or
-/// shared owner, 66 owner absent. One stderr line; nothing on stdout.
+/// shared owner, 66 owner absent, 75 a transient store failure (retry), 77 the store refused the
+/// credential. A store failure prints `memory: store cause=<code>`. One stderr line; nothing on
+/// stdout.
 #[must_use]
 pub fn main_entry(args: impl Iterator<Item = OsString>) -> ExitCode {
     let Some(args) = parse_args(args) else {

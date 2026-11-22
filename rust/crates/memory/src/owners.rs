@@ -3,13 +3,14 @@
 //!
 //! stdout: owner texts, sorted and deduplicated, one per line, in the form `memory export` and
 //! `memory restore` take. stderr: `memory: owners=N` or one closed `memory: <code>` line; no
-//! endpoint, key, token or prefix. The paging loop lives here, so `s3.rs` keeps one exchange per
-//! call.
+//! endpoint, key, token or prefix. A store failure is `memory: store cause=<code>` (the closed
+//! `StoreError` codes, brief 52) and exits 75 when a retry may help, 77 on auth. The paging loop
+//! lives here, so `s3.rs` keeps one exchange per call.
 use crate::assemble::build_store;
 use crate::config::Config;
 use crate::daemon::EXIT_CONFIG;
 use crate::environment::StoreError;
-use crate::restore::{EXIT_FAILED, EXIT_USAGE};
+use crate::restore::{EXIT_FAILED, EXIT_USAGE, store_exit, store_line};
 use crate::s3::Page;
 use memory_core::domain::Owner;
 use memory_core::limits::parse_owner_prefix;
@@ -29,8 +30,8 @@ pub const MAX_PAGES: usize = 10_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum Failure {
     /// The store failed.
-    #[error("store")]
-    Store,
+    #[error("{}", store_line(*.0))]
+    Store(Option<StoreError>),
     /// A listed key was not under the requested prefix.
     #[error("listing_outside_prefix")]
     OutsidePrefix,
@@ -58,7 +59,7 @@ pub fn collect_owners(
         if pages > MAX_PAGES {
             return Err(Failure::Loop);
         }
-        let page = list(token.as_deref()).map_err(|_| Failure::Store)?;
+        let page = list(token.as_deref()).map_err(|e| Failure::Store(Some(e)))?;
         if page.outside > 0 {
             return Err(Failure::OutsidePrefix);
         }
@@ -93,8 +94,9 @@ fn fail(code: &str, exit: u8) -> ExitCode {
 
 /// Entry of `memory owners`; `args` follow the word `owners` and must be empty.
 ///
-/// Exit codes: 0 listed (also none), 1 failed, 2 config or token, 64 usage. Nothing is printed
-/// on stdout unless the whole listing succeeded.
+/// Exit codes: 0 listed (also none), 1 failed, 2 config or token, 64 usage, 75 a transient store
+/// failure (retry), 77 the store refused the credential. A store failure prints
+/// `memory: store cause=<code>`. Nothing is printed on stdout unless the whole listing succeeded.
 #[must_use]
 pub fn main_entry(mut args: impl Iterator<Item = OsString>) -> ExitCode {
     if args.next().is_some() {
@@ -125,6 +127,12 @@ pub fn main_entry(mut args: impl Iterator<Item = OsString>) -> ExitCode {
             let _ = writeln!(std::io::stderr(), "memory: owners={}", owners.len());
             ExitCode::SUCCESS
         }
-        Err(failure) => fail(&failure.to_string(), EXIT_FAILED),
+        Err(failure) => {
+            let exit = match failure {
+                Failure::Store(e) => store_exit(e),
+                _ => EXIT_FAILED,
+            };
+            fail(&failure.to_string(), exit)
+        }
     }
 }

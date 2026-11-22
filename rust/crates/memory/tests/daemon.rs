@@ -300,6 +300,10 @@ struct FStore {
     revoked: bool,
     rules: Vec<Rule>,
     put_log: Vec<String>,
+    /// GET requests made (brief 52: with `put_log`, the store requests of a window).
+    gets: u64,
+    /// While set, every request is answered `Throttled` with this `Retry-After` (brief 52).
+    throttle: Option<Option<u32>>,
     lost_fired: u64,
     /// While set, `current.json` PUTs that pass their fence are held, not landed (5xx reply).
     stall: bool,
@@ -363,6 +367,8 @@ impl FStore {
             Err(StoreError::Auth)
         } else if self.offline {
             Err(StoreError::Offline(Cause::Connect))
+        } else if let Some(retry_after) = self.throttle {
+            Err(StoreError::Throttled(retry_after))
         } else {
             Ok(())
         }
@@ -441,6 +447,7 @@ impl Store for FStore {
         self.put(key, &body, Some(etag))
     }
     fn get(&mut self, key: &str) -> Result<Stored, StoreError> {
+        self.gets += 1;
         self.gate()?;
         let (b, v) = self.store.objects.get(key).ok_or(StoreError::NotFound)?;
         Ok(Stored {
@@ -5009,5 +5016,338 @@ fn an_index_without_the_withheld_field_loads() -> Result<(), serde_json::Error> 
     let old = r#"{"sources":{"s":{"index":null,"missing":0,"snapshot":null,"deletion_recorded":false}},"hints":{}}"#;
     let body: memory::daemon::IndexBody = serde_json::from_str(old)?;
     assert!(body.sources.values().all(|s| s.withheld.is_none()));
+    Ok(())
+}
+
+// ---------------------------------------------------------------- host retry budget (brief 52)
+
+/// Store requests so far (PUT and GET).
+fn requests(d: &mut D) -> usize {
+    let store = d.store_mut();
+    store.put_log.len() + usize::try_from(store.gets).unwrap_or(usize::MAX)
+}
+
+fn at_secs(d: &mut D, secs: u64) {
+    d.clock_mut().mono = secs * 1_000_000_000;
+}
+
+/// Capture every owner whose own deadline has passed, as the driver does.
+fn run_due(d: &mut D) -> R<Vec<OwnerOutcome>> {
+    let mut out = Vec::new();
+    for owner in d.retries_due() {
+        out.push(d.capture_owner(&owner).map_err(e)?);
+    }
+    Ok(out)
+}
+
+/// `n` owners `s1..=sn` listed, one more file (`s{n+1}`, handle `n+1`) on disk but not listed.
+fn crowd(n: u64) -> R<(MemFs, Vec<(Owner, Source)>)> {
+    let mut fs = MemFs::default();
+    let mut list = Vec::new();
+    for h in 1..=n + 1 {
+        fs.files.insert(h, format!("line {h}\n").into_bytes());
+        if h <= n {
+            list.push(src_of(&format!("s{h}"), h)?);
+        }
+    }
+    Ok((fs, list))
+}
+
+fn boot_listed(tmp: &Tmp, cfg: &Path, fs: MemFs, store: FStore, list: &Shared) -> R<D> {
+    let shared = Arc::clone(list);
+    let mut parts = parts_of(fs, store, &[], WALL);
+    parts.sources = FSrcs::new(move || shared.lock().map(|g| g.clone()).unwrap_or_default());
+    let mut d = boot_default_sleep(tmp, cfg, parts, SyncPolicy::Full)?;
+    d.set_sleep(|_| {});
+    Ok(d)
+}
+
+/// Thirty owners fail `Offline` at t = 0 (first attempts, no token); at t = 2 s every deadline
+/// has passed (the first backoff is at most 2 s) and the ten tokens are spent on ten retries,
+/// the other twenty are denied. Returns the daemon with an empty bucket and the owner list;
+/// `s31` is on disk but not listed.
+fn exhausted(tmp: &Tmp, cfg: &Path, store: FStore) -> R<(D, Shared)> {
+    let (fs, list) = crowd(30)?;
+    let shared: Shared = Arc::new(Mutex::new(list));
+    let mut d = boot_listed(tmp, cfg, fs, store, &shared)?;
+    d.store_mut().offline = true;
+    let r = d.reconcile_once().map_err(e)?;
+    assert_eq!((r.landed, r.failed, r.deferred), (0, 30, 0));
+    at_secs(&mut d, 2);
+    let before = requests(&mut d);
+    let outcomes = run_due(&mut d)?;
+    assert_eq!(outcomes.len(), 30);
+    assert_eq!(
+        requests(&mut d) - before,
+        10,
+        "ten tokens buy ten retries, one request each"
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|o| **o == OwnerOutcome::Deferred)
+            .count(),
+        20
+    );
+    Ok((d, shared))
+}
+
+/// Retried store requests in the 60 s after one round in which `n` owners failed `Offline`.
+fn retry_load(n: u64) -> R<usize> {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let (fs, list) = crowd(n)?;
+    let store = FStore {
+        offline: true,
+        ..FStore::default()
+    };
+    let mut d = boot(&tmp, &cfg, fs, store, &list, WALL)?;
+    assert_eq!(
+        d.reconcile_once().map_err(e)?.failed,
+        usize::try_from(n).map_err(e)?
+    );
+    let before = requests(&mut d);
+    for t in 1..=60 {
+        at_secs(&mut d, t);
+        run_due(&mut d)?;
+    }
+    Ok(requests(&mut d) - before)
+}
+
+/// Brief 52: the retries of the next minute are bounded by the bucket (10 tokens and one more
+/// per 15 s, so 14), whatever the number of owners. Without the budget this is about 150 at
+/// 20 owners and about 1,500 at 200.
+#[test]
+fn retried_requests_in_a_minute_do_not_grow_with_the_owner_count() -> R {
+    const BOUND: usize = 14;
+    let (few, many) = (retry_load(20)?, retry_load(200)?);
+    // Measured 2026-11-22: 13 at 20 owners and 13 at 200 owners.
+    assert!(few <= BOUND, "20 owners: {few}");
+    assert!(many <= BOUND, "200 owners: {many}");
+    assert!(many > 0, "the bucket still lets retries through");
+    Ok(())
+}
+
+/// A landed commit gives a token back: with the store reachable again, thirty owners land in one
+/// pass although only two tokens have refilled by then (without the refill only two would run).
+#[test]
+fn a_landed_commit_refills_the_bucket() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let (mut d, _shared) = exhausted(&tmp, &cfg, FStore::default())?;
+    d.store_mut().offline = false;
+    // Every deadline is at most 2 + 30 s; 31 s of refill since t = 2 is two tokens.
+    at_secs(&mut d, 33);
+    let outcomes = run_due(&mut d)?;
+    assert_eq!(outcomes.len(), 30);
+    assert!(
+        outcomes.iter().all(|o| *o == OwnerOutcome::Landed),
+        "{outcomes:?}"
+    );
+    Ok(())
+}
+
+/// A first attempt never needs a token, and a denied owner is deferred by 1 to 30 s.
+#[test]
+fn a_first_attempt_is_never_denied_and_a_denied_retry_waits_at_most_thirty_seconds() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let (mut d, shared) = exhausted(&tmp, &cfg, FStore::default())?;
+    // Deferred at least 1 s: nothing is due at the instant of the denial.
+    assert!(run_due(&mut d)?.is_empty());
+    // A new owner, first attempt, empty bucket: it reaches the store.
+    shared.lock().map_err(e)?.push(src_of("s31", 31)?);
+    let before = requests(&mut d);
+    let outcome = d.capture_owner(&owner_of("s31")?).map_err(e)?;
+    assert_eq!(outcome, OwnerOutcome::Failed);
+    assert!(requests(&mut d) > before, "a first attempt is not denied");
+    // At most 30 s: every one of the thirty is due again at 2 + 30 s.
+    at_secs(&mut d, 32);
+    assert_eq!(d.retries_due().len(), 31);
+    Ok(())
+}
+
+/// `Retry-After` is never shortened: an owner throttled for 300 s is deferred until then, with
+/// no store call, and runs at its own deadline, whatever the bucket does.
+#[test]
+fn the_budget_never_shortens_retry_after() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let (mut d, shared) = exhausted(&tmp, &cfg, FStore::default())?;
+    shared.lock().map_err(e)?.push(src_of("s31", 31)?);
+    let s31 = owner_of("s31")?;
+    d.store_mut().offline = false;
+    d.store_mut().throttle = Some(Some(300));
+    assert_eq!(d.capture_owner(&s31).map_err(e)?, OwnerOutcome::Failed);
+    d.store_mut().throttle = None;
+    at_secs(&mut d, 301);
+    let before = requests(&mut d);
+    assert_eq!(d.capture_owner(&s31).map_err(e)?, OwnerOutcome::Deferred);
+    assert_eq!(
+        requests(&mut d),
+        before,
+        "no store call before the deadline"
+    );
+    at_secs(&mut d, 302);
+    assert_eq!(d.capture_owner(&s31).map_err(e)?, OwnerOutcome::Landed);
+    Ok(())
+}
+
+/// An owner whose last attempt ended `LandingUnknown` verifies at its own deadline while the
+/// bucket is empty: its recovery GET is not held back.
+#[test]
+fn a_landing_unknown_verify_runs_at_its_own_deadline_with_an_empty_bucket() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let (fs, mut list) = crowd(30)?;
+    // s0 is listed first: its commit lands, the reply is lost and the store goes dark.
+    let mut fs = fs;
+    fs.files.insert(100, b"unknown\n".to_vec());
+    list.insert(0, src_of("s0", 100)?);
+    let s0 = owner_of("s0")?;
+    let mut store = FStore::default();
+    store.arm(
+        Some(current_key(&s0)),
+        Effect::LandThenDark(StoreError::Ambiguous(Cause::Reset)),
+    );
+    let mut d = boot(&tmp, &cfg, fs, store, &list, WALL)?;
+    let r = d.reconcile_once().map_err(e)?;
+    assert_eq!((r.landed, r.failed), (0, 31));
+    // All deadlines are at most 1 s. The thirty others spend the ten tokens; s0 is not asked yet.
+    at_secs(&mut d, 1);
+    let before = requests(&mut d);
+    for h in 1..=30 {
+        d.capture_owner(&owner_of(&format!("s{h}"))?).map_err(e)?;
+    }
+    assert_eq!(requests(&mut d) - before, 10, "the bucket is now empty");
+    d.store_mut().blackout = false;
+    let gets = d.store_mut().gets;
+    let outcome = d.capture_owner(&s0).map_err(e)?;
+    assert_ne!(outcome, OwnerOutcome::Deferred, "the verify is not delayed");
+    assert!(d.store_mut().gets > gets, "the verify GET was made");
+    Ok(())
+}
+
+/// Auth still pauses the host with an empty bucket, and a paused host attempts nothing.
+#[test]
+fn auth_still_pauses_with_an_empty_bucket() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let (mut d, shared) = exhausted(&tmp, &cfg, FStore::default())?;
+    shared.lock().map_err(e)?.push(src_of("s31", 31)?);
+    d.store_mut().offline = false;
+    d.store_mut().revoked = true;
+    assert_eq!(
+        d.capture_owner(&owner_of("s31")?).map_err(e)?,
+        OwnerOutcome::Failed
+    );
+    assert!(d.status().host_paused);
+    assert_eq!(
+        d.capture_owner(&owner_of("s1")?).map_err(e)?,
+        OwnerOutcome::Paused
+    );
+    Ok(())
+}
+
+/// The bucket is in memory: a new daemon starts full and buys ten retries again.
+#[test]
+fn a_new_daemon_starts_with_a_full_bucket() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let (d, shared) = exhausted(&tmp, &cfg, FStore::default())?;
+    let list = shared.lock().map_err(e)?.clone();
+    let mut d = cycle_sync(d, &tmp, &cfg, &list, true, SyncPolicy::Full)?;
+    d.store_mut().offline = true;
+    let r = d.reconcile_once().map_err(e)?;
+    assert_eq!(r.failed, 30);
+    at_secs(&mut d, 2);
+    let before = requests(&mut d);
+    run_due(&mut d)?;
+    assert_eq!(requests(&mut d) - before, 10);
+    Ok(())
+}
+
+/// Parent (brief 52 teeth): a denied retry is deferred by a jittered 1 to 30 s, not a fixed
+/// 30 s, so twenty denied owners do not all come back together.
+#[test]
+fn denied_retries_are_spread_over_the_deferral_window() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let (fs, list) = crowd(30)?;
+    let shared: Shared = Arc::new(Mutex::new(list));
+    let mut d = boot_listed(&tmp, &cfg, fs, FStore::default(), &shared)?;
+    d.store_mut().offline = true;
+    assert_eq!(d.reconcile_once().map_err(e)?.failed, 30);
+    at_secs(&mut d, 2);
+    let mut denied = Vec::new();
+    for owner in d.retries_due() {
+        if d.capture_owner(&owner).map_err(e)? == OwnerOutcome::Deferred {
+            denied.push(owner);
+        }
+    }
+    assert_eq!(denied.len(), 20);
+    let due_of = |d: &D| {
+        let due = d.retries_due();
+        denied.iter().filter(|o| due.contains(o)).count()
+    };
+    at_secs(&mut d, 31);
+    assert!(
+        due_of(&d) > 0,
+        "no denied owner is due before the 30 s ceiling: the deferral is not jittered"
+    );
+    at_secs(&mut d, 32);
+    assert_eq!(due_of(&d), 20, "every denial ends within 30 s");
+    Ok(())
+}
+
+/// Parent (brief 52 teeth): in a full round with an empty bucket, an owner whose own deadline
+/// (here a 300 s `Retry-After`) has not passed keeps it; the budget never rewrites it to a
+/// sooner deferral.
+#[test]
+fn a_full_round_with_an_empty_bucket_keeps_a_later_retry_after() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let (mut d, shared) = exhausted(&tmp, &cfg, FStore::default())?;
+    shared.lock().map_err(e)?.push(src_of("s31", 31)?);
+    let s31 = owner_of("s31")?;
+    d.store_mut().offline = false;
+    d.store_mut().throttle = Some(Some(300));
+    assert_eq!(d.capture_owner(&s31).map_err(e)?, OwnerOutcome::Failed);
+    d.store_mut().throttle = None;
+    // Still t = 2 s and no token: a full round reaches s31 before its deadline.
+    d.store_mut().offline = true;
+    d.reconcile_once().map_err(e)?;
+    at_secs(&mut d, 60);
+    assert!(
+        !d.retries_due().contains(&s31),
+        "the 300 s Retry-After was shortened"
+    );
+    at_secs(&mut d, 302);
+    assert!(d.retries_due().contains(&s31));
+    Ok(())
+}
+
+/// Parent (brief 52 teeth): a parked owner with a failure streak stays parked through a full
+/// round with an empty bucket; the budget never turns a park into a retry.
+#[test]
+fn a_parked_owner_with_a_streak_stays_parked_when_the_bucket_is_empty() -> R {
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    let (mut d, _shared) = exhausted(&tmp, &cfg, FStore::default())?;
+    let s5 = owner_of("s5")?;
+    // t = 33 s: every deadline has passed and the bucket has refilled a little. s5 (streak > 0,
+    // base unknown) finds a newer remote schema and parks.
+    at_secs(&mut d, 33);
+    d.store_mut().offline = false;
+    d.store_mut().store.write(&current_key(&s5), NEWER.to_vec());
+    d.capture_owner(&s5).map_err(e)?;
+    let parked = |d: &D| d.status().parked.iter().any(|p| p.owner == s5);
+    assert!(parked(&d), "s5 parked");
+    // Drain the bucket with the other due owners, then run a full round.
+    d.store_mut().offline = true;
+    run_due(&mut d)?;
+    d.reconcile_once().map_err(e)?;
+    assert!(parked(&d), "a full round unparked s5");
+    assert!(!d.retries_due().contains(&s5));
     Ok(())
 }

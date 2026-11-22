@@ -334,7 +334,7 @@ fn errors_and_codes_carry_no_input_text() {
     for error in [
         RestoreError::OutputNotEmpty,
         RestoreError::OutputIo,
-        RestoreError::Store,
+        RestoreError::Store(None),
         RestoreError::NewerSchema,
         RestoreError::ChainCorrupt,
         RestoreError::BadSourcePath,

@@ -369,6 +369,19 @@ from `main` alone.
      2026-11-22 (this Mac 06:12Z, `runs = 15`; dev-01 06:19Z): no re-judgement, `memory check`
      exit 0 on both, withheld 3 and 26; peak 82 MB here over a full check (was 130 MB), dev-01
      `VmHWM` 109 MB. Open: the operator's answer on shared owners in analytics (item 27 d).
+  30. 2026-11-22, brief 52 (D62 to D64), [evidence 47](rust-rewrite/implementation/evidence/47-robustness/):
+     the three robustness findings, settled by research (DDIA ch. 1 to 8, AWS Builders' Library,
+     SRE, sysexits) and rig experiments. `export`, `restore` and `owners` print
+     `store cause=<code>` and exit 75 (retry) or 77 (auth); the daemon has a host retry token
+     bucket (10 tokens, 1 per 15 s and per landed commit; 13 retried requests in a minute at 20 and
+     at 200 failing owners, was about 150 and 1,500); `memory check` confirms `uncaptured`,
+     `mismatch` and `remote_only` once against a fresh read, so a concurrent commit no longer
+     gives a false result. Accepted locally at `034be38`: teeth 33 of 33 (4 parent tests), gates
+     14/14, Linux container passed. `url` 2.5.9 (RUSTSEC-2026-0592) merged first as `4d6729f`.
+     Operator answer 2026-11-22 on shared owners: restore is not a use; capture only what
+     analytics uses, and analytics must describe the agent setup (model, harness, extensions,
+     skills, tool calls). Research done (analytics report); briefs to follow after an R1
+     amendment.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

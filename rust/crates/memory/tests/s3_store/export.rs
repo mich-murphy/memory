@@ -15,7 +15,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-fn capture(rig: &Rig) -> R<(String, PathBuf)> {
+pub(super) fn capture(rig: &Rig) -> R<(String, PathBuf)> {
     let file = rig.root.join(SESSION);
     fs::create_dir_all(file.parent().ok_or("parent")?).map_err(e)?;
     fs::write(&file, lines(0..12)).map_err(e)?;

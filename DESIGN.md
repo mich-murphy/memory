@@ -1135,6 +1135,19 @@ a restarted daemon's first commit (A14.1): a killed predecessor's fully sent PUT
 land up to about 0.5 s after its death (3.8), and the daemon must not verify `current.json`
 before it lands.
 
+Host retry budget (D63, 2026-11-22). Per-owner backoff bounds each owner's retries, not the
+host's: with the store down, retry load grows with the number of owners (DDIA ch. 2, retry
+storms). The daemon holds a token bucket in memory: capacity 10, one token back per 15 s of the
+monotonic clock and one per landed commit, never above 10. A first attempt never needs a token; a
+retry takes one, and without one the owner is deferred by a full-jitter 1 to 30 s (the D44 draw)
+and counted `deferred`, with no log line. A `LandingUnknown` verify, a parked owner and an owner
+whose own deadline has not passed are never charged, so the bucket only delays and never shortens
+a `Retry-After`. A restart starts full. A token bucket, not a circuit breaker, because breakers
+are modal and slow recovery (AWS Builders' Library, "Timeouts, retries, and backoff with jitter";
+AWS "Introducing Retry Throttling"). Measured on the rig: 13 retried requests in the first minute
+at both 20 and 200 failing owners (bound 14), where it was about 150 and 1,500; all owners land
+within 30 s of the store's recovery.
+
 ### 11.3 Status
 
 `status.json` is daemon-owned and survives restarts. [review, 04 B1, M2, M3] It holds:
@@ -1157,7 +1170,13 @@ before it lands.
 2. `status.json` fields.
 3. `--verify`: GET each owner's `current.json` and compare its ETag with the index. (Amended
    2026-11-20, D51: not built; `memory check` is the verified view, and `status` makes no
-   network request.)
+   network request.) `memory check` walks, reads and judges at different instants while the
+   daemon commits (DDIA ch. 8, analytic queries and integrity checks). Since pieces and
+   manifests are immutable and only `current.json` moves, it confirms only what disagrees: an
+   owner with an `uncaptured` or `mismatch` verdict has `current.json` read once more and, if
+   the head moved, those sources are judged again against the fresh chain; a `remote_only`
+   candidate is dropped when a second walk after the last owner read sees it. A quiet owner
+   costs no extra request (D64, 2026-11-22).
 
 It says "up to date as of <time>", never "all captured". `memory unpark <source|owner>` clears
 a parked entry. (Amended 2026-11-20, D51: `memory unpark <owner-prefix>|--all`, since source ids
@@ -1213,6 +1232,10 @@ Neither check trusts the index, the planner or the hasher it is checking.
   `loginctl enable-linger` commands without running them (D53, 2026-11-20).
 - Exit codes: 0 only on a requested stop, and distinct codes for "lock held" and "config
   invalid".
+- `memory export`, `memory restore` and `memory owners` print a store failure as
+  `memory: store cause=<code>` (the closed codes of D49) and exit 75 (`EX_TEMPFAIL`) for an
+  offline, ambiguous, throttled or server failure, 77 (`EX_NOPERM`) for auth, 1 otherwise. These
+  commands only read, so every transport failure is safe to retry (D62, 2026-11-22).
 - A corrupt index is rebuilt, never a crash loop. [review, 03 m3]
 
 ## 12. Concurrency and single instance
@@ -1586,6 +1609,9 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D53 | 2026-11-20: on Linux `memory install` writes a systemd user unit at `$XDG_CONFIG_HOME/systemd/user/memory.service` (absolute only) or `~/.config/systemd/user/memory.service`: first line is our marker, `ExecStart="<exe>" daemon` (quoted with `\`, `"`, `%`, `$` escaped), `Restart=on-failure`, `RestartSec=60`, `StandardError=journal`, `WantedBy=default.target`. Uninstall removes only our unit. The binary prints `systemctl --user daemon-reload`, `enable --now` and `loginctl enable-linger $USER` and runs none of them. A control character in the exe path is refused | brief 44, evidence 36; 11.5, 17 |
 | D54 | 2026-11-21, operator answers to the uncaptured-files review: the `~/.claude/skills` folder and Pi `pi-terminology/` are not captured; Codex `generated_images`/`attachments` and Claude `paste-cache` are captured (slice 3; superseded by D55: none of the three is captured); known non-session files get an `Ignored` verdict, counted apart from `UnknownKind` and never captured. Claude `file-history` (operator: research and decide): captured in slice 3 only behind a content scan that withholds the whole file, with a recorded reason, on a secret match, binary or non-UTF-8 content, an oversize file or a scanner error; the local file is never touched. Reason: the transcript stays the record of what a session did, file-history adds the exact pre-edit file state at about 10 MB per host, and it is a raw copy of project files that no path denylist can see (names are hashes) | research report (Anthropic `claude-directory` and `checkpointing` docs), evidence 37; 5, 8, 19 |
 | D55 | 2026-11-21, operator after an evidence check of D54: Codex `generated_images`, Codex `attachments` and Claude `paste-cache` are not captured (they become `Ignored`). Measured on this Mac (byte and hash comparison, counts only): all 59 `paste-cache` files occur in captured Claude transcripts, since the cache only backs `history.jsonl` recall; all 4 generated images occur as base64 in Codex `thread_history_1.sqlite`, which slice 3 captures first; the 5 attachment screenshots and the attachment JSON index exist nowhere else and are given up (operator choice; the conversation text is intact). Reason: data minimisation in an archive that never deletes, and an image cannot be scanned for secrets | evidence 38; 5, 19 |
+| D64 | 2026-11-22: `memory check` confirms its anomalies once: after the judge, an owner with an `uncaptured` or `mismatch` verdict has `current.json` read again and, if its head moved, those sources are judged against the fresh chain and the fresh verdict replaces the first; `remote_only` candidates are confirmed by a second walk after the last owner read. A quiet owner costs no extra request; output and exit codes are unchanged. Reason: a commit between walk and fetch gave a false `remote_only` (2026-11-21) and one between fetch and judge a false `uncaptured` with exit 1; immutable pieces and strongly consistent reads make a re-read sufficient (DDIA ch. 6 and 8) | brief 52, evidence 47; 11.3 |
+| D63 | 2026-11-22: a host retry budget in the daemon: a token bucket in memory, capacity 10, one token per 15 s and one per landed commit; a retry takes a token or is deferred by a jittered 1 to 30 s; first attempts, `LandingUnknown` verifies, parked owners and owners not yet due are never charged, so a `Retry-After` is never shortened. Per-owner backoff, auth pause and parking unchanged. Reason: per-owner backoff alone let retry load grow with the owner count (1,472 requests in a minute at 200 owners); a bucket bounds it (13) without the modal behaviour of a circuit breaker (AWS Builders' Library) | brief 52, evidence 47; 11.2 |
+| D62 | 2026-11-22: `export`, `restore` and `owners` keep the store cause: `memory: store cause=<code>`, exit 75 for `Offline`, `Ambiguous`, `Throttled` and `Server`, 77 for `Auth`, 1 otherwise (an exhaustive match); an unusable 200 list body is `Offline(Protocol)`. Reason: every failure printed `store` with exit 1, so a caller could not tell a retryable outage from a revoked token (DDIA ch. 5; sysexits(3)) | brief 52, evidence 47; 11.5 |
 | D61 | 2026-11-22, operator ("take the gitleaks approach"): the `Profile::Scanned` content scan runs the vendored gitleaks v8.30.1 rule set (a port of `detectRule` over `regex::bytes`, no new crate, file sha256-pinned) plus our provider, PEM and URL-credential patterns (provider shapes anchored with `\b`), on the bytes and on a JSON-unescaped copy. The name-only assignment rule and the shell guard leave the scan (`text.rs` is unchanged for other profiles). Fail closed: unknown keys, an allowlist without a check, or a compile failure withhold with `scrub_failed`; path and commit allowlists never apply; `gitleaks:allow` is ignored. `TABLE_VERSION` `scan/2`. Not ported: decoding passes. Reason: R8 (well-known work), and the old rules withheld code by name (150 here, 141 on dev-01); a replay with the built scanner withholds 3 and 26, and no released value is a literal secret by shape | brief 50, evidence 45; 8 |
 | D60 | 2026-11-21: every snapshot kind except `ClaudeSessionEnv`, `ClaudeUsage` and `ClaudePaste` is yielded, and every yielded snapshot kind except `CodexStore` has `Profile::Scanned` (recognized config documents are scrubbed, then scanned whole). Append kinds keep their profiles; the privacy rules and `rules_digest` are unchanged. Codex `skills/.system/**` (Codex's own pack) is `Ignored` in an agent dir. Reason: D54 asks for a fail-closed judgement of any raw copy no path rule can see; a probe found every deferred file would have published under the old `Config`, `TextAsset` and `OtherKnown` profiles, and 16 of 1,211 (this Mac) and 53 of 1,174 (dev-01) are withheld under `Scanned` | brief 49, evidence 43; 8 |
 | D59 | 2026-11-21: D52 applies to snapshot entries unchanged: a live stored snapshot entry (Codex store, Claude file-history) that a complete full round did not walk is probed by `stat` (a store by its database file only) and recorded `deleted` at the second consecutive miss; an owner whose only live entries are snapshots stays in the owner set; a recreated snapshot is a new `Replace` epoch; a local record holding only a withheld judgement is dropped after two consecutive complete walks without it, with no manifest change. Reason: since D56 and D58 the archive holds snapshot entries that Claude's cleanup or Codex can remove | brief 48, evidence 42; 6, 9 |

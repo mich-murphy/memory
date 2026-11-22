@@ -3,7 +3,8 @@
 //!
 //! Read-only towards the bucket (GET only), takes no daemon lock and writes nothing under the
 //! state root. Every error is a closed code; none carries a manifest path, a key, the endpoint,
-//! the bucket or a credential.
+//! the bucket or a credential. A store failure prints `store cause=<code>` (brief 52) and exits
+//! 75 (transient, retry), 77 (auth) or 1 (see `store_exit`).
 //!
 //! The library takes a fetch closure, not a `Store`: the reader already takes one, so a test
 //! (or another caller) supplies a closure without implementing the trait's write methods.
@@ -41,6 +42,54 @@ pub const EXIT_ABSENT: u8 = 66;
 /// Exit code: any other failure.
 pub const EXIT_FAILED: u8 = 1;
 
+/// A fetch error the commands can classify. `()` (test fetchers) carries no store error.
+pub trait StoreFault {
+    /// The store error behind this fetch failure, if any.
+    fn store_error(&self) -> Option<StoreError>;
+}
+impl StoreFault for StoreError {
+    fn store_error(&self) -> Option<StoreError> {
+        Some(*self)
+    }
+}
+impl StoreFault for () {
+    fn store_error(&self) -> Option<StoreError> {
+        None
+    }
+}
+
+/// Exit code: a transient store failure (EX_TEMPFAIL); retrying later may succeed.
+pub const EXIT_TEMPFAIL: u8 = 75;
+/// Exit code: the store refused the credential (EX_NOPERM); retrying cannot help.
+pub const EXIT_NOPERM: u8 = 77;
+
+/// Closed line for a store failure: `store cause=<code>` (`store` alone when unknown).
+#[must_use]
+pub fn store_line(error: Option<StoreError>) -> String {
+    match error {
+        Some(e) => format!("store cause={}", e.code()),
+        None => "store".to_owned(),
+    }
+}
+
+/// Exit code of a store failure (brief 52): 77 for auth, 75 for a transient one (the commands
+/// only read, so a retry is always safe), else 1. Exhaustive: a new `StoreError` variant must
+/// choose its exit here.
+#[must_use]
+pub const fn store_exit(error: Option<StoreError>) -> u8 {
+    match error {
+        None => EXIT_FAILED,
+        Some(StoreError::Auth) => EXIT_NOPERM,
+        Some(
+            StoreError::Offline(_)
+            | StoreError::Ambiguous(_)
+            | StoreError::Throttled(_)
+            | StoreError::Server,
+        ) => EXIT_TEMPFAIL,
+        Some(StoreError::PreconditionFailed | StoreError::NotFound) => EXIT_FAILED,
+    }
+}
+
 /// Why a restore was refused or failed. Closed; carries no input text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum RestoreError {
@@ -51,8 +100,8 @@ pub enum RestoreError {
     #[error("output_io")]
     OutputIo,
     /// The store failed (transport, auth or throttle).
-    #[error("store")]
-    Store,
+    #[error("{}", store_line(*.0))]
+    Store(Option<StoreError>),
     /// The owner's manifest was written by a newer schema.
     #[error("newer_schema")]
     NewerSchema,
@@ -82,6 +131,17 @@ pub struct Report {
     pub skipped_deleted: usize,
     /// Bytes written.
     pub bytes: u64,
+}
+
+impl RestoreError {
+    /// Process exit code.
+    #[must_use]
+    pub fn exit_code(self) -> u8 {
+        match self {
+            Self::Store(e) => store_exit(e),
+            _ => EXIT_FAILED,
+        }
+    }
 }
 
 /// Outcome of [`restore_owner`].
@@ -193,7 +253,7 @@ fn cleanup(out: &Path, created: bool) {
 ///
 /// # Errors
 /// A closed [`RestoreError`]; a failure after writing started removes what this run created.
-pub fn restore_state<E>(
+pub fn restore_state<E: StoreFault>(
     state: &OwnerState,
     mut fetch: impl FnMut(&str) -> Result<Option<Vec<u8>>, E>,
     out: &Path,
@@ -219,7 +279,7 @@ pub fn restore_state<E>(
         })
         .map_err(|e| match e {
             PieceError::Fetch(Miss::Missing) => RestoreError::ObjectMissing,
-            PieceError::Fetch(Miss::Fetch(_)) => RestoreError::Store,
+            PieceError::Fetch(Miss::Fetch(f)) => RestoreError::Store(f.store_error()),
             PieceError::NoEpoch
             | PieceError::Decode(_)
             | PieceError::Gap
@@ -251,7 +311,7 @@ pub fn restore_state<E>(
 ///
 /// # Errors
 /// A closed [`RestoreError`].
-pub fn restore_owner<E>(
+pub fn restore_owner<E: StoreFault>(
     owner: &Owner,
     mut fetch: impl FnMut(&str) -> Result<Option<Vec<u8>>, E>,
     out: &Path,
@@ -260,7 +320,7 @@ pub fn restore_owner<E>(
     let folded = match read_owner(owner, &mut fetch) {
         Ok(Some(folded)) => folded,
         Ok(None) => return Ok(Outcome::Absent),
-        Err(OwnerError::Fetch(_)) => return Err(RestoreError::Store),
+        Err(OwnerError::Fetch(f)) => return Err(RestoreError::Store(f.store_error())),
         Err(OwnerError::NewerSchema) => return Err(RestoreError::NewerSchema),
         Err(OwnerError::Corrupt(_)) => return Err(RestoreError::ChainCorrupt),
     };
@@ -303,8 +363,9 @@ fn parse_args(args: impl Iterator<Item = OsString>) -> Option<Args> {
 /// Entry of `memory restore`; `args` are the arguments after the word `restore`.
 ///
 /// Exit codes: 0 restored, 2 config or token refusal, 64 usage or unparsable owner, 66 owner
-/// absent, 1 anything else. Failure writes one line `memory: <code>` to stderr, success one line
-/// of counts. Nothing goes to stdout.
+/// absent, 75 a transient store failure (retry), 77 the store refused the credential, 1 anything
+/// else. A store failure prints `memory: store cause=<code>`. Failure writes one line
+/// `memory: <code>` to stderr, success one line of counts. Nothing goes to stdout.
 #[must_use]
 pub fn main_entry(args: impl Iterator<Item = OsString>) -> ExitCode {
     let Some(args) = parse_args(args) else {
@@ -341,6 +402,6 @@ pub fn main_entry(args: impl Iterator<Item = OsString>) -> ExitCode {
             );
             ExitCode::SUCCESS
         }
-        Err(error) => fail(&error.to_string(), EXIT_FAILED),
+        Err(error) => fail(&error.to_string(), error.exit_code()),
     }
 }
