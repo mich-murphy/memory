@@ -115,6 +115,11 @@ fn finds(own: &Table, rules: &gitleaks::Table, text: &str) -> bool {
 
 /// First hit wins: size, binary, secret pattern, internal error.
 pub(super) fn check(bytes: &[u8]) -> Result<(), Reason> {
+    judge(bytes, table().zip(gitleaks::table()))
+}
+
+/// The verdict over given tables; `None` (a table that failed to load) withholds.
+fn judge(bytes: &[u8], tables: Option<(&Table, &gitleaks::Table)>) -> Result<(), Reason> {
     if bytes.len() as u64 > MAX_SCANNED_BYTES {
         return Err(Reason::SourceLimit);
     }
@@ -124,7 +129,7 @@ pub(super) fn check(bytes: &[u8]) -> Result<(), Reason> {
     let Ok(source) = std::str::from_utf8(bytes) else {
         return Err(Reason::Binary);
     };
-    let (Some(own), Some(rules)) = (table(), gitleaks::table()) else {
+    let Some((own, rules)) = tables else {
         return Err(Reason::ScrubFailed);
     };
     if finds(own, rules, source) {
@@ -134,4 +139,19 @@ pub(super) fn check(bytes: &[u8]) -> Result<(), Reason> {
         return Err(Reason::SecretInText);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Parent, brief 50: a table that failed to load withholds a clean file (fail closed).
+    #[test]
+    fn a_missing_table_withholds_a_clean_file() {
+        assert_eq!(judge(b"clean text\n", None), Err(Reason::ScrubFailed));
+        assert_eq!(
+            judge(b"clean text\n", table().zip(gitleaks::table())),
+            Ok(())
+        );
+    }
 }
