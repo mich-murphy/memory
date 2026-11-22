@@ -101,3 +101,7 @@ dev-01, under 128 MB.
   for file on both hosts; this Mac +22.0 → +12.6 MB and 12 → 1.0 s, dev-01 +29.6 → +19.6 MB and
   43.5 → 6.0 s. [Evidence 46](evidence/46-scan-cost/). Next: hosted gates, merge, install on both
   hosts, the daemon's peak below 128 MB.
+- 2026-11-22 06:11Z to 06:51Z: merged as `ecb1d74` (stack #250) and installed on this Mac and
+  dev-01. No source judged again; `memory check` exit 0 on both with the same withholds (3, 26).
+  Peak: this Mac 82 MB over a full `memory check` and two timer rounds (was 130 MB), dev-01
+  `VmHWM` 109 MB. Exit criteria met. Details in evidence 46.

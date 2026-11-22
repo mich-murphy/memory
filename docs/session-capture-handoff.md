@@ -365,7 +365,10 @@ from `main` alone.
      hit (validated at load), and the lazy-DFA cache is 256 KiB per pattern. Verdicts are unchanged
      (no digest move). Accepted locally at `1b1d5e8`: teeth 10 of 10, gates 14/14, Linux container
      passed; this Mac +12.6 MB and 1.0 s per full judgement (was +22.0 MB, 12 s), dev-01 +19.6 MB
-     and 6.0 s (was +29.6 MB, 43.5 s). Next: hosted gates, merge, install, peak below 128 MB.
+     and 6.0 s (was +29.6 MB, 43.5 s). Merged as `ecb1d74` and installed on both hosts on
+     2026-11-22 (this Mac 06:12Z, `runs = 15`; dev-01 06:19Z): no re-judgement, `memory check`
+     exit 0 on both, withheld 3 and 26; peak 82 MB here over a full check (was 130 MB), dev-01
+     `VmHWM` 109 MB. Open: the operator's answer on shared owners in analytics (item 27 d).
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

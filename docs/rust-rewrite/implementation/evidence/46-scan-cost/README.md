@@ -63,3 +63,25 @@ The brief's target (at most +13 MB and 1.5 s, the same withholds) is met on this
 set. On dev-01 the verdicts are equal file for file and the CPU falls by a factor of 7. The added
 memory falls by 10 MB but is above 13 MB, because dev-01's scanned files are larger Pi run logs. The
 acceptance criterion is the daemon's peak below 128 MB on both hosts (install below).
+
+## Merge, install on both hosts
+
+- Stack #250 (PRs #247 to #249) merged as `ecb1d74`. Rust gates passed on all three PRs; CI failed
+  only in the two accepted `govulncheck` steps.
+- This Mac: installed in place at 06:11:50Z (sha256 prefix `abb1688a53a58c37`, `runs = 15`), with
+  the `6510ff7` binary kept as `backup/memory-6510ff7`. Start round at 06:16:10Z: `landed=2
+  failed=0 local=0 deleted=0 withheld=0` (the digest did not move, so nothing was judged again),
+  `tmp/` empty, no WARN or ERROR line. `memory check` 06:26Z to 06:51Z: exit 0, 1,170 owners, 8,180
+  sources, 8,177 match, 0 mismatch, 0 uncaptured, `remote_only=0`, `store_error=0`; withheld
+  file_history 2, claude.memory 1 (`secret_in_text`). Two timer rounds ran during the check. Peak
+  footprint over the start round, both timer rounds and the check: 82 MB (232 samples; it was
+  130 MB on `6510ff7` in the same situation).
+- dev-01: `ecb1d74` built on the host (sha256 prefix `f00659da2d3510da`); both Nix store
+  dependencies are the pinned GC roots. Installed at 06:19:11Z with `backup/memory-6510ff7`. Start
+  round: `landed=0 withheld=0`, `NRestarts=0`, `tmp/` empty, no WARN or ERROR line. `memory check`
+  06:21Z to 06:26Z: exit 0, 454 owners, 5,971 sources, 5,945 match, all other counts 0; withheld
+  file_history 4, pi.aux 12 (`secret_in_text`), pi.aux 10 (`source_limit`). `VmHWM` after the
+  check: 109,016 kB.
+
+Both peaks are below the 128 MB backlog target of DESIGN section 15. Exit criteria met.
+
