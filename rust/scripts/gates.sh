@@ -32,7 +32,10 @@ run() {
   if [[ $status != 0 ]]; then tail -30 "artifacts/$name.log"; failed=1; fi
 }
 run 01-fmt cargo fmt --check
-run 02-clippy cargo clippy --workspace --all-targets --locked -- -Dwarnings
+# The second pass builds only the libraries and binaries: with resolver 2 the dev-dependency's
+# `sim` feature is then off, as in the release build. Under --all-targets every crate is built
+# with `sim`, so non-`sim` code was never compiled by any gate (brief 52 follow-up).
+run 02-clippy bash -c 'cargo clippy --workspace --all-targets --locked -- -Dwarnings && cargo clippy --workspace --lib --bins --locked -- -Dwarnings'
 run 03-deny cargo deny --locked check
 run 03-core-bans bash -c 'cd crates/memory-core && cargo deny --locked --exclude-dev check bans'
 # Each test runs once across 04, 05 and 06: 04 runs everything that is not a named property,

@@ -722,7 +722,7 @@ fn a_commit_between_walk_and_fetch_is_not_remote_only() -> R {
     let s = setup("race-remote")?;
     capture(&s)?;
     let debug = debug_file(&s)?;
-    let r = raced(&s, Phase::AfterWalk, || {
+    let r = raced(&s, Phase::Walked, || {
         let _ = fs::write(&debug, "debug line\n");
         let _ = capture(&s);
     })?;
@@ -738,7 +738,7 @@ fn a_commit_between_fetch_and_judge_is_not_uncaptured() -> R {
     let s = setup("race-uncap")?;
     capture(&s)?;
     fs::write(debug_file(&s)?, "debug line\n").map_err(e)?; // seen by the walk, not yet captured
-    let r = raced(&s, Phase::AfterFetch, || {
+    let r = raced(&s, Phase::Fetched, || {
         let _ = capture(&s);
     })?;
     assert_eq!(r.tally.uncaptured, 0, "{:?}", r.details);
@@ -754,7 +754,7 @@ fn a_file_deleted_after_the_walk_is_never_a_failure() -> R {
     let debug = debug_file(&s)?;
     fs::write(&debug, "debug line\n").map_err(e)?;
     capture(&s)?;
-    let r = raced(&s, Phase::AfterFetch, || {
+    let r = raced(&s, Phase::Fetched, || {
         let _ = fs::remove_file(&debug);
     })?;
     assert_eq!(r.tally.mismatch + r.tally.uncaptured, 0, "{:?}", r.details);
@@ -770,7 +770,7 @@ fn a_file_really_gone_locally_is_still_remote_only() -> R {
     fs::write(&debug, "debug line\n").map_err(e)?;
     capture(&s)?;
     fs::remove_file(&debug).map_err(e)?;
-    let r = raced(&s, Phase::AfterWalk, || {})?;
+    let r = raced(&s, Phase::Walked, || {})?;
     assert_eq!(r.tally.remote_only, 1);
     Ok(())
 }
@@ -781,7 +781,7 @@ fn a_never_captured_file_is_still_uncaptured_and_exits_one() -> R {
     let s = setup("race-real-uncap")?;
     capture(&s)?;
     fs::write(debug_file(&s)?, "debug line\n").map_err(e)?;
-    let r = raced(&s, Phase::AfterFetch, || {})?;
+    let r = raced(&s, Phase::Fetched, || {})?;
     assert_eq!((r.tally.uncaptured, r.exit()), (1, 1));
     // The real binary agrees.
     let ran = run(&s)?;
@@ -820,7 +820,7 @@ fn a_corrupted_piece_is_still_a_mismatch_even_when_the_owner_moved() -> R {
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert!(ran.has("mismatch", 1));
     // The owner moves between fetch and judge (an append is captured): still a mismatch.
-    let r = raced(&s, Phase::AfterFetch, || {
+    let r = raced(&s, Phase::Fetched, || {
         let _ = s.append(12..14);
         let _ = capture(&s);
     })?;
@@ -864,7 +864,7 @@ fn a_rewrite_captured_between_fetch_and_judge_is_not_a_mismatch() -> R {
     fs::write(&debug, "a longer first debug line\n").map_err(e)?;
     capture(&s)?;
     fs::write(&debug, "short\n").map_err(e)?;
-    let r = raced(&s, Phase::AfterFetch, || {
+    let r = raced(&s, Phase::Fetched, || {
         let _ = capture(&s);
     })?;
     assert_eq!(r.tally.mismatch + r.tally.uncaptured, 0, "{:?}", r.details);
