@@ -29,6 +29,7 @@
 //! the scanner table and size cap.
 
 mod document;
+mod gitleaks;
 mod launch;
 mod names;
 mod scan;

@@ -335,6 +335,27 @@ from `main` alone.
      1,618 `unchanged`, 13,299 sources and 1,770,753 events queryable, `report()` 0 failures;
      file-history (1,224) and subagent aux `json` (1,694) reach the projection. Limit: shared
      owners (stores, memory notes, config) are restorable but not in the analytics projection.
+  27. 2026-11-21/22, operator decisions and checks. (a) The 2-day production criterion was
+     brought forward by the operator ("arbitrary"): checked on 2026-11-21 21:08Z to 21:37Z, both
+     hosts pass. This Mac: `memory check` exit 0, 8,177 sources, 8,027 match, 0 mismatch, 0
+     uncaptured, 0 parked, 0 `store_error`; every 12-hourly check (6) exit 0. dev-01: exit 0,
+     5,967 sources, 5,826 match, all zero; 2 of 2 loop checks exit 0. No WARN or ERROR line,
+     no restart on either host. The loop check at 21:02Z on this Mac showed `remote_only=2`: two
+     files landed at 21:13Z between that check's walk and its remote read (a race in `check`,
+     open finding); the check started 21:12Z shows 0. (b) Cleanup approved and done: this Mac
+     deleted `~/.local/state/agent-sessions-retired-20261120/`, `codex-preserved-20261120/` and
+     the Go `agent-sessions-capture/` and `agent-sessions-locks/` (untouched since October), 32 GB;
+     dev-01 deleted the first two, 6 GB. Nothing referred to them; both daemons kept running.
+     (c) Secret scanning: the operator chose the gitleaks approach (brief 50). (d) Shared owners
+     in analytics: research and counts (this Mac: 899 threads in `thread_history_1.sqlite`, 872
+     with no local rollout; `Replace` keeps only the newest config version) are reported to the
+     operator; the decision whether restore counts as a use is open.
+  28. 2026-11-22, brief 50 (D61), [evidence 45](rust-rewrite/implementation/evidence/45-gitleaks-scan/):
+     the `Scanned` content scan runs the vendored gitleaks v8.30.1 rules plus our provider, PEM and
+     URL-credential patterns, on the bytes and a JSON-unescaped copy; the name-only assignment rule
+     and the shell guard leave the scan. Accepted locally at `cd6910d`: teeth 29 of 29, gates 14/14,
+     Linux container passed. Replay with the built scanner: withheld 150 → 3 here, 141 → 26 on
+     dev-01. Next: hosted gates, merge, install on both hosts.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

@@ -577,8 +577,10 @@ fn rule_digest_golden_requires_explicit_semantic_review() {
         privacy::rules_digest(),
         [
             // D54, brief 47: the scanner table and cap joined the digest (was 165, 111, 102, ...).
-            223, 26, 99, 231, 255, 225, 11, 174, 228, 75, 77, 105, 94, 14, 197, 219, 37, 2, 143,
-            164, 171, 54, 156, 54, 57, 231, 77, 232, 81, 132, 206, 217
+            // Brief 50: scan/2 on the vendored gitleaks v8.30.1 rules moved the digest (was 223, 26, 99, ...).
+            // Brief 50 (parent): own provider patterns start at a word boundary (was 136, 128, 227, ...).
+            0, 202, 21, 35, 19, 153, 7, 168, 139, 54, 133, 252, 26, 198, 109, 180, 221, 160, 67,
+            111, 209, 104, 190, 255, 242, 31, 218, 102, 95, 108, 76, 57
         ]
     );
 }

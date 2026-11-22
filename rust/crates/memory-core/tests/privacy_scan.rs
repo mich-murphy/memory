@@ -39,6 +39,12 @@ fn scan(input: &[u8]) -> Result<Vec<u8>, Reason> {
     }
 }
 
+/// High-entropy literal for the generic fixtures (brief 50: gitleaks judges the value, not the
+/// name alone). Built from parts so no literal secret is committed.
+fn value() -> String {
+    format!("{}{}{}", "Zk9Qx2Lm7P", "v4Rt8Yb3Nc6W", "d1Fe5Gh0Js")
+}
+
 fn hits() -> Vec<(&'static str, String)> {
     let up = "ABCDEFGHIJKLMNOP";
     let low = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -72,23 +78,18 @@ fn hits() -> Vec<(&'static str, String)> {
         ),
         ("jwt", format!("{}.{}.sig", "eyJhbGciOiJ", "eyJzdWIiOiJ")),
         ("url", format!("postgres{}user:hunter22@host/db", "://")),
-        ("shell", format!("export API_{}=literalvalue123", "KEY")),
-        ("generic-env", format!("DB_{}=literalvalue123", "PASSWORD")),
-        ("generic-yaml", format!("api_{}: literalvalue123", "token")),
+        // Brief 50: the generic fixtures carry a high-entropy value (gitleaks generic rule).
+        ("shell", format!("export API_{}={}", "KEY", value())),
+        ("generic-env", format!("DB_{}={}", "PASSWORD", value())),
+        ("generic-yaml", format!("api_{}: {}", "token", value())),
         (
             "generic-json",
-            format!("{{\"client_{}\": \"literalvalue123\"}}", "secret"),
+            format!("{{\"client_{}\": \"{}\"}}", "secret", value()),
         ),
-        (
-            "generic-toml",
-            format!("auth_{} = 'literalvalue123'", "key"),
-        ),
+        ("generic-toml", format!("auth_{} = '{}'", "key", value())),
         (
             "generic-code",
-            format!(
-                "let x = {{ apiKey: \"literalvalue123\" }}; // {}",
-                "apikey: literalvalue123"
-            ),
+            format!("let x = {{ apiKey: \"{}\" }};", value()),
         ),
     ]
 }
@@ -131,14 +132,45 @@ fn near_misses_pass_byte_for_byte() {
     }
 }
 
-/// A secret assignment inside another assignment's value is judged too (parent finding,
-/// brief 47): a non-overlapping search took `args`/`url` as the name and never saw the inner one.
+/// Brief 50 (parent): a provider prefix inside a longer identifier is not a token.
+#[test]
+fn provider_prefixes_inside_an_identifier_pass() {
+    let tail = "abcdefgh-ijklmnop-qrstuvwx-yzabcdef-ghij";
+    for text in [
+        format!("run: ta{}{tail}", "sk-"),
+        format!("id: di{}{tail}", "sk-"),
+        format!("x{}{}", "AIza", "B".repeat(35)),
+        format!("my{}{}", "ghp_", "abcdefghijklmnopqrstuvwxyz"),
+    ] {
+        let input = format!("{text}\n");
+        assert_eq!(
+            scan(input.as_bytes()),
+            Ok(input.clone().into_bytes()),
+            "embedded prefix {text:?} withheld"
+        );
+    }
+    // At a word start the same shapes are withheld.
+    for text in [
+        format!("run: {}{tail}", "sk-"),
+        format!("key=\"{}{}\"", "AIza", "B".repeat(35)),
+    ] {
+        let input = format!("{text}\n");
+        assert_eq!(
+            scan(input.as_bytes()).err(),
+            Some(Reason::SecretInText),
+            "word-start token {text:?} published"
+        );
+    }
+}
+
+/// Brief 50: the generic rule matches an assignment wherever it sits in a line, including
+/// inside another assignment's value.
 #[test]
 fn an_assignment_nested_in_a_value_is_withheld() {
     for text in [
-        format!("args: --{}=literalvalue123", "token"),
-        format!("url=https://h/p?api_{}=literalvalue123", "key"),
-        format!("opts = \"x client_{}: literalvalue123\"", "secret"),
+        format!("args: --{}={}", "token", value()),
+        format!("url=https://h/p?api_{}={}", "key", value()),
+        format!("opts = \"x client_{}: {}\"", "secret", value()),
     ] {
         let input = format!("{text}\n");
         assert_eq!(
@@ -151,26 +183,46 @@ fn an_assignment_nested_in_a_value_is_withheld() {
     assert_eq!(scan(clean.as_bytes()), Ok(clean.as_bytes().to_vec()));
 }
 
-/// The reused shell-assignment guard is the only rule for a short literal and for fish's
-/// `set -gx NAME value` (no `=` or `:`), so dropping it must be seen (parent finding, brief 47).
+/// Brief 50: the shell guard and the name-only assignment rule no longer run in the scan, so
+/// low-entropy and code-shaped values pass byte for byte (the 12 code lines of the synthetic set).
 #[test]
-fn the_shell_guard_catches_short_and_fish_assignments() {
-    for text in [
-        format!("export DB_{}=abc12", "PASSWORD"),
-        format!("set -gx API_{} literalvalue123", "TOKEN"),
-    ] {
+fn code_shaped_lines_pass_byte_for_byte() {
+    let lines = [
+        "token = getToken()",
+        "let key = lookup(name);",
+        "const apiKey = process.env.API_KEY;",
+        "password = os.environ[\"DB_PASSWORD\"]",
+        "auth_token: Option<String>,",
+        "secret = config.secret_name",
+        "self.token = token_from_header(req)",
+        "export DB_PASSWORD=abc12",
+        "set -gx API_TOKEN literalvalue123",
+        "headers[\"Authorization\"] = format!(\"Bearer {}\", tok)",
+        "if token == expected_token { return true }",
+        "client_secret = load_secret(path)",
+    ];
+    for text in lines {
         let input = format!("{text}\n");
         assert_eq!(
-            scan(input.as_bytes()).err(),
-            Some(Reason::SecretInText),
-            "shell assignment not withheld"
+            scan(input.as_bytes()),
+            Ok(input.clone().into_bytes()),
+            "code line {text:?} withheld"
         );
     }
-    let clean = format!(
-        "export DB_{}=${{DB_PASSWORD}}\nset -gx EDITOR vim\n",
-        "PASSWORD"
+}
+
+/// Brief 50: a secret that is only visible once JSON string escapes are undone.
+#[test]
+fn a_secret_inside_json_escapes_is_withheld() {
+    let input = format!(
+        "{{\"text\":\"line\\nDB_{}=\\\"{}\\\"\\n\"}}\n",
+        "PASSWORD",
+        value()
     );
-    assert_eq!(scan(clean.as_bytes()), Ok(clean.clone().into_bytes()));
+    assert!(input.contains('\\'));
+    assert_eq!(scan(input.as_bytes()).err(), Some(Reason::SecretInText));
+    let clean = "{\"text\":\"a\\nb\\\"c\\\"\"}\n";
+    assert_eq!(scan(clean.as_bytes()), Ok(clean.as_bytes().to_vec()));
 }
 
 #[test]

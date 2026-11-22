@@ -1,8 +1,13 @@
 //! Whole-file content scan for `Profile::Scanned` (D54, brief 47). The file is published whole
 //! or withheld whole: a clean file passes byte for byte, nothing is redacted. Reasons are fixed
 //! codes; no match, offset or content ever leaves this module.
+//!
+//! Detection order (brief 50): own patterns, then the vendored gitleaks v8.30.1 rule set on the
+//! bytes, then, if the bytes hold a backslash, both again on a copy with JSON string escapes
+//! undone. Any finding withholds the file. Not ported from gitleaks: base64, hex and percent
+//! decoding passes. The generic assignment rule and the shell guard no longer run here.
 
-use super::{Reason, names, text};
+use super::{Reason, gitleaks};
 use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::sync::OnceLock;
@@ -12,41 +17,38 @@ pub const MAX_SCANNED_BYTES: u64 = 1024 * 1024;
 
 /// Version of the table below; bump with any change to a pattern, so the digest moves even if a
 /// edit were to cancel out.
-const TABLE_VERSION: &str = "scan/1";
+const TABLE_VERSION: &str = "scan/2";
 
 /// Fixed secret shapes. Each hit withholds the whole file (false positives are accepted).
+/// Provider shapes start at a word boundary, as gitleaks' provider rules do: measured before
+/// brief 50's install, every unanchored `sk-` hit (2 files here, 17 on dev-01) sat inside a
+/// longer identifier (`…task-…`), never at a word start.
 const PATTERNS: &[&str] = &[
     // PEM, OpenSSH and PGP private-key headers.
     r"-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----",
     // AWS access key ids.
-    r"(AKIA|ASIA)[A-Z0-9]{16}",
+    r"\b(AKIA|ASIA)[A-Z0-9]{16}",
     // GitHub tokens (classic prefixes and fine-grained).
-    r"gh[pousr]_[A-Za-z0-9]{20,}",
-    r"github_pat_[A-Za-z0-9_]{20,}",
+    r"\bgh[pousr]_[A-Za-z0-9]{20,}",
+    r"\bgithub_pat_[A-Za-z0-9_]{20,}",
     // Slack tokens.
-    r"xox[abprs]-[A-Za-z0-9-]{10,}",
+    r"\bxox[abprs]-[A-Za-z0-9-]{10,}",
     // Anthropic and OpenAI keys.
-    r"sk-ant-[A-Za-z0-9_-]{16,}",
-    r"sk-proj-[A-Za-z0-9_-]{16,}",
-    r"sk-[A-Za-z0-9_-]{32,}",
+    r"\bsk-ant-[A-Za-z0-9_-]{16,}",
+    r"\bsk-proj-[A-Za-z0-9_-]{16,}",
+    r"\bsk-[A-Za-z0-9_-]{32,}",
     // Google API keys.
-    r"AIza[0-9A-Za-z_-]{35}",
+    r"\bAIza[0-9A-Za-z_-]{35}",
     // Stripe live keys.
-    r"(sk|rk)_live_[0-9A-Za-z]{16,}",
+    r"\b(sk|rk)_live_[0-9A-Za-z]{16,}",
     // JSON web tokens (header and payload segments).
-    r"eyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.",
+    r"\beyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.",
     // Credentials embedded in a URL: scheme://user:password@host.
     r"://[^\s/:@]+:[^\s/@]+@",
 ];
 
-/// A name, `=` or `:` (optionally quoted: env, YAML, JSON, TOML, source code), then a value of
-/// 8 or more characters. Names are judged by `names::is_secret_name`, values by
-/// `names::reference` plus the `<placeholder>` form.
-const ASSIGNMENT: &str = r#"([A-Za-z_][A-Za-z0-9_.-]*)["']?\s*[=:]\s*["']?([^\s"',;]{8,})"#;
-
 struct Table {
     patterns: Vec<Regex>,
-    assignment: Regex,
 }
 
 fn table() -> Option<&'static Table> {
@@ -58,30 +60,69 @@ fn table() -> Option<&'static Table> {
                 .map(|p| Regex::new(p))
                 .collect::<Result<Vec<_>, _>>()
                 .ok()?;
-            Some(Table {
-                patterns,
-                assignment: Regex::new(ASSIGNMENT).ok()?,
-            })
+            Some(Table { patterns })
         })
         .as_ref()
 }
 
-/// Scanner table and cap, for `rules_digest`.
+/// Marker for the JSON-unescape pass, so changing it moves the digest.
+const ESCAPE_PASS: &str = "json-unescape:\\\" \\\\ \\/ \\n \\t \\r";
+
+/// Scanner table, vendored rule file and cap, for `rules_digest`.
 pub(super) fn digest_rules(hash: &mut Sha256) {
     hash.update(TABLE_VERSION.as_bytes());
     hash.update(MAX_SCANNED_BYTES.to_le_bytes());
-    for pattern in PATTERNS.iter().copied().chain([ASSIGNMENT]) {
+    gitleaks::digest_rules(hash);
+    for pattern in PATTERNS {
         hash.update(pattern.as_bytes());
         hash.update(b"\n");
     }
+    hash.update(ESCAPE_PASS.as_bytes());
 }
 
-fn placeholder(value: &str) -> bool {
-    value.starts_with('<') && value.ends_with('>')
+/// Undo JSON string escapes `\"`, `\\`, `\/`, `\n`, `\t`, `\r`; other backslashes stay.
+fn unescape(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek().copied() {
+            Some(n @ ('"' | '\\' | '/')) => {
+                out.push(n);
+                chars.next();
+            }
+            Some('n') => {
+                out.push('\n');
+                chars.next();
+            }
+            Some('t') => {
+                out.push('\t');
+                chars.next();
+            }
+            Some('r') => {
+                out.push('\r');
+                chars.next();
+            }
+            _ => out.push('\\'),
+        }
+    }
+    out
+}
+
+fn finds(own: &Table, rules: &gitleaks::Table, text: &str) -> bool {
+    own.patterns.iter().any(|re| re.is_match(text)) || rules.detect(text.as_bytes())
 }
 
 /// First hit wins: size, binary, secret pattern, internal error.
 pub(super) fn check(bytes: &[u8]) -> Result<(), Reason> {
+    judge(bytes, table().zip(gitleaks::table()))
+}
+
+/// The verdict over given tables; `None` (a table that failed to load) withholds.
+fn judge(bytes: &[u8], tables: Option<(&Table, &gitleaks::Table)>) -> Result<(), Reason> {
     if bytes.len() as u64 > MAX_SCANNED_BYTES {
         return Err(Reason::SourceLimit);
     }
@@ -91,31 +132,29 @@ pub(super) fn check(bytes: &[u8]) -> Result<(), Reason> {
     let Ok(source) = std::str::from_utf8(bytes) else {
         return Err(Reason::Binary);
     };
-    let Some(table) = table() else {
+    let Some((own, rules)) = tables else {
         return Err(Reason::ScrubFailed);
     };
-    if table.patterns.iter().any(|re| re.is_match(source)) {
+    if finds(own, rules, source) {
         return Err(Reason::SecretInText);
     }
-    // The shell-assignment guard, with no extension exemption.
-    text::check(&[], bytes)?;
-    // Each search restarts at the start of the last value, not after it: a value may itself
-    // hold an assignment (`args: --token=…`, `url=…?api_key=…`) whose name must be judged too.
-    let mut at = 0;
-    while let Some(found) = table.assignment.captures_at(source, at) {
-        let (Some(name), Some(value)) = (found.get(1), found.get(2)) else {
-            return Err(Reason::ScrubFailed);
-        };
-        if names::is_secret_name(name.as_str())
-            && !names::reference(value.as_str())
-            && !placeholder(value.as_str())
-        {
-            return Err(Reason::SecretInText);
-        }
-        if value.start() <= at {
-            return Err(Reason::ScrubFailed);
-        }
-        at = value.start();
+    if source.contains('\\') && finds(own, rules, &unescape(source)) {
+        return Err(Reason::SecretInText);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Parent, brief 50: a table that failed to load withholds a clean file (fail closed).
+    #[test]
+    fn a_missing_table_withholds_a_clean_file() {
+        assert_eq!(judge(b"clean text\n", None), Err(Reason::ScrubFailed));
+        assert_eq!(
+            judge(b"clean text\n", table().zip(gitleaks::table())),
+            Ok(())
+        );
+    }
 }
