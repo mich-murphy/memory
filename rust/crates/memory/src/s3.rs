@@ -171,12 +171,15 @@ pub struct Page {
     pub next: Option<String>,
 }
 
+/// A 200 list reply that cannot be used: a protocol fault, retryable like any garbled read.
+const PROTOCOL: StoreError = StoreError::Offline(Cause::Protocol);
+
 /// Map one ListObjectsV2 reply to a [`Page`]. Pure. `full` is `prefix + under`, `prefix` the
 /// store prefix to strip.
 ///
 /// # Errors
-/// The [`StoreError`] of a non-200 status; `Server` for a body over [`MAX_LIST_BODY`], not UTF-8
-/// or not a ListObjectsV2 document.
+/// The [`StoreError`] of a non-200 status; `Offline(Cause::Protocol)` (brief 52) for a 200 body
+/// over [`MAX_LIST_BODY`], not UTF-8 or not a ListObjectsV2 document.
 pub fn map_list_reply(
     prefix: &str,
     full: &str,
@@ -191,11 +194,10 @@ pub fn map_list_reply(
         };
     }
     if u64::try_from(body.len()).map_or(true, |n| n > MAX_LIST_BODY) {
-        return Err(StoreError::Server);
+        return Err(PROTOCOL);
     }
-    let text = std::str::from_utf8(body).map_err(|_| StoreError::Server)?;
-    let parsed =
-        rusty_s3::actions::ListObjectsV2::parse_response(text).map_err(|_| StoreError::Server)?;
+    let text = std::str::from_utf8(body).map_err(|_| PROTOCOL)?;
+    let parsed = rusty_s3::actions::ListObjectsV2::parse_response(text).map_err(|_| PROTOCOL)?;
     let mut page = Page {
         next: parsed.next_continuation_token,
         ..Page::default()
@@ -485,23 +487,23 @@ mod list_tests {
     }
 
     #[test]
-    fn oversized_body_is_server() {
+    fn oversized_body_is_protocol() {
         let body = vec![b' '; usize::try_from(MAX_LIST_BODY).unwrap_or(0) + 1];
         assert_eq!(
             map_list_reply(P, FULL, 200, &body, None),
-            Err(StoreError::Server)
+            Err(StoreError::Offline(Cause::Protocol))
         );
     }
 
     #[test]
-    fn unparsable_body_is_server() {
+    fn unparsable_body_is_protocol() {
         assert_eq!(
             map_list_reply(P, FULL, 200, b"not xml", None),
-            Err(StoreError::Server)
+            Err(StoreError::Offline(Cause::Protocol))
         );
         assert_eq!(
             map_list_reply(P, FULL, 200, &[0xff, 0xfe], None),
-            Err(StoreError::Server)
+            Err(StoreError::Offline(Cause::Protocol))
         );
     }
 

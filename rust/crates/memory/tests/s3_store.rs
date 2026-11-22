@@ -34,6 +34,8 @@ mod codex_store;
 mod consumer_gate;
 #[path = "s3_store/daemon_restore.rs"]
 mod daemon_restore;
+#[path = "s3_store/errors.rs"]
+mod errors;
 #[path = "s3_store/event_loop.rs"]
 mod event_loop;
 #[path = "s3_store/export.rs"]

@@ -209,7 +209,8 @@ fn owners_a_500_fails_as_store() -> R {
     let server = Fake::start()?;
     let rig = rig(&server, "own-500")?;
     server.queue("GET", "", Fault::Status(500, None));
-    failing(&server, &rig, "store", 1)
+    // Brief 52: the cause is named and a transient store failure exits 75 (was `store`, 1).
+    failing(&server, &rig, "store cause=server", 75)
 }
 
 #[test]
@@ -217,7 +218,7 @@ fn owners_a_403_fails_as_store() -> R {
     let server = Fake::start()?;
     let rig = rig(&server, "own-403")?;
     server.queue("GET", "", Fault::Status(403, None));
-    failing(&server, &rig, "store", 1)
+    failing(&server, &rig, "store cause=auth", 77)
 }
 
 #[test]
@@ -225,7 +226,8 @@ fn owners_unparsable_body_fails_as_store() -> R {
     let server = Fake::start()?;
     let rig = rig(&server, "own-garbage")?;
     server.queue("GET", "", Fault::ListBody("this is not xml"));
-    failing(&server, &rig, "store", 1)
+    // Brief 52: an unusable 200 list body is `Offline(Protocol)`, retryable (75), no longer `server`.
+    failing(&server, &rig, "store cause=protocol", 75)
 }
 
 #[test]
