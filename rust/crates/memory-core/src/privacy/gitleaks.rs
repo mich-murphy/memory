@@ -7,6 +7,15 @@
 //! `pkcs12-file` rule is skipped. Not ported: base64, hex and percent decoding passes and
 //! multi-part `required` rules (none in v8.30.1).
 //!
+//! Cost (brief 51). The keyword prefilter runs `memchr::memmem` over the lowercased text. Every
+//! rule pattern is compiled once at load to validate it (a failure is a table failure), then the
+//! regex is dropped. A rule's regex is compiled again, and kept in a `OnceLock`, at the first
+//! text whose keywords match (a rule without keywords: at its first use). Most rules never
+//! compile, which saves memory. A compile that fails then gives `Detect::Failed`, and the caller
+//! withholds with `ScrubFailed`. Each rule regex has a 256 KiB lazy-DFA cache cap instead of the
+//! default 2 MiB: 221 caches at the default were most of the scan's resident memory. Neither
+//! change alters a verdict. Allowlist regexes stay compiled from load.
+//!
 //! The table loads once; any parse or compile failure yields `None` and the caller withholds.
 
 use regex::bytes::{Regex, RegexBuilder};
