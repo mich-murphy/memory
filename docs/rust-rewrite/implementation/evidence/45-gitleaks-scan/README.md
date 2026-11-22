@@ -77,6 +77,42 @@ The values released on both hosts were classed before the brief (evidence in bri
 expressions, file paths, URLs without credentials and identifier text without digits; none is a
 literal secret by shape, entropy or character class.
 
+## Merge, install on both hosts
+
+- Stack #246 (PRs #243 to #245) merged as `6510ff7`. Rust gates passed on all three PRs; CI failed
+  only in the two accepted `govulncheck` steps.
+- This Mac: installed in place at 03:52:38Z (sha256 prefix `13dce21b40dde2cb`, `runs = 14`), with
+  the `30002d9` binary kept as `backup/memory-30002d9`. Start round at 04:04:00Z: `landed=198
+  failed=0 local=0 deleted=0 withheld=3`, `tmp/` empty, no WARN or ERROR line. `memory status`:
+  total 8,179, current 8,174, `withheld` 150 → 3, `ignored` 20,220, `deferred_snapshot` 0.
+  `memory check` 04:17Z to 04:42Z: exit 0, 1,170 owners, 8,179 sources, 8,176 match, 0 mismatch,
+  0 uncaptured, `remote_only=0`, `store_error=0`; withheld file_history 2, claude.memory 1 (all
+  `secret_in_text`), as the replay predicted.
+- dev-01: `6510ff7` built on the host (sha256 prefix `4cb5e71ac89aa88d`); both Nix store
+  dependencies are the pinned GC roots. Installed at 04:07:24Z with `backup/memory-30002d9`. Start
+  round: `landed=57 failed=0 local=0 deleted=0 withheld=26`, `VmHWM` 109,264 kB, `NRestarts=0`,
+  `tmp/` empty, no WARN or ERROR line. `memory check` 04:12Z to 04:17Z: exit 0, 454 owners, 5,970
+  sources, 5,944 match, all other counts 0; withheld file_history 4, pi.aux 12 (`secret_in_text`),
+  pi.aux 10 (`source_limit`), as the replay predicted.
+
+### Finding: memory and CPU of the new scan
+
+The Mac daemon's footprint was 99 MB in the start round but reached 130 MB at 04:19:13Z, in the
+first timer round, above the 128 MB backlog peak of section 15 (earlier installs: 88 to 105 MB).
+A scratch crate judged the same 2,108 scanned files on this Mac with the real `admit` and
+`transform` (one thread, as the daemon judges; counts only):
+
+| Build | Resident added after the walk | CPU |
+|---|---|---|
+| `30002d9` (old scan) | +2.6 MB | 0.6 s |
+| `6510ff7` (this brief) | +21.9 MB: 10.7 MB compiled table, 11.3 MB match caches | 11.8 s |
+
+Variants measured in a scratch build of `6510ff7`: the keyword prefilter through
+`memchr::memmem` takes the CPU to 0.6 to 0.9 s with no change in memory; compiling a rule only
+when one of its keywords occurs (64 of 221 rules ever compile here) takes the added memory to
+15.7 MB; a 256 KiB lazy-DFA cache per gitleaks pattern takes it to 12.8 MB (1.0 s). Every variant
+gives the same 3 withholds. Fixed in brief 51.
+
 ## Limits
 
 - gitleaks' base64, hex and percent decoding passes are not ported. A secret that is only visible

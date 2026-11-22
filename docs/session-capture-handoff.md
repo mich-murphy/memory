@@ -355,7 +355,11 @@ from `main` alone.
      URL-credential patterns, on the bytes and a JSON-unescaped copy; the name-only assignment rule
      and the shell guard leave the scan. Accepted locally at `cd6910d`: teeth 29 of 29, gates 14/14,
      Linux container passed. Replay with the built scanner: withheld 150 → 3 here, 141 → 26 on
-     dev-01. Next: hosted gates, merge, install on both hosts.
+     dev-01. Merged as `6510ff7` and installed on both hosts on 2026-11-22 (this Mac 03:53Z,
+     `runs = 14`; dev-01 04:07Z): first rounds withheld 3 and 26, `memory check` exit 0 on both.
+     Finding: the Mac daemon peaked at 130 MB against the 128 MB target; the gitleaks table and
+     its match caches add 21.9 MB and the naive keyword search 11 s of CPU per full judgement
+     (evidence 45). Brief 51 fixes it.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

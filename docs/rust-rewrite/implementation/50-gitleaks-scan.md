@@ -128,3 +128,7 @@ DESIGN (8, D61), the handoff; merge; install on both hosts; the first round's `l
   seed 3449721935, nextest 906, coverage 95.64 %; Linux container passed. Replay with the built
   scanner: 150 → 3 withheld here, 141 → 26 on dev-01. [Evidence 45](evidence/45-gitleaks-scan/).
   Next: hosted gates, merge, install on both hosts, first round, `memory status`, `memory check`.
+- 2026-11-22 03:52Z to 04:42Z: merged as `6510ff7` (stack #246) and installed on this Mac and
+  dev-01. First rounds withheld 3 and 26, `memory check` exit 0 on both with the predicted
+  withholds. Finding: the Mac daemon peaked at 130 MB (target 128 MB); the scan adds 21.9 MB and
+  11.8 s CPU over 2,108 files (evidence 45). Fixed in brief 51.
