@@ -133,3 +133,57 @@ fn file_history_lands_clean_and_withholds_secret_and_binary() -> R {
     assert!(exported.err.contains("sources=2"), "{}", exported.err);
     Ok(())
 }
+
+/// Brief 50: the scan judges the value, not the name. Code that merely names a token lands;
+/// a high-entropy literal in a generic assignment (a gitleaks rule, no own pattern) is withheld.
+#[test]
+fn file_history_lands_code_with_token_names_and_withholds_a_literal() -> R {
+    let s = setup("file-history")?;
+    let fh = s.rig.root.join("file-history").join(UUID);
+    fs::create_dir_all(&fh).map_err(e)?;
+    let code = "token = getToken()\nlet key = lookup(name);\n";
+    let literal = concat!(
+        "api_key = \"",
+        "Zk9Qx2Lm7P",
+        "v4Rt8Yb3Nc6W",
+        "d1Fe5Gh0Js",
+        "\"\n"
+    );
+    fs::write(fh.join(CLEAN), code).map_err(e)?;
+    fs::write(fh.join(SECRET_FILE), literal).map_err(e)?;
+
+    let ran = command(&s, &["reconcile"])?;
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    let round = ran
+        .err
+        .lines()
+        .find(|l| l.contains(" INFO round "))
+        .ok_or("no round line")?;
+    assert!(round.contains(" withheld=1"), "{round}");
+
+    let check = command(&s, &["check"])?;
+    assert_eq!(check.code, 0, "{}{}", check.out, check.err);
+    let withheld: Vec<&str> = check
+        .out
+        .lines()
+        .filter(|l| l.starts_with("withheld "))
+        .collect();
+    assert_eq!(withheld.len(), 1, "{}", check.out);
+    assert!(
+        withheld
+            .iter()
+            .all(|l| l.ends_with(" reason=secret_in_text")),
+        "{}",
+        check.out
+    );
+
+    let out = s.rig.dir.join("restored");
+    let out_text = out.display().to_string();
+    let prefix = memory_core::limits::owner_prefix(&s.owner);
+    let restored = command(&s, &["restore", &prefix, "--out", &out_text])?;
+    assert_eq!(restored.code, 0, "{}{}", restored.out, restored.err);
+    let rel = out.join("file-history").join(UUID);
+    assert_eq!(fs::read(rel.join(CLEAN)).map_err(e)?, code.as_bytes());
+    assert!(!rel.join(SECRET_FILE).exists());
+    Ok(())
+}
