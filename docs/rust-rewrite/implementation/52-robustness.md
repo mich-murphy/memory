@@ -75,7 +75,7 @@ Each is reversible before merge. A worker that finds one wrong reports it and do
 |---|---|
 | Store line (1) | `export`, `restore` and `owners` print `memory: store cause=<StoreError::code()>` (the closed codes of D49). A fetcher with no typed error (test fetchers) still prints `store` |
 | Store exit codes (1) | 75 for `Offline`, `Ambiguous`, `Throttled` and `Server`; 77 for `Auth`; 1 for everything else (`object_missing`, `source_corrupt`, `chain_corrupt`, `not_found` from a list). 66 `owner_absent` and the other existing codes are unchanged. The rustdoc exit tables of the three `main_entry`s are updated |
-| Unparsable list body (1) | `owners` on an unparsable list reply prints `store cause=protocol`, exit 1 (not retryable). If this needs a `StoreError` change that the daemon or `check` would see differently, stop and report |
+| Unparsable list body (1) | `owners` on an unparsable list reply prints `store cause=protocol`, exit 1 (not retryable). If this needs a `StoreError` change that the daemon or `check` would see differently, stop and report. (Amended 2026-11-22 by the parent after the worker's stop: `map_list_reply` returns `Offline(Cause::Protocol)` and the exit is 75 like every `Offline`. No new variant; a garbled 200 is most likely a truncated reply or a proxy, and these commands only read) |
 | Retry budget (2) | A host-level token bucket in the daemon: capacity 10 tokens, refill 1 token per 15 s, plus 1 per landed commit, never above 10. A first attempt (an owner with no failure streak) never needs a token. A retry (streak > 0) takes one token; without one the owner is `Deferred` to now plus a jittered 1 to 30 s (the same jitter source as D44). The verify GET of an owner whose last outcome was `LandingUnknown` never waits for a token. The bucket only delays: an owner's own `RetryAt` (incl. `Retry-After`) is never shortened. `DestinationAuth` pausing, per-owner backoff and parking are unchanged. In memory only; a restart starts full |
 | Retry visibility (2) | A denied retry logs nothing per owner (it would flood the log); `memory status` gains no field in this brief |
 | Check confirmation (3) | After the judge, an owner with an `uncaptured` or `mismatch` verdict has its `current.json` read once more; if the head moved, only those sources are judged again against the fresh chain (at most 64 manifests, as today) and the fresh verdict replaces the first. `remote_only` candidates are confirmed by a second walk after the last owner read; an id the second walk sees is not `remote_only`. One confirmation only; what survives it is reported exactly as today |
@@ -155,3 +155,10 @@ both hosts; first rounds, `memory status`, `memory check`, peak memory.
 ## Ledger
 
 - 2026-11-22: brief written on `1968cfe`.
+- 2026-11-22: three workers in parallel. STORECAUSE stopped on the list-body row (no `StoreError`
+  with code `protocol` and exit 1); the parent chose `Offline(Protocol)`, exit 75 (row amended).
+  Teeth 29 of 33 at first; the parent added tests for the four survivors (jitter, `RetryAt` and
+  parking under an empty bucket, a raced `mismatch`), then 33 of 33. Gate `03-deny` failed on
+  `RUSTSEC-2026-0592` (`url` 2.5.8, also on `main`), fixed by PR #252 (`4d6729f`); the stack was
+  rebased onto it. Accepted locally at `034be38`: gates 14/14, Linux container passed. Details
+  in evidence 47.
