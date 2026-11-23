@@ -77,6 +77,32 @@ Actual conditional R2, native agents, installed paths on both machines and
 representative resource/freshness acceptance remain separate. Defaults remain legacy;
 no cutover, historical research migration or classifier activation occurred.
 
+## Agent setup facts (brief 53)
+
+Each import also derives `session_setup`, a long-format change log of the agent setup recorded in the
+transcript at the time: `harness`, `harness_version`, `session_format` (Pi's `session.version`),
+`entrypoint`, `originator`, `model`, `provider`, `reasoning_effort`, `permission_mode`,
+`approval_policy`, `sandbox_policy`, `collaboration_mode`, available/invoked skills, subagent types,
+tools, MCP servers, disabled plugins and `instruction_file`. The fact list is closed
+(`setup_facts.FACTS`). One row is kept per first sighting of each `(fact, name, value)` within a
+source.
+
+Privacy: instruction files store only an allowlisted base name (`CLAUDE.md`, `CLAUDE.local.md`,
+`AGENTS.md`, `AGENTS.override.md`, `GEMINI.md`, else `other`) and a closed scope (`project`, `user`,
+`local`, `managed`, `other`). Never a path, directory, cwd or text. Names and values are strings of at
+most 200 characters; anything longer, non-string or non-encodable is skipped and counted
+(`setup_skipped` in the import result).
+
+`session_setup_version(session_key, version)` records the extractor version (`SETUP_VERSION`). An import
+of an unchanged publication whose recorded version differs re-derives that session's rows from the owned
+bodies in one transaction, so an existing database fills without `--reset`. The view `session_dim` (one
+row per session) is recreated on every writable open. Read-only opens (`report`, dashboard validation)
+create nothing and tolerate missing tables.
+
+```sh
+duckdb -readonly .analytics/publications.duckdb "SELECT agent, models, harness_version FROM session_dim"
+```
+
 ## Legacy research pipeline (historical reference)
 
 > **Not supported for the current collector or its replacement.** `r2_metadata.py`,
