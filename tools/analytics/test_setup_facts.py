@@ -13,14 +13,16 @@ CANARY = 'CANARY-7f3a91'
 
 CLAUDE = [
     {'type': 'attachment', 'timestamp': 't1', 'version': '9.9', 'entrypoint': 'cli', 'cwd': f'/w/{CANARY}',
-     'gitBranch': CANARY, 'attachment': {'type': 'skill_listing', 'names': ['s-one', 's-two']}},
+     'gitBranch': CANARY, 'attachment': {'type': 'skill_listing',
+                                         'names': ['s-one', 's-two', f'.x/{CANARY}/plug-in:p-skill']}},
     {'type': 'attachment', 'attachment': {'type': 'model', 'identity': {'modelId': 'claude-att'}}},
     {'type': 'attachment', 'attachment': {'type': 'agent_listing_delta', 'addedTypes': ['reviewer']}},
     {'type': 'attachment', 'attachment': {'type': 'deferred_tools_delta', 'addedNames': ['WebFetch'],
         'failedMcpServers': [{'name': 'bad-srv'}]}},
     {'type': 'attachment', 'attachment': {'type': 'mcp_instructions_delta', 'addedNames': ['srv']}},
     {'type': 'attachment', 'attachment': {'type': 'invoked_skills', 'skills': [{'name': 's-one'}]}},
-    {'type': 'attachment', 'attachment': {'type': 'command_permissions', 'allowedTools': ['Bash(ls)']}},
+    {'type': 'attachment', 'attachment': {'type': 'command_permissions',
+                                          'allowedTools': ['Bash(ls)', f'Read(~/{CANARY}/**)']}},
     {'type': 'attachment', 'attachment': {'type': 'instructions', 'files': [
         {'path': f'/home/{CANARY}/proj/CLAUDE.md', 'type': 'Project', 'content': CANARY + '-text'},
         {'path': f'/home/{CANARY}/proj/.claude/rules/{CANARY}.md', 'type': 'Project', 'content': CANARY},
@@ -37,6 +39,13 @@ CODEX = [
         'sandbox_policy': {'type': 'read-only'}, 'collaboration_mode': {'mode': 'default'},
         'disabled_plugin_ids': ['pl'], 'agents_md': {'directory': f'/w/{CANARY}', 'text': CANARY}}},
     {'type': 'turn_context', 'payload': {'model': 'gpt-x', 'agents_md': {'directory': f'/elsewhere/{CANARY}', 'text': CANARY}}},
+]
+# The shape real rollouts use (parent, brief 53 real-data run): world_state, payload.state.agents_md.
+CODEX_WORLD = [
+    {'type': 'session_meta', 'payload': {'id': 'y', 'cwd': f'/w/{CANARY}', 'cli_version': '1.3'}},
+    {'type': 'world_state', 'payload': {'state': {'agents_md': {'directory': f'/w/{CANARY}', 'text': CANARY}}}},
+    {'type': 'world_state', 'payload': {'state': {'agents_md': {'text': CANARY}}}},
+    {'type': 'world_state', 'payload': {'state': {'agents_md': {}}}},
 ]
 PI = [
     {'type': 'session', 'version': 3, 'id': 'a', 'cwd': f'/w/{CANARY}'},
@@ -93,8 +102,12 @@ class SetupFactsTest(Base):
                      ('permission_mode', '', 'plan'), ('skill_available', 's-two', ''),
                      ('subagent_type_available', 'reviewer', ''), ('tool_available', 'WebFetch', ''),
                      ('mcp_server_failed', 'bad-srv', ''), ('mcp_server_available', 'srv', ''),
-                     ('skill_invoked', 's-one', ''), ('tool_allowed', 'Bash(ls)', '')]:
+                     ('skill_invoked', 's-one', ''), ('tool_allowed', 'Bash', ''), ('tool_allowed', 'Read', ''),
+                     ('skill_available', 'plug-in:p-skill', '')]:
             self.assertIn(want, rows)
+        # Parent (brief 53 real-data run): a permission pattern keeps only its tool name, and a
+        # plugin skill only its last segment.
+        self.assertFalse([r for r in rows if r[0] in ('tool_allowed', 'skill_available') and '(' in r[1]])
 
     def test_codex_every_source(self):
         rows = self.run_import('codex', CODEX)
@@ -109,6 +122,23 @@ class SetupFactsTest(Base):
         rows = self.run_import('codex', CODEX)
         self.assertIn(('instruction_file', 'AGENTS.md', 'project'), rows)
         self.assertIn(('instruction_file', 'AGENTS.md', 'other'), rows)
+
+    def test_codex_world_state_agents_md(self):
+        rows = [r for r in self.run_import('codex', CODEX_WORLD, name='cw') if r[0] == 'instruction_file']
+        self.assertEqual(sorted(rows), [('instruction_file', 'AGENTS.md', 'other'),
+                                        ('instruction_file', 'AGENTS.md', 'project')])
+
+    def test_path_characters_are_skipped_outside_model(self):
+        path = self.root / 'g.jsonl'
+        path.write_bytes(encode([{'type': 'x'}]))
+        from unittest import mock
+        fake = lambda r, ctx: [('provider', '', 'a/b'), ('entrypoint', '', '~x'), ('skill_available', 'a\\b', ''),
+                               ('model', 'org/model', '')]
+        skipped = {}
+        with mock.patch.dict(setup_facts._AGENTS, {'claude': fake}):
+            rows = [(r['fact'], r['name'], r['value']) for r in setup_facts.iter_setup(path, 'claude', 't', skipped)]
+        self.assertEqual(rows, [('harness', 'claude', ''), ('model', 'org/model', '')])
+        self.assertEqual(skipped, {'skipped': 3})
 
     def test_codex_absent_approval_policy_records_nothing(self):
         # Parent (brief 53 review): only a structured policy is `granular`; an absent one is no fact.
@@ -225,7 +255,8 @@ class SetupFactsTest(Base):
                        'tools_available, instruction_files_available, permission_mode FROM session_dim')[0]
         self.assertEqual(row[:3], ('claude', '9.9', 'cli'))
         self.assertEqual(row[3], ['claude-att', 'claude-x'])
-        self.assertEqual(row[4:], (2, 1, 1, 4, 'plan'))
+        # Parent (brief 53 real-data run): the fixture gained a plugin skill, so 3 skills.
+        self.assertEqual(row[4:], (3, 1, 1, 4, 'plan'))
 
     def test_read_only_old_database_creates_nothing(self):
         self.run_import('claude', CLAUDE)

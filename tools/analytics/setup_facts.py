@@ -63,6 +63,21 @@ def _instruction_name(path):
     return base if base in INSTRUCTION_NAMES else 'other'
 
 
+def _leaf(name):
+    """A plugin skill name carries a relative directory (`.x/y/plugin:skill`); keep the last
+    segment only, so no directory is stored."""
+    return re.split(r'[\\/]', name)[-1] if isinstance(name, str) else name
+
+
+def _tool(pattern):
+    """A permission pattern `Tool(argument)` can hold a path or command; keep the tool name."""
+    return pattern.split('(', 1)[0].strip() if isinstance(pattern, str) else pattern
+
+
+# Outside these facts a path character means a path slipped through: skip and count it.
+PATH_OK = frozenset(('model',))
+
+
 def _scope(kind):
     kind = kind.lower() if isinstance(kind, str) else ''
     return kind if kind in SCOPES else 'other'
@@ -83,7 +98,7 @@ def _claude(r, ctx):
     elif at == 'model':
         _scalar(out, 'model', a.get('identity'), 'modelId', True)
     elif at == 'skill_listing':
-        out += [('skill_available', n, '') for n in _list(a.get('names'))]
+        out += [('skill_available', _leaf(n), '') for n in _list(a.get('names'))]
     elif at == 'agent_listing_delta':
         out += [('subagent_type_available', n, '') for n in _list(a.get('addedTypes'))]
     elif at == 'deferred_tools_delta':
@@ -96,10 +111,10 @@ def _claude(r, ctx):
             if isinstance(f, dict) and 'path' in f:
                 out.append(('instruction_file', _instruction_name(f['path']), _scope(f.get('type'))))
     elif at == 'invoked_skills':
-        out += [('skill_invoked', x.get('name') if isinstance(x, dict) else x, '')
+        out += [('skill_invoked', _leaf(x.get('name') if isinstance(x, dict) else x), '')
                 for x in _list(a.get('skills'))]
     elif at == 'command_permissions':
-        out += [('tool_allowed', n, '') for n in _list(a.get('allowedTools'))]
+        out += [('tool_allowed', _tool(n), '') for n in _list(a.get('allowedTools'))]
     return out
 
 
@@ -127,11 +142,14 @@ def _codex(r, ctx):
         _scalar(out, 'collaboration_mode', p.get('collaboration_mode'), 'mode')
         out += [('plugin_disabled', n, '') for n in _list(p.get('disabled_plugin_ids'))]
     if t in ('turn_context', 'world_state'):
-        agents = p.get('agents_md', _get(p, 'world_state', 'agents_md'))
+        # Real rollouts carry it in `world_state` records at payload.state.agents_md (parent,
+        # brief 53 real-data run); the turn_context form is kept for tolerance.
+        agents = p.get('agents_md', _get(p, 'state', 'agents_md'))
         cwd = ctx.get('cwd')
         for item in agents if isinstance(agents, list) else [agents]:
             directory = _opt(item, 'directory')
-            if isinstance(directory, str) and directory:
+            text = _opt(item, 'text')
+            if (isinstance(directory, str) and directory) or (isinstance(text, str) and text):
                 same = isinstance(cwd, str) and bool(cwd) and directory == cwd
                 out.append(('instruction_file', 'AGENTS.md', 'project' if same else 'other'))
     return out
@@ -174,6 +192,8 @@ def _valid(fact, name, value):
         try:
             text.encode('utf-8')
         except UnicodeError:
+            return False
+        if fact not in PATH_OK and ('/' in text or '\\' in text or text.startswith('~')):
             return False
     return fact == 'harness' or bool(name or value)
 
