@@ -8,10 +8,16 @@
 //!
 //! A fourth verdict, `Ignored` (D54, D55, brief 46), marks known non-session files (vendor code,
 //! caches, backups, generated media) so `UnknownKind` stays the list of files nobody has
-//! classified. The ignore rules apply to agent-dir layouts only, and only where the result
-//! would otherwise be `UnknownKind` or a config/paste snapshot: a session-owned source never
-//! becomes `Ignored`, a custom Pi root keeps its own rules, and credential files keep their
-//! verdict. Ignored files are counted by the walk and never yielded, hinted or captured.
+//! classified. Ignored files are counted by the walk and never yielded, hinted or captured.
+//!
+//! Brief 54 replaces the former "only a miss or a config/paste snapshot can become `Ignored`"
+//! rule with one allowlist (`CAPTURED_KINDS`): `ClaudeTranscript`, `ClaudeSubagent`,
+//! `ClaudeToolResults`, `CodexRollout`, `CodexCompressed`, `PiSession`, and `PiAux` only for
+//! `sessions/<cwd>/subagent-artifacts/<name>.json` (exactly that depth). Every other located
+//! kind is `Ignored` in every layout (agent dir, Claude primary home, Pi custom root), also
+//! when its owner cannot be derived. `SourceKind` keeps every variant: stored manifests name
+//! them and the reader still restores them. Credential files keep their verdict at the
+//! privacy layer, for the kept paths.
 //!
 //! Identifiers are content-independent and derived only from the root namespace and the
 //! path itself, so an unrelated sibling appearing elsewhere never changes a result.

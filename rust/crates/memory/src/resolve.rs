@@ -12,13 +12,12 @@
 //! * Hop bound: [`MAX_HOPS`] (40) links on the last component; more, or a loop, is
 //!   unresolved. Directory-component links are resolved by `canonicalize`, which also
 //!   rejects loops.
-//! * Snapshot kinds (brief 49): every snapshot kind is yielded except `ClaudeSessionEnv`,
-//!   `ClaudeUsage` and `ClaudePaste`, which are counted as `deferred_snapshot`. Every yielded
-//!   snapshot kind but `CodexStore` has profile `Scanned` (whole-file content scan; recognized
-//!   config documents are scrubbed first). `CodexStore` keeps `OtherKnown`; append kinds keep
-//!   their profiles. `note` still routes append sources only. `locate_absent` (D52, brief 48)
-//!   resolves stored snapshot entries too; a Codex store is probed by its database file only,
-//!   so a missing `-wal` or `-shm` is never an absence.
+//! * Captured set (brief 54): the locator yields only the allowlisted kinds; everything else
+//!   is `Ignored` and counted `ignored`. The only snapshot source left is the Pi run record,
+//!   profile `Scanned` (whole-file content scan). `deferred_snapshot` no longer exists. `note`
+//!   still routes append sources only. `locate_absent` (D52, brief 48) resolves stored entries
+//!   too, and returns `Probe::Retired` for a stored path that now locates to `Ignored`
+//!   ([`retired`], shared with `memory check`).
 //! * No `unsafe`, no new dependencies, no panics; any I/O failure clears a resolved flag.
 
 use crate::capture::Source;

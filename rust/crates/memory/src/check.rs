@@ -21,9 +21,13 @@
 //! A quiet owner costs no extra request; an anomalous owner costs one `current.json` GET (plus
 //! the chain and the re-judged pieces only when its head moved).
 //!
-//! A Codex SQLite store is not compared byte for byte (a backup is not a copy of the live file):
-//! the stored epoch is fetched and verified (every piece digest and the whole digest), then the
-//! local fingerprint (db plus `-wal`) is compared with the one indexed for that epoch: `match`
+//! Retired (brief 54): a stored live entry of a fetched owner whose path now locates to
+//! `Ignored` is counted `retired=` (after `remote_only=`) instead of `remote_only`, and never
+//! changes the exit code.
+//!
+//! A snapshot source is not compared byte for byte when it is a backup (a Codex SQLite store, no
+//! longer located): the stored epoch is fetched and verified (every piece digest and the whole
+//! digest), then the local fingerprint is compared with the one indexed for that epoch: `match`
 //! when equal, `behind` when the store changed since, `unsettled` without an index entry.
 //!
 //! Output is a closed vocabulary: counts, then one line per mismatch, uncaptured, withheld or
