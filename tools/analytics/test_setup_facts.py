@@ -12,8 +12,8 @@ import setup_facts
 CANARY = 'CANARY-7f3a91'
 
 CLAUDE = [
-    {'type': 'attachment', 'timestamp': 't1', 'version': '9.9', 'entrypoint': 'cli',
-     'attachment': {'type': 'skill_listing', 'names': ['s-one', 's-two']}},
+    {'type': 'attachment', 'timestamp': 't1', 'version': '9.9', 'entrypoint': 'cli', 'cwd': f'/w/{CANARY}',
+     'gitBranch': CANARY, 'attachment': {'type': 'skill_listing', 'names': ['s-one', 's-two']}},
     {'type': 'attachment', 'attachment': {'type': 'model', 'identity': {'modelId': 'claude-att'}}},
     {'type': 'attachment', 'attachment': {'type': 'agent_listing_delta', 'addedTypes': ['reviewer']}},
     {'type': 'attachment', 'attachment': {'type': 'deferred_tools_delta', 'addedNames': ['WebFetch'],
@@ -168,6 +168,19 @@ class SetupFactsTest(Base):
         self.assertEqual(result['setup_skipped'], 3)
         models = [r for r in self.rows('pi') if r[0] == 'model']
         self.assertEqual(models, [('model', 'x' * 200, '')])
+
+    def test_unknown_fact_is_skipped_and_counted(self):
+        # Parent (brief 53 teeth): the closed list is enforced at the validator, whatever an
+        # extractor yields.
+        from unittest import mock
+        path = self.root / 'u.jsonl'
+        path.write_bytes(encode([{'type': 'x'}]))
+        fake = lambda r, ctx: [('cwd', '', '/w'), ('model', 'm', '')]
+        skipped = {}
+        with mock.patch.dict(setup_facts._AGENTS, {'claude': fake}):
+            rows = list(setup_facts.iter_setup(path, 'claude', 't', skipped))
+        self.assertEqual({r['fact'] for r in rows}, {'harness', 'model'})
+        self.assertEqual(skipped, {'skipped': 1})
 
     def test_closed_fact_list(self):
         for agent, records in (('claude', CLAUDE), ('codex', CODEX), ('pi', PI)):
