@@ -59,7 +59,8 @@ pub(super) fn fixture(server: &Fake, label: &str) -> R<Fixture> {
     put(
         &p.join(format!("{U1}.jsonl")),
         &jl(&[
-            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":"hello claude"}}"#,
+            r#"{"type":"user","uuid":"u1","version":"9.9.9","message":{"role":"user","content":"hello claude"}}"#,
+            r#"{"type":"attachment","uuid":"at1","attachment":{"type":"instructions","files":[{"path":"/home/me/proj/CLAUDE.md","type":"Project"}]}}"#,
             r#"{"type":"assistant","uuid":"a1","message":{"role":"assistant","model":"claude-x","content":[{"type":"text","text":"hi"}]}}"#,
             r#"{"type":"assistant","uuid":"a2","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"p":1}}]}}"#,
             r#"{"type":"user","uuid":"u2","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}"#,
@@ -91,7 +92,8 @@ pub(super) fn fixture(server: &Fake, label: &str) -> R<Fixture> {
     put(
         &codex.join(CODEX_FILE),
         &jl(&[
-            r#"{"type":"session_meta","payload":{"id":"cx1"}}"#,
+            r#"{"type":"session_meta","payload":{"id":"cx1","cli_version":"1.2.3"}}"#,
+            r#"{"type":"turn_context","payload":{"model":"gpt-x","approval_policy":"never"}}"#,
             r#"{"type":"event_msg","payload":{"type":"user_message","message":"codex prompt"}}"#,
             r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"codex prompt"}]}}"#,
             r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"codex answer"}]}}"#,
@@ -116,7 +118,7 @@ pub(super) fn fixture(server: &Fake, label: &str) -> R<Fixture> {
         &jl(&[
             r#"{"type":"session","id":"p1"}"#,
             r#"{"type":"message","id":"pm1","message":{"role":"user","content":"pi prompt"}}"#,
-            r#"{"type":"message","id":"pm2","message":{"role":"assistant","content":[{"type":"text","text":"pi answer"},{"type":"toolCall","id":"tc1","name":"bash","arguments":{"c":"ls"}}]}}"#,
+            r#"{"type":"message","id":"pm2","message":{"role":"assistant","model":"pi-m","content":[{"type":"text","text":"pi answer"},{"type":"toolCall","id":"tc1","name":"bash","arguments":{"c":"ls"}}]}}"#,
             r#"{"type":"message","id":"pm3","message":{"role":"toolResult","toolCallId":"tc1","toolName":"bash","content":[{"type":"text","text":"out"}]}}"#,
         ]),
     )?;
@@ -416,7 +418,8 @@ fn phase1() -> Vec<Want> {
             agent: "claude",
             needle: U1,
             sources: 3,
-            events: 6,
+            // Brief 53: was 6; the fixture gained an `instructions` attachment (a system event).
+            events: 7,
             issues: json!({"artifact_not_normalized": 1}),
             roles: json!({"main": 1, "subagent": 1, "artifact": 1}),
         },
@@ -443,7 +446,8 @@ fn phase1() -> Vec<Want> {
             agent: "codex",
             needle: CX,
             sources: 1,
-            events: 6,
+            // Brief 53: was 6; the fixture gained a `turn_context` record (a system event).
+            events: 7,
             issues: json!({}),
             roles: json!({"main": 1}),
         },
@@ -534,8 +538,9 @@ fn consumer_gate_claude_codex_pi_export_imports_and_reports() -> R {
     daemon.shutdown().map_err(e)?;
     let mut second = Vec::new();
     let all_p1 = phase1();
+    // Brief 53: s1 was 7; the fixture gained an `instructions` attachment.
     for (name, sources, events, roles) in [
-        ("s1", 3, 7, json!({"main": 1, "subagent": 1, "artifact": 1})),
+        ("s1", 3, 8, json!({"main": 1, "subagent": 1, "artifact": 1})),
         ("rewrite", 2, 5, json!({"main": 2})),
     ] {
         let w = all_p1.iter().find(|w| w.name == name).ok_or("want")?;

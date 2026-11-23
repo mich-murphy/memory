@@ -71,6 +71,21 @@ class RustExportJourney(unittest.TestCase):
         self.assertEqual(sum(x['issues'] for x in report['issue_counts']), sum(sum(e['issues'].values()) for e in self.p1.values()))
         self.assertEqual({s['session_key'] for s in report['sessions']}, {session_key(e) for e in self.p1.values()})
 
+    def test_setup_facts_end_to_end(self):
+        self.import_all(self.p1.values())
+
+        def facts(name):
+            return {tuple(r) for r in self.query(
+                'SELECT fact,name,value FROM session_setup WHERE session_key=?', [session_key(self.p1[name])])}
+        claude = facts('s1')
+        self.assertIn(('model', 'claude-x', ''), claude)
+        self.assertIn(('harness_version', '', '9.9.9'), claude)
+        self.assertIn(('instruction_file', 'CLAUDE.md', 'project'), claude)
+        codex = facts('codex')
+        self.assertIn(('model', 'gpt-x', ''), codex)
+        self.assertIn(('approval_policy', '', 'never'), codex)
+        self.assertIn(('model', 'pi-m', ''), facts('pi'))
+
     def test_session_key_and_non_ascii(self):
         self.import_all(self.p1.values())
         e = self.p1['nonascii']
