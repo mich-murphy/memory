@@ -114,3 +114,10 @@ Evidence 48, DESIGN (the analytics projection section and D65), the handoff.
 ## Ledger
 
 - 2026-11-23: brief written on `0da72df`.
+- 2026-11-23: worker done (3 commits). Parent review: an absent Codex `approval_policy` recorded
+  `granular` (fixed). Teeth 21 of 22 at first (`fact_list_open` survived); parent tests close it.
+  Real-data run on this Mac (1,647 exports, all imported, re-import unchanged) found plugin skill
+  names with a relative directory, permission patterns with home paths, and no Codex instruction
+  files (`agents_md` lives in `world_state` at `payload.state`); fixed by the parent with a path
+  guard outside `model`. Teeth 27 of 27, Python 174 OK, gates 14/14. Accepted locally at
+  `e4159a2`. Details in evidence 48.

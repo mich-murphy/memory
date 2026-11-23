@@ -387,6 +387,18 @@ from `main` alone.
      installed on both hosts on 2026-11-22 (this Mac 14:40Z, `runs = 16`; dev-01 15:14Z):
      `memory check` exit 0 on both, `remote_only=0`, withheld 3 and 26; peak 90 MB here,
      dev-01 `VmHWM` 109 MB.
+  31. 2026-11-23, brief 53 (D65), [evidence 48](rust-rewrite/implementation/evidence/48-setup-facts/):
+     the analytics importer derives each session's agent setup (`session_setup`, `session_dim`)
+     from transcript control records; instruction files by allowlisted name and closed scope only.
+     Real data here: 1,647 exports imported, a model for 371 of 620 Claude, 162 of 167 Codex and
+     860 of 860 Pi sessions; no path in any setup row. Accepted locally at `e4159a2`: teeth 27 of
+     27, gates 14/14. Analytics only; nothing installed. Capture reduction measured on both hosts
+     (evidence 48): dev-01's `subagent-artifacts` hold run records with setup facts and 59 short
+     outputs found nowhere else, so stopping that kind needs an operator decision. Incident
+     2026-11-23: while stopping a slow counts-only probe on dev-01, `pkill -f 'python3 -I -'` also
+     killed an unrelated, unmanaged `python3 -m http.server 8766`; no unit owned it and nothing
+     else was affected; the operator said no further action is needed. Probes now run under
+     `timeout` and are never stopped by pattern.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
