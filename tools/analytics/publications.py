@@ -16,6 +16,8 @@ import sys
 import tempfile
 import time
 
+import setup_facts
+
 
 class ImportFailure(ValueError):
     """A safe, content-free diagnostic code."""
@@ -227,6 +229,28 @@ def _schema(db, events):
         sequence BIGINT, failed_at_ns BIGINT, reason VARCHAR, attempts BIGINT)''')
 
 
+def _write_setup(db, owned, agent, trace, loc, skipped):
+    for fact in setup_facts.iter_setup(owned, agent, trace, skipped):
+        _insert(db, 'session_setup', dict(fact, **loc))
+
+
+def _record_setup_version(db, session):
+    db.execute('DELETE FROM session_setup_version WHERE session_key=?', [session])
+    db.execute('INSERT INTO session_setup_version VALUES (?, ?)', [session, setup_facts.SETUP_VERSION])
+
+
+def _rederive_setup(db, session, coords, sources, bodies, storage, agent):
+    """Rebuild one session's setup rows from its owned bodies (caller holds the transaction)."""
+    db.execute('DELETE FROM session_setup WHERE session_key=?', [session])
+    for pair, source in sources.items():
+        if source.get('withheld') is not None or source['role'] == 'artifact':
+            continue
+        trace = _key([session, *pair])
+        loc = dict(coords, source_id=source['source_id'], epoch_id=pair[1])
+        _write_setup(db, storage / bodies[pair]['sha256'], agent, trace, loc, {})
+    _record_setup_version(db, session)
+
+
 def _clear_failure(db, session, manifest):
     # Equal sequence only resolves the corresponding publication, not a conflict.
     db.execute('''DELETE FROM failures WHERE session_key=? AND
@@ -339,11 +363,13 @@ def import_export(export_dir, db_path, *, reset=False):
                 os.unlink(private)
     with duckdb.connect(str(path)) as db:
         _schema(db, events)
+        setup_facts.ensure(db)  # writable open only: tables and view; read-only opens never create
         bound = db.execute('SELECT archive_id FROM publication_binding').fetchone()[0]
         _require(bound in (None, archive) or reset, 'archive_mismatch')
         if reset:
             db.execute('BEGIN')
-            for table in ('sessions', 'sources', 'events', 'issues', 'failures'):
+            for table in ('sessions', 'sources', 'events', 'issues', 'failures',
+                          'session_setup', 'session_setup_version'):
                 db.execute(f'DELETE FROM {table}')
             db.execute('UPDATE publication_binding SET archive_id=?', [archive])
             db.execute('COMMIT')
@@ -369,12 +395,24 @@ def import_export(export_dir, db_path, *, reset=False):
                     for pair, target in staged.items():
                         os.replace(target, storage / bodies[pair]['sha256'])
                     db.execute('UPDATE sessions SET manifest_sha256=? WHERE session_key=?', [fingerprint, session])
+                    recorded = db.execute('SELECT version FROM session_setup_version WHERE session_key=?',
+                                          [session]).fetchone()
+                    if recorded != (setup_facts.SETUP_VERSION,):
+                        db.execute('BEGIN')
+                        try:
+                            _rederive_setup(db, session, coords, sources, bodies, storage, identity['agent'])
+                            db.execute('COMMIT')
+                        except BaseException:
+                            db.execute('ROLLBACK')
+                            raise
                     _clear_failure(db, session, manifest)
                     return {'status': 'unchanged', 'publication_id': old[0]}
                 db.execute('BEGIN')
                 try:
-                    for table in ('events', 'issues', 'sources', 'sessions'):
+                    for table in ('events', 'issues', 'sources', 'sessions', 'session_setup',
+                                  'session_setup_version'):
                         db.execute(f'DELETE FROM {table} WHERE session_key=?', [session])
+                    skipped = {}
                     counts = dict(sources=0, events=0, issues=0)
                     codex_traces = []
                     batch_columns = dict(**{k: 'VARCHAR' for k in coords}, source_id='VARCHAR', epoch_id='VARCHAR')
@@ -414,6 +452,7 @@ def import_export(export_dir, db_path, *, reset=False):
                                 length=body['size'], kind='artifact_not_normalized', record_type=None))]
                         else:
                             parsed = events.iter_events(owned, identity['agent'], trace)
+                            _write_setup(db, owned, identity['agent'], trace, loc, skipped)
                             if identity['agent'] == 'codex':
                                 codex_traces.append(trace)
                         for event, issue in parsed:
@@ -451,9 +490,11 @@ def import_export(export_dir, db_path, *, reset=False):
                         observed_at_ns=manifest['observed_at_ns'], captured_at_ns=manifest['captured_at_ns'],
                         published_at_ns=manifest['published_at_ns'], imported_at_ns=now, normalized_at_ns=now,
                         coverage=json.dumps(manifest['coverage']), normalization='partial' if counts['issues'] else 'complete'))
+                    _record_setup_version(db, session)
                     db.execute('UPDATE publication_binding SET archive_id=?', [archive])
                     _clear_failure(db, session, manifest)
                     db.execute('COMMIT')
+                    counts['setup_skipped'] = skipped.get('skipped', 0)
                     return dict(counts, status='imported', publication_id=manifest['publication_id'])
                 except Exception:
                     db.execute('ROLLBACK')
