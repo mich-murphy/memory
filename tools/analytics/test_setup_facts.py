@@ -205,7 +205,9 @@ class SetupFactsTest(Base):
         from unittest import mock
         path = self.root / 'u.jsonl'
         path.write_bytes(encode([{'type': 'x'}]))
-        fake = lambda r, ctx: [('cwd', '', '/w'), ('model', 'm', '')]
+        # No path character in the value, so only the closed list can reject it (the path
+        # guard would also catch a cwd-shaped value).
+        fake = lambda r, ctx: [('cwd', '', 'plain'), ('model', 'm', '')]
         skipped = {}
         with mock.patch.dict(setup_facts._AGENTS, {'claude': fake}):
             rows = list(setup_facts.iter_setup(path, 'claude', 't', skipped))
