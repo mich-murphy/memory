@@ -3,7 +3,7 @@ use hegel::{TestCase, generators as gs};
 use memory::environment::FileSystem;
 use memory::realfs::{RealFs, RealFsError, WalkLimits, walk};
 use memory_core::domain::{Agent, ArchiveId, MachineId, SourceKind};
-use memory_core::locator::{ConfigAsset, Located, Role, RootLayout, RootNamespace, Roots};
+use memory_core::locator::{Located, Role, RootLayout, RootNamespace, Roots};
 use proptest::prelude::*;
 use std::fs;
 use std::io::Write;
@@ -289,19 +289,12 @@ fn walk_synthetic_layouts() -> TestResult {
         "claude transcript {:?}",
         at(&w, 0)?
     );
-    ensure!(
-        is_source(
-            at(&w, 1)?,
-            SourceKind::ClaudeConfig,
-            Role::Asset(ConfigAsset::Settings)
-        ),
-        "settings {:?}",
-        at(&w, 1)?
-    );
+    // Brief 54: config files are a dropped kind, so these three rows are `Ignored`.
+    ensure!(*at(&w, 1)? == Located::Ignored, "settings {:?}", at(&w, 1)?);
     ensure!(*at(&w, 2)? == Located::UnknownKind, "unknown.txt");
-    ensure!(matches!(at(&w, 3)?, Located::Source { .. }), "codex config");
+    ensure!(*at(&w, 3)? == Located::Ignored, "codex config");
     ensure!(*at(&w, 4)? == Located::UnknownKind, "bin/x");
-    ensure!(matches!(at(&w, 5)?, Located::Source { .. }), "pi models");
+    ensure!(*at(&w, 5)? == Located::Ignored, "pi models");
     ensure!(
         w.files.first().ok_or("row")?.0 == t.path().join("claude/projects/-p/abc.jsonl"),
         "abs path"

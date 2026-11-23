@@ -1,7 +1,8 @@
-//! Brief 49: the remaining snapshot kinds on the real binary against the loopback fake. One
-//! Claude session (transcript, a session aux `json`) with a project memory note, plus
-//! `settings.json` in the root. One reconcile lands all of them; `check` is clean; `restore` of the
-//! session and of the shared owner writes equal bytes; `export` succeeds.
+//! Brief 49, reduced by brief 54: a snapshot kind on the real binary against the loopback fake.
+//! One Claude session plus a Pi run record `sessions/<cwd>/subagent-artifacts/<name>.json`
+//! (the kept snapshot kind); a project memory note, `settings.json` and a session aux `json`
+//! are ignored. One reconcile lands the session and the record; `check` is clean; `restore`
+//! of the session and of the shared owner writes equal bytes; `export` succeeds.
 use super::assemble::SESSION;
 use super::daemon_restore::{Setup, setup};
 use super::{R, e};
@@ -19,6 +20,8 @@ const UUID: &str = "0f0e0d0c-0b0a-4908-8706-050403020100";
 const AUX: &str = "aux.json";
 const NOTE: &str = "n.md";
 const AUX_BODY: &str = "{\"aux\":\"aux_marker_k49\"}\n";
+const RECORD: &str = "sessions/--pi-cwd--/subagent-artifacts/r.json";
+const RECORD_BODY: &str = "{\"run\":\"record_marker_k54\"}\n";
 const NOTE_BODY: &str = "# note\nnote_marker_k49\n";
 const SETTINGS_BODY: &str = "{\n  \"theme\": \"dark\"\n}\n";
 
@@ -38,9 +41,12 @@ fn run(s: &Setup, args: &[&str]) -> R<(i32, String, String)> {
     ))
 }
 
+// Brief 54: the snapshot is a Pi run record; the note, settings and aux file are ignored.
 #[test]
 fn session_aux_memory_note_and_settings_land_check_clean_and_restore_equal() -> R {
     let s = setup("snapkinds")?;
+    let pi = s.rig.add_root("pi")?;
+    fs::copy(&s.rig.cfg, s.rig.state.join("config.toml")).map_err(e)?;
     let root = &s.rig.root;
     let aux = root.join(format!("projects/-p/{UUID}/{AUX}"));
     let note = root.join(format!("projects/-p/memory/{NOTE}"));
@@ -48,6 +54,7 @@ fn session_aux_memory_note_and_settings_land_check_clean_and_restore_equal() -> 
         (&aux, AUX_BODY),
         (&note, NOTE_BODY),
         (&root.join("settings.json"), SETTINGS_BODY),
+        (&pi.join(RECORD), RECORD_BODY),
     ] {
         fs::create_dir_all(p.parent().ok_or("parent")?).map_err(e)?;
         fs::write(p, body).map_err(e)?;
@@ -75,7 +82,7 @@ fn session_aux_memory_note_and_settings_land_check_clean_and_restore_equal() -> 
 
     let (code, out, err) = run(&s, &["check"])?;
     assert_eq!(code, 0, "{out}{err}");
-    for k in ["uncaptured=0", "mismatch=0", "deferred_snapshot=0"] {
+    for k in ["uncaptured=0", "mismatch=0", "ignored=3", "unknown_kind=0"] {
         assert!(out.lines().next().unwrap_or("").contains(k), "{k}: {out}");
     }
 
@@ -94,10 +101,7 @@ fn session_aux_memory_note_and_settings_land_check_clean_and_restore_equal() -> 
         fs::read(dest.join(SESSION)).map_err(e)?,
         fs::read(&s.file).map_err(e)?
     );
-    assert_eq!(
-        fs::read(dest.join(format!("projects/-p/{UUID}/{AUX}"))).map_err(e)?,
-        AUX_BODY.as_bytes()
-    );
+    assert!(!dest.join(format!("projects/-p/{UUID}/{AUX}")).exists());
 
     let dest = s.rig.dir.join("restored-shared");
     let (code, out, err) = run(
@@ -111,13 +115,11 @@ fn session_aux_memory_note_and_settings_land_check_clean_and_restore_equal() -> 
     )?;
     assert_eq!(code, 0, "{out}{err}");
     assert_eq!(
-        fs::read(dest.join(format!("projects/-p/memory/{NOTE}"))).map_err(e)?,
-        NOTE_BODY.as_bytes()
+        fs::read(dest.join(RECORD)).map_err(e)?,
+        RECORD_BODY.as_bytes()
     );
-    assert_eq!(
-        fs::read(dest.join("settings.json")).map_err(e)?,
-        SETTINGS_BODY.as_bytes()
-    );
+    assert!(!dest.join(format!("projects/-p/memory/{NOTE}")).exists());
+    assert!(!dest.join("settings.json").exists());
 
     let exp = s.rig.dir.join("exported");
     let (code, out, err) = run(

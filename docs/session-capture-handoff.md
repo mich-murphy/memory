@@ -399,6 +399,13 @@ from `main` alone.
      killed an unrelated, unmanaged `python3 -m http.server 8766`; no unit owned it and nothing
      else was affected; the operator said no further action is needed. Probes now run under
      `timeout` and are never stopped by pattern.
+  32. 2026-11-23, brief 54 (D66), [evidence 49](rust-rewrite/implementation/evidence/49-capture-reduction/):
+     operator rule: capture only the live session record analytics uses. Allowlist: Claude
+     transcripts, subagents and tool results, Codex rollouts, Pi sessions and Pi subagent run
+     records; everything else `Ignored`; stored entries of dropped kinds are retired (kept,
+     never deleted, `retired=` in `memory check`); `deferred_snapshot` removed. Accepted locally
+     at `9566497`: teeth 18 of 19 (1 equivalent), gates 14/14, Linux passed. Brief E (Codex
+     databases in analytics) is dropped: it only adds threads older than the install.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

@@ -12,13 +12,12 @@
 //! * Hop bound: [`MAX_HOPS`] (40) links on the last component; more, or a loop, is
 //!   unresolved. Directory-component links are resolved by `canonicalize`, which also
 //!   rejects loops.
-//! * Snapshot kinds (brief 49): every snapshot kind is yielded except `ClaudeSessionEnv`,
-//!   `ClaudeUsage` and `ClaudePaste`, which are counted as `deferred_snapshot`. Every yielded
-//!   snapshot kind but `CodexStore` has profile `Scanned` (whole-file content scan; recognized
-//!   config documents are scrubbed first). `CodexStore` keeps `OtherKnown`; append kinds keep
-//!   their profiles. `note` still routes append sources only. `locate_absent` (D52, brief 48)
-//!   resolves stored snapshot entries too; a Codex store is probed by its database file only,
-//!   so a missing `-wal` or `-shm` is never an absence.
+//! * Captured set (brief 54): the locator yields only the allowlisted kinds; everything else
+//!   is `Ignored` and counted `ignored`. The only snapshot source left is the Pi run record,
+//!   profile `Scanned` (whole-file content scan). `deferred_snapshot` no longer exists. `note`
+//!   still routes append sources only. `locate_absent` (D52, brief 48) resolves stored entries
+//!   too, and returns `Probe::Retired` for a stored path that now locates to `Ignored`
+//!   ([`retired`], shared with `memory check`).
 //! * No `unsafe`, no new dependencies, no panics; any I/O failure clears a resolved flag.
 
 use crate::capture::Source;
@@ -330,9 +329,6 @@ pub struct Counts {
     /// Files whose (owner, source id) another file with a lexicographically smaller
     /// root-relative path already holds; not yielded.
     pub duplicate: u64,
-    /// Session-env, usage-data and paste-cache snapshot files (brief 49), located but not yielded
-    /// (DESIGN.md 17); neither counted as unknown.
-    pub deferred_snapshot: u64,
     /// Yielded sources whose facts are unresolved (capture will block them).
     pub unresolved: u64,
     /// Symlinks the walk skipped.
@@ -361,6 +357,17 @@ pub struct WalkSources {
     /// Per owner, the files of the last walk and the paths noted since, as (root index, path
     /// spelled under the configured root).
     known: HashMap<Owner, BTreeSet<(usize, PathBuf)>>,
+}
+
+/// Brief 54: a stored entry is retired when its path now locates to `Ignored`. Pure: the id's
+/// namespace selects the root and the stored path is located. Shared by the daemon's absence
+/// probe and `memory check`.
+pub fn retired(roots: &[(PathBuf, Roots)], id: &SourceId, path: &str) -> bool {
+    let namespace = id.as_str().split(':').next().unwrap_or_default();
+    let Some((_, found)) = roots.iter().find(|(_, r)| r.namespace() == namespace) else {
+        return false;
+    };
+    RootRelativePath::parse(path).is_ok_and(|rel| locate(&rel, found) == Located::Ignored)
 }
 
 /// Root-relative path of `rest`, or `None` for a non-UTF-8 or non-plain component.
@@ -515,17 +522,6 @@ impl crate::daemon::Sources for WalkSources {
                         counts.ignored += 1;
                         continue;
                     }
-                    Located::Source {
-                        class: SourceClass::Snapshot,
-                        kind:
-                            SourceKind::ClaudeSessionEnv
-                            | SourceKind::ClaudeUsage
-                            | SourceKind::ClaudePaste,
-                        ..
-                    } => {
-                        counts.deferred_snapshot += 1;
-                        continue;
-                    }
                     Located::Source { .. } => {}
                 }
                 if let Some((owner, source)) =
@@ -550,6 +546,9 @@ impl crate::daemon::Sources for WalkSources {
     }
 
     fn locate_absent(&mut self, id: &SourceId, path: &str) -> Probe {
+        if retired(&self.roots, id, path) {
+            return Probe::Retired;
+        }
         let namespace = id.as_str().split(':').next().unwrap_or_default();
         let Some((dir, _)) = self.roots.iter().find(|(_, r)| r.namespace() == namespace) else {
             return Probe::Skip;

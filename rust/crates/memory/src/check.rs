@@ -21,9 +21,13 @@
 //! A quiet owner costs no extra request; an anomalous owner costs one `current.json` GET (plus
 //! the chain and the re-judged pieces only when its head moved).
 //!
-//! A Codex SQLite store is not compared byte for byte (a backup is not a copy of the live file):
-//! the stored epoch is fetched and verified (every piece digest and the whole digest), then the
-//! local fingerprint (db plus `-wal`) is compared with the one indexed for that epoch: `match`
+//! Retired (brief 54): a stored live entry of a fetched owner whose path now locates to
+//! `Ignored` is counted `retired=` (after `remote_only=`) instead of `remote_only`, and never
+//! changes the exit code.
+//!
+//! A snapshot source is not compared byte for byte when it is a backup (a Codex SQLite store, no
+//! longer located): the stored epoch is fetched and verified (every piece digest and the whole
+//! digest), then the local fingerprint is compared with the one indexed for that epoch: `match`
 //! when equal, `behind` when the store changed since, `unsettled` without an index entry.
 //!
 //! Output is a closed vocabulary: counts, then one line per mismatch, uncaptured, withheld or
@@ -110,6 +114,8 @@ pub struct Tally {
     pub withheld: u64,
     /// Live stored entries with no local row.
     pub remote_only: u64,
+    /// Stored live entries whose path now locates to `Ignored` (brief 54); never an anomaly.
+    pub retired: u64,
     /// Parked entries in `status.json`.
     pub parked: u64,
     /// Walk: files no pattern matched.
@@ -120,8 +126,6 @@ pub struct Tally {
     pub ignored: u64,
     /// Walk: files duplicating another file's source id (not captured).
     pub duplicate: u64,
-    /// Walk: snapshot files other than Codex SQLite stores, withheld.
-    pub deferred_snapshot: u64,
     /// Walk: entries that could not be read.
     pub unreadable: u64,
     /// Store failures.
@@ -168,7 +172,7 @@ impl Report {
     pub fn summary(&self) -> String {
         let t = &self.tally;
         format!(
-            "check owners={} sources={} match={} behind={} unsettled={} mismatch={} uncaptured={} withheld={} remote_only={} parked={} unknown_kind={} ignored={} unknown_owner={} duplicate={} deferred_snapshot={} unreadable={} store_error={} status={}",
+            "check owners={} sources={} match={} behind={} unsettled={} mismatch={} uncaptured={} withheld={} remote_only={} retired={} parked={} unknown_kind={} ignored={} unknown_owner={} duplicate={} unreadable={} store_error={} status={}",
             t.owners,
             t.sources,
             t.matched,
@@ -178,12 +182,12 @@ impl Report {
             t.uncaptured,
             t.withheld,
             t.remote_only,
+            t.retired,
             t.parked,
             t.unknown_kind,
             t.ignored,
             t.unknown_owner,
             t.duplicate,
-            t.deferred_snapshot,
             t.unreadable,
             t.store_error,
             self.status
@@ -790,7 +794,6 @@ fn check_inner(root: &Path, hook: &mut dyn FnMut(Phase)) -> Result<Report, Refus
     tally.unknown_owner = counts.unknown_owner;
     tally.ignored = counts.ignored;
     tally.duplicate = counts.duplicate;
-    tally.deferred_snapshot = counts.deferred_snapshot;
     tally.unreadable = counts.unreadable;
     tally.sources = u64::try_from(rows.len()).unwrap_or(u64::MAX);
     let mut groups: BTreeMap<String, (Owner, Vec<Source>)> = BTreeMap::new();
@@ -880,6 +883,12 @@ fn check_inner(root: &Path, hook: &mut dyn FnMut(Phase)) -> Result<Report, Refus
                     .sources
                     .iter()
                     .filter(|(id, entry)| entry.deleted_at.is_none() && !local.contains(id))
+                    .filter(|(id, entry)| {
+                        // Brief 54: a retired entry is counted apart, never remote_only.
+                        let gone = crate::resolve::retired(&roots, id, &entry.path);
+                        tally.retired += u64::from(gone);
+                        !gone
+                    })
                     .map(|(id, _)| id.clone()),
             );
         }

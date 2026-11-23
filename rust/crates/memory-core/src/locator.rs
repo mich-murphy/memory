@@ -8,10 +8,16 @@
 //!
 //! A fourth verdict, `Ignored` (D54, D55, brief 46), marks known non-session files (vendor code,
 //! caches, backups, generated media) so `UnknownKind` stays the list of files nobody has
-//! classified. The ignore rules apply to agent-dir layouts only, and only where the result
-//! would otherwise be `UnknownKind` or a config/paste snapshot: a session-owned source never
-//! becomes `Ignored`, a custom Pi root keeps its own rules, and credential files keep their
-//! verdict. Ignored files are counted by the walk and never yielded, hinted or captured.
+//! classified. Ignored files are counted by the walk and never yielded, hinted or captured.
+//!
+//! Brief 54 replaces the former "only a miss or a config/paste snapshot can become `Ignored`"
+//! rule with one allowlist (`CAPTURED_KINDS`): `ClaudeTranscript`, `ClaudeSubagent`,
+//! `ClaudeToolResults`, `CodexRollout`, `CodexCompressed`, `PiSession`, and `PiAux` only for
+//! `sessions/<cwd>/subagent-artifacts/<name>.json` (exactly that depth). Every other located
+//! kind is `Ignored` in every layout (agent dir, Claude primary home, Pi custom root), also
+//! when its owner cannot be derived. `SourceKind` keeps every variant: stored manifests name
+//! them and the reader still restores them. Credential files keep their verdict at the
+//! privacy layer, for the kept paths.
 //!
 //! Identifiers are content-independent and derived only from the root namespace and the
 //! path itself, so an unrelated sibling appearing elsewhere never changes a result.
@@ -634,6 +640,11 @@ fn claude_external<'a>(
     parts: &[&'a str],
     roots: &'a Roots,
 ) -> Res<'a> {
+    // Brief 54: a dropped kind is `Ignored` whether or not its owner is derivable, so a stored
+    // path judged without the walk's session index is still retired.
+    if !CAPTURED_KINDS.contains(&kind) {
+        return Err(Miss::Ignored);
+    }
     let uuid = uuid_prefix(sub).ok_or(Miss::Owner)?;
     let slug = roots.claude_sessions.lookup(uuid).ok_or(Miss::Owner)?;
     session(kind, class, Role::Artifact, vec![slug, uuid], parts)
@@ -1106,6 +1117,31 @@ pub fn export_role(kind: &SourceKind, path: &str) -> ExportRole {
     }
 }
 
+/// Kinds captured whatever the path (brief 54). `PiAux` is not here: only the run-record shape
+/// qualifies, see [`pi_run_record`].
+const CAPTURED_KINDS: [SourceKind; 6] = [
+    SourceKind::ClaudeTranscript,
+    SourceKind::ClaudeSubagent,
+    SourceKind::ClaudeToolResults,
+    SourceKind::CodexRollout,
+    SourceKind::CodexCompressed,
+    SourceKind::PiSession,
+];
+
+/// `sessions/<cwd>/subagent-artifacts/<name>.json`: exactly that depth, a Pi cwd directory and
+/// a non-empty stem.
+fn pi_run_record(parts: &[&str]) -> bool {
+    matches!(
+        parts,
+        ["sessions", cwd, "subagent-artifacts", name]
+            if pi_cwd(cwd) && name.strip_suffix(".json").is_some_and(|s| !s.is_empty())
+    )
+}
+
+fn captured(hit: &Hit<'_>, parts: &[&str]) -> bool {
+    CAPTURED_KINDS.contains(&hit.kind) || (hit.kind == SourceKind::PiAux && pi_run_record(parts))
+}
+
 /// Map one root-relative path to its source, or to a countable withhold. Pure and total.
 pub fn locate(path: &RootRelativePath, roots: &Roots) -> Located {
     let parts: Vec<&str> = path.0.iter().map(String::as_str).collect();
@@ -1133,6 +1169,14 @@ pub fn locate(path: &RootRelativePath, roots: &Roots) -> Located {
         (RootLayout::AgentDir, Agent::Codex) => apply_ignored(codex(&parts), &Agent::Codex, &parts),
         (RootLayout::AgentDir, Agent::Pi) => apply_ignored(pi(&parts), &Agent::Pi, &parts),
     };
+    // Brief 54: only the allowlisted kinds are captured, in every layout.
+    let res = res.and_then(|hit| {
+        if captured(&hit, &parts) {
+            Ok(hit)
+        } else {
+            Err(Miss::Ignored)
+        }
+    });
     match res {
         Err(Miss::Kind) => Located::UnknownKind,
         Err(Miss::Owner) => Located::UnknownOwner,

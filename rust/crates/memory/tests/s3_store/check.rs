@@ -230,7 +230,11 @@ fn a_parked_entry_fails_the_check() -> R {
 #[test]
 fn a_deleted_sibling_is_remote_only() -> R {
     let s = setup("check-remote")?;
-    let debug = s.rig.root.join(format!("debug/{UUID}.txt"));
+    // Brief 54: a kept kind of the same session (Claude tool-results), formerly a debug file.
+    let debug = s
+        .rig
+        .root
+        .join(format!("projects/-p/{UUID}/tool-results/t.txt"));
     fs::create_dir_all(debug.parent().ok_or("parent")?).map_err(e)?;
     fs::write(&debug, "debug line\n").map_err(e)?;
     capture(&s)?;
@@ -244,17 +248,25 @@ fn a_deleted_sibling_is_remote_only() -> R {
     Ok(())
 }
 
+// Brief 54: session-env, usage-data and paste-cache files are `Ignored` now (formerly counted
+// `deferred_snapshot`): not yielded, not unknown_kind, exit 0.
 #[test]
-fn a_deferred_snapshot_is_counted_apart() -> R {
+fn session_env_usage_and_paste_files_are_counted_ignored() -> R {
     let s = setup("check-deferred")?;
     capture(&s)?;
-    // Brief 49: settings.json is captured now; session-env is the deferred snapshot kind.
-    let env = s.rig.root.join("session-env").join(UUID);
-    fs::create_dir_all(&env).map_err(e)?;
-    fs::write(env.join("e"), "x\n").map_err(e)?;
+    for rel in [
+        format!("session-env/{UUID}/e"),
+        "usage-data/session-meta/u.json".to_owned(),
+        "paste-cache/p.txt".to_owned(),
+    ] {
+        let f = s.rig.root.join(rel);
+        fs::create_dir_all(f.parent().ok_or("parent")?).map_err(e)?;
+        fs::write(f, "x\n").map_err(e)?;
+    }
     let ran = run(&s)?;
     assert_eq!(ran.code, 0, "{}", ran.out);
-    assert!(ran.has("deferred_snapshot", 1) && ran.has("uncaptured", 0) && ran.has("sources", 1));
+    assert!(ran.has("ignored", 3) && ran.has("unknown_kind", 0));
+    assert!(ran.has("uncaptured", 0) && ran.has("sources", 1));
     Ok(())
 }
 
@@ -470,7 +482,11 @@ fn read_settled_refuses_a_file_that_moved_during_the_read() {
 #[test]
 fn an_appended_debug_log_is_behind() -> R {
     let s = setup("check-unsettled")?;
-    let debug = s.rig.root.join(format!("debug/{UUID}.txt"));
+    // Brief 54: a kept kind of the same session (Claude tool-results), formerly a debug file.
+    let debug = s
+        .rig
+        .root
+        .join(format!("projects/-p/{UUID}/tool-results/t.txt"));
     fs::create_dir_all(debug.parent().ok_or("parent")?).map_err(e)?;
     fs::write(&debug, "debug line\n").map_err(e)?;
     capture(&s)?;
@@ -697,7 +713,11 @@ fn a_deleted_file_is_recorded_on_the_second_reconcile_and_restore_skips_it() -> 
 // defect ----
 
 fn debug_file(s: &Setup) -> R<std::path::PathBuf> {
-    let debug = s.rig.root.join(format!("debug/{UUID}.txt"));
+    // Brief 54: a kept kind of the same session (Claude tool-results), formerly a debug file.
+    let debug = s
+        .rig
+        .root
+        .join(format!("projects/-p/{UUID}/tool-results/t.txt"));
     fs::create_dir_all(debug.parent().ok_or("parent")?).map_err(e)?;
     Ok(debug)
 }
@@ -869,5 +889,98 @@ fn a_rewrite_captured_between_fetch_and_judge_is_not_a_mismatch() -> R {
     })?;
     assert_eq!(r.tally.mismatch + r.tally.uncaptured, 0, "{:?}", r.details);
     assert_eq!(r.exit(), 0);
+    Ok(())
+}
+
+/// Brief 54: `Sources` that adds one hand-built source (a file-history snapshot, which the
+/// locator ignores now) to the real walk, to seed a stored entry as written before the change.
+struct WithExtra {
+    inner: WalkSources,
+    extra: (memory_core::domain::Owner, memory::capture::Source),
+}
+
+impl Sources for WithExtra {
+    fn enumerate(&mut self) -> Vec<(memory_core::domain::Owner, memory::capture::Source)> {
+        let mut all = self.inner.enumerate();
+        all.push(self.extra.clone());
+        all
+    }
+}
+
+// Brief 54: a stored live entry whose path now locates to `Ignored` is `retired=1`, not
+// `remote_only`, and the check exits 0 (real binary).
+#[test]
+fn a_stored_retired_entry_is_counted_retired_not_remote_only() -> R {
+    use memory::assemble::policy_context;
+    use memory::capture::Source;
+    use memory::daemon::{Daemon, Parts};
+    use memory::realfs::Encoding;
+    use memory::resolve::pack;
+    use memory_core::domain::{SourceClass, SourceId, SourceKind};
+    use memory_core::privacy::{Profile, ResolvedSourceFacts};
+    let s = setup("check-retired")?;
+    let config = Config::load(&s.rig.cfg).map_err(e)?;
+    let roots = locator_roots(&config).map_err(e)?;
+    let namespace = roots.first().ok_or("no root")?.1.namespace().to_owned();
+    let rel = format!("file-history/{UUID}/aaaaaaaaaaaaaaaa@v1");
+    let file = s.rig.root.join(&rel);
+    fs::create_dir_all(file.parent().ok_or("parent")?).map_err(e)?;
+    fs::write(&file, "fn history() {}\n").map_err(e)?;
+    let fs_seam = SharedFs::with_tmp(s.rig.state.join("tmp"));
+    let handle = fs_seam
+        .cell()
+        .borrow_mut()
+        .register_encoded(file.clone(), Encoding::Plain);
+    let extra = (
+        s.owner.clone(),
+        Source {
+            handle,
+            id: SourceId::try_from(format!("{namespace}:retired-fh")).map_err(e)?,
+            kind: SourceKind::ClaudeFileHistory,
+            class: SourceClass::Snapshot,
+            path: rel.clone(),
+            facts: ResolvedSourceFacts {
+                identities: vec![rel],
+                file_identity: Some(pack(&fs::metadata(&file).map_err(e)?)),
+                ancestor_identities: vec![],
+                path_resolved: true,
+                root_resolved: true,
+                owner: Some(UUID.to_owned()),
+                profile: Profile::Scanned,
+            },
+        },
+    );
+    let parts = Parts {
+        fs: fs_seam.clone(),
+        store: store_at(&s.server.url(), PREFIX, TimeoutPolicy::PRODUCTION)?,
+        clock: memory::clock::SystemClock::new(),
+        sources: WithExtra {
+            inner: WalkSources::new(roots, WalkLimits::default(), fs_seam),
+            extra,
+        },
+        context: policy_context(&s.rig.state, &s.rig.cfg, &config),
+    };
+    let mut daemon = Daemon::start(&s.rig.state, &s.rig.cfg, parts).map_err(e)?;
+    let report = daemon.reconcile_once().map_err(e)?;
+    assert_eq!((report.failed, report.landed), (0, 1));
+    daemon.shutdown().map_err(e)?;
+
+    let ran = run(&s)?;
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    assert!(
+        ran.has("retired", 1) && ran.has("remote_only", 0),
+        "{}",
+        ran.out
+    );
+    assert!(
+        ran.out.contains(" remote_only=0 retired=1 parked="),
+        "{}",
+        ran.out
+    );
+    assert!(
+        ran.has("ignored", 1) && ran.has("uncaptured", 0),
+        "{}",
+        ran.out
+    );
     Ok(())
 }

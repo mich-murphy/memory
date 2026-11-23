@@ -1,7 +1,8 @@
-//! Brief 48: deletions of snapshot sources on the real binary against the loopback fake. One
-//! session (transcript plus a clean file-history file) and a synthetic Codex store. After the
-//! file-history file and the store are removed, two reconciles record both deleted; `check`,
-//! `restore` and `export` follow D52; a recreated store lands as a new epoch.
+//! Brief 48, reduced by brief 54: deletions on the real binary against the loopback fake. One
+//! session (transcript plus a tool-results file) and a Pi run record (the kept snapshot kind;
+//! Codex stores and file-history are ignored now). After both are removed, two reconciles
+//! record both deleted; `check`, `restore` and `export` follow D52/D59; a recreated run record
+//! lands as a new epoch.
 use super::daemon_restore::{Setup, setup};
 use super::{R, e};
 use memory::config::Config;
@@ -11,14 +12,13 @@ use memory::resolve::{SharedFs, WalkSources};
 use memory::roots::locator_roots;
 use memory_core::domain::Owner;
 use memory_core::limits::owner_prefix;
-use rusqlite::Connection;
 use std::fs;
-use std::path::Path;
 use std::process::Command;
 
 const UUID: &str = "0f0e0d0c-0b0a-4908-8706-050403020100";
-const FH: &str = "aaaaaaaaaaaaaaaa@v1";
-const STORE: &str = "thread_history_1.sqlite";
+const TR: &str = "t.txt";
+const RECORD: &str = "sessions/--pi-cwd--/subagent-artifacts/r.json";
+const RECORD_BODY: &str = "{\"run\":\"record_marker_k54\"}\n";
 
 fn run(s: &Setup, args: &[&str]) -> R<(i32, String, String)> {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_memory"));
@@ -45,27 +45,6 @@ fn round(s: &Setup) -> R<String> {
         .ok_or_else(|| "no round line".to_owned())
 }
 
-fn make_store(db: &Path) -> R {
-    let conn = Connection::open(db).map_err(e)?;
-    conn.pragma_update(None, "journal_mode", "wal").map_err(e)?;
-    conn.execute("create table t (n integer, s text)", [])
-        .map_err(e)?;
-    for n in 0..20 {
-        conn.execute("insert into t values (?1, 'row')", [n])
-            .map_err(e)?;
-    }
-    Ok(())
-}
-
-fn remove_store(db: &Path) -> R {
-    for suffix in ["", "-wal", "-shm"] {
-        let mut p = db.as_os_str().to_owned();
-        p.push(suffix);
-        let _ = fs::remove_file(p);
-    }
-    Ok(())
-}
-
 fn states(v: &serde_json::Value, out: &mut Vec<String>) {
     match v {
         serde_json::Value::Object(m) => {
@@ -82,13 +61,14 @@ fn states(v: &serde_json::Value, out: &mut Vec<String>) {
 #[test]
 fn deleted_snapshot_sources_follow_d52_and_a_recreated_store_lands_again() -> R {
     let s = setup("snapdel")?;
-    let codex = s.rig.add_root("codex")?;
+    let pi = s.rig.add_root("pi")?;
     fs::copy(&s.rig.cfg, s.rig.state.join("config.toml")).map_err(e)?;
-    let fh = s.rig.root.join("file-history").join(UUID);
-    fs::create_dir_all(&fh).map_err(e)?;
-    fs::write(fh.join(FH), "fn clean() {}\n").map_err(e)?;
-    let db = codex.join(STORE);
-    make_store(&db)?;
+    let tr = s.rig.root.join(format!("projects/-p/{UUID}/tool-results"));
+    fs::create_dir_all(&tr).map_err(e)?;
+    fs::write(tr.join(TR), "tool line\n").map_err(e)?;
+    let rec = pi.join(RECORD);
+    fs::create_dir_all(rec.parent().ok_or("parent")?).map_err(e)?;
+    fs::write(&rec, RECORD_BODY).map_err(e)?;
 
     let config = Config::load(&s.rig.cfg).map_err(e)?;
     let shared: Owner = WalkSources::new(
@@ -104,8 +84,8 @@ fn deleted_snapshot_sources_follow_d52_and_a_recreated_store_lands_again() -> R 
 
     let first = round(&s)?;
     assert!(first.contains(" deleted=0"), "{first}");
-    fs::remove_file(fh.join(FH)).map_err(e)?;
-    remove_store(&db)?;
+    fs::remove_file(tr.join(TR)).map_err(e)?;
+    fs::remove_file(&rec).map_err(e)?;
     let one = round(&s)?;
     assert!(
         one.contains(" deleted=0"),
@@ -129,7 +109,12 @@ fn deleted_snapshot_sources_follow_d52_and_a_recreated_store_lands_again() -> R 
         err.contains("restored written=1 skipped_deleted=1 "),
         "{err}"
     );
-    assert!(!dest.join("file-history").exists());
+    assert!(
+        !dest
+            .join(format!("projects/-p/{UUID}/tool-results"))
+            .join(TR)
+            .exists()
+    );
 
     let exp = s.rig.dir.join("exported");
     let (code, out, err) = run(
@@ -143,8 +128,8 @@ fn deleted_snapshot_sources_follow_d52_and_a_recreated_store_lands_again() -> R 
     states(&meta, &mut seen);
     assert!(seen.iter().any(|x| x == "sealed"), "{seen:?}");
 
-    // The store comes back: a new epoch, restorable again.
-    make_store(&db)?;
+    // The run record comes back: a new epoch, restorable again.
+    fs::write(&rec, RECORD_BODY).map_err(e)?;
     let back = round(&s)?;
     assert!(
         back.contains(" landed=1") && back.contains(" deleted=0"),
@@ -165,10 +150,9 @@ fn deleted_snapshot_sources_follow_d52_and_a_recreated_store_lands_again() -> R 
         err.contains("restored written=1 skipped_deleted=0 "),
         "{err}"
     );
-    let conn = Connection::open(dest.join(STORE)).map_err(e)?;
-    let ok: String = conn
-        .query_row("pragma integrity_check", [], |r| r.get(0))
-        .map_err(e)?;
-    assert_eq!(ok, "ok");
+    assert_eq!(
+        fs::read(dest.join(RECORD)).map_err(e)?,
+        RECORD_BODY.as_bytes()
+    );
     Ok(())
 }

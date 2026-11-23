@@ -17,10 +17,13 @@
 //! walk (not truncated, not busy). Per visited owner, stored live entries (append or snapshot,
 //! brief 48) that the walk did not yield and that are not parked are probed with `stat` through
 //! [`Sources::locate_absent`]; a missing root, an unknown namespace or a bad path is counted as
-//! `absence_skipped` and never deletes. `index.json` keeps `owners` (`#[serde(default)]`) so an
-//! owner whose every file is gone is still visited; it leaves the set once no live entry
-//! remains. `capture_owner` never counts absence. A local record holding only a withheld
-//! judgement is dropped after two consecutive complete walks that did not yield it (brief 48).
+//! `absence_skipped` and never deletes. A stored entry whose path now locates to `Ignored`
+//! (brief 54) is `Probe::Retired`: never probed, never deleted, not `absence_skipped`; its
+//! manifest entry stays. Retired entries do not keep an owner in the set. `index.json` keeps
+//! `owners` (`#[serde(default)]`) so an owner whose every file is gone is still visited; it
+//! leaves the set once no live entry remains. `capture_owner` never counts absence. A local
+//! record holding only a withheld judgement is dropped after two consecutive complete walks
+//! that did not yield it (brief 48).
 //!
 //! Withheld scanned files (D54, brief 47): `SourceIndex.withheld` (`#[serde(default)]`) records the
 //! fingerprint, rules and reason of a withhold of a `Profile::Scanned` file (Claude file-history).
@@ -303,6 +306,9 @@ pub enum Probe {
     /// Not probed: unknown namespace, unparsable path, a root that is not a directory, or no
     /// resolver. Never counts toward deletion.
     Skip,
+    /// Brief 54: the stored path now locates to `Ignored`. Never probed, never deleted, not
+    /// counted as skipped; the stored entry stays as it is.
+    Retired,
 }
 
 /// Monotonic time between `progress` log lines of a running round.
@@ -1046,6 +1052,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                     id: id.clone(),
                 }),
                 Probe::Skip => skipped += 1,
+                Probe::Retired => {}
             }
         }
         (found, skipped)
@@ -1450,7 +1457,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             let known: Vec<SourceId> = rt.parked_sources.keys().cloned().collect();
             let pause = self.run_owner(owner, sources, &mut rt, &mut files, &when, &mut report);
             Self::log_parks(owner, &rt, was_parked, &known);
-            if sources.is_empty() && self.absence && Self::all_gone(&rt) {
+            if sources.is_empty() && self.absence && self.all_gone(&rt) {
                 self.dirty |= self.known.remove(owner);
             }
             self.owners.insert(owner.clone(), rt);
@@ -1496,9 +1503,12 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     }
 
     /// The owner's recovered state has no live append entry left.
-    fn all_gone(rt: &OwnerRt) -> bool {
+    /// Brief 54: retired entries (their path now locates to `Ignored`) do not count as live.
+    fn all_gone(&mut self, rt: &OwnerRt) -> bool {
         match &rt.base {
-            RemoteBase::Known(base) => !base.state.sources.values().any(|e| e.deleted_at.is_none()),
+            RemoteBase::Known(base) => !base.state.sources.iter().any(|(id, e)| {
+                e.deleted_at.is_none() && self.sources.locate_absent(id, &e.path) != Probe::Retired
+            }),
             RemoteBase::Absent => true,
             RemoteBase::Unknown => false,
         }

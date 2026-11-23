@@ -4482,6 +4482,8 @@ struct Gate {
     list: Shared,
     complete: Arc<std::sync::atomic::AtomicBool>,
     root: Arc<std::sync::atomic::AtomicBool>,
+    /// Brief 54: every stored path locates to `Ignored`.
+    retired: Arc<std::sync::atomic::AtomicBool>,
 }
 impl memory::daemon::Sources for Gate {
     fn enumerate(&mut self) -> Vec<(Owner, Source)> {
@@ -4491,6 +4493,9 @@ impl memory::daemon::Sources for Gate {
         self.complete.load(Ordering::SeqCst)
     }
     fn locate_absent(&mut self, id: &SourceId, _path: &str) -> memory::daemon::Probe {
+        if self.retired.load(Ordering::SeqCst) {
+            return memory::daemon::Probe::Retired;
+        }
         if !self.root.load(Ordering::SeqCst) {
             return memory::daemon::Probe::Skip;
         }
@@ -4550,6 +4555,7 @@ fn rig() -> R<Rig> {
         list: Arc::new(Mutex::new(vec![src_of("s1", 1)?, src_of("s1", 2)?])),
         complete: Arc::new(AtomicBool::new(true)),
         root: Arc::new(AtomicBool::new(true)),
+        retired: Arc::new(AtomicBool::new(false)),
     };
     let mut d = start_ad(&tmp, &cfg, fs, FStore::default(), &gate)?;
     assert_eq!(d.reconcile_once().map_err(e)?.landed, 1);
@@ -4624,6 +4630,36 @@ fn a_file_back_before_the_second_round_is_not_deleted() -> R {
     // The count restarted: one absent round is not two.
     assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 0);
     assert!(!deleted_and_epochs(&mut r.d)?.0);
+    Ok(())
+}
+
+// Brief 54: a retired entry is never probed, never deleted and not `absence_skipped`, over
+// several full rounds, also after its file is removed; the manifest entry stays.
+#[test]
+fn a_retired_entry_is_never_probed_nor_deleted() -> R {
+    let mut r = rig()?;
+    r.gate.retired.store(true, Ordering::SeqCst);
+    let skipped = rounds_never_delete(&mut r, 3)?;
+    assert_eq!(skipped, 0, "retired is not absence_skipped");
+    remove_file(&mut r, 1);
+    remove_file(&mut r, 2);
+    assert_eq!(rounds_never_delete(&mut r, 4)?, 0);
+    Ok(())
+}
+
+// Brief 54: an owner whose walk yields nothing and whose live entries are all retired leaves
+// the owner set like `all_gone`; a kept source that vanishes is still deleted after two misses.
+#[test]
+fn an_owner_with_only_retired_entries_leaves_the_owner_set() -> R {
+    let mut r = rig()?;
+    remove_file(&mut r, 1);
+    remove_file(&mut r, 2);
+    r.gate.retired.store(true, Ordering::SeqCst);
+    assert_eq!(rounds_never_delete(&mut r, 2)?, 0);
+    let (tmp, d) = (r.tmp, r.d);
+    d.shutdown().map_err(e)?;
+    let index = need(index_of(&tmp)?, "no index")?;
+    assert!(index.owners.is_empty(), "{:?}", index.owners);
     Ok(())
 }
 
@@ -4768,6 +4804,7 @@ fn snap_rig() -> R<Rig> {
         list: Arc::new(Mutex::new(vec![snap_of(3)?])),
         complete: Arc::new(AtomicBool::new(true)),
         root: Arc::new(AtomicBool::new(true)),
+        retired: Arc::new(AtomicBool::new(false)),
     };
     let mut d = start_ad(&tmp, &cfg, fs, FStore::default(), &gate)?;
     assert_eq!(d.reconcile_once().map_err(e)?.landed, 1);
@@ -5003,6 +5040,7 @@ fn an_index_without_owners_still_loads() -> R {
         list: Arc::new(Mutex::new(Vec::new())),
         complete: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         root: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        retired: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
     let d = start_ad(&tmp, &cfg, FlakyFs::default(), FStore::default(), &gate)?;
     assert_eq!(d.index_load(), StateLoad::Loaded);

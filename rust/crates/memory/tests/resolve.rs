@@ -339,14 +339,34 @@ fn end_to_end_commits_transcript_and_never_a_symlinked_credential() -> R {
 fn shared_owner_and_profiles_are_literal() -> R {
     use memory_core::privacy::Profile;
     let t = Tmp::new()?;
-    // A plan is a shared (sessionless) artifact. Brief 49: yielded snapshot kinds are Scanned.
+    // Brief 54: plans and settings are dropped kinds, so the locator ignores them; the Located
+    // values are built below the locator to keep this test's purpose (owner and profile).
+    use memory_core::locator::{ConfigAsset, Role};
+    let shared = |kind, role, id: &str| -> R<Located> {
+        Ok(Located::Source {
+            owner: Owner::Shared {
+                archive: ArchiveId::try_from("a".to_owned())?,
+                machine: MachineId::try_from("m".to_owned())?,
+                agent: Agent::Claude,
+            },
+            kind,
+            class: memory_core::domain::SourceClass::Snapshot,
+            id: memory_core::domain::SourceId::try_from(id.to_owned())?,
+            role,
+        })
+    };
     let plan = t.write("claude/plans/p.md", b"plan")?;
-    let facts = resolve_facts(&plan, &t.root(), &located("plans/p.md")?);
+    let loc = shared(SourceKind::ClaudePlan, Role::Artifact, "r1:plans:p.md")?;
+    let facts = resolve_facts(&plan, &t.root(), &loc);
     assert_eq!(facts.owner.as_deref(), Some("a/m/Claude"));
     assert_eq!(facts.profile, Profile::Scanned);
-    // settings.json is structured config (brief 49: scrubbed, then scanned).
     let cfg = t.write("claude/settings.json", b"{}")?;
-    let facts = resolve_facts(&cfg, &t.root(), &located("settings.json")?);
+    let loc = shared(
+        SourceKind::ClaudeConfig,
+        Role::Asset(ConfigAsset::Settings),
+        "r1:settings.json",
+    )?;
+    let facts = resolve_facts(&cfg, &t.root(), &loc);
     assert_eq!(facts.profile, Profile::Scanned);
     assert_eq!(facts.owner.as_deref(), Some("a/m/Claude"));
     // An unlocated row has no owner and the unknown profile.
@@ -359,9 +379,10 @@ fn shared_owner_and_profiles_are_literal() -> R {
 fn unknown_owner_rows_are_counted_not_yielded() -> R {
     let t = Tmp::new()?;
     t.write(T, b"x")?;
-    // A Claude external whose UUID no shell fact names has no derivable owner.
+    // Brief 54: a Claude external whose UUID no shell fact names is Ignored (a dropped kind),
+    // no longer unknown_owner.
     let rel = "todos/0f0e0d0c-0b0a-4908-8706-050403020100-agent.json";
-    assert_eq!(located(rel)?, Located::UnknownOwner);
+    assert_eq!(located(rel)?, Located::Ignored);
     t.write(&format!("claude/{rel}"), b"[]")?;
     let mut s = WalkSources::new(
         vec![(t.root(), roots()?)],
@@ -370,7 +391,10 @@ fn unknown_owner_rows_are_counted_not_yielded() -> R {
     );
     assert_eq!(s.enumerate().len(), 1);
     let c = s.counts();
-    assert_eq!((c.yielded, c.unknown_owner, c.unknown_kind), (1, 1, 0));
+    assert_eq!(
+        (c.yielded, c.ignored, c.unknown_owner, c.unknown_kind),
+        (1, 1, 0, 0)
+    );
     Ok(())
 }
 
@@ -859,26 +883,24 @@ fn agent_walker(root: &Path, agent: Agent) -> R<WalkSources> {
 
 #[test]
 fn a_debug_file_takes_the_owner_of_its_transcript() -> R {
+    // Brief 54: `ClaudeDebug` is a dropped kind, so the debug file is `Ignored` (counted, never
+    // yielded, never routed by `note`); the transcript alone is captured. The debug-owner
+    // derivation itself is covered by the locator matrix, which still builds the row's owner.
     let t = Tmp::new()?;
     t.write(&format!("claude/projects/-p/{U1}.jsonl"), b"{}\n")?;
     let debug = t.write(&format!("claude/debug/{U1}.txt"), b"log\n")?;
     let mut w = walker(&t.root(), WalkLimits::default())?;
     let found = w.enumerate();
-    assert_eq!(found.len(), 2);
+    assert_eq!(found.len(), 1);
     let owner = owner_at(&format!("projects/-p/{U1}.jsonl"))?;
     assert!(found.iter().all(|(o, _)| *o == owner));
     let c = w.counts();
     assert_eq!(
-        (
-            c.yielded,
-            c.unknown_owner,
-            c.unknown_kind,
-            c.deferred_snapshot
-        ),
-        (2, 0, 0, 0)
+        (c.yielded, c.ignored, c.unknown_owner, c.unknown_kind),
+        (1, 1, 0, 0)
     );
-    assert_eq!(w.of(&owner).len(), 2);
-    assert_eq!(w.note(&debug), Some(owner));
+    assert_eq!(w.of(&owner).len(), 1);
+    assert_eq!(w.note(&debug), None);
     // A fresh walker that never walked cannot know the uuid.
     let mut cold = walker(&t.root(), WalkLimits::default())?;
     assert_eq!(cold.note(&debug), None);
@@ -896,7 +918,11 @@ fn a_symlinked_projects_dir_does_not_fill_the_session_index() -> R {
     let mut w = walker(&t.root(), WalkLimits::default())?;
     assert!(w.enumerate().is_empty());
     let c = w.counts();
-    assert_eq!((c.yielded, c.unknown_owner, c.symlinks), (0, 1, 1));
+    // Brief 54: the debug file is Ignored (was unknown_owner).
+    assert_eq!(
+        (c.yielded, c.ignored, c.unknown_owner, c.symlinks),
+        (0, 1, 0, 1)
+    );
     assert_eq!(w.note(&debug), None);
     Ok(())
 }
@@ -910,7 +936,8 @@ fn a_uuid_under_two_slugs_leaves_its_debug_file_unowned() -> R {
     let mut w = walker(&t.root(), WalkLimits::default())?;
     assert_eq!(w.enumerate().len(), 2);
     let c = w.counts();
-    assert_eq!((c.yielded, c.unknown_owner, c.deferred_snapshot), (2, 1, 0));
+    // Brief 54: the debug file is Ignored (was unknown_owner).
+    assert_eq!((c.yielded, c.ignored, c.unknown_owner), (2, 1, 0));
     assert_eq!(w.note(&debug), None);
     Ok(())
 }
@@ -924,40 +951,29 @@ fn snapshot_files_are_deferred_not_yielded_and_not_unknown() -> R {
     let history = t.write(&format!("claude/file-history/{U1}/f@v1"), b"x")?;
     let mut w = walker(&t.root(), WalkLimits::default())?;
     let owner = owner_at(&format!("projects/-p/{U1}.jsonl"))?;
-    // Brief 49: settings and file-history are yielded; only session-env stays deferred.
-    assert_eq!(w.enumerate().len(), 3);
+    // Brief 54: settings, session-env and file-history are dropped kinds: counted `ignored`.
+    assert_eq!(w.enumerate().len(), 1);
     let c = w.counts();
     assert_eq!(
-        (
-            c.yielded,
-            c.deferred_snapshot,
-            c.unknown_owner,
-            c.unknown_kind
-        ),
-        (3, 1, 0, 0)
+        (c.yielded, c.ignored, c.unknown_owner, c.unknown_kind),
+        (1, 3, 0, 0)
     );
     assert_eq!(w.note(&settings), None);
     // `note` routes watcher events for append sources only; file-history waits for the reconcile.
     assert_eq!(w.note(&history), None);
-    assert_eq!(w.of(&owner).len(), 2);
+    assert_eq!(w.of(&owner).len(), 1);
 
     let codex = t.0.join("codex");
     t.write("codex/state.sqlite", b"x")?;
     t.write("codex/logs_2.sqlite", b"x")?;
     t.write("codex/config.toml", b"x")?;
     let mut w = agent_walker(&codex, Agent::Codex)?;
-    // Brief 49: the store and `config.toml` are yielded; the log database is ignored.
-    assert_eq!(w.enumerate().len(), 2);
+    // Brief 54: the store, `config.toml` and the log database are all ignored.
+    assert_eq!(w.enumerate().len(), 0);
     let c = w.counts();
     assert_eq!(
-        (
-            c.yielded,
-            c.deferred_snapshot,
-            c.unknown_owner,
-            c.unknown_kind
-        ),
-        // Brief 46 / D54: `logs_*.sqlite` is Ignored, no longer unknown_kind.
-        (2, 0, 0, 0)
+        (c.yielded, c.ignored, c.unknown_owner, c.unknown_kind),
+        (0, 3, 0, 0)
     );
     assert_eq!(w.note(&codex.join("logs_2.sqlite")), None);
     assert_eq!(w.note(&codex.join("config.toml")), None);
@@ -965,17 +981,12 @@ fn snapshot_files_are_deferred_not_yielded_and_not_unknown() -> R {
     let pi = t.0.join("pi");
     t.write("pi/settings.json", b"{}")?;
     let mut w = agent_walker(&pi, Agent::Pi)?;
-    // Brief 49: Pi settings are yielded.
-    assert_eq!(w.enumerate().len(), 1);
+    // Brief 54: Pi settings are ignored.
+    assert_eq!(w.enumerate().len(), 0);
     let c = w.counts();
     assert_eq!(
-        (
-            c.yielded,
-            c.deferred_snapshot,
-            c.unknown_owner,
-            c.unknown_kind
-        ),
-        (1, 0, 0, 0)
+        (c.yielded, c.ignored, c.unknown_owner, c.unknown_kind),
+        (0, 1, 0, 0)
     );
     Ok(())
 }
@@ -1009,11 +1020,14 @@ fn yielded_snapshot_kinds_are_scanned_and_append_kinds_keep_their_profile() -> R
     }
     let mut w = walker(&t.root(), WalkLimits::default())?;
     let found = w.enumerate();
-    assert_eq!(found.len(), files.len());
+    // Brief 54: only tool-results and the transcript are still captured; every other row is a
+    // dropped kind and is not yielded (its profile function is exercised by the privacy tests).
+    assert_eq!(found.len(), 2);
     for (rel, want) in &files {
         let hit = found.iter().find(|(_, s)| s.path == *rel);
         let got = hit.map(|(_, s)| s.facts.profile);
-        assert_eq!(got, Some(*want), "{rel}");
+        let kept = rel.contains("tool-results") || rel.ends_with(&format!("{U1}.jsonl"));
+        assert_eq!(got, kept.then_some(*want), "{rel}");
     }
     let codex = t.0.join("codex");
     t.write("codex/state.sqlite", b"x")?;
@@ -1027,9 +1041,10 @@ fn yielded_snapshot_kinds_are_scanned_and_append_kinds_keep_their_profile() -> R
             .find(|(_, s)| s.path == p)
             .map(|(_, s)| s.facts.profile)
     };
-    assert_eq!(prof("state.sqlite"), Some(Profile::OtherKnown));
-    assert_eq!(prof("config.toml"), Some(Profile::Scanned));
-    assert_eq!(prof("history.jsonl"), Some(Profile::OtherKnown));
+    assert!(found.is_empty());
+    assert_eq!(prof("state.sqlite"), None);
+    assert_eq!(prof("config.toml"), None);
+    assert_eq!(prof("history.jsonl"), None);
     // Pi session aux is Scanned; the Pi transcript keeps `Transcript` (parent finding, brief 49).
     let pi = t.0.join("pi");
     let stem = format!("2026-11-21T10-00-00-000Z_{U1}");
@@ -1045,7 +1060,7 @@ fn yielded_snapshot_kinds_are_scanned_and_append_kinds_keep_their_profile() -> R
             .find(|(_, s)| s.path == p)
             .map(|(_, s)| (s.kind.clone(), s.facts.profile))
     };
-    assert_eq!(prof(&aux), Some((SourceKind::PiAux, Profile::Scanned)));
+    assert_eq!(prof(&aux), None);
     assert_eq!(
         prof(&main),
         Some((SourceKind::PiSession, Profile::Transcript))
@@ -1067,8 +1082,8 @@ fn of_over_every_owner_equals_enumerate_on_a_mixed_tree() -> R {
     let found = w.enumerate();
     let mut walked: Vec<String> = found.iter().map(|(o, s)| key_of(o, s)).collect();
     walked.sort();
-    // Brief 49: todos and settings are yielded too; only session-env stays deferred.
-    assert_eq!(walked.len(), 6, "{walked:?}");
+    // Brief 54: debug, todos, settings and session-env are ignored; only transcripts remain.
+    assert_eq!(walked.len(), 2, "{walked:?}");
     let mut owners: Vec<Owner> = Vec::new();
     for (o, _) in &found {
         if !owners.contains(o) {
@@ -1081,7 +1096,7 @@ fn of_over_every_owner_equals_enumerate_on_a_mixed_tree() -> R {
         .collect();
     got.sort();
     assert_eq!(got, walked);
-    assert_eq!(w.counts().deferred_snapshot, 1);
+    assert_eq!(w.counts().ignored, 5);
     Ok(())
 }
 
@@ -1270,14 +1285,36 @@ fn ignored_files_are_counted_not_yielded_and_never_hints() -> R {
     let mut w = walker(&t.root(), WalkLimits::default())?;
     assert_eq!(w.enumerate().len(), 1);
     let c = w.counts();
-    assert_eq!(
-        (c.yielded, c.ignored, c.unknown_kind, c.deferred_snapshot),
-        (1, 2, 1, 0)
-    );
+    assert_eq!((c.yielded, c.ignored, c.unknown_kind), (1, 2, 1));
     assert_eq!(w.note(&skill), None);
     assert_eq!(w.note(&cache), None);
     let (owners, _) = w.read_dir(&t.root().join("skills/a"));
     assert!(owners.is_empty());
     assert_eq!(w.enumerate().len(), 1);
+    Ok(())
+}
+
+// Parent (brief 54 teeth): the real `WalkSources::locate_absent` returns `Retired` for a stored
+// path that now locates to `Ignored`, whether or not the file is still there, and still a handle
+// for a kept path. The daemon tests use a stub `Sources`, so only this test reaches it.
+#[test]
+fn locate_absent_retires_a_dropped_path_and_probes_a_kept_one() -> R {
+    use memory::daemon::Probe;
+    use memory_core::domain::SourceId;
+    let t = Tmp::new()?;
+    t.write(T, b"x")?;
+    t.write("claude/history.jsonl", b"x")?;
+    let ns = roots()?.namespace().to_owned();
+    let id = |n: &str| SourceId::try_from(format!("{ns}:{n}"));
+    let fh = "file-history/0f0e0d0c-0b0a-4908-8706-050403020100/aaaaaaaaaaaaaaaa@v1";
+    let mut s = walker(&t.root(), WalkLimits::default())?;
+    assert_eq!(s.locate_absent(&id("h")?, "history.jsonl"), Probe::Retired);
+    assert_eq!(s.locate_absent(&id("fh")?, fh), Probe::Retired);
+    assert!(matches!(
+        s.locate_absent(&id("t")?, "projects/-p/abc.jsonl"),
+        Probe::Handle(_)
+    ));
+    fs::remove_file(t.root().join("history.jsonl"))?;
+    assert_eq!(s.locate_absent(&id("h")?, "history.jsonl"), Probe::Retired);
     Ok(())
 }
