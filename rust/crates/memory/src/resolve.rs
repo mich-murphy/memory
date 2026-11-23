@@ -330,9 +330,6 @@ pub struct Counts {
     /// Files whose (owner, source id) another file with a lexicographically smaller
     /// root-relative path already holds; not yielded.
     pub duplicate: u64,
-    /// Session-env, usage-data and paste-cache snapshot files (brief 49), located but not yielded
-    /// (DESIGN.md 17); neither counted as unknown.
-    pub deferred_snapshot: u64,
     /// Yielded sources whose facts are unresolved (capture will block them).
     pub unresolved: u64,
     /// Symlinks the walk skipped.
@@ -513,17 +510,6 @@ impl crate::daemon::Sources for WalkSources {
                     Located::UnknownOwner => counts.unknown_owner += 1,
                     Located::Ignored => {
                         counts.ignored += 1;
-                        continue;
-                    }
-                    Located::Source {
-                        class: SourceClass::Snapshot,
-                        kind:
-                            SourceKind::ClaudeSessionEnv
-                            | SourceKind::ClaudeUsage
-                            | SourceKind::ClaudePaste,
-                        ..
-                    } => {
-                        counts.deferred_snapshot += 1;
                         continue;
                     }
                     Located::Source { .. } => {}

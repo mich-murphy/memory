@@ -144,7 +144,25 @@ fn eid(path: &str) -> String {
     path.split('/').map(esc).collect::<Vec<_>>().join(":")
 }
 
+/// Brief 54: the captured kinds, stated here independently of the locator's allowlist. The
+/// table keeps each row's pre-brief expectation; a row whose kind is not in this list must
+/// now locate as `Ignored`. `PiAux` is captured only as a run record (own tests below).
+fn kept(kind: &SourceKind) -> bool {
+    matches!(
+        kind,
+        SourceKind::ClaudeTranscript
+            | SourceKind::ClaudeSubagent
+            | SourceKind::ClaudeToolResults
+            | SourceKind::CodexRollout
+            | SourceKind::CodexCompressed
+            | SourceKind::PiSession
+    )
+}
+
 fn matches(got: &Located, exp: &Exp, agent: &Agent) -> bool {
+    if let (Located::Ignored, Exp::Src { kind, .. }) = (got, exp) {
+        return !kept(kind);
+    }
     match (got, exp) {
         (Located::UnknownKind, Exp::Kind)
         | (Located::UnknownOwner, Exp::Owner)
@@ -1059,10 +1077,12 @@ fn collect_wire_names(schema: &serde_json::Value, out: &mut Vec<String>) {
 fn every_kind_but_generated_snapshot_and_every_asset_is_reachable() -> TestResult {
     let mut kinds = HashSet::new();
     let mut roles = HashSet::new();
+    // Brief 54: kinds and roles come from the expectations; the matrix test proves that every
+    // row whose kind is not captured locates as `Ignored`.
     for r in ROWS.iter() {
-        if let Located::Source { kind, role, .. } = locate_row(r, "r1")? {
-            kinds.insert(serde_json::to_string(&kind)?);
-            roles.insert(role);
+        if let Exp::Src { kind, role, .. } = &r.exp {
+            kinds.insert(serde_json::to_string(kind)?);
+            roles.insert(*role);
         }
     }
     // Derived from the enum's own schema, so a new kind forces a fixture row; the only
@@ -1085,17 +1105,17 @@ fn every_kind_but_generated_snapshot_and_every_asset_is_reachable() -> TestResul
     let mut shared_aux = false;
     for r in ROWS.iter() {
         shared_aux |= matches!(
-            locate_row(r, "r1")?,
-            Located::Source {
+            &r.exp,
+            Exp::Src {
                 kind: SourceKind::PiAux,
-                owner: Owner::Shared { .. },
+                owner: None,
                 class: SourceClass::Snapshot,
                 role: Role::Artifact,
                 ..
             }
         );
     }
-    ensure!(shared_aux, "the Shared PiAux arm is never reached");
+    ensure!(shared_aux, "the Shared PiAux arm is never expected");
     ensure!(
         !kinds.contains("\"pi.snapshot\""),
         "pi.snapshot is generated, never a path kind"
@@ -1548,19 +1568,6 @@ fn prop_stable_rows(e: &[u8]) -> TestResult {
     Ok(())
 }
 
-fn is_shared_pi_aux(got: &Located) -> bool {
-    matches!(
-        got,
-        Located::Source {
-            kind: SourceKind::PiAux,
-            owner: Owner::Shared { .. },
-            class: SourceClass::Snapshot,
-            role: Role::Artifact,
-            ..
-        }
-    )
-}
-
 fn prop_unmapped(e: &[u8]) -> TestResult {
     let mut p = Pick { bytes: e, at: 0 };
     let frags = frags();
@@ -1583,8 +1590,9 @@ fn prop_unmapped(e: &[u8]) -> TestResult {
     let roots = make_roots(home, "r1", &p.noise(), false)?;
     let got = locate(&RootRelativePath::parse(&comps.join("/"))?, &roots);
     if home == Home::PiCustom {
-        // Go agentDir=false: all non-transcript files are sessionless aux.
-        ensure!(is_shared_pi_aux(&got), "custom root aux expected: {got:?}");
+        // Go agentDir=false: all non-transcript files are sessionless aux; brief 54 drops
+        // that kind, so the verdict is `Ignored`.
+        ensure!(got == Located::Ignored, "custom root aux ignored: {got:?}");
     } else {
         ensure!(
             got == Located::UnknownKind,
@@ -1621,19 +1629,21 @@ fn prop_unmapped(e: &[u8]) -> TestResult {
         ensure!(got == locate(&path, &agent), "promotion differs: {got:?}");
     }
     let got = locate(&RootRelativePath::parse(pp)?, &custom);
-    let Located::Source { kind, .. } = &got else {
-        return Err(format!("{pp}: not promoted: {got:?}").into());
-    };
-    ensure!(
-        serde_json::to_value(kind)?.as_str() == Some(want),
-        "{pp}: wrong promoted kind {kind:?}"
-    );
+    // Brief 54: only the session promotion is still a source; the rest are dropped kinds.
+    if want == "pi.session" {
+        let Located::Source { kind, .. } = &got else {
+            return Err(format!("{pp}: not promoted: {got:?}").into());
+        };
+        ensure!(
+            serde_json::to_value(kind)?.as_str() == Some(want),
+            "{pp}: wrong promoted kind {kind:?}"
+        );
+    } else {
+        ensure!(got == Located::Ignored, "{pp} ({want}): {got:?}");
+    }
     let pi_roots = make_roots(Home::Pi, "r1", &p.noise(), false)?;
     let got = locate(&RootRelativePath::parse(&sl)?, &pi_roots);
-    ensure!(is_shared_pi_aux(&got), "{sl}: {got:?}");
-    if let Located::Source { id, .. } = &got {
-        ensure!(id.as_str().starts_with("r1:sessions:"), "path-qualified id");
-    }
+    ensure!(got == Located::Ignored, "{sl}: {got:?}");
 
     // Claude externals with a UUID absent from the shell facts are always UnknownOwner.
     let first = ["c", "d", "e", "f"].get(p.below(4)).copied().unwrap_or("c");
@@ -1874,22 +1884,15 @@ fn codex_system_skills_are_ignored_and_user_skills_are_assets() -> TestResult {
         let got = verdict(Home::Codex, p)?;
         ensure!(got == Located::Ignored, "codex {p}: {got:?}");
     }
+    // Brief 54: user skills are a dropped kind (`CodexConfig`), so they are `Ignored` too;
+    // the custom-root check below still shows the system-skill rule is layout specific.
     for p in [
         "skills/mine/SKILL.md",
         "skills/.systemx/a.md",
         "skills/.system",
     ] {
         let got = verdict(Home::Codex, p)?;
-        ensure!(
-            matches!(
-                &got,
-                Located::Source {
-                    kind: SourceKind::CodexConfig,
-                    ..
-                }
-            ),
-            "codex {p}: {got:?}"
-        );
+        ensure!(got == Located::Ignored, "codex {p}: {got:?}");
     }
     let custom = verdict(Home::CodexOnCustom, "skills/.system/a.md");
     ensure!(
@@ -1902,6 +1905,7 @@ fn codex_system_skills_are_ignored_and_user_skills_are_assets() -> TestResult {
 #[test]
 fn ignored_near_misses_keep_their_verdict() -> TestResult {
     // Claude: assets and sources next to ignored names.
+    // Brief 54: these assets are dropped kinds; they are `Ignored` by the allowlist.
     for p in [
         "plugins/installed_plugins.json",
         "plugins/known_marketplaces.json",
@@ -1909,7 +1913,7 @@ fn ignored_near_misses_keep_their_verdict() -> TestResult {
         "history.jsonl",
         "agents/a/b.md",
     ] {
-        ensure!(is_src(&verdict(Home::Claude, p)?), "claude {p}");
+        ensure!(verdict(Home::Claude, p)? == Located::Ignored, "claude {p}");
     }
     for p in [
         "sessions/x",
@@ -1922,7 +1926,7 @@ fn ignored_near_misses_keep_their_verdict() -> TestResult {
             "claude {p}"
         );
     }
-    // Codex: stores, plugins assets, near-miss names.
+    // Codex: stores, plugins assets, near-miss names (brief 54: dropped kinds are `Ignored`).
     for p in [
         "state_5.sqlite",
         "logs.sqlite3",
@@ -1933,6 +1937,10 @@ fn ignored_near_misses_keep_their_verdict() -> TestResult {
         "plugins/p/plugin.json",
         "plugins/p/a.toml",
         "plugins/p/a.md",
+    ] {
+        ensure!(verdict(Home::Codex, p)? == Located::Ignored, "codex {p}");
+    }
+    for p in [
         &format!("sessions/2026/01/02/rollout-2026-01-02T03-04-05-{UA}.jsonl"),
         &format!("sessions/rollout-2026-01-02T03-04-05-{UA}.jsonl.zst"),
     ] {
@@ -1952,15 +1960,12 @@ fn ignored_near_misses_keep_their_verdict() -> TestResult {
             "codex {p}"
         );
     }
-    // Pi: sessions and config assets.
-    for p in [
-        "settings.json",
-        "models.json",
-        "extensions/a/b.ts",
-        "sessions/--c--/2026-01-02T03-04-05.000Z_11111111-2222-3333-4444-555555555555.jsonl",
-    ] {
-        ensure!(is_src(&verdict(Home::Pi, p)?), "pi {p}");
+    // Pi: config assets are dropped (brief 54); sessions are kept.
+    for p in ["settings.json", "models.json", "extensions/a/b.ts"] {
+        ensure!(verdict(Home::Pi, p)? == Located::Ignored, "pi {p}");
     }
+    let p = "sessions/--c--/2026-01-02T03-04-05.000Z_11111111-2222-3333-4444-555555555555.jsonl";
+    ensure!(is_src(&verdict(Home::Pi, p)?), "pi {p}");
     for p in [
         "missions/a",
         "pi-peers/a",
@@ -1974,15 +1979,23 @@ fn ignored_near_misses_keep_their_verdict() -> TestResult {
         format!("projects/-p/{U1}.jsonl"),
         format!("projects/-p/{U1}/subagents/a.jsonl"),
         format!("projects/-p/{U1}/tool-results/a"),
-        format!("file-history/{U1}/f@v1"),
-        "projects/-p/memory/m.md".to_owned(),
     ] {
         ensure!(is_src(&verdict(Home::Claude, &p)?), "claude {p}");
     }
-    // A custom Pi root keeps its rules: the same paths are not ignored.
-    for p in ["git/a", "npm/a", "pi-terminology/a", "x-debug.jsonl"] {
+    // Brief 54: file-history and memory notes are dropped kinds, `Ignored` by the allowlist.
+    for p in [
+        format!("file-history/{U1}/f@v1"),
+        "projects/-p/memory/m.md".to_owned(),
+    ] {
+        ensure!(verdict(Home::Claude, &p)? == Located::Ignored, "claude {p}");
+    }
+    // A custom Pi root keeps its own rules: a transcript name is still a session. Brief 54:
+    // its sessionless aux files are a dropped kind, so they are `Ignored` there as well.
+    let got = verdict(Home::PiCustom, "x-debug.jsonl")?;
+    ensure!(is_src(&got), "custom x-debug.jsonl: {got:?}");
+    for p in ["git/a", "npm/a", "pi-terminology/a"] {
         let got = verdict(Home::PiCustom, p)?;
-        ensure!(got != Located::Ignored, "custom {p}: {got:?}");
+        ensure!(got == Located::Ignored, "custom {p}: {got:?}");
     }
     Ok(())
 }
@@ -2074,45 +2087,25 @@ fn prop_ignored_never_session_owned(e: &[u8]) -> TestResult {
                 got.withhold_reason() == Some(WithholdReason::Ignored),
                 "reason"
             );
-            let lower = last.to_ascii_lowercase();
-            let store = [".sqlite", ".sqlite3", ".db"]
-                .iter()
-                .any(|x| lower.ends_with(x))
-                && !lower.starts_with("logs_");
-            let session_root = match home {
-                Home::Claude => [
-                    "projects",
-                    "file-history",
-                    "session-env",
-                    "debug",
-                    "todos",
-                    "tasks",
-                    "history.jsonl",
-                ]
-                .contains(&first),
-                Home::Codex => [
-                    "sessions",
-                    "archived_sessions",
-                    "history.jsonl",
-                    "session_index.jsonl",
-                    "memories",
-                    "log",
-                ]
-                .contains(&first),
-                _ => first == "sessions",
-            };
-            ensure!(
-                !session_root && !store,
-                "{home:?} {path}: ignored but session-owned or a store"
-            );
-            if parts.len() > 1 && home == Home::Claude {
-                ensure!(first != "projects", "{path}");
-            }
+            // Brief 54: dropped kinds (stores, history, config, aux) are ignored now, so the
+            // oracle only forbids ignoring a Pi transcript directly under `sessions/`.
+            let pi_transcript = home == Home::Pi
+                && parts.len() == 2
+                && first == "sessions"
+                && last.strip_suffix(".jsonl").is_some_and(|s| !s.is_empty());
+            ensure!(!pi_transcript, "{home:?} {path}: transcript ignored");
         }
     }
+    // Brief 54: the allowlist applies in every layout, so these may be `Ignored` as well; the
+    // session-shaped paths below must still be captured under a custom Pi root.
     for home in [Home::PiCustom, Home::ClaudePrimary] {
         let got = locate(&rel, &make_roots(home, "r1", &[], false)?);
-        ensure!(got != Located::Ignored, "{home:?} {path}: ignored");
+        if got == Located::Ignored {
+            ensure!(
+                got.withhold_reason() == Some(WithholdReason::Ignored),
+                "reason"
+            );
+        }
     }
     Ok(())
 }
@@ -2130,4 +2123,53 @@ proptest! {
         let r = prop_ignored_never_session_owned(&e);
         prop_assert!(r.is_ok(), "{:?}", r);
     }
+}
+
+/// Brief 54: `sessions/<cwd>/subagent-artifacts/<name>.json` is the one captured `PiAux` shape.
+#[test]
+fn pi_run_records_are_kept_and_near_misses_are_ignored() -> TestResult {
+    let kept = [
+        "sessions/--c--/subagent-artifacts/run1.json",
+        "sessions/--home-me-proj--/subagent-artifacts/a.b.json",
+    ];
+    for home in [Home::Pi, Home::PiCustom] {
+        for p in kept {
+            let got = verdict(home, p)?;
+            ensure!(
+                matches!(
+                    &got,
+                    Located::Source {
+                        kind: SourceKind::PiAux,
+                        ..
+                    }
+                ),
+                "{home:?} {p}: {got:?}"
+            );
+        }
+        for p in [
+            "sessions/--c--/subagent-artifacts/x/run1.json",
+            "sessions/--c--/subagent-artifacts/run1.md",
+            "sessions/--c--/subagent-artifacts/run1.jsonl",
+            "sessions/--c--/subagent-artifacts/run1.json.bak",
+            "sessions/--c--/subagent-artifacts/marker",
+            "sessions/--c--/subagent-artifacts/.json",
+            "sessions/--c--/run1.json",
+            "sessions/c/subagent-artifacts/run1.json",
+            "sessions/--c--/other-artifacts/run1.json",
+            "subagent-artifacts/run1.json",
+        ] {
+            let got = verdict(home, p)?;
+            ensure!(
+                !matches!(
+                    &got,
+                    Located::Source {
+                        kind: SourceKind::PiAux,
+                        ..
+                    }
+                ),
+                "{home:?} {p}: captured {got:?}"
+            );
+        }
+    }
+    Ok(())
 }

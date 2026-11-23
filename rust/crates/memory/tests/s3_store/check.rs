@@ -230,7 +230,11 @@ fn a_parked_entry_fails_the_check() -> R {
 #[test]
 fn a_deleted_sibling_is_remote_only() -> R {
     let s = setup("check-remote")?;
-    let debug = s.rig.root.join(format!("debug/{UUID}.txt"));
+    // Brief 54: a kept kind of the same session (Claude tool-results), formerly a debug file.
+    let debug = s
+        .rig
+        .root
+        .join(format!("projects/-p/{UUID}/tool-results/t.txt"));
     fs::create_dir_all(debug.parent().ok_or("parent")?).map_err(e)?;
     fs::write(&debug, "debug line\n").map_err(e)?;
     capture(&s)?;
@@ -244,17 +248,25 @@ fn a_deleted_sibling_is_remote_only() -> R {
     Ok(())
 }
 
+// Brief 54: session-env, usage-data and paste-cache files are `Ignored` now (formerly counted
+// `deferred_snapshot`): not yielded, not unknown_kind, exit 0.
 #[test]
-fn a_deferred_snapshot_is_counted_apart() -> R {
+fn session_env_usage_and_paste_files_are_counted_ignored() -> R {
     let s = setup("check-deferred")?;
     capture(&s)?;
-    // Brief 49: settings.json is captured now; session-env is the deferred snapshot kind.
-    let env = s.rig.root.join("session-env").join(UUID);
-    fs::create_dir_all(&env).map_err(e)?;
-    fs::write(env.join("e"), "x\n").map_err(e)?;
+    for rel in [
+        format!("session-env/{UUID}/e"),
+        "usage-data/session-meta/u.json".to_owned(),
+        "paste-cache/p.txt".to_owned(),
+    ] {
+        let f = s.rig.root.join(rel);
+        fs::create_dir_all(f.parent().ok_or("parent")?).map_err(e)?;
+        fs::write(f, "x\n").map_err(e)?;
+    }
     let ran = run(&s)?;
     assert_eq!(ran.code, 0, "{}", ran.out);
-    assert!(ran.has("deferred_snapshot", 1) && ran.has("uncaptured", 0) && ran.has("sources", 1));
+    assert!(ran.has("ignored", 3) && ran.has("unknown_kind", 0));
+    assert!(ran.has("uncaptured", 0) && ran.has("sources", 1));
     Ok(())
 }
 
@@ -470,7 +482,11 @@ fn read_settled_refuses_a_file_that_moved_during_the_read() {
 #[test]
 fn an_appended_debug_log_is_behind() -> R {
     let s = setup("check-unsettled")?;
-    let debug = s.rig.root.join(format!("debug/{UUID}.txt"));
+    // Brief 54: a kept kind of the same session (Claude tool-results), formerly a debug file.
+    let debug = s
+        .rig
+        .root
+        .join(format!("projects/-p/{UUID}/tool-results/t.txt"));
     fs::create_dir_all(debug.parent().ok_or("parent")?).map_err(e)?;
     fs::write(&debug, "debug line\n").map_err(e)?;
     capture(&s)?;
@@ -697,7 +713,11 @@ fn a_deleted_file_is_recorded_on_the_second_reconcile_and_restore_skips_it() -> 
 // defect ----
 
 fn debug_file(s: &Setup) -> R<std::path::PathBuf> {
-    let debug = s.rig.root.join(format!("debug/{UUID}.txt"));
+    // Brief 54: a kept kind of the same session (Claude tool-results), formerly a debug file.
+    let debug = s
+        .rig
+        .root
+        .join(format!("projects/-p/{UUID}/tool-results/t.txt"));
     fs::create_dir_all(debug.parent().ok_or("parent")?).map_err(e)?;
     Ok(debug)
 }

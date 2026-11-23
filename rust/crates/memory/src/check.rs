@@ -120,8 +120,6 @@ pub struct Tally {
     pub ignored: u64,
     /// Walk: files duplicating another file's source id (not captured).
     pub duplicate: u64,
-    /// Walk: snapshot files other than Codex SQLite stores, withheld.
-    pub deferred_snapshot: u64,
     /// Walk: entries that could not be read.
     pub unreadable: u64,
     /// Store failures.
@@ -168,7 +166,7 @@ impl Report {
     pub fn summary(&self) -> String {
         let t = &self.tally;
         format!(
-            "check owners={} sources={} match={} behind={} unsettled={} mismatch={} uncaptured={} withheld={} remote_only={} parked={} unknown_kind={} ignored={} unknown_owner={} duplicate={} deferred_snapshot={} unreadable={} store_error={} status={}",
+            "check owners={} sources={} match={} behind={} unsettled={} mismatch={} uncaptured={} withheld={} remote_only={} parked={} unknown_kind={} ignored={} unknown_owner={} duplicate={} unreadable={} store_error={} status={}",
             t.owners,
             t.sources,
             t.matched,
@@ -183,7 +181,6 @@ impl Report {
             t.ignored,
             t.unknown_owner,
             t.duplicate,
-            t.deferred_snapshot,
             t.unreadable,
             t.store_error,
             self.status
@@ -790,7 +787,6 @@ fn check_inner(root: &Path, hook: &mut dyn FnMut(Phase)) -> Result<Report, Refus
     tally.unknown_owner = counts.unknown_owner;
     tally.ignored = counts.ignored;
     tally.duplicate = counts.duplicate;
-    tally.deferred_snapshot = counts.deferred_snapshot;
     tally.unreadable = counts.unreadable;
     tally.sources = u64::try_from(rows.len()).unwrap_or(u64::MAX);
     let mut groups: BTreeMap<String, (Owner, Vec<Source>)> = BTreeMap::new();

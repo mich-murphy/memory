@@ -1106,6 +1106,31 @@ pub fn export_role(kind: &SourceKind, path: &str) -> ExportRole {
     }
 }
 
+/// Kinds captured whatever the path (brief 54). `PiAux` is not here: only the run-record shape
+/// qualifies, see [`pi_run_record`].
+const CAPTURED_KINDS: [SourceKind; 6] = [
+    SourceKind::ClaudeTranscript,
+    SourceKind::ClaudeSubagent,
+    SourceKind::ClaudeToolResults,
+    SourceKind::CodexRollout,
+    SourceKind::CodexCompressed,
+    SourceKind::PiSession,
+];
+
+/// `sessions/<cwd>/subagent-artifacts/<name>.json`: exactly that depth, a Pi cwd directory and
+/// a non-empty stem.
+fn pi_run_record(parts: &[&str]) -> bool {
+    matches!(
+        parts,
+        ["sessions", cwd, "subagent-artifacts", name]
+            if pi_cwd(cwd) && name.strip_suffix(".json").is_some_and(|s| !s.is_empty())
+    )
+}
+
+fn captured(hit: &Hit<'_>, parts: &[&str]) -> bool {
+    CAPTURED_KINDS.contains(&hit.kind) || (hit.kind == SourceKind::PiAux && pi_run_record(parts))
+}
+
 /// Map one root-relative path to its source, or to a countable withhold. Pure and total.
 pub fn locate(path: &RootRelativePath, roots: &Roots) -> Located {
     let parts: Vec<&str> = path.0.iter().map(String::as_str).collect();
@@ -1133,6 +1158,14 @@ pub fn locate(path: &RootRelativePath, roots: &Roots) -> Located {
         (RootLayout::AgentDir, Agent::Codex) => apply_ignored(codex(&parts), &Agent::Codex, &parts),
         (RootLayout::AgentDir, Agent::Pi) => apply_ignored(pi(&parts), &Agent::Pi, &parts),
     };
+    // Brief 54: only the allowlisted kinds are captured, in every layout.
+    let res = res.and_then(|hit| {
+        if captured(&hit, &parts) {
+            Ok(hit)
+        } else {
+            Err(Miss::Ignored)
+        }
+    });
     match res {
         Err(Miss::Kind) => Located::UnknownKind,
         Err(Miss::Owner) => Located::UnknownOwner,
