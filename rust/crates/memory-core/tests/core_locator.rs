@@ -98,7 +98,6 @@ enum Exp {
         id: String,
     },
     Kind,
-    Owner,
     /// Brief 46: a known non-session file.
     Ignored,
 }
@@ -164,9 +163,7 @@ fn matches(got: &Located, exp: &Exp, agent: &Agent) -> bool {
         return !kept(kind);
     }
     match (got, exp) {
-        (Located::UnknownKind, Exp::Kind)
-        | (Located::UnknownOwner, Exp::Owner)
-        | (Located::Ignored, Exp::Ignored) => true,
+        (Located::UnknownKind, Exp::Kind) | (Located::Ignored, Exp::Ignored) => true,
         (
             Located::Source {
                 owner,
@@ -392,7 +389,8 @@ fn rows() -> Vec<Row> {
             format!("{dir}/not-a-uuid.txt"),
             format!("{dir}/{U1}x.json"),
         ] {
-            v.push(row(cl, bad, Exp::Owner));
+            // Brief 54: a dropped kind is Ignored even when its owner is not derivable.
+            v.push(row(cl, bad, Exp::Ignored));
         }
     }
     v.push(row(
@@ -1345,10 +1343,8 @@ fn ambiguity_is_absorbing_and_order_independent() -> TestResult {
         &RootRelativePath::parse(&format!("debug/{U1}.txt"))?,
         &roots,
     );
-    ensure!(
-        got == Located::UnknownOwner,
-        "conflict withholds, got {got:?}"
-    );
+    // Brief 54: debug files are dropped, so the conflict is Ignored (was UnknownOwner).
+    ensure!(got == Located::Ignored, "conflict withholds, got {got:?}");
     // A transcript path is self-owning: conflicting facts never affect it.
     let got = locate(&RootRelativePath::parse("projects/-p/abc.jsonl")?, &roots);
     ensure!(
@@ -1560,10 +1556,8 @@ fn prop_stable_rows(e: &[u8]) -> TestResult {
     {
         let conflict = make_roots(r.home, "r1", &[(U1.to_owned(), "-zz".to_owned())], reverse)?;
         let got = locate(&RootRelativePath::parse(&r.path)?, &conflict);
-        ensure!(
-            got == Located::UnknownOwner,
-            "conflict must withhold: {got:?}"
-        );
+        // Brief 54: the external kinds are all dropped, so the conflict row is Ignored.
+        ensure!(got == Located::Ignored, "conflict must withhold: {got:?}");
     }
     Ok(())
 }
@@ -1645,7 +1639,7 @@ fn prop_unmapped(e: &[u8]) -> TestResult {
     let got = locate(&RootRelativePath::parse(&sl)?, &pi_roots);
     ensure!(got == Located::Ignored, "{sl}: {got:?}");
 
-    // Claude externals with a UUID absent from the shell facts are always UnknownOwner.
+    // Brief 54: Claude externals with a UUID absent from the shell facts are Ignored.
     let first = ["c", "d", "e", "f"].get(p.below(4)).copied().unwrap_or("c");
     let uuid = format!(
         "{first}{:07x}-0000-0000-0000-{:012x}",
@@ -1663,9 +1657,9 @@ fn prop_unmapped(e: &[u8]) -> TestResult {
     let path = format!("{dir}/{uuid}{suffix}/x");
     let roots = make_roots(Home::Claude, "r1", &p.noise(), false)?;
     let got = locate(&RootRelativePath::parse(&path)?, &roots);
-    ensure!(got == Located::UnknownOwner, "{path}: {got:?}");
+    ensure!(got == Located::Ignored, "{path}: {got:?}");
     ensure!(
-        got.withhold_reason() == Some(WithholdReason::UnknownOwner),
+        got.withhold_reason() == Some(WithholdReason::Ignored),
         "countable"
     );
     Ok(())

@@ -360,6 +360,17 @@ pub struct WalkSources {
     known: HashMap<Owner, BTreeSet<(usize, PathBuf)>>,
 }
 
+/// Brief 54: a stored entry is retired when its path now locates to `Ignored`. Pure: the id's
+/// namespace selects the root and the stored path is located. Shared by the daemon's absence
+/// probe and `memory check`.
+pub fn retired(roots: &[(PathBuf, Roots)], id: &SourceId, path: &str) -> bool {
+    let namespace = id.as_str().split(':').next().unwrap_or_default();
+    let Some((_, found)) = roots.iter().find(|(_, r)| r.namespace() == namespace) else {
+        return false;
+    };
+    RootRelativePath::parse(path).is_ok_and(|rel| locate(&rel, found) == Located::Ignored)
+}
+
 /// Root-relative path of `rest`, or `None` for a non-UTF-8 or non-plain component.
 fn rel_of(rest: &Path) -> Option<RootRelativePath> {
     let mut parts = Vec::new();
@@ -536,6 +547,9 @@ impl crate::daemon::Sources for WalkSources {
     }
 
     fn locate_absent(&mut self, id: &SourceId, path: &str) -> Probe {
+        if retired(&self.roots, id, path) {
+            return Probe::Retired;
+        }
         let namespace = id.as_str().split(':').next().unwrap_or_default();
         let Some((dir, _)) = self.roots.iter().find(|(_, r)| r.namespace() == namespace) else {
             return Probe::Skip;

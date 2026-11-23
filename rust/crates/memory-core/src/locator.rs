@@ -634,6 +634,11 @@ fn claude_external<'a>(
     parts: &[&'a str],
     roots: &'a Roots,
 ) -> Res<'a> {
+    // Brief 54: a dropped kind is `Ignored` whether or not its owner is derivable, so a stored
+    // path judged without the walk's session index is still retired.
+    if !CAPTURED_KINDS.contains(&kind) {
+        return Err(Miss::Ignored);
+    }
     let uuid = uuid_prefix(sub).ok_or(Miss::Owner)?;
     let slug = roots.claude_sessions.lookup(uuid).ok_or(Miss::Owner)?;
     session(kind, class, Role::Artifact, vec![slug, uuid], parts)

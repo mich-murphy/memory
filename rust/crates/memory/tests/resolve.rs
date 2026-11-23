@@ -379,9 +379,10 @@ fn shared_owner_and_profiles_are_literal() -> R {
 fn unknown_owner_rows_are_counted_not_yielded() -> R {
     let t = Tmp::new()?;
     t.write(T, b"x")?;
-    // A Claude external whose UUID no shell fact names has no derivable owner.
+    // Brief 54: a Claude external whose UUID no shell fact names is Ignored (a dropped kind),
+    // no longer unknown_owner.
     let rel = "todos/0f0e0d0c-0b0a-4908-8706-050403020100-agent.json";
-    assert_eq!(located(rel)?, Located::UnknownOwner);
+    assert_eq!(located(rel)?, Located::Ignored);
     t.write(&format!("claude/{rel}"), b"[]")?;
     let mut s = WalkSources::new(
         vec![(t.root(), roots()?)],
@@ -390,7 +391,10 @@ fn unknown_owner_rows_are_counted_not_yielded() -> R {
     );
     assert_eq!(s.enumerate().len(), 1);
     let c = s.counts();
-    assert_eq!((c.yielded, c.unknown_owner, c.unknown_kind), (1, 1, 0));
+    assert_eq!(
+        (c.yielded, c.ignored, c.unknown_owner, c.unknown_kind),
+        (1, 1, 0, 0)
+    );
     Ok(())
 }
 
@@ -914,7 +918,11 @@ fn a_symlinked_projects_dir_does_not_fill_the_session_index() -> R {
     let mut w = walker(&t.root(), WalkLimits::default())?;
     assert!(w.enumerate().is_empty());
     let c = w.counts();
-    assert_eq!((c.yielded, c.unknown_owner, c.symlinks), (0, 1, 1));
+    // Brief 54: the debug file is Ignored (was unknown_owner).
+    assert_eq!(
+        (c.yielded, c.ignored, c.unknown_owner, c.symlinks),
+        (0, 1, 0, 1)
+    );
     assert_eq!(w.note(&debug), None);
     Ok(())
 }
@@ -928,7 +936,8 @@ fn a_uuid_under_two_slugs_leaves_its_debug_file_unowned() -> R {
     let mut w = walker(&t.root(), WalkLimits::default())?;
     assert_eq!(w.enumerate().len(), 2);
     let c = w.counts();
-    assert_eq!((c.yielded, c.unknown_owner), (2, 1));
+    // Brief 54: the debug file is Ignored (was unknown_owner).
+    assert_eq!((c.yielded, c.ignored, c.unknown_owner), (2, 1, 0));
     assert_eq!(w.note(&debug), None);
     Ok(())
 }

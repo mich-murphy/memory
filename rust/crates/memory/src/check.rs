@@ -110,6 +110,8 @@ pub struct Tally {
     pub withheld: u64,
     /// Live stored entries with no local row.
     pub remote_only: u64,
+    /// Stored live entries whose path now locates to `Ignored` (brief 54); never an anomaly.
+    pub retired: u64,
     /// Parked entries in `status.json`.
     pub parked: u64,
     /// Walk: files no pattern matched.
@@ -166,7 +168,7 @@ impl Report {
     pub fn summary(&self) -> String {
         let t = &self.tally;
         format!(
-            "check owners={} sources={} match={} behind={} unsettled={} mismatch={} uncaptured={} withheld={} remote_only={} parked={} unknown_kind={} ignored={} unknown_owner={} duplicate={} unreadable={} store_error={} status={}",
+            "check owners={} sources={} match={} behind={} unsettled={} mismatch={} uncaptured={} withheld={} remote_only={} retired={} parked={} unknown_kind={} ignored={} unknown_owner={} duplicate={} unreadable={} store_error={} status={}",
             t.owners,
             t.sources,
             t.matched,
@@ -176,6 +178,7 @@ impl Report {
             t.uncaptured,
             t.withheld,
             t.remote_only,
+            t.retired,
             t.parked,
             t.unknown_kind,
             t.ignored,
@@ -876,6 +879,12 @@ fn check_inner(root: &Path, hook: &mut dyn FnMut(Phase)) -> Result<Report, Refus
                     .sources
                     .iter()
                     .filter(|(id, entry)| entry.deleted_at.is_none() && !local.contains(id))
+                    .filter(|(id, entry)| {
+                        // Brief 54: a retired entry is counted apart, never remote_only.
+                        let gone = crate::resolve::retired(&roots, id, &entry.path);
+                        tally.retired += u64::from(gone);
+                        !gone
+                    })
                     .map(|(id, _)| id.clone()),
             );
         }
