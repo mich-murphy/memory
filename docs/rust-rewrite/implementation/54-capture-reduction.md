@@ -136,3 +136,10 @@ unchanged at 0) and the `index.json` records of retired sources. Evidence 49, DE
 ## Ledger
 
 - 2026-11-23: brief written on `a6a7755`.
+- 2026-11-23: first worker stopped twice at its turn limit (locator change and most locator
+  tests uncommitted); the parent accepted that diff and decided the rig tests move to kept kinds
+  (the rig runs a real walk; no test-only production path) and the five Codex store rig tests
+  become one "ignored, nothing lands" test. Second worker finished in 3 commits; deviation
+  accepted: `claude_external` ignores a dropped kind before the owner lookup. Teeth 18 of 19
+  (1 equivalent; parent test `9566497`), property tests 69 of 69, gates 14/14, Linux passed.
+  Accepted locally at `9566497`. Details in evidence 49.
