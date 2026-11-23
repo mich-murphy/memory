@@ -418,6 +418,7 @@ fn phase1() -> Vec<Want> {
             agent: "claude",
             needle: U1,
             sources: 3,
+            // Brief 53: was 6; the fixture gained an `instructions` attachment (a system event).
             events: 7,
             issues: json!({"artifact_not_normalized": 1}),
             roles: json!({"main": 1, "subagent": 1, "artifact": 1}),
@@ -445,6 +446,7 @@ fn phase1() -> Vec<Want> {
             agent: "codex",
             needle: CX,
             sources: 1,
+            // Brief 53: was 6; the fixture gained a `turn_context` record (a system event).
             events: 7,
             issues: json!({}),
             roles: json!({"main": 1}),
@@ -536,6 +538,7 @@ fn consumer_gate_claude_codex_pi_export_imports_and_reports() -> R {
     daemon.shutdown().map_err(e)?;
     let mut second = Vec::new();
     let all_p1 = phase1();
+    // Brief 53: s1 was 7; the fixture gained an `instructions` attachment.
     for (name, sources, events, roles) in [
         ("s1", 3, 8, json!({"main": 1, "subagent": 1, "artifact": 1})),
         ("rewrite", 2, 5, json!({"main": 2})),

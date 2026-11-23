@@ -110,6 +110,15 @@ class SetupFactsTest(Base):
         self.assertIn(('instruction_file', 'AGENTS.md', 'project'), rows)
         self.assertIn(('instruction_file', 'AGENTS.md', 'other'), rows)
 
+    def test_codex_absent_approval_policy_records_nothing(self):
+        # Parent (brief 53 review): only a structured policy is `granular`; an absent one is no fact.
+        rows = self.run_import('codex', [
+            {'type': 'session_meta', 'payload': {'id': 'x', 'cli_version': '1.2'}},
+            {'type': 'turn_context', 'payload': {'model': 'gpt-x'}},
+            {'type': 'turn_context', 'payload': {'model': 'gpt-x', 'approval_policy': {'granular': {}}}},
+        ])
+        self.assertEqual([r for r in rows if r[0] == 'approval_policy'], [('approval_policy', '', 'granular')])
+
     def test_pi_every_source_and_session_format(self):
         rows = self.run_import('pi', PI)
         for want in [('harness', 'pi', ''), ('session_format', '', '3'), ('model', 'm1', ''), ('model', 'm2', ''),

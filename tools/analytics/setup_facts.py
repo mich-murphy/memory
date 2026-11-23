@@ -119,8 +119,10 @@ def _codex(r, ctx):
     elif t == 'turn_context':
         _scalar(out, 'model', p, 'model', True)
         _scalar(out, 'reasoning_effort', p, 'effort')
+        # A structured (non-string) policy is Codex's granular form; an absent one records nothing.
         ap = p.get('approval_policy')
-        out.append(('approval_policy', '', ap if isinstance(ap, str) else 'granular'))
+        if ap is not None:
+            out.append(('approval_policy', '', ap if isinstance(ap, str) else 'granular'))
         _scalar(out, 'sandbox_policy', p.get('sandbox_policy'), 'type')
         _scalar(out, 'collaboration_mode', p.get('collaboration_mode'), 'mode')
         out += [('plugin_disabled', n, '') for n in _list(p.get('disabled_plugin_ids'))]
