@@ -135,7 +135,8 @@ checked while reading, source `kind` = `pi_run_record`). It binds the archive li
 (`archive_mismatch`), replaces one owner's rows in one transaction, and returns `unchanged` when
 the owner's `publication_id` and `pi_runs.RUNS_VERSION` are unchanged. A session export given to
 it, or a shared export given to `import_export`, fails `unsupported_contract`. `--reset` clears
-the run tables too.
+the run tables too. From the command line: `publications.py import-shared EXPORT --database DB`;
+`publications.py report --database DB --summary` includes the `setup` and `runs` sections.
 
 - `pi_run`: one row per run record (columns in brief 56). An invalid value is NULL and counted in
   `runs_skipped`; a record that is not a JSON object or lacks a valid `runId` is not a row and is
