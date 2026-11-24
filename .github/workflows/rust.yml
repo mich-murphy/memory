@@ -77,6 +77,12 @@ jobs:
         run: |
           "$ANALYTICS_BASE_PYTHON" -m venv "$RUNNER_TEMP/analytics-venv"
           "$RUNNER_TEMP/analytics-venv/bin/python" -m pip install --only-binary=:all: -r tools/analytics/requirements.txt
+      - name: Analytics unit suite
+        if: matrix.part == 'gates'
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: >-
+          "$RUNNER_TEMP/analytics-venv/bin/python" -m unittest discover -s tools/analytics
       - name: Run all Rust gates without live access
         env:
           # Absent in the coverage part, where the consumer test skips and 10-consumer does not run.
