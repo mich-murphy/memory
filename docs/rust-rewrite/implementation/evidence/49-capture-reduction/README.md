@@ -1,8 +1,8 @@
 # Evidence 49: capture only the live session record (brief 54)
 
 All dates are UTC. Status: increment RETIRE accepted locally at `9566497` on 2026-11-23. That is
-4 commits (3 by workers, 1 by the parent) over the brief `ba3e5bf`, on `main` `a6a7755`. Install
-on both hosts follows the merge and is recorded below when done.
+4 commits (3 by workers, 1 by the parent) over the brief `ba3e5bf`, on `main` `a6a7755`. Merged
+as `df23437` (stack #270) and installed on both hosts on 2026-11-23/24 (section Install).
 
 [Brief 54](../../54-capture-reduction.md) records the measurements behind the decisions.
 
@@ -62,6 +62,31 @@ The content scan still runs on Pi run records.
   Codex store rig paths are no longer exercised end to end; floor 80).
 - Linux container: `core_locator` 23, `resolve` 38, `daemon` 107, `s3_store` 143 (1 ignored),
   `memory --lib` 10, all passed.
+
+## Install (`df23437`)
+
+| | This Mac | dev-01 |
+|---|---|---|
+| Time | 2026-11-23 23:46Z | 2026-11-24 00:20Z |
+| sha256 prefix | `f1b015ba62ed3eea` | `94e4a6ec994c9309` |
+| Process | `runs = 17`, pid 59058 | `NRestarts=0` |
+| Backup | `memory-94833f6` | `memory-94833f6` |
+| Start round | `landed=1 failed=0 deleted=0 absence_skipped=0`, no WARN/ERROR, `tmp/` empty | `landed=2 failed=0 deleted=0 absence_skipped=0`, no WARN/ERROR, `tmp/` empty |
+| `memory status` sources | 6,073 (was 8,189), withheld 0 (was 3), `ignored=22386` (was 20,268) | 4,479 (was 5,989), withheld 0 (was 26), `ignored=50275` (was 48,636) |
+| `memory check` | exit 0; 1,079 owners, 6,073 match, `remote_only=0`, `retired=1791` | exit 0; 485 owners, 4,478 match, 1 behind, `remote_only=0`, `retired=1492` |
+| Memory | RSS peak 125 MB during the check (241 samples at 5 s; the earlier footprint sampler is gone, so the start round was not sampled) | `VmHWM` 101 MB at the start round and after the check |
+
+`unknown_owner` is 0 on both, as expected after the `claude_external` change. `unknown_kind` is
+29 here (unchanged) and 122 on dev-01 (119 before the install, new files since); the allowlist
+only turns located kinds into `Ignored`, so it does not touch that verdict.
+
+`index.json` keeps the local records of retired sources, as the brief says: this Mac 8,188
+records (8.6 MB) for 6,073 live sources, about 2,115 retired; dev-01 6,069 records (6.4 MB) for
+4,479 live sources, 26 of them holding only a withheld judgement. At 00:31Z dev-01 had run only
+its start round, so the brief 48 rule (a withheld-only record the walk does not yield is dropped
+after two consecutive complete walks) had not yet applied; those 26 are retired paths and are
+expected to go after two timer rounds (checked below once they have run). Pruning the other
+retired records (they hold an index or a snapshot) is a follow-up.
 
 ## Measurements behind the decisions (2026-11-23, counts only)
 
