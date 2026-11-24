@@ -89,6 +89,7 @@ fn code<E: StoreFault>(error: &ExportError<E>) -> Failure {
         ExportError::DestinationExists => Failure::OutputExists,
         ExportError::Fetch(f) => Failure::Store(f.store_error()),
         ExportError::Shared => Failure::Shared,
+        ExportError::Session => Failure::Export("owner_session"),
         ExportError::Overflow => Failure::Export("export_overflow"),
         ExportError::BadTime => Failure::Export("export_bad_time"),
         ExportError::TooManySources => Failure::Export("export_too_many_sources"),
