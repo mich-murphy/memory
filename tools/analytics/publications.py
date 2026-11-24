@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 
+import pi_runs
 import setup_facts
 import usage_facts
 
@@ -196,6 +197,86 @@ def _load(root):
         raise ImportFailure('invalid_metadata') from None
 
 
+# shared-reader/v1 (brief 56): the analytics sources of one shared owner; every key is required.
+MAX_SHARED_SOURCES = 16384
+SHARED_KIND = 'pi_run_record'
+_SHARED_MANIFEST = {'contract', 'identity', 'publication_id', 'sequence', 'captured_at_ns',
+                    'published_at_ns', 'sources'}
+_SHARED_IDENTITY = {'archive_id', 'machine_id', 'agent'}
+_SHARED_SOURCE = {'source_id', 'epoch_id', 'kind', 'path', 'state', 'revision',
+                  'captured_at_ns', 'object'}
+
+
+def _closed(value, keys):
+    _require(isinstance(value, dict) and set(value) == keys)
+
+
+def _load_shared(root):
+    try:
+        with (root / 'metadata.json').open('rb') as stream:
+            raw = stream.read(MAX_METADATA + 1)
+        _require(len(raw) <= MAX_METADATA)
+        data = json.loads(raw)
+        _require(isinstance(data, dict))
+        _require(data.get('contract') == 'shared-reader/v1', 'unsupported_contract')
+        _closed(data, _TOP)
+        _require(_digest(data['manifest_sha256']))
+        manifest = data['manifest']
+        _require(isinstance(manifest, dict) and manifest.get('contract') == 'shared-publication/v1',
+                 'unsupported_contract')
+        _closed(manifest, _SHARED_MANIFEST)
+        identity = manifest['identity']
+        _closed(identity, _SHARED_IDENTITY)
+        for value in identity.values():
+            _require(isinstance(value, str) and bool(value))
+            _text(value)
+        _require(isinstance(manifest['publication_id'], str) and bool(manifest['publication_id']))
+        _text(manifest['publication_id'])
+        _require(_order(manifest['sequence']))
+        for key in ('captured_at_ns', 'published_at_ns'):
+            _require(_integer(manifest[key]))
+        _require(isinstance(manifest['sources'], list) and isinstance(data['bodies'], list))
+        _require(len(manifest['sources']) <= MAX_SHARED_SOURCES and
+                 len(data['bodies']) <= MAX_SHARED_SOURCES)
+        sources = {}
+        for source in manifest['sources']:
+            _closed(source, _SHARED_SOURCE)
+            for key in ('source_id', 'epoch_id', 'path', 'state'):
+                _require(isinstance(source[key], str) and bool(source[key]))
+            _text(*(source[key] for key in ('source_id', 'epoch_id', 'path', 'state')))
+            _require(source['kind'] == SHARED_KIND)
+            _require(_order(source['revision']) and _integer(source['captured_at_ns']))
+            obj = source['object']
+            _closed(obj, _OBJECT)
+            for key in ('sha256', 'encoded_sha256'):
+                _require(_digest(obj[key]))
+            for key in ('size', 'encoded_size'):
+                _require(_integer(obj[key]) and obj[key] < 2**63 - 1)
+            _require(isinstance(obj['key'], str) and bool(obj['key']) and obj['encoding'] == 'zstd')
+            _text(obj['key'])
+            pair = (_source_hash(source['source_id']), source['epoch_id'])
+            _require(pair not in sources, 'duplicate_source')
+            sources[pair] = source
+        bodies = {}
+        for body in data['bodies']:
+            _closed(body, _BODY)
+            pair = (_source_hash(body['source_id']), body['epoch_id'])
+            _require(pair not in bodies and pair in sources, 'body_coverage')
+            _require(body['sha256'] == sources[pair]['object']['sha256'] and
+                     body['size'] == sources[pair]['object']['size'], 'body_metadata_mismatch')
+            _require(isinstance(body['path'], str))
+            path = PurePosixPath(body['path'])
+            _require(not path.is_absolute() and bool(path.parts) and '..' not in path.parts
+                     and '\\' not in str(path), 'unsafe_body_path')
+            bodies[pair] = body
+        _require(sources.keys() == bodies.keys(), 'body_coverage')
+        return manifest, sources, bodies, data['manifest_sha256']
+    except ImportFailure:
+        raise
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, UnicodeError):
+        raise ImportFailure('invalid_metadata') from None
+
+
 def _schema(db, events):
     tables = {row[0] for row in db.execute('SHOW TABLES').fetchall()}
     if tables:
@@ -337,21 +418,8 @@ def _copy_verified(root, body, destination):
         raise ImportFailure('body_unavailable') from None
 
 
-def import_export(export_dir, db_path, *, reset=False):
-    """Atomically replace one session's projection; failures retain its old success.
-
-    Explicit reset clears only this dedicated projection (not legacy databases).
-    Unsupported metadata versions are rejected before any local write.
-    """
-    duckdb, events = _dependencies()
-    root, path = Path(export_dir).resolve(), Path(db_path)
-    manifest, sources, bodies, fingerprint = _load(root)
-    identity = manifest['identity']
-    archive = identity['archive_id']
-    session = _key(identity[k] for k in ('archive_id', 'machine_id', 'agent', 'session_id'))
-    # Projections imported before the reader exported its digest stored this local hash.
-    legacy = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-    coords = dict(session_key=session, **identity, publication_id=manifest['publication_id'])
+def _reserve(duckdb, events, path):
+    """Refuse old projections, then create the database file privately when absent."""
     if path.exists():
         # Refuse old projections before a writable open (including --reset).
         with duckdb.connect(str(path), read_only=True) as existing:
@@ -369,16 +437,35 @@ def import_export(export_dir, db_path, *, reset=False):
                 os.link(private, path)
             finally:
                 os.unlink(private)
+
+
+def import_export(export_dir, db_path, *, reset=False):
+    """Atomically replace one session's projection; failures retain its old success.
+
+    Explicit reset clears only this dedicated projection (not legacy databases).
+    Unsupported metadata versions are rejected before any local write.
+    """
+    duckdb, events = _dependencies()
+    root, path = Path(export_dir).resolve(), Path(db_path)
+    manifest, sources, bodies, fingerprint = _load(root)
+    identity = manifest['identity']
+    archive = identity['archive_id']
+    session = _key(identity[k] for k in ('archive_id', 'machine_id', 'agent', 'session_id'))
+    # Projections imported before the reader exported its digest stored this local hash.
+    legacy = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    coords = dict(session_key=session, **identity, publication_id=manifest['publication_id'])
+    _reserve(duckdb, events, path)
     with duckdb.connect(str(path)) as db:
         _schema(db, events)
         setup_facts.ensure(db)  # writable open only: tables and views; read-only opens never create
         usage_facts.ensure(db)
+        pi_runs.ensure(db)
         bound = db.execute('SELECT archive_id FROM publication_binding').fetchone()[0]
         _require(bound in (None, archive) or reset, 'archive_mismatch')
         if reset:
             db.execute('BEGIN')
             for table in ('sessions', 'sources', 'events', 'issues', 'failures',
-                          *DERIVED, 'session_setup_version'):
+                          *DERIVED, 'session_setup_version', *pi_runs.TABLES):
                 db.execute(f'DELETE FROM {table}')
             db.execute('UPDATE publication_binding SET archive_id=?', [archive])
             db.execute('COMMIT')
@@ -530,6 +617,64 @@ def import_export(export_dir, db_path, *, reset=False):
                 db.execute('ROLLBACK')
                 raise
             raise ImportFailure(reason) from None
+
+
+def import_shared(export_dir, db_path, *, reset=False):
+    """Atomically replace one shared owner's run rows (brief 56); never touches sessions."""
+    duckdb, events = _dependencies()
+    root, path = Path(export_dir).resolve(), Path(db_path)
+    manifest, sources, bodies, fingerprint = _load_shared(root)
+    identity = manifest['identity']
+    archive = identity['archive_id']
+    owner = _key([*(identity[k] for k in ('archive_id', 'machine_id', 'agent')), 'shared'])
+    _reserve(duckdb, events, path)
+    with duckdb.connect(str(path)) as db:
+        _schema(db, events)
+        setup_facts.ensure(db)
+        usage_facts.ensure(db)
+        pi_runs.ensure(db)
+        bound = db.execute('SELECT archive_id FROM publication_binding').fetchone()[0]
+        _require(bound in (None, archive) or reset, 'archive_mismatch')
+        if reset:
+            db.execute('BEGIN')
+            for table in ('sessions', 'sources', 'events', 'issues', 'failures',
+                          *DERIVED, 'session_setup_version', *pi_runs.TABLES):
+                db.execute(f'DELETE FROM {table}')
+            db.execute('UPDATE publication_binding SET archive_id=?', [archive])
+            db.execute('COMMIT')
+        old = db.execute('SELECT publication_id, sequence, manifest_sha256, runs_version '
+                         'FROM pi_run_owner WHERE owner_key=?', [owner]).fetchone()
+        if old:
+            _require(manifest['sequence'] >= old[1], 'stale_publication')
+            same = old[2] == fingerprint
+            _require(manifest['sequence'] != old[1] or (manifest['publication_id'] == old[0] and same),
+                     'publication_conflict')
+            _require(manifest['publication_id'] != old[0] or same, 'publication_conflict')
+            if manifest['publication_id'] == old[0] and old[3] == pi_runs.RUNS_VERSION:
+                return {'status': 'unchanged', 'publication_id': old[0]}
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with tempfile.TemporaryDirectory(prefix='.shared-', dir=path.parent) as temp:
+            staged = {}
+            for n, (pair, body) in enumerate(bodies.items()):
+                staged[pair] = Path(temp) / str(n)
+                _copy_verified(root, body, staged[pair])
+            db.execute('BEGIN')
+            try:
+                for table in ('pi_run', 'pi_run_extension', 'pi_run_owner'):
+                    db.execute(f'DELETE FROM {table} WHERE owner_key=?', [owner])
+                counts = pi_runs.write_runs(db, dict(owner_key=owner, **{
+                    k: identity[k] for k in ('archive_id', 'machine_id')}), sources, staged)
+                _insert(db, 'pi_run_owner', dict(owner_key=owner, **identity,
+                    publication_id=manifest['publication_id'], sequence=manifest['sequence'],
+                    manifest_sha256=fingerprint, runs_version=pi_runs.RUNS_VERSION,
+                    captured_at_ns=manifest['captured_at_ns'],
+                    published_at_ns=manifest['published_at_ns'], imported_at_ns=time.time_ns()))
+                db.execute('UPDATE publication_binding SET archive_id=?', [archive])
+                db.execute('COMMIT')
+            except BaseException:
+                db.execute('ROLLBACK')
+                raise
+            return dict(counts, status='imported', publication_id=manifest['publication_id'])
 
 
 def _setup_report(db, rows):
