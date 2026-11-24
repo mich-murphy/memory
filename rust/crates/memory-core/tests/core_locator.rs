@@ -6,7 +6,7 @@ use memory_core::domain::{
 };
 use memory_core::locator::{
     ClaudeSessionIndex, ConfigAsset, InputError, Located, Role, RootLayout, RootNamespace,
-    RootRelativePath, Roots, locate,
+    RootRelativePath, Roots, locate, shared_analytics,
 };
 use proptest::prelude::*;
 use sha2::{Digest, Sha256};
@@ -2163,6 +2163,49 @@ fn pi_run_records_are_kept_and_near_misses_are_ignored() -> TestResult {
                 ),
                 "{home:?} {p}: captured {got:?}"
             );
+        }
+    }
+    Ok(())
+}
+
+/// Brief 56: the shared analytics predicate is true only for a `PiAux` run-record path, and
+/// agrees with what the locator captures as `PiAux`.
+#[test]
+fn shared_analytics_is_the_pi_run_record_shape_only() -> TestResult {
+    let yes = [
+        "sessions/--c--/subagent-artifacts/run1.json",
+        "sessions/--home-me-proj--/subagent-artifacts/a.b.json",
+    ];
+    for p in yes {
+        ensure!(shared_analytics(&SourceKind::PiAux, p), "{p}");
+        for kind in [
+            SourceKind::PiSession,
+            SourceKind::PiConfig,
+            SourceKind::ClaudeTranscript,
+        ] {
+            ensure!(!shared_analytics(&kind, p), "{kind:?} {p}");
+        }
+    }
+    for p in [
+        "sessions/--c--/subagent-artifacts/x/run1.json",
+        "sessions/--c--/subagent-artifacts/run1.md",
+        "sessions/--c--/subagent-artifacts/.json",
+        "sessions/--c--/run1.json",
+        "sessions/c/subagent-artifacts/run1.json",
+        "sessions/--c--/other-artifacts/run1.json",
+        "subagent-artifacts/run1.json",
+        "settings.json",
+        "",
+    ] {
+        ensure!(!shared_analytics(&SourceKind::PiAux, p), "{p}");
+    }
+    for home in [Home::Pi, Home::PiCustom] {
+        for p in yes {
+            let got = verdict(home, p)?;
+            match &got {
+                Located::Source { kind, .. } => ensure!(shared_analytics(kind, p), "{p}"),
+                _ => ensure!(false, "{p}: {got:?}"),
+            }
         }
     }
     Ok(())
