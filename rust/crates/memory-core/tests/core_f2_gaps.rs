@@ -99,7 +99,7 @@ const ELEVEN: [(&str, &str, bool); 11] = [
     ("config.toml", TOML_CODEX, true),
     ("managed_config.toml", TOML_CODEX, true),
 ];
-/// Backup spellings per the suffix normalization (names.rs / Go policy.go:75-123).
+/// Backup spellings per the suffix normalization (names.rs, from the former Go policy).
 const SUFFIXES: [&str; 19] = [
     "",
     ".bak",

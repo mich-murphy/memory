@@ -43,7 +43,7 @@ fn compile(
     Inventory::compile(r, a, o)
 }
 
-// ---- Go fixtures (coordinates_test.go:29,56,104,128) ----
+// ---- fixtures from the former Go coordinates tests ----
 
 #[test]
 fn default_and_custom_roots_need_no_filesystem() -> Result<(), CoordError> {
@@ -293,7 +293,7 @@ fn bounds_and_alias_depth() -> Result<(), CoordError> {
     Ok(())
 }
 
-// ---- Go location_test.go:12,70,96 as shell observations ----
+// ---- the former Go location tests as shell observations ----
 
 #[test]
 fn var_alias_resolves_to_one_namespace() -> Result<(), CoordError> {

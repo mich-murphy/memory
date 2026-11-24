@@ -78,7 +78,7 @@ pub(super) fn collector_match(path: &str, collector: &str) -> bool {
             })
 }
 
-/// Secret-name rules shared by argv, references and text guards.
+/// Secret-name rules shared by argv and references.
 pub fn is_secret_name(name: &str) -> bool {
     let name = name.rsplit('.').next().unwrap_or_default().to_lowercase();
     name.split(['-', '_'])

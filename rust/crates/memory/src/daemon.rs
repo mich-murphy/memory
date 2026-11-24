@@ -17,16 +17,18 @@
 //! walk (not truncated, not busy). Per visited owner, stored live entries (append or snapshot,
 //! brief 48) that the walk did not yield and that are not parked are probed with `stat` through
 //! [`Sources::locate_absent`]; a missing root, an unknown namespace or a bad path is counted as
-//! `absence_skipped` and never deletes. A stored entry whose path now locates to `Ignored`
-//! (brief 54) is `Probe::Retired`: never probed, never deleted, not `absence_skipped`; its
+//! `absence_skipped` and never deletes. A stored entry whose kind is not captured
+//! (`stored_retired`, brief 57) is `Probe::Retired`: never probed, never deleted, not `absence_skipped`; its
 //! manifest entry stays. Retired entries do not keep an owner in the set. `index.json` keeps
 //! `owners` (`#[serde(default)]`) so an owner whose every file is gone is still visited; it
-//! leaves the set once no live entry remains. `capture_owner` never counts absence. A local
-//! record holding only a withheld judgement is dropped after two consecutive complete walks
-//! that did not yield it (brief 48).
+//! leaves the set once no live entry remains. `capture_owner` never counts absence.
+//!
+//! Prune (brief 57): after a complete, finished full round in which every owner's base is
+//! `Known` or `Absent`, a local record is dropped unless its id was walked or is a live,
+//! non-retired entry of some owner's base (`prune_locals`).
 //!
 //! Withheld scanned files (D54, brief 47): `SourceIndex.withheld` (`#[serde(default)]`) records the
-//! fingerprint, rules and reason of a withhold of a `Profile::Scanned` file (Claude file-history).
+//! fingerprint, rules and reason of a withhold of a `Profile::Scanned` file (a Pi run record).
 //! The same pair gives `Unchanged` without a read; a new fingerprint or rules judge again; a file
 //! that later lands clears it. `RoundReport.withheld` counts judgements made in the round, not
 //! cached ones. The manifest never records a withheld file.

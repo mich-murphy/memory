@@ -888,7 +888,7 @@ fn rows() -> Vec<Row> {
         src(K::PiAux, S, R::Artifact, Some(&se), &format!("{se}:x.txt")),
     ));
     // Go (agentDir=false): every non-transcript file is sessionless aux; no owner exists.
-    // Correction 3 (Go Pi.Classify, pi.go:158-168): promotion to agent-dir rules.
+    // Correction 3 (former Go Pi.Classify): promotion to agent-dir rules.
     // (b) topRole(piRoles) names and dirs.
     for (p, kind, a) in [
         ("settings.json", K::PiSettings, C::Settings),
@@ -981,7 +981,7 @@ fn rows() -> Vec<Row> {
         v.push(row(h, p, Exp::Kind));
     }
     // Correction 2: Go keeps multi-part paths under `sessions/` outside any session dir as
-    // sessionless aux (pi.go:192-195).
+    // sessionless aux (former Go Pi.Classify).
     for p in [
         "sessions/foo/tasks/t.jsonl",
         "sessions/foo/x",

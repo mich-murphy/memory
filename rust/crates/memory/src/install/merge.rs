@@ -1,5 +1,5 @@
-//! Merging our hook handlers into a Claude or Codex settings document, after Go's
-//! `replaceOurs`/`mergeHooks` (`internal/install/install.go`). Ours is replaced in place, foreign
+//! Merging our hook handlers into a Claude or Codex settings document, after the
+//! former Go installer's `replaceOurs`/`mergeHooks` rules. Ours is replaced in place, foreign
 //! handlers keep their group and handler positions (Codex trust keys hold them), emptied groups
 //! are dropped and an event with no group is deleted.
 use super::Failure;
@@ -53,7 +53,7 @@ const fn ev(name: &'static str, is_async: bool, timeout: u64) -> HookEvent {
     }
 }
 
-/// Claude events (`internal/install/install.go:31-49`, `docs/hooks.md`).
+/// Claude events (`docs/hooks.md`).
 pub const CLAUDE_EVENTS: &[HookEvent] = &[
     ev("SessionStart", true, 30),
     ev("Stop", true, 30),

@@ -7,8 +7,8 @@
 //! is ever inferred from spelling, so case is never folded and `/var` is never assumed to be
 //! `/private/var`. Every spelling is kept in the result so deny checks can run over all of them.
 //!
-//! Mirrors `internal/capturecoordinates` (root routes, `validRoutes`, projection, ownership
-//! selected after projection). Differences are listed in
+//! Mirrors the former Go `capturecoordinates` package (root routes, `validRoutes`, projection,
+//! ownership selected after projection). Differences are listed in
 //! `docs/rust-rewrite/implementation/11-coordinates.md`.
 use crate::domain::Agent;
 use sha2::{Digest, Sha256};
