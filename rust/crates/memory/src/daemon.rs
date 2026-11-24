@@ -59,8 +59,8 @@ use crate::state::{
 use memory_core::coalescer::Signal;
 use memory_core::disposition::{Streak, jittered};
 use memory_core::domain::{
-    Agent, Disposition, ErrorClass, Fingerprint, LocalError, Owner, OwnerParkReason, ParkReason,
-    RulesDigest, SnapshotFingerprint, SourceId, SourceKind, SourceState, WithholdReason,
+    Agent, Disposition, ErrorClass, Fingerprint, Owner, OwnerParkReason, ParkReason, RulesDigest,
+    SnapshotFingerprint, SourceId, SourceKind, SourceState, WithholdReason,
 };
 use memory_core::hint::{
     HintEvent, HintScan, LaunchHint, PathHint, RetentionFacts, past_retention, removable, scan,
@@ -141,9 +141,6 @@ pub struct SourceIndex {
     /// Pieces of the last landed snapshot epoch (reuse by digest).
     #[serde(default)]
     pub snapshot_pieces: Vec<Piece>,
-    /// Wall time of the last landed snapshot.
-    #[serde(default)]
-    pub snapshot_at_ns: Option<i64>,
     /// A deletion was committed for the current absence.
     pub deletion_recorded: bool,
     /// Withheld scanned file: fingerprint, rules and reason of the judgement (D54, brief 47).
@@ -719,7 +716,6 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                     missing: s.missing,
                     snapshot: s.snapshot,
                     snapshot_pieces: s.snapshot_pieces,
-                    snapshot_at_ns: s.snapshot_at_ns,
                     deletion_recorded: s.deletion_recorded,
                     withheld: s.withheld,
                 };
@@ -1241,16 +1237,9 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             .count();
         // A source park takes effect whether or not the owner's commit lands.
         for (id, outcome) in &got.outcomes {
-            match outcome {
-                SourceOutcome::Parked(reason) => {
-                    rt.parked_sources.insert(id.clone(), reason.clone());
-                    report.parked += 1;
-                }
-                // Counted under `Local`; no owner retry or park: the source is tried next round.
-                SourceOutcome::BackupFailed => report
-                    .failures
-                    .bump(&ErrorClass::Local(LocalError::BackupFailed)),
-                _ => {}
+            if let SourceOutcome::Parked(reason) = outcome {
+                rt.parked_sources.insert(id.clone(), reason.clone());
+                report.parked += 1;
             }
         }
         if let Some(failure) = failed {
@@ -1347,7 +1336,6 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                         missing: l.missing,
                         snapshot: l.snapshot.clone(),
                         snapshot_pieces: l.snapshot_pieces.clone(),
-                        snapshot_at_ns: l.snapshot_at_ns,
                         deletion_recorded: l.deletion_recorded,
                         withheld: l.withheld.clone(),
                     };

@@ -926,7 +926,7 @@ fn a_stored_retired_entry_is_counted_retired_not_remote_only() -> R {
     let file = s.rig.root.join(&rel);
     fs::create_dir_all(file.parent().ok_or("parent")?).map_err(e)?;
     fs::write(&file, "fn history() {}\n").map_err(e)?;
-    let fs_seam = SharedFs::with_tmp(s.rig.state.join("tmp"));
+    let fs_seam = SharedFs::new();
     let handle = fs_seam
         .cell()
         .borrow_mut()

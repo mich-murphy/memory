@@ -201,41 +201,6 @@ fn fingerprint() -> Fingerprint {
     }
 }
 #[test]
-fn sqlite_db_and_wal_and_absence_are_each_part_of_snapshot_fingerprint() {
-    let base = SnapshotFingerprint::Sqlite {
-        db: fingerprint(),
-        wal: WalFingerprint::Absent,
-    };
-    let mut r = request();
-    r.strategy = Strategy::Snapshot {
-        previous: Some(base.clone()),
-        current: base.clone(),
-        previous_rules: None,
-    };
-    assert_eq!(planned(&r), Some(Plan::Unchanged));
-    if let Strategy::Snapshot { current, .. } = &mut r.strategy {
-        *current = SnapshotFingerprint::Sqlite {
-            db: fingerprint(),
-            wal: WalFingerprint::Present(fingerprint()),
-        };
-    }
-    assert_eq!(planned(&r), Some(Plan::Snapshot));
-    r.rules = Some(RulesDigest::new(hash(6)));
-    assert_eq!(planned(&r), replay(ReplayReason::RulesChanged));
-    r.rules = None;
-    if let Strategy::Snapshot { previous, .. } = &mut r.strategy {
-        *previous = None;
-    }
-    assert_eq!(planned(&r), Some(Plan::Snapshot));
-    let plain = SnapshotFingerprint::Plain(fingerprint());
-    r.strategy = Strategy::Snapshot {
-        previous: Some(plain.clone()),
-        current: plain,
-        previous_rules: None,
-    };
-    assert_eq!(planned(&r), Some(Plan::Unchanged));
-}
-#[test]
 fn snapshot_audit_compares_transformed_bytes_even_when_fingerprint_is_stable() {
     let plain = SnapshotFingerprint::Plain(fingerprint());
     let mut r = request();

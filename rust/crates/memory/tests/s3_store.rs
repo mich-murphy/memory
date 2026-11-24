@@ -28,8 +28,6 @@ mod assemble;
 mod check;
 #[path = "common/clock.rs"]
 mod clock;
-#[path = "s3_store/codex_store.rs"]
-mod codex_store;
 #[path = "s3_store/consumer_gate.rs"]
 mod consumer_gate;
 #[path = "s3_store/daemon_restore.rs"]

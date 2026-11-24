@@ -17,16 +17,14 @@ fn transition(
 }
 
 use memory_core::domain::{
-    Agent, ArchiveId, Birth, Disposition, ErrorClass, FileId, Fingerprint, LocalError, MachineId,
-    Observed, Offset, Owner, Plan, RulesDigest, SessionId, SessionKey, Sha256, SnapshotFingerprint,
-    SourceClass, SourceId, SourceKind, WalFingerprint,
+    Agent, ArchiveId, Disposition, ErrorClass, LocalError, MachineId, Offset, Owner, RulesDigest,
+    SessionId, SessionKey, Sha256, SourceClass, SourceId, SourceKind,
 };
 use memory_core::locator::{Located, RootLayout, RootNamespace, RootRelativePath, Roots, locate};
 use memory_core::manifest::{
     Change, CheckpointSource, EpochRecord, EpochStamp, EpochWriter, Header, Manifest, OwnerState,
     Piece, Position, SourceWrite, Timestamp, Writer, build, fold,
 };
-use memory_core::planner::{AuditEvidence, Observation, PlanInput, Planning, Strategy, plan};
 use memory_core::privacy::{
     self, Admission, Authorization, AuthorizedBody, PolicyContext, Profile, Reason,
     ResolvedSourceFacts, UnknownReason, sanitize_launch,
@@ -322,135 +320,6 @@ fn row1b_argv_bound_is_thirty_two() {
 
 // ------------------------------------------------------------------ row 5a
 
-fn fp() -> Fingerprint {
-    Fingerprint {
-        id: FileId {
-            dev: 1,
-            ino: 2,
-            birth: Birth::Unavailable,
-        },
-        size: 100,
-        mtime_ns: 1,
-    }
-}
-/// One variant per physical field.
-fn variants() -> Vec<Fingerprint> {
-    let b = fp();
-    vec![
-        Fingerprint {
-            id: FileId {
-                dev: 9,
-                ..b.id.clone()
-            },
-            ..b.clone()
-        },
-        Fingerprint {
-            id: FileId {
-                ino: 9,
-                ..b.id.clone()
-            },
-            ..b.clone()
-        },
-        Fingerprint {
-            id: FileId {
-                birth: Birth::Known(5),
-                ..b.id.clone()
-            },
-            ..b.clone()
-        },
-        Fingerprint {
-            size: 101,
-            ..b.clone()
-        },
-        Fingerprint { mtime_ns: 2, ..b },
-    ]
-}
-fn snapshot_plan(previous: SnapshotFingerprint, current: SnapshotFingerprint) -> Option<Plan> {
-    let observed = Observed {
-        id: FileId {
-            dev: 1,
-            ino: 2,
-            birth: Birth::Unavailable,
-        },
-        size: 100,
-        mtime_ns: 1,
-        observed_at_ns: 9_000_000_000,
-    };
-    let input = PlanInput {
-        withheld: None,
-        observation: Observation::Present(observed),
-        strategy: Strategy::Snapshot {
-            previous: Some(previous),
-            current,
-            previous_rules: None,
-        },
-        rules: None,
-        audit: AuditEvidence::NotDue,
-    };
-    match plan(&input) {
-        Planning::Ready { plan, .. } => Some(plan),
-        _ => None,
-    }
-}
-fn sqlite(db: Fingerprint, wal: WalFingerprint) -> SnapshotFingerprint {
-    SnapshotFingerprint::Sqlite { db, wal }
-}
-
-#[test]
-fn row5a_db_only_wal_only_and_unchanged_fingerprints() {
-    let present = WalFingerprint::Present(fp());
-    for wal in [WalFingerprint::Absent, present.clone()] {
-        assert_eq!(
-            snapshot_plan(sqlite(fp(), wal.clone()), sqlite(fp(), wal.clone())),
-            Some(Plan::Unchanged)
-        );
-        for changed in variants() {
-            // db-only change, WAL unchanged.
-            assert_eq!(
-                snapshot_plan(sqlite(fp(), wal.clone()), sqlite(changed, wal.clone())),
-                Some(Plan::Snapshot)
-            );
-        }
-    }
-    for changed in variants() {
-        // WAL-only change, db unchanged.
-        assert_eq!(
-            snapshot_plan(
-                sqlite(fp(), present.clone()),
-                sqlite(fp(), WalFingerprint::Present(changed.clone()))
-            ),
-            Some(Plan::Snapshot)
-        );
-        // Both changed.
-        assert_eq!(
-            snapshot_plan(
-                sqlite(fp(), present.clone()),
-                sqlite(changed.clone(), WalFingerprint::Present(changed))
-            ),
-            Some(Plan::Snapshot)
-        );
-    }
-    assert_eq!(
-        snapshot_plan(
-            sqlite(fp(), present.clone()),
-            sqlite(fp(), WalFingerprint::Absent)
-        ),
-        Some(Plan::Snapshot)
-    );
-    assert_eq!(
-        snapshot_plan(sqlite(fp(), WalFingerprint::Absent), sqlite(fp(), present)),
-        Some(Plan::Snapshot)
-    );
-    // A plain fingerprint never equals a SQLite one.
-    assert_eq!(
-        snapshot_plan(
-            SnapshotFingerprint::Plain(fp()),
-            sqlite(fp(), WalFingerprint::Absent)
-        ),
-        Some(Plan::Snapshot)
-    );
-}
-
 #[test]
 fn row5a_wal_identity_is_covered_by_admission_when_supplied_as_facts() {
     let kind = |f: ResolvedSourceFacts| privacy::admit(&context(), f);
@@ -494,10 +363,7 @@ fn row5a_wal_identity_is_covered_by_admission_when_supplied_as_facts() {
 
 #[test]
 fn row5b_changed_and_failed_are_closed_local_retries_never_done() -> R {
-    for (err, wire) in [
-        (LocalError::BackupFailed, "\"backup_failed\""),
-        (LocalError::SourceChanged, "\"source_changed\""),
-    ] {
+    for (err, wire) in [(LocalError::SourceChanged, "\"source_changed\"")] {
         assert_eq!(serde_json::to_string(&err)?, wire);
         assert_eq!(serde_json::from_str::<LocalError>(wire)?, err);
         for (retries, secs) in [

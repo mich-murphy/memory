@@ -512,29 +512,12 @@ pub struct Fingerprint {
     pub mtime_ns: i64,
 }
 
-/// WAL absence is explicit, not a fabricated zero-length file.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub enum WalFingerprint {
-    /// No WAL observed.
-    Absent,
-    /// Observed WAL.
-    Present(Fingerprint),
-}
-
 /// Complete physical snapshot inputs.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum SnapshotFingerprint {
     /// Plain file.
     Plain(Fingerprint),
-    /// Database and WAL together.
-    Sqlite {
-        /// Database fingerprint.
-        db: Fingerprint,
-        /// WAL fingerprint, including absence.
-        wal: WalFingerprint,
-    },
 }
 
 /// Authoritative remote committed position, independent of local cache.
@@ -678,8 +661,6 @@ pub enum LocalError {
     DiskFull,
     /// Permission local failure.
     Permission,
-    /// BackupFailed local failure.
-    BackupFailed,
     /// SourceChanged local failure.
     SourceChanged,
     /// Io local failure.

@@ -4,25 +4,18 @@
 //! Stat observation follows DESIGN.md 7.1 and 7.2: `symlink_metadata`, so a symlink is
 //! reported as itself (its own inode, size and times) and never followed. `walk` skips
 //! symlinks entirely and counts them. No `unsafe`; open flags and errno come from `rustix`.
-//!
-//! A handle registered with [`Encoding::Sqlite`] is a Codex store: capture reads a consistent
-//! backup, never the live file. `begin_snapshot` opens the source read-only (never `immutable`,
-//! 5 s busy timeout), runs SQLite's backup in one step into a new 0600 file under the state
-//! root's `tmp/`, and `end_snapshot` removes it (after every attempt). The fingerprint is the
-//! database plus its `-wal` (or absence), never `-shm`, which a read-only open touches.
 
-use crate::environment::{Backup, FileSystem, Stat};
+use crate::environment::{FileSystem, Stat};
 use crate::zstd_stream::{Failure, Stream};
-use memory_core::domain::{Birth, FileId, Fingerprint, SnapshotFingerprint, WalFingerprint};
+use memory_core::domain::{Birth, FileId};
 use memory_core::locator::{ClaudeSessionIndex, Located, RootRelativePath, Roots, locate};
 use rustix::fs::{Mode, OFlags};
 use rustix::io::Errno;
-use std::collections::BTreeMap;
 use std::fs;
 use std::io::{ErrorKind, Read, Seek, SeekFrom};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 /// Closed error vocabulary of the real filesystem adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -68,9 +61,6 @@ pub enum Encoding {
     /// One or more whole zstd frames; `stat` reports the decoded length and `read` decoded
     /// ranges.
     Zstd,
-    /// A SQLite database. `stat` reports the database file itself; its bytes are read from a
-    /// consistent backup made by [`FileSystem::begin_snapshot`] (never from the live file).
-    Sqlite,
 }
 
 /// What a decoded length is valid for: the physical identity, size and modification time.
@@ -116,25 +106,12 @@ pub struct RealFs {
     lengths: Vec<Option<(Key, Option<u64>)>>,
     live: Option<Live>,
     counters: Counters,
-    /// Where backups of SQLite stores are made (`state/tmp`); without it no backup can be made.
-    tmp: Option<PathBuf>,
-    /// The backup file of each handle between `begin_snapshot` and `end_snapshot`.
-    backups: BTreeMap<usize, PathBuf>,
-    seq: u64,
 }
 
 impl RealFs {
     /// Empty adapter.
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Adapter that makes SQLite backups under `tmp` (a vetted, private directory).
-    pub fn with_tmp(tmp: impl Into<PathBuf>) -> Self {
-        Self {
-            tmp: Some(tmp.into()),
-            ..Self::default()
-        }
     }
 
     /// Bind an absolute path to a new handle (plain bytes).
@@ -274,59 +251,6 @@ impl RealFs {
     }
 }
 
-/// Delete a backup file and any side file SQLite may have left beside it.
-fn remove_backup(dest: &Path) {
-    for suffix in ["", "-wal", "-shm", "-journal"] {
-        let mut name = dest.as_os_str().to_os_string();
-        name.push(suffix);
-        let _ = fs::remove_file(PathBuf::from(name));
-    }
-}
-
-/// Copy the database at `src` into the new private file `dest` with SQLite's online backup:
-/// opened read-only (never `immutable`), 5 s busy timeout, all pages in one step. Returns the
-/// copy's length. The caller removes `dest` on every outcome.
-fn sqlite_backup(src: &Path, dest: &Path) -> Result<u64, ()> {
-    use rusqlite::backup::Backup as Copy;
-    use rusqlite::{Connection, OpenFlags};
-    use std::os::unix::fs::OpenOptionsExt;
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(dest)
-        .map_err(|_| ())?;
-    let source = Connection::open_with_flags(
-        src,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(|_| ())?;
-    source
-        .busy_timeout(Duration::from_secs(5))
-        .map_err(|_| ())?;
-    let mut target = Connection::open_with_flags(
-        dest,
-        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(|_| ())?;
-    {
-        let copy = Copy::new(&source, &mut target).map_err(|_| ())?;
-        copy.run_to_completion(i32::MAX, Duration::ZERO, None)
-            .map_err(|_| ())?;
-    }
-    target.close().map_err(|_| ())?;
-    source.close().map_err(|_| ())?;
-    fs::metadata(dest).map(|m| m.len()).map_err(|_| ())
-}
-
-fn fingerprint_of(key: &Key) -> Fingerprint {
-    Fingerprint {
-        id: key.id.clone(),
-        size: key.size,
-        mtime_ns: key.mtime_ns,
-    }
-}
-
 /// Identity from dev, ino and birth time. Birth time is `created()` in nanoseconds since
 /// the epoch; when the platform or filesystem does not provide it (or it predates the
 /// epoch or overflows `i64`) the id carries `Birth::Unavailable`.
@@ -384,27 +308,6 @@ impl FileSystem for RealFs {
             .ok_or(RealFsError::InvalidRange)?;
         let io = |e: std::io::Error| RealFsError::Io(e.kind());
         let i = Self::index(source)?;
-        if self.encoding(i) == Encoding::Sqlite {
-            // Only the backup is ever read; without one the store has not been made stable.
-            let backup = self.backups.get(&i).ok_or(RealFsError::Changed)?;
-            let mut file = fs::File::open(backup).map_err(io)?;
-            let file_len = file
-                .metadata()
-                .map_err(io)?
-                .len()
-                .saturating_sub(range.start);
-            file.seek(SeekFrom::Start(range.start)).map_err(io)?;
-            // Exact allocation, as for plain files: a buffer grown by `read_to_end` doubles past
-            // the piece and left about one freed 8 MiB block per piece behind (561 MB peak on a
-            // 615 MB store, measured 2026-11-21).
-            let mut buf = Vec::with_capacity(
-                usize::try_from(file_len.min(len)).map_err(|_| RealFsError::InvalidRange)?,
-            );
-            file.take(len).read_to_end(&mut buf).map_err(io)?;
-            self.counters.reads += 1;
-            self.counters.bytes_read += buf.len() as u64;
-            return Ok(buf);
-        }
         let observed = self.observed.get(i).and_then(Option::as_ref).cloned();
         let (mut file, meta) = self.open_checked(source, observed.as_ref().map(|k| &k.id))?;
         if self.encoding(i) == Encoding::Zstd {
@@ -431,78 +334,6 @@ impl FileSystem for RealFs {
 
     fn is_undecodable(error: &RealFsError) -> bool {
         *error == RealFsError::Undecodable
-    }
-
-    fn snapshot_fingerprint(
-        &mut self,
-        source: u64,
-    ) -> Result<Option<SnapshotFingerprint>, RealFsError> {
-        let i = Self::index(source)?;
-        if self.encoding(i) != Encoding::Sqlite {
-            return Ok(None);
-        }
-        let Some(db) = self.observed.get(i).and_then(Option::as_ref).cloned() else {
-            return Ok(None);
-        };
-        let mut name = self.path(source)?.as_os_str().to_os_string();
-        name.push("-wal");
-        // The `-shm` file is never looked at: opening the store read-only touches it.
-        let wal = match fs::symlink_metadata(PathBuf::from(name)) {
-            Ok(meta) => WalFingerprint::Present(fingerprint_of(&key_of(&meta))),
-            Err(e) if e.kind() == ErrorKind::NotFound => WalFingerprint::Absent,
-            Err(e) => return Err(RealFsError::Io(e.kind())),
-        };
-        Ok(Some(SnapshotFingerprint::Sqlite {
-            db: fingerprint_of(&db),
-            wal,
-        }))
-    }
-
-    fn begin_snapshot(&mut self, source: u64) -> Result<Option<u64>, Backup> {
-        let i = Self::index(source).map_err(|_| Backup::Failed)?;
-        if self.encoding(i) != Encoding::Sqlite {
-            return Ok(None);
-        }
-        self.end_snapshot(source);
-        let observed = self
-            .observed
-            .get(i)
-            .and_then(Option::as_ref)
-            .cloned()
-            .ok_or(Backup::Changed)?;
-        let path = self.path(source).map_err(|_| Backup::Failed)?.to_path_buf();
-        let same = |meta: &fs::Metadata| meta.is_file() && file_id(meta) == observed.id;
-        match fs::symlink_metadata(&path) {
-            Ok(meta) if same(&meta) => {}
-            Ok(_) => return Err(Backup::Changed),
-            Err(e) if e.kind() == ErrorKind::NotFound => return Err(Backup::Changed),
-            Err(_) => return Err(Backup::Failed),
-        }
-        let tmp = self.tmp.clone().ok_or(Backup::Failed)?;
-        self.seq += 1;
-        let dest = tmp.join(format!("snapshot-{i}-{}.sqlite", self.seq));
-        match sqlite_backup(&path, &dest) {
-            Ok(len) => {
-                self.backups.insert(i, dest);
-                Ok(Some(len))
-            }
-            Err(()) => {
-                remove_backup(&dest);
-                // A store that vanished or was replaced meanwhile is a retry, not a failure.
-                match fs::symlink_metadata(&path) {
-                    Ok(meta) if same(&meta) => Err(Backup::Failed),
-                    _ => Err(Backup::Changed),
-                }
-            }
-        }
-    }
-
-    fn end_snapshot(&mut self, source: u64) {
-        if let Ok(i) = Self::index(source)
-            && let Some(dest) = self.backups.remove(&i)
-        {
-            remove_backup(&dest);
-        }
     }
 }
 
