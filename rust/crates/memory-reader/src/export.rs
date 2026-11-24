@@ -3,9 +3,9 @@
 //!
 //! [`build_envelope`] (and [`build_shared_envelope`], the `shared-reader/v1` form for a shared
 //! owner's run records, brief 56) is pure: it checks every limit and renders the whole
-//! `metadata.json` before any file exists. [`write_export`] then streams each epoch body piece by piece (fetch,
-//! [`decode_piece`], write, incremental SHA-256); at most one stored and one decoded piece are
-//! alive at a time, and it never calls `restore_epoch`.
+//! `metadata.json` before any file exists. [`write_export`] then streams each epoch body piece
+//! by piece (fetch, [`decode_piece`], write, incremental SHA-256); at most one stored and one
+//! decoded piece are alive at a time, and it never calls `restore_epoch`.
 //!
 //! The `object` descriptor of an epoch is shape-checked by the importer and never fetched. One
 //! piece: that piece's key, `encoded_sha256` and `encoded_len`. Several pieces: the first
