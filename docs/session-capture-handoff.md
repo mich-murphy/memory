@@ -405,7 +405,11 @@ from `main` alone.
      records; everything else `Ignored`; stored entries of dropped kinds are retired (kept,
      never deleted, `retired=` in `memory check`); `deferred_snapshot` removed. Accepted locally
      at `9566497`: teeth 18 of 19 (1 equivalent), gates 14/14, Linux passed. Brief E (Codex
-     databases in analytics) is dropped: it only adds threads older than the install.
+     databases in analytics) is dropped: it only adds threads older than the install. Merged as
+     `df23437` (stack #270), installed on this Mac 2026-11-23 23:46Z (`runs = 17`) and dev-01
+     2026-11-24 00:20Z: start rounds `deleted=0`, no WARN/ERROR; sources 6,073 and 4,479
+     (were 8,189 and 5,989), withheld 0 on both; `memory check` exit 0, `remote_only=0`,
+     `retired=1791` and `1492`; RSS peak 125 MB here, dev-01 `VmHWM` 101 MB.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
