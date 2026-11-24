@@ -2638,8 +2638,7 @@ fn state_api_failure_table() -> R {
         Some(StateError::TooLarge)
     );
     set_mode(&tmp.root(), 0o500)?;
-    let id = MachineId::try_from("m".to_owned()).map_err(e)?;
-    let got = state.create_machine_id(&id).err();
+    let got = state.write(StateFile::Roots, b"x").err();
     set_mode(&tmp.root(), 0o700)?;
     assert_eq!(got, Some(StateError::Io(ErrorKind::PermissionDenied)));
     Ok(())
