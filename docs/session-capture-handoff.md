@@ -432,6 +432,23 @@ from `main` alone.
      Real data: 59 run records (dev-01 only), 48 linked to a session (11 are named only in
      text); every extension digest is 16 hex characters, so the parent widened the rule
      (`1ead95b`, `RUNS_VERSION = 2`); then 136 extension rows, nothing skipped, no path stored.
+  35. 2026-11-24, new-machine guide and long runs. `docs/install.md` opens with a current
+     section for a new host (build, Linux GC roots, token file, `config.toml`, `memory install`
+     and its `next:` lines, verification, upgrade, removal, analytics commands); the
+     `publications.py` command line gains `import-shared` and `report --summary` (PR #283,
+     `a0d3ef6`). On `a0d3ef6`: gates with `PROPERTY_CASES=2000`, 14 of 14, seed 4014092643,
+     line coverage 95.25 %; the whole workspace in the Linux container (`memory-linux-test`,
+     `HEGEL_TEST_CASES` and `PROPTEST_CASES` 2000), 1,027 passed, 0 failed, 5 ignored. A first
+     Linux attempt failed 2 tests because of how it was run, not the code: the source was mounted
+     read-only (the xtask schema test writes under `rust/artifacts/`), and `PROPERTY_CASES` was
+     set without the `HEGEL_TEST_CASES` that `gates.sh` derives from it, so Hegel ran its small
+     default and the coverage guard saw no `revoke`. Run the container on a writable copy with
+     both case variables set. Housekeeping: the acceptance samplers and check loops are stopped
+     on both hosts (their logs stay in `~/.local/state/memory-cutover/`); the old
+     `agent-sessions` binary and launchd agent are absent from this Mac. Open: dev-01 keeps one
+     withheld-only `index.json` record; pruning retired `index.json` records; whether to remove
+     the capture code without a production path (Codex SQLite backup, the 6 h interval, config
+     scrubbing); the two whole-file reads in `check`; six old, fully merged worktrees.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
