@@ -463,6 +463,7 @@ def import_export(export_dir, db_path, *, reset=False):
         setup_facts.ensure(db)  # writable open only: tables and views; read-only opens never create
         usage_facts.ensure(db)
         pi_runs.ensure(db)
+        pi_runs.create_view(db)
         bound = db.execute('SELECT archive_id FROM publication_binding').fetchone()[0]
         _require(bound in (None, archive) or reset, 'archive_mismatch')
         if reset:
@@ -636,6 +637,7 @@ def import_shared(export_dir, db_path, *, reset=False):
         setup_facts.ensure(db)
         usage_facts.ensure(db)
         pi_runs.ensure(db)
+        pi_runs.create_view(db)
         bound = db.execute('SELECT archive_id FROM publication_binding').fetchone()[0]
         _require(bound in (None, archive) or reset, 'archive_mismatch')
         if reset:
@@ -716,6 +718,36 @@ def _setup_report(db, rows):
                           'FROM tool_outcome GROUP BY agent ORDER BY agent'))
 
 
+def _runs_report(db, rows):
+    """Pi run groups (brief 56); empty when the tables or the view are absent."""
+    have = {r[0] for r in db.execute('SHOW TABLES').fetchall()}
+    views = {r[0] for r in db.execute('SELECT view_name FROM duckdb_views() WHERE NOT internal').fetchall()}
+    if not {'pi_run', 'pi_run_extension', 'pi_run_ref'} <= have or 'pi_run_dim' not in views:
+        return {}
+    top = ' ORDER BY runs DESC, 1 LIMIT 20'
+
+    def by(column):
+        return rows(f'SELECT {column}, count(*) AS runs FROM pi_run WHERE {column} IS NOT NULL '
+                    f'GROUP BY {column}' + top)
+    return dict(
+        totals=rows('SELECT count(*) AS runs, count(*) FILTER (WHERE referencing_sessions > 0) AS linked, '
+                    'count(*) FILTER (WHERE has_error) AS with_error, '
+                    'count(*) FILTER (WHERE exit_code <> 0) AS non_zero_exit FROM pi_run_dim')[0],
+        by_agent_type=rows('SELECT agent_type, count(*) AS runs, count(*) FILTER (WHERE exit_code <> 0) AS '
+                           'non_zero_exits FROM pi_run WHERE agent_type IS NOT NULL GROUP BY agent_type'
+                           ' ORDER BY runs DESC, 1'),
+        acceptance=rows('SELECT agent_type, acceptance_status, count(*) AS runs FROM pi_run '
+                        'WHERE agent_type IS NOT NULL AND acceptance_status IS NOT NULL '
+                        'GROUP BY agent_type, acceptance_status ORDER BY 1, 2'),
+        by_model=by('model'), by_requested_model=by('requested_model'),
+        requested_differs=rows('SELECT count(*) AS runs FROM pi_run WHERE model IS NOT NULL AND '
+                               'requested_model IS NOT NULL AND model <> requested_model')[0]['runs'],
+        extensions_effective=rows('SELECT min(extensions_effective) AS min, median(extensions_effective) '
+                                  'AS median, max(extensions_effective) AS max FROM pi_run')[0],
+        distinct_effective_digests=rows("SELECT count(DISTINCT digest) AS digests FROM pi_run_extension "
+                                        "WHERE \"list\"='effective'")[0]['digests'])
+
+
 def report(db_path, *, now_ns=None, stale_after_ns=86400 * 10**9, summary=False):
     """Actual event-index report; summary bounds detail for interactive overview.
 
@@ -754,7 +786,7 @@ def report(db_path, *, now_ns=None, stale_after_ns=86400 * 10**9, summary=False)
                                 '(SELECT count(*) FROM failures) AS failures, '
                                 '(SELECT count(*) FROM sources) AS sources')[0],
                     agents=rows('SELECT agent,count(*) AS sessions FROM sessions GROUP BY agent ORDER BY agent'),
-                    setup=_setup_report(db, rows))
+                    setup=_setup_report(db, rows), runs=_runs_report(db, rows))
                if summary else {}),
             freshness=rows('''SELECT max(captured_at_ns) AS captured_at_ns,
                 max(published_at_ns) AS published_at_ns, max(imported_at_ns) AS imported_at_ns,

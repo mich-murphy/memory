@@ -60,6 +60,18 @@ LISTS = ('configured', 'effective', 'runtime', 'required')
 MAX_RECORD = 8 << 20
 
 
+def create_view(db):
+    """pi_run with its earliest referencing session; run usage is never added to sessions."""
+    db.execute('''CREATE OR REPLACE VIEW pi_run_dim AS
+        SELECT r.*, f.session_key, coalesce(f.referencing_sessions, 0) AS referencing_sessions
+        FROM pi_run r LEFT JOIN (
+            SELECT archive_id, machine_id, run_id,
+                list(session_key ORDER BY timestamp NULLS LAST, session_key)[1] AS session_key,
+                count(DISTINCT session_key) AS referencing_sessions
+            FROM pi_run_ref GROUP BY archive_id, machine_id, run_id) f
+        ON f.archive_id = r.archive_id AND f.machine_id = r.machine_id AND f.run_id = r.run_id''')
+
+
 def _d(value):
     return value if isinstance(value, dict) else {}
 

@@ -311,5 +311,53 @@ class RefTest(SessionBase):
         self.assertEqual(self.sql('SELECT run_id FROM pi_run_ref'), [('r-req',)])
 
 
+
+class DimReportTest(SessionBase):
+    def shared(self, records):
+        helper = Shared()
+        helper.setUp()
+        self.addCleanup(helper.tmp.cleanup)
+        helper.db = self.db
+        publications.import_shared(helper.build(records), self.db)
+
+    def test_view_links_earliest_session_and_leaves_session_totals(self):
+        usage = {'type': 'message', 'message': {'role': 'assistant', 'usage': {'input': 7}, 'content': []}}
+        self.shared([run_record('r-req', usage=dict(input=1000)), run_record('r-none')])
+        publications.import_export(self.export('pi', [usage, REFS[2]]), self.db)
+        rows = self.sql('SELECT run_id, session_key IS NOT NULL, referencing_sessions FROM pi_run_dim '
+                        'ORDER BY run_id')
+        self.assertEqual(rows, [('r-none', False, 0), ('r-req', True, 1)])
+        self.assertEqual(self.sql('SELECT input_tokens FROM session_dim'), [(7,)])
+        self.assertEqual(self.sql('SELECT input_tokens FROM usage_by_model')[0], (7,))
+
+    def test_report_runs_section(self):
+        self.shared([run_record('a', model='p/m', requestedModel='p/n', exitCode=1,
+                                acceptance=dict(status='passed'),
+                                launchResolvedExtensions=dict(effective=[D, 'sha256:' + 'cd' * 32])),
+                     run_record('b', model='p/m', requestedModel='p/m', error='x',
+                                launchResolvedExtensions=dict(effective=[D]))])
+        publications.import_export(self.export('pi', [REFS[2].__class__(REFS[2], details={'runId': 'a'})]), self.db)
+        runs = publications.report(self.db, summary=True)['runs']
+        self.assertEqual(runs['totals'], dict(runs=2, linked=1, with_error=1, non_zero_exit=1))
+        self.assertEqual(runs['by_model'], [dict(model='p/m', runs=2)])
+        self.assertEqual(runs['requested_differs'], 1)
+        self.assertEqual(runs['extensions_effective'], dict(min=1, median=1.5, max=2))
+        self.assertEqual(runs['distinct_effective_digests'], 2)
+        self.assertEqual(runs['acceptance'], [dict(agent_type='worker', acceptance_status='passed', runs=1)])
+        self.assertEqual(runs['by_agent_type'], [dict(agent_type='worker', runs=2, non_zero_exits=1)])
+
+    def test_read_only_old_database(self):
+        publications.import_export(self.export('pi', PI), self.db)
+        self.assertNotEqual(publications.report(self.db, summary=True)['runs'], None)
+        with duckdb.connect(str(self.db)) as c:
+            c.execute('DROP VIEW pi_run_dim')
+            for table in ('pi_run_ref', *pi_runs.TABLES[:2]):
+                c.execute(f'DROP TABLE {table}')
+        tables = self.sql('SHOW TABLES')
+        self.assertEqual(publications.report(self.db, summary=True)['runs'], {})
+        self.assertEqual(publications.report(self.db)['sessions'][0]['agent'], 'pi')
+        self.assertEqual(self.sql('SHOW TABLES'), tables)
+
+
 if __name__ == '__main__':
     unittest.main()
