@@ -4498,7 +4498,8 @@ impl memory::daemon::Sources for Gate {
         _kind: &SourceKind,
         _path: &str,
     ) -> memory::daemon::Probe {
-        if self.retired.load(Ordering::SeqCst) {
+        if self.retired.load(Ordering::SeqCst) || memory_core::locator::stored_retired(_kind, _path)
+        {
             return memory::daemon::Probe::Retired;
         }
         if !self.root.load(Ordering::SeqCst) {
@@ -4963,21 +4964,16 @@ fn rig_index_has(r: Rig, id: &str) -> R<bool> {
     Ok(index.sources.keys().any(|k| k.as_str() == id))
 }
 
+// Brief 57 (f): a withheld-only record whose file vanished is dropped by the first complete
+// round that did not walk it (the brief 48 two-miss rule is replaced), with no manifest change.
 #[test]
-fn a_withheld_only_record_is_dropped_after_two_misses_and_builds_no_change() -> R {
+fn a_withheld_only_record_is_dropped_by_one_full_round_and_builds_no_change() -> R {
     let mut r = withheld_rig()?;
     remove_file(&mut r, 4);
     let first = r.d.reconcile_once().map_err(e)?;
-    assert_eq!((first.landed, first.deleted), (0, 0));
-    assert!(rig_index_has(r, "src4")?, "dropped after one miss");
-
-    let mut r = withheld_rig()?;
-    remove_file(&mut r, 4);
-    r.d.reconcile_once().map_err(e)?;
-    let second = r.d.reconcile_once().map_err(e)?;
-    assert_eq!((second.landed, second.deleted), (0, 0), "no change built");
+    assert_eq!((first.landed, first.deleted), (0, 0), "no change built");
     assert!(!deleted_and_epochs(&mut r.d)?.0);
-    assert!(!rig_index_has(r, "src4")?, "kept forever");
+    assert!(!rig_index_has(r, "src4")?, "kept after a complete round");
     Ok(())
 }
 
@@ -4998,7 +4994,7 @@ fn a_walked_withheld_file_with_a_stat_error_keeps_its_record() -> R {
 }
 
 #[test]
-fn a_withheld_file_back_before_the_second_round_keeps_its_record() -> R {
+fn a_withheld_file_that_is_back_is_withheld_again_and_dropped_when_it_vanishes() -> R {
     let mut r = withheld_rig()?;
     let secret: Vec<u8> = r.d.fs_mut().mem.files.get(&4).cloned().unwrap_or_default();
     remove_file(&mut r, 4);
@@ -5007,10 +5003,126 @@ fn a_withheld_file_back_before_the_second_round_keeps_its_record() -> R {
     if let Ok(mut list) = r.gate.list.lock() {
         list.push(snap_of(4)?);
     }
-    r.d.reconcile_once().map_err(e)?;
+    let back = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((back.landed, back.withheld), (0, 1));
     remove_file(&mut r, 4);
     r.d.reconcile_once().map_err(e)?;
-    assert!(rig_index_has(r, "src4")?, "count did not restart");
+    assert!(!rig_index_has(r, "src4")?, "vanished again");
+    Ok(())
+}
+
+fn puts(r: &mut Rig) -> usize {
+    r.d.store_mut().put_log.len()
+}
+
+// Brief 57 (a): a record for a stored retired entry is gone after one full round; no commit.
+#[test]
+fn a_retired_record_is_pruned_by_one_full_round_without_a_commit() -> R {
+    let mut r = snap_rig_with(retired_snap_of(3)?)?;
+    remove_file(&mut r, 3);
+    let before = puts(&mut r);
+    let round = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((round.landed, round.deleted), (0, 0));
+    assert_eq!(puts(&mut r), before, "no store write");
+    assert!(!rig_index_has(r, "src3")?);
+    Ok(())
+}
+
+// Brief 57 (b): an incomplete walk prunes nothing.
+#[test]
+fn an_incomplete_walk_prunes_nothing() -> R {
+    let mut r = snap_rig_with(retired_snap_of(3)?)?;
+    remove_file(&mut r, 3);
+    r.gate.complete.store(false, Ordering::SeqCst);
+    r.d.reconcile_once().map_err(e)?;
+    assert!(rig_index_has(r, "src3")?);
+    Ok(())
+}
+
+// Brief 57 (c): an owner whose base is `Unknown` (store failing) blocks every prune.
+#[test]
+fn an_unknown_base_prunes_nothing() -> R {
+    let r = snap_rig_with(retired_snap_of(3)?)?;
+    let (tmp, cfg, gate, fail) = (r.tmp, r.cfg, r.gate, r.fail);
+    let mut d = r.d;
+    let fs = std::mem::take(d.fs_mut());
+    let mut store = std::mem::take(d.store_mut());
+    d.shutdown().map_err(e)?;
+    store.offline = true;
+    if let Ok(mut list) = gate.list.lock() {
+        list.clear();
+    }
+    let d = start_ad(&tmp, &cfg, fs, store, &gate)?;
+    let mut r = Rig {
+        tmp,
+        cfg,
+        d,
+        gate,
+        fail,
+    };
+    r.d.reconcile_once().map_err(e)?;
+    assert!(rig_index_has(r, "src3")?);
+    Ok(())
+}
+
+// Brief 57 (d): a kept source that vanished is `Deleted` after exactly two misses; its record
+// survives the first miss and is dropped once the deletion has landed.
+#[test]
+fn a_vanished_kept_source_keeps_its_record_until_the_deletion_lands() -> R {
+    let mut r = rig()?;
+    remove_file(&mut r, 1);
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 0);
+    assert!(rig_index_has(r, "src1")?, "kept after one miss");
+    let mut r = rig()?;
+    remove_file(&mut r, 1);
+    r.d.reconcile_once().map_err(e)?;
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 1);
+    assert!(deleted_and_epochs(&mut r.d)?.0);
+    assert!(!rig_index_has(r, "src1")?, "dropped after the deletion");
+    Ok(())
+}
+
+// Brief 57 (e): a present, withheld Pi run record keeps its record and uploads nothing.
+#[test]
+fn a_present_withheld_run_record_keeps_its_record_round_after_round() -> R {
+    let mut r = withheld_rig()?;
+    let before = puts(&mut r);
+    for _ in 0..4 {
+        let round = r.d.reconcile_once().map_err(e)?;
+        assert_eq!((round.landed, round.deleted), (0, 0));
+    }
+    assert_eq!(puts(&mut r), before, "nothing uploaded");
+    assert!(rig_index_has(r, "src4")?);
+    Ok(())
+}
+
+// Brief 57 (g): after pruning, a restart and a full round make no `Deleted` and no write.
+#[test]
+fn after_pruning_a_restart_and_a_round_write_nothing() -> R {
+    let mut r = rig()?;
+    remove_file(&mut r, 1);
+    remove_file(&mut r, 2);
+    r.d.reconcile_once().map_err(e)?;
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 2);
+    let (tmp, cfg, gate, fail) = (r.tmp, r.cfg, r.gate, r.fail);
+    let mut d = r.d;
+    let fs = std::mem::take(d.fs_mut());
+    let store = std::mem::take(d.store_mut());
+    d.shutdown().map_err(e)?;
+    let index = need(index_of(&tmp)?, "no index")?;
+    assert!(index.sources.is_empty(), "{:?}", index.sources.keys());
+    let d = start_ad(&tmp, &cfg, fs, store, &gate)?;
+    let mut r = Rig {
+        tmp,
+        cfg,
+        d,
+        gate,
+        fail,
+    };
+    let before = puts(&mut r);
+    let round = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((round.landed, round.deleted), (0, 0));
+    assert_eq!(puts(&mut r), before);
     Ok(())
 }
 

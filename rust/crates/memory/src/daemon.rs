@@ -1397,29 +1397,6 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 None => groups.push((owner, vec![source])),
             }
         }
-        // Brief 48: a local record that only holds a withheld judgement (never published, so
-        // never a candidate) is dropped after two consecutive full rounds that did not walk
-        // it. No manifest change is built: the file was never in R2.
-        if self.absence {
-            let seen: HashSet<&SourceId> = groups
-                .iter()
-                .flat_map(|(_, list)| list.iter().map(|s| &s.id))
-                .collect();
-            let mut touched = false;
-            self.locals.retain(|id, l| {
-                if l.withheld.is_none()
-                    || l.snapshot.is_some()
-                    || l.index.is_some()
-                    || seen.contains(id)
-                {
-                    return true;
-                }
-                touched = true;
-                l.missing = l.missing.saturating_add(1);
-                l.missing < 2
-            });
-            self.dirty |= touched;
-        }
         let walked: HashSet<Owner> = groups.iter().map(|(o, _)| o.clone()).collect();
         for owner in &walked {
             if self.known.insert(owner.clone()) {
@@ -1444,10 +1421,12 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         self.status.host_paused = false;
         let started_ns = self.clock.monotonic_ns();
         let mut last_progress_ns = started_ns;
+        let mut finished = true;
         for (done, (owner, sources)) in groups.iter().enumerate() {
             if (self.stop)() {
                 // A round cut short re-probed nothing more: it cannot resume a paused host.
                 self.status.host_paused |= before.0;
+                finished = false;
                 break;
             }
             let mut rt = self
@@ -1475,8 +1454,12 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             }
             if pause {
                 self.status.host_paused = true;
+                finished = false;
                 break;
             }
+        }
+        if self.absence && finished {
+            self.prune_locals(&groups);
         }
         self.absence = false;
         if self.status.host_paused != before.0 {
@@ -1501,6 +1484,46 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             .map_err(RoundError::State)?;
         self.write_index(false).map_err(RoundError::State)?;
         Ok(report)
+    }
+
+    /// Brief 57: after a complete, finished full round, drop each local record whose id was not
+    /// walked and is not a live, non-retired entry of any owner's base. Nothing is pruned
+    /// unless every owner in the owner set has a `Known` or `Absent` base, so a store failure
+    /// (`Unknown`) or a parked owner never loses a record that still guards a deletion.
+    fn prune_locals(&mut self, groups: &[(Owner, Vec<Source>)]) {
+        let loaded = |o: &Owner| {
+            self.owners
+                .get(o)
+                .is_some_and(|rt| !matches!(rt.base, RemoteBase::Unknown))
+        };
+        let ready = self.known.iter().all(loaded)
+            && self
+                .owners
+                .values()
+                .all(|rt| !matches!(rt.base, RemoteBase::Unknown));
+        if !ready {
+            return;
+        }
+        let mut keep: HashSet<&SourceId> = groups
+            .iter()
+            .flat_map(|(_, list)| list.iter().map(|s| &s.id))
+            .collect();
+        for rt in self.owners.values() {
+            if let RemoteBase::Known(base) = &rt.base {
+                keep.extend(
+                    base.state
+                        .sources
+                        .iter()
+                        .filter(|(_, e)| {
+                            e.deleted_at.is_none() && !stored_retired(&e.kind, &e.path)
+                        })
+                        .map(|(id, _)| id),
+                );
+            }
+        }
+        let before = self.locals.len();
+        self.locals.retain(|id, _| keep.contains(id));
+        self.dirty |= self.locals.len() != before;
     }
 
     /// The owner's recovered state has no live append entry left.
