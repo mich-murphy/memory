@@ -169,5 +169,88 @@ class ImportSharedTest(Shared):
         self.assertEqual(self.sql('SELECT count(*) FROM sessions'), [(1,)])
 
 
+D = 'sha256:' + 'ab' * 32
+FULL = dict(
+    runId='run-1', agent='worker', exitCode=1, timestamp=1700000000123, model='prov/m:high',
+    requestedModel='prov/m2', error=CANARY, transcriptPath=f'/h/{CANARY}/t.jsonl',
+    usage=dict(input=1, output=2, cacheRead=3, cacheWrite=4, turns=5, cost=0.25),
+    launchResolvedExtensions=dict(
+        version=1, source=f'/p/{CANARY}', configured=[D, 'sha256:' + 'cd' * 32], effective=[D],
+        runtime=[], required=['bad', D],
+        omitted=dict(configured=1, effective=2, required=3, runtime=4),
+        disableAmbientExtensions=True),
+    acceptance=dict(status='passed', evidenceStatus='verified', explicit=True,
+                    criteria=[{'text': CANARY, 'evidence': CANARY}],
+                    effectiveAcceptance=dict(level='strict'), reviewResult=dict(status='approved'),
+                    runtimeChecks=[{'command': CANARY}, {}],
+                    childReport=dict(commands=[CANARY], changedFiles=[CANARY], notes=CANARY)),
+    runner=dict(type='external-cli', command=CANARY, args=[CANARY]),
+    externalProcess=dict(durationMs=77, exitCode=-2, pid=4242, cwd=f'/w/{CANARY}'))
+COLUMNS = ', '.join(pi_runs.RUN_COLUMNS)
+
+
+class RunRowsTest(Shared):
+    def row(self, record):
+        publications.import_shared(self.build([record]), self.db)
+        return dict(zip(pi_runs.RUN_COLUMNS, self.sql(f'SELECT {COLUMNS} FROM pi_run')[0]))
+
+    def test_every_column(self):
+        result = publications.import_shared(self.build([FULL]), self.db)
+        self.assertEqual((result['runs'], result['runs_skipped']), (1, 1))  # one bad digest
+        self.assertEqual(dict(zip(pi_runs.RUN_COLUMNS, self.sql(f'SELECT {COLUMNS} FROM pi_run')[0])), dict(
+            run_id='run-1', timestamp_ms=1700000000123, agent_type='worker', model='prov/m:high',
+            requested_model='prov/m2', exit_code=1, has_error=True, acceptance_status='passed',
+            evidence_status='verified', acceptance_level='strict', acceptance_explicit=True,
+            review_status='approved', criteria=1, runtime_checks=2, input_tokens=1, output_tokens=2,
+            cache_read_tokens=3, cache_write_tokens=4, cost_usd=0.25, turns=5,
+            extensions_configured=2, extensions_effective=1, extensions_runtime=0,
+            extensions_required=2, extensions_omitted=10, ambient_extensions_disabled=True,
+            runner_type='external-cli', external_duration_ms=77, external_exit_code=-2))
+        self.assertEqual(self.sql('SELECT "list", digest FROM pi_run_extension ORDER BY 1, 2'),
+                         [('configured', D), ('configured', 'sha256:' + 'cd' * 32),
+                          ('effective', D), ('required', D)])
+
+    def test_canaries_never_stored(self):
+        publications.import_shared(self.build([FULL]), self.db)
+        with duckdb.connect(str(self.db), read_only=True) as c:
+            for (table,) in c.execute('SHOW TABLES').fetchall():
+                for col in [r[0] for r in c.execute(f'DESCRIBE "{table}"').fetchall()]:
+                    hits = c.execute(f'SELECT count(*) FROM "{table}" WHERE '
+                                     f'CAST("{col}" AS VARCHAR) ILIKE ?', ['%canary%']).fetchone()[0]
+                    self.assertEqual(hits, 0, (table, col))
+        self.assertNotIn(CANARY, json.dumps(publications.report(self.db, summary=True)))
+
+    def test_invalid_values_null_and_counted(self):
+        bad = dict(runId='r', agent='bad/agent', exitCode='1', timestamp=-1, model='/abs',
+                   requestedModel='a//b', error=5, usage=dict(input=-1, cost=float('inf'), turns=True),
+                   acceptance=dict(status='Passed', evidenceStatus='x' * 41, explicit='yes',
+                                   criteria='x', reviewResult=dict(status=3)),
+                   launchResolvedExtensions=dict(effective='x', disableAmbientExtensions=1),
+                   runner=dict(type='A'), externalProcess=dict(durationMs=2 ** 53, exitCode=1.5))
+        result = publications.import_shared(self.build([bad]), self.db)
+        row = dict(zip(pi_runs.RUN_COLUMNS, self.sql(f'SELECT {COLUMNS} FROM pi_run')[0]))
+        self.assertEqual({k for k, v in row.items() if v is not None}, {'run_id'})
+        self.assertEqual(result['runs_skipped'], 19)  # one per invalid value above
+
+    def test_absent_fields_are_null_not_skipped(self):
+        result = publications.import_shared(self.build([dict(runId='r')]), self.db)
+        self.assertEqual(result['runs_skipped'], 0)
+        row = dict(zip(pi_runs.RUN_COLUMNS, self.sql(f'SELECT {COLUMNS} FROM pi_run')[0]))
+        self.assertEqual({k for k, v in row.items() if v is not None}, {'run_id', 'has_error'})
+
+    def test_not_a_row(self):
+        records = [b'not json', b'[1]', json.dumps(dict(agent='w')).encode(),
+                   json.dumps(dict(runId='a/b')).encode(), json.dumps(dict(runId=5)).encode(),
+                   run_record('ok')]
+        result = publications.import_shared(self.build(records), self.db)
+        self.assertEqual((result['runs'], result['runs_skipped']), (1, 5))
+        self.assertEqual(self.sql('SELECT run_id FROM pi_run'), [('ok',)])
+
+    def test_empty_error_is_false_and_coordinates(self):
+        self.assertFalse(self.row(dict(runId='r', error=''))['has_error'])
+        self.assertEqual(self.sql('SELECT archive_id, machine_id, source_id FROM pi_run'),
+                         [('a', 'm', 's0')])
+
+
 if __name__ == '__main__':
     unittest.main()
