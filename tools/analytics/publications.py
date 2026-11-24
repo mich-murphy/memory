@@ -17,6 +17,7 @@ import tempfile
 import time
 
 import setup_facts
+import usage_facts
 
 
 class ImportFailure(ValueError):
@@ -229,9 +230,15 @@ def _schema(db, events):
         sequence BIGINT, failed_at_ns BIGINT, reason VARCHAR, attempts BIGINT)''')
 
 
-def _write_setup(db, owned, agent, trace, loc, skipped):
+def _write_setup(db, owned, agent, trace, loc, skipped, usage_skipped=None):
     for fact in setup_facts.iter_setup(owned, agent, trace, skipped):
         _insert(db, 'session_setup', dict(fact, **loc))
+    for table, row in usage_facts.iter_usage(owned, agent, trace, usage_skipped):
+        _insert(db, table, dict(row, **loc))
+
+
+# Every side table derived from the bodies; one version row governs them all (brief 55).
+DERIVED = ('session_setup', 'session_usage', 'tool_outcome')
 
 
 def _record_setup_version(db, session):
@@ -241,7 +248,8 @@ def _record_setup_version(db, session):
 
 def _rederive_setup(db, session, coords, sources, bodies, storage, agent):
     """Rebuild one session's setup rows from its owned bodies (caller holds the transaction)."""
-    db.execute('DELETE FROM session_setup WHERE session_key=?', [session])
+    for table in DERIVED:
+        db.execute(f'DELETE FROM {table} WHERE session_key=?', [session])
     for pair, source in sources.items():
         if source.get('withheld') is not None or source['role'] == 'artifact':
             continue
@@ -363,13 +371,14 @@ def import_export(export_dir, db_path, *, reset=False):
                 os.unlink(private)
     with duckdb.connect(str(path)) as db:
         _schema(db, events)
-        setup_facts.ensure(db)  # writable open only: tables and view; read-only opens never create
+        setup_facts.ensure(db)  # writable open only: tables and views; read-only opens never create
+        usage_facts.ensure(db)
         bound = db.execute('SELECT archive_id FROM publication_binding').fetchone()[0]
         _require(bound in (None, archive) or reset, 'archive_mismatch')
         if reset:
             db.execute('BEGIN')
             for table in ('sessions', 'sources', 'events', 'issues', 'failures',
-                          'session_setup', 'session_setup_version'):
+                          *DERIVED, 'session_setup_version'):
                 db.execute(f'DELETE FROM {table}')
             db.execute('UPDATE publication_binding SET archive_id=?', [archive])
             db.execute('COMMIT')
@@ -409,10 +418,10 @@ def import_export(export_dir, db_path, *, reset=False):
                     return {'status': 'unchanged', 'publication_id': old[0]}
                 db.execute('BEGIN')
                 try:
-                    for table in ('events', 'issues', 'sources', 'sessions', 'session_setup',
+                    for table in ('events', 'issues', 'sources', 'sessions', *DERIVED,
                                   'session_setup_version'):
                         db.execute(f'DELETE FROM {table} WHERE session_key=?', [session])
-                    skipped = {}
+                    skipped, usage_skipped = {}, {}
                     counts = dict(sources=0, events=0, issues=0)
                     codex_traces = []
                     batch_columns = dict(**{k: 'VARCHAR' for k in coords}, source_id='VARCHAR', epoch_id='VARCHAR')
@@ -452,7 +461,7 @@ def import_export(export_dir, db_path, *, reset=False):
                                 length=body['size'], kind='artifact_not_normalized', record_type=None))]
                         else:
                             parsed = events.iter_events(owned, identity['agent'], trace)
-                            _write_setup(db, owned, identity['agent'], trace, loc, skipped)
+                            _write_setup(db, owned, identity['agent'], trace, loc, skipped, usage_skipped)
                             if identity['agent'] == 'codex':
                                 codex_traces.append(trace)
                         for event, issue in parsed:
@@ -495,6 +504,8 @@ def import_export(export_dir, db_path, *, reset=False):
                     _clear_failure(db, session, manifest)
                     db.execute('COMMIT')
                     counts['setup_skipped'] = skipped.get('skipped', 0)
+                    # Skipped usage and tool-outcome values (brief 55), one counter for both tables.
+                    counts['usage_skipped'] = usage_skipped.get('skipped', 0)
                     return dict(counts, status='imported', publication_id=manifest['publication_id'])
                 except Exception:
                     db.execute('ROLLBACK')

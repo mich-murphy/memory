@@ -285,12 +285,13 @@ def _count(fact):
 
 
 def ensure(db):
-    """Writable-open only: create the tables and (re)create the view; never called read-only."""
+    """Writable-open only: create the tables and (re)create the setup view (`session_dim` is
+    completed by usage_facts.ensure); never called read-only."""
     spec = dict({k: 'VARCHAR' for k in COORDINATES}, **SETUP_COLUMNS)
     db.execute('CREATE TABLE IF NOT EXISTS session_setup (' +
                ','.join(f'"{k}" {v}' for k, v in spec.items()) + ')')
     db.execute('CREATE TABLE IF NOT EXISTS session_setup_version(session_key VARCHAR, version INTEGER)')
-    db.execute(f'''CREATE OR REPLACE VIEW session_dim AS
+    db.execute(f'''CREATE OR REPLACE VIEW session_setup_dim AS
         SELECT s.session_key, s.agent,
             f.harness_version, f.session_format, f.entrypoint,
             coalesce(f.models, []::VARCHAR[]) AS models,
