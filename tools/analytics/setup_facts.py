@@ -6,6 +6,8 @@ tolerant (schema-on-read) and the projection is strict (schema-on-write): the fa
 closed, names and values are short strings, and the content never includes a prompt,
 instruction text, tool input or output, path, directory or cwd.
 
+Brief 55 adds the used facts; usage and tool outcomes live in usage_facts.py.
+
 Table `session_setup` is long format: the coordinate columns of `events` plus trace_id,
 line, timestamp, fact, name, value. One row is kept per first sighting of each
 (fact, name, value) within a source; a repeat is skipped.
