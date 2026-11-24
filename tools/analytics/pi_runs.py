@@ -7,6 +7,7 @@ criteria text or evidence, command, argument, path, pid or file name.
 """
 import json
 import re
+from pathlib import Path
 
 import setup_facts
 import usage_facts
@@ -34,10 +35,17 @@ OWNER_COLUMNS = {'owner_key': 'VARCHAR', 'archive_id': 'VARCHAR', 'machine_id': 
                  'captured_at_ns': 'BIGINT', 'published_at_ns': 'BIGINT',
                  'imported_at_ns': 'BIGINT'}
 TABLES = ('pi_run', 'pi_run_extension', 'pi_run_owner')
+REF_COLUMNS = {'trace_id': 'VARCHAR', 'line': 'BIGINT', 'timestamp': 'VARCHAR',
+               'run_id': 'VARCHAR', 'via': 'VARCHAR'}
+VIAS = ('tool_result', 'workflow_child', 'pending', 'supervisor_request', 'supervisor_reply',
+        'control_notice')
 
 
 def ensure(db):
     """Writable-open only: create the run tables; never called read-only."""
+    spec = dict({k: 'VARCHAR' for k in setup_facts.COORDINATES}, **REF_COLUMNS)
+    db.execute('CREATE TABLE IF NOT EXISTS pi_run_ref (' +
+               ','.join(f'"{k}" {v}' for k, v in spec.items()) + ')')
     run = dict({k: 'VARCHAR' for k in COORDINATES}, **RUN_COLUMNS)
     for table, columns in (('pi_run', run), ('pi_run_extension', EXTENSION_COLUMNS),
                            ('pi_run_owner', OWNER_COLUMNS)):
@@ -162,3 +170,54 @@ def write_runs(db, coords, sources, staged):
                        [coords['owner_key'], run_id, name, digest])
         runs += 1
     return dict(runs=runs, runs_skipped=skipped.get('skipped', 0))
+
+
+def _ids(items):
+    return [i.get('runId') for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+
+
+def _refs(r):
+    """(via, raw run id) pairs from exactly the structured fields; never free text."""
+    out = []
+    custom = r.get('customType')
+    if custom == 'subagent_supervisor_request':
+        out.append(('supervisor_request', _d(r.get('details')).get('runId')))
+    elif custom == 'subagent_supervisor_reply':
+        out.append(('supervisor_reply', _d(r.get('data')).get('runId')))
+    elif custom == 'subagent_control_notice':
+        out.append(('control_notice', _d(_d(r.get('details')).get('event')).get('runId')))
+    m = _d(r.get('message'))
+    if r.get('type') == 'message' and m.get('role') == 'toolResult':
+        d = _d(m.get('details'))
+        out.append(('tool_result', d.get('runId')))
+        out += [('workflow_child', i) for i in _ids(_d(d.get('mission')).get('workflowChildren'))]
+        out += [('workflow_child', i) for i in _ids(_d(d.get('workflowChildren')).get('children'))]
+        out += [('pending', i) for i in _ids(d.get('pending'))]
+    return out
+
+
+def iter_refs(path, trace, skipped=None):
+    """Yield one row per first sighting of (run_id, via) in a Pi session source."""
+    c = _Fields(skipped)
+    seen = set()
+    with Path(path).open('rb') as source:
+        for number, raw in enumerate(source, 1):
+            try:
+                r = json.loads(raw)
+                if not isinstance(r, dict):
+                    continue
+                found = _refs(r)
+            except (ValueError, RecursionError):
+                continue
+            ts = r.get('timestamp')
+            ts = ts if isinstance(ts, str) and len(ts) <= 200 else None
+            try:
+                ts and ts.encode('utf-8')
+            except UnicodeError:
+                ts = None
+            for via, value in found:
+                run_id = c.name(value)
+                if run_id is None or (run_id, via) in seen:
+                    continue
+                seen.add((run_id, via))
+                yield dict(trace_id=trace, line=number, timestamp=ts, run_id=run_id, via=via)

@@ -316,10 +316,13 @@ def _write_setup(db, owned, agent, trace, loc, skipped, usage_skipped=None):
         _insert(db, 'session_setup', dict(fact, **loc))
     for table, row in usage_facts.iter_usage(owned, agent, trace, usage_skipped):
         _insert(db, table, dict(row, **loc))
+    if agent == 'pi':
+        for row in pi_runs.iter_refs(owned, trace, usage_skipped):
+            _insert(db, 'pi_run_ref', dict(row, **loc))
 
 
 # Every side table derived from the bodies; one version row governs them all (brief 55).
-DERIVED = ('session_setup', 'session_usage', 'tool_outcome')
+DERIVED = ('session_setup', 'session_usage', 'tool_outcome', 'pi_run_ref')
 
 
 def _record_setup_version(db, session):

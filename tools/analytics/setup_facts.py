@@ -17,8 +17,8 @@ import re
 from pathlib import Path
 
 # Version 2 (brief 55): adds the used facts and the usage and tool-outcome tables; one version
-# row per session governs every derived side table.
-SETUP_VERSION = 2
+# row per session governs every derived side table. Version 3 (brief 56): adds pi_run_ref.
+SETUP_VERSION = 3
 MAX_TEXT = 200
 
 FACTS = frozenset((

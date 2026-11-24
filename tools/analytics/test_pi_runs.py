@@ -8,6 +8,7 @@ import unittest
 import duckdb
 import publications
 import pi_runs
+import setup_facts
 from test_setup_facts import Base as SessionBase, PI
 
 CANARY = 'CANARY-5c21d8'
@@ -250,6 +251,64 @@ class RunRowsTest(Shared):
         self.assertFalse(self.row(dict(runId='r', error=''))['has_error'])
         self.assertEqual(self.sql('SELECT archive_id, machine_id, source_id FROM pi_run'),
                          [('a', 'm', 's0')])
+
+
+
+def custom(kind, **kw):
+    return dict(type='custom_message', customType=kind, **kw)
+
+
+def tool_result(details):
+    return {'type': 'message', 'timestamp': 'ts', 'message': {'role': 'toolResult', 'details': details,
+                                                              'content': [{'text': 'run-free-text'}]}}
+
+
+REFS = [
+    tool_result({'runId': 'r-tool', 'mission': {'workflowChildren': [{'runId': 'r-wf1'}, {'runId': 'r-wf1'}]},
+                 'workflowChildren': {'children': [{'runId': 'r-wf2'}, 5]},
+                 'pending': [{'runId': 'r-pend'}, 'x']}),
+    tool_result({'runId': 'r-tool'}),
+    custom('subagent_supervisor_request', details={'runId': 'r-req'}),
+    custom('subagent_supervisor_reply', data={'runId': 'r-rep'}),
+    custom('subagent_control_notice', details={'event': {'runId': 'r-note'}}),
+    custom('subagent_control_notice', details={'runId': 'r-wrong-place'}),
+    {'type': 'message', 'message': {'role': 'assistant', 'content': 'runId r-free'}},
+    tool_result({'runId': 'bad/id', 'text': 'r-text'}),
+]
+REF_SQL = 'SELECT run_id, via, line FROM pi_run_ref ORDER BY line, run_id'
+
+
+class RefTest(SessionBase):
+    def test_each_via_first_sighting_only_structured(self):
+        publications.import_export(self.export('pi', REFS), self.db)
+        self.assertEqual(self.sql(REF_SQL), [
+            ('r-pend', 'pending', 1), ('r-tool', 'tool_result', 1), ('r-wf1', 'workflow_child', 1),
+            ('r-wf2', 'workflow_child', 1), ('r-req', 'supervisor_request', 3),
+            ('r-rep', 'supervisor_reply', 4), ('r-note', 'control_notice', 5)])
+        self.assertEqual(set(pi_runs.VIAS), {r[1] for r in self.sql(REF_SQL)})
+
+    def test_only_pi_sessions(self):
+        publications.import_export(self.export('claude', REFS), self.db)
+        self.assertEqual(self.sql('SELECT count(*) FROM pi_run_ref'), [(0,)])
+
+    def test_version_two_database_rederives_once(self):
+        d = self.export('pi', REFS)
+        publications.import_export(d, self.db)
+        want = self.sql('SELECT * FROM pi_run_ref ORDER BY line, run_id')
+        self.assertEqual(setup_facts.SETUP_VERSION, 3)
+        with duckdb.connect(str(self.db)) as c:
+            c.execute('DROP TABLE pi_run_ref')
+            c.execute('UPDATE session_setup_version SET version=2')
+        self.assertEqual(publications.import_export(d, self.db)['status'], 'unchanged')
+        self.assertEqual(self.sql('SELECT * FROM pi_run_ref ORDER BY line, run_id'), want)
+        self.assertEqual(self.sql('SELECT version FROM session_setup_version'), [(3,)])
+        publications.import_export(d, self.db)
+        self.assertEqual(self.sql('SELECT * FROM pi_run_ref ORDER BY line, run_id'), want)
+
+    def test_reset_clears_refs(self):
+        publications.import_export(self.export('pi', REFS), self.db)
+        publications.import_export(self.export('pi', [REFS[2]]), self.db, reset=True)
+        self.assertEqual(self.sql('SELECT run_id FROM pi_run_ref'), [('r-req',)])
 
 
 if __name__ == '__main__':
