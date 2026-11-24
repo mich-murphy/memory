@@ -28,7 +28,9 @@ digests, `omitted.{configured,effective,required,runtime}` int, `disableAmbientE
 diff summary and notes in 39). 9 have `error` (free text). 2 have `runner` (`type`
 `external-cli`, `command`, `args`) and `externalProcess` (`durationMs`, `exitCode`, pid, paths).
 
-Links: all 59 runs are named by structured fields in captured Pi sessions: toolResult
+Links (amended 2026-11-24 after the real-data run: 48 of 59 runs are named by these structured
+fields; the other 11 only inside text): all 59 runs are named by structured fields in captured Pi
+sessions: toolResult
 `message.details.runId` (23), `message.details.mission.workflowChildren[].runId` (55),
 `message.details.workflowChildren.children[].runId` (9), `message.details.pending[].runId` (6),
 `subagent_supervisor_request` `details.runId` (16), `subagent_supervisor_reply` `data.runId` (16),
@@ -47,7 +49,7 @@ Each is reversible before merge. A worker that finds one wrong reports it and do
 | `memory owners` | `memory owners --shared` lists `<prefix>shared/` (keys `shared/<a>/<m>/<agent>/current.json`, any other key `listing_unexpected_key`); without the flag unchanged |
 | Importer | `publications.import_shared(export_dir, db_path, *, reset=False)` validates the shared contract as strictly as `_load` (closed keys, bounds, digests, body sha256 and size), binds the archive like `import_export`, and replaces one shared owner's rows in one transaction; `unchanged` when the owner's `publication_id` and `RUNS_VERSION` are unchanged. A session export given to it, or a shared export given to `import_export`, fails `unsupported_contract` |
 | Table `pi_run` | One row per run record: `owner_key`, `archive_id`, `machine_id`, `source_id`, `run_id`, `timestamp_ms`, `agent_type`, `model`, `requested_model`, `exit_code`, `has_error` (BOOLEAN: `error` present and non-empty; the text is never stored), `acceptance_status`, `evidence_status`, `acceptance_level`, `acceptance_explicit`, `review_status`, `criteria` (count), `runtime_checks` (count), `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd`, `turns`, `extensions_configured`, `extensions_effective`, `extensions_runtime`, `extensions_required` (list lengths), `extensions_omitted` (sum of `omitted`), `ambient_extensions_disabled`, `runner_type`, `external_duration_ms`, `external_exit_code`. Status-like strings must match `[a-z][a-z0-9_-]{0,39}`; `run_id` and `agent_type` the used-name rule of brief 55; `model` and `requested_model` `[A-Za-z0-9._:@/-]{1,100}` not starting with `/`, `.` or `~` and without `//`. Numbers as brief 55 (non-negative integers below 2^53, cost finite non-negative; exit codes signed). An invalid value is NULL and counted (`runs_skipped`); a record that is not a JSON object or has no valid `run_id` is not a row and is counted. Never stored: `task`, `error` text, `transcriptPath`, any `childReport` content, criteria text or evidence, commands, args, paths, pid, the file name |
-| Table `pi_run_extension` | `owner_key`, `run_id`, `list` (closed: `configured`, `effective`, `runtime`, `required`), `digest` (must match `sha256:[0-9a-f]{64}`, else skipped and counted). Digests identify an extension build, not a name |
+| Table `pi_run_extension` | (Digest rule amended 2026-11-24, `1ead95b`: `sha256:` and 16 to 64 lowercase hex characters; real records hold 16.) `owner_key`, `run_id`, `list` (closed: `configured`, `effective`, `runtime`, `required`), `digest` (must match `sha256:[0-9a-f]{64}`, else skipped and counted). Digests identify an extension build, not a name |
 | Table `pi_run_ref` | Derived from Pi session bodies by the brief 55 mechanism (`usage_facts` or a new module, one version row; `SETUP_VERSION = 3`): session coordinates, `trace_id`, `line`, `timestamp`, `run_id`, `via` (closed: `tool_result`, `workflow_child`, `pending`, `supervisor_request`, `supervisor_reply`, `control_notice`) from exactly the structured fields listed under Links; never from free text. One row per (source, run_id, via) first sighting |
 | View `pi_run_dim` | `pi_run` LEFT JOIN its referencing sessions on `archive_id`, `machine_id`, `run_id`: `session_key` of the earliest reference (NULL when none), `referencing_sessions` (count). A run's tokens are already in `session_usage` through its child session: `pi_run` usage is per-run detail and is never added to session totals |
 | Report | `report(summary=True)` gains `runs`: totals (runs, linked to a session, with an error, exit code not 0), by `agent_type` (runs, non-zero exits, each acceptance status), by `model` and by `requested_model` (runs, top 20), requested ≠ resolved model (count), extensions effective per run (min, median, max), distinct effective digests. Empty when the tables are absent; read-only opens create nothing |
@@ -112,3 +114,8 @@ counts above. Evidence 51, DESIGN (D68), the handoff.
   51). Teeth RUNS 26 of 26 and SHARED 11 of 13 (2 equivalent) after two parent tests; Python 213
   OK, gates 14/14, Linux passed. Accepted locally at `2bf71d9`. Install and the real-data run
   follow merge.
+- 2026-11-24: merged as `07bfc7d` (stack #281), installed on both hosts (`memory check` exit 0,
+  `remote_only=0`). Real-data run: 59 run records imported, 48 linked to a session. Every
+  extension digest was 16 hex characters and was skipped; the parent fixed the rule (`1ead95b`,
+  `RUNS_VERSION = 2`), after which 136 extension rows are stored and nothing is skipped. Details
+  in evidence 51.

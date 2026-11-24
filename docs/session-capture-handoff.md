@@ -426,7 +426,12 @@ from `main` alone.
      `pi_run_extension`, `pi_run_ref` (`SETUP_VERSION = 3`), `pi_run_dim` and a `runs` report
      section; no task, error text, child report, command or path is stored. Accepted locally at
      `2bf71d9`: teeth 26 of 26 and 11 of 13 (2 equivalent), Python 213 OK, gates 14/14, Linux
-     passed. Install on both hosts and the real-data run follow merge.
+     passed. Merged as `07bfc7d` (stack #281), installed on this Mac 08:14Z (`runs = 18`) and
+     dev-01 08:47Z: start rounds `deleted=0`, no WARN/ERROR; `memory check` exit 0,
+     `remote_only=0`, withheld 0 on both; daemon RSS peak 126 MiB here, dev-01 `VmHWM` 101 MiB.
+     Real data: 59 run records (dev-01 only), 48 linked to a session (11 are named only in
+     text); every extension digest is 16 hex characters, so the parent widened the rule
+     (`1ead95b`, `RUNS_VERSION = 2`); then 136 extension rows, nothing skipped, no path stored.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
