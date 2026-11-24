@@ -86,6 +86,20 @@ class RustExportJourney(unittest.TestCase):
         self.assertIn(('approval_policy', '', 'never'), codex)
         self.assertIn(('model', 'pi-m', ''), facts('pi'))
 
+    def test_usage_and_tool_outcomes_end_to_end(self):
+        # Brief 55: usage rows for every agent, tool outcomes for Claude and Pi.
+        self.import_all(self.p1.values())
+
+        def rows(sql, name):
+            return self.query(sql, [session_key(self.p1[name])])
+        usage = 'SELECT input_tokens, cache_read_tokens, output_tokens, cost_usd FROM session_usage WHERE session_key=?'
+        out = 'SELECT tool_name, is_error, duration_ms FROM tool_outcome WHERE session_key=?'
+        self.assertEqual(rows(usage, 's1'), [(3, None, 4, None)])
+        self.assertEqual(rows(usage, 'codex'), [(4, 2, 3, None)])
+        self.assertEqual(rows(usage, 'pi'), [(4, None, 2, 0.5)])
+        self.assertEqual(rows(out, 's1'), [('Read', None, 5)])
+        self.assertEqual(rows(out, 'pi'), [('bash', False, 7)])
+
     def test_session_key_and_non_ascii(self):
         self.import_all(self.p1.values())
         e = self.p1['nonascii']

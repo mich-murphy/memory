@@ -103,6 +103,29 @@ create nothing and tolerate missing tables.
 duckdb -readonly .analytics/publications.duckdb "SELECT agent, models, harness_version FROM session_dim"
 ```
 
+## Usage, tool outcomes and the setup actually used (brief 55)
+
+`SETUP_VERSION = 2`. The one `session_setup_version` row per session governs `session_setup`,
+`session_usage` and `tool_outcome`: an unchanged publication recorded with an older version is
+re-derived (all three tables) in one transaction, a new publication derives all three, and
+`--reset` clears them.
+
+- Used facts in `session_setup`: `skill_used` (Claude `attributionSkill`; Pi `read` of a
+  `.../SKILL.md`, name = the parent directory's name, never the path), `plugin_used`,
+  `mcp_server_used`, `extension_used` (Pi `customType` before the first `:`). A name outside
+  `[A-Za-z0-9._:@-]{1,100}` is skipped and counted.
+- `session_usage`: one row per billable unit (Claude first record per `message.id`; Codex one per
+  change of `total_token_usage.total_tokens`, input = input - cached; Pi message and compaction
+  usage, cost = `cost.total`). Missing is NULL, never 0; a value that is not a non-negative
+  integer below 2^53 (cost: finite, non-negative) is NULL and counted.
+- `tool_outcome`: `tool_call_id`, `tool_name`, `is_error`, `exit_code`, `duration_ms`. Never a
+  command, arguments, output, cwd or a path.
+- Views: `session_dim` gains token, cost, tool and used-fact columns; `usage_by_model` is new.
+  Both are created on writable open only.
+- Import result: `setup_skipped` (setup facts) and `usage_skipped` (usage and tool outcomes).
+- `report(summary=True)` gains `setup` (top 20 each by sessions); `{}` on a database without the
+  new tables. Read-only opens create nothing.
+
 ## Legacy research pipeline (historical reference)
 
 > **Not supported for the current collector or its replacement.** `r2_metadata.py`,

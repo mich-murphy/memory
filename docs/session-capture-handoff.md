@@ -410,6 +410,16 @@ from `main` alone.
      2026-11-24 00:20Z: start rounds `deleted=0`, no WARN/ERROR; sources 6,073 and 4,479
      (were 8,189 and 5,989), withheld 0 on both; `memory check` exit 0, `remote_only=0`,
      `retired=1791` and `1492`; RSS peak 125 MB here, dev-01 `VmHWM` 101 MB.
+  33. 2026-11-24, brief 55 (D67), [evidence 50](rust-rewrite/implementation/evidence/50-usage-and-used/):
+     the analytics importer derives used facts (skills, plugins, MCP servers, Pi extensions),
+     `session_usage` (tokens, Pi cost; Claude deduplicated by message id, Codex by cumulative
+     total) and `tool_outcome` (call id, tool name, error, exit code, duration; no command,
+     argument, output or path); `SETUP_VERSION = 2`; a `setup` section in the summary report.
+     Real data here: 1,647 exports imported, nothing skipped after the parent's used-name fix
+     (claude.ai connector names hold spaces); usage for 371 Claude, 159 Codex and 858 Pi
+     sessions; no path in any stored name. Accepted locally at `6b66e77`: teeth 28 of 28,
+     Python 188 OK, gates 14/14. Analytics only; nothing installed. Next: brief 56, Pi subagent
+     run records in analytics (needs a shared-owner export).
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
