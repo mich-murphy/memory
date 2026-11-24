@@ -5,6 +5,10 @@
 //! Every failure is a closed code on one stderr line; no key, path, endpoint or owner text. A
 //! store failure is `store cause=<code>` and exits 75 (transient) or 77 (auth), as in `restore`.
 //!
+//! A shared owner (brief 56) is written as `shared-reader/v1`: only its Pi run records, other
+//! stored entries counted as `skipped`; its success line is `memory: exported sources=<n>
+//! deleted=<n> bytes=<n> skipped=<n>`.
+//!
 //! Sessions are never deleted from the store, so a deleted source's epochs are exported too, every
 //! one `sealed` (none `active`). The success line is `memory: exported sources=<n> deleted=<n>
 //! bytes=<n>`, `deleted` counting the deleted sources exported.
@@ -15,7 +19,7 @@ use crate::environment::{Store, StoreError};
 use crate::restore::{EXIT_ABSENT, EXIT_FAILED, EXIT_USAGE, StoreFault, store_exit, store_line};
 use memory_core::domain::Owner;
 use memory_core::limits::parse_owner_prefix;
-use memory_reader::export::{ExportError, build_envelope, write_export};
+use memory_reader::export::{ExportError, build_envelope, build_shared_envelope, write_export};
 use memory_reader::{OwnerError, read_owner_head};
 use std::ffi::OsString;
 use std::io::Write;
@@ -47,9 +51,6 @@ pub enum Failure {
     /// The stored chain is corrupt.
     #[error("chain_corrupt")]
     ChainCorrupt,
-    /// The owner is a shared owner; the envelope needs a session id.
-    #[error("owner_shared")]
-    Shared,
     /// The export library refused; its code.
     #[error("{0}")]
     Export(&'static str),
@@ -65,7 +66,6 @@ impl Failure {
         match self {
             Self::Absent => EXIT_ABSENT,
             Self::TooLarge => EXIT_TOO_LARGE,
-            Self::Shared => EXIT_USAGE,
             Self::Store(e) => store_exit(e),
             _ => EXIT_FAILED,
         }
@@ -81,6 +81,10 @@ pub struct Report {
     pub deleted: usize,
     /// Body bytes.
     pub bytes: u64,
+    /// Stored entries left out as not analytics sources (shared owners only, else 0).
+    pub skipped: usize,
+    /// The owner was a shared owner (brief 56): the success line carries `skipped`.
+    pub shared: bool,
 }
 
 fn code<E: StoreFault>(error: &ExportError<E>) -> Failure {
@@ -88,7 +92,8 @@ fn code<E: StoreFault>(error: &ExportError<E>) -> Failure {
         ExportError::TooLarge => Failure::TooLarge,
         ExportError::DestinationExists => Failure::OutputExists,
         ExportError::Fetch(f) => Failure::Store(f.store_error()),
-        ExportError::Shared => Failure::Shared,
+        // Unreachable from `export_owner`, which picks the builder by owner kind.
+        ExportError::Shared => Failure::Export("owner_shared"),
         ExportError::Session => Failure::Export("owner_session"),
         ExportError::Overflow => Failure::Export("export_overflow"),
         ExportError::BadTime => Failure::Export("export_bad_time"),
@@ -111,9 +116,6 @@ pub fn export_owner<E: StoreFault>(
     out: &Path,
     max_bytes: u64,
 ) -> Result<Report, Failure> {
-    if matches!(owner, Owner::Shared { .. }) {
-        return Err(Failure::Shared);
-    }
     match std::fs::symlink_metadata(out) {
         Ok(_) => return Err(Failure::OutputExists),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -126,12 +128,20 @@ pub fn export_owner<E: StoreFault>(
         Err(OwnerError::NewerSchema) => return Err(Failure::NewerSchema),
         Err(OwnerError::Corrupt(_)) => return Err(Failure::ChainCorrupt),
     };
-    let envelope = build_envelope::<E>(&head, max_bytes).map_err(|e| code(&e))?;
+    let shared = matches!(owner, Owner::Shared { .. });
+    let envelope = if shared {
+        build_shared_envelope::<E>(&head, max_bytes)
+    } else {
+        build_envelope::<E>(&head, max_bytes)
+    }
+    .map_err(|e| code(&e))?;
     write_export(&envelope, &mut fetch, out).map_err(|e| code(&e))?;
     Ok(Report {
         sources: envelope.sources,
         deleted: envelope.deleted,
         bytes: envelope.bytes,
+        skipped: envelope.skipped,
+        shared,
     })
 }
 
@@ -181,10 +191,9 @@ fn parse_args(args: impl Iterator<Item = OsString>) -> Option<Args> {
 
 /// Entry of `memory export`; `args` follow the word `export`.
 ///
-/// Exit codes: 0 exported, 1 failed, 2 config or token, 4 too large, 64 usage, owner text or
-/// shared owner, 66 owner absent, 75 a transient store failure (retry), 77 the store refused the
-/// credential. A store failure prints `memory: store cause=<code>`. One stderr line; nothing on
-/// stdout.
+/// Exit codes: 0 exported, 1 failed, 2 config or token, 4 too large, 64 usage or owner text, 66
+/// owner absent, 75 a transient store failure (retry), 77 the store refused the credential. A
+/// store failure prints `memory: store cause=<code>`. One stderr line; nothing on stdout.
 #[must_use]
 pub fn main_entry(args: impl Iterator<Item = OsString>) -> ExitCode {
     let Some(args) = parse_args(args) else {
@@ -193,9 +202,6 @@ pub fn main_entry(args: impl Iterator<Item = OsString>) -> ExitCode {
     let Ok(owner) = parse_owner_prefix(&args.owner) else {
         return fail("owner_text", EXIT_USAGE);
     };
-    if matches!(owner, Owner::Shared { .. }) {
-        return fail("owner_shared", EXIT_USAGE);
-    }
     let Some(root) = crate::state::default_root() else {
         return fail("state_root", EXIT_CONFIG);
     };
@@ -214,13 +220,18 @@ pub fn main_entry(args: impl Iterator<Item = OsString>) -> ExitCode {
     };
     match export_owner(&owner, fetch, &args.out, args.max_bytes) {
         Ok(report) => {
-            let _ = writeln!(
-                std::io::stderr(),
-                "memory: exported sources={} deleted={} bytes={}",
-                report.sources,
-                report.deleted,
-                report.bytes
-            );
+            let line = if report.shared {
+                format!(
+                    "memory: exported sources={} deleted={} bytes={} skipped={}",
+                    report.sources, report.deleted, report.bytes, report.skipped
+                )
+            } else {
+                format!(
+                    "memory: exported sources={} deleted={} bytes={}",
+                    report.sources, report.deleted, report.bytes
+                )
+            };
+            let _ = writeln!(std::io::stderr(), "{line}");
             ExitCode::SUCCESS
         }
         Err(failure) => fail(&failure.to_string(), failure.exit_code()),

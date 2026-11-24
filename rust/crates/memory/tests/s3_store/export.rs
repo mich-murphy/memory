@@ -178,19 +178,26 @@ fn the_binary_exports_a_session_and_its_exit_table() -> R {
             vec!["export".as_ref(), "garbage".as_ref(), "--out".as_ref(), f],
             "memory: owner_text",
         ),
-        (
-            vec![
+    ];
+    for (args, line) in cases {
+        check(&run(&rig.dir, &args)?, 64, line);
+    }
+    // Brief 56: a shared owner is no longer a usage error; one with no `current.json` is
+    // absent (66), as for a session owner.
+    check(
+        &run(
+            &rig.dir,
+            &[
                 "export".as_ref(),
                 "shared/a/m/claude".as_ref(),
                 "--out".as_ref(),
                 f,
             ],
-            "memory: owner_shared",
-        ),
-    ];
-    for (args, line) in cases {
-        check(&run(&rig.dir, &args)?, 64, line);
-    }
+        )?,
+        66,
+        "memory: owner_absent",
+    );
+    assert!(!fresh.exists());
     // Too large: exit 4, nothing created.
     let r = run(
         &rig.dir,
@@ -287,11 +294,74 @@ fn an_existing_destination_is_refused_before_any_fetch() -> R {
     );
     assert_eq!(r, Err(memory::export::Failure::OutputExists));
     assert_eq!(calls, 0);
+    // Brief 56: `Failure::Shared` is removed; a shared owner is exported like any owner, so an
+    // absent one is `Absent`.
     let shared = memory_core::limits::parse_owner_prefix("shared/a/m/claude").map_err(e)?;
-    let r =
-        memory::export::export_owner(&shared, |_: &str| Ok::<Option<Vec<u8>>, ()>(None), &dir, 1);
-    assert_eq!(r, Err(memory::export::Failure::Shared));
-    assert_eq!(memory::export::Failure::Shared.exit_code(), 64);
+    let fresh = dir.join("fresh");
+    let r = memory::export::export_owner(
+        &shared,
+        |_: &str| Ok::<Option<Vec<u8>>, ()>(None),
+        &fresh,
+        1,
+    );
+    assert_eq!(r, Err(memory::export::Failure::Absent));
     let _ = fs::remove_dir_all(&dir);
     Ok(())
+}
+
+/// Brief 56: a shared Pi owner with one run record and one non-run-record `PiAux` file exports
+/// the record only; the line carries `skipped`.
+#[test]
+fn the_binary_exports_a_shared_owner_run_records() -> R {
+    use super::daemon_restore::setup;
+    let s = setup("export-shared")?;
+    let pi = s.rig.add_root("pi")?;
+    fs::copy(&s.rig.cfg, s.rig.state.join("config.toml")).map_err(e)?;
+    let dir = pi.join("sessions/--pi-cwd--/subagent-artifacts");
+    fs::create_dir_all(&dir).map_err(e)?;
+    let body = "{\"runId\":\"r1\",\"agent\":\"worker\",\"exitCode\":0}\n";
+    fs::write(dir.join("run1.json"), body).map_err(e)?;
+    let r = run(&s.rig.state, &["reconcile".as_ref()])?;
+    assert_eq!(r.status.code(), Some(0), "{}", err(&r));
+    let prefix = shared_prefix(&s)?;
+    let out = s.rig.dir.join("shared-out");
+    let r = run(
+        &s.rig.state,
+        &[
+            "export".as_ref(),
+            prefix.as_ref(),
+            "--out".as_ref(),
+            out.as_os_str(),
+        ],
+    )?;
+    check(
+        &r,
+        0,
+        &format!(
+            "memory: exported sources=1 deleted=0 bytes={} skipped=0",
+            body.len()
+        ),
+    );
+    assert_eq!(
+        fs::read(out.join("bodies/0000.bin")).map_err(e)?,
+        body.as_bytes()
+    );
+    let meta = fs::read_to_string(out.join("metadata.json")).map_err(e)?;
+    assert!(meta.contains("\"shared-reader/v1\"") && meta.contains("\"pi_run_record\""));
+    Ok(())
+}
+
+fn shared_prefix(s: &super::daemon_restore::Setup) -> R<String> {
+    let config = Config::load(&s.rig.cfg).map_err(e)?;
+    let owner = WalkSources::new(
+        locator_roots(&config).map_err(e)?,
+        WalkLimits::default(),
+        SharedFs::new(),
+    )
+    .enumerate()
+    .into_iter()
+    .map(|(o, _)| o)
+    .find(|o| *o != s.owner)
+    .ok_or("no shared owner")?;
+    Ok(owner_prefix(&owner))
 }
