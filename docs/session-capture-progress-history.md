@@ -1,5 +1,7 @@
 # Historical session-capture implementation ledger
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 > **Archived 2026-10-24 (AEDT). Not current implementation or continuation guidance.**
 > This preserves the former cumulative handoff, including intermediate plans,
 > incomplete APIs, failed checks and subsequently repaired defects. Statements such

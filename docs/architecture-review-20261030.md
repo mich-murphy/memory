@@ -1,5 +1,7 @@
 # Architecture, test quality and production-readiness review
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 **Source baseline:** `b0f949c6a8de76b4a8cd3f0bdf48ae29d44b1026`.
 **Status:** source review, focused repairs and offline qualification **complete and
 parent-accepted**. Changes are in the working tree, not committed or deployed by this task.

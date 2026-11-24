@@ -1,5 +1,7 @@
 # Replacement analytics projection (offline v2 candidate)
 
+> Historical note: the Go reader, `serve.py`, `publication_refresh.py` and `projection_access.py` named below were deleted on 2026-11-25 (brief 57). The wire contract and projection still describe what `publications.py` imports from `memory export`.
+
 This filename is retained for existing links. The repository consumer is
 v2-only; prior v1 gate results in the handoff remain historical evidence, not
 proof of this candidate or a claim that a database migration occurred.

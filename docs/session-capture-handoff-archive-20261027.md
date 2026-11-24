@@ -1,5 +1,7 @@
 # Archived handoff ledger (to 2026-10-27)
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 > **Archived 2026-10-27 (AEDT). Not current guidance.** This is the former
 > `session-capture-handoff.md` verbatim, including the V24–V32 private-candidate log,
 > worker/lease bookkeeping and dated checks. Its "current", "next action", grants,

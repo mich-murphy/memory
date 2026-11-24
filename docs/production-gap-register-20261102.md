@@ -1,5 +1,7 @@
 # Production gap register — November 2
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 > **Historical Go evidence, not current instructions.** The dated source/deployment
 > statements and links below describe their original checkpoints. Current ownership,
 > authority, verification and next actions are in the

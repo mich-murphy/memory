@@ -1,5 +1,7 @@
 # Append-only archive design
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 > **Status (2026-10-23):** Legacy v3 design, not the replacement contract. The guarantees and machine-wide recovery below describe the existing archive architecture, including historical retention promises; they are not requirements to carry forward. See the agreed canonical [session-capture contract](session-capture-contract.md): greenfield session-local capture with a durable spool, per-source progress and isolated retries. The opt-in [candidate](session-capture-phase3.md) implements a different v2 publication/reader path with [passing offline development gates](session-capture-offline-evidence.md), not release acceptance or default activation. Legacy repair/compatibility is not a rollout prerequisite.
 
 ## Authority and durability

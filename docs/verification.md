@@ -1,8 +1,10 @@
 # Executed verification — 2026-10-14
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 > **Status (2026-10-23):** Historical executed v3 verification only. The commands, counts and hashes below record that dated run, not current deployment health or a replacement pass. The agreed canonical [session-capture contract](session-capture-contract.md) requires durable spool/restart/failure-isolation checks and the real shared-reader/analytics/report consumer path; these older isolated archive oracles alone do not establish that acceptance.
 
-The [verification skill](../.agents/skills/verify-agent-sessions/SKILL.md) and its
+The verification skill (`.agents/skills/verify-agent-sessions`, deleted) and its
 five-feature map were used for the historical user-path checks below. The skill is
 operator-blocked for the current documentation audit: it was not read, executed or
 revalidated, and no replacement coverage claim is made for it. Current candidate

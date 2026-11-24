@@ -1,5 +1,7 @@
 # Corrected capture delivery ledger
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 **Historical ledger — October 24, not current operating status or rollout authority.**
 The implementation checkpoint below is **`c9749da`** (after `b68a412`); its running
 services, pending fixes and next actions describe that earlier experiment. Later repairs,

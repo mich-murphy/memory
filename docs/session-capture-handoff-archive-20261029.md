@@ -1,5 +1,7 @@
 # Implementation handoff: dependable session capture
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 This is the single compact delivery brief. The [contract](session-capture-contract.md)
 is the authoritative design; this file records current state, decisions, ownership and
 the next action only. The previous 6.6k-line ledger (V24–V32 private-candidate log,

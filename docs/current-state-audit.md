@@ -1,5 +1,7 @@
 # Current-state and direction alignment audit
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 > **Historical audit record, not current-checkout certification.** Its findings and
 > validation below apply to the 2026-10-24 source state only. Later changes, failed
 > gates, experimental deployment history, unknown current health and the subsequent

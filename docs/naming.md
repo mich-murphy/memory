@@ -1,5 +1,7 @@
 # Naming
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 A name is as short as its scope allows and no shorter: it carries what a reader can't see from where they are, and nothing they can. The rules below come from [Effective Go](https://go.dev/doc/effective_go#names), [Go Code Review Comments](https://go.dev/wiki/CodeReviewComments) (CRC) and the [Google Go style guide](https://google.github.io/styleguide/go/decisions#naming) (Google). Where those sources differ, the rule says which one this repo follows. Rules marked **repo** are this project's own.
 
 Lint checks only error names, receiver names and duration units. Everything else here is checked in review, so check a change against this page before sending it.

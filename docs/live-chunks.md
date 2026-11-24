@@ -1,5 +1,7 @@
 # Fixed-chunk database publication acceptance
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 > **Status (2026-10-23):** Historical v3 chunk-publication probe and dated evidence, not acceptance of the replacement. Exact thresholds, PUT counts and historical-restore assertions below belong to this existing test. The agreed canonical [session-capture contract](session-capture-contract.md) starts with complete source-epoch snapshots and requires real reader/analytics consumer acceptance before production cutover; chunking and legacy restoration are not prerequisites.
 
 The existing `internal/store/TestR2LiveAcceptance` and `TestR2AcceptanceFake`

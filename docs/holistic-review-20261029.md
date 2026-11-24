@@ -1,5 +1,7 @@
 # Holistic architecture and production-readiness review
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 **Reviewed:** 2026-10-29, `main` at `4c9aca5c5cb178316e9eed32626dbf56f7dbaac9`.
 **Scope:** architecture, abstractions, APIs, contracts, data structures, maintainability,
 resource behavior, tests and operational readiness. Implementation was not changed.

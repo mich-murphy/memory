@@ -1,5 +1,7 @@
 # Opt-in live R2 acceptance
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 > **Status (2026-10-23):** Existing v3 backend/engine acceptance probe and historical results, not replacement acceptance or authorization to reset production. Preserve its exact namespace confinement and cleanup contracts. The agreed canonical [session-capture contract](session-capture-contract.md) requires writer-generated fixtures through the authoritative reader shared by restore and analytics, plus actual consumer coverage and freshness. Passing this legacy cold-recovery test is neither sufficient nor a required legacy repair step for the controlled rebuild.
 
 `internal/store/TestR2LiveAcceptance` verifies the actual R2 S3 protocol and the normal

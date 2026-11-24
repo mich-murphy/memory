@@ -1,5 +1,7 @@
 # Opt-in live-agent acceptance (loopback, local store only)
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 > **Status (2026-10-23):** Existing native-agent/local-store acceptance harness and historical v3 results. These isolation and byte-exact lifecycle checks remain useful, but are not replacement or production consumer acceptance. The agreed canonical [session-capture contract](session-capture-contract.md) additionally requires source → durable queue → publication → authoritative reader → analytics bodies/events → report, including restart/retry and session failure isolation. No new writer/reader is implemented by this page.
 
 The regular tests and `make check` **do not require or launch live agents**.

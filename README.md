@@ -68,93 +68,16 @@ refresh job were stopped and disabled, and the old capture prefixes in the R2 bu
 deleted. The Go hooks are still installed and write only local spool files. Preserve existing
 identities, sources and protections.
 
-### Go candidate reference — not the Rust roadmap
+### Retired Go implementation
 
-**Historical October 30 status: source integration is complete; live operating acceptance is not.**
-[PR30](https://github.com/mich-murphy/memory/pull/30) is merged, with local development
-qualification and all seven PR and merged-main CI jobs passing. This does **not** prove
-memory is now working live end to end. Earlier experimental installations and selected
-live journeys are historical evidence; current installed health was not freshly checked.
-The next stage is separately authorized **Mac → BC-01 → combined operating acceptance**,
-not more PR cleanup or activation inferred from a green build.
-
-An **opt-in replacement candidate** is implemented under the experimental
-`agent-sessions capture-v1` command prefix. Its publication, reader and report
-contracts are **v2**; the prefix does not imply v1 wire compatibility. It includes
-durable capture, autonomous work, quarantine, explicit Local/R2 backend construction,
-independent enrichment and an authoritative reader shared with the opt-in analytics
-consumer. Unselected collector and analytics defaults remain legacy.
-
-For current checkout qualification, deployment, service health, blockers and next action,
-use the handoff's [current-session checkpoint](docs/session-capture-handoff.md#current-session-checkpoint).
-The [implementation reference](docs/session-capture-implementation.md),
-[phase-3 candidate](docs/session-capture-phase3.md),
-[backend boundary](docs/session-capture-backends.md) and
-[dated offline evidence](docs/session-capture-offline-evidence.md) describe interfaces and
-historical results, not current release acceptance. No experimental installation alone
-establishes final cutover.
-
-The old R2 archive was retired on 2026-11-09 (inventory, then deletion of the
-`capture-v1/` and `v3/` prefixes; see the handoff brief and amendment A2). The Rust writer
-rebuilds from sources on this Mac and BC-01. That does not authorize deleting original
-sessions, identities, secret protections, or local research.
-
-### Go candidate flow and retained acceptance goals
-
-```text
-agent hooks + periodic discovery
-    -> durable per-source capture/work queue
-    -> bounded fair publication workers
-    -> complete session publications in R2
-    -> one authoritative reader
-    -> analytics metadata/bodies -> events -> reports
-```
-
-- **Session isolation:** a failed session does not block unrelated capture or reads.
-- **Honest progress:** observed, locally captured, remotely published, enriched, and
-  imported/served are separate states. Previous success survives failed updates.
-- **Durable recovery:** pending work retries without another hook, with backoff,
-  explicit quarantine, bounded resources, and visible coverage/freshness.
-- **Conversation preservation:** retain captured source epochs across unproven rewrites;
-  do not require every collector prefix, fold, or compression layout to survive forever.
-- **Simple storage first:** full compressed epoch objects and complete session manifests.
-  Delta chunking is an optimization to measure, not the logical data contract.
-- **One reader:** restore and analytics use the same resolved publication, not independent
-  interpretations of storage JSON.
-- **Consumer acceptance:** actual writer output must reach the real importer and report.
-  Upload success or separately handwritten fixtures are insufficient.
-
-See the [documentation map](docs/README.md) for current implementation references,
-historical evidence, and the [design rationale](docs/research/session-capture-contract-review.md).
-
-## Current tooling: legacy, not replacement acceptance
-
-`agent-sessions` is the existing Go collector. It installs Claude/Codex hooks and a Pi
-extension, captures session files and associated launch/harness data, applies credential
-exclusions and configuration scrubbing, and writes to R2. Its implemented detached syncs
-and sweeps are **not** the Rust implementation or evidence of its acceptance.
-
-| Existing command | Current purpose |
-| --- | --- |
-| `agent-sessions machine-id` | Print the effective stable machine identity. |
-| `agent-sessions machine-id --new` | Explicit new-machine setup, not identity recovery. |
-| `agent-sessions install` | Install current hooks/extension and configuration template. |
-| `agent-sessions doctor` | Inspect current setup; includes remote store probes. |
-| `agent-sessions backfill` | Capture available sources using the legacy archive engine. |
-| `agent-sessions sync` | Run the legacy sync path. |
-| `agent-sessions uninstall` | Remove managed hooks/extension; retain data and configuration. |
-
-These are references to implemented commands, not instructions to install the old
-collector for the replacement rollout. Follow [install](docs/install.md),
-[hooks](docs/hooks.md), and [machine identity](docs/machine-identity.md) when maintaining
-an existing deployment. They do not prove deployment health or new-contract acceptance.
-
-The optional [analytics tools](tools/analytics/README.md) preserve existing private
-local research access and provide a separate v2 publication consumer. The legacy R2
-importer targets retired manifest payloads, not current legacy session references or
-the replacement contract; it is not a current archive refresh path. Use the explicit
-publication-backed mode only with its separate reader-generated projection. Neither
-historical reports nor offline candidate results establish live archive coverage.
+The Go collector (`agent-sessions`, its `capture-v1` candidate and the legacy analytics) was
+deleted on 2026-11-25 (brief 57); it is in git history, and its docs carry a historical
+banner. The old R2 archive was deleted on 2026-11-09. The Rust writer rebuilds from sources.
+That does not authorize deleting original sessions, identities, secret protections or local
+research. Install and operate `memory` with [install](docs/install.md). The optional
+[analytics tools](tools/analytics/README.md) import `memory export` output into DuckDB.
+See the [documentation map](docs/README.md) and the
+[design rationale](docs/research/session-capture-contract-review.md).
 
 ### Safety boundaries
 
@@ -178,32 +101,14 @@ See [security](docs/security.md) and the replacement contract for the full bound
 Read [AGENTS.md](AGENTS.md) before editing. Use the pinned Nix development environment:
 
 ```sh
-nix develop --max-jobs 2 --cores 2
-# Or use direnv with the existing .envrc after reviewing it.
+nix develop --max-jobs 2 --cores 2   # Rust toolchain, nextest, deny, llvm-cov, mutants
 ```
 
-The shell supplies pinned Go and Rust toolchains, matching Rust LLVM tools,
-golangci-lint, C compiler for race tests, Python, and supporting verification tools.
-Go tool dependencies are pinned in `tools/`; Rust dependencies are in `rust/Cargo.lock`.
-Agent CLIs and live credentials are not provisioned. See the
-[Rust workspace guide](rust/README.md) for its canonical gate command; the `make`
-commands below remain Go checks, not Rust replacement acceptance.
-
-```sh
-make build        # builds the collector currently in this checkout
-make test         # current race-enabled Go suite
-make check        # existing formatting, lint, static, coverage/CRAP and other gates
-make hooks        # install repository Git hooks
-make gopls        # install the pinned language server
-```
-
-[Quality gates](docs/quality-gates.md) describes the current development checks,
-including mandatory actual-writer/shared-reader/importer/report journeys in `make test`
-and `make check`, plus the separate CI analytics job. Legacy safety suites remain.
-The [verification record](docs/verification.md) and linked verification skill describe
-separate legacy/native work, not authorization to operate hosts during Rust development.
-No live verification was run as part of this documentation handoff. Passing offline
-gates does not prove native-agent/live-R2 or installed replacement acceptance. Do not relax gates to ship the redesign.
+The shell supplies the pinned Rust toolchain and matching LLVM tools, Python and the gate
+tools. Rust dependencies are in `rust/Cargo.lock`. Agent CLIs and live credentials are not
+provisioned. See the [Rust workspace guide](rust/README.md) for the gate command, and
+[quality gates](docs/quality-gates.md). CI runs the Rust gates, the analytics unit suite and
+workflow lint (zizmor, actionlint). Do not relax gates.
 
 Existing dated benchmark and production records remain under `docs/` as historical
-evidence. They are not active release instructions or promises about the replacement.
+evidence, not active release instructions.
