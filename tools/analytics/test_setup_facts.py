@@ -219,7 +219,8 @@ class SetupFactsTest(Base):
             self.run_import(agent, records)
         facts = {r[0] for r in self.sql('SELECT DISTINCT fact FROM session_setup')}
         self.assertTrue(facts <= setup_facts.FACTS, facts - setup_facts.FACTS)
-        self.assertEqual(len(setup_facts.FACTS), 21)
+        # Brief 55: four used facts join the closed list (21 -> 25).
+        self.assertEqual(len(setup_facts.FACTS), 25)
         self.assertFalse(setup_facts.FACTS & {'thread_source', 'personality'})
 
     def test_rederivation_of_unchanged_publication(self):
@@ -244,6 +245,28 @@ class SetupFactsTest(Base):
         publications.import_export(d, self.db)
         self.assertEqual(self.sql('SELECT * FROM session_setup ORDER BY line,fact,name'), before)
         self.assertEqual(self.sql('SELECT count(*) FROM session_setup_version'), [(1,)])
+
+    def test_used_facts_brief_55(self):
+        rows = self.run_import('claude', [
+            {'type': 'assistant', 'attributionSkill': 'sk', 'attributionPlugin': 'pl@m',
+             'attributionMcpServer': 'srv', 'message': {'role': 'assistant', 'content': 'a'}},
+            {'type': 'assistant', 'attributionSkill': 'bad name', 'message': {'role': 'assistant'}}])
+        for want in (('skill_used', 'sk', ''), ('plugin_used', 'pl@m', ''), ('mcp_server_used', 'srv', '')):
+            self.assertIn(want, rows)
+        self.assertFalse([r for r in rows if r[1] == 'bad name'])
+        rows = self.run_import('codex', [
+            {'type': 'event_msg', 'payload': {'type': 'item_completed', 'item': {
+                'type': 'McpToolCall', 'server': 's1', 'pluginId': 'p1',
+                'metadata': {'mcp_attribution': {'sources': [{'server_name': 's2'}]}}}}}])
+        for want in (('plugin_used', 'p1', ''), ('mcp_server_used', 's1', ''), ('mcp_server_used', 's2', '')):
+            self.assertIn(want, rows)
+        rows = self.run_import('pi', [
+            {'type': 'custom', 'customType': 'subagents:record'},
+            {'type': 'message', 'message': {'role': 'assistant', 'content': [
+                {'type': 'toolCall', 'name': 'read', 'arguments': {'path': f'/h/{CANARY}/skills/my-skill/SKILL.md'}}]}}])
+        self.assertIn(('extension_used', 'subagents', ''), rows)
+        self.assertIn(('skill_used', 'my-skill', ''), rows)
+        self.assertFalse([r for r in rows if CANARY in r[1] or CANARY in r[2]])
 
     def test_new_publication_replaces_rows_and_records_version(self):
         self.run_import('pi', PI)

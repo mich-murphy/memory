@@ -14,7 +14,9 @@ import json
 import re
 from pathlib import Path
 
-SETUP_VERSION = 1
+# Version 2 (brief 55): adds the used facts and the usage and tool-outcome tables; one version
+# row per session governs every derived side table.
+SETUP_VERSION = 2
 MAX_TEXT = 200
 
 FACTS = frozenset((
@@ -22,7 +24,12 @@ FACTS = frozenset((
     'provider', 'reasoning_effort', 'permission_mode', 'approval_policy', 'sandbox_policy',
     'collaboration_mode', 'skill_available', 'skill_invoked', 'subagent_type_available',
     'tool_available', 'tool_allowed', 'mcp_server_available', 'mcp_server_failed',
-    'plugin_disabled', 'instruction_file'))
+    'plugin_disabled', 'instruction_file', 'skill_used', 'plugin_used', 'mcp_server_used',
+    'extension_used'))
+
+# Used facts carry only an identifier-like name (brief 55); anything else is skipped and counted.
+USED = frozenset(('skill_used', 'plugin_used', 'mcp_server_used', 'extension_used'))
+USED_NAME = re.compile(r'[A-Za-z0-9._:@-]{1,100}')
 
 SETUP_COLUMNS = {'trace_id': 'VARCHAR', 'line': 'BIGINT', 'timestamp': 'VARCHAR',
                  'fact': 'VARCHAR', 'name': 'VARCHAR', 'value': 'VARCHAR'}
@@ -93,6 +100,9 @@ def _claude(r, ctx):
     if t == 'assistant':
         _scalar(out, 'model', r.get('message'), 'model', True)
         _scalar(out, 'reasoning_effort', r, 'effort')
+        _scalar(out, 'skill_used', r, 'attributionSkill', True)
+        _scalar(out, 'plugin_used', r, 'attributionPlugin', True)
+        _scalar(out, 'mcp_server_used', r, 'attributionMcpServer', True)
     elif t == 'permission-mode':
         _scalar(out, 'permission_mode', r, 'permissionMode')
     elif at == 'model':
@@ -141,6 +151,13 @@ def _codex(r, ctx):
         _scalar(out, 'sandbox_policy', p.get('sandbox_policy'), 'type')
         _scalar(out, 'collaboration_mode', p.get('collaboration_mode'), 'mode')
         out += [('plugin_disabled', n, '') for n in _list(p.get('disabled_plugin_ids'))]
+    elif t == 'event_msg' and p.get('type') == 'item_completed':
+        item = p.get('item') if isinstance(p.get('item'), dict) else {}
+        _scalar(out, 'plugin_used', item, 'pluginId', True)
+        if item.get('type') == 'McpToolCall':
+            _scalar(out, 'mcp_server_used', item, 'server', True)
+            for src in _list(_get(item, 'metadata', 'mcp_attribution', 'sources')):
+                _scalar(out, 'mcp_server_used', src, 'server_name', True)
     if t in ('turn_context', 'world_state'):
         # Real rollouts carry it in `world_state` records at payload.state.agents_md (parent,
         # brief 53 real-data run); the turn_context form is kept for tolerance.
@@ -155,9 +172,18 @@ def _codex(r, ctx):
     return out
 
 
+def _skill_dir(path):
+    """The parent directory's name of a `.../SKILL.md` path; never the path itself."""
+    parts = re.split(r'[\\/]', path) if isinstance(path, str) else []
+    return parts[-2] if len(parts) >= 2 and parts[-1] == 'SKILL.md' else None
+
+
 def _pi(r, ctx):
     t = r.get('type')
     out = []
+    if 'customType' in r:
+        ct = r['customType']
+        out.append(('extension_used', ct.split(':', 1)[0] if isinstance(ct, str) else ct, ''))
     if t == 'session':
         _scalar(out, 'session_format', r, 'version')  # the session format, not the Pi release
     elif t == 'model_change':
@@ -170,6 +196,11 @@ def _pi(r, ctx):
         _scalar(out, 'model', m, 'model', True)
         _scalar(out, 'provider', m, 'provider')
         _scalar(out, 'reasoning_effort', m, 'thinkingLevel')
+        for b in _list(m.get('content')):
+            if isinstance(b, dict) and b.get('type') == 'toolCall' and b.get('name') == 'read':
+                name = _skill_dir(_get(b, 'arguments', 'path'))
+                if name is not None:
+                    out.append(('skill_used', name, ''))
     return out
 
 
@@ -195,6 +226,8 @@ def _valid(fact, name, value):
             return False
         if fact not in PATH_OK and ('/' in text or '\\' in text or text.startswith('~')):
             return False
+    if fact in USED and not USED_NAME.fullmatch(name):
+        return False
     return fact == 'harness' or bool(name or value)
 
 
