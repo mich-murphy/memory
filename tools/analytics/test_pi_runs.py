@@ -211,6 +211,19 @@ class RunRowsTest(Shared):
                          [('configured', D), ('configured', 'sha256:' + 'cd' * 32),
                           ('effective', D), ('required', D)])
 
+    def test_short_digest_prefix_kept_and_bad_lengths_skipped(self):
+        # Parent (brief 56 real-data run): real records hold `sha256:` + 16 lowercase hex. The
+        # rule changed, so RUNS_VERSION moved to 2 and owners stored under 1 are re-imported.
+        self.assertEqual(pi_runs.RUNS_VERSION, 2)
+        short = 'sha256:' + '0a' * 8
+        record = dict(runId='run-s', launchResolvedExtensions=dict(
+            effective=[short, 'sha256:' + 'a' * 15, 'sha256:' + 'a' * 65, 'sha256:' + 'A' * 16]))
+        result = publications.import_shared(self.build([record]), self.db)
+        self.assertEqual((result['runs'], result['runs_skipped']), (1, 3))
+        self.assertEqual(self.sql('SELECT "list", digest FROM pi_run_extension'),
+                         [('effective', short)])
+        self.assertEqual(self.sql('SELECT extensions_effective FROM pi_run'), [(4,)])
+
     def test_canaries_never_stored(self):
         publications.import_shared(self.build([FULL]), self.db)
         with duckdb.connect(str(self.db), read_only=True) as c:

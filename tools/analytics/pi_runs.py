@@ -13,7 +13,8 @@ import setup_facts
 import usage_facts
 
 # Bump when the extraction changes; an owner imported under another version is re-imported.
-RUNS_VERSION = 1
+# Version 2 (parent, brief 56 real-data run): extension digests of 16 to 64 hex characters.
+RUNS_VERSION = 2
 
 COORDINATES = ('owner_key', 'archive_id', 'machine_id', 'source_id')
 RUN_COLUMNS = {
@@ -55,7 +56,9 @@ def ensure(db):
 
 STATUS = re.compile(r'[a-z][a-z0-9_-]{0,39}')
 MODEL = re.compile(r'(?!/|\.|~)[A-Za-z0-9._:@/-]{1,100}')
-DIGEST = re.compile(r'sha256:[0-9a-f]{64}')
+# Real run records carry a 16-hex-character digest prefix (`sha256:` + 16 lowercase hex, 136 of
+# 136 on dev-01, parent 2026-11-24); a full 64-character digest is accepted too.
+DIGEST = re.compile(r'sha256:[0-9a-f]{16,64}')
 LISTS = ('configured', 'effective', 'runtime', 'required')
 MAX_RECORD = 8 << 20
 
