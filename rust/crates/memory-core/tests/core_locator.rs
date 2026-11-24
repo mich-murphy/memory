@@ -6,7 +6,7 @@ use memory_core::domain::{
 };
 use memory_core::locator::{
     ClaudeSessionIndex, ConfigAsset, InputError, Located, Role, RootLayout, RootNamespace,
-    RootRelativePath, Roots, locate, shared_analytics,
+    RootRelativePath, Roots, locate, shared_analytics, stored_retired,
 };
 use proptest::prelude::*;
 use sha2::{Digest, Sha256};
@@ -2207,6 +2207,80 @@ fn shared_analytics_is_the_pi_run_record_shape_only() -> TestResult {
                 _ => ensure!(false, "{p}: {got:?}"),
             }
         }
+    }
+    Ok(())
+}
+
+/// Brief 57: a kept kind is never retired, whatever the path.
+#[test]
+fn stored_retired_never_retires_a_kept_kind() -> TestResult {
+    for kind in [
+        SourceKind::ClaudeTranscript,
+        SourceKind::ClaudeSubagent,
+        SourceKind::ClaudeToolResults,
+        SourceKind::CodexRollout,
+        SourceKind::CodexCompressed,
+        SourceKind::PiSession,
+    ] {
+        for p in ["a.jsonl", "x/y/z", ""] {
+            ensure!(!stored_retired(&kind, p), "{kind:?} {p}");
+        }
+    }
+    Ok(())
+}
+
+/// Brief 57: every dropped kind is retired, also at a run-record path.
+#[test]
+fn stored_retired_retires_every_dropped_kind() -> TestResult {
+    use SourceKind::*;
+    let run = "sessions/--c--/subagent-artifacts/run1.json";
+    for kind in [
+        ClaudeTodos,
+        ClaudeTasks,
+        ClaudeTeams,
+        ClaudeFileHistory,
+        ClaudeDebug,
+        ClaudeHistory,
+        ClaudeConfig,
+        CodexStore,
+        CodexHistory,
+        CodexConfig,
+        PiSettings,
+        PiModels,
+        PiSnapshot,
+        ClaudeSessionEnv,
+        ClaudePlan,
+        ClaudePaste,
+        ClaudeUsage,
+        ClaudeMemory,
+        ClaudeAux,
+        CodexMemory,
+        CodexLog,
+        PiConfig,
+        PiLog,
+    ] {
+        ensure!(stored_retired(&kind, "history.jsonl"), "{kind:?}");
+        ensure!(stored_retired(&kind, run), "{kind:?} at a run record");
+    }
+    Ok(())
+}
+
+/// Brief 57: `PiAux` is kept only at the run-record shape.
+#[test]
+fn stored_retired_keeps_a_pi_run_record_only() -> TestResult {
+    let aux = SourceKind::PiAux;
+    ensure!(
+        !stored_retired(&aux, "sessions/--c--/subagent-artifacts/run1.json"),
+        "run record"
+    );
+    for p in [
+        "sessions/--c--/subagent-artifacts/run1.jsonl",
+        "sessions/--c--/subagent-artifacts/run1.md",
+        "sessions/--c--/subagent-artifacts/x/run1.json",
+        "sessions/--c--/subagent-artifacts/.json",
+        "sessions/--c--/run1.json",
+    ] {
+        ensure!(stored_retired(&aux, p), "{p}");
     }
     Ok(())
 }

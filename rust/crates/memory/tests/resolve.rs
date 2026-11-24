@@ -1300,7 +1300,7 @@ fn ignored_files_are_counted_not_yielded_and_never_hints() -> R {
 #[test]
 fn locate_absent_retires_a_dropped_path_and_probes_a_kept_one() -> R {
     use memory::daemon::Probe;
-    use memory_core::domain::SourceId;
+    use memory_core::domain::{SourceId, SourceKind};
     let t = Tmp::new()?;
     t.write(T, b"x")?;
     t.write("claude/history.jsonl", b"x")?;
@@ -1308,13 +1308,26 @@ fn locate_absent_retires_a_dropped_path_and_probes_a_kept_one() -> R {
     let id = |n: &str| SourceId::try_from(format!("{ns}:{n}"));
     let fh = "file-history/0f0e0d0c-0b0a-4908-8706-050403020100/aaaaaaaaaaaaaaaa@v1";
     let mut s = walker(&t.root(), WalkLimits::default())?;
-    assert_eq!(s.locate_absent(&id("h")?, "history.jsonl"), Probe::Retired);
-    assert_eq!(s.locate_absent(&id("fh")?, fh), Probe::Retired);
+    assert_eq!(
+        s.locate_absent(&id("h")?, &SourceKind::ClaudeHistory, "history.jsonl"),
+        Probe::Retired
+    );
+    assert_eq!(
+        s.locate_absent(&id("fh")?, &SourceKind::ClaudeFileHistory, fh),
+        Probe::Retired
+    );
     assert!(matches!(
-        s.locate_absent(&id("t")?, "projects/-p/abc.jsonl"),
+        s.locate_absent(
+            &id("t")?,
+            &SourceKind::ClaudeTranscript,
+            "projects/-p/abc.jsonl",
+        ),
         Probe::Handle(_)
     ));
     fs::remove_file(t.root().join("history.jsonl"))?;
-    assert_eq!(s.locate_absent(&id("h")?, "history.jsonl"), Probe::Retired);
+    assert_eq!(
+        s.locate_absent(&id("h")?, &SourceKind::ClaudeHistory, "history.jsonl"),
+        Probe::Retired
+    );
     Ok(())
 }

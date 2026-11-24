@@ -21,8 +21,8 @@
 //! A quiet owner costs no extra request; an anomalous owner costs one `current.json` GET (plus
 //! the chain and the re-judged pieces only when its head moved).
 //!
-//! Retired (brief 54): a stored live entry of a fetched owner whose path now locates to
-//! `Ignored` is counted `retired=` (after `remote_only=`) instead of `remote_only`, and never
+//! Retired (brief 57): a stored live entry of a fetched owner whose kind is not captured
+//! (`stored_retired`, no root lookup) is counted `retired=` (after `remote_only=`) instead of `remote_only`, and never
 //! changes the exit code.
 //!
 //! A snapshot source is not compared byte for byte when it is a backup (a Codex SQLite store, no
@@ -45,6 +45,7 @@ use crate::s3::S3Store;
 use crate::state::{Loaded, MissingReason, StateFile, default_root, read_durable};
 use memory_core::domain::{Owner, Sha256, SnapshotFingerprint, SourceId, SourceKind};
 use memory_core::limits::{current_key, owner_prefix};
+use memory_core::locator::stored_retired;
 use memory_core::manifest::{EpochRecord, OwnerState, SourceEntry, parse_current};
 use memory_core::privacy::{Admission, AdmittedSource, PolicyContext, UnknownReason, admit};
 use memory_reader::{OwnerError, RestoreError, decode_piece, read_owner, restore_source};
@@ -883,9 +884,9 @@ fn check_inner(root: &Path, hook: &mut dyn FnMut(Phase)) -> Result<Report, Refus
                     .sources
                     .iter()
                     .filter(|(id, entry)| entry.deleted_at.is_none() && !local.contains(id))
-                    .filter(|(id, entry)| {
-                        // Brief 54: a retired entry is counted apart, never remote_only.
-                        let gone = crate::resolve::retired(&roots, id, &entry.path);
+                    .filter(|(_, entry)| {
+                        // Brief 57: a retired entry is counted apart, never remote_only.
+                        let gone = stored_retired(&entry.kind, &entry.path);
                         tally.retired += u64::from(gone);
                         !gone
                     })

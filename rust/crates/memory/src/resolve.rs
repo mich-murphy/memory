@@ -16,8 +16,8 @@
 //!   is `Ignored` and counted `ignored`. The only snapshot source left is the Pi run record,
 //!   profile `Scanned` (whole-file content scan). `deferred_snapshot` no longer exists. `note`
 //!   still routes append sources only. `locate_absent` (D52, brief 48) resolves stored entries
-//!   too, and returns `Probe::Retired` for a stored path that now locates to `Ignored`
-//!   ([`retired`], shared with `memory check`).
+//!   too, and returns `Probe::Retired` for a stored entry whose kind is not captured
+//!   (`stored_retired`, brief 57, shared with `memory check`).
 //! * No `unsafe`, no new dependencies, no panics; any I/O failure clears a resolved flag.
 
 use crate::capture::Source;
@@ -27,7 +27,7 @@ use crate::realfs::{
     Encoding, RealFs, RealFsError, WalkLimits, index_claude_sessions, walk, walk_under,
 };
 use memory_core::domain::{Owner, SnapshotFingerprint, SourceClass, SourceId, SourceKind};
-use memory_core::locator::{Located, RootRelativePath, Roots, locate};
+use memory_core::locator::{Located, RootRelativePath, Roots, locate, stored_retired};
 use memory_core::privacy::{Profile, ResolvedSourceFacts};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -359,17 +359,6 @@ pub struct WalkSources {
     known: HashMap<Owner, BTreeSet<(usize, PathBuf)>>,
 }
 
-/// Brief 54: a stored entry is retired when its path now locates to `Ignored`. Pure: the id's
-/// namespace selects the root and the stored path is located. Shared by the daemon's absence
-/// probe and `memory check`.
-pub fn retired(roots: &[(PathBuf, Roots)], id: &SourceId, path: &str) -> bool {
-    let namespace = id.as_str().split(':').next().unwrap_or_default();
-    let Some((_, found)) = roots.iter().find(|(_, r)| r.namespace() == namespace) else {
-        return false;
-    };
-    RootRelativePath::parse(path).is_ok_and(|rel| locate(&rel, found) == Located::Ignored)
-}
-
 /// Root-relative path of `rest`, or `None` for a non-UTF-8 or non-plain component.
 fn rel_of(rest: &Path) -> Option<RootRelativePath> {
     let mut parts = Vec::new();
@@ -545,8 +534,8 @@ impl crate::daemon::Sources for WalkSources {
         !self.counts.truncated && !self.counts.busy
     }
 
-    fn locate_absent(&mut self, id: &SourceId, path: &str) -> Probe {
-        if retired(&self.roots, id, path) {
+    fn locate_absent(&mut self, id: &SourceId, kind: &SourceKind, path: &str) -> Probe {
+        if stored_retired(kind, path) {
             return Probe::Retired;
         }
         let namespace = id.as_str().split(':').next().unwrap_or_default();

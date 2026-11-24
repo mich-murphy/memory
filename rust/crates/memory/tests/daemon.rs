@@ -4492,7 +4492,12 @@ impl memory::daemon::Sources for Gate {
     fn walk_complete(&self) -> bool {
         self.complete.load(Ordering::SeqCst)
     }
-    fn locate_absent(&mut self, id: &SourceId, _path: &str) -> memory::daemon::Probe {
+    fn locate_absent(
+        &mut self,
+        id: &SourceId,
+        _kind: &SourceKind,
+        _path: &str,
+    ) -> memory::daemon::Probe {
         if self.retired.load(Ordering::SeqCst) {
             return memory::daemon::Probe::Retired;
         }
@@ -4651,9 +4656,9 @@ fn a_retired_entry_is_never_probed_nor_deleted() -> R {
 // the owner set like `all_gone`; a kept source that vanishes is still deleted after two misses.
 #[test]
 fn an_owner_with_only_retired_entries_leaves_the_owner_set() -> R {
-    let mut r = rig()?;
-    remove_file(&mut r, 1);
-    remove_file(&mut r, 2);
+    // Brief 57: retirement is the stored kind (file history), not a locator verdict.
+    let mut r = snap_rig_with(retired_snap_of(3)?)?;
+    remove_file(&mut r, 3);
     r.gate.retired.store(true, Ordering::SeqCst);
     assert_eq!(rounds_never_delete(&mut r, 2)?, 0);
     let (tmp, d) = (r.tmp, r.d);
@@ -4778,12 +4783,21 @@ fn an_owner_whose_every_file_is_gone_is_recorded_deleted_then_leaves_the_set() -
 
 // ---------------------------------------------------------------- snapshot absence (brief 48)
 
-/// A Claude file-history snapshot source (handle 3) of owner `s1`.
+/// A retired Claude file-history snapshot source of owner `s1`.
+fn retired_snap_of(handle: u64) -> R<(Owner, Source)> {
+    let (owner, mut s) = snap_of(handle)?;
+    s.kind = SourceKind::ClaudeFileHistory;
+    s.path = format!("file-history/s1/{handle:016x}@v1");
+    s.facts.identities = vec![s.path.clone()];
+    Ok((owner, s))
+}
+
+/// A kept Pi run-record snapshot source of owner `s1` (brief 57: file history is retired).
 fn snap_of(handle: u64) -> R<(Owner, Source)> {
     let (owner, mut s) = src_of("s1", handle)?;
-    s.kind = SourceKind::ClaudeFileHistory;
+    s.kind = SourceKind::PiAux;
     s.class = SourceClass::Snapshot;
-    s.path = format!("file-history/s1/{handle:016x}@v1");
+    s.path = format!("sessions/--c--/subagent-artifacts/run{handle}.json");
     s.facts.profile = Profile::Scanned;
     s.facts.identities = vec![s.path.clone()];
     Ok((owner, s))
@@ -4791,6 +4805,10 @@ fn snap_of(handle: u64) -> R<(Owner, Source)> {
 
 /// Owner `s1` holding only one captured snapshot file (handle 3); the first round has landed.
 fn snap_rig() -> R<Rig> {
+    snap_rig_with(snap_of(3)?)
+}
+
+fn snap_rig_with(first: (Owner, Source)) -> R<Rig> {
     use std::sync::atomic::AtomicBool;
     let tmp = Tmp::new()?;
     let cfg = tmp.config(true)?;
@@ -4801,7 +4819,7 @@ fn snap_rig() -> R<Rig> {
     };
     fs.mem.files.insert(3, SNAP.to_vec());
     let gate = Gate {
-        list: Arc::new(Mutex::new(vec![snap_of(3)?])),
+        list: Arc::new(Mutex::new(vec![first])),
         complete: Arc::new(AtomicBool::new(true)),
         root: Arc::new(AtomicBool::new(true)),
         retired: Arc::new(AtomicBool::new(false)),

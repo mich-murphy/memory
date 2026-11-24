@@ -60,11 +60,12 @@ use memory_core::coalescer::Signal;
 use memory_core::disposition::{Streak, jittered};
 use memory_core::domain::{
     Agent, Disposition, ErrorClass, Fingerprint, LocalError, Owner, OwnerParkReason, ParkReason,
-    RulesDigest, SnapshotFingerprint, SourceId, SourceState, WithholdReason,
+    RulesDigest, SnapshotFingerprint, SourceId, SourceKind, SourceState, WithholdReason,
 };
 use memory_core::hint::{
     HintEvent, HintScan, LaunchHint, PathHint, RetentionFacts, past_retention, removable, scan,
 };
+use memory_core::locator::stored_retired;
 use memory_core::manifest::{Change, Header, ManifestError, OwnerState, Piece, Timestamp, Writer};
 use memory_core::pause::pause_for;
 use memory_core::privacy::{PolicyContext, SanitizedLaunch, sanitize_launch};
@@ -337,7 +338,7 @@ pub trait Sources {
     }
     /// Resolve a stored source (id and root-relative path) that the walk did not yield to a
     /// handle for a `stat`-only absence probe. Default: [`Probe::Skip`].
-    fn locate_absent(&mut self, _id: &SourceId, _path: &str) -> Probe {
+    fn locate_absent(&mut self, _id: &SourceId, _kind: &SourceKind, _path: &str) -> Probe {
         Probe::Skip
     }
     /// The current sources of one owner. Default: [`Sources::enumerate`] filtered.
@@ -1046,7 +1047,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             {
                 continue;
             }
-            match self.sources.locate_absent(id, &entry.path) {
+            match self.sources.locate_absent(id, &entry.kind, &entry.path) {
                 Probe::Handle(handle) => found.push(Candidate {
                     handle,
                     id: id.clone(),
@@ -1503,12 +1504,14 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
     }
 
     /// The owner's recovered state has no live append entry left.
-    /// Brief 54: retired entries (their path now locates to `Ignored`) do not count as live.
+    /// Brief 57: retired entries (kind not captured, [`stored_retired`]) do not count as live.
     fn all_gone(&mut self, rt: &OwnerRt) -> bool {
         match &rt.base {
-            RemoteBase::Known(base) => !base.state.sources.iter().any(|(id, e)| {
-                e.deleted_at.is_none() && self.sources.locate_absent(id, &e.path) != Probe::Retired
-            }),
+            RemoteBase::Known(base) => !base
+                .state
+                .sources
+                .values()
+                .any(|e| e.deleted_at.is_none() && !stored_retired(&e.kind, &e.path)),
             RemoteBase::Absent => true,
             RemoteBase::Unknown => false,
         }

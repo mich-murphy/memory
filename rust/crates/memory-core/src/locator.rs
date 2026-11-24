@@ -1147,6 +1147,14 @@ pub fn shared_analytics(kind: &SourceKind, path: &str) -> bool {
     *kind == SourceKind::PiAux && pi_run_record(&parts)
 }
 
+/// Whether a stored manifest entry is retired (brief 57): its kind is not in the captured set
+/// and it is not a `PiAux` run record. Pure and total; needs no root and no locator verdict, so
+/// it stays correct whatever the ignore tables say.
+#[must_use]
+pub fn stored_retired(kind: &SourceKind, path: &str) -> bool {
+    !(CAPTURED_KINDS.contains(kind) || shared_analytics(kind, path))
+}
+
 fn captured(hit: &Hit<'_>, parts: &[&str]) -> bool {
     CAPTURED_KINDS.contains(&hit.kind) || (hit.kind == SourceKind::PiAux && pi_run_record(parts))
 }
