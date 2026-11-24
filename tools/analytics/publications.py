@@ -532,6 +532,42 @@ def import_export(export_dir, db_path, *, reset=False):
             raise ImportFailure(reason) from None
 
 
+def _setup_report(db, rows):
+    """Closed-shape setup groups, top 20 each by sessions; empty when the tables are absent."""
+    have = {r[0] for r in db.execute('SHOW TABLES').fetchall()}
+    views = {r[0] for r in db.execute('SELECT view_name FROM duckdb_views() WHERE NOT internal').fetchall()}
+    if not {'session_setup', 'session_usage', 'tool_outcome'} <= have or 'session_dim' not in views:
+        return {}
+    top = ' ORDER BY sessions DESC, 1, 2 LIMIT 20'
+
+    def fact(name, fact_name):
+        return rows(f"SELECT agent, name AS {name}, count(DISTINCT session_key) AS sessions "
+                    f"FROM session_setup WHERE fact='{fact_name}' GROUP BY agent, name" + top)
+
+    def dim(column):
+        return rows(f'SELECT agent, {column}, count(*) AS sessions FROM session_dim '
+                    f'WHERE {column} IS NOT NULL GROUP BY agent, {column}' + top)
+    return dict(
+        harness_versions=dim('harness_version'),
+        models=rows("SELECT agent, name AS model, count(DISTINCT session_key) AS sessions FROM session_setup "
+                    "WHERE fact='model' GROUP BY agent, name" + top),
+        reasoning_efforts=rows("SELECT agent, value AS reasoning_effort, count(DISTINCT session_key) AS sessions "
+                               "FROM session_setup WHERE fact='reasoning_effort' GROUP BY agent, value" + top),
+        permissions=rows("SELECT agent, fact, value, count(DISTINCT session_key) AS sessions FROM session_setup "
+                         "WHERE fact IN ('permission_mode','approval_policy') GROUP BY agent, fact, value" + top),
+        usage_by_model=rows('SELECT agent, model, sessions, input_tokens, cache_read_tokens, cache_write_tokens, '
+                            'output_tokens, reasoning_tokens, cost_usd FROM usage_by_model '
+                            'ORDER BY sessions DESC, 1, 2 LIMIT 20'),
+        skills_used=fact('skill', 'skill_used'), plugins_used=fact('plugin', 'plugin_used'),
+        mcp_servers_used=fact('mcp_server', 'mcp_server_used'),
+        extensions_used=fact('extension', 'extension_used'),
+        tool_results=rows('SELECT agent, count(*) AS results, count(*) FILTER (WHERE is_error) AS errors, '
+                          'count(*) FILTER (WHERE is_error IS NOT NULL) AS known, '
+                          'round(count(*) FILTER (WHERE is_error) * 1.0 / '
+                          'nullif(count(*) FILTER (WHERE is_error IS NOT NULL), 0), 4) AS error_share '
+                          'FROM tool_outcome GROUP BY agent ORDER BY agent'))
+
+
 def report(db_path, *, now_ns=None, stale_after_ns=86400 * 10**9, summary=False):
     """Actual event-index report; summary bounds detail for interactive overview.
 
@@ -569,7 +605,8 @@ def report(db_path, *, now_ns=None, stale_after_ns=86400 * 10**9, summary=False)
                     totals=rows('SELECT (SELECT count(*) FROM sessions) AS sessions, '
                                 '(SELECT count(*) FROM failures) AS failures, '
                                 '(SELECT count(*) FROM sources) AS sources')[0],
-                    agents=rows('SELECT agent,count(*) AS sessions FROM sessions GROUP BY agent ORDER BY agent'))
+                    agents=rows('SELECT agent,count(*) AS sessions FROM sessions GROUP BY agent ORDER BY agent'),
+                    setup=_setup_report(db, rows))
                if summary else {}),
             freshness=rows('''SELECT max(captured_at_ns) AS captured_at_ns,
                 max(published_at_ns) AS published_at_ns, max(imported_at_ns) AS imported_at_ns,
