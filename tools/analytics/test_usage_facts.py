@@ -4,7 +4,6 @@ import unittest
 
 import duckdb
 import publications
-import publication_dashboard
 import setup_facts
 import usage_facts
 from test_setup_facts import Base, CANARY
@@ -161,7 +160,7 @@ class UsageTest(Base):
             c.execute('UPDATE session_setup_version SET version=1')
         tables = self.sql('SHOW TABLES')
         self.assertEqual(publications.report(self.db, summary=True)['setup'], {})
-        publication_dashboard.PublicationDashboard(self.db).report()
+        publications.report(self.db)
         self.assertEqual(self.sql('SHOW TABLES'), tables)  # read-only creates nothing
         self.assertEqual(publications.import_export(d, self.db)['status'], 'unchanged')
         self.assertEqual([self.sql(f'SELECT * FROM {t} ORDER BY line') for t in ('session_usage', 'tool_outcome')], want)

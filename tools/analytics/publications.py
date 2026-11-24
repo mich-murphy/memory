@@ -11,7 +11,6 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
-import subprocess
 import sys
 import tempfile
 import time
@@ -804,20 +803,6 @@ def report(db_path, *, now_ns=None, stale_after_ns=86400 * 10**9, summary=False)
             event_counts=rows('SELECT event_type, count(*) AS events FROM events GROUP BY event_type ORDER BY event_type'),
             issue_counts=rows('SELECT kind, count(*) AS issues FROM issues GROUP BY kind ORDER BY kind'),
             dashboard_wired=False)
-
-
-def export_session(binary, store, archive, machine, agent, session, output, *, config=None):
-    """Invoke the sole reader; configuration carries references, never secret argv."""
-    _require((store is None) != (config is None), 'reader_destination_required')
-    destination = ['--store', str(store)] if config is None else ['--config', str(config)]
-    command = [str(binary), 'capture-v1', 'export', *destination, '--archive', archive,
-               '--machine', machine, '--agent', agent, '--session', session, '--output', str(output)]
-    try:
-        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
-    except subprocess.TimeoutExpired:
-        raise ImportFailure('reader_export_timeout') from None
-    except (OSError, subprocess.CalledProcessError):
-        raise ImportFailure('reader_export_failed') from None
 
 
 def main():

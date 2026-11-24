@@ -4,7 +4,6 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
-import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -824,18 +823,6 @@ class PublicationsTests(unittest.TestCase):
         with self.assertRaisesRegex(publications.ImportFailure, 'unsupported_database'):
             publications.report(self.db)
         self.assertEqual(self.db.read_bytes(), before)
-
-    def test_export_helper_without_shell(self):
-        with patch('publications.subprocess.run') as run:
-            publications.export_session('/binary', '/store', 'a', 'm', 'pi', 's;not-shell', '/output')
-        args, kwargs = run.call_args
-        self.assertIsInstance(args[0], list)
-        self.assertIn('s;not-shell', args[0])
-        self.assertNotIn('shell', kwargs)
-        self.assertEqual(kwargs['timeout'], 300)
-        with patch('publications.subprocess.run', side_effect=subprocess.TimeoutExpired('PRIVATE', 300)):
-            with self.assertRaisesRegex(publications.ImportFailure, '^reader_export_timeout$'):
-                publications.export_session('/binary', '/store', 'a', 'm', 'pi', 's', '/output')
 
 
 if __name__ == '__main__':
