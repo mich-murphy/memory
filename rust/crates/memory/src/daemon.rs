@@ -130,7 +130,7 @@ pub enum RoundError {
 
 /// One source's persisted local knowledge.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(from = "crate::index_shim::RawSourceIndex")] // BRIEF57-SHIM: strict fields live there
 pub struct SourceIndex {
     /// Append index.
     pub index: Option<SourceState>,
