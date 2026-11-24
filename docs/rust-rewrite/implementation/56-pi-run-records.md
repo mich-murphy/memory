@@ -108,3 +108,7 @@ counts above. Evidence 51, DESIGN (D68), the handoff.
 ## Ledger
 
 - 2026-11-24: brief written on `2ff1640`.
+- 2026-11-24: workers done (SHARED 5 commits, RUNS 5, GATE 1); deviations accepted (evidence
+  51). Teeth RUNS 26 of 26 and SHARED 11 of 13 (2 equivalent) after two parent tests; Python 213
+  OK, gates 14/14, Linux passed. Accepted locally at `2bf71d9`. Install and the real-data run
+  follow merge.
