@@ -622,16 +622,6 @@ fn moved_head(store: &mut S3Store, owner: &Owner, first: Option<&Head>) -> Optio
     read_head(store, owner, Some((key, body))).ok()
 }
 
-fn judge_source(
-    fs: &mut SharedFs,
-    store: &mut S3Store,
-    context: &PolicyContext,
-    state: Option<&OwnerState>,
-    source: &Source,
-) -> Verdict {
-    judge(fs, store, context, state, source)
-}
-
 fn tally_verdict(
     tally: &mut Tally,
     details: &mut Vec<String>,
@@ -764,7 +754,7 @@ fn check_inner(root: &Path, hook: &mut dyn FnMut(Phase)) -> Result<Report, Refus
         let mut verdicts: Vec<Verdict> = sources
             .iter()
             .map(|source| {
-                judge_source(
+                judge(
                     &mut fs,
                     &mut store,
                     &context,
@@ -783,7 +773,7 @@ fn check_inner(root: &Path, hook: &mut dyn FnMut(Phase)) -> Result<Report, Refus
         {
             for (verdict, source) in verdicts.iter_mut().zip(sources) {
                 if anomalous(verdict) {
-                    *verdict = judge_source(
+                    *verdict = judge(
                         &mut fs,
                         &mut store,
                         &context,

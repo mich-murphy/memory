@@ -18,8 +18,9 @@
 //! brief 48) that the walk did not yield and that are not parked are probed with `stat` through
 //! [`Sources::locate_absent`]; a missing root, an unknown namespace or a bad path is counted as
 //! `absence_skipped` and never deletes. A stored entry whose kind is not captured
-//! (`stored_retired`, brief 57) is `Probe::Retired`: never probed, never deleted, not `absence_skipped`; its
-//! manifest entry stays. Retired entries do not keep an owner in the set. `index.json` keeps
+//! (`stored_retired`, brief 57) is `Probe::Retired`: never probed, never deleted, not
+//! `absence_skipped`; its manifest entry stays. Retired entries do not keep an owner in the
+//! set. `index.json` keeps
 //! `owners` (`#[serde(default)]`) so an owner whose every file is gone is still visited; it
 //! leaves the set once no live entry remains. `capture_owner` never counts absence.
 //!
