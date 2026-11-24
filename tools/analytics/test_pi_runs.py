@@ -330,6 +330,24 @@ class DimReportTest(SessionBase):
         self.assertEqual(self.sql('SELECT input_tokens FROM session_dim'), [(7,)])
         self.assertEqual(self.sql('SELECT input_tokens FROM usage_by_model')[0], (7,))
 
+    def test_view_picks_the_earliest_of_two_referencing_sessions(self):
+        # Parent (brief 56 teeth): two Pi sessions reference one run; the earlier reference wins
+        # whatever the import order or session key order.
+        def ref(ts):
+            return dict(custom('subagent_supervisor_request', details={'runId': 'r-two'}), timestamp=ts)
+        self.shared([run_record('r-two')])
+        keys = {}
+        for name, ts in (('late', '2026-01-02T00:00:00Z'), ('early', '2026-01-01T00:00:00Z')):
+            d = self.export('pi', [ref(ts)], name=name)
+            meta = json.loads((d / 'metadata.json').read_text())
+            meta['manifest']['identity']['session_id'] = name
+            (d / 'metadata.json').write_text(json.dumps(meta))
+            publications.import_export(d, self.db)
+            keys[name] = self.sql('SELECT session_key FROM sessions WHERE session_id=?', [name])[0][0]
+        self.assertNotEqual(keys['late'], keys['early'])
+        self.assertEqual(self.sql('SELECT session_key, referencing_sessions FROM pi_run_dim'),
+                         [(keys['early'], 2)])
+
     def test_report_runs_section(self):
         self.shared([run_record('a', model='p/m', requestedModel='p/n', exitCode=1,
                                 acceptance=dict(status='passed'),
