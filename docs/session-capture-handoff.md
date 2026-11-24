@@ -420,6 +420,13 @@ from `main` alone.
      sessions; no path in any stored name. Accepted locally at `6b66e77`: teeth 28 of 28,
      Python 188 OK, gates 14/14. Analytics only; nothing installed. Next: brief 56, Pi subagent
      run records in analytics (needs a shared-owner export).
+  34. 2026-11-24, brief 56 (D68), [evidence 51](rust-rewrite/implementation/evidence/51-pi-run-records/):
+     `memory export` writes a shared owner as `shared-reader/v1` (Pi run records only, others
+     counted `skipped=`), `memory owners --shared`; the importer gains `import_shared`, `pi_run`,
+     `pi_run_extension`, `pi_run_ref` (`SETUP_VERSION = 3`), `pi_run_dim` and a `runs` report
+     section; no task, error text, child report, command or path is stored. Accepted locally at
+     `2bf71d9`: teeth 26 of 26 and 11 of 13 (2 equivalent), Python 213 OK, gates 14/14, Linux
+     passed. Install on both hosts and the real-data run follow merge.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

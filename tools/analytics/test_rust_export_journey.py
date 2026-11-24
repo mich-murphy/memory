@@ -100,6 +100,56 @@ class RustExportJourney(unittest.TestCase):
         self.assertEqual(rows(out, 's1'), [('Read', None, 5)])
         self.assertEqual(rows(out, 'pi'), [('bash', False, 7)])
 
+    def test_shared_pi_run_end_to_end(self):
+        # Brief 56: the built binary's shared Pi owner export, imported after the sessions.
+        self.import_all(self.p1.values())
+        shared = self.want['shared']
+        first = publications.import_shared(shared, self.db)
+        self.assertEqual((first['status'], first['runs'], first['runs_skipped']), ('imported', 1, 0))
+        self.assertEqual(publications.import_shared(shared, self.db)['status'], 'unchanged')
+        cols = ('run_id', 'agent_type', 'model', 'requested_model', 'exit_code', 'has_error',
+                'acceptance_status', 'evidence_status', 'acceptance_level', 'acceptance_explicit',
+                'review_status', 'criteria', 'runtime_checks', 'input_tokens', 'output_tokens',
+                'cache_read_tokens', 'cache_write_tokens', 'cost_usd', 'turns',
+                'extensions_configured', 'extensions_effective', 'extensions_runtime',
+                'extensions_required', 'extensions_omitted', 'ambient_extensions_disabled',
+                'runner_type', 'external_duration_ms', 'external_exit_code', 'timestamp_ms')
+        rows = self.query('SELECT ' + ','.join(cols) + ' FROM pi_run')
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(dict(zip(cols, rows[0])), dict(
+            run_id='run-gate-1', agent_type='worker', model='pi-m', requested_model='pi-m2',
+            exit_code=0, has_error=True, acceptance_status='passed', evidence_status='verified',
+            acceptance_level='strict', acceptance_explicit=True, review_status='approved',
+            criteria=1, runtime_checks=1, input_tokens=5, output_tokens=6, cache_read_tokens=1,
+            cache_write_tokens=2, cost_usd=0.25, turns=3, extensions_configured=2,
+            extensions_effective=1, extensions_runtime=0, extensions_required=0,
+            extensions_omitted=1, ambient_extensions_disabled=True, runner_type='external-cli',
+            external_duration_ms=1200, external_exit_code=0, timestamp_ms=1_700_000_000_000))
+        ext = sorted(self.query('SELECT list, digest FROM pi_run_extension'))
+        self.assertEqual(ext, sorted([('configured', 'sha256:' + 'a' * 64),
+                                      ('configured', 'sha256:' + 'b' * 64),
+                                      ('effective', 'sha256:' + 'a' * 64)]))
+        dim = self.query('SELECT session_key, referencing_sessions FROM pi_run_dim')
+        self.assertEqual(dim, [(session_key(self.p1['pi']), 1)])
+        report = publications.report(self.db, now_ns=1_700_000_001_000_000_000, summary=True)
+        self.assertEqual(report['failures'], [])
+        self.assertTrue(report['runs'])
+        self.assertEqual(report['runs']['totals']['runs'], 1)
+        self.assertEqual(report['runs']['totals']['linked'], 1)
+        # Canaries: dump every table and view as text, and the report.
+        with duckdb.connect(str(self.db), read_only=True) as conn:
+            names = [r[0] for r in conn.execute('SHOW TABLES').fetchall()]
+            names += [r[0] for r in conn.execute(
+                'SELECT view_name FROM duckdb_views() WHERE NOT internal').fetchall()]
+            dump = [json.dumps(report, default=str)]
+            for n in names:
+                dump.append(repr(conn.execute(f'SELECT * FROM "{n}"').fetchall()))
+        text = '\n'.join(dump)
+        self.assertIn('run-gate-1', text)
+        self.assertGreater(len(names), 10)
+        for needle in self.want['run_canaries']:
+            self.assertNotIn(needle, text, needle)
+
     def test_session_key_and_non_ascii(self):
         self.import_all(self.p1.values())
         e = self.p1['nonascii']

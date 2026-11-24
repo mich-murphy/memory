@@ -8,7 +8,7 @@ use memory_core::manifest::{
     EpochRecord, EpochStamp, EpochWriter, Folded, OwnerState, Piece, Position, SourceEntry,
     Timestamp,
 };
-use memory_reader::export::{ExportError, build_envelope, write_export};
+use memory_reader::export::{ExportError, build_envelope, build_shared_envelope, write_export};
 use memory_reader::{OwnerHead, restore_epoch};
 use serde_json::Value;
 use std::cell::Cell;
@@ -945,4 +945,316 @@ fn shared_owner_heads_and_overflowing_sequence_are_refused() -> R {
 
 fn at(v: &Value, k: &str) -> Value {
     v.get(k).cloned().unwrap_or(Value::Null)
+}
+
+const RUN: &str = "sessions/--c--/subagent-artifacts/run1.json";
+
+fn g<'a>(v: &'a Value, k: &str) -> R<&'a Value> {
+    v.get(k).ok_or_else(|| format!("missing {k}"))
+}
+
+fn shared_head(entries: Vec<(&str, SourceEntry)>) -> R<OwnerHead> {
+    let mut h = head(entries, 6)?;
+    h.folded.owner = memory_core::limits::parse_owner_prefix("shared/arch/mach/pi").map_err(bad)?;
+    Ok(h)
+}
+fn shared_export(h: &OwnerHead, max: u64, objects: &Objects, out: &Path) -> R<usize> {
+    let env = build_shared_envelope::<()>(h, max).map_err(bad)?;
+    write_export(&env, |k: &str| Ok::<_, ()>(objects.get(k).cloned()), out).map_err(bad)?;
+    Ok(env.skipped)
+}
+
+/// Brief 56: byte-exact `shared-reader/v1` metadata for one empty run record.
+#[test]
+fn shared_metadata_is_byte_exact() -> R {
+    let rec = record(0, 0, sha(b"")?, vec![]);
+    let h = shared_head(vec![(
+        "a",
+        entry(SourceKind::PiAux, RUN, vec![rec], false)?,
+    )])?;
+    let env = build_shared_envelope::<()>(&h, 1).map_err(bad)?;
+    let m = hex(b"manifest");
+    let want = serde_json::json!({
+        "contract": "shared-reader/v1",
+        "manifest_sha256": m,
+        "manifest": {
+            "contract": "shared-publication/v1",
+            "identity": {"archive_id": "arch", "machine_id": "mach", "agent": "pi"},
+            "publication_id": m,
+            "sequence": 7,
+            "captured_at_ns": 1_794_047_400_000_000_000_u64,
+            "published_at_ns": 1_794_048_300_000_000_000_u64,
+            "sources": [{
+                "source_id": "a",
+                "epoch_id": "0",
+                "kind": "pi_run_record",
+                "path": RUN,
+                "state": "active",
+                "revision": 1,
+                "captured_at_ns": 1_794_047_400_000_000_000_u64,
+                "object": {
+                    "key": "objects/none",
+                    "encoding": "zstd",
+                    "sha256": hex(b""),
+                    "encoded_sha256": hex(b""),
+                    "size": 0,
+                    "encoded_size": 0,
+                },
+            }],
+        },
+        "bodies": [{
+            "source_id": "a",
+            "epoch_id": "0",
+            "path": "bodies/0000.bin",
+            "sha256": hex(b""),
+            "size": 0,
+        }],
+    });
+    assert_eq!(env.metadata, serde_json::to_vec(&want).map_err(bad)?);
+    assert_eq!(
+        (env.sources, env.deleted, env.skipped, env.bytes),
+        (1, 0, 0, 0)
+    );
+    Ok(())
+}
+
+/// Brief 56: retired kinds and non-run-record `PiAux` paths are skipped and counted; deleted
+/// sources are exported sealed; a source without epochs is left out (not counted).
+#[test]
+fn shared_export_keeps_run_records_only() -> R {
+    let mut objects = Objects::new();
+    let live = epoch(0, &[chunk(1, 0)], &mut objects)?;
+    let gone0 = epoch(0, &[chunk(2, 0)], &mut objects)?;
+    let gone1 = epoch(1, &[chunk(2, 1)], &mut objects)?;
+    let retired = epoch(0, &[chunk(3, 0)], &mut objects)?;
+    let h = shared_head(vec![
+        ("a", entry(SourceKind::PiAux, RUN, vec![live], false)?),
+        (
+            "b",
+            entry(
+                SourceKind::PiAux,
+                "sessions/--c--/subagent-artifacts/run2.json",
+                vec![gone0, gone1],
+                true,
+            )?,
+        ),
+        (
+            "c",
+            entry(
+                SourceKind::PiConfig,
+                "settings.json",
+                vec![retired.clone()],
+                false,
+            )?,
+        ),
+        (
+            "d",
+            entry(
+                SourceKind::PiAux,
+                "sessions/--c--/other/x.json",
+                vec![retired],
+                false,
+            )?,
+        ),
+        ("e", entry(SourceKind::PiAux, RUN, vec![], false)?),
+        (
+            "f",
+            entry(SourceKind::ClaudeTranscript, "p/x.jsonl", vec![], false)?,
+        ),
+    ])?;
+    let base = tmp("shared-keep")?;
+    let out = base.join("out");
+    let skipped = shared_export(&h, 1 << 30, &objects, &out)?;
+    assert_eq!(skipped, 3);
+    let m = meta(&out)?;
+    let srcs = g(g(&m, "manifest")?, "sources")?
+        .as_array()
+        .ok_or("sources")?;
+    let got: Vec<(&str, &str, &str)> = srcs
+        .iter()
+        .map(|x| {
+            Ok((
+                s(g(x, "source_id")?)?,
+                s(g(x, "epoch_id")?)?,
+                s(g(x, "state")?)?,
+            ))
+        })
+        .collect::<R<_>>()?;
+    assert_eq!(
+        got,
+        [
+            ("a", "0", "active"),
+            ("b", "0", "sealed"),
+            ("b", "1", "sealed")
+        ]
+    );
+    for x in srcs {
+        assert_eq!(
+            keys(x)?,
+            set(&[
+                "source_id",
+                "epoch_id",
+                "kind",
+                "path",
+                "state",
+                "revision",
+                "captured_at_ns",
+                "object",
+            ])
+        );
+        assert_eq!(s(g(x, "kind")?)?, "pi_run_record");
+    }
+    assert_eq!(
+        keys(&m)?,
+        set(&["contract", "manifest_sha256", "manifest", "bodies"])
+    );
+    assert_eq!(
+        keys(g(&m, "manifest")?)?,
+        set(&[
+            "contract",
+            "identity",
+            "publication_id",
+            "sequence",
+            "captured_at_ns",
+            "published_at_ns",
+            "sources",
+        ])
+    );
+    assert_eq!(
+        keys(g(g(&m, "manifest")?, "identity")?)?,
+        set(&["archive_id", "machine_id", "agent"])
+    );
+    let b = g(&m, "bodies")?.as_array().ok_or("bodies")?;
+    assert_eq!(b.len(), 3);
+    for x in b {
+        assert_eq!(
+            keys(x)?,
+            set(&["source_id", "epoch_id", "path", "sha256", "size"])
+        );
+    }
+    assert_eq!(
+        names(&out.join("bodies"))?,
+        ["0000.bin", "0001.bin", "0002.bin"]
+    );
+    let env = build_shared_envelope::<()>(&h, 1 << 30).map_err(bad)?;
+    assert_eq!((env.sources, env.deleted, env.skipped), (3, 1, 3));
+    let _ = fs::remove_dir_all(&base);
+    Ok(())
+}
+
+/// Brief 56: a shared owner with only retired entries exports valid and empty.
+#[test]
+fn shared_export_of_only_retired_entries_is_empty() -> R {
+    let h = shared_head(vec![(
+        "c",
+        entry(
+            SourceKind::PiConfig,
+            "settings.json",
+            vec![record(0, 0, sha(b"")?, vec![])],
+            false,
+        )?,
+    )])?;
+    let env = build_shared_envelope::<()>(&h, 1).map_err(bad)?;
+    assert_eq!((env.sources, env.skipped, env.bytes), (0, 1, 0));
+    let v: Value = serde_json::from_slice(&env.metadata).map_err(bad)?;
+    assert_eq!(*g(g(&v, "manifest")?, "sources")?, serde_json::json!([]));
+    assert_eq!(*g(&v, "bodies")?, serde_json::json!([]));
+    Ok(())
+}
+
+/// Brief 56: the shared bounds (16,384 sources, 8 MiB metadata, byte budget) and owner kinds.
+#[test]
+fn shared_limits_and_owner_kinds() -> R {
+    let empties_of = |n| entry(SourceKind::PiAux, RUN, empties(n)?, false);
+    // 16,384 sources pass the source bound; their metadata (about 600 bytes each) is over
+    // 8 MiB, so the metadata bound is the one that refuses it (brief 56 note).
+    let h = shared_head(vec![("a", empties_of(16_384)?)])?;
+    assert_eq!(
+        build_shared_envelope::<()>(&h, 1).map(|_| ()),
+        Err(ExportError::MetadataTooLarge)
+    );
+    let h = shared_head(vec![("a", empties_of(10_000)?)])?;
+    assert!(build_shared_envelope::<()>(&h, 1).is_ok());
+    let h = shared_head(vec![("a", empties_of(16_385)?)])?;
+    assert_eq!(
+        build_shared_envelope::<()>(&h, 1).map(|_| ()),
+        Err(ExportError::TooManySources)
+    );
+    let long = format!(
+        "sessions/--c--/subagent-artifacts/{}.json",
+        "x".repeat(4000)
+    );
+    let entries = (0..3000)
+        .map(|i| {
+            Ok((
+                format!("s{i:04}"),
+                entry(SourceKind::PiAux, &long, empties(1)?, false)?,
+            ))
+        })
+        .collect::<R<Vec<_>>>()?;
+    let refs = entries
+        .iter()
+        .map(|(id, en)| (id.as_str(), en.clone()))
+        .collect();
+    assert_eq!(
+        build_shared_envelope::<()>(&shared_head(refs)?, 1).map(|_| ()),
+        Err(ExportError::MetadataTooLarge)
+    );
+    let big = |size: u64| record(0, size, Sha256::from_bytes([0; 32]), vec![]);
+    let h = shared_head(vec![(
+        "a",
+        entry(SourceKind::PiAux, RUN, vec![big(11)], false)?,
+    )])?;
+    assert_eq!(
+        build_shared_envelope::<()>(&h, 10).map(|_| ()),
+        Err(ExportError::TooLarge)
+    );
+    assert!(build_shared_envelope::<()>(&h, 11).is_ok());
+    // A retired entry's size never counts against the budget.
+    let h = shared_head(vec![(
+        "a",
+        entry(
+            SourceKind::PiConfig,
+            "settings.json",
+            vec![big(u64::MAX)],
+            false,
+        )?,
+    )])?;
+    assert!(build_shared_envelope::<()>(&h, 1).is_ok());
+    // Owner kinds are not interchangeable.
+    let h = head(vec![], 0)?;
+    assert_eq!(
+        build_shared_envelope::<()>(&h, 1).map(|_| ()),
+        Err(ExportError::Session)
+    );
+    let mut h = shared_head(vec![])?;
+    h.folded.position.seq = u64::MAX;
+    assert_eq!(
+        build_shared_envelope::<()>(&h, 1).map(|_| ()),
+        Err(ExportError::Overflow)
+    );
+    Ok(())
+}
+
+/// Brief 56 (parent, teeth): a deleted run record with no epochs is left out entirely; it is
+/// neither exported nor counted as deleted or skipped.
+#[test]
+fn shared_deleted_source_without_epochs_is_left_out() -> R {
+    let mut objects = Objects::new();
+    let live = epoch(0, &[chunk(1, 0)], &mut objects)?;
+    let h = shared_head(vec![
+        ("a", entry(SourceKind::PiAux, RUN, vec![live], false)?),
+        (
+            "b",
+            entry(
+                SourceKind::PiAux,
+                "sessions/--c--/subagent-artifacts/run2.json",
+                vec![],
+                true,
+            )?,
+        ),
+    ])?;
+    let env = build_shared_envelope::<()>(&h, 1 << 30).map_err(bad)?;
+    assert_eq!((env.sources, env.deleted, env.skipped), (1, 0, 0));
+    Ok(())
 }

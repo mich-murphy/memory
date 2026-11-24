@@ -1138,6 +1138,15 @@ fn pi_run_record(parts: &[&str]) -> bool {
     )
 }
 
+/// Whether a stored source of a shared owner is an analytics source (brief 56): only a
+/// `PiAux` whose root-relative path is the run-record shape, the rule [`pi_run_record`] applies
+/// at capture. Pure and total; every other kind and path is `false`.
+#[must_use]
+pub fn shared_analytics(kind: &SourceKind, path: &str) -> bool {
+    let parts: Vec<&str> = path.split('/').collect();
+    *kind == SourceKind::PiAux && pi_run_record(&parts)
+}
+
 fn captured(hit: &Hit<'_>, parts: &[&str]) -> bool {
     CAPTURED_KINDS.contains(&hit.kind) || (hit.kind == SourceKind::PiAux && pi_run_record(parts))
 }

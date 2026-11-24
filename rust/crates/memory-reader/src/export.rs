@@ -1,10 +1,11 @@
 //! Export of one session owner's folded state as a `session-reader/v2` directory
 //! (`metadata.json` plus `bodies/NNNN.bin`), the envelope the Python importer reads.
 //!
-//! [`build_envelope`] is pure: it checks every limit and renders the whole `metadata.json`
-//! before any file exists. [`write_export`] then streams each epoch body piece by piece (fetch,
-//! [`decode_piece`], write, incremental SHA-256); at most one stored and one decoded piece are
-//! alive at a time, and it never calls `restore_epoch`.
+//! [`build_envelope`] (and [`build_shared_envelope`], the `shared-reader/v1` form for a shared
+//! owner's run records, brief 56) is pure: it checks every limit and renders the whole
+//! `metadata.json` before any file exists. [`write_export`] then streams each epoch body piece
+//! by piece (fetch, [`decode_piece`], write, incremental SHA-256); at most one stored and one
+//! decoded piece are alive at a time, and it never calls `restore_epoch`.
 //!
 //! The `object` descriptor of an epoch is shape-checked by the importer and never fetched. One
 //! piece: that piece's key, `encoded_sha256` and `encoded_len`. Several pieces: the first
@@ -19,7 +20,7 @@
 //! directory left behind.
 use crate::{OwnerHead, decode_piece};
 use memory_core::domain::{Owner, Sha256 as Digest};
-use memory_core::locator::export_role;
+use memory_core::locator::{export_role, shared_analytics};
 use memory_core::manifest::{EpochRecord, Piece, manifest_hash};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -30,15 +31,20 @@ use std::path::Path;
 
 /// The importer's source bound.
 pub const MAX_SOURCES: usize = 1024;
+/// The shared importer's source bound (brief 56).
+pub const MAX_SHARED_SOURCES: usize = 16_384;
 /// The importer's `metadata.json` bound.
 pub const MAX_METADATA: usize = 8 << 20;
 
 /// Why an export was refused or failed. Closed; carries no input text.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ExportError<E> {
-    /// The owner is not a session owner.
+    /// The owner is not a session owner (`build_envelope` was given a shared owner).
     #[error("owner_shared")]
     Shared,
+    /// The owner is not a shared owner (`build_shared_envelope` was given a session owner).
+    #[error("owner_session")]
+    Session,
     /// The sequence or a size does not fit the envelope.
     #[error("export_overflow")]
     Overflow,
@@ -48,7 +54,7 @@ pub enum ExportError<E> {
     /// The exported bytes exceed the budget.
     #[error("export_too_large")]
     TooLarge,
-    /// More than [`MAX_SOURCES`] epochs.
+    /// More than [`MAX_SOURCES`] epochs ([`MAX_SHARED_SOURCES`] for a shared owner).
     #[error("export_too_many_sources")]
     TooManySources,
     /// `metadata.json` would exceed [`MAX_METADATA`].
@@ -84,6 +90,9 @@ pub struct Envelope<'a> {
     pub deleted: usize,
     /// Sum of the epoch sizes.
     pub bytes: u64,
+    /// Stored entries left out because they are not analytics sources (shared owners only;
+    /// always 0 for a session owner).
+    pub skipped: usize,
 }
 
 fn hex(d: Digest) -> String {
@@ -224,6 +233,122 @@ pub fn build_envelope<E>(head: &OwnerHead, max_bytes: u64) -> Result<Envelope<'_
         epochs,
         deleted,
         bytes,
+        skipped: 0,
+    })
+}
+
+/// Render the `shared-reader/v1` envelope for a shared owner's `head`, checking every limit.
+/// Touches no filesystem.
+///
+/// Only analytics sources are exported ([`shared_analytics`]); every other stored entry is left
+/// out and counted in `skipped`. A source without epochs is left out (not counted). A deleted
+/// source is exported with every epoch `sealed`. Bounds: [`MAX_SHARED_SOURCES`] sources,
+/// [`MAX_METADATA`] bytes of metadata and `max_bytes` of bodies.
+///
+/// # Errors
+/// A closed [`ExportError`] (never a `Fetch`).
+pub fn build_shared_envelope<E>(
+    head: &OwnerHead,
+    max_bytes: u64,
+) -> Result<Envelope<'_>, ExportError<E>> {
+    let Owner::Shared {
+        archive,
+        machine,
+        agent,
+    } = &head.folded.owner
+    else {
+        return Err(ExportError::Session);
+    };
+    let sequence = head
+        .folded
+        .position
+        .seq
+        .checked_add(1)
+        .ok_or(ExportError::Overflow)?;
+    let captured = head.captured_at.unix_ns().ok_or(ExportError::BadTime)?;
+    let published = head.updated_at.unix_ns().ok_or(ExportError::BadTime)?;
+    let manifest_hex = hex(head.folded.position.manifest);
+
+    let mut epochs: Vec<&EpochRecord> = Vec::new();
+    let mut sources: Vec<Value> = Vec::new();
+    let mut bodies: Vec<Value> = Vec::new();
+    let mut bytes: u64 = 0;
+    let mut deleted = 0;
+    let mut skipped = 0;
+    for (id, entry) in &head.folded.state.sources {
+        if !shared_analytics(&entry.kind, &entry.path) {
+            skipped += 1;
+            continue;
+        }
+        if entry.epochs.is_empty() {
+            continue;
+        }
+        let gone = entry.deleted_at.is_some();
+        deleted += usize::from(gone);
+        let count = entry.epochs.len();
+        for (index, record) in entry.epochs.iter().enumerate() {
+            bytes = bytes
+                .checked_add(record.size)
+                .ok_or(ExportError::TooLarge)?;
+            let n = record.epoch.n;
+            let revision = u64::from(n).checked_add(1).ok_or(ExportError::Overflow)?;
+            let last = index.checked_add(1) == Some(count);
+            let position = sources.len();
+            sources.push(json!({
+                "source_id": id.as_str(),
+                "epoch_id": n.to_string(),
+                "kind": "pi_run_record",
+                "path": entry.path,
+                "state": if last && !gone { "active" } else { "sealed" },
+                "revision": revision,
+                "captured_at_ns": captured,
+                "object": object(record).map_err(|()| ExportError::Overflow)?,
+            }));
+            bodies.push(json!({
+                "source_id": id.as_str(),
+                "epoch_id": n.to_string(),
+                "path": format!("bodies/{position:04}.bin"),
+                "sha256": hex(record.sha256),
+                "size": record.size,
+            }));
+            epochs.push(record);
+        }
+    }
+    if bytes > max_bytes {
+        return Err(ExportError::TooLarge);
+    }
+    if sources.len() > MAX_SHARED_SOURCES {
+        return Err(ExportError::TooManySources);
+    }
+    let envelope = json!({
+        "contract": "shared-reader/v1",
+        "manifest_sha256": manifest_hex,
+        "manifest": {
+            "contract": "shared-publication/v1",
+            "identity": {
+                "archive_id": archive.as_str(),
+                "machine_id": machine.as_str(),
+                "agent": agent.as_str(),
+            },
+            "publication_id": manifest_hex,
+            "sequence": sequence,
+            "captured_at_ns": captured,
+            "published_at_ns": published,
+            "sources": sources,
+        },
+        "bodies": bodies,
+    });
+    let metadata = serde_json::to_vec(&envelope).map_err(|_| ExportError::Overflow)?;
+    if metadata.len() > MAX_METADATA {
+        return Err(ExportError::MetadataTooLarge);
+    }
+    Ok(Envelope {
+        metadata,
+        sources: epochs.len(),
+        epochs,
+        deleted,
+        bytes,
+        skipped,
     })
 }
 

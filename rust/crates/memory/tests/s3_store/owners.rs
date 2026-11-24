@@ -261,3 +261,53 @@ fn owners_with_an_empty_prefix_lists_sessions_at_the_bucket_root() -> R {
     assert_eq!(text(&out.stderr), "memory: owners=1\n");
     Ok(())
 }
+
+/// Brief 56: `--shared` lists `shared/<a>/<m>/<agent>/current.json` keys, sorted, and only those.
+#[test]
+fn owners_shared_lists_shared_keys_only() -> R {
+    let server = Fake::start()?;
+    let rig = rig(&server, "own-shared-ok")?;
+    seed_key(&server, "shared/a/m/pi/current.json");
+    seed_key(&server, "shared/a/m/claude/current.json");
+    seed_key(&server, "sessions/a/m/claude/s1/current.json");
+    let out = owners_cmd(&rig, &["--shared"])?;
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(text(&out.stdout), "shared/a/m/claude\nshared/a/m/pi\n");
+    assert_eq!(text(&out.stderr), "memory: owners=2\n");
+    no_leak(&out, &server, &[]);
+    // Without the flag the shared keys are not listed.
+    let out = owners_cmd(&rig, &[])?;
+    assert_eq!(text(&out.stdout), "sessions/a/m/claude/s1\n");
+    Ok(())
+}
+
+/// Brief 56: a session-shaped or other key under `shared/`, and extra arguments, are refused.
+#[test]
+fn owners_shared_refuses_other_keys_and_arguments() -> R {
+    for (label, key) in [
+        ("own-sh-session", "shared/a/m/claude/s1/current.json"),
+        ("own-sh-manifest", "shared/a/m/pi/manifests/abc"),
+        ("own-sh-text", "shared/a/m/bogus/current.json"),
+    ] {
+        let server = Fake::start()?;
+        let rig = rig(&server, label)?;
+        seed_key(&server, key);
+        let out = owners_cmd(&rig, &["--shared"])?;
+        assert_eq!(out.status.code(), Some(1));
+        assert!(out.stdout.is_empty());
+        assert_eq!(text(&out.stderr), "memory: listing_unexpected_key\n");
+    }
+    let server = Fake::start()?;
+    let rig = rig(&server, "own-sh-usage")?;
+    for args in [
+        &["--shared", "--shared"][..],
+        &["--shared", "x"],
+        &["x", "--shared"],
+    ] {
+        let out = owners_cmd(&rig, args)?;
+        assert_eq!(out.status.code(), Some(64));
+        assert_eq!(text(&out.stderr), "memory: usage\n");
+    }
+    assert!(server.requests().is_empty());
+    Ok(())
+}

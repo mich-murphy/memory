@@ -50,6 +50,47 @@ pub(super) struct Fixture {
     canaries: Vec<(&'static str, PathBuf, PathBuf)>,
 }
 
+/// Brief 56: strings in the run record's never-stored fields; none may reach the database.
+const RUN_CANARIES: [&str; 12] = [
+    "CANARY-RUN-TASK-a1",
+    "CANARY-RUN-ERROR-b2",
+    "CANARY-RUN-TRANSCRIPT-c3",
+    "CANARY-RUN-CRITERION-d4",
+    "CANARY-RUN-EVIDENCE-e5",
+    "CANARY-RUN-REPORT-CMD-f6",
+    "CANARY-RUN-REPORT-FILE-g7",
+    "CANARY-RUN-REPORT-NOTE-h8",
+    "CANARY-RUN-COMMAND-i9",
+    "CANARY-RUN-ARG-j0",
+    "CANARY-RUN-EXTPATH-k1",
+    "90817263",
+];
+
+/// A synthetic run record (brief 56): every field the importer reads, plus the canaries.
+fn run_record() -> String {
+    let d = |c: &str| format!("sha256:{}", c.repeat(64));
+    json!({
+        "runId": "run-gate-1", "agent": "worker", "exitCode": 0, "timestamp": 1_700_000_000_000_u64,
+        "model": "pi-m", "requestedModel": "pi-m2",
+        "task": RUN_CANARIES[0], "error": RUN_CANARIES[1], "transcriptPath": RUN_CANARIES[2],
+        "usage": {"input": 5, "output": 6, "cacheRead": 1, "cacheWrite": 2, "cost": 0.25,
+            "turns": 3},
+        "launchResolvedExtensions": {"configured": [d("a"), d("b")], "effective": [d("a")],
+            "runtime": [], "required": [], "omitted": {"configured": 1},
+            "disableAmbientExtensions": true},
+        "acceptance": {"status": "passed", "evidenceStatus": "verified", "explicit": true,
+            "criteria": [{"text": RUN_CANARIES[3], "evidence": RUN_CANARIES[4]}],
+            "effectiveAcceptance": {"level": "strict"}, "reviewResult": {"status": "approved"},
+            "runtimeChecks": [{"command": RUN_CANARIES[5]}],
+            "childReport": {"commands": [RUN_CANARIES[5]], "changedFiles": [RUN_CANARIES[6]],
+                "notes": RUN_CANARIES[7]}},
+        "runner": {"type": "external-cli", "command": RUN_CANARIES[8], "args": [RUN_CANARIES[9]]},
+        "externalProcess": {"durationMs": 1200, "exitCode": 0, "pid": 90_817_263,
+            "path": RUN_CANARIES[10]},
+    })
+    .to_string()
+}
+
 pub(super) fn fixture(server: &Fake, label: &str) -> R<Fixture> {
     let rig = Rig::new(label, &server.url(), PREFIX, false)?;
     let codex = rig.add_root("codex")?;
@@ -120,7 +161,7 @@ pub(super) fn fixture(server: &Fake, label: &str) -> R<Fixture> {
             r#"{"type":"session","id":"p1"}"#,
             r#"{"type":"message","id":"pm1","message":{"role":"user","content":"pi prompt"}}"#,
             r#"{"type":"message","id":"pm2","message":{"role":"assistant","model":"pi-m","usage":{"input":4,"output":2,"cost":{"total":0.5}},"content":[{"type":"text","text":"pi answer"},{"type":"toolCall","id":"tc1","name":"bash","arguments":{"c":"ls"}}]}}"#,
-            r#"{"type":"message","id":"pm3","message":{"role":"toolResult","toolCallId":"tc1","toolName":"bash","isError":false,"durationMs":7,"content":[{"type":"text","text":"out"}]}}"#,
+            r#"{"type":"message","id":"pm3","message":{"role":"toolResult","toolCallId":"tc1","toolName":"bash","isError":false,"durationMs":7,"details":{"runId":"run-gate-1"},"content":[{"type":"text","text":"out"}]}}"#,
         ]),
     )?;
     put(
@@ -129,6 +170,12 @@ pub(super) fn fixture(server: &Fake, label: &str) -> R<Fixture> {
             r#"{"type":"message","id":"c1","message":{"role":"user","content":"child task"}}"#,
             r#"{"type":"message","id":"c2","message":{"role":"assistant","content":"child done"}}"#,
         ]),
+    )?;
+
+    // Brief 56: the run record is a shared owner's source, beside the session directory.
+    put(
+        &pi.join("sessions/--home-me--/subagent-artifacts/run1.json"),
+        &run_record(),
     )?;
 
     // Canaries: only where the writer must withhold them.
@@ -381,6 +428,23 @@ struct Want {
     roles: Value,
 }
 
+/// Brief 56: the one shared owner of the fixture.
+pub(super) fn shared_owner(rig: &Rig) -> R<String> {
+    let config = Config::load(&rig.cfg).map_err(e)?;
+    let v: Vec<String> = WalkSources::new(
+        locator_roots(&config).map_err(e)?,
+        WalkLimits::default(),
+        SharedFs::new(),
+    )
+    .enumerate()
+    .iter()
+    .map(|(o, _)| owner_prefix(o))
+    .filter(|t| t.starts_with("shared/"))
+    .collect();
+    assert_eq!(v.len(), 1, "{v:?}");
+    v.into_iter().next().ok_or_else(|| "shared".to_owned())
+}
+
 fn find<'a>(owners: &'a [String], w: &Want) -> R<&'a String> {
     let hits: Vec<_> = owners
         .iter()
@@ -408,7 +472,11 @@ pub(super) fn captured(fx: &Fixture) -> R<memory::assemble::ProductionDaemon> {
     let mut daemon = start_from_config(&fx.rig.state, &fx.rig.cfg).map_err(e)?;
     let report = daemon.reconcile_once().map_err(e)?;
     assert_eq!((report.failed, report.parked), (0, 0));
-    assert_eq!(report.landed, 6, "six owners land");
+    // Brief 56: was 6; the fixture gained a shared owner (the Pi run record).
+    assert_eq!(
+        report.landed, 7,
+        "six session owners and one shared owner land"
+    );
     Ok(daemon)
 }
 
@@ -493,6 +561,29 @@ fn consumer_gate_claude_codex_pi_export_imports_and_reports() -> R {
         first.push(entry(w, text, &dir));
         dirs.push(dir);
     }
+    // Brief 56: the built binary exports the shared Pi owner (one run record).
+    let shared_dir = out.join("shared");
+    fs::create_dir_all(&out).map_err(e)?;
+    let r = run(
+        &fx.rig.dir,
+        &[
+            "export".as_ref(),
+            shared_owner(&fx.rig)?.as_ref(),
+            "--out".as_ref(),
+            shared_dir.as_os_str(),
+        ],
+    )?;
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&r.stdout),
+        String::from_utf8_lossy(&r.stderr)
+    );
+    assert_eq!(r.status.code(), Some(0), "{said}");
+    assert!(
+        said.contains("exported sources=1 deleted=0") && said.contains("skipped="),
+        "{said}"
+    );
+
     // `manifest_sha256` and `publication_id` are the stored head's digest, and a second export
     // of the same head is byte-identical.
     for (i, w) in phase1().iter().enumerate() {
@@ -600,8 +691,11 @@ fn consumer_gate_claude_codex_pi_export_imports_and_reports() -> R {
     let canaries: Vec<&str> = fx.canaries.iter().map(|c| c.0).collect();
     fs::write(
         &expect,
-        serde_json::to_vec(&json!({"phase1": first, "phase2": second, "canaries": canaries}))
-            .map_err(e)?,
+        serde_json::to_vec(
+            &json!({"phase1": first, "phase2": second, "canaries": canaries,
+            "shared": shared_dir, "run_canaries": RUN_CANARIES}),
+        )
+        .map_err(e)?,
     )
     .map_err(e)?;
     let tools = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tools/analytics");

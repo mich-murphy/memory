@@ -105,7 +105,7 @@ duckdb -readonly .analytics/publications.duckdb "SELECT agent, models, harness_v
 
 ## Usage, tool outcomes and the setup actually used (brief 55)
 
-`SETUP_VERSION = 2`. The one `session_setup_version` row per session governs `session_setup`,
+`SETUP_VERSION = 3` (brief 56 added `pi_run_ref`). The one `session_setup_version` row per session governs `session_setup`,
 `session_usage` and `tool_outcome`: an unchanged publication recorded with an older version is
 re-derived (all three tables) in one transaction, a new publication derives all three, and
 `--reset` clears them.
@@ -125,6 +125,35 @@ re-derived (all three tables) in one transaction, a new publication derives all 
 - Import result: `setup_skipped` (setup facts) and `usage_skipped` (usage and tool outcomes).
 - `report(summary=True)` gains `setup` (top 20 each by sessions); `{}` on a database without the
   new tables. Read-only opens create nothing.
+
+## Pi subagent run records (brief 56)
+
+`publications.import_shared(EXPORT, DB, reset=False)` imports a `shared-reader/v1` /
+`shared-publication/v1` export (`memory export` of a shared Pi owner), validated as strictly as a
+session export (closed keys, at most 16,384 sources, 8 MiB of metadata, body sha256 and size
+checked while reading, source `kind` = `pi_run_record`). It binds the archive like `import_export`
+(`archive_mismatch`), replaces one owner's rows in one transaction, and returns `unchanged` when
+the owner's `publication_id` and `pi_runs.RUNS_VERSION` are unchanged. A session export given to
+it, or a shared export given to `import_export`, fails `unsupported_contract`. `--reset` clears
+the run tables too.
+
+- `pi_run`: one row per run record (columns in brief 56). An invalid value is NULL and counted in
+  `runs_skipped`; a record that is not a JSON object or lacks a valid `runId` is not a row and is
+  counted. `pi_run_extension`: extension digests per list (`sha256:<hex>` only). `pi_run_owner`:
+  one row per shared owner (publication, version).
+- Never stored: task, error text, transcript path, child report content, criteria text or
+  evidence, commands, arguments, paths, pid, the file name.
+- `pi_run_ref` is derived from Pi session bodies under `SETUP_VERSION` (a version-2 database
+  re-derives once), only from the structured fields: toolResult `details.runId` (`tool_result`),
+  `details.mission.workflowChildren[]` and `details.workflowChildren.children[]`
+  (`workflow_child`), `details.pending[]` (`pending`), and the custom messages
+  `subagent_supervisor_request`, `subagent_supervisor_reply`, `subagent_control_notice`.
+  One row per (source, run id, via) first sighting.
+- View `pi_run_dim`: `pi_run` plus the earliest referencing session and `referencing_sessions`.
+  Run usage is per-run detail and is never added to session totals (it is already in
+  `session_usage` through the run's child session).
+- `report(summary=True)` gains `runs`; `{}` when the tables are absent. Tables and views are
+  created on writable opens only.
 
 ## Legacy research pipeline (historical reference)
 
