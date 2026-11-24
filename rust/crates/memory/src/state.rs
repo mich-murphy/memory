@@ -193,8 +193,6 @@ pub struct Schema {
 /// The daemon's state files with a fixed schema each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StateFile {
-    /// `roots.json`, learned custom roots.
-    Roots,
     /// `index.json`, a derived cache.
     Index,
     /// `status.json`, parked list and counters.
@@ -206,7 +204,6 @@ impl StateFile {
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
-            Self::Roots => "roots.json",
             Self::Index => "index.json",
             Self::Status => "status.json",
         }
@@ -216,7 +213,6 @@ impl StateFile {
     #[must_use]
     pub const fn schema(self) -> Schema {
         let name = match self {
-            Self::Roots => "memory.roots",
             Self::Index => "memory.index",
             Self::Status => "memory.status",
         };

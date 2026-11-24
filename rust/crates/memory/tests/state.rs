@@ -113,7 +113,7 @@ fn round_trip_and_modes() -> R {
         .filter(|x| x.file_name().to_string_lossy().contains(".tmp-"))
         .count();
     assert_eq!(leftovers, 0);
-    for file in [StateFile::Roots, StateFile::Status] {
+    for file in [StateFile::Index, StateFile::Status] {
         assert_eq!(
             missing(&dir.read(file)),
             Some(MissingReason::NotFound),

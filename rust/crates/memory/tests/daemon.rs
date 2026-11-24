@@ -2638,7 +2638,7 @@ fn state_api_failure_table() -> R {
         Some(StateError::TooLarge)
     );
     set_mode(&tmp.root(), 0o500)?;
-    let got = state.write(StateFile::Roots, b"x").err();
+    let got = state.write(StateFile::Status, b"x").err();
     set_mode(&tmp.root(), 0o700)?;
     assert_eq!(got, Some(StateError::Io(ErrorKind::PermissionDenied)));
     Ok(())
