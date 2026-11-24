@@ -61,9 +61,9 @@ pub(super) fn fixture(server: &Fake, label: &str) -> R<Fixture> {
         &jl(&[
             r#"{"type":"user","uuid":"u1","version":"9.9.9","message":{"role":"user","content":"hello claude"}}"#,
             r#"{"type":"attachment","uuid":"at1","attachment":{"type":"instructions","files":[{"path":"/home/me/proj/CLAUDE.md","type":"Project"}]}}"#,
-            r#"{"type":"assistant","uuid":"a1","message":{"role":"assistant","model":"claude-x","content":[{"type":"text","text":"hi"}]}}"#,
+            r#"{"type":"assistant","uuid":"a1","message":{"role":"assistant","model":"claude-x","usage":{"input_tokens":3,"output_tokens":4},"content":[{"type":"text","text":"hi"}]}}"#,
             r#"{"type":"assistant","uuid":"a2","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"p":1}}]}}"#,
-            r#"{"type":"user","uuid":"u2","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}"#,
+            r#"{"type":"user","uuid":"u2","toolUseResult":{"durationMs":5},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}"#,
         ]),
     )?;
     put(
@@ -99,6 +99,7 @@ pub(super) fn fixture(server: &Fake, label: &str) -> R<Fixture> {
             r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"codex answer"}]}}"#,
             r#"{"type":"response_item","payload":{"type":"function_call","name":"shell","call_id":"c1","arguments":"{\"cmd\":\"ls\"}"}}"#,
             r#"{"type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"files"}}"#,
+            r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":9},"last_token_usage":{"input_tokens":6,"cached_input_tokens":2,"output_tokens":3}}}}"#,
         ]),
     )?;
     let zst = jl(&[
@@ -118,8 +119,8 @@ pub(super) fn fixture(server: &Fake, label: &str) -> R<Fixture> {
         &jl(&[
             r#"{"type":"session","id":"p1"}"#,
             r#"{"type":"message","id":"pm1","message":{"role":"user","content":"pi prompt"}}"#,
-            r#"{"type":"message","id":"pm2","message":{"role":"assistant","model":"pi-m","content":[{"type":"text","text":"pi answer"},{"type":"toolCall","id":"tc1","name":"bash","arguments":{"c":"ls"}}]}}"#,
-            r#"{"type":"message","id":"pm3","message":{"role":"toolResult","toolCallId":"tc1","toolName":"bash","content":[{"type":"text","text":"out"}]}}"#,
+            r#"{"type":"message","id":"pm2","message":{"role":"assistant","model":"pi-m","usage":{"input":4,"output":2,"cost":{"total":0.5}},"content":[{"type":"text","text":"pi answer"},{"type":"toolCall","id":"tc1","name":"bash","arguments":{"c":"ls"}}]}}"#,
+            r#"{"type":"message","id":"pm3","message":{"role":"toolResult","toolCallId":"tc1","toolName":"bash","isError":false,"durationMs":7,"content":[{"type":"text","text":"out"}]}}"#,
         ]),
     )?;
     put(
@@ -447,7 +448,8 @@ fn phase1() -> Vec<Want> {
             needle: CX,
             sources: 1,
             // Brief 53: was 6; the fixture gained a `turn_context` record (a system event).
-            events: 7,
+            // Brief 55: was 7; the fixture gained a `token_count` record (a system event).
+            events: 8,
             issues: json!({}),
             roles: json!({"main": 1}),
         },
