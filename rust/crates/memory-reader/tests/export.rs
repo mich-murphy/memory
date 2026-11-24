@@ -1235,3 +1235,26 @@ fn shared_limits_and_owner_kinds() -> R {
     );
     Ok(())
 }
+
+/// Brief 56 (parent, teeth): a deleted run record with no epochs is left out entirely; it is
+/// neither exported nor counted as deleted or skipped.
+#[test]
+fn shared_deleted_source_without_epochs_is_left_out() -> R {
+    let mut objects = Objects::new();
+    let live = epoch(0, &[chunk(1, 0)], &mut objects)?;
+    let h = shared_head(vec![
+        ("a", entry(SourceKind::PiAux, RUN, vec![live], false)?),
+        (
+            "b",
+            entry(
+                SourceKind::PiAux,
+                "sessions/--c--/subagent-artifacts/run2.json",
+                vec![],
+                true,
+            )?,
+        ),
+    ])?;
+    let env = build_shared_envelope::<()>(&h, 1 << 30).map_err(bad)?;
+    assert_eq!((env.sources, env.deleted, env.skipped), (1, 0, 0));
+    Ok(())
+}
