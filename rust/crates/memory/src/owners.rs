@@ -21,6 +21,8 @@ use std::process::ExitCode;
 
 /// The key family listed, below the configured prefix.
 const FAMILY: &str = "sessions/";
+/// The shared-owner key family (`memory owners --shared`, brief 56).
+const SHARED_FAMILY: &str = "shared/";
 /// The suffix every listed key must end with.
 const CURRENT: &str = "/current.json";
 /// Most pages followed before the listing is declared a loop.
@@ -48,8 +50,28 @@ pub enum Failure {
 /// # Errors
 /// A [`Failure`]; no partial result is returned.
 pub fn collect_owners(
+    list: impl FnMut(Option<&str>) -> Result<Page, StoreError>,
+) -> Result<Vec<String>, Failure> {
+    collect_family(false, list)
+}
+
+/// As [`collect_owners`] for the `shared/` family: every key must be
+/// `shared/<archive>/<machine>/<agent>/current.json`; a session-shaped or any other key is
+/// [`Failure::UnexpectedKey`].
+///
+/// # Errors
+/// A [`Failure`]; no partial result is returned.
+pub fn collect_shared_owners(
+    list: impl FnMut(Option<&str>) -> Result<Page, StoreError>,
+) -> Result<Vec<String>, Failure> {
+    collect_family(true, list)
+}
+
+fn collect_family(
+    shared: bool,
     mut list: impl FnMut(Option<&str>) -> Result<Page, StoreError>,
 ) -> Result<Vec<String>, Failure> {
+    let family = if shared { SHARED_FAMILY } else { FAMILY };
     let mut owners = BTreeSet::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut token: Option<String> = None;
@@ -66,10 +88,10 @@ pub fn collect_owners(
         for key in &page.keys {
             let text = key
                 .strip_suffix(CURRENT)
-                .filter(|_| key.starts_with(FAMILY))
+                .filter(|_| key.starts_with(family))
                 .ok_or(Failure::UnexpectedKey)?;
-            match parse_owner_prefix(text) {
-                Ok(Owner::Session(_)) => {
+            match (parse_owner_prefix(text), shared) {
+                (Ok(Owner::Session(_)), false) | (Ok(Owner::Shared { .. }), true) => {
                     owners.insert(text.to_owned());
                 }
                 _ => return Err(Failure::UnexpectedKey),
@@ -92,13 +114,19 @@ fn fail(code: &str, exit: u8) -> ExitCode {
     ExitCode::from(exit)
 }
 
-/// Entry of `memory owners`; `args` follow the word `owners` and must be empty.
+/// Entry of `memory owners [--shared]`; `args` follow the word `owners` and are empty or the one
+/// word `--shared` (list `<prefix>shared/` instead, brief 56); anything else is `usage`.
 ///
 /// Exit codes: 0 listed (also none), 1 failed, 2 config or token, 64 usage, 75 a transient store
 /// failure (retry), 77 the store refused the credential. A store failure prints
 /// `memory: store cause=<code>`. Nothing is printed on stdout unless the whole listing succeeded.
 #[must_use]
 pub fn main_entry(mut args: impl Iterator<Item = OsString>) -> ExitCode {
+    let shared = match args.next() {
+        None => false,
+        Some(a) if a == "--shared" => true,
+        Some(_) => return fail("usage", EXIT_USAGE),
+    };
     if args.next().is_some() {
         return fail("usage", EXIT_USAGE);
     }
@@ -113,7 +141,12 @@ pub fn main_entry(mut args: impl Iterator<Item = OsString>) -> ExitCode {
         Ok(store) => store,
         Err(error) => return fail(error.code(), error.exit_code()),
     };
-    match collect_owners(|token| store.list_page(FAMILY, token)) {
+    let listed = if shared {
+        collect_shared_owners(|token| store.list_page(SHARED_FAMILY, token))
+    } else {
+        collect_owners(|token| store.list_page(FAMILY, token))
+    };
+    match listed {
         Ok(owners) => {
             let mut out = std::io::stdout().lock();
             for owner in &owners {
