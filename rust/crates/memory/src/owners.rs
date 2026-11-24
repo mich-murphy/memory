@@ -1,6 +1,10 @@
 //! `memory owners`: list every session owner that has a `current.json` under the configured
 //! prefix, by ListObjectsV2 over `<prefix>sessions/`.
 //!
+//! `memory owners --shared` (brief 56) lists `<prefix>shared/` instead: keys must be
+//! `shared/<archive>/<machine>/<agent>/current.json`, and a session-shaped or any other key is
+//! `listing_unexpected_key`. Any other argument is `usage`.
+//!
 //! stdout: owner texts, sorted and deduplicated, one per line, in the form `memory export` and
 //! `memory restore` take. stderr: `memory: owners=N` or one closed `memory: <code>` line; no
 //! endpoint, key, token or prefix. A store failure is `memory: store cause=<code>` (the closed
