@@ -139,8 +139,8 @@ the run tables too.
 
 - `pi_run`: one row per run record (columns in brief 56). An invalid value is NULL and counted in
   `runs_skipped`; a record that is not a JSON object or lacks a valid `runId` is not a row and is
-  counted. `pi_run_extension`: extension digests per list (`sha256:<hex>` only). `pi_run_owner`:
-  one row per shared owner (publication, version).
+  counted. `pi_run_extension`: extension digests per list (`sha256:` and 16 to 64 lowercase hex
+  characters only). `pi_run_owner`: one row per shared owner (publication, version).
 - Never stored: task, error text, transcript path, child report content, criteria text or
   evidence, commands, arguments, paths, pid, the file name.
 - `pi_run_ref` is derived from Pi session bodies under `SETUP_VERSION` (a version-2 database
