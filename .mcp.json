@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "gopls": {
-      "command": "go",
-      "args": ["tool", "-modfile=tools/gopls/go.mod", "gopls", "mcp"]
-    }
-  }
-}

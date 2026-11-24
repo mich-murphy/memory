@@ -1,5 +1,0 @@
-go test fuzz v1
-[]byte("{\"hooks\":{\"Stop\":[]}}")
-bool(true)
-bool(true)
-string("0")
