@@ -23,7 +23,6 @@
 //! path itself, so an unrelated sibling appearing elsewhere never changes a result.
 use crate::domain::{
     Agent, ArchiveId, MachineId, Owner, SessionId, SessionKey, SourceClass, SourceId, SourceKind,
-    WithholdReason,
 };
 use sha2::{Digest, Sha256 as Hasher};
 use std::collections::BTreeMap;
@@ -349,18 +348,6 @@ pub enum Located {
     /// A known non-session file (vendor code, cache, backup; D54/D55, brief 46): never
     /// captured, counted apart from `UnknownKind`.
     Ignored,
-}
-
-impl Located {
-    /// Fixed local reason when the path is withheld, `None` for a capturable source.
-    pub fn withhold_reason(&self) -> Option<WithholdReason> {
-        match self {
-            Self::Source { .. } => None,
-            Self::UnknownKind => Some(WithholdReason::UnknownKind),
-            Self::UnknownOwner => Some(WithholdReason::UnknownOwner),
-            Self::Ignored => Some(WithholdReason::Ignored),
-        }
-    }
 }
 
 // ---- matching helpers -------------------------------------------------------------------

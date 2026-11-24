@@ -772,6 +772,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         self.stop = Box::new(probe);
     }
 
+    #[cfg(feature = "sim")]
     /// Install the sleep used for commit pauses (decision D44). Default: a real
     /// `std::thread::sleep`. The stop probe is not consulted during a pause.
     pub fn set_sleep(&mut self, sleep: impl FnMut(Duration) + 'static) {
@@ -796,14 +797,17 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         &self.status
     }
     /// The filesystem seam (tests mutate sources through it).
+    #[cfg(feature = "sim")]
     pub const fn fs_mut(&mut self) -> &mut F {
         &mut self.fs
     }
     /// The store seam.
+    #[cfg(feature = "sim")]
     pub const fn store_mut(&mut self) -> &mut S {
         &mut self.store
     }
     /// The clock seam.
+    #[cfg(feature = "sim")]
     pub const fn clock_mut(&mut self) -> &mut C {
         &mut self.clock
     }

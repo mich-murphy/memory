@@ -35,8 +35,6 @@ use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 
-/// Exit code: something is parked, the host is paused or `status.json` is not loaded.
-pub const EXIT_ATTENTION: u8 = 1;
 /// Exit code: usage error.
 pub const EXIT_USAGE: u8 = 64;
 

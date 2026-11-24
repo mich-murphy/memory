@@ -195,11 +195,6 @@ fn resolve(path: &Path, root: &Path, located: &Located) -> (ResolvedSourceFacts,
     (facts, final_path)
 }
 
-/// Resolve one path for privacy admission. Never panics; unresolved is a cleared flag.
-pub fn resolve_facts(path: &Path, root: &Path, located: &Located) -> ResolvedSourceFacts {
-    resolve(path, root, located).0
-}
-
 /// Build a capture source for a located file. `None` for withheld (unlocated) rows, which
 /// have no id, kind or owner to capture under. The registered path is the canonical final
 /// path (the filesystem seam never follows links), or the logical path when unresolved so the
