@@ -828,12 +828,22 @@ def main():
     imp.add_argument('export_dir', type=Path)
     imp.add_argument('--database', type=Path, required=True)
     imp.add_argument('--reset', action='store_true')
+    # A `shared-reader/v1` export (`memory export shared/...`), brief 56.
+    shared = sub.add_parser('import-shared')
+    shared.add_argument('export_dir', type=Path)
+    shared.add_argument('--database', type=Path, required=True)
+    shared.add_argument('--reset', action='store_true')
     rep = sub.add_parser('report')
     rep.add_argument('--database', type=Path, required=True)
+    rep.add_argument('--summary', action='store_true')
     args = parser.parse_args()
     try:
-        result = (import_export(args.export_dir, args.database, reset=args.reset)
-                  if args.command == 'import' else report(args.database))
+        if args.command == 'import':
+            result = import_export(args.export_dir, args.database, reset=args.reset)
+        elif args.command == 'import-shared':
+            result = import_shared(args.export_dir, args.database, reset=args.reset)
+        else:
+            result = report(args.database, summary=args.summary)
     except Exception as exc:
         print(str(exc) if isinstance(exc, ImportFailure) else 'consumer_failed', file=sys.stderr)
         return 1

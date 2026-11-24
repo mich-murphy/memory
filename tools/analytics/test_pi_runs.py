@@ -62,6 +62,38 @@ class Shared(unittest.TestCase):
         self.assertEqual(str(cm.exception), code)
 
 
+class CommandLineTest(Shared):
+    """`publications.py import-shared` and `report --summary` (new-machine guide)."""
+
+    def main(self, *argv):
+        import contextlib
+        import io
+        from unittest.mock import patch
+        out, err = io.StringIO(), io.StringIO()
+        with patch('sys.argv', ['publications.py', *argv]), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(err):
+            code = publications.main()
+        return code, out.getvalue(), err.getvalue()
+
+    def test_import_shared_then_unchanged_and_summary_report(self):
+        d = str(self.build())
+        code, out, _ = self.main('import-shared', d, '--database', str(self.db))
+        result = json.loads(out)
+        self.assertEqual((code, result['status'], result['runs']), (0, 'imported', 1))
+        code, out, _ = self.main('import-shared', d, '--database', str(self.db))
+        self.assertEqual((code, json.loads(out)['status']), (0, 'unchanged'))
+        code, out, _ = self.main('report', '--database', str(self.db), '--summary')
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)['runs']['totals']['runs'], 1)
+        code, out, _ = self.main('report', '--database', str(self.db))
+        self.assertEqual(code, 0)
+        self.assertNotIn('runs', json.loads(out))
+
+    def test_cross_contract_refused_with_a_closed_code(self):
+        code, out, err = self.main('import', str(self.build()), '--database', str(self.db))
+        self.assertEqual((code, out, err.strip()), (1, '', 'unsupported_contract'))
+
+
 class ImportSharedTest(Shared):
     def test_imports_and_unchanged(self):
         d = self.build()

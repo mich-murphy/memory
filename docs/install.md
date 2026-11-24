@@ -1,5 +1,116 @@
 # Installation and removal
 
+## New machine (Rust `memory`, current)
+
+This is how the running hosts (this Mac and dev-01) were set up. Every step is local to the new
+host; nothing in the bucket changes until the daemon starts.
+
+1. **Build** from a tagged or merged commit, inside the pinned toolchain:
+
+   ```sh
+   git clone git@github.com:mich-murphy/memory.git && cd memory
+   nix develop .#rust --command bash -c 'cd rust && cargo build --release --locked -p memory'
+   mkdir -p ~/.local/libexec/memory
+   cp rust/target/release/memory ~/.local/libexec/memory/.memory.new
+   chmod 755 ~/.local/libexec/memory/.memory.new
+   mv -f ~/.local/libexec/memory/.memory.new ~/.local/libexec/memory/memory
+   ```
+
+   The binary must be named `memory` and be run by an absolute path (`install_binary_name`,
+   exit 2, otherwise). On Linux the binary links against Nix store glibc and `libgcc_s`: pin
+   them so a garbage collection cannot remove them from under the daemon:
+
+   ```sh
+   mkdir -p ~/.local/libexec/memory/gcroots
+   for p in $(ldd ~/.local/libexec/memory/memory | grep -o '/nix/store/[^/]*' | sort -u); do
+     nix-store --add-root ~/.local/libexec/memory/gcroots/"${p#/nix/store/*-}" --realise "$p"
+   done
+   ```
+
+2. **Token file**, TOML with exactly two keys, mode 0600 (group or world bits are refused,
+   `config_token_permissions`). Its content is never printed or logged:
+
+   ```toml
+   access_key_id = "..."
+   secret_access_key = "..."
+   ```
+
+3. **`~/.local/state/memory/config.toml`** (directory 0700). Unknown keys are refused, and every
+   error is a closed code that never echoes a value:
+
+   ```toml
+   archive_id = "<the archive id every host shares>"
+   machine_id = "<a new id, unique to this host>"
+   bucket = "agent-sessions"
+   endpoint = "https://<the S3-compatible endpoint of the bucket>"
+   region = "auto"            # default "auto"
+   prefix = ""                # required; "" is the bucket root, else "a/b/"
+   token_path = "/home/<user>/.local/state/memory/token.toml"   # absolute
+   window = { quiet = 60, cap = 300 }                            # optional, seconds
+
+   [[roots]]
+   agent = "claude"
+   path = "/home/<user>/.claude"
+
+   [[roots]]
+   agent = "codex"
+   path = "/home/<user>/.codex"
+
+   [[roots]]
+   agent = "pi"
+   path = "/home/<user>/.pi/agent"
+   ```
+
+   Use the same `archive_id` as the other hosts so their sessions land in one archive, and a
+   `machine_id` no other host uses (ids are `[A-Za-z0-9._:-]`, at most 1,024 bytes). List one
+   root per agent installed on the host; roots must be absolute and must not overlap. A root
+   that does not exist yet is fine.
+
+4. **Install** the service file and the hooks. `MEMORY_STATE_DIR` must be unset (the hooks run
+   without it). Preview first with `--dry-run`:
+
+   ```sh
+   ~/.local/libexec/memory/memory install --dry-run
+   ~/.local/libexec/memory/memory install
+   ```
+
+   It writes the launchd agent (`~/Library/LaunchAgents/memory.plist`) or the systemd user unit
+   (see Linux below), the Claude `settings.json` and Codex `hooks.json` hook entries and the Pi
+   extension `~/.pi/agent/extensions/memory.ts`, backing up any file it changes. It prints the
+   commands it does not run as `next:` lines: on macOS
+   `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/memory.plist`; on Linux
+   `systemctl --user daemon-reload`, `systemctl --user enable --now memory.service` and
+   `loginctl enable-linger $USER`; and, when it wrote Codex hooks, approving them in Codex
+   `/hooks`. Run them.
+
+5. **Verify.** The first round captures the backlog; wait for its `round cause=start` line in
+   `~/Library/Logs/memory/daemon.log` (macOS) or `journalctl --user -u memory` (Linux), with no
+   `WARN` or `ERROR`. Then `memory status` (local, instant) and `memory check` (fetches every
+   piece; exit 0 with `mismatch=0` and `remote_only=0`).
+
+**Upgrade:** build the new commit, copy the current binary aside, swap the new one in as in step
+1 and restart (`launchctl kickstart -k gui/$(id -u)/memory` or
+`systemctl --user restart memory.service`); the hook commands name the stable path, so Codex's
+hook approval stays valid. On Linux repeat the GC-root step if `ldd` names new store paths.
+**Remove:** `memory uninstall`, then the `next:` lines it prints; the archive is never touched.
+
+**Analytics** read the archive through the binary, never the bucket directly:
+
+```sh
+memory owners > owners.txt                 # session owners, one per line
+memory owners --shared > shared.txt        # shared owners (Pi subagent run records)
+memory export "<owner>" --out exports/<n>  # one directory per owner
+py=.analytics-venv/bin/python; db=.analytics/publications.duckdb
+$py tools/analytics/publications.py import exports/<n> --database $db
+$py tools/analytics/publications.py import-shared exports/<n> --database $db
+$py tools/analytics/publications.py report --database $db --summary
+```
+
+Imports are idempotent (`unchanged` on a repeat). The tables and views are described in
+[tools/analytics/README.md](../tools/analytics/README.md).
+
+## Go candidate and legacy mechanics (historical)
+
 > **Scope:** These are binary installation/removal and legacy managed-hook mechanics,
 > not candidate service activation or controlled cutover instructions. Preserve machine
 > IDs, exclusions, learned roots, original sources and pending state. See the
