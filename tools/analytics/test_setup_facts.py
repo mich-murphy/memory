@@ -250,10 +250,17 @@ class SetupFactsTest(Base):
         rows = self.run_import('claude', [
             {'type': 'assistant', 'attributionSkill': 'sk', 'attributionPlugin': 'pl@m',
              'attributionMcpServer': 'srv', 'message': {'role': 'assistant', 'content': 'a'}},
-            {'type': 'assistant', 'attributionSkill': 'bad name', 'message': {'role': 'assistant'}}])
-        for want in (('skill_used', 'sk', ''), ('plugin_used', 'pl@m', ''), ('mcp_server_used', 'srv', '')):
+            {'type': 'assistant', 'attributionSkill': 'bad  name', 'message': {'role': 'assistant'}},
+            {'type': 'assistant', 'attributionSkill': ' lead', 'message': {'role': 'assistant'}},
+            {'type': 'assistant', 'attributionSkill': 'tab\tname', 'message': {'role': 'assistant'}},
+            {'type': 'assistant', 'attributionSkill': 'x' * 101, 'message': {'role': 'assistant'}},
+            # Parent (brief 55 real-data run): a claude.ai connector name has single spaces.
+            {'type': 'assistant', 'attributionMcpServer': 'claude.ai Gmail Box',
+             'message': {'role': 'assistant'}}])
+        for want in (('skill_used', 'sk', ''), ('plugin_used', 'pl@m', ''), ('mcp_server_used', 'srv', ''),
+                     ('mcp_server_used', 'claude.ai Gmail Box', '')):
             self.assertIn(want, rows)
-        self.assertFalse([r for r in rows if r[1] == 'bad name'])
+        self.assertFalse([r for r in rows if r[0] == 'skill_used' and r[1] != 'sk'])
         rows = self.run_import('codex', [
             {'type': 'event_msg', 'payload': {'type': 'item_completed', 'item': {
                 'type': 'McpToolCall', 'server': 's1', 'pluginId': 'p1',

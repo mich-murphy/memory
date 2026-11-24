@@ -30,8 +30,11 @@ FACTS = frozenset((
     'extension_used'))
 
 # Used facts carry only an identifier-like name (brief 55); anything else is skipped and counted.
+# Parent (brief 55 real-data run): claude.ai connectors are named with single internal spaces
+# (5 names, 1,959 uses here, the same strings brief 53 stores as `mcp_server_available`), so words
+# of identifier characters joined by one space are allowed; at most 100 characters.
 USED = frozenset(('skill_used', 'plugin_used', 'mcp_server_used', 'extension_used'))
-USED_NAME = re.compile(r'[A-Za-z0-9._:@-]{1,100}')
+USED_NAME = re.compile(r'(?=.{1,100}\Z)[A-Za-z0-9._:@-]+(?: [A-Za-z0-9._:@-]+)*', re.DOTALL)
 
 SETUP_COLUMNS = {'trace_id': 'VARCHAR', 'line': 'BIGINT', 'timestamp': 'VARCHAR',
                  'fact': 'VARCHAR', 'name': 'VARCHAR', 'value': 'VARCHAR'}
