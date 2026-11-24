@@ -33,7 +33,6 @@ mod gitleaks;
 mod launch;
 mod names;
 mod scan;
-mod text;
 
 pub(crate) use launch::{LAUNCH_ARGV_MAX, LAUNCH_ENV_MAX};
 pub use launch::{SanitizedLaunch, sanitize_launch};
@@ -44,8 +43,6 @@ use sha2::{Digest, Sha256};
 
 /// Explicit semantic version; bump for parser, reference, copy or guard changes.
 pub const TRANSFORM_VERSION: &str = "memory.privacy/2";
-/// Whole-document protected input limit. Never falls back to raw on overflow.
-pub const MAX_PROTECTED_BYTES: usize = 8 * 1024 * 1024;
 
 /// Fixed, content-free withholding reasons.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
@@ -100,10 +97,6 @@ pub enum UnknownReason {
 pub enum Profile {
     /// Safe transcript bytes, never text-DLP scanned.
     Transcript,
-    /// Known configuration; recognized basenames always select structural rules.
-    Config,
-    /// Known small non-transcript assets subject to assignment guard.
-    TextAsset,
     /// Whole-file content scan (D54, brief 47): published whole or withheld whole, never
     /// prefix-stable, bound to the rules digest.
     Scanned,
@@ -167,18 +160,10 @@ pub struct AdmittedSource {
 
 impl AdmittedSource {
     /// True only when `transform(prefix ++ delta) == prefix ++ transform(delta)` for every
-    /// split: no structural scrubbing (no recognized protected document) and no whole-text
-    /// check (Config/TextAsset scan across lines). Only then may a shell transform a delta alone.
+    /// split: no whole-file content scan (`Profile::Scanned`). Only then may a shell transform
+    /// a delta alone.
     pub fn prefix_stable(&self) -> bool {
-        !self
-            .facts
-            .identities
-            .iter()
-            .any(|name| document::recognizes(name))
-            && !matches!(
-                self.facts.profile,
-                Profile::Config | Profile::TextAsset | Profile::Scanned
-            )
+        self.facts.profile != Profile::Scanned
     }
 }
 
@@ -224,7 +209,6 @@ pub enum Authorization {
 pub fn rules_digest() -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(TRANSFORM_VERSION.as_bytes());
-    document::digest_rules(&mut h);
     scan::digest_rules(&mut h);
     h.finalize().into()
 }
@@ -290,8 +274,6 @@ fn binding(context: &PolicyContext, facts: &ResolvedSourceFacts) -> [u8; 32] {
     }
     h.update([match profile {
         Profile::Transcript => 0,
-        Profile::Config => 1,
-        Profile::TextAsset => 2,
         Profile::OtherKnown => 3,
         Profile::Unknown => 4,
         Profile::Scanned => 5,
@@ -310,12 +292,7 @@ pub fn admit(context: &PolicyContext, facts: ResolvedSourceFacts) -> Admission {
     if !facts.path_resolved || facts.identities.is_empty() || facts.file_identity.is_none() {
         return Admission::Unknown(UnknownReason::PathUnresolvable);
     }
-    if (matches!(
-        facts.profile,
-        Profile::Config | Profile::TextAsset | Profile::Scanned
-    ) || facts.identities.iter().any(|p| document::recognizes(p)))
-        && context.rules != Some(rules_digest())
-    {
+    if facts.profile == Profile::Scanned && context.rules != Some(rules_digest()) {
         return Admission::Unknown(UnknownReason::RulesUnavailable);
     }
     for path in &facts.identities {
@@ -364,23 +341,7 @@ pub fn transform(source: &AdmittedSource, bytes: &[u8]) -> Result<RedactedBytes,
 /// # Errors
 /// As [`transform`].
 pub fn transform_owned(source: &AdmittedSource, bytes: Vec<u8>) -> Result<RedactedBytes, Reason> {
-    let protected = source
-        .facts
-        .identities
-        .iter()
-        .any(|name| document::recognizes(name));
-    if protected && bytes.len() > MAX_PROTECTED_BYTES {
-        return Err(Reason::SourceLimit);
-    }
-    let mut out = bytes;
-    for name in &source.facts.identities {
-        if document::recognizes(name) {
-            out = document::scrub(name, &out)?;
-        }
-    }
-    if matches!(source.facts.profile, Profile::Config | Profile::TextAsset) {
-        text::check(&source.facts.identities, &out)?;
-    }
+    let out = bytes;
     if source.facts.profile == Profile::Scanned {
         scan::check(&out)?;
     }

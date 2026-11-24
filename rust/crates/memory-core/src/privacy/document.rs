@@ -2,9 +2,11 @@ use super::{Reason, names};
 use serde::Deserializer;
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde_json::value::RawValue;
-use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fmt;
+
+/// Whole-document input limit of `scrub` (launch argv JSON). Never falls back to raw.
+const MAX_PROTECTED_BYTES: usize = 8 * 1024 * 1024;
 
 // Typed executable rules are also the canonical digest input. There is no second
 // textual specification or permissive unknown-mode parser to drift from them.
@@ -24,18 +26,6 @@ enum Mode {
     Commands,
     Url,
     Args,
-}
-impl Mode {
-    fn code(self) -> u8 {
-        match self {
-            Self::Nothing => b'N',
-            Self::References => b'R',
-            Self::Environment => b'E',
-            Self::Commands => b'C',
-            Self::Url => b'U',
-            Self::Args => b'A',
-        }
-    }
 }
 const CONFIGS: &[(&[&str], Family)] = &[
     (&["claude.json", ".claude.json"], Family::Claude),
@@ -88,9 +78,6 @@ fn kind(name: &str) -> Option<Family> {
         .iter()
         .find_map(|(names, family)| names.contains(&base.as_str()).then_some(*family))
 }
-pub(super) fn recognizes(name: &str) -> bool {
-    kind(name).is_some()
-}
 fn rules(family: Family) -> Vec<(Vec<String>, Mode)> {
     let base = match family {
         Family::Claude => CLAUDE,
@@ -118,19 +105,6 @@ fn rules(family: Family) -> Vec<(Vec<String>, Mode)> {
     }
     rules
 }
-pub(super) fn digest_rules(hash: &mut Sha256) {
-    for (names, family) in CONFIGS {
-        for name in *names {
-            hash.update(name.as_bytes());
-            hash.update(b"\n");
-            for (pattern, mode) in rules(*family) {
-                hash.update(pattern.join(".").as_bytes());
-                hash.update([0, mode.code(), b'\n']);
-            }
-        }
-    }
-}
-
 // Raw numeric lexemes retain arbitrary precision like Go json.Number. The
 // standard parser validates syntax; our recursive map visitor rejects decoded
 // duplicate keys and our string decode rejects invalid Unicode. No reserved
@@ -276,7 +250,7 @@ pub(super) fn scrub(name: &str, bytes: &[u8]) -> Result<Vec<u8>, Reason> {
         return Ok(bytes.to_vec());
     }
     copies(&mut doc, &replacements);
-    if expansion_bound(&doc, 0).is_none_or(|n| n > super::MAX_PROTECTED_BYTES) {
+    if expansion_bound(&doc, 0).is_none_or(|n| n > MAX_PROTECTED_BYTES) {
         return Err(Reason::SourceLimit);
     }
     let result = if k == Family::Codex {
@@ -288,7 +262,7 @@ pub(super) fn scrub(name: &str, bytes: &[u8]) -> Result<Vec<u8>, Reason> {
     } else {
         serde_json::to_vec(&doc).map_err(|_| Reason::ScrubFailed)
     }?;
-    if result.len() > super::MAX_PROTECTED_BYTES {
+    if result.len() > MAX_PROTECTED_BYTES {
         return Err(Reason::SourceLimit);
     }
     Ok(result)

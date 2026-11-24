@@ -1,7 +1,7 @@
 //! Independently authored privacy regression oracles from the parent review.
 use memory_core::privacy::{
-    Admission, Authorization, AuthorizedBody, PolicyContext, Profile, ResolvedSourceFacts, admit,
-    authorize, rules_digest, sanitize_launch, transform,
+    Admission, Authorization, PolicyContext, Profile, ResolvedSourceFacts, admit, authorize,
+    rules_digest, sanitize_launch, transform,
 };
 
 fn context() -> PolicyContext {
@@ -26,18 +26,6 @@ fn facts(paths: &[&str], profile: Profile) -> ResolvedSourceFacts {
     }
 }
 
-fn publish(path: &str, bytes: &[u8]) -> Result<AuthorizedBody, &'static str> {
-    let policy = context();
-    let Admission::Allow(source) = admit(&policy, facts(&[path], Profile::Config)) else {
-        return Err("fixture admission failed");
-    };
-    let redacted = transform(&source, bytes).map_err(|_| "fixture transform failed")?;
-    match authorize(&source, redacted, &policy) {
-        Authorization::Allow(body) => Ok(body),
-        Authorization::Deny(_) | Authorization::Unknown(_) => Err("fixture authorization failed"),
-    }
-}
-
 #[test]
 fn transformed_capability_cannot_be_rebound_to_a_protected_source() -> Result<(), &'static str> {
     let policy = context();
@@ -49,10 +37,8 @@ fn transformed_capability_cannot_be_rebound_to_a_protected_source() -> Result<()
     };
     let raw = transform(&transcript, br#"{"env":{"API_KEY":"FixtureCanary"}}"#)
         .map_err(|_| "fixture transform failed")?;
-    let Admission::Allow(config) = admit(
-        &policy,
-        facts(&["synthetic/settings.json"], Profile::Config),
-    ) else {
+    let Admission::Allow(config) = admit(&policy, facts(&["synthetic/run.json"], Profile::Scanned))
+    else {
         return Err("fixture admission failed");
     };
     assert!(matches!(
@@ -85,14 +71,7 @@ fn intermediate_credential_and_unknown_root_are_not_admitted() {
 }
 
 #[test]
-fn escaped_duplicate_config_keys_fail_closed_and_launch_prompt_is_dropped() {
-    assert!(
-        publish(
-            "synthetic/settings.json",
-            br#"{"env":{"SAFE":"one","SA\u0046E":"FixtureCanary"}}"#,
-        )
-        .is_err()
-    );
+fn launch_prompt_is_dropped() {
     let launch = sanitize_launch(
         &["/bin/claude".to_owned(), "FixtureCanary".to_owned()],
         &[
