@@ -4,15 +4,13 @@
 > (spool, work queue, per-source job state, whole source-epoch snapshots as the upload
 > unit, walk-driven discovery) are superseded for the Rust rewrite by
 > [DESIGN.md](../DESIGN.md), which was chosen by measurement over this Mac's session
-> history. The Go candidate that implements this contract keeps running until cutover.
+> history.
 
 **Status:** authoritative replacement requirements, not implementation or release
 evidence. For current deployment, qualification and next action, see the
 [current-session checkpoint](session-capture-handoff.md#current-session-checkpoint);
-for historical checks see [dated offline evidence](session-capture-offline-evidence.md).
-Existing v3 code, wire specifications and rollout records describe legacy behavior,
-not requirements to reproduce it. Final legacy/default cutover requires the controlled
-acceptance sequence below.
+the dated evidence is under [rust-rewrite/](rust-rewrite/). Earlier wire specifications
+and rollout records describe retired behavior, not requirements to reproduce it.
 
 ## Objective
 
@@ -127,7 +125,7 @@ snapshot consistency is not a requirement.
 
 **One authoritative storage reader/resolver** must serve restoration and analytics.
 Define a language-neutral consumer interface; do not independently recreate current
-selection or reconstruction algorithms in Python and Go. Metadata and bodies must
+selection or reconstruction algorithms in two languages. Metadata and bodies must
 refer to the same pinned publication. Unknown contracts are explicit errors, never
 successful empty discovery.
 
@@ -169,11 +167,9 @@ Required scenarios:
 - Sandboxed/native hooks, actual R2 semantics, and both machines' installed paths are
   verified separately from offline tests. Do not weaken existing quality gates.
 
-The mandatory offline consumer gate now exercises the actual candidate writer,
-authoritative reader, importer, event index and report, including an injected actual
-SDK peer. It is not merely a legacy suite or a disconnected hand-written fixture.
-Those passing tests do not establish actual R2/native/installed-path acceptance;
-adding this document alone would not have added such a gate.
+The `10-consumer` gate exercises the actual writer, reader (`memory export`), importer,
+event index and report. Passing it does not establish actual R2/native/installed-path
+acceptance.
 
 ## 6. Controlled two-machine rebuild
 
@@ -203,15 +199,12 @@ adding this document alone would not have added such a gate.
 4. Complete analytics projections/reporting and two-machine acceptance, then cut over
    and retire the old archive.
 
-The [wire/reader v2 reference](session-publication-v1.md),
-[enrichment contract](session-enrichment-contract.md) and
-[phase-3 implementation](session-capture-phase3.md) now define candidate wire fields,
-source/artifact ownership, bounds and configured defaults. These are not silently
-supplied by legacy v3 rules. Representative freshness/capacity/offline-retention
-budgets and actual inventory coverage still require operating acceptance. Current
-retention is conservative with no automatic GC; any deletion/retention-window change
-needs its own policy and validation, not incidental spool cleanup.
+The [export contract](session-publication-v1.md) defines the wire fields consumed by
+analytics and the [analytics projection](session-analytics-v1.md) what the importer builds.
+Representative freshness/capacity/offline-retention budgets and actual inventory coverage
+still require operating acceptance. Any deletion or retention-window change needs its own
+policy and validation.
 
 For rationale and primary sources, see the
-[design review](research/session-capture-contract-review.md). For legacy behavior and
-historical evidence, use the explicitly labeled [documentation index](README.md).
+[design review](research/session-capture-contract-review.md). For the live
+docs, see the [documentation map](README.md).
