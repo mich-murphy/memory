@@ -1,5 +1,5 @@
 //! The consumer gate: real writer output (the daemon against the loopback fake) -> the real
-//! `memory export` and `memory restore` binary -> the unchanged Python importer and report
+//! `memory export` binary -> the unchanged Python importer and report
 //! (`tools/analytics/test_rust_export_journey.py`), for Claude, Codex and Pi, plus the privacy
 //! canary scan of every export.
 //!
@@ -328,29 +328,6 @@ fn check_bodies(fx: &Fixture, agent: &str, dir: &Path, sources: usize) -> R {
     Ok(())
 }
 
-/// Decoded bytes of a logical path: the plain file, or its `.zst` spelling.
-fn disk_logical(root: &Path, rel: &Path) -> R<Vec<u8>> {
-    let plain = root.join(rel);
-    if plain.exists() {
-        return fs::read(&plain).map_err(e);
-    }
-    let mut z = plain.into_os_string();
-    z.push(".zst");
-    zstd::stream::decode_all(fs::read(z).map_err(e)?.as_slice()).map_err(e)
-}
-
-fn walk(dir: &Path, base: &Path, out: &mut Vec<PathBuf>) -> R {
-    for entry in fs::read_dir(dir).map_err(e)? {
-        let p = entry.map_err(e)?.path();
-        if p.is_dir() {
-            walk(&p, base, out)?;
-        } else {
-            out.push(p.strip_prefix(base).map_err(e)?.to_path_buf());
-        }
-    }
-    Ok(())
-}
-
 fn has(hay: &[u8], needle: &[u8]) -> bool {
     hay.windows(needle.len()).any(|w| w == needle)
 }
@@ -651,40 +628,6 @@ fn consumer_gate_claude_codex_pi_export_imports_and_reports() -> R {
         dirs.push(dir);
     }
 
-    // `memory restore` agrees with the disk byte for byte, per owner.
-    for (i, w) in phase1().iter().enumerate() {
-        let text = find(&all, w)?;
-        let dir = out.join(format!("restore-{i}"));
-        fs::create_dir_all(&out).map_err(e)?;
-        let r = run(
-            &fx.rig.dir,
-            &[
-                "restore".as_ref(),
-                text.as_ref(),
-                "--out".as_ref(),
-                dir.as_os_str(),
-            ],
-        )?;
-        assert_eq!(
-            r.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&r.stderr)
-        );
-        let mut files = Vec::new();
-        walk(&dir, &dir, &mut files)?;
-        assert_eq!(
-            files.len(),
-            w.sources.max(if w.name == "rewrite" { 1 } else { 0 })
-        );
-        for f in files {
-            assert_eq!(
-                fs::read(dir.join(&f)).map_err(e)?,
-                disk_logical(root_of(&fx, w.agent), &f)?,
-                "restore equals disk for {f:?}"
-            );
-        }
-    }
     scan(&fx, &dirs)?;
 
     let expect = fx.rig.dir.join("expectations.json");

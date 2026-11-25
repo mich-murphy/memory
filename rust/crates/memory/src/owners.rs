@@ -5,8 +5,8 @@
 //! `shared/<archive>/<machine>/<agent>/current.json`, and a session-shaped or any other key is
 //! `listing_unexpected_key`. Any other argument is `usage`.
 //!
-//! stdout: owner texts, sorted and deduplicated, one per line, in the form `memory export` and
-//! `memory restore` take. stderr: `memory: owners=N` or one closed `memory: <code>` line; no
+//! stdout: owner texts, sorted and deduplicated, one per line, in the form `memory export`
+//! takes. stderr: `memory: owners=N` or one closed `memory: <code>` line; no
 //! endpoint, key, token or prefix. A store failure is `memory: store cause=<code>` (the closed
 //! `StoreError` codes, brief 52) and exits 75 when a retry may help, 77 on auth. The paging loop
 //! lives here, so `s3.rs` keeps one exchange per call.
@@ -14,7 +14,7 @@ use crate::assemble::build_store;
 use crate::config::Config;
 use crate::daemon::EXIT_CONFIG;
 use crate::environment::StoreError;
-use crate::restore::{EXIT_FAILED, EXIT_USAGE, store_exit, store_line};
+use crate::exit::{EXIT_FAILED, EXIT_USAGE, store_exit, store_line};
 use crate::s3::Page;
 use memory_core::domain::Owner;
 use memory_core::limits::parse_owner_prefix;

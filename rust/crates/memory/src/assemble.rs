@@ -82,8 +82,8 @@ fn collector(paths: [&Path; 3]) -> (Vec<String>, Vec<u128>) {
     (names, identities)
 }
 
-/// Build the S3 store from the config and the token file: the one place both the daemon and
-/// `memory restore` construct it. The token is read here, after the config's own checks.
+/// Build the S3 store from the config and the token file: the one place the daemon and
+/// the commands construct it. The token is read here, after the config's own checks.
 /// No network call is made and the prefix is not judged (the config already checked it; an
 /// empty one is the bucket root).
 ///
@@ -104,7 +104,7 @@ pub fn build_store(config: &Config) -> Result<S3Store, AssembleError> {
 }
 
 /// The policy context the daemon captures under: valid, the built-in revision and rules, and
-/// the identities of the config file, the token file and the state root. `memory check` builds
+/// the identities of the config file, the token file and the state root. `memory status` builds
 /// the same context so it judges sources as capture does.
 #[must_use]
 pub fn policy_context(root: &Path, config_path: &Path, config: &Config) -> PolicyContext {

@@ -1,11 +1,11 @@
-//! Store failures of `memory export`, `restore` and `owners` on the real binary: each injected
+//! Store failures of `memory export` and `owners` on the real binary: each injected
 //! fault prints one closed line and exits with a code an operator can act on.
 use super::assemble::{PREFIX, Rig};
 use super::export::capture;
 use super::fake::{Fake, Fault};
 use super::{BUCKET, R, e};
 use memory::environment::{Cause, StoreError};
-use memory::restore::{RestoreError, store_exit};
+use memory::exit::store_exit;
 use std::net::TcpListener;
 use std::process::{Command, Output};
 
@@ -30,7 +30,6 @@ fn cmd(rig: &Rig, owner: &str, which: &str, n: usize) -> R<Output> {
     let out = out.to_string_lossy().into_owned();
     match which {
         "export" => run(rig, &["export", owner, "--out", &out]),
-        "restore" => run(rig, &["restore", owner, "--out", &out]),
         _ => run(rig, &["owners"]),
     }
 }
@@ -56,7 +55,7 @@ fn store_failures_name_their_cause_and_exit_by_retryability() -> R {
         .ok_or("no piece")?;
     let tail = piece.rsplit('/').next().unwrap_or("").to_owned();
     let mut n = 0;
-    for which in ["export", "restore"] {
+    for which in ["export"] {
         let table: [(&str, Fault, i32, &str); 8] = [
             (
                 "",
@@ -107,7 +106,7 @@ fn store_failures_name_their_cause_and_exit_by_retryability() -> R {
 }
 
 #[test]
-fn a_refused_connection_is_transient_for_all_three_commands() -> R {
+fn a_refused_connection_is_transient_for_both_commands() -> R {
     let server = Fake::start()?;
     let rig = Rig::new("errors-live", &server.url(), PREFIX, false)?;
     let (owner, _) = capture(&rig)?;
@@ -115,7 +114,7 @@ fn a_refused_connection_is_transient_for_all_three_commands() -> R {
     let closed = format!("http://{}", l.local_addr().map_err(e)?);
     drop(l);
     let dead = Rig::new("errors-dead", &closed, PREFIX, false)?;
-    for (n, which) in ["export", "restore", "owners"].into_iter().enumerate() {
+    for (n, which) in ["export", "owners"].into_iter().enumerate() {
         expect(&cmd(&dead, &owner, which, n)?, 75, "store cause=refused");
     }
     Ok(())
@@ -193,7 +192,6 @@ fn the_exit_mapping_covers_every_store_error_variant() {
     assert_eq!(store_exit(None), 1);
     for (error, exit) in store_errors() {
         assert_eq!(store_exit(Some(error)), exit, "{error:?}");
-        assert_eq!(RestoreError::Store(Some(error)).exit_code(), exit);
         assert_eq!(
             memory::export::Failure::Store(Some(error)).exit_code(),
             exit
@@ -206,7 +204,6 @@ fn every_cause_line_is_closed_text_without_input() {
     for (error, _) in store_errors() {
         let want = format!("store cause={}", error.code());
         let lines = [
-            RestoreError::Store(Some(error)).to_string(),
             memory::export::Failure::Store(Some(error)).to_string(),
             memory::owners::Failure::Store(Some(error)).to_string(),
         ];

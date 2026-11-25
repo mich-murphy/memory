@@ -129,7 +129,7 @@ fn cancel_swallows_only_retryable() {
             reason: OwnerParkReason::NewerRemoteSchema
         }
     );
-    let (d, n) = transition(&det(Fault::ReadbackMismatch), true, S(1), &prior);
+    let (d, n) = transition(&det(Fault::SourceUnstable), true, S(1), &prior);
     assert!(matches!(d, Disposition::Retry { .. }));
     assert_eq!(n.deterministic, 1);
     let (d, _) = transition(
@@ -253,10 +253,6 @@ fn every_deterministic_fault_parks_with_its_own_reason() {
     // DESIGN 11.2: non-JSON 200 and schema errors are deterministic and park too.
     for (f, reason) in [
         (Fault::AuditMismatch, ParkReason::RepeatedAuditMismatch),
-        (
-            Fault::ReadbackMismatch,
-            ParkReason::RepeatedReadbackMismatch,
-        ),
         (Fault::SourceUnstable, ParkReason::SourceUnstable),
         (Fault::NonJsonResponse, ParkReason::RepeatedNonJsonResponse),
         (Fault::Schema, ParkReason::RepeatedSchemaError),
@@ -288,7 +284,7 @@ fn different_fault_or_success_resets_streak() {
         first_at: Some(S(0)),
         retries: 2,
     };
-    let (d, n) = transition(&det(Fault::ReadbackMismatch), false, S(10 * H), &prior);
+    let (d, n) = transition(&det(Fault::SourceUnstable), false, S(10 * H), &prior);
     assert!(matches!(d, Disposition::Retry { .. }));
     assert_eq!((n.deterministic, n.first_at), (1, Some(S(10 * H))));
     // Streak with a fault but missing first_at restarts.
@@ -310,11 +306,10 @@ fn different_fault_or_success_resets_streak() {
 }
 
 fn fault_of(n: u8) -> Fault {
-    match n % 5 {
+    match n % 4 {
         0 => Fault::NonJsonResponse,
         1 => Fault::Schema,
         2 => Fault::AuditMismatch,
-        3 => Fault::ReadbackMismatch,
         _ => Fault::SourceUnstable,
     }
 }

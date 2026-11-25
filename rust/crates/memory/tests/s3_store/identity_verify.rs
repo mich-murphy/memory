@@ -85,11 +85,6 @@ fn atomic_replace_with_same_prefix_extends_one_epoch() -> R {
         }
         cmd.output().map_err(e)
     };
-    let out = run(&["check".as_ref()])?;
-    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    let line = format!("{} ", stdout.lines().next().unwrap_or_default());
-    assert!(line.contains(" mismatch=0 "), "{line}");
     let text = owner_prefix(&owner);
     let dest = rig.dir.join("out");
     let ex = run(&[

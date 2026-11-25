@@ -3,7 +3,7 @@
 //!
 //! Read-only towards the bucket (GET only), no daemon lock, nothing under the state root.
 //! Every failure is a closed code on one stderr line; no key, path, endpoint or owner text. A
-//! store failure is `store cause=<code>` and exits 75 (transient) or 77 (auth), as in `restore`.
+//! store failure is `store cause=<code>` and exits 75 (transient) or 77 (auth), as in `owners`.
 //!
 //! A shared owner (brief 56) is written as `shared-reader/v1`: only its Pi run records, other
 //! stored entries counted as `skipped`; its success line is `memory: exported sources=<n>
@@ -16,7 +16,7 @@ use crate::assemble::build_store;
 use crate::config::Config;
 use crate::daemon::EXIT_CONFIG;
 use crate::environment::{Store, StoreError};
-use crate::restore::{EXIT_ABSENT, EXIT_FAILED, EXIT_USAGE, StoreFault, store_exit, store_line};
+use crate::exit::{EXIT_ABSENT, EXIT_FAILED, EXIT_USAGE, StoreFault, store_exit, store_line};
 use memory_core::domain::Owner;
 use memory_core::limits::parse_owner_prefix;
 use memory_reader::export::{ExportError, build_envelope, build_shared_envelope, write_export};

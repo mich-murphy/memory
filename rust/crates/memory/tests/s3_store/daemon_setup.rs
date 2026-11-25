@@ -1,5 +1,5 @@
 //! R4: `memory daemon` captures a synthetic session, is stopped with SIGTERM, and `memory
-//! restore` returns the bytes, all on the real binary against the local server.
+//! export` returns the bytes, all on the real binary against the local server.
 //!
 //! The daemon's state root (holding `config.toml`) is `<dir>/state`, a sibling of the session
 //! root `<dir>/claude`: a root under the state root would be withheld as collector state. The
@@ -18,7 +18,7 @@ use memory_core::limits::{current_key, owner_prefix};
 use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
@@ -166,25 +166,14 @@ pub(super) fn stop(s: &Setup, mut child: Guard) -> R<String> {
     Ok(err)
 }
 
-fn files_under(dir: &Path, out: &mut Vec<PathBuf>) -> R {
-    for entry in fs::read_dir(dir).map_err(e)? {
-        let path = entry.map_err(e)?.path();
-        if path.is_dir() {
-            files_under(&path, out)?;
-        } else {
-            out.push(path);
-        }
-    }
-    Ok(())
-}
-
-/// Run `memory restore` into a fresh directory and check the output; returns it.
-pub(super) fn restore(s: &Setup, label: &str) -> R<PathBuf> {
+/// Run `memory export` into a fresh directory and check that the one body equals the file on
+/// disk byte for byte; returns the output directory.
+pub(super) fn exported(s: &Setup, label: &str) -> R<PathBuf> {
     let out = s.rig.dir.join(format!("out-{label}"));
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_memory"));
     cmd.env_clear()
         .env("MEMORY_STATE_DIR", &s.rig.state)
-        .arg("restore")
+        .arg("export")
         .arg(owner_prefix(&s.owner))
         .arg("--out")
         .arg(&out);
@@ -197,15 +186,12 @@ pub(super) fn restore(s: &Setup, label: &str) -> R<PathBuf> {
     assert!(result.stdout.is_empty());
     assert_eq!(err.lines().count(), 1, "{err}");
     assert!(
-        err.starts_with("memory: restored written=1 skipped_deleted=0 bytes="),
+        err.starts_with("memory: exported sources=1 deleted=0 bytes="),
         "{err}"
     );
-    let mut found = Vec::new();
-    files_under(&out, &mut found)?;
-    assert_eq!(found, [out.join(SESSION)]);
     let want = fs::read(&s.file).map_err(e)?;
     assert!(
-        fs::read(out.join(SESSION)).map_err(e)? == want,
+        fs::read(out.join("bodies/0000.bin")).map_err(e)? == want,
         "bytes differ"
     );
     assert!(String::from_utf8(want).map_err(e)?.contains(MARKER));
@@ -246,7 +232,7 @@ fn assert_hygiene(s: &Setup, seen: &[Seen]) {
 }
 
 #[test]
-fn daemon_captures_then_restore_returns_the_bytes() -> R {
+fn daemon_captures_then_export_returns_the_bytes() -> R {
     let s = setup("d2r")?;
     // The owner agrees with the key the fake stored current.json under.
     let mut child = s.spawn()?;
@@ -267,7 +253,7 @@ fn daemon_captures_then_restore_returns_the_bytes() -> R {
         "current.json not stored under the owner's key"
     );
 
-    restore(&s, "a")?;
+    exported(&s, "a")?;
     let all = s.server.requests();
     let new = all.get(after_append..).ok_or("slice")?;
     assert!(!new.is_empty());
@@ -277,7 +263,7 @@ fn daemon_captures_then_restore_returns_the_bytes() -> R {
 }
 
 #[test]
-fn a_restarted_daemon_continues_and_restore_returns_everything() -> R {
+fn a_restarted_daemon_continues_and_export_returns_everything() -> R {
     let s = setup("restart")?;
     let mut one = s.spawn()?;
     let first = s.wait_commit(&mut one, None)?;
@@ -323,7 +309,7 @@ fn a_restarted_daemon_continues_and_restore_returns_everything() -> R {
         "session bytes were uploaded more or less than once"
     );
 
-    restore(&s, "b")?;
+    exported(&s, "b")?;
     assert_hygiene(&s, &s.server.requests());
     Ok(())
 }

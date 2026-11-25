@@ -1,10 +1,9 @@
 //! Brief 49, reduced by brief 54: a snapshot kind on the real binary against the loopback fake.
 //! One Claude session plus a Pi run record `sessions/<cwd>/subagent-artifacts/<name>.json`
 //! (the kept snapshot kind); a project memory note, `settings.json` and a session aux `json`
-//! are ignored. One reconcile lands the session and the record; `check` is clean; `restore`
-//! of the session and of the shared owner writes equal bytes; `export` succeeds.
-use super::assemble::SESSION;
-use super::daemon_restore::{Setup, setup};
+//! are ignored. One reconcile lands the session and the record; `status` counts the ignored
+//! files; `export` of the session and of the shared owner writes bodies equal to the disk.
+use super::daemon_setup::{Setup, setup};
 use super::{R, e};
 use memory::config::Config;
 use memory::daemon::Sources;
@@ -43,7 +42,7 @@ fn run(s: &Setup, args: &[&str]) -> R<(i32, String, String)> {
 
 // Brief 54: the snapshot is a Pi run record; the note, settings and aux file are ignored.
 #[test]
-fn session_aux_memory_note_and_settings_land_check_clean_and_restore_equal() -> R {
+fn session_aux_memory_note_and_settings_land_and_export_equal() -> R {
     let s = setup("snapkinds")?;
     let pi = s.rig.add_root("pi")?;
     fs::copy(&s.rig.cfg, s.rig.state.join("config.toml")).map_err(e)?;
@@ -80,46 +79,47 @@ fn session_aux_memory_note_and_settings_land_check_clean_and_restore_equal() -> 
     assert!(round.contains(" landed=2"), "{round}");
     assert!(round.contains(" withheld=0"), "{round}");
 
-    let (code, out, err) = run(&s, &["check"])?;
+    let (code, out, err) = run(&s, &["status"])?;
     assert_eq!(code, 0, "{out}{err}");
-    for k in ["uncaptured=0", "mismatch=0", "ignored=3", "unknown_kind=0"] {
-        assert!(out.lines().next().unwrap_or("").contains(k), "{k}: {out}");
-    }
+    let line = out
+        .lines()
+        .find(|l| l.starts_with("sources "))
+        .unwrap_or("");
+    assert!(line.split(' ').any(|w| w == "ignored=3"), "{out}");
 
-    let dest = s.rig.dir.join("restored");
+    let dest = s.rig.dir.join("exported-session");
     let (code, out, err) = run(
         &s,
         &[
-            "restore",
+            "export",
             &owner_prefix(&s.owner),
             "--out",
             &dest.display().to_string(),
         ],
     )?;
     assert_eq!(code, 0, "{out}{err}");
+    assert!(err.contains("exported sources=1 "), "{err}");
     assert_eq!(
-        fs::read(dest.join(SESSION)).map_err(e)?,
+        fs::read(dest.join("bodies/0000.bin")).map_err(e)?,
         fs::read(&s.file).map_err(e)?
     );
-    assert!(!dest.join(format!("projects/-p/{UUID}/{AUX}")).exists());
 
-    let dest = s.rig.dir.join("restored-shared");
+    let dest = s.rig.dir.join("exported-shared");
     let (code, out, err) = run(
         &s,
         &[
-            "restore",
+            "export",
             &owner_prefix(&shared),
             "--out",
             &dest.display().to_string(),
         ],
     )?;
     assert_eq!(code, 0, "{out}{err}");
+    assert!(err.contains("exported sources=1 "), "{err}");
     assert_eq!(
-        fs::read(dest.join(RECORD)).map_err(e)?,
+        fs::read(dest.join("bodies/0000.bin")).map_err(e)?,
         RECORD_BODY.as_bytes()
     );
-    assert!(!dest.join(format!("projects/-p/memory/{NOTE}")).exists());
-    assert!(!dest.join("settings.json").exists());
 
     let exp = s.rig.dir.join("exported");
     let (code, out, err) = run(

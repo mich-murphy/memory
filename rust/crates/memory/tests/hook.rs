@@ -548,8 +548,8 @@ fn other_subcommands_keep_explicit_failure() -> R {
         assert_eq!(out.status.code(), Some(78), "{args:?}");
         assert!(out.stdout.is_empty());
     }
-    // `restore` is wired (R3): a malformed call is a usage error, never a silent success.
-    let out = spawn(&["restore", "x"], tmp.p(), &[], b"")?;
+    // `export` is wired: a malformed call is a usage error, never a silent success.
+    let out = spawn(&["export", "x"], tmp.p(), &[], b"")?;
     assert_eq!(out.status.code(), Some(64));
     assert!(out.stdout.is_empty());
     assert!(!tmp.p().join("hints").exists());

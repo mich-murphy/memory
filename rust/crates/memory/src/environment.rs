@@ -85,7 +85,7 @@ pub enum Cause {
 }
 
 impl Cause {
-    /// Closed lowercase code for logs and `check` output.
+    /// Closed lowercase code for logs.
     pub const fn code(self) -> &'static str {
         match self {
             Self::Dns => "dns",
@@ -162,7 +162,7 @@ impl StoreError {
             | Self::Ambiguous(_) => ErrorClass::Offline,
         }
     }
-    /// Closed code of the failure for logs and `check`: the cause's code for `Offline` and
+    /// Closed code of the failure for logs: the cause's code for `Offline` and
     /// `Ambiguous`, else the variant name in snake case.
     pub const fn code(self) -> &'static str {
         match self {

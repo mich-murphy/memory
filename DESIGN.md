@@ -56,9 +56,10 @@ In scope:
   that the bytes, their order and their provenance can be recovered.
 - A capture ends when the content objects, the manifest and the guarded `current.json` are
   durable.
-- A minimal reader in slice 2b: a `memory-reader` library, `memory restore`, and an export to
-  the existing `session-reader/v2` envelope for the analytics importer. Acceptance needs
-  writer, reader, importer, event index and report (`AGENTS.md`). [decided 2026-11-07]
+- A minimal reader in slice 2b: a `memory-reader` library and `memory export` to the existing
+  `session-reader/v2` envelope for the analytics importer. Acceptance needs writer, export,
+  importer, event index and report (`AGENTS.md`). [decided 2026-11-07] Amended 2026-11-25:
+  the archive is for analytics, not session restore, so there is no `memory restore`.
 - The analytics projection describes each session's agent setup (D65, 2026-11-23): the importer
   derives `session_setup` (a closed list of facts such as harness version, model, provider,
   reasoning level, permission or sandbox mode, skills, MCP servers and instruction files) from the
@@ -400,7 +401,7 @@ pub enum Disposition {
     ParkOwner { reason: OwnerParkReason },    // foreign writer or newer remote schema
     Cancelled,
 }
-pub enum ParkReason { RepeatedAuditMismatch, RepeatedReadbackMismatch, SourceUnstable }
+pub enum ParkReason { RepeatedAuditMismatch, SourceUnstable }
 pub enum OwnerParkReason { ForeignWriter { theirs: Sha256, ours: Sha256 }, NewerRemoteSchema }
 
 // Commit result after the guarded current.json PUT and any verification GET (section 7.4).
@@ -658,9 +659,10 @@ local staging is needed for append-class sources. [review, 04 M5] For each piece
    stored object is read, and the manifest records its encoding (`encoded_len`,
    `encoded_sha256`), not the writer's (A10.2).
    - If the chosen client can cheaply set `Content-MD5`, send it. [prototype P2]
-   - The end-to-end checks are the reader's digest verification and the restore sample (section
-     11.4), not a transport checksum. Content-MD5 is therefore not a gate. [DDIA ch. 13, The
-     end-to-end argument; `07-ddia-crosscheck.md` blocker 5]
+   - The end-to-end checks are the reader's digest verification in `memory export` and the daily
+     audit (section 11.4). Every PUT also carries `Content-MD5`, and R2
+     rejects a body that does not match. [DDIA ch. 13, The end-to-end argument;
+     `07-ddia-crosscheck.md` blocker 5]
 
 A replay captures `[0, size_at_stat)` only, even while the file grows. Under the append-only
 assumption those bytes are stable, and the next reconcile appends the rest. After the last
@@ -807,12 +809,12 @@ directory with all its files. A path that `locate` maps to no kind is `UnknownKi
 with no derivable owner is `UnknownOwner`. Both are withheld and counted, never passed through.
 Unrecognised names are never passed through. [review, 05 m2] A known non-session file
 in an agent directory (vendor code, caches, backups, SQLite sidecars, the D54 and D55 folders) is
-`Ignored`: never captured, counted apart as `ignored=` in `memory status` and `memory check`.
+`Ignored`: never captured, counted apart as `ignored=` in `memory status`.
 Since D66 (brief 54) one allowlist decides what is captured, in every layout: `ClaudeTranscript`,
 `ClaudeSubagent`, `ClaudeToolResults`, `CodexRollout`, `CodexCompressed`, `PiSession`, and
 `PiAux` only for `sessions/<cwd>/subagent-artifacts/<name>.json`; every other located kind is
 `Ignored`. A stored entry whose path now locates to `Ignored` is retired: never probed, never
-recorded deleted, counted `retired=` by `memory check` (no exit-code effect), and it does not keep
+recorded deleted, and it does not keep
 its owner in the daemon's owner set. The rule "only a miss or a config or paste snapshot can
 become `Ignored`" (D57) is replaced.
 
@@ -853,8 +855,8 @@ redacted inside a file. Launch argv and environment are reduced by the allowlist
 
 - **Rules digest.** `RulesDigest` covers the scanner table and size cap. It is bound to each
   scanned snapshot. A rule change re-captures scanned kinds.
-- **Integrity checks compare transformed bytes.** The audit and read-back in section 11.4
-  compare `transform(local)` with R2, not the raw local file.
+- **Integrity checks compare transformed bytes.** The audit in section 11.4
+  compares `transform(local)` with the committed digest, not the raw local file.
 - **Errors carry a fixed reason and never echo values.**
 
 Transcripts are published as written. This is a known-file policy, not DLP
@@ -941,7 +943,7 @@ Accepted residual risks:
   re-upload sessions whose local sources have expired. The operator accepted this.
 
 Rejected: SSE-C, because the key would sit on the same hosts as the token. Client-side `age`,
-because it would need off-host key custody and a restore test tied to the key holder. Both are
+because it would need off-host key custody tied to the key holder. Both are
 recorded in `challenge/00-synthesis.md`.
 
 ## 9. Local state
@@ -1094,9 +1096,9 @@ assumptions and what it checks anyway.
 
 | Assumed not to happen, verified anyway | Check |
 |---|---|
-| Resumable hash state, offsets or epoch rules wrong | Daily audit and read-back (11.4) |
+| Resumable hash state, offsets or epoch rules wrong | Daily audit (11.4) |
 | Index drifts from disk or R2 | Safety reconcile every 15 min |
-| Stored piece no longer matches its key | Reader verifies raw and encoded digests on every restore |
+| Stored piece no longer matches its key | Reader verifies raw and encoded digests on every export |
 
 Assumed and not verified: SHA-256 is collision-free, `F_FULLFSYNC` and fsync are durable, and
 R2's conditional writes are atomic as documented.
@@ -1147,7 +1149,7 @@ within 30 s of the store's recovery.
   `captured_to` is greater than the size the last committed manifest confirmed. Those bytes
   were never uploaded and the source no longer holds them. A spill buffer is added only if this
   is nonzero after a month on both hosts (D8).
-- Audit and read-back mismatch counts, and `SourceUnstable` counts.
+- Audit mismatch counts, and `SourceUnstable` counts.
 
 `memory status` answers in three tiers:
 
@@ -1155,14 +1157,9 @@ within 30 s of the store's recovery.
    available.
 2. `status.json` fields.
 3. `--verify`: GET each owner's `current.json` and compare its ETag with the index. (Amended
-   2026-11-20, D51: not built; `memory check` is the verified view, and `status` makes no
-   network request.) `memory check` walks, reads and judges at different instants while the
-   daemon commits (DDIA ch. 8, analytic queries and integrity checks). Since pieces and
-   manifests are immutable and only `current.json` moves, it confirms only what disagrees: an
-   owner with an `uncaptured` or `mismatch` verdict has `current.json` read once more and, if
-   the head moved, those sources are judged again against the fresh chain; a `remote_only`
-   candidate is dropped when a second walk after the last owner read sees it. A quiet owner
-   costs no extra request (D64, 2026-11-22).
+   2026-11-20, D51: not built, and `status` makes no network request. Amended
+   2026-11-25: `memory check` is deleted too; the stored data is verified by `memory export`
+   and the daily audit, section 11.4.)
 
 It says "up to date as of <time>", never "all captured". `memory unpark <source|owner>` clears
 a parked entry. (Amended 2026-11-20, D51: `memory unpark <owner-prefix>|--all`, since source ids
@@ -1173,7 +1170,7 @@ writer of `status.json` and reads it only at start.)
 
 Checksums below the application "would not be caught" for software bugs. [DDIA, Maintaining
 integrity in the face of software bugs] The parts most likely to carry such a bug are ours: the
-resumable hash state, the offset bookkeeping and the planner's epoch rules. Three measures:
+resumable hash state, the offset bookkeeping and the planner's epoch rules. Two measures:
 
 1. **Writer stamps.** Every manifest and every epoch records the writer's name, version and
    commit. A fixed writer re-captures from the source and supersedes a buggy version's epochs
@@ -1189,13 +1186,11 @@ resumable hash state, the offset bookkeeping and the planner's epoch rules. Thre
    - Cost: 70 ms per 19 MB. [measured]
    - The reviewed design quarantined on any mismatch, which included normal appends. [review,
      01 B2, 04 B2]
-3. **Read-back restore.** Once a day the daemon restores up to ten sessions captured that day
-   through the `memory-reader` library. It compares the bytes with
-   `transform(local)[0, captured_to)` where identity is unchanged.
-   - A mismatch is counted, logged by class, and the source is replayed. A repeat parks it.
-   - This is the restore the backup is proven by. [DDIA ch. 13, Don't just blindly trust what
-     they promise]
-   - It runs on a low-priority lane and never blocks captures. [review, 04 m3]
+A third measure, a daily read-back restore of sampled sessions, is not part of the design (operator
+decision, 2026-11-25): the archive feeds analytics and is never used to restore session history.
+It is read only by `memory export`, which checks every piece's stored and decoded digest and
+each epoch's digest and fails closed. Every PUT carries `Content-MD5`, and each commit reads
+`current.json` back.
 
 Neither check trusts the index, the planner or the hasher it is checking.
 
@@ -1210,15 +1205,13 @@ Neither check trusts the index, the planner or the hasher it is checking.
 - Every failed attempt that will be retried logs one `retry` line: owner, class, a closed cause
   (`dns`, `connect`, `refused`, `tls`, `timeout`, `reset`, `server` and the like), whether the
   landing is unknown, the attempt number, the time the attempt took and the retry delay.
-  `memory check` prints one `store_error` detail line per failed fetch, with the source kind (or
-  `chain`) and the cause (D49, 2026-11-19).
 - launchd uses `KeepAlive` with `SuccessfulExit=false`. systemd uses `Restart=on-failure` with a
   start limit. On Linux `memory install` writes a systemd user unit (`Restart=on-failure`,
   `RestartSec=60`, stderr to the journal) and prints the `systemctl --user` and
   `loginctl enable-linger` commands without running them (D53, 2026-11-20).
 - Exit codes: 0 only on a requested stop, and distinct codes for "lock held" and "config
   invalid".
-- `memory export`, `memory restore` and `memory owners` print a store failure as
+- `memory export` and `memory owners` print a store failure as
   `memory: store cause=<code>` (the closed codes of D49) and exit 75 (`EX_TEMPFAIL`) for an
   offline, ambiguous, throttled or server failure, 77 (`EX_NOPERM`) for auth, 1 otherwise. These
   commands only read, so every transport failure is safe to retry (D62, 2026-11-22).
@@ -1249,10 +1242,9 @@ Workspace:
 
 - `memory-core`, library. Types, locator, planner, coalescer, manifest and schema types, policy
   and transform. No I/O crates, enforced by `cargo-deny` bans.
-- `memory-reader`, library. Restore and export. Used by the daemon's read-back and by
-  `memory restore`.
-- `memory`, binary. Subcommands `daemon`, `hook`, `status`, `reconcile`, `restore`, `export`
-  and `unpark`. `reconcile` takes the daemon lock and refuses to run beside a daemon.
+- `memory-reader`, library. Piece decoding and export. Used by `memory export`.
+- `memory`, binary. Subcommands `daemon`, `hook`, `status`, `reconcile`, `export`, `owners`,
+  `unpark` and `install`. `reconcile` takes the daemon lock and refuses to run beside a daemon.
 - `xtask`. Schema export and the lint-check crate.
 
 | Crate | Use | Note |
@@ -1382,7 +1374,7 @@ Counter tests:
 
 Journey test: fixtures replayed from this Mac's session timelines (timestamps and sizes only)
 through the real daemon against the fake store. It asserts the byte and request totals in
-section 3, then restores every session through `memory-reader`.
+section 3, then decodes every session through `memory-reader`.
 
 Footprint targets [target, measured in slices 2 and 3]:
 
@@ -1451,18 +1443,21 @@ is the `rust-acceptance/<run-id>/` prefix of the bucket (section 6.1).
    - Adds property 4 and the counter tests. Footprint is measured, and remeasured in slice 3.
    - Exit: a day of this Mac's sessions captured, with totals matching section 3.
 2b. **Reader.**
-   - Builds: `memory-reader`, `memory restore <owner> --out DIR`, the daemon's read-back reusing
-     the library, and `memory export` to the `session-reader/v2` envelope.
+   - Builds (at the time): `memory-reader`, `memory restore <owner> --out DIR` and a daemon
+     read-back (both removed 2026-11-25), and `memory export` to the `session-reader/v2`
+     envelope.
    - The existing Python importer, event index and report run against the export unchanged.
    - Shadow run on the Mac into the `rust-acceptance/` prefix, comparing every restored session
-     with `transform(local)`. Local session files that have no captured owner are counted as the
-     coverage cross-check. [review, 06 F1, F2; A13.1]
+     (at the time; now every exported session) with `transform(local)`. Local session files
+     that have no captured owner are counted as the coverage cross-check. [review, 06 F1, F2;
+     A13.1]
    - Exit criterion of the shadow run and of cutover: 2 consecutive days with zero restore
      mismatches, zero parked owners and zero local session files without a captured owner. It
      replaces any longer fixed shadow-run length. [A13.1, A14.2]
    - Abort triggers: any restore mismatch, any owner parked as `Foreign`, or any privacy
      canary found in an export stops the run until the cause is found. [A13.1]
-   - Exit: every captured session restores to its source bytes, and the consumer gate is green.
+   - Exit (at the time): every captured session restores to its source bytes, and the consumer
+     gate is green. Since 2026-11-25 the check is that every export passes its digest checks.
 3. **Linux and snapshot classes.**
    - Builds: BC-01 inotify, SQLite and config snapshots, shared stores, deletions, launch
      evidence for every agent, the loss-window counter, and reconcile tuning.
@@ -1491,7 +1486,7 @@ source's whole range in memory, measured against the 128 MB target (section 7.4,
 4. The safety reconcile captures every available local source into the fresh archive. Nothing
    is imported from the old R2 archive. Sessions that exist only in the old archive are not
    recovered, which the operator accepted.
-5. Fresh automatic capture, restart and retry, restore, and analytics are verified on both
+5. Fresh automatic capture, restart and retry, export, and analytics are verified on both
    hosts against the exit criterion of slice 2b (A13.1).
 6. The old archive was deleted on 2026-11-09 (A2). Before rollout, every `rust-acceptance/`
    prefix is deleted and the bucket is verified to hold only `delivery-artifacts/` and data
@@ -1590,6 +1585,7 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D53 | 2026-11-20: on Linux `memory install` writes a systemd user unit at `$XDG_CONFIG_HOME/systemd/user/memory.service` (absolute only) or `~/.config/systemd/user/memory.service`: first line is our marker, `ExecStart="<exe>" daemon` (quoted with `\`, `"`, `%`, `$` escaped), `Restart=on-failure`, `RestartSec=60`, `StandardError=journal`, `WantedBy=default.target`. Uninstall removes only our unit. The binary prints `systemctl --user daemon-reload`, `enable --now` and `loginctl enable-linger $USER` and runs none of them. A control character in the exe path is refused | brief 44, evidence 36; 11.5, 17 |
 | D54 | 2026-11-21, operator answers to the uncaptured-files review: the `~/.claude/skills` folder and Pi `pi-terminology/` are not captured; Codex `generated_images`/`attachments` and Claude `paste-cache` are captured (slice 3; superseded by D55: none of the three is captured); known non-session files get an `Ignored` verdict, counted apart from `UnknownKind` and never captured. Claude `file-history` (operator: research and decide): captured in slice 3 only behind a content scan that withholds the whole file, with a recorded reason, on a secret match, binary or non-UTF-8 content, an oversize file or a scanner error; the local file is never touched. Reason: the transcript stays the record of what a session did, file-history adds the exact pre-edit file state at about 10 MB per host, and it is a raw copy of project files that no path denylist can see (names are hashes) | research report (Anthropic `claude-directory` and `checkpointing` docs), evidence 37; 5, 8, 19 |
 | D55 | 2026-11-21, operator after an evidence check of D54: Codex `generated_images`, Codex `attachments` and Claude `paste-cache` are not captured (they become `Ignored`). Measured on this Mac (byte and hash comparison, counts only): all 59 `paste-cache` files occur in captured Claude transcripts, since the cache only backs `history.jsonl` recall; all 4 generated images occur as base64 in Codex `thread_history_1.sqlite`, which slice 3 captures first; the 5 attachment screenshots and the attachment JSON index exist nowhere else and are given up (operator choice; the conversation text is intact). Reason: data minimisation in an archive that never deletes, and an image cannot be scanned for secrets | evidence 38; 5, 19 |
+| D71 | 2026-11-25, operator ("there does not need to be a restore. we are exporting session to R2 for wholistic analysis ... as long as we have geurantees that the data stroed in R2 is good ... anything else would seem to be unnecessary code and complexity"): the archive is read only by `memory export`. `memory restore`, `memory check`, the never-built daily read-back (`ReadbackMismatch`, `RepeatedReadbackMismatch`) and the reader's restore functions are deleted; this supersedes the restore, check and read-back parts of D9, D10, D49, D51, D62 and D64. Kept: `content-md5` on every PUT, immutable pieces and manifests, the commit's read-back of `current.json`, the daily audit, and export's piece and epoch digest checks that fail closed | 7.3, 11.4, 12; brief 59, evidence 54 |
 | D70 | 2026-11-25, operator ("ensure all go code and any references to it are cleaned up"; the watcher test: "if it is valuable then fix it, otherwise remove"): no Go code is tracked; Go-only docs are deleted, live docs, DESIGN body and AGENTS.md name no Go mechanism; dated records keep theirs. The credential denylist drops the Go installer suffix `.agent-sessions-backup-<n>` (no such file on either host) and normalises `memory`'s own `.memory-backup-<stamp>[-n]`. Real-watcher tests first prove the stream is live and run alone; their waits are unchanged | 8.2, 10.2; brief 58, evidence 53 |
 | D69 | 2026-11-25, operator ("delete anything that doesn't run in production, no dead code should be left behind"; "prune retired records"): retirement is decided by the stored entry's kind (`stored_retired`: not in `CAPTURED_KINDS` and not a `PiAux` run record), with no root lookup; it drives `Probe::Retired`, `all_gone`, `check`'s `retired=` and the prune. After a complete, finished full round in which every owner's base is `Known` or `Absent`, `index.json` keeps only records whose id was walked or is a live, non-retired entry of some base (replaces the brief 48 two-walk rule). Deleted with their tests: the Codex SQLite backup (`rusqlite`, `Encoding::Sqlite`, `begin/end_snapshot`, `Deferred`, `BackupFailed`, the 6 h interval, `SnapshotFingerprint::Sqlite`, `check`'s `judge_store`), `Profile::Config`, `Profile::TextAsset`, `privacy/text.rs`, `privacy/document.rs` and `MalformedProtected` (the launch argv scrub had no effect behind the allowlist: a 20,000-case differential test), and the unused `pub` items a sweep found. One release loads old `index.json` records (`BRIEF57-SHIM`) and rewrites them; the shim is then removed. The Go tree, legacy analytics and Go CI are deleted; CI runs the analytics suite and workflow lint | brief 57; evidence 52; 7.2, 7.3, 8.3, 9.1, 13 |
 | D68 | 2026-11-24: Pi subagent run records reach analytics. `memory export` accepts a shared owner and writes `shared-reader/v1` holding only its analytics sources (`shared_analytics`: `PiAux` with the run-record shape); other stored entries are left out and counted `skipped=`; `memory owners --shared` lists shared owners. `publications.import_shared` validates that contract as strictly as session exports and replaces one shared owner's rows per transaction. `pi_run` has one row per run (agent type, models, exit code, an error flag, closed acceptance and review statuses, counts, usage, extension list lengths, runner type, external duration and exit code); `pi_run_extension` holds the `sha256:` extension digests (16 to 64 hex characters; real records hold 16); `pi_run_ref` (`SETUP_VERSION = 3`) records which session names a run, from structured `runId` fields only; `pi_run_dim` links a run to its earliest referencing session and never adds run usage to session totals (the child session already carries it); the summary report gains `runs`. Never stored: the task, error text, transcript path, child report, criteria text, commands, arguments, paths, pid. Reason: D66 keeps run records because they are the only record of resolved extensions and, for most runs, requested model, exit code and acceptance (evidence 51) | brief 56, evidence 51; 1 |

@@ -1,6 +1,7 @@
-//! Command entry point. `memory hook <agent>`, `memory restore <owner> --out DIR`, `memory export`,
-//! `memory owners` (list captured owners), `memory check` (read-only acceptance measure), `memory status` (offline local health view), `memory unpark` (clear parked owners), `memory reconcile` (one manual round) and
-//! `memory install` / `memory uninstall` and `memory daemon` (the run loop) are wired; everything else exits 78.
+//! Command entry point. `memory hook <agent>`, `memory export`, `memory owners` (list captured
+//! owners), `memory status` (offline local health view), `memory unpark` (clear parked owners),
+//! `memory reconcile` (one manual round), `memory install` / `memory uninstall` and
+//! `memory daemon` (the run loop) are wired; everything else exits 78.
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -14,16 +15,14 @@ fn main() -> ExitCode {
             memory::hook::main_entry(&agent)
         }
         Some(word) if word == "daemon" => memory::run::main_entry(),
-        Some(word) if word == "check" => memory::check::main_entry(args),
         Some(word) if word == "install" => memory::install::main_entry(true, args),
         Some(word) if word == "uninstall" => memory::install::main_entry(false, args),
         Some(word) if word == "export" => memory::export::main_entry(args),
         Some(word) if word == "owners" => memory::owners::main_entry(args),
-        Some(word) if word == "restore" => memory::restore::main_entry(args),
         Some(word) if word == "status" => memory::status::main_entry(args),
         Some(word) if word == "unpark" => memory::unpark::main_entry(args),
         Some(word) if word == "reconcile" => memory::reconcile::main_entry(args),
-        // Fail explicitly rather than simulate successful capture or restore.
+        // Fail explicitly rather than simulate successful capture.
         _ => ExitCode::from(78),
     }
 }

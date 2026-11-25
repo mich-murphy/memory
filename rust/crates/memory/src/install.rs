@@ -32,7 +32,7 @@ impl Failure {
 
 use crate::config::Config;
 use crate::daemon::EXIT_CONFIG;
-use crate::restore::{EXIT_FAILED, EXIT_USAGE};
+use crate::exit::{EXIT_FAILED, EXIT_USAGE};
 use files::Outcome;
 use merge::Agent;
 use std::ffi::OsString;

@@ -401,8 +401,8 @@ fn withhold_of(reason: Reason) -> WithholdReason {
 }
 
 /// Privacy transform, then the final authorization of the transformed bytes: the one place the
-/// bytes capture would publish for `raw` are decided. `memory check` calls it too, so the check
-/// compares against what capture stores rather than a reimplementation.
+/// bytes capture would publish for `raw` are decided. `memory status` does not read source bytes,
+/// so this is the only place that decides them.
 ///
 /// # Errors
 /// [`SourceOutcome::Withheld`] when the transform or the authorization denies, and

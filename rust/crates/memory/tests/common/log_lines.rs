@@ -125,7 +125,6 @@ pub fn parse(line: &str) -> Result<&str, String> {
                 "foreign_writer",
                 "newer_remote_schema",
                 "repeated_audit_mismatch",
-                "repeated_readback_mismatch",
                 "source_unstable",
                 "repeated_non_json_response",
                 "repeated_schema_error",

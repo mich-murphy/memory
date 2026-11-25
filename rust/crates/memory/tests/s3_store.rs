@@ -24,14 +24,14 @@ use std::time::Duration;
 
 #[path = "s3_store/assemble.rs"]
 mod assemble;
-#[path = "s3_store/check.rs"]
-mod check;
 #[path = "common/clock.rs"]
 mod clock;
 #[path = "s3_store/consumer_gate.rs"]
 mod consumer_gate;
-#[path = "s3_store/daemon_restore.rs"]
-mod daemon_restore;
+#[path = "s3_store/daemon_setup.rs"]
+mod daemon_setup;
+#[path = "common/epoch.rs"]
+mod epoch;
 #[path = "s3_store/errors.rs"]
 mod errors;
 #[path = "s3_store/event_loop.rs"]
@@ -52,8 +52,6 @@ mod ops;
 mod owners;
 #[path = "s3_store/peak_memory.rs"]
 mod peak_memory;
-#[path = "s3_store/restore.rs"]
-mod restore;
 #[path = "s3_store/rollout_identity.rs"]
 mod rollout_identity;
 #[path = "s3_store/skeleton.rs"]

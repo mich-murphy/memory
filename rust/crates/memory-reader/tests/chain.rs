@@ -1,4 +1,4 @@
-//! `read_owner` against an in-memory object map holding real manifests built by `memory-core`.
+//! `read_owner_head` against an in-memory object map holding real manifests built by `memory-core`.
 use memory_core::domain::{
     Agent, ArchiveId, MachineId, Owner, SessionId, SessionKey, Sha256, SourceClass, SourceId,
     SourceKind,
@@ -8,7 +8,7 @@ use memory_core::manifest::{
     Built, Change, Current, EpochStamp, EpochWriter, Folded, Header, SourceWrite, Timestamp,
     Writer, build, manifest_hash,
 };
-use memory_reader::{ChainFault, OwnerError, read_owner, restore_source};
+use memory_reader::{ChainFault, OwnerError, decode_piece, read_owner_head};
 use std::collections::HashMap;
 
 mod common;
@@ -16,6 +16,14 @@ use common::{R, enc, hex, piece};
 
 type Objects = HashMap<String, Vec<u8>>;
 type Read = Result<Option<Folded>, OwnerError<String>>;
+
+/// The folded state of an owner, through `read_owner_head`.
+fn read_owner<E>(
+    owner: &Owner,
+    fetch: impl FnMut(&str) -> Result<Option<Vec<u8>>, E>,
+) -> Result<Option<Folded>, OwnerError<E>> {
+    Ok(read_owner_head(owner, fetch)?.map(|head| head.folded))
+}
 
 fn bad<T>(_: T) -> String {
     "invalid test value".to_owned()
@@ -129,8 +137,14 @@ fn hash_of(c: &Chain, index: usize) -> R<Sha256> {
 }
 fn restored(c: &Chain, folded: &Folded) -> R<Vec<u8>> {
     let entry = folded.state.sources.get(&source_id()?).ok_or("no source")?;
-    restore_source(entry, |key| c.objects.get(key).cloned().ok_or("missing"))
-        .map_err(|e| e.to_string())
+    let record = entry.epochs.last().ok_or("no epoch")?;
+    let mut out = Vec::new();
+    for piece in &record.pieces {
+        let stored = c.objects.get(piece.object()).ok_or("missing")?;
+        out.extend(decode_piece(piece, stored).map_err(|e| e.to_string())?);
+    }
+    assert_eq!(manifest_hash(&out), record.sha256);
+    Ok(out)
 }
 
 #[test]

@@ -85,8 +85,9 @@ host; nothing in the bucket changes until the daemon starts.
 
 5. **Verify.** The first round captures the backlog; wait for its `round cause=start` line in
    `~/Library/Logs/memory/daemon.log` (macOS) or `journalctl --user -u memory` (Linux), with no
-   `WARN` or `ERROR`. Then `memory status` (local, instant) and `memory check` (fetches every
-   piece; exit 0 with `mismatch=0` and `remote_only=0`).
+   `WARN` or `ERROR`. Then `memory status` (local, instant). Optionally run
+   `memory export <owner> --out DIR` on one owner (`memory owners` lists them); it checks every
+   piece's digest and fails closed.
 
 **Upgrade:** build the new commit, copy the current binary aside, swap the new one in as in step
 1 and restart (`launchctl kickstart -k gui/$(id -u)/memory` or
@@ -123,8 +124,7 @@ counts sources as `current`, `behind`, `changed` or `unindexed`, plus `withheld`
 line per parked entry. Exit 0, or 1 when anything is parked, the host is paused or
 `status.json` is not `loaded`; 2 config; 64 usage. `index.json` is written at most every 60 s,
 so a source captured in the last minute may show as `behind`. It never claims everything is
-captured: `memory check` is the verified view (it fetches every piece, about 23 minutes on a
-large archive), and `status --verify` exits 64.
+captured: `memory export` is the verified read of one owner, and `status --verify` exits 64.
 
 **`memory unpark <owner-prefix>|--all`** clears parked entries from `status.json`. The daemon is
 the only writer of that file and reads it once at start, so `unpark` takes the daemon lock and

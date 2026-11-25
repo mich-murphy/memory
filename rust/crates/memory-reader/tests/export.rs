@@ -9,7 +9,7 @@ use memory_core::manifest::{
     Timestamp,
 };
 use memory_reader::export::{ExportError, build_envelope, build_shared_envelope, write_export};
-use memory_reader::{OwnerHead, restore_epoch};
+use memory_reader::{OwnerHead, decode_piece};
 use serde_json::Value;
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -505,12 +505,16 @@ fn metadata_key_sets_are_exactly_the_importers() -> R {
 }
 
 #[test]
-fn bodies_equal_restore_epoch_for_0_1_3_and_70_pieces() -> R {
+fn bodies_equal_decoded_pieces_for_0_1_3_and_70_pieces() -> R {
     for count in [0usize, 1, 3, 70] {
         let mut objects = Objects::new();
         let chunks: Vec<Vec<u8>> = (0..count).map(|i| chunk(9, i)).collect();
         let rec = epoch(0, &chunks, &mut objects)?;
-        let want = restore_epoch(&rec, |k| objects.get(k).cloned().ok_or(())).map_err(bad)?;
+        let mut want = Vec::new();
+        for p in &rec.pieces {
+            let stored = objects.get(p.object()).ok_or("missing piece")?;
+            want.extend(decode_piece(p, stored).map_err(bad)?);
+        }
         let h = head(
             vec![(
                 "a",

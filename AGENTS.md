@@ -24,8 +24,8 @@ and update its progress ledger with implemented work, exact checks, and the next
   `agent-sessions` bucket (acceptance writes only under `rust-acceptance/<run-id>/`), no
   migration of existing R2 data. Measured, not assumed; rerun the experiment scripts before
   changing a number.
-- Use one authoritative storage reader for restore and analytics. Release acceptance
-  includes actual writer output -> reader -> importer -> event index -> report.
+- Use one authoritative storage reader (`memory export`) for analytics. Release acceptance
+  includes actual writer output -> export -> importer -> event index -> report.
 - The old R2 archive (`capture-v1/` and `v3/`) was deleted on 2026-11-09 and the Rust writer
   rebuilds from sources on this Mac and dev-01. Follow DESIGN.md section 18; that the archive
   is gone is not evidence that local sources contain every old byte.

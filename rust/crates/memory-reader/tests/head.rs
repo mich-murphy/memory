@@ -7,7 +7,7 @@ use memory_core::limits::{current_key, manifest_key};
 use memory_core::manifest::{
     Built, Change, Current, EpochStamp, EpochWriter, Header, SourceWrite, Timestamp, Writer, build,
 };
-use memory_reader::{read_owner, read_owner_head};
+use memory_reader::read_owner_head;
 use std::collections::HashMap;
 
 mod common;
@@ -99,8 +99,6 @@ fn the_head_carries_the_head_manifests_captured_at_and_currents_updated_at() -> 
         );
         assert_eq!(head.updated_at.unix_ns(), Some(1_794_049_200_000_000_000));
         assert_eq!(head.folded.position.seq, (count - 1) as u64);
-        let plain = read_owner(&owner, |k| Ok::<_, ()>(objects.get(k).cloned())).map_err(bad)?;
-        assert_eq!(plain, Some(head.folded), "read_owner unchanged");
     }
     Ok(())
 }

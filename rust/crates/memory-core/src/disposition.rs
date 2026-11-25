@@ -65,7 +65,6 @@ pub struct Streak {
 pub const fn park_reason(fault: &Fault) -> ParkReason {
     match fault {
         Fault::AuditMismatch => ParkReason::RepeatedAuditMismatch,
-        Fault::ReadbackMismatch => ParkReason::RepeatedReadbackMismatch,
         Fault::SourceUnstable => ParkReason::SourceUnstable,
         Fault::NonJsonResponse => ParkReason::RepeatedNonJsonResponse,
         Fault::Schema => ParkReason::RepeatedSchemaError,
