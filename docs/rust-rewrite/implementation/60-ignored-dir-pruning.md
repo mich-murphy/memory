@@ -48,3 +48,5 @@ does not delete them.
 ## Ledger
 
 - 2026-11-26: brief written on `9b97cb8`.
+- 2026-11-26: accepted at `fac4846`: 5 of 5 teeth caught; gates 13 of 14 locally, the
+  `fs_watcher_*` failure reproduced on `main` with `fseventsd` saturated (evidence 55).
