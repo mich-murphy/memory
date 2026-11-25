@@ -54,3 +54,17 @@ Diff over the brief: 59 files, 511 insertions, 3,721 deletions.
 ## Hosts
 
 Nothing scheduled `memory check` on either host (no launchd, systemd timer or cron entry).
+
+## Install of `126ac48` (2026-11-25)
+
+Stack #298 merged as `126ac48`. The capture binary changed (subcommands and closed enums).
+
+| | This Mac | dev-01 |
+|---|---|---|
+| sha256 prefix | `4d3bb3e2327164a4` | `1dee9f0eb02f65d3` (built there; `ldd` store paths equal the gcroots) |
+| Backup | `memory-befdd0a` | `memory-befdd0a` |
+| Start round | 13:51Z, `landed=1 failed=0 withheld=0`, no WARN/ERROR, `tmp/` empty | 13:56Z, `landed=3 failed=0 withheld=0`, no WARN/ERROR, `tmp/` empty, `NRestarts=0` |
+| `memory status` | exit 0, `state=loaded index=loaded`, 6,088 sources, 1 behind (live), `audit_mismatched=0` | `state=loaded index=loaded`, 4,707 sources, 3 behind and 1 unindexed (live), `audit_mismatched=0` |
+| `memory check`, `memory restore` | exit 78 (unknown subcommand) | exit 78 |
+| `memory export` of one owner | exit 0, `sources=1 deleted=0`; output deleted | exit 0, `sources=1 deleted=0`; output deleted |
+| Daemon | pid 9471, RSS 50 MiB after the start round | `VmHWM` 100 MiB |
