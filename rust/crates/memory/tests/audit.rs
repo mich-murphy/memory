@@ -18,6 +18,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[path = "common/epoch.rs"]
+mod epoch;
 #[path = "common/fs.rs"]
 mod mem_fs;
 #[path = "common/store.rs"]
@@ -320,12 +322,13 @@ impl Rig {
     fn restore_of(&mut self, id: &SourceId) -> R<(Vec<u8>, usize)> {
         let store = &mut self.d.as_mut().ok_or("no daemon")?.store_mut().inner;
         let fetch = |key: &str| store.objects.get(key).map(|(body, _)| body.clone());
-        let folded = memory_reader::read_owner(&self.owner, |key| Ok::<_, ()>(fetch(key)))
+        let folded = memory_reader::read_owner_head(&self.owner, |key| Ok::<_, ()>(fetch(key)))
             .map_err(e)?
-            .ok_or("no chain")?;
+            .ok_or("no chain")?
+            .folded;
         let entry = folded.state.sources.get(id).ok_or("no entry")?;
-        let bytes =
-            memory_reader::restore_source(entry, |key| fetch(key).ok_or("missing")).map_err(e)?;
+        let record = entry.epochs.last().ok_or("no epoch")?;
+        let bytes = epoch::epoch_bytes(record, |key| fetch(key).ok_or("missing"))?;
         Ok((bytes, entry.epochs.len()))
     }
 }

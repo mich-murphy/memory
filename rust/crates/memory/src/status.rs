@@ -2,7 +2,7 @@
 //!
 //! Read-only and offline: no daemon lock, nothing created or written under the state root and no
 //! network request of any method (the store is never built and the token file is not read). It
-//! reads `config.toml`, `status.json` and `index.json` with [`crate::check::read_state`], walks
+//! reads `config.toml`, `status.json` and `index.json` with [`read_state`], walks
 //! the configured roots with the daemon's walk and stats each source. No byte of a source is
 //! read.
 //!
@@ -10,8 +10,7 @@
 //! (appended since the last capture), `changed` (another file, or shorter than captured),
 //! `unindexed` (no entry). `index.json` is written at most every 60 s, so a source captured in
 //! the last minute may still show as `behind`. Tier 2 is `status.json`: age, rounds, host pause,
-//! failure and audit counts and the parked entries. The verified view, which fetches every piece
-//! from the store, is `memory check`; `status --verify` is a usage error.
+//! failure and audit counts and the parked entries. `status --verify` is a usage error.
 //!
 //! A source with a recorded withhold in `index.json` (a scanned file, D54, brief 47) counts as
 //! `withheld`, as does one that admission denies.
@@ -20,23 +19,84 @@
 //! source id, content or a credential, and never a claim that everything is captured.
 use crate::assemble::policy_context;
 use crate::capture::Source;
-use crate::check::{Refusal, parked_line, read_state};
 use crate::clock::SystemClock;
 use crate::config::Config;
-use crate::daemon::{EXIT_CONFIG, IndexBody, SourceIndex, StatusBody};
+use crate::daemon::{EXIT_CONFIG, IndexBody, ParkedReason, SourceIndex, StatusBody};
 use crate::environment::{Clock, FileSystem, Stat};
 use crate::realfs::WalkLimits;
 use crate::resolve::{SharedFs, WalkSources};
 use crate::roots::locator_roots;
-use crate::state::{StateFile, default_root};
+use crate::state::{Loaded, MissingReason, StateFile, default_root, read_durable};
 use memory_core::domain::{SnapshotFingerprint, SourceClass};
+use memory_core::limits::owner_prefix;
 use memory_core::privacy::{Admission, admit};
+use serde::Serialize;
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 
 /// Exit code: usage error.
 pub const EXIT_USAGE: u8 = 64;
+
+/// A refusal before any measurement: a closed code and the exit code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    /// Machine-readable code.
+    pub code: String,
+    /// Exit code.
+    pub exit: u8,
+}
+
+/// The snake-case code of a closed enum value: its string form, or the tag of a variant that
+/// carries data (the data is never printed).
+pub fn code_of<T: Serialize>(value: &T) -> String {
+    match serde_json::to_value(value) {
+        Ok(serde_json::Value::String(text)) => text,
+        Ok(serde_json::Value::Object(map)) => map
+            .keys()
+            .next()
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_owned()),
+        _ => "unknown".to_owned(),
+    }
+}
+
+/// Read one state file under `root` without a lock: the parsed body and the state code
+/// (`loaded`, `missing`, `damaged` or `newer_schema`).
+#[must_use]
+pub fn read_state<T: serde::de::DeserializeOwned>(
+    root: &Path,
+    file: StateFile,
+) -> (Option<T>, &'static str) {
+    match read_durable(&root.join(file.name()), file.schema()) {
+        Loaded::Present(stored) => match serde_json::from_slice::<T>(&stored.body) {
+            Ok(body) => (Some(body), "loaded"),
+            Err(_) => (None, "damaged"),
+        },
+        Loaded::Missing(MissingReason::NotFound) => (None, "missing"),
+        Loaded::Missing(MissingReason::NewerSchema) => (None, "newer_schema"),
+        Loaded::Missing(_) => (None, "damaged"),
+    }
+}
+
+/// [`read_state`] of `status.json`.
+#[must_use]
+pub fn read_status(root: &Path) -> (Option<StatusBody>, &'static str) {
+    read_state(root, StateFile::Status)
+}
+
+/// The closed line printed for a parked entry: owner prefix, reason code and scope.
+#[must_use]
+pub fn parked_line(entry: &crate::daemon::ParkedEntry) -> String {
+    let (scope, reason) = match &entry.reason {
+        ParkedReason::Owner(reason) => ("owner", code_of(reason)),
+        ParkedReason::Source(reason) => ("source", code_of(reason)),
+    };
+    format!(
+        "parked owner={} reason={reason} scope={scope}",
+        owner_prefix(&entry.owner)
+    )
+}
 
 /// Tier-1 counts.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -267,7 +327,7 @@ fn fail(code: &str, exit: u8) -> ExitCode {
 }
 
 /// Entry of `memory status`; `args` follow the word `status` and must be empty (`--verify` is
-/// not built: `memory check` is the verified view).
+/// not built:).
 ///
 /// Exit codes: 0 healthy, 1 something is parked, the host is paused or `status.json` is not
 /// loaded, 2 config refusal, 64 usage.

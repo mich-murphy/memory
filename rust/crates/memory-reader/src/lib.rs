@@ -1,12 +1,13 @@
-//! Authoritative restore library: decodes stored pieces and restores one source's bytes.
+//! Authoritative reader: decodes stored pieces, walks an owner's manifest chain and exports it.
 //!
-//! [`read_owner`] walks `current.json` and the manifest chain; [`restore_source`] then restores
-//! one source from the folded state. Callers pass a fetch function over object keys.
+//! [`read_owner_head`] walks `current.json` and the manifest chain and folds it;
+//! [`decode_piece`] checks one stored piece against its descriptor; [`export`] writes an owner
+//! for analytics. Callers pass a fetch function over object keys.
 use memory_core::domain::{CommitOutcome, Owner};
 use memory_core::limits::{current_key, manifest_key};
 use memory_core::manifest::{
-    CHECKPOINT_INTERVAL, EpochRecord, Folded, Manifest, ManifestError, Piece, ProjectedKind,
-    SourceEntry, Timestamp, fold, manifest_hash, parse_current, parse_manifest, recover_projection,
+    CHECKPOINT_INTERVAL, Folded, Manifest, ManifestError, Piece, ProjectedKind, Timestamp, fold,
+    manifest_hash, parse_current, parse_manifest, recover_projection,
 };
 pub mod export;
 
@@ -38,29 +39,6 @@ pub enum DecodeError {
     RawDigest,
 }
 
-/// Why one source could not be restored.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum RestoreError<E> {
-    /// The source has no epoch to restore.
-    #[error("the source has no epoch")]
-    NoEpoch,
-    /// Fetching an object failed; the fetch error is passed through.
-    #[error("fetching an object failed")]
-    Fetch(E),
-    /// A piece did not decode.
-    #[error("a piece did not decode")]
-    Decode(DecodeError),
-    /// Pieces are not contiguous from offset 0.
-    #[error("pieces are not contiguous from offset 0")]
-    Gap,
-    /// The restored length differs from the epoch's `size`.
-    #[error("restored length differs from the epoch size")]
-    Size,
-    /// The restored digest differs from the epoch's `sha256`.
-    #[error("restored digest differs from the epoch digest")]
-    Digest,
-}
-
 /// Decode one stored piece, verifying it against its descriptor.
 ///
 /// The output is bounded by the descriptor's `len`, so a decompression bomb fails instead of
@@ -78,7 +56,7 @@ pub fn decode_piece(piece: &Piece, stored: &[u8]) -> Result<Vec<u8>, DecodeError
     let bound = piece.len();
     let mut decoder = zstd::stream::read::Decoder::new(stored).map_err(|_| DecodeError::Zstd)?;
     // Exact allocation from the descriptor, capped at one capture piece: a buffer grown by
-    // doubling leaves large freed blocks behind, which kept a streamed `memory check` of one
+    // doubling leaves large freed blocks behind, which kept a streamed read of one
     // 100 MB source at 249 MB (brief 34). `len` is only checked non-zero, hence the cap.
     let mut out =
         Vec::with_capacity(usize::try_from(bound.min(PREALLOC_PIECE_BYTES)).unwrap_or_default());
@@ -98,44 +76,6 @@ pub fn decode_piece(piece: &Piece, stored: &[u8]) -> Result<Vec<u8>, DecodeError
         return Err(DecodeError::RawDigest);
     }
     Ok(out)
-}
-
-/// Restore the transformed bytes of one epoch: fetch and decode every piece, require them
-/// contiguous from offset 0, and check the epoch's `size` and `sha256`.
-///
-/// # Errors
-/// [`RestoreError`]; a fetch error is returned unchanged in [`RestoreError::Fetch`].
-pub fn restore_epoch<E>(
-    record: &EpochRecord,
-    mut fetch: impl FnMut(&str) -> Result<Vec<u8>, E>,
-) -> Result<Vec<u8>, RestoreError<E>> {
-    let mut out: Vec<u8> = Vec::new();
-    for piece in &record.pieces {
-        if u64::try_from(out.len()).ok() != Some(piece.offset().get()) {
-            return Err(RestoreError::Gap);
-        }
-        let stored = fetch(piece.object()).map_err(RestoreError::Fetch)?;
-        out.extend(decode_piece(piece, &stored).map_err(RestoreError::Decode)?);
-    }
-    if u64::try_from(out.len()).ok() != Some(record.size) {
-        return Err(RestoreError::Size);
-    }
-    if manifest_hash(&out) != record.sha256 {
-        return Err(RestoreError::Digest);
-    }
-    Ok(out)
-}
-
-/// Restore the latest epoch of a source (the only one for a snapshot source).
-///
-/// # Errors
-/// [`RestoreError::NoEpoch`] when the entry has none, otherwise as [`restore_epoch`].
-pub fn restore_source<E>(
-    entry: &SourceEntry,
-    fetch: impl FnMut(&str) -> Result<Vec<u8>, E>,
-) -> Result<Vec<u8>, RestoreError<E>> {
-    let record = entry.epochs.last().ok_or(RestoreError::NoEpoch)?;
-    restore_epoch(record, fetch)
 }
 
 /// What is wrong with an owner's stored chain.
@@ -194,26 +134,16 @@ pub struct OwnerHead {
     pub updated_at: Timestamp,
 }
 
-/// Read an owner's folded state: GET `current.json`, walk `previous` back to the checkpoint
-/// (at most [`CHECKPOINT_INTERVAL`] manifest fetches, each verified against its key) and fold.
+/// Read an owner's folded state and head times: GET `current.json`, walk `previous` back to
+/// the checkpoint (at most [`CHECKPOINT_INTERVAL`] manifest fetches, each verified against its
+/// key) and fold. The head carries the head manifest's `captured_at` and `current.json`'s
+/// `updated_at`.
 ///
 /// `fetch` returns `Ok(None)` for an absent key. An absent `current.json` is `Ok(None)`; an
 /// absent manifest that `current.json` or a delta names is corruption.
 ///
 /// # Errors
 /// [`OwnerError`]; a fetch error is returned unchanged in [`OwnerError::Fetch`].
-pub fn read_owner<E>(
-    owner: &Owner,
-    fetch: impl FnMut(&str) -> Result<Option<Vec<u8>>, E>,
-) -> Result<Option<Folded>, OwnerError<E>> {
-    Ok(read_owner_head(owner, fetch)?.map(|head| head.folded))
-}
-
-/// As [`read_owner`], also returning the head manifest's `captured_at` and `current.json`'s
-/// `updated_at`.
-///
-/// # Errors
-/// As [`read_owner`].
 pub fn read_owner_head<E>(
     owner: &Owner,
     mut fetch: impl FnMut(&str) -> Result<Option<Vec<u8>>, E>,

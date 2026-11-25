@@ -176,10 +176,6 @@ fn parked_names_the_owner_prefix_and_a_closed_reason() -> Result<(), String> {
             "repeated_audit_mismatch",
         ),
         (
-            ParkedReason::Source(ParkReason::RepeatedReadbackMismatch),
-            "repeated_readback_mismatch",
-        ),
-        (
             ParkedReason::Source(ParkReason::SourceUnstable),
             "source_unstable",
         ),

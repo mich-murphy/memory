@@ -1,7 +1,7 @@
 //! `memory status`, `memory unpark` and `memory reconcile` on the real binary beside the local
 //! server. Every run clears the environment and sets `MEMORY_STATE_DIR` to a temporary directory.
 use super::assemble::{MARKER, SESSION, lines};
-use super::daemon_restore::{BOUND, Guard, Setup, setup};
+use super::daemon_setup::{BOUND, Guard, Setup, setup};
 use super::fake::Fault;
 use super::{R, e};
 use memory::assemble::start_from_config;
@@ -311,7 +311,7 @@ fn unpark_one_owner_keeps_the_other_and_the_counters() -> R {
             ..ran
         },
     )?;
-    let (after, code) = memory::check::read_status(&s.rig.state);
+    let (after, code) = memory::status::read_status(&s.rig.state);
     assert_eq!(code, "loaded");
     let want = StatusBody {
         parked: vec![entry(&other)],
@@ -329,7 +329,7 @@ fn unpark_all_empties_the_list() -> R {
     assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
     assert_eq!(ran.lines_with("unparked owner="), 2);
     assert!(ran.out.contains(&prefix(&other)));
-    let (after, _) = memory::check::read_status(&s.rig.state);
+    let (after, _) = memory::status::read_status(&s.rig.state);
     assert_eq!(
         after,
         Some(StatusBody {
@@ -452,12 +452,12 @@ fn reconcile_captures_a_new_file_then_lands_nothing_with_zero_puts() -> R {
     for line in ran.err.lines() {
         assert!(!super::log_lines::parse(line).map_err(e)?.is_empty());
     }
-    let out = s.rig.dir.join("restored");
+    let out = s.rig.dir.join("exported");
     let out_text = out.display().to_string();
-    let restored = command(&s, &["restore", &prefix(&s.owner), "--out", &out_text])?;
+    let restored = command(&s, &["export", &prefix(&s.owner), "--out", &out_text])?;
     assert_eq!(restored.code, 0, "{}{}", restored.out, restored.err);
     assert_eq!(
-        fs::read(out.join(SESSION)).map_err(e)?,
+        fs::read(out.join("bodies/0000.bin")).map_err(e)?,
         fs::read(&s.file).map_err(e)?
     );
     let puts = s.server.count("PUT");

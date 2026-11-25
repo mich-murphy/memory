@@ -14,7 +14,7 @@ use memory_core::limits::current_key;
 use memory_core::locator::{RootLayout, RootNamespace, Roots};
 use memory_core::manifest::{Folded, manifest_hash};
 use memory_core::privacy::{PolicyContext, rules_digest};
-use memory_reader::{decode_piece, read_owner, restore_source};
+use memory_reader::{decode_piece, read_owner_head};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -196,15 +196,17 @@ fn scenario(make: &dyn Fn() -> R<S3Store>, mark: &mut dyn FnMut(&str)) -> R<Outc
     // An independent reader: its own store, and nothing from the daemon but the owner.
     let read_back = || -> R<(Folded, Vec<u8>)> {
         let mut store = store()?;
-        let folded = read_owner(&owner, |key| match store.get(key) {
+        let folded = read_owner_head(&owner, |key| match store.get(key) {
             Ok(stored) => Ok(Some(stored.body)),
             Err(StoreError::NotFound) => Ok(None),
             Err(other) => Err(other),
         })
         .map_err(e)?
-        .ok_or("owner absent")?;
+        .ok_or("owner absent")?
+        .folded;
         let entry = folded.state.sources.values().next().ok_or("no source")?;
-        let restored = restore_source(entry, |key| store.get(key).map(|s| s.body)).map_err(e)?;
+        let record = entry.epochs.last().ok_or("no epoch")?;
+        let restored = super::epoch::epoch_bytes(record, |key| store.get(key).map(|s| s.body))?;
         assert_eq!(restored, fs::read(&file).map_err(e)?);
         Ok((folded, restored))
     };

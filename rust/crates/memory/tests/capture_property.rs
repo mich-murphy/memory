@@ -26,6 +26,8 @@ use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[path = "common/epoch.rs"]
+mod epoch;
 #[path = "common/fs.rs"]
 mod mem_fs;
 #[path = "common/store.rs"]
@@ -394,13 +396,12 @@ fn read_chain(store: &FakeStore, owner: &Owner) -> R<Option<Chain>> {
 /// Reassemble an epoch from stored objects, decoding each piece through `memory_reader`
 /// (stored bytes are zstd frames; the reader checks both descriptors and the digests).
 fn reassemble(store: &FakeStore, record: &EpochRecord) -> R<Vec<u8>> {
-    memory_reader::restore_epoch(record, |key| {
+    epoch::epoch_bytes(record, |key| {
         store
             .peek(key)
             .map(<[u8]>::to_vec)
             .ok_or_else(|| "piece object missing".to_owned())
     })
-    .map_err(|err| format!("restore failed: {err:?}"))
 }
 
 struct Observed {

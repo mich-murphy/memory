@@ -15,6 +15,8 @@ use memory_core::privacy::{
     sanitize_launch,
 };
 
+#[path = "common/epoch.rs"]
+mod epoch;
 #[path = "common/fs.rs"]
 mod mem_fs;
 #[path = "common/store.rs"]
@@ -891,14 +893,14 @@ fn restore_latest(rig: &Rig) -> R<Vec<u8>> {
     let id = &rig.sources.first().ok_or("no source")?.id;
     let base = rig.base.as_ref().ok_or("no base")?;
     let entry = base.state.sources.get(id).ok_or("no entry")?;
-    memory_reader::restore_source(entry, |key| {
+    let record = entry.epochs.last().ok_or("no epoch")?;
+    epoch::epoch_bytes(record, |key| {
         rig.store
             .objects
             .get(key)
             .map(|(body, _)| body.clone())
             .ok_or_else(|| "piece object missing".to_owned())
     })
-    .map_err(|err| format!("restore failed: {err:?}"))
 }
 
 /// Facts-table row 7: an extension that cannot resume the digest re-reads `[0, to)`. A byte

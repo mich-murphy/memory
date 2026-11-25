@@ -9,7 +9,7 @@ use memory::realfs::WalkLimits;
 use memory::resolve::{SharedFs, WalkSources};
 use memory::roots::locator_roots;
 use memory::s3::TimeoutPolicy;
-use memory_reader::{read_owner, restore_source};
+use memory_reader::read_owner_head;
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -146,15 +146,17 @@ fn daemon_from_config_alone_round_trips_through_the_server() -> R {
     .0
     .clone();
     let mut store = store_at(&server.url(), PREFIX, TimeoutPolicy::PRODUCTION)?;
-    let folded = read_owner(&owner, |key| match store.get(key) {
+    let folded = read_owner_head(&owner, |key| match store.get(key) {
         Ok(stored) => Ok(Some(stored.body)),
         Err(StoreError::NotFound) => Ok(None),
         Err(other) => Err(other),
     })
     .map_err(e)?
-    .ok_or("owner absent")?;
+    .ok_or("owner absent")?
+    .folded;
     let entry = folded.state.sources.values().next().ok_or("no source")?;
-    let restored = restore_source(entry, |key| store.get(key).map(|s| s.body)).map_err(e)?;
+    let record = entry.epochs.last().ok_or("no epoch")?;
+    let restored = super::epoch::epoch_bytes(record, |key| store.get(key).map(|s| s.body))?;
     assert_eq!(restored, fs::read(&file).map_err(e)?);
     assert!(String::from_utf8(restored).map_err(e)?.contains(MARKER));
 
@@ -225,7 +227,7 @@ fn refusals_are_closed_codes_and_leave_no_lock() -> R {
 }
 
 #[test]
-fn an_empty_prefix_writes_only_at_the_bucket_root_and_restore_and_owners_find_it() -> R {
+fn an_empty_prefix_writes_only_at_the_bucket_root_and_export_and_owners_find_it() -> R {
     use super::consumer_gate::run;
     let server = Fake::start()?;
     let rig = Rig::new("rootprefix", &server.url(), "", false)?;
@@ -281,7 +283,7 @@ fn an_empty_prefix_writes_only_at_the_bucket_root_and_restore_and_owners_find_it
     let restored = run(
         &rig.dir,
         &[
-            "restore".as_ref(),
+            "export".as_ref(),
             text.as_ref(),
             "--out".as_ref(),
             out.as_os_str(),
@@ -294,7 +296,7 @@ fn an_empty_prefix_writes_only_at_the_bucket_root_and_restore_and_owners_find_it
         String::from_utf8_lossy(&restored.stderr)
     );
     assert_eq!(
-        fs::read(out.join(SESSION)).map_err(e)?,
+        fs::read(out.join("bodies/0000.bin")).map_err(e)?,
         fs::read(&file).map_err(e)?
     );
     Ok(())

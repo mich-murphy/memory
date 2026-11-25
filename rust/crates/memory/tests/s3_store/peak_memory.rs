@@ -6,7 +6,7 @@
 //! footprint` line is parsed; elsewhere `VmHWM` is read from `/proc/<pid>/status` before the
 //! stop. The fake server's memory is in the test process, not the daemon's.
 use super::assemble::Rig;
-use super::daemon_restore::{Guard, PREFIX, Setup, setup};
+use super::daemon_setup::{Guard, PREFIX, Setup, setup};
 use super::fake::Fake;
 use super::{BUCKET, R, e};
 use memory::config::Config;

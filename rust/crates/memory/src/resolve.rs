@@ -17,7 +17,7 @@
 //!   profile `Scanned` (whole-file content scan). `deferred_snapshot` no longer exists. `note`
 //!   still routes append sources only. `locate_absent` (D52, brief 48) resolves stored entries
 //!   too, and returns `Probe::Retired` for a stored entry whose kind is not captured
-//!   (`stored_retired`, brief 57, shared with `memory check`).
+//!   (`stored_retired`, brief 57, shared with `memory status`).
 //! * No `unsafe`, no new dependencies, no panics; any I/O failure clears a resolved flag.
 
 use crate::capture::Source;

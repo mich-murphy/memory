@@ -30,7 +30,7 @@
 //! | `log_rotated` | none |
 //! | `state_load` | `file` (`index` or `status`) `result` (`damaged` or `newer_schema`) |
 //! | `retry` | `owner` `class` (`offline throttled transient destination_auth local deterministic`) `cause` (a closed code: a transport cause such as `dns refused timeout reset`, or `server throttled auth not_found base_unchanged corrupt` and the like) `landing` (`unknown` or `no`) `attempt elapsed_ms after_ms` |
-//! | `parked` | `owner` `reason` `scope` (`owner` or `source`; reasons: `foreign_writer`, `newer_remote_schema`, `repeated_audit_mismatch`, `repeated_readback_mismatch`, `source_unstable`, `repeated_non_json_response`, `repeated_schema_error`) |
+//! | `parked` | `owner` `reason` `scope` (`owner` or `source`; reasons: `foreign_writer`, `newer_remote_schema`, `repeated_audit_mismatch`, `source_unstable`, `repeated_non_json_response`, `repeated_schema_error`) |
 //! | `host_paused` | none |
 //! | `host_resumed` | none |
 //!
@@ -68,7 +68,7 @@
 //! Under the `sim` feature `MEMORY_SIM_LOG_CAP=<bytes>` replaces the cap; the release binary never
 //! reads it. See [`rotate`].
 //!
-//! `memory hook` and `memory restore` never start the subscriber.
+//! `memory hook` never starts the subscriber.
 use crate::daemon::{OwnerOutcome, ParkedReason, RoundReport, StateLoad};
 use crate::driver::Cause;
 use memory_core::domain::{ErrorClass, Owner, OwnerParkReason, ParkReason};
@@ -442,7 +442,6 @@ const fn reason_id(reason: &ParkedReason) -> &'static str {
         ParkedReason::Owner(OwnerParkReason::ForeignWriter { .. }) => "foreign_writer",
         ParkedReason::Owner(OwnerParkReason::NewerRemoteSchema) => "newer_remote_schema",
         ParkedReason::Source(ParkReason::RepeatedAuditMismatch) => "repeated_audit_mismatch",
-        ParkedReason::Source(ParkReason::RepeatedReadbackMismatch) => "repeated_readback_mismatch",
         ParkedReason::Source(ParkReason::SourceUnstable) => "source_unstable",
         ParkedReason::Source(ParkReason::RepeatedNonJsonResponse) => "repeated_non_json_response",
         ParkedReason::Source(ParkReason::RepeatedSchemaError) => "repeated_schema_error",

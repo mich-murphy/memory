@@ -313,7 +313,7 @@ fn an_existing_destination_is_refused_before_any_fetch() -> R {
 /// the record only; the line carries `skipped`.
 #[test]
 fn the_binary_exports_a_shared_owner_run_records() -> R {
-    use super::daemon_restore::setup;
+    use super::daemon_setup::setup;
     let s = setup("export-shared")?;
     let pi = s.rig.add_root("pi")?;
     fs::copy(&s.rig.cfg, s.rig.state.join("config.toml")).map_err(e)?;
@@ -351,7 +351,7 @@ fn the_binary_exports_a_shared_owner_run_records() -> R {
     Ok(())
 }
 
-fn shared_prefix(s: &super::daemon_restore::Setup) -> R<String> {
+fn shared_prefix(s: &super::daemon_setup::Setup) -> R<String> {
     let config = Config::load(&s.rig.cfg).map_err(e)?;
     let owner = WalkSources::new(
         locator_roots(&config).map_err(e)?,

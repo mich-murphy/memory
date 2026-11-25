@@ -1,9 +1,9 @@
 //! Brief 48, reduced by brief 54: deletions on the real binary against the loopback fake. One
 //! session (transcript plus a tool-results file) and a Pi run record (the kept snapshot kind;
 //! Codex stores and file-history are ignored now). After both are removed, two reconciles
-//! record both deleted; `check`, `restore` and `export` follow D52/D59; a recreated run record
+//! record both deleted; `export` follows D52/D59; a recreated run record
 //! lands as a new epoch.
-use super::daemon_restore::{Setup, setup};
+use super::daemon_setup::{Setup, setup};
 use super::{R, e};
 use memory::config::Config;
 use memory::daemon::Sources;
@@ -94,28 +94,7 @@ fn deleted_snapshot_sources_follow_d52_and_a_recreated_store_lands_again() -> R 
     let two = round(&s)?;
     assert!(two.contains(" deleted=2"), "{two}");
 
-    let (code, out, err) = run(&s, &["check"])?;
-    assert_eq!(code, 0, "{out}{err}");
-    assert!(out.contains(" remote_only=0 "), "{out}");
-
     let prefix = owner_prefix(&s.owner);
-    let dest = s.rig.dir.join("restored");
-    let (code, out, err) = run(
-        &s,
-        &["restore", &prefix, "--out", &dest.display().to_string()],
-    )?;
-    assert_eq!(code, 0, "{out}{err}");
-    assert!(
-        err.contains("restored written=1 skipped_deleted=1 "),
-        "{err}"
-    );
-    assert!(
-        !dest
-            .join(format!("projects/-p/{UUID}/tool-results"))
-            .join(TR)
-            .exists()
-    );
-
     let exp = s.rig.dir.join("exported");
     let (code, out, err) = run(
         &s,
@@ -135,23 +114,20 @@ fn deleted_snapshot_sources_follow_d52_and_a_recreated_store_lands_again() -> R 
         back.contains(" landed=1") && back.contains(" deleted=0"),
         "{back}"
     );
-    let dest = s.rig.dir.join("restored-shared");
+    let dest = s.rig.dir.join("exported-shared");
     let (code, out, err) = run(
         &s,
         &[
-            "restore",
+            "export",
             &owner_prefix(&shared),
             "--out",
             &dest.display().to_string(),
         ],
     )?;
     assert_eq!(code, 0, "{out}{err}");
-    assert!(
-        err.contains("restored written=1 skipped_deleted=0 "),
-        "{err}"
-    );
+    assert!(err.contains("exported sources=1 deleted=0 "), "{err}");
     assert_eq!(
-        fs::read(dest.join(RECORD)).map_err(e)?,
+        fs::read(dest.join("bodies/0000.bin")).map_err(e)?,
         RECORD_BODY.as_bytes()
     );
     Ok(())

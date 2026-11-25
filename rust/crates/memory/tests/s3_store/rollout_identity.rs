@@ -1,6 +1,6 @@
 //! Briefs 38/39: a Codex rollout keeps one logical identity across archive, recompression and
 //! resume; `.zst` is decoded at capture.
-//! Each scenario runs the daemon against the loopback fake, then `memory check` and
+//! Each scenario runs the daemon against the loopback fake, then `memory status` and
 //! `memory export` on the real binary.
 use super::assemble::{PREFIX, Rig, lines};
 use super::fake::Fake;
@@ -36,7 +36,6 @@ struct Src {
 
 struct Done {
     check: String,
-    stdout: String,
     code: Option<i32>,
     export_line: String,
     sources: Vec<Src>,
@@ -133,18 +132,20 @@ impl Ctx {
             }
             cmd.output().map_err(e)
         };
-        let out = run(&["check".as_ref()])?;
+        let out = run(&["status".as_ref()])?;
         let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
         let code = out.status.code();
-        let check = format!("{} ", stdout.lines().next().unwrap_or_default());
-        assert!(
-            check.contains(" mismatch=0 ") && check.contains(" uncaptured=0 "),
-            "{check}"
+        let check = format!(
+            "{} ",
+            stdout
+                .lines()
+                .find(|l| l.starts_with("sources "))
+                .unwrap_or_default()
         );
+        assert!(check.contains(" unindexed=0 "), "{check}");
         if !export {
             return Ok(Done {
                 check,
-                stdout,
                 code,
                 export_line: String::new(),
                 sources: Vec::new(),
@@ -165,7 +166,6 @@ impl Ctx {
         let sources = read_sources(&meta, &dest)?;
         Ok(Done {
             check,
-            stdout,
             code,
             export_line,
             sources,
@@ -321,20 +321,19 @@ fn sessions_and_archived_copies_at_once_land_once() -> R {
 }
 
 #[test]
-fn undecodable_zst_is_withheld_with_no_put_and_check_says_why() -> R {
+fn undecodable_zst_is_withheld_with_no_put_and_status_counts_it() -> R {
     let mut c = ctx("ri-undecodable")?;
     c.write(&live(&zst_name()), b"this is not zstd")?;
     c.rounds(3)?;
     assert!(c.puts().is_empty(), "no object PUT");
     let d = c.finish_with(false)?;
-    assert!(d.has("withheld", 1), "{}", d.check);
-    assert!(d.check.contains(" mismatch=0 ") && d.check.contains(" uncaptured=0 "));
+    // `status` reads no source bytes: the undecodable file is counted unreadable, never current.
     assert!(
-        d.stdout.contains("withheld ") && d.stdout.contains("reason=undecodable"),
+        d.has("current", 0) && !d.has("unreadable", 0),
         "{}",
-        d.stdout
+        d.check
     );
-    // Withheld is not a failure: check exits 0.
+    // Withheld is not a failure: status exits 0.
     assert_eq!(d.code, Some(0));
     Ok(())
 }

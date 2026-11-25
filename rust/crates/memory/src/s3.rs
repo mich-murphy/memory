@@ -420,7 +420,7 @@ impl Store for S3Store {
             }
         };
         // Exact allocation from `Content-Length` (capped at the body limit): `read_to_vec` grows
-        // its buffer by doubling, and the freed blocks kept a streamed `memory check` of one
+        // its buffer by doubling, and the freed blocks kept a streamed read of one
         // 100 MB source at 249 MB (brief 34). An over-limit body is still `BodyExceedsLimit`,
         // which `ureq::Error::from` recovers from the reader's `io::Error`.
         let reserve = body.content_length().unwrap_or(0).min(MAX_GET_BODY);

@@ -15,6 +15,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[path = "common/epoch.rs"]
+mod epoch;
 #[path = "common/fs.rs"]
 mod mem_fs;
 #[path = "common/store.rs"]
@@ -512,13 +514,12 @@ fn read_chain(store: &FStore, owner: &Owner) -> R<Option<Chain>> {
     }))
 }
 fn reassemble(store: &FStore, record: &EpochRecord) -> R<Vec<u8>> {
-    memory_reader::restore_epoch(record, |key| {
+    epoch::epoch_bytes(record, |key| {
         store
             .peek(key)
             .map(<[u8]>::to_vec)
             .ok_or_else(|| "piece object missing".to_owned())
     })
-    .map_err(|err| format!("restore failed: {err:?}"))
 }
 struct Observed {
     latest: Option<Vec<u8>>,

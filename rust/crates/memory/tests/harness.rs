@@ -229,13 +229,7 @@ fn a_missing_prefix_is_refused_with_exit_2_by_every_command() -> std::io::Result
     let out = setup.base.join("out");
     let out = out.to_string_lossy().into_owned();
     let owner = "sessions/a/m/claude/s1";
-    let commands: [&[&str]; 5] = [
-        &["daemon"],
-        &["check"],
-        &["export", owner, "--out", &out],
-        &["restore", owner, "--out", &out],
-        &["owners"],
-    ];
+    let commands: [&[&str]; 3] = [&["daemon"], &["export", owner, "--out", &out], &["owners"]];
     for args in commands {
         let done = setup.spawn(args, None)?.finish(BOUND)?;
         assert_eq!(done.code, Some(2), "{args:?}");

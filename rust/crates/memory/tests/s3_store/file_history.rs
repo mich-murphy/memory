@@ -3,7 +3,7 @@
 //! Pi run record `sessions/<cwd>/subagent-artifacts/<name>.json` under a Pi root. One Claude
 //! session, three run records (clean, secret, binary) and a file-history file that is ignored.
 //! Secrets are synthetic and assembled from parts.
-use super::daemon_restore::{Setup, setup};
+use super::daemon_setup::{Setup, setup};
 use super::{R, e};
 use std::fs;
 use std::path::PathBuf;
@@ -42,7 +42,7 @@ fn command(s: &Setup, args: &[&str]) -> R<Ran> {
         err: String::from_utf8_lossy(&o.stderr).into_owned(),
     };
     // No file name, secret, content byte or path in any output. The owner prefix (which
-    // `check` prints by design) carries the session id, so that is not a needle.
+    // `status` prints by design) carries the session id, so that is not a needle.
     let needles = [
         CLEAN,
         SECRET_FILE,
@@ -126,29 +126,6 @@ fn file_history_lands_clean_and_withholds_secret_and_binary() -> R {
     assert!(line.split(' ').any(|w| w == "withheld=2"), "{line}");
     assert!(line.split(' ').any(|w| w == "ignored=1"), "{line}");
 
-    let check = command(&s, &["check"])?;
-    assert_eq!(check.code, 0, "{}{}", check.out, check.err);
-    let withheld: Vec<&str> = check
-        .out
-        .lines()
-        .filter(|l| l.starts_with("withheld "))
-        .collect();
-    assert_eq!(withheld.len(), 2, "{}", check.out);
-    assert!(
-        withheld
-            .iter()
-            .any(|l| l.ends_with(" reason=secret_in_text"))
-    );
-    assert!(withheld.iter().any(|l| l.ends_with(" reason=binary")));
-    assert!(
-        check
-            .out
-            .lines()
-            .next()
-            .unwrap_or("")
-            .contains(" ignored=1 ")
-    );
-
     // A second round judges nothing again.
     let puts = s.server.count("PUT");
     let again = command(&s, &["reconcile"])?;
@@ -160,15 +137,16 @@ fn file_history_lands_clean_and_withholds_secret_and_binary() -> R {
     assert!(round.contains(" withheld=0"), "{round}");
     assert_eq!(s.server.count("PUT"), puts);
 
-    let out = s.rig.dir.join("restored");
+    let out = s.rig.dir.join("shared-export");
     let out_text = out.display().to_string();
     let prefix = shared_prefix(&s)?;
-    let restored = command(&s, &["restore", &prefix, "--out", &out_text])?;
-    assert_eq!(restored.code, 0, "{}{}", restored.out, restored.err);
-    let rel = out.join("sessions").join(CWD).join("subagent-artifacts");
-    assert_eq!(fs::read(rel.join(CLEAN)).map_err(e)?, CLEAN_BODY.as_bytes());
-    assert!(!rel.join(SECRET_FILE).exists() && !rel.join(BINARY).exists());
-    assert!(!out.join("file-history").exists());
+    let shared = command(&s, &["export", &prefix, "--out", &out_text])?;
+    assert_eq!(shared.code, 0, "{}{}", shared.out, shared.err);
+    assert!(shared.err.contains("sources=1"), "{}", shared.err);
+    assert_eq!(
+        fs::read(out.join("bodies/0000.bin")).map_err(e)?,
+        CLEAN_BODY.as_bytes()
+    );
 
     let export = s.rig.dir.join("exported");
     let export_text = export.display().to_string();
@@ -209,29 +187,15 @@ fn file_history_lands_code_with_token_names_and_withholds_a_literal() -> R {
         .ok_or("no round line")?;
     assert!(round.contains(" withheld=1"), "{round}");
 
-    let check = command(&s, &["check"])?;
-    assert_eq!(check.code, 0, "{}{}", check.out, check.err);
-    let withheld: Vec<&str> = check
-        .out
-        .lines()
-        .filter(|l| l.starts_with("withheld "))
-        .collect();
-    assert_eq!(withheld.len(), 1, "{}", check.out);
-    assert!(
-        withheld
-            .iter()
-            .all(|l| l.ends_with(" reason=secret_in_text")),
-        "{}",
-        check.out
-    );
-
-    let out = s.rig.dir.join("restored");
+    let out = s.rig.dir.join("shared-export");
     let out_text = out.display().to_string();
     let prefix = shared_prefix(&s)?;
-    let restored = command(&s, &["restore", &prefix, "--out", &out_text])?;
-    assert_eq!(restored.code, 0, "{}{}", restored.out, restored.err);
-    let rel = out.join("sessions").join(CWD).join("subagent-artifacts");
-    assert_eq!(fs::read(rel.join(CLEAN)).map_err(e)?, code.as_bytes());
-    assert!(!rel.join(SECRET_FILE).exists());
+    let shared = command(&s, &["export", &prefix, "--out", &out_text])?;
+    assert_eq!(shared.code, 0, "{}{}", shared.out, shared.err);
+    assert!(shared.err.contains("sources=1"), "{}", shared.err);
+    assert_eq!(
+        fs::read(out.join("bodies/0000.bin")).map_err(e)?,
+        code.as_bytes()
+    );
     Ok(())
 }

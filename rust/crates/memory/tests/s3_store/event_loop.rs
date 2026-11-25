@@ -1,7 +1,7 @@
 //! LOOP-2b: `memory daemon` runs the event loop on the real binary against the local server.
 //! The reconcile interval is one hour in every test here, so only the watcher, a hint or a
 //! stop can make anything happen after the start round. Every wait is bounded.
-use super::daemon_restore::{BOUND, Guard, PREFIX, Setup, restore, setup, stop};
+use super::daemon_setup::{BOUND, Guard, PREFIX, Setup, exported, setup, stop};
 use super::fake::Fault;
 use super::{BUCKET, R, e};
 use memory::assemble::start_wired;
@@ -58,7 +58,7 @@ fn an_append_is_in_the_store_within_seconds_not_an_hour() -> R {
             .all(|l| l.contains(" INFO round cause=start "))
     );
     assert!(landed_captures(&log) >= 1, "{log}");
-    restore(&s, "a")?;
+    exported(&s, "a")?;
     Ok(())
 }
 
@@ -128,7 +128,7 @@ fn a_failed_capture_is_retried_at_its_deadline_without_a_round() -> R {
     );
     assert!(results.contains(&"landed"), "{log}");
     assert_eq!(lines_with(&log, "round").len(), 1, "{log}");
-    restore(&s, "a")?;
+    exported(&s, "a")?;
     Ok(())
 }
 
@@ -238,7 +238,7 @@ fn a_session_end_hint_flushes_before_the_quiet_window() -> R {
     s.wait_commit(&mut child, Some(&first))?;
     let log = stop(&s, child)?;
     assert!(landed_captures(&log) >= 1, "{log}");
-    restore(&s, "a")?;
+    exported(&s, "a")?;
     Ok(())
 }
 
@@ -299,7 +299,7 @@ fn a_stop_during_a_held_piece_put_ends_the_capture_before_the_manifest() -> R {
     let mut two = s.spawn_with(HOUR)?;
     s.wait_commit(&mut two, Some(&first))?;
     stop(&s, two)?;
-    restore(&s, "b")?;
+    exported(&s, "b")?;
     Ok(())
 }
 

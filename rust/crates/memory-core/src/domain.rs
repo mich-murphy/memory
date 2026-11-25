@@ -675,8 +675,6 @@ pub enum Fault {
     Schema,
     /// AuditMismatch deterministic failure.
     AuditMismatch,
-    /// ReadbackMismatch deterministic failure.
-    ReadbackMismatch,
     /// SourceUnstable deterministic failure.
     SourceUnstable,
 }
@@ -707,8 +705,6 @@ pub enum ErrorClass {
 pub enum ParkReason {
     /// RepeatedAuditMismatch source park.
     RepeatedAuditMismatch,
-    /// RepeatedReadbackMismatch source park.
-    RepeatedReadbackMismatch,
     /// SourceUnstable source park.
     SourceUnstable,
     /// Repeated non-JSON 200 responses (captive portal), DESIGN 11.2.
