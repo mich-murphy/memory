@@ -90,3 +90,6 @@ unchanged, peak memory. Then increment 3 and its install.
   20,000-case differential test that the scrub never changes `sanitize_launch` output, and
   deleted it with `MalformedProtected` (`ca1070e`). LEGACY rebased onto RUST. Teeth 11 of 12 (1
   equivalent), gates 14/14, Linux passed. Accepted locally at `4bc0a86`. Details in evidence 52.
+- 2026-11-25: merged as `d92484c` (stack #288), installed on both hosts (evidence 52, Install):
+  `index.json` pruned to 6,084 and 4,633 records, `retired=` unchanged. Increment 3 removes the
+  shim (`11290d5`).
