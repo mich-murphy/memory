@@ -1,4 +1,4 @@
-"""Offline consumer tests, not a substitute for the actual Go writer journey."""
+"""Offline consumer tests, not a substitute for the actual writer journey."""
 import builtins
 import hashlib
 import json

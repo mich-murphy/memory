@@ -38,7 +38,7 @@ def _require(condition, code='invalid_metadata'):
         raise ImportFailure(code)
 
 
-# Go's publication.MaxMetadata / MaxSources / validOrder, mirrored exactly.
+# Limits of the export contract (docs/session-publication-v1.md), mirrored exactly.
 MAX_METADATA = 8 << 20
 MAX_SOURCES = 1024
 _TOP = {'contract', 'manifest_sha256', 'manifest', 'bodies'}
@@ -57,17 +57,17 @@ def _integer(value):
 
 
 def _order(value):
-    """Go validOrder: sequence and revision lie in (0, MaxInt64]."""
+    """Export contract: sequence and revision lie in (0, MaxInt64]."""
     return _integer(value) and value > 0
 
 
 def _known(value, keys):
-    """Go decodes with DisallowUnknownFields, so an unexpected key is invalid."""
+    """The reader rejects unknown fields, so an unexpected key is invalid."""
     _require(isinstance(value, dict) and set(value) <= keys)
 
 
 def _text(*values):
-    """Go validStrings: bounded, valid UTF-8, no NUL."""
+    """Export contract: strings are bounded, valid UTF-8, no NUL."""
     for value in values:
         _require(isinstance(value, str) and len(value) <= MAX_METADATA and '\x00' not in value)
         value.encode('utf-8')
@@ -111,7 +111,7 @@ def _load(root):
             _require(_integer(manifest[key]))
         coverage = manifest['coverage']
         _known(coverage, _COVERAGE)
-        # Go's v2 wire model permits nil slices as JSON null. Normalize only
+        # The v2 wire model permits empty slices as JSON null. Normalize only
         # declared array fields, not missing fields or unsupported contracts.
         if coverage['missing'] is None:
             coverage['missing'] = []
@@ -164,7 +164,7 @@ def _load(root):
                 _known(obj, _OBJECT)
                 for key in ('sha256', 'encoded_sha256'):
                     _require(_digest(obj[key]))
-                # Go validateObjectDescriptor: sizes are non-negative and below MaxInt64.
+                # Object descriptor: sizes are non-negative and below MaxInt64.
                 for key in ('size', 'encoded_size'):
                     _require(_integer(obj[key]) and obj[key] < 2**63 - 1)
                 _require(isinstance(obj['key'], str) and bool(obj['key']) and obj['encoding'] == 'zstd')

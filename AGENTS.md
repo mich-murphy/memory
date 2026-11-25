@@ -5,15 +5,12 @@
 For the Rust rewrite of session capture, read [DESIGN.md](DESIGN.md) first. It is the
 authoritative design, approved 2026-11-07, and its section 0 says what to read next and
 what not to take direction from. Its evidence is under
-[docs/rust-rewrite/](docs/rust-rewrite/). Where the contract, the handoff or the retired Go
-design describe a mechanism that DESIGN.md replaces (spool, work queue, SQLite job tables,
-periodic walk as driver, whole-object upload), DESIGN.md wins. The contract's goals
+[docs/rust-rewrite/](docs/rust-rewrite/). Where the contract or the handoff describe a
+mechanism that DESIGN.md replaces (spool, work queue, SQLite job tables, periodic walk as
+driver, whole-object upload), DESIGN.md wins. The contract's goals
 (session-local publication, immutable evidence, fail-closed privacy, idempotent
 at-least-once writes, one authoritative reader) still hold.
-
-The Go implementation (collector, hooks, `capture-v1` candidate, legacy analytics, Go CI)
-was deleted on 2026-11-25 (brief 57); it is in git history and its docs carry a historical
-banner. [docs/session-capture-contract.md](docs/session-capture-contract.md) remains the
+[docs/session-capture-contract.md](docs/session-capture-contract.md) remains the
 authoritative statement of goals. [docs/README.md](docs/README.md) separates current
 references from historical evidence; [docs/install.md](docs/install.md) is how a host is set up.
 For continuation, read [docs/session-capture-handoff.md](docs/session-capture-handoff.md)
@@ -34,8 +31,7 @@ and update its progress ledger with implemented work, exact checks, and the next
   is gone is not evidence that local sources contain every old byte.
 - Preserve identities, learned custom roots, original sources, local research evidence,
   and the secret protections that run in production (credential denylist, the gitleaks
-  content scan, the launch argv allowlist). Config scrubbing was deleted with the config kinds
-  (brief 57).
+  content scan, the launch argv allowlist).
   Session opt-out is retired (operator decision 2026-11-07, see README). Never print
   credentials or private transcripts.
 

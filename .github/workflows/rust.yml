@@ -59,7 +59,7 @@ jobs:
           nix build .#cargo-llvm-cov --no-link --max-jobs 2 --cores 2
           nix copy --to "file://$HOME/nix-llvm-cov-cache" "$(nix eval --raw .#cargo-llvm-cov.outPath)"
       # 10-consumer runs the unchanged Python importer against `memory export` output; it
-      # needs the pinned analytics dependencies, installed like the Go consumer job does.
+      # needs the pinned analytics dependencies, installed by pip from the pinned requirements.
       # The interpreter is pinned: macos-26's python3 is 3.15, for which duckdb 1.5.6 has no
       # wheel, and building it from source took 18 minutes (hosted run 44207967760).
       # --only-binary turns a missing wheel into a fast failure instead of a source build.
