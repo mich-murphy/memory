@@ -136,3 +136,18 @@ or `DESIGN.md`):
 
 Kept: 16 Rust prototype and backup branches (`proto/ds-*`, `backup/*`, one worktree branch);
 dated Rust evidence cites them.
+
+## Install of `befdd0a` (2026-11-25)
+
+Stack #293 merged as `befdd0a`. The capture binary changed (denylist), and this release also
+carries the shim removal (`ac918a5`).
+
+| | This Mac | dev-01 |
+|---|---|---|
+| sha256 prefix | `9928deeef26c4f80` | `e5e2a976503e307f` (built there; `ldd` store paths equal the gcroots) |
+| Backup | `memory-d92484c` | `memory-d92484c` |
+| Start round | 07:16Z, `landed=1 failed=0 withheld=0`, no WARN/ERROR, `tmp/` empty | 07:38Z, `landed=0 failed=0 withheld=0`, no WARN/ERROR, `tmp/` empty, `NRestarts=0` |
+| `memory check` | exit 0: 6,086 sources, 6,086 match, `remote_only=0`, `retired=1791`; 1,076 s; peak RSS 93 MiB (was 159) | exit 0: 4,679 sources, 4,679 match, `remote_only=0`, `retired=1492`; 375 s; `VmHWM` 105 MiB |
+| Daemon | pid 6299, peak RSS 90 MiB during the check | `VmHWM` 100 MiB |
+
+Both hosts load `index.json` without the shim (`state=loaded`).
