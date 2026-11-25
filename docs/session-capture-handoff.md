@@ -467,6 +467,11 @@ from `main` alone.
      `~/.local/share/agent-sessions` on both hosts, Docker images but `memory-linux-test`, Go
      installer backups, dev-01's Go caches, the Go releases and tags, PR #266, merged and Go-era
      branches. `memory check` reasoning is with the operator.
+  38. 2026-11-25, brief 59 (D71),
+     [evidence 54](rust-rewrite/implementation/evidence/54-no-restore/): the archive is for
+     analytics only, so `memory restore`, `memory check` and the never-built read-back are
+     deleted; `memory export` is the one reader and checks every piece and epoch digest. The
+     daily audit, `content-md5` and the commit read-back stay.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

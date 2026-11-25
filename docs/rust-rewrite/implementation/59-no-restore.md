@@ -45,3 +45,5 @@ unnecessary code and complexity".
 ## Ledger
 
 - 2026-11-25: brief written on `b358ebc`.
+- 2026-11-25: accepted at `31519cc`: full gates 14/14 (seed 1881541311, 95.77 %), 5 of 5
+  teeth caught after the decode tests were restored; evidence 54.
