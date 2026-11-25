@@ -47,3 +47,5 @@ unnecessary code and complexity".
 - 2026-11-25: brief written on `b358ebc`.
 - 2026-11-25: accepted at `31519cc`: full gates 14/14 (seed 1881541311, 95.77 %), 5 of 5
   teeth caught after the decode tests were restored; evidence 54.
+- 2026-11-25: merged as `126ac48` (stack #298) and installed on both hosts; start rounds clean,
+  `memory export` exits 0 on both (evidence 54, Install).
