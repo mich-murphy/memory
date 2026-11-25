@@ -101,6 +101,8 @@ fn deleted_snapshot_sources_follow_d52_and_a_recreated_store_lands_again() -> R 
         &["export", &prefix, "--out", &exp.display().to_string()],
     )?;
     assert_eq!(code, 0, "{out}{err}");
+    // The deleted tool result is exported as a deleted source (sealed, never active).
+    assert!(err.contains(" deleted=1 "), "{err}");
     let meta: serde_json::Value =
         serde_json::from_slice(&fs::read(exp.join("metadata.json")).map_err(e)?).map_err(e)?;
     let mut seen = Vec::new();

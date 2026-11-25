@@ -327,7 +327,7 @@ fn fail(code: &str, exit: u8) -> ExitCode {
 }
 
 /// Entry of `memory status`; `args` follow the word `status` and must be empty (`--verify` is
-/// not built:).
+/// not built).
 ///
 /// Exit codes: 0 healthy, 1 something is parked, the host is paused or `status.json` is not
 /// loaded, 2 config refusal, 64 usage.
