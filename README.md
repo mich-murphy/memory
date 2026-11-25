@@ -6,8 +6,8 @@ Capture and analyze Claude Code, Codex, and Pi session evidence across machines.
 
 Production is the Rust `memory` binary under [`rust/`](rust/README.md): `memory daemon`
 captures Claude Code, Codex and Pi sessions as append pieces and delta manifests in an
-S3-compatible bucket, `memory hook <agent>` writes hint lines, and `memory restore`,
-`memory export`, `memory check`, `memory status`, `memory unpark` and `memory reconcile` read
+S3-compatible bucket, `memory hook <agent>` writes hint lines, and `memory export`,
+`memory owners`, `memory status`, `memory unpark` and `memory reconcile` read
 and operate the archive. [DESIGN.md](DESIGN.md) is authoritative; the
 [capture contract](docs/session-capture-contract.md) retains the goals, and the
 [handoff](docs/session-capture-handoff.md#current-session-checkpoint) says where the work is.

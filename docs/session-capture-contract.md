@@ -16,6 +16,13 @@ Capture Claude Code, Codex, and Pi session evidence dependably on this Mac and B
 publish independent readable sessions to R2, and make those publications available to
 analytics. Successful upload alone is not successful end-to-end capture.
 
+**Operator decision, 2026-11-25:** the archive exists for analytics across development
+machines. It is not used to restore session history, so there is no restore command; the
+archive is read only through `memory export`. The integrity goals stay: the data in R2 must be
+known good (content-md5 on every write, immutable pieces, the daily audit, and digest checks
+in export that fail closed). Below, "restore" in a goal or test names reading a publication
+back through that export.
+
 The operator accepts destroying the existing R2 archive and rebuilding from available
 local sources. A legacy migration engine, retired-schema compatibility, reconstruction
 of pruned pieces, and restoration of every collector intermediate version are **not**
@@ -127,7 +134,7 @@ refer to the same pinned publication. Unknown contracts are explicit errors, nev
 successful empty discovery.
 
 Chunking is optional physical optimization. Measure full-snapshot bytes, request
-counts, local I/O, CPU, freshness, and restore cost before adding it. It must not change
+counts, local I/O, CPU, freshness, and export cost before adding it. It must not change
 the logical contract or reintroduce historical replay. Begin without automatic GC.
 Future GC must honor current/retained roots, readers, and in-flight work, separately
 from normal capture.
@@ -151,7 +158,7 @@ Required scenarios:
 - Crash/restart at local state, upload, manifest, current-reference, and local-ack boundaries.
 - Lost acknowledgement, duplicate delivery, stale jobs, conditional conflicts, and
   recovery without another hook.
-- Broken A with errors retained while B captures, publishes, restores, and imports.
+- Broken A with errors retained while B captures, publishes, exports, and imports.
 - Previous successful publication remains readable after a failed update.
 - Append, partial tail, rename, truncation, same-size rewrite/regrowth, and compaction.
 - Source/epoch identity survives analytics; overlapping epochs do not collide or
@@ -190,7 +197,7 @@ acceptance.
 ## 7. Implementation sequence and remaining parameters
 
 1. Specify the versioned publication/reader interface and writer-generated fixtures.
-2. Build one-session durable capture/publication/restore/import vertical slice.
+2. Build one-session durable capture/publication/export/import vertical slice.
 3. Add bounded coordinator, autonomous discovery/retry, status/quarantine/replay, and
    hook/install integration. Prove failure isolation and privacy boundaries.
 4. Complete analytics projections/reporting and two-machine acceptance, then cut over
