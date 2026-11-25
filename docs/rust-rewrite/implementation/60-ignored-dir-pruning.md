@@ -1,15 +1,15 @@
-# 60. The walk skips ignored directories; snapshot routing closed (2026-11-26)
+# 60. The walk skips ignored directories; snapshot routing closed (2026-11-25)
 
 Coordinator brief. The parent session owns this file and acceptance. Evidence goes to
 `evidence/55-ignored-dirs/`.
 
 ## Why
 
-Operator, 2026-11-26: "update 1, 2, 3, 4", where 4 was the two open findings: the walk descends
+Operator, 2026-11-25: "update 1, 2, 3, 4", where 4 was the two open findings: the walk descends
 into ignored directories (evidence 40, Limits), and watcher events for snapshot sources are not
 routed (evidence 41, Limits).
 
-## Measurements (2026-11-26, counts only)
+## Measurements (2026-11-25, counts only)
 
 | Agent dir | This Mac: entries / under ignored top-level dirs | dev-01: entries / under ignored dirs |
 |---|---|---|
@@ -47,6 +47,6 @@ does not delete them.
 
 ## Ledger
 
-- 2026-11-26: brief written on `9b97cb8`.
-- 2026-11-26: accepted at `fac4846`: 5 of 5 teeth caught; gates 13 of 14 locally, the
+- 2026-11-25: brief written on `9b97cb8`.
+- 2026-11-25: accepted at `fac4846`: 5 of 5 teeth caught; gates 13 of 14 locally, the
   `fs_watcher_*` failure reproduced on `main` with `fseventsd` saturated (evidence 55).
