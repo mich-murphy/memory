@@ -1,6 +1,6 @@
 # Evidence 55: the walk skips ignored directories; snapshot routing closed (brief 60)
 
-All dates are UTC. Status: accepted locally on 2026-11-26 at `fac4846` over the brief `4948e66` on
+All dates are UTC. Status: accepted locally on 2026-11-25 at `fac4846` over the brief `4948e66` on
 `main` `9b97cb8`. [Brief 60](../../60-ignored-dir-pruning.md) records the measurements and
 decisions.
 
@@ -63,5 +63,19 @@ decisions.
 
 The watcher's `note` routes append sources only, so a Pi run record (the only snapshot kind left,
 D66) is captured by the next 15-minute reconcile, not by its event (evidence 41, Limits). On
-2026-11-26 this Mac had 0 run records and dev-01 59, the newest 56 days old; Pi neither creates
+2026-11-25 this Mac had 0 run records and dev-01 59, the newest 56 days old; Pi neither creates
 them often nor deletes them, so the reconcile loses nothing.
+
+## Install of `771f27b` (2026-11-25)
+
+Stack #303 merged as `771f27b`. The capture binary changed (the walk and the status line).
+
+| | This Mac | dev-01 |
+|---|---|---|
+| sha256 prefix | `f6a976741d96663b` | `a1b6da1c81cdacdc` (built there; `ldd` store paths equal the gcroots) |
+| Backup | `memory-126ac48` (older backups removed) | `memory-126ac48` (older backups removed) |
+| Start round | 22:10Z, `landed=1 failed=0 withheld=0`, no WARN/ERROR, `tmp/` empty | 22:15Z, `landed=2 failed=0`, no WARN/ERROR, `tmp/` empty, `NRestarts=0` |
+| `memory status` | `state=loaded`, 6,089 sources, 1 behind (live), `ignored=2154 ignored_dirs=36`, `audit_mismatched=0` | `state=loaded`, 4,734 sources, 1 behind (live), `ignored=1623 ignored_dirs=32`, `audit_mismatched=0` |
+| `memory status` peak RSS, 3 runs | 63 MiB (was 79 MiB on `126ac48`) | 38 MiB (was 85 MiB) |
+| `memory export` of one owner | exit 0; output deleted | exit 0; output deleted |
+| Daemon | pid 12320, RSS 17 to 32 MiB after the start round | `VmHWM` 61 MiB (was 100 MiB) |
