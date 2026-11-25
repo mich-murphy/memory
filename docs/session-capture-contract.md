@@ -25,9 +25,9 @@ replacement requirements. Do not resume the old cold-recovery patch stack as the
 
 This permission is scoped to the archive replacement. It does not authorize deleting
 original sources, local research/classification evidence, credentials, identities, or
-privacy opt-outs, except as section 6 step 2 records for the retired session opt-out. The permission itself is not evidence of a reset or deployment. Subsequent controlled
-experimental installations are recorded in the handoff; documenting this direction does
-not authorize additional rollout, reset or deletion.
+privacy opt-outs, except as section 6 step 2 records for the retired session opt-out. The
+permission itself is not evidence of a reset or deployment, and documenting this direction
+does not authorize additional rollout, reset or deletion.
 
 ## 1. Logical data contract
 
