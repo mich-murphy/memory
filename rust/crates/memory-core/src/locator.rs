@@ -1016,6 +1016,42 @@ fn pi_ignored(parts: &[&str]) -> bool {
     }
 }
 
+/// Whether the walk may skip directory `dir` (and everything below it) without reading it:
+/// true only where [`locate`] returns `Ignored` for every file under `dir`, whatever its name
+/// or depth. Pure and total. Only `AgentDir` layouts qualify (where `apply_ignored` applies);
+/// `ClaudePrimaryHome` and `PiCustomRoot` are always `false`, as is the empty path.
+///
+/// The rules are whole-directory ones whose directories can never hold a captured kind:
+/// Claude `CLAUDE_IGNORED_DIRS` at top level except `plugins`, plus `plugins/<x>` (the two
+/// asset files sit directly in `plugins/`); Codex `CODEX_IGNORED_DIRS`, `app-server-*`,
+/// `*-locks`, `skills/.system`, `plugins/cache` and `plugins/.<dot>`; Pi `PI_IGNORED_DIRS` and
+/// the two prefixes. A directory below a pruned one is also pruned, so a directory event
+/// anywhere under it reads nothing. Codex `plugins/<x>/cache` is NOT pruned: a `.json` file
+/// there is not ignored (`codex_plugin_ignored` keys on `plugins/<sub>`).
+#[must_use]
+pub fn dir_ignored(dir: &RootRelativePath, roots: &Roots) -> bool {
+    if roots.layout != RootLayout::AgentDir {
+        return false;
+    }
+    let parts: Vec<&str> = dir.0.iter().map(String::as_str).collect();
+    match (&roots.agent, parts.as_slice()) {
+        (Agent::Claude, ["plugins", _, ..]) => true,
+        (Agent::Claude, [top, ..]) => *top != "plugins" && CLAUDE_IGNORED_DIRS.contains(top),
+        (Agent::Codex, ["skills", ".system", ..]) => true,
+        (Agent::Codex, ["plugins", sub, ..]) => *sub == "cache" || sub.starts_with('.'),
+        (Agent::Codex, [top, ..]) => {
+            CODEX_IGNORED_DIRS.contains(top)
+                || top.starts_with("app-server-")
+                || top.ends_with("-locks")
+        }
+        (Agent::Pi, [top, ..]) => {
+            PI_IGNORED_DIRS.contains(top)
+                || PI_IGNORED_DIR_PREFIXES.iter().any(|p| top.starts_with(p))
+        }
+        _ => false,
+    }
+}
+
 /// Apply the ignore rules to an agent-dir result. Only a miss or a config/paste snapshot can
 /// become `Ignored`, so a session-owned source never does and a credential keeps its verdict.
 fn apply_ignored<'a>(res: Res<'a>, agent: &Agent, parts: &[&str]) -> Res<'a> {

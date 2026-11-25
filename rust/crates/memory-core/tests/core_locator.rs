@@ -4,7 +4,7 @@ use hegel::{TestCase, generators as gs};
 use memory_core::domain::{Agent, ArchiveId, MachineId, Owner, SourceClass, SourceKind};
 use memory_core::locator::{
     ClaudeSessionIndex, ConfigAsset, InputError, Located, Role, RootLayout, RootNamespace,
-    RootRelativePath, Roots, locate, shared_analytics, stored_retired,
+    RootRelativePath, Roots, dir_ignored, locate, shared_analytics, stored_retired,
 };
 use proptest::prelude::*;
 use sha2::{Digest, Sha256};
@@ -2239,6 +2239,204 @@ fn stored_retired_keeps_a_pi_run_record_only() -> TestResult {
         "sessions/--c--/run1.json",
     ] {
         ensure!(stored_retired(&aux, p), "{p}");
+    }
+    Ok(())
+}
+
+// ---- brief 60: dir_ignored ---------------------------------------------------------------
+
+fn dir_verdict(home: Home, dir: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    Ok(dir_ignored(
+        &RootRelativePath::parse(dir)?,
+        &make_roots(home, "r1", &[], false)?,
+    ))
+}
+
+#[test]
+fn dir_ignored_names_each_pruned_rule_and_near_misses() -> TestResult {
+    let pruned = [
+        (Home::Claude, "telemetry"),
+        (Home::Claude, "skills"),
+        (Home::Claude, "paste-cache"),
+        (Home::Claude, "downloads"),
+        (Home::Claude, "plugins/marketplaces"),
+        (Home::Claude, "cache/deep/er"),
+        (Home::Codex, ".tmp"),
+        (Home::Codex, "packages"),
+        (Home::Codex, "app-server-x"),
+        (Home::Codex, "thread-locks"),
+        (Home::Codex, "skills/.system"),
+        (Home::Codex, "skills/.system/a"),
+        (Home::Codex, "plugins/cache"),
+        (Home::Codex, "plugins/.git"),
+        (Home::Pi, "npm"),
+        (Home::Pi, "install"),
+        (Home::Pi, "git"),
+        (Home::Pi, "web-search-cache"),
+        (Home::Pi, "pi-extensions-pre-1"),
+        (Home::Pi, "extensions-update-backup-2/x"),
+    ];
+    for (home, d) in pruned {
+        ensure!(dir_verdict(home, d)?, "{home:?} {d} should be pruned");
+    }
+    let walked = [
+        (Home::Claude, "plugins"),
+        (Home::Claude, "projects"),
+        (Home::Claude, "projects/-p"),
+        (Home::Claude, "todos"),
+        (Home::Codex, "sessions"),
+        (Home::Codex, "skills"),
+        (Home::Codex, "skills/mine"),
+        (Home::Codex, "plugins"),
+        (Home::Codex, "plugins/x"),
+        (Home::Codex, "plugins/x/cache"),
+        (Home::Pi, "sessions"),
+        (Home::Pi, "sessions/--c--"),
+        (Home::Pi, "extensions"),
+        (Home::ClaudePrimary, "telemetry"),
+        (Home::PiCustom, "npm"),
+        (Home::ClaudeOnCustom, "telemetry"),
+        (Home::CodexOnCustom, ".tmp"),
+    ];
+    for (home, d) in walked {
+        ensure!(!dir_verdict(home, d)?, "{home:?} {d} must be walked");
+    }
+    Ok(())
+}
+
+const POOL: [&str; 16] = [
+    "a",
+    "sessions",
+    "subagent-artifacts",
+    "x.jsonl",
+    "x.json",
+    U1,
+    "--c--",
+    "projects",
+    "subagents",
+    "session.jsonl",
+    "tool-results",
+    "memory",
+    "history.jsonl",
+    "rollout-2025-01-01T00-00-00-11111111-2222-3333-4444-555555555555.jsonl",
+    "2025-01-01T00:00:00Z_11111111-2222-3333-4444-555555555555",
+    ".jsonl",
+];
+
+const HEADS: [(Home, &[&str]); 3] = [
+    (
+        Home::Claude,
+        &[
+            "skills",
+            "paste-cache",
+            "plugins",
+            "telemetry",
+            "backups",
+            "cache",
+            "shell-snapshots",
+            "moshi-plugin",
+            "jobs",
+            "state",
+            "daemon",
+            "downloads",
+            "projects",
+            "todos",
+        ],
+    ),
+    (
+        Home::Codex,
+        &[
+            ".tmp",
+            "tmp",
+            "cache",
+            "packages",
+            "computer-use",
+            "generated_images",
+            "attachments",
+            "shell_snapshots",
+            "tui-thread-reference-capabilities",
+            "app-server-1",
+            "x-locks",
+            "skills",
+            "plugins",
+            "sessions",
+        ],
+    ),
+    (
+        Home::Pi,
+        &[
+            "git",
+            "npm",
+            "install",
+            "pi-terminology",
+            "web-search-cache",
+            "pi-extensions-pre-1",
+            "extensions-update-backup-9",
+            "sessions",
+            "extensions",
+        ],
+    ),
+];
+
+fn at(pool: &[&str], i: usize) -> String {
+    pool.get(i).copied().unwrap_or("a").to_owned()
+}
+
+fn prop_dir_ignored_implies_all_files_ignored(e: &[u8]) -> TestResult {
+    let mut it = e.iter().copied();
+    let mut pick = |n: usize| usize::from(it.next().unwrap_or(0)) % n;
+    for (home, heads) in HEADS {
+        let mut dir = vec![at(heads, pick(heads.len()))];
+        if matches!(home, Home::Claude | Home::Codex) && pick(2) == 0 {
+            dir.push(at(&["plugins", "cache", ".git", ".system", "x"], pick(5)));
+        }
+        for _ in 0..pick(3) {
+            dir.push(at(&POOL, pick(POOL.len())));
+        }
+        let roots = make_roots(home, "r1", &[], false)?;
+        if !dir_ignored(&RootRelativePath::parse(&dir.join("/"))?, &roots) {
+            continue;
+        }
+        let mut file = dir.clone();
+        for _ in 0..=pick(5) {
+            file.push(at(&POOL, pick(POOL.len())));
+        }
+        let path = file.join("/");
+        let got = locate(&RootRelativePath::parse(&path)?, &roots);
+        ensure!(got == Located::Ignored, "{home:?} {path}: {got:?}");
+    }
+    Ok(())
+}
+
+#[hegel::test]
+fn hegel_dir_ignored_implies_all_files_ignored(tc: TestCase) {
+    let e: Vec<u8> = tc.draw(gs::vecs(gs::integers::<u8>()));
+    let r = prop_dir_ignored_implies_all_files_ignored(&e);
+    assert!(r.is_ok(), "{r:?}");
+}
+
+proptest! {
+    #[test]
+    fn proptest_dir_ignored_implies_all_files_ignored(
+        e in prop::collection::vec(any::<u8>(), 0..96)
+    ) {
+        let r = prop_dir_ignored_implies_all_files_ignored(&e);
+        prop_assert!(r.is_ok(), "{:?}", r);
+    }
+}
+
+/// Converse sanity: every real table directory is pruned and its sample files are ignored.
+#[test]
+fn proptest_dir_ignored_table_directories_are_pruned_exhaustively() -> TestResult {
+    for (home, heads) in HEADS {
+        let roots = make_roots(home, "r1", &[], false)?;
+        for head in heads {
+            let pruned = dir_ignored(&RootRelativePath::parse(head)?, &roots);
+            for leaf in POOL {
+                let got = locate(&RootRelativePath::parse(&format!("{head}/{leaf}"))?, &roots);
+                ensure!(!pruned || got == Located::Ignored, "{home:?} {head}/{leaf}");
+            }
+        }
     }
     Ok(())
 }
