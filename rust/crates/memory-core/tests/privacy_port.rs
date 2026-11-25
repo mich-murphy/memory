@@ -76,6 +76,7 @@ fn denied_identities_backups_collector_aliases_and_unknowns() {
             "-20260412-235959.gz",
             ".before-update.bak",
             ".memory-backup-20261014T101010Z",
+            ".memory-backup-20261014T101010Z-2",
             ".~123~.tar.gz",
         ] {
             let path = format!("/safe/{}{}", name.to_uppercase(), suffix);
