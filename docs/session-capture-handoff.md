@@ -472,6 +472,13 @@ from `main` alone.
      analytics only, so `memory restore`, `memory check` and the never-built read-back are
      deleted; `memory export` is the one reader and checks every piece and epoch digest. The
      daily audit, `content-md5` and the commit read-back stay.
+  39. 2026-11-26, brief 60 (D72),
+     [evidence 55](rust-rewrite/implementation/evidence/55-ignored-dirs/): the walk skips
+     directories whose files are all `Ignored` (44,171 of 47,413 Pi entries on dev-01), counted
+     as `ignored_dirs=`; snapshot routing is closed without code. Also done: Dependabot #265
+     (fast-forwarded over SSH as `9b97cb8`, the gh token lacks the `workflow` scope),
+     nix-config TODO line removed (#167), cutover backups trimmed to `memory-befdd0a` on both
+     hosts. Open: this Mac's `fseventsd` at 100 % CPU makes the local `fs_watcher_*` tests fail.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

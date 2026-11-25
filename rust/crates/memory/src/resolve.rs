@@ -291,6 +291,8 @@ pub struct Counts {
     pub unknown_owner: u64,
     /// Known non-session files (D54, brief 46); never yielded, never hints.
     pub ignored: u64,
+    /// Directories the walk did not enter because every file below is ignored (brief 60).
+    pub ignored_dirs: u64,
     /// Files whose (owner, source id) another file with a lexicographically smaller
     /// root-relative path already holds; not yielded.
     pub duplicate: u64,
@@ -427,6 +429,7 @@ impl crate::daemon::Sources for WalkSources {
             .collect();
         let found = walk(&self.roots, &self.limits);
         counts.symlinks = found.symlinks;
+        counts.ignored_dirs = found.ignored_dirs;
         counts.unreadable = found.unreadable;
         counts.truncated = found.truncated;
         let mut out = Vec::new();
