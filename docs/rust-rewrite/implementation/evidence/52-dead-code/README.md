@@ -68,3 +68,29 @@ either way. The test and the hook were reverted; `document.rs` was deleted. Neit
   was 216 with 29 skipped. No skip needs a Go binary.
 - Deleted tests covered only deleted behaviour; the worker reports list them. The subagent-role
   assertion dropped from `test_events.py` is covered by `test_publications.py`.
+
+## Install of `d92484c` (2026-11-25)
+
+| | This Mac | dev-01 |
+|---|---|---|
+| Time | 02:08Z | 02:16Z |
+| sha256 prefix | `c505b965c0ab10c9` | `a2c75c75b3a3f015` (built there; `ldd` store paths equal the gcroots) |
+| Backup | `memory-07bfc7d` | `memory-07bfc7d` |
+| Start round | `landed=1 failed=0 deleted=0 withheld=0`, no WARN/ERROR, `tmp/` empty | `landed=2 failed=0 deleted=0`, no WARN/ERROR, `tmp/` empty, `NRestarts=0` |
+| `index.json` | 8,199 records (8.6 MB) to 6,084 (6.8 MB) | 6,198 records (6.6 MB) to 4,633 (5.2 MB); the withheld record is gone |
+| Old forms left (`snapshot_at_ns`, `sqlite` fingerprint) | 0, 0 | 0, 0 |
+| `memory check` | exit 0: 6,084 sources, 6,084 match, `remote_only=0`, `retired=1791`; 1,076 s; peak RSS 159 MiB (was 193 MiB) | exit 0: 4,634 sources, 4,633 match, 1 behind (live), `remote_only=0`, `retired=1492`; `VmHWM` 102 MiB (sampled on the `memory` pid) |
+| Daemon | pid 7453 | `VmHWM` 103 MiB to the start round |
+
+`retired=` is unchanged on both hosts, so the kind-based test agrees with the locator-based one on
+real stored data.
+
+## Increment 3: shim removed
+
+`11290d5` deletes `index_shim.rs`, its `mod` line, the `serde(from)` attribute (back to
+`deny_unknown_fields`) and its test, after both hosts rewrote `index.json` (table above). Gates:
+01 to 07, 09 and 10 passed in two full runs; `08-coverage` failed in both on
+`fs_watcher_reports_directory_moved_in_with_children` (no FSEvents `DirCreated` within its 10 s
+wait, late in the run) and passed alone (`GATES_PART=coverage`, 95.61 %). The watcher tests
+passed 30 of 30 runs on their own, and `main` passed the coverage part alone. The change does not
+touch the watcher. Recorded as an open finding (FSEvents latency under load), not loosened.

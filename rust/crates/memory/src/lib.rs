@@ -14,7 +14,6 @@ pub mod driver;
 pub mod environment;
 pub mod export;
 pub mod hook;
-mod index_shim; // BRIEF57-SHIM
 pub mod install;
 pub mod log;
 pub mod owners;
