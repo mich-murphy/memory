@@ -1,16 +1,7 @@
 version: 2
 updates:
-  - package-ecosystem: gomod
-    directories: ["/", "/tools", "/tools/gopls"]
-    schedule:
-      interval: weekly
-    cooldown:
-      default-days: 7
-    groups:
-      go-modules:
-        patterns: ["*"]
   - package-ecosystem: github-actions
-    directories: ["/", "/.github/actions/setup-go"]
+    directories: ["/"]
     schedule:
       interval: weekly
     cooldown:

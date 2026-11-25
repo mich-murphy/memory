@@ -1,5 +1,7 @@
 # Explicit candidate backend construction
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 **Scope:** opt-in Local/R2 backend construction, not archive replacement or
 activation authorization. Wire/reader/report contracts are v2 despite the `capture-v1`
 prefix. See [dated offline evidence](session-capture-offline-evidence.md) for historical

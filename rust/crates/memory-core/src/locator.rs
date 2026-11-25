@@ -23,7 +23,6 @@
 //! path itself, so an unrelated sibling appearing elsewhere never changes a result.
 use crate::domain::{
     Agent, ArchiveId, MachineId, Owner, SessionId, SessionKey, SourceClass, SourceId, SourceKind,
-    WithholdReason,
 };
 use sha2::{Digest, Sha256 as Hasher};
 use std::collections::BTreeMap;
@@ -349,18 +348,6 @@ pub enum Located {
     /// A known non-session file (vendor code, cache, backup; D54/D55, brief 46): never
     /// captured, counted apart from `UnknownKind`.
     Ignored,
-}
-
-impl Located {
-    /// Fixed local reason when the path is withheld, `None` for a capturable source.
-    pub fn withhold_reason(&self) -> Option<WithholdReason> {
-        match self {
-            Self::Source { .. } => None,
-            Self::UnknownKind => Some(WithholdReason::UnknownKind),
-            Self::UnknownOwner => Some(WithholdReason::UnknownOwner),
-            Self::Ignored => Some(WithholdReason::Ignored),
-        }
-    }
 }
 
 // ---- matching helpers -------------------------------------------------------------------
@@ -1145,6 +1132,14 @@ fn pi_run_record(parts: &[&str]) -> bool {
 pub fn shared_analytics(kind: &SourceKind, path: &str) -> bool {
     let parts: Vec<&str> = path.split('/').collect();
     *kind == SourceKind::PiAux && pi_run_record(&parts)
+}
+
+/// Whether a stored manifest entry is retired (brief 57): its kind is not in the captured set
+/// and it is not a `PiAux` run record. Pure and total; needs no root and no locator verdict, so
+/// it stays correct whatever the ignore tables say.
+#[must_use]
+pub fn stored_retired(kind: &SourceKind, path: &str) -> bool {
+    !(CAPTURED_KINDS.contains(kind) || shared_analytics(kind, path))
 }
 
 fn captured(hit: &Hit<'_>, parts: &[&str]) -> bool {

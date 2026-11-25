@@ -642,8 +642,7 @@ The system model states the guarantee honestly. [DDIA ch. 9, System Model and Re
 - The resumable `Sha256State` saves only the cost of the whole-file digest. It proves nothing.
 
 Class `snapshot` uses a fingerprint, not windows. A plain file's fingerprint is identity, size
-and mtime. A SQLite store's fingerprint is the identity, size and mtime of the db, plus those of
-its `-wal`, never of its `-shm`, which a read-only open touches (measured 2026-11-20, brief 45).
+and mtime. (The SQLite store fingerprint of D56 was deleted with the store capture, D69.)
 An unchanged fingerprint is `Unchanged` without opening the store. A changed one is
 `Snapshot`. [review, 01 M3; prototype P9] A changed `RulesDigest` on a protected kind is
 `Replay{RulesChanged}`.
@@ -683,19 +682,7 @@ A snapshot of a plain file reads its pieces and then compares the fingerprint ag
 fingerprint changed, the capture is retried at most 3 times in the window. After that it counts
 as `SourceUnstable`. After 3 windows in a row it is parked.
 
-SQLite snapshot:
-
-- Open read-only, never with `immutable=1`, which ignores the WAL. [review, 05-history D7]
-- Run the backup API with all pages in one step into a 0600 temporary file under `state/tmp/`.
-  Pieces are read from that file, which is deleted after the source's capture ends, landed or
-  not. The copy is made inside the filesystem seam, like the `.jsonl.zst` decode (D48).
-- A piece whose transformed digest equals one of the last landed epoch's reuses that descriptor
-  with no PUT and no GET (the index keeps the epoch's pieces). Matched by digest, never offset.
-- A changed store is snapshotted at most once per 6 h after its last landed snapshot [default,
-  unmeasured]; inside the interval it is deferred and `memory check` reports it `behind` (D56).
-- `logs_*.sqlite` is not a store (brief 45).
-- Two errors stay distinct, as Go's `ErrSQLiteSourceChanged` was: `SourceChanged` is a retry,
-  and `BackupFailed` is `Local`. [review, 05-history D8]
+SQLite snapshot: deleted (D69). Codex stores are not captured since D66.
 
 Request timeout: 30 s plus size at 1 MiB/s, with a floor of 60 s. At the 8 MiB cap this is at
 most 60 s. [review, 05-history L2]
@@ -765,7 +752,9 @@ output. [DDIA ch. 12, Microbatching and checkpointing]
 
 ### 7.5 Shared stores
 
-Codex SQLite, `history.jsonl` and config files have no session. They are owned by
+Since D66 the only shared source captured is the Pi run record; the Codex SQLite,
+`history.jsonl` and config files below are no longer captured (stored entries are retired, D69).
+Files with no session are owned by
 `Owner::Shared` and committed under `shared/<archive>/<machine>/<agent>/`. Each is captured once
 per change, not once per session. [default, review, 01 M4] Session opt-out is retired, so the Go
 rule "withhold the whole store if any session is excluded" no longer applies. That rule produced
@@ -865,6 +854,10 @@ symlinked parents such as `/var` on macOS). Closing it needs a rule that the sou
 reads only canonical paths, carried by a type that only resolution builds (A12.4).
 
 ### 8.3 Transform (from `internal/scrub`)
+
+> D69 (2026-11-25): the structural scrub, `MalformedProtected` and the small-text guard below were
+> deleted: no captured kind is a config document or a text asset (D66). The transform is the
+> identity for transcripts and the whole-file scan (D58, D61) for Pi run records.
 
 - **Structural scrub.** Eleven config basenames are scrubbed, selected by the filename of every
   identity in the chain, not by the collecting agent: `claude.json`, `.claude.json`,
@@ -982,18 +975,17 @@ dataflows]
 | Agent session files | System of record (leader) | Agents | Never written by us |
 | `config.toml` | System of record | Operator | Holds the archive id, machine id, agent roots, window, endpoint, region, bucket, key prefix and token path. `deny_unknown_fields`. `prefix` is required: `""` is the bucket root, so a forgotten line cannot select it (brief 35). The daemon refuses to start if it is invalid |
 | Token file | System of record | Operator | 0600. Excluded from capture |
-| `state/roots.json` | System of record | Daemon | Learned custom roots. Monotonic union: a root is never removed automatically |
 | `state/hints/YYYY-MM-DD.jsonl` | System of record for launch evidence | `memory hook` | Directory 0700, files 0600. Kept for 7 days [default, unmeasured] and until every launch record in the file is committed |
 | `state/index.json` | Derived cache | Daemon | Holds `SourceState`, hint offsets, ETags and pending launch digests, and (D52) the owners with a live source (append, or snapshot since D59), so an owner whose every file is gone is still visited, and (D58) per scanned file the fingerprint, rules and reason of its last withhold, so it is not read again until one of them changes. May be deleted |
 | `state/status.json` | System of record for the parked list and counters | Daemon | Section 11.3 |
 | `state/daemon.lock` | Lock | Daemon | `flock`, section 12 |
-| `state/tmp/` | Transient | Daemon | SQLite backups only. Emptied at start |
+| `state/tmp/` | Transient | Daemon | Unused since the SQLite backup was deleted (D69). Emptied at start |
 
 The state root is `$HOME/.local/state/memory` on both hosts. `MEMORY_STATE_DIR` overrides it, and
 tests always set it to a temporary directory with a cleared environment (A5).
 
-Machine ids are created once with `O_EXCL`. [review, 05-history D3] At install, the existing Go
-machine ids are copied into `config.toml`. This keeps identities and is not a data migration.
+The machine id is set in `config.toml` (`docs/install.md`); the create-once machine-id file was
+deleted unused (D69).
 Every state file is 0600 and every state directory is 0700. [review, 05 M4] The daemon refuses
 a hint directory that is not owned by its user, or that is group- or world-writable. One user
 per host is assumed.
@@ -1291,7 +1283,6 @@ Workspace:
 | `sha2` 0.11.1 | Digests and resumable state | `SerializableState` has an internal format; the index stores the crate version and re-hashes on mismatch |
 | `serde`, `serde_json`, `schemars`, `toml` | Schemas and config | A duplicate-key-rejecting JSON path for scrubbing |
 | `tracing`, `tracing-subscriber`, `clap`, `thiserror` | Logs, CLI, errors | `clap` is not used by `memory hook` |
-| `rusqlite` `=0.43.0`, features `bundled` and `backup` | SQLite backup API | `memory` only (brief 45) |
 | `rustix`, direct dependency of `memory`, features `std` and `fs` | Named open flags and errno values in the source read | Pinned to the version in the lockfile (A12.4) |
 | `hegeltest` `=0.52.0`, `static-engine` | Property tests, dev only | 255 releases since 2026-03-16. Pinned exactly [review, 06 F4] |
 | `proptest`, `proptest-state-machine` | Standing cross-check of properties 1 and 4 | |
@@ -1623,6 +1614,7 @@ Defaults adopted. Each applies unless the operator says otherwise:
 | D53 | 2026-11-20: on Linux `memory install` writes a systemd user unit at `$XDG_CONFIG_HOME/systemd/user/memory.service` (absolute only) or `~/.config/systemd/user/memory.service`: first line is our marker, `ExecStart="<exe>" daemon` (quoted with `\`, `"`, `%`, `$` escaped), `Restart=on-failure`, `RestartSec=60`, `StandardError=journal`, `WantedBy=default.target`. Uninstall removes only our unit. The binary prints `systemctl --user daemon-reload`, `enable --now` and `loginctl enable-linger $USER` and runs none of them. A control character in the exe path is refused | brief 44, evidence 36; 11.5, 17 |
 | D54 | 2026-11-21, operator answers to the uncaptured-files review: the `~/.claude/skills` folder and Pi `pi-terminology/` are not captured; Codex `generated_images`/`attachments` and Claude `paste-cache` are captured (slice 3; superseded by D55: none of the three is captured); known non-session files get an `Ignored` verdict, counted apart from `UnknownKind` and never captured. Claude `file-history` (operator: research and decide): captured in slice 3 only behind a content scan that withholds the whole file, with a recorded reason, on a secret match, binary or non-UTF-8 content, an oversize file or a scanner error; the local file is never touched. Reason: the transcript stays the record of what a session did, file-history adds the exact pre-edit file state at about 10 MB per host, and it is a raw copy of project files that no path denylist can see (names are hashes) | research report (Anthropic `claude-directory` and `checkpointing` docs), evidence 37; 5, 8, 19 |
 | D55 | 2026-11-21, operator after an evidence check of D54: Codex `generated_images`, Codex `attachments` and Claude `paste-cache` are not captured (they become `Ignored`). Measured on this Mac (byte and hash comparison, counts only): all 59 `paste-cache` files occur in captured Claude transcripts, since the cache only backs `history.jsonl` recall; all 4 generated images occur as base64 in Codex `thread_history_1.sqlite`, which slice 3 captures first; the 5 attachment screenshots and the attachment JSON index exist nowhere else and are given up (operator choice; the conversation text is intact). Reason: data minimisation in an archive that never deletes, and an image cannot be scanned for secrets | evidence 38; 5, 19 |
+| D69 | 2026-11-25, operator ("delete anything that doesn't run in production, no dead code should be left behind"; "prune retired records"): retirement is decided by the stored entry's kind (`stored_retired`: not in `CAPTURED_KINDS` and not a `PiAux` run record), with no root lookup; it drives `Probe::Retired`, `all_gone`, `check`'s `retired=` and the prune. After a complete, finished full round in which every owner's base is `Known` or `Absent`, `index.json` keeps only records whose id was walked or is a live, non-retired entry of some base (replaces the brief 48 two-walk rule). Deleted with their tests: the Codex SQLite backup (`rusqlite`, `Encoding::Sqlite`, `begin/end_snapshot`, `Deferred`, `BackupFailed`, the 6 h interval, `SnapshotFingerprint::Sqlite`, `check`'s `judge_store`), `Profile::Config`, `Profile::TextAsset`, `privacy/text.rs`, `privacy/document.rs` and `MalformedProtected` (the launch argv scrub had no effect behind the allowlist: a 20,000-case differential test), and the unused `pub` items a sweep found. One release loads old `index.json` records (`BRIEF57-SHIM`) and rewrites them; the shim is then removed. The Go tree, legacy analytics and Go CI are deleted; CI runs the analytics suite and workflow lint | brief 57; evidence 52; 7.2, 7.3, 8.3, 9.1, 13 |
 | D68 | 2026-11-24: Pi subagent run records reach analytics. `memory export` accepts a shared owner and writes `shared-reader/v1` holding only its analytics sources (`shared_analytics`: `PiAux` with the run-record shape); other stored entries are left out and counted `skipped=`; `memory owners --shared` lists shared owners. `publications.import_shared` validates that contract as strictly as session exports and replaces one shared owner's rows per transaction. `pi_run` has one row per run (agent type, models, exit code, an error flag, closed acceptance and review statuses, counts, usage, extension list lengths, runner type, external duration and exit code); `pi_run_extension` holds the `sha256:` extension digests (16 to 64 hex characters; real records hold 16); `pi_run_ref` (`SETUP_VERSION = 3`) records which session names a run, from structured `runId` fields only; `pi_run_dim` links a run to its earliest referencing session and never adds run usage to session totals (the child session already carries it); the summary report gains `runs`. Never stored: the task, error text, transcript path, child report, criteria text, commands, arguments, paths, pid. Reason: D66 keeps run records because they are the only record of resolved extensions and, for most runs, requested model, exit code and acceptance (evidence 51) | brief 56, evidence 51; 1 |
 | D67 | 2026-11-24, operator ("details of the agent model, harness, extensions, skills, tool calls etc."; "finish off the work"): the analytics importer also derives what a session used and what it cost. `session_setup` gains the closed facts `skill_used` (Claude `attributionSkill`; Pi a `read` of a `.../SKILL.md`, stored as the parent directory's name), `plugin_used`, `mcp_server_used` and `extension_used` (Pi `customType` before the first `:`); a used name is words of `[A-Za-z0-9._:@-]` joined by single spaces, at most 100 characters, else skipped and counted. `session_usage` has one row per billable unit (Claude the first record per `message.id`; Codex one per change of the cumulative total, from `last_token_usage`, input net of cached; Pi each assistant message and compaction, with its cost) and `tool_outcome` one row per tool result with an outcome (call id, tool name, error flag, exit code, duration; never a command, argument, output or path). A missing or invalid value is NULL, never 0. `SETUP_VERSION = 2`: one version row per session governs every derived table, so an unchanged publication is re-derived once. `session_dim` gains token, cost, tool and used columns; `usage_by_model` is new; `report(summary=True)` gains a `setup` section, empty on an older database. Reason: usage and outcomes are recorded only in the transcript, and each repeat rule was measured on real data (evidence 50) | brief 55, evidence 50; 1 |
 | D66 | 2026-11-23, operator ("once our memory package is installed it will capture everything live ... we drop most of the files, unless they provide information that is not captured live and is useful for analysis purposes"; proposals agreed): capture is an allowlist of the live session record: Claude transcripts, subagent transcripts and tool results, Codex rollouts (plain and `.zst`), Pi sessions, and Pi subagent run records (`sessions/<cwd>/subagent-artifacts/<name>.json`, the only record of a run's resolved extensions and, for most runs, its requested model, exit code and acceptance). Everything else (Claude memory, plans, file-history, history, config, debug, aux; Codex stores, history, config, logs; Pi config, settings, models, other aux) is `Ignored`. Stored entries of dropped kinds are retired: kept in the archive, never probed or deleted, counted `retired=` by `memory check`. `SourceKind` keeps every variant; `deferred_snapshot` is removed. Supersedes D54 to D56, D58 and the eligibility rule of D57 for what is captured. Reason: measured duplication (evidence 49) and data minimisation in an archive that never deletes | brief 54, evidence 49; 2, 8 |

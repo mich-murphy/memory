@@ -16,18 +16,18 @@
 //!   is `Ignored` and counted `ignored`. The only snapshot source left is the Pi run record,
 //!   profile `Scanned` (whole-file content scan). `deferred_snapshot` no longer exists. `note`
 //!   still routes append sources only. `locate_absent` (D52, brief 48) resolves stored entries
-//!   too, and returns `Probe::Retired` for a stored path that now locates to `Ignored`
-//!   ([`retired`], shared with `memory check`).
+//!   too, and returns `Probe::Retired` for a stored entry whose kind is not captured
+//!   (`stored_retired`, brief 57, shared with `memory check`).
 //! * No `unsafe`, no new dependencies, no panics; any I/O failure clears a resolved flag.
 
 use crate::capture::Source;
 use crate::daemon::Probe;
-use crate::environment::{Backup, FileSystem, Stat};
+use crate::environment::{FileSystem, Stat};
 use crate::realfs::{
     Encoding, RealFs, RealFsError, WalkLimits, index_claude_sessions, walk, walk_under,
 };
-use memory_core::domain::{Owner, SnapshotFingerprint, SourceClass, SourceId, SourceKind};
-use memory_core::locator::{Located, RootRelativePath, Roots, locate};
+use memory_core::domain::{Owner, SourceClass, SourceId, SourceKind};
+use memory_core::locator::{Located, RootRelativePath, Roots, locate, stored_retired};
 use memory_core::privacy::{Profile, ResolvedSourceFacts};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -195,11 +195,6 @@ fn resolve(path: &Path, root: &Path, located: &Located) -> (ResolvedSourceFacts,
     (facts, final_path)
 }
 
-/// Resolve one path for privacy admission. Never panics; unresolved is a cleared flag.
-pub fn resolve_facts(path: &Path, root: &Path, located: &Located) -> ResolvedSourceFacts {
-    resolve(path, root, located).0
-}
-
 /// Build a capture source for a located file. `None` for withheld (unlocated) rows, which
 /// have no id, kind or owner to capture under. The registered path is the canonical final
 /// path (the filesystem seam never follows links), or the logical path when unresolved so the
@@ -227,13 +222,7 @@ pub fn to_source(
     // A `.zst` rollout is captured as the logical rollout: plain kind and path, decoded bytes.
     let zst = *kind == SourceKind::CodexCompressed;
     let handle = *handles.entry(target.clone()).or_insert_with(|| {
-        let encoding = if zst {
-            Encoding::Zstd
-        } else if *kind == SourceKind::CodexStore {
-            Encoding::Sqlite
-        } else {
-            Encoding::Plain
-        };
+        let encoding = if zst { Encoding::Zstd } else { Encoding::Plain };
         fs.register_encoded(target, encoding)
     });
     let mut path_string = rel.components().join("/");
@@ -266,10 +255,6 @@ impl SharedFs {
     pub fn new() -> Self {
         Self::default()
     }
-    /// Adapter that makes SQLite backups under `tmp` (the state root's `tmp/`).
-    pub fn with_tmp(tmp: impl Into<PathBuf>) -> Self {
-        Self(Rc::new(RefCell::new(RealFs::with_tmp(tmp))))
-    }
     /// The shared cell.
     pub fn cell(&self) -> Rc<RefCell<RealFs>> {
         Rc::clone(&self.0)
@@ -292,26 +277,6 @@ impl FileSystem for SharedFs {
     }
     fn is_undecodable(error: &RealFsError) -> bool {
         *error == RealFsError::Undecodable
-    }
-    fn snapshot_fingerprint(
-        &mut self,
-        source: u64,
-    ) -> Result<Option<SnapshotFingerprint>, RealFsError> {
-        self.0
-            .try_borrow_mut()
-            .map_err(|_| RealFsError::Io(ErrorKind::WouldBlock))?
-            .snapshot_fingerprint(source)
-    }
-    fn begin_snapshot(&mut self, source: u64) -> Result<Option<u64>, Backup> {
-        self.0
-            .try_borrow_mut()
-            .map_err(|_| Backup::Failed)?
-            .begin_snapshot(source)
-    }
-    fn end_snapshot(&mut self, source: u64) {
-        if let Ok(mut fs) = self.0.try_borrow_mut() {
-            fs.end_snapshot(source);
-        }
     }
 }
 
@@ -357,17 +322,6 @@ pub struct WalkSources {
     /// Per owner, the files of the last walk and the paths noted since, as (root index, path
     /// spelled under the configured root).
     known: HashMap<Owner, BTreeSet<(usize, PathBuf)>>,
-}
-
-/// Brief 54: a stored entry is retired when its path now locates to `Ignored`. Pure: the id's
-/// namespace selects the root and the stored path is located. Shared by the daemon's absence
-/// probe and `memory check`.
-pub fn retired(roots: &[(PathBuf, Roots)], id: &SourceId, path: &str) -> bool {
-    let namespace = id.as_str().split(':').next().unwrap_or_default();
-    let Some((_, found)) = roots.iter().find(|(_, r)| r.namespace() == namespace) else {
-        return false;
-    };
-    RootRelativePath::parse(path).is_ok_and(|rel| locate(&rel, found) == Located::Ignored)
 }
 
 /// Root-relative path of `rest`, or `None` for a non-UTF-8 or non-plain component.
@@ -545,8 +499,8 @@ impl crate::daemon::Sources for WalkSources {
         !self.counts.truncated && !self.counts.busy
     }
 
-    fn locate_absent(&mut self, id: &SourceId, path: &str) -> Probe {
-        if retired(&self.roots, id, path) {
+    fn locate_absent(&mut self, id: &SourceId, kind: &SourceKind, path: &str) -> Probe {
+        if stored_retired(kind, path) {
             return Probe::Retired;
         }
         let namespace = id.as_str().split(':').next().unwrap_or_default();

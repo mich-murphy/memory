@@ -453,7 +453,7 @@ fn hegel_converged_reconcile_makes_zero_puts() {
 
 #[test]
 fn non_prefix_stable_source_still_reads_in_full() -> R {
-    let mut r = rig_with(1, 1, &lines(200_000), Profile::Config)?;
+    let mut r = rig_with(1, 1, &lines(200_000), Profile::Scanned)?;
     r.converge()?;
     let mut more = lines(200_000);
     more.extend(lines(59_000));

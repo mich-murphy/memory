@@ -37,7 +37,7 @@ by the earlier `74c00f4` staged-prerequisite and October 24 records. It does not
 operating acceptance. The [current-state alignment audit](current-state-audit.md) is
 also a dated record, not a current-checkout certification or rollout instruction.
 
-## References for the implementation that exists today
+## References (the Go implementation they describe was deleted on 2026-11-25, brief 57)
 
 These remain useful for safe maintenance and tests, but their archive-specific
 mechanisms do not override DESIGN.md for Rust or the retained contract goals:
@@ -47,10 +47,8 @@ mechanisms do not override DESIGN.md for Rust or the retained contract goals:
   [gate-runtime diagnosis](quality-gate-runtime.md), [naming](naming.md).
 - [v3 archive design](archive-design.md), [v3 storage layout](storage-layout.md).
 - [Verification](verification.md), [verification harness](verification/README.md),
-  [verification skill](../.agents/skills/verify-agent-sessions/SKILL.md).
-- [Analytics tools and caller modes](../tools/analytics/README.md) — preserved legacy
-  inspection/defaults and explicit publication-backed import/query/dashboard; candidate
-  consumers use the authoritative reader.
+  (the verification skill was deleted with the Go tree, brief 57).
+- [Analytics tools](../tools/analytics/README.md) — the `memory export` importer and report.
 
 ## Current development review evidence
 

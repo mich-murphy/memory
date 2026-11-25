@@ -3,7 +3,7 @@ use memory::capture::{Env, Locals, capture};
 use memory::commit::{Base, commit};
 use memory::daemon::Sources;
 use memory::realfs::{RealFs, WalkLimits, walk};
-use memory::resolve::{MAX_HOPS, SharedFs, WalkSources, resolve_facts, to_source};
+use memory::resolve::{MAX_HOPS, SharedFs, WalkSources, to_source};
 use memory_core::domain::{Agent, ArchiveId, MachineId, Owner, SourceKind};
 use memory_core::locator::{Located, RootLayout, RootNamespace, RootRelativePath, Roots, locate};
 use memory_core::manifest::{Header, OwnerState, Timestamp, Writer};
@@ -81,7 +81,7 @@ const T: &str = "claude/projects/-p/abc.jsonl";
 fn plain_file_resolves_and_is_admitted() -> R {
     let t = Tmp::new()?;
     let f = t.write(T, b"{}\n")?;
-    let facts = resolve_facts(&f, &t.root(), &located("projects/-p/abc.jsonl")?);
+    let facts = resolve_facts(&f, &t.root(), &located("projects/-p/abc.jsonl")?)?;
     assert!(facts.path_resolved && facts.root_resolved);
     assert_eq!(facts.file_identity, Some(pack(&f)?));
     assert!(facts.owner.is_some());
@@ -93,7 +93,7 @@ fn plain_file_resolves_and_is_admitted() -> R {
 fn ancestors_include_root_and_parents() -> R {
     let t = Tmp::new()?;
     let f = t.write(T, b"x")?;
-    let facts = resolve_facts(&f, &t.root(), &located("projects/-p/abc.jsonl")?);
+    let facts = resolve_facts(&f, &t.root(), &located("projects/-p/abc.jsonl")?)?;
     assert!(facts.ancestor_identities.contains(&pack(&t.root())?));
     assert!(
         facts
@@ -114,7 +114,7 @@ fn symlink_inside_root_and_chain_record_every_spelling() -> R {
         &d.join("c.jsonl"),
         &t.root(),
         &located("projects/-p/c.jsonl")?,
-    );
+    )?;
     assert!(facts.path_resolved);
     assert_eq!(facts.file_identity, Some(pack(&f)?));
     for name in ["c.jsonl", "b.jsonl", "abc.jsonl"] {
@@ -138,13 +138,26 @@ fn symlink_to_credential_is_denied_through_identity_union() -> R {
         &d.join("abc.jsonl"),
         &t.root(),
         &located("projects/-p/abc.jsonl")?,
-    );
+    )?;
     assert!(facts.path_resolved);
     match admit(&context(), facts) {
         Admission::Deny(r) => assert_eq!(r, Reason::Credential),
         _ => return Err("not denied".into()),
     }
     Ok(())
+}
+
+/// Facts as production builds them: through `to_source`.
+fn resolve_facts(
+    path: &Path,
+    root: &Path,
+    located: &Located,
+) -> R<memory_core::privacy::ResolvedSourceFacts> {
+    let rel = RootRelativePath::parse("projects/-p/abc.jsonl")?;
+    let mut rfs = RealFs::new();
+    let mut handles = BTreeMap::new();
+    let (_, src) = to_source(&mut rfs, &mut handles, path, root, &rel, located).ok_or("source")?;
+    Ok(src.facts)
 }
 
 fn assert_unresolved(facts: memory_core::privacy::ResolvedSourceFacts) {
@@ -164,9 +177,9 @@ fn loop_dangling_and_hop_overflow_fail_closed() -> R {
     let l = located("projects/-p/a.jsonl")?;
     symlink("b.jsonl", d.join("a.jsonl"))?;
     symlink("a.jsonl", d.join("b.jsonl"))?;
-    assert_unresolved(resolve_facts(&d.join("a.jsonl"), &t.root(), &l));
+    assert_unresolved(resolve_facts(&d.join("a.jsonl"), &t.root(), &l)?);
     symlink("nowhere", d.join("dangling.jsonl"))?;
-    assert_unresolved(resolve_facts(&d.join("dangling.jsonl"), &t.root(), &l));
+    assert_unresolved(resolve_facts(&d.join("dangling.jsonl"), &t.root(), &l)?);
     symlink("abc.jsonl", d.join("h0"))?;
     for i in 1..=MAX_HOPS + 2 {
         symlink(format!("h{}", i - 1), d.join(format!("h{i}")))?;
@@ -175,9 +188,9 @@ fn loop_dangling_and_hop_overflow_fail_closed() -> R {
         &d.join(format!("h{}", MAX_HOPS + 2)),
         &t.root(),
         &l,
-    ));
+    )?);
     // Within the bound it resolves.
-    assert!(resolve_facts(&d.join("h5"), &t.root(), &l).path_resolved);
+    assert!(resolve_facts(&d.join("h5"), &t.root(), &l)?.path_resolved);
     Ok(())
 }
 
@@ -185,7 +198,7 @@ fn loop_dangling_and_hop_overflow_fail_closed() -> R {
 fn missing_root_and_directory_target_fail_closed() -> R {
     let t = Tmp::new()?;
     let f = t.write(T, b"x")?;
-    let facts = resolve_facts(&f, &t.0.join("absent"), &located("projects/-p/abc.jsonl")?);
+    let facts = resolve_facts(&f, &t.0.join("absent"), &located("projects/-p/abc.jsonl")?)?;
     assert!(!facts.root_resolved);
     assert!(matches!(
         admit(&context(), facts),
@@ -196,15 +209,8 @@ fn missing_root_and_directory_target_fail_closed() -> R {
         &t.root().join("projects"),
         &t.root(),
         &located("projects/-p/abc.jsonl")?,
-    );
+    )?;
     assert!(!facts.path_resolved);
-    // Unlocated rows carry no owner and the unknown profile.
-    let facts = resolve_facts(&f, &t.root(), &located("nothing/here.bin")?);
-    assert!(facts.owner.is_none());
-    assert!(matches!(
-        admit(&context(), facts),
-        Admission::Deny(Reason::UnknownKind)
-    ));
     Ok(())
 }
 
@@ -357,7 +363,7 @@ fn shared_owner_and_profiles_are_literal() -> R {
     };
     let plan = t.write("claude/plans/p.md", b"plan")?;
     let loc = shared(SourceKind::ClaudePlan, Role::Artifact, "r1:plans:p.md")?;
-    let facts = resolve_facts(&plan, &t.root(), &loc);
+    let facts = resolve_facts(&plan, &t.root(), &loc)?;
     assert_eq!(facts.owner.as_deref(), Some("a/m/Claude"));
     assert_eq!(facts.profile, Profile::Scanned);
     let cfg = t.write("claude/settings.json", b"{}")?;
@@ -366,12 +372,9 @@ fn shared_owner_and_profiles_are_literal() -> R {
         Role::Asset(ConfigAsset::Settings),
         "r1:settings.json",
     )?;
-    let facts = resolve_facts(&cfg, &t.root(), &loc);
+    let facts = resolve_facts(&cfg, &t.root(), &loc)?;
     assert_eq!(facts.profile, Profile::Scanned);
     assert_eq!(facts.owner.as_deref(), Some("a/m/Claude"));
-    // An unlocated row has no owner and the unknown profile.
-    let facts = resolve_facts(&cfg, &t.root(), &Located::UnknownKind);
-    assert_eq!((facts.owner, facts.profile), (None, Profile::Unknown));
     Ok(())
 }
 
@@ -1300,7 +1303,7 @@ fn ignored_files_are_counted_not_yielded_and_never_hints() -> R {
 #[test]
 fn locate_absent_retires_a_dropped_path_and_probes_a_kept_one() -> R {
     use memory::daemon::Probe;
-    use memory_core::domain::SourceId;
+    use memory_core::domain::{SourceId, SourceKind};
     let t = Tmp::new()?;
     t.write(T, b"x")?;
     t.write("claude/history.jsonl", b"x")?;
@@ -1308,13 +1311,26 @@ fn locate_absent_retires_a_dropped_path_and_probes_a_kept_one() -> R {
     let id = |n: &str| SourceId::try_from(format!("{ns}:{n}"));
     let fh = "file-history/0f0e0d0c-0b0a-4908-8706-050403020100/aaaaaaaaaaaaaaaa@v1";
     let mut s = walker(&t.root(), WalkLimits::default())?;
-    assert_eq!(s.locate_absent(&id("h")?, "history.jsonl"), Probe::Retired);
-    assert_eq!(s.locate_absent(&id("fh")?, fh), Probe::Retired);
+    assert_eq!(
+        s.locate_absent(&id("h")?, &SourceKind::ClaudeHistory, "history.jsonl"),
+        Probe::Retired
+    );
+    assert_eq!(
+        s.locate_absent(&id("fh")?, &SourceKind::ClaudeFileHistory, fh),
+        Probe::Retired
+    );
     assert!(matches!(
-        s.locate_absent(&id("t")?, "projects/-p/abc.jsonl"),
+        s.locate_absent(
+            &id("t")?,
+            &SourceKind::ClaudeTranscript,
+            "projects/-p/abc.jsonl",
+        ),
         Probe::Handle(_)
     ));
     fs::remove_file(t.root().join("history.jsonl"))?;
-    assert_eq!(s.locate_absent(&id("h")?, "history.jsonl"), Probe::Retired);
+    assert_eq!(
+        s.locate_absent(&id("h")?, &SourceKind::ClaudeHistory, "history.jsonl"),
+        Probe::Retired
+    );
     Ok(())
 }

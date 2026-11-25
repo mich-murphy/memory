@@ -1,9 +1,8 @@
 //! Daemon-owned local state (DESIGN.md 9, 12): the state directory, the single-instance lock,
-//! the durable versioned envelope and the create-once machine id. Safe std only.
+//! the durable versioned envelope. Safe std only.
 //!
 //! State root: `MEMORY_STATE_DIR`, else `$HOME/.local/state/memory`, the same rule as
 //! `hook.rs`, so the hook and the daemon agree on `state/hints`.
-use memory_core::domain::MachineId;
 use sha2::{Digest, Sha256};
 use std::ffi::OsString;
 use std::fmt::Write as _;
@@ -56,9 +55,6 @@ pub enum StateError {
     /// A body exceeds [`MAX_BODY_BYTES`].
     #[error("state_too_large")]
     TooLarge,
-    /// The stored machine id exists but is not a valid id. It is never overwritten.
-    #[error("machine_id_corrupt")]
-    MachineIdCorrupt,
 }
 
 impl StateError {
@@ -75,7 +71,6 @@ impl StateError {
             Self::NotOwned => "state_not_owned",
             Self::InvalidName => "state_invalid_name",
             Self::TooLarge => "state_too_large",
-            Self::MachineIdCorrupt => "machine_id_corrupt",
         }
     }
 
@@ -198,14 +193,10 @@ pub struct Schema {
 /// The daemon's state files with a fixed schema each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StateFile {
-    /// `roots.json`, learned custom roots.
-    Roots,
     /// `index.json`, a derived cache.
     Index,
     /// `status.json`, parked list and counters.
     Status,
-    /// `machine_id`, created once.
-    MachineId,
 }
 
 impl StateFile {
@@ -213,10 +204,8 @@ impl StateFile {
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
-            Self::Roots => "roots.json",
             Self::Index => "index.json",
             Self::Status => "status.json",
-            Self::MachineId => "machine_id",
         }
     }
 
@@ -224,10 +213,8 @@ impl StateFile {
     #[must_use]
     pub const fn schema(self) -> Schema {
         let name = match self {
-            Self::Roots => "memory.roots",
             Self::Index => "memory.index",
             Self::Status => "memory.status",
-            Self::MachineId => "memory.machine-id",
         };
         Schema { name, version: 1 }
     }
@@ -447,8 +434,6 @@ pub mod trace {
         SyncFile,
         /// `rename(2)` of the temp file over the destination.
         Rename,
-        /// `link(2)` of the temp file to a destination that must not exist.
-        Link,
         /// A flush of the containing directory.
         SyncDir,
     }
@@ -504,15 +489,6 @@ fn rename_file(from: &Path, to: &Path) -> std::io::Result<()> {
     #[cfg(feature = "sim")]
     if result.is_ok() {
         trace::note(trace::Step::Rename);
-    }
-    result
-}
-
-fn link_file(from: &Path, to: &Path) -> std::io::Result<()> {
-    let result = fs::hard_link(from, to);
-    #[cfg(feature = "sim")]
-    if result.is_ok() {
-        trace::note(trace::Step::Link);
     }
     result
 }
@@ -589,35 +565,6 @@ impl Staged {
         }
         fsync_dir(&self.dir, self.sync)
     }
-
-    /// Publish only if the destination does not exist (`link(2)` fails with `EEXIST`, the
-    /// `O_EXCL` guarantee, yet readers never see a partial file). Returns whether this call
-    /// created the destination.
-    ///
-    /// # Errors
-    /// [`StateError::Io`] other than "already exists".
-    pub fn publish_new(self) -> Result<bool, StateError> {
-        let linked = link_file(&self.tmp, &self.dest);
-        let _ = fs::remove_file(&self.tmp);
-        match linked {
-            Ok(()) => fsync_dir(&self.dir, self.sync).map(|()| true),
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => Ok(false),
-            Err(error) => Err(io(error)),
-        }
-    }
-}
-
-/// Write one file durably: stage, then publish. Always [`SyncPolicy::Full`].
-///
-/// # Errors
-/// As [`stage`] and [`Staged::publish`].
-pub fn write_durable(
-    dir: &Path,
-    name: &str,
-    schema: Schema,
-    body: &[u8],
-) -> Result<(), StateError> {
-    stage(dir, name, schema, body)?.publish()
 }
 
 /// One bounded read of a hint day file.
@@ -716,22 +663,10 @@ impl StateDir {
         &self.root
     }
 
-    /// `state/tmp`.
-    #[must_use]
-    pub fn tmp_dir(&self) -> PathBuf {
-        self.root.join("tmp")
-    }
-
     /// `state/hints`.
     #[must_use]
     pub fn hints_dir(&self) -> PathBuf {
         self.root.join("hints")
-    }
-
-    /// The sync policy of this directory's writes.
-    #[must_use]
-    pub const fn sync_policy(&self) -> SyncPolicy {
-        self.sync
     }
 
     /// Stage a state file (steps 1 and 2) under this directory's policy, so a caller can
@@ -866,25 +801,5 @@ impl StateDir {
     #[must_use]
     pub fn read(&self, file: StateFile) -> Loaded {
         read_durable(&self.path(file), file.schema())
-    }
-
-    /// Create the machine id once. If one exists, return it and never overwrite, even if the
-    /// stored file is damaged ([`StateError::MachineIdCorrupt`]).
-    ///
-    /// # Errors
-    /// [`StateError::MachineIdCorrupt`] or [`StateError::Io`].
-    pub fn create_machine_id(&self, candidate: &MachineId) -> Result<MachineId, StateError> {
-        let file = StateFile::MachineId;
-        let staged = self.stage(file, candidate.as_str().as_bytes())?;
-        if staged.publish_new()? {
-            return Ok(candidate.clone());
-        }
-        match self.read(file) {
-            Loaded::Present(stored) => String::from_utf8(stored.body)
-                .ok()
-                .and_then(|text| MachineId::try_from(text).ok())
-                .ok_or(StateError::MachineIdCorrupt),
-            Loaded::Missing(_) => Err(StateError::MachineIdCorrupt),
-        }
     }
 }

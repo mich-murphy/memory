@@ -1,5 +1,7 @@
 # Quality-gate runtime investigation
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 **2026-10-23, uncommitted on `9078a3e`.** Synthetic offline fixtures only. This
 investigation is maintenance of the existing quality gates, not a return to the
 retired recovery implementation plan or evidence of replacement rollout readiness.

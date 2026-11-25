@@ -17,16 +17,19 @@
 //! walk (not truncated, not busy). Per visited owner, stored live entries (append or snapshot,
 //! brief 48) that the walk did not yield and that are not parked are probed with `stat` through
 //! [`Sources::locate_absent`]; a missing root, an unknown namespace or a bad path is counted as
-//! `absence_skipped` and never deletes. A stored entry whose path now locates to `Ignored`
-//! (brief 54) is `Probe::Retired`: never probed, never deleted, not `absence_skipped`; its
-//! manifest entry stays. Retired entries do not keep an owner in the set. `index.json` keeps
+//! `absence_skipped` and never deletes. A stored entry whose kind is not captured
+//! (`stored_retired`, brief 57) is `Probe::Retired`: never probed, never deleted, not
+//! `absence_skipped`; its manifest entry stays. Retired entries do not keep an owner in the
+//! set. `index.json` keeps
 //! `owners` (`#[serde(default)]`) so an owner whose every file is gone is still visited; it
-//! leaves the set once no live entry remains. `capture_owner` never counts absence. A local
-//! record holding only a withheld judgement is dropped after two consecutive complete walks
-//! that did not yield it (brief 48).
+//! leaves the set once no live entry remains. `capture_owner` never counts absence.
+//!
+//! Prune (brief 57): after a complete, finished full round in which every owner's base is
+//! `Known` or `Absent`, a local record is dropped unless its id was walked or is a live,
+//! non-retired entry of some owner's base (`prune_locals`).
 //!
 //! Withheld scanned files (D54, brief 47): `SourceIndex.withheld` (`#[serde(default)]`) records the
-//! fingerprint, rules and reason of a withhold of a `Profile::Scanned` file (Claude file-history).
+//! fingerprint, rules and reason of a withhold of a `Profile::Scanned` file (a Pi run record).
 //! The same pair gives `Unchanged` without a read; a new fingerprint or rules judge again; a file
 //! that later lands clears it. `RoundReport.withheld` counts judgements made in the round, not
 //! cached ones. The manifest never records a withheld file.
@@ -59,12 +62,13 @@ use crate::state::{
 use memory_core::coalescer::Signal;
 use memory_core::disposition::{Streak, jittered};
 use memory_core::domain::{
-    Agent, Disposition, ErrorClass, Fingerprint, LocalError, Owner, OwnerParkReason, ParkReason,
-    RulesDigest, SnapshotFingerprint, SourceId, SourceState, WithholdReason,
+    Agent, Disposition, ErrorClass, Fingerprint, Owner, OwnerParkReason, ParkReason, RulesDigest,
+    SnapshotFingerprint, SourceId, SourceKind, SourceState, WithholdReason,
 };
 use memory_core::hint::{
     HintEvent, HintScan, LaunchHint, PathHint, RetentionFacts, past_retention, removable, scan,
 };
+use memory_core::locator::stored_retired;
 use memory_core::manifest::{Change, Header, ManifestError, OwnerState, Piece, Timestamp, Writer};
 use memory_core::pause::pause_for;
 use memory_core::privacy::{PolicyContext, SanitizedLaunch, sanitize_launch};
@@ -129,7 +133,7 @@ pub enum RoundError {
 
 /// One source's persisted local knowledge.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(from = "crate::index_shim::RawSourceIndex")] // BRIEF57-SHIM: strict fields live there
 pub struct SourceIndex {
     /// Append index.
     pub index: Option<SourceState>,
@@ -140,9 +144,6 @@ pub struct SourceIndex {
     /// Pieces of the last landed snapshot epoch (reuse by digest).
     #[serde(default)]
     pub snapshot_pieces: Vec<Piece>,
-    /// Wall time of the last landed snapshot.
-    #[serde(default)]
-    pub snapshot_at_ns: Option<i64>,
     /// A deletion was committed for the current absence.
     pub deletion_recorded: bool,
     /// Withheld scanned file: fingerprint, rules and reason of the judgement (D54, brief 47).
@@ -337,7 +338,7 @@ pub trait Sources {
     }
     /// Resolve a stored source (id and root-relative path) that the walk did not yield to a
     /// handle for a `stat`-only absence probe. Default: [`Probe::Skip`].
-    fn locate_absent(&mut self, _id: &SourceId, _path: &str) -> Probe {
+    fn locate_absent(&mut self, _id: &SourceId, _kind: &SourceKind, _path: &str) -> Probe {
         Probe::Skip
     }
     /// The current sources of one owner. Default: [`Sources::enumerate`] filtered.
@@ -718,7 +719,6 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                     missing: s.missing,
                     snapshot: s.snapshot,
                     snapshot_pieces: s.snapshot_pieces,
-                    snapshot_at_ns: s.snapshot_at_ns,
                     deletion_recorded: s.deletion_recorded,
                     withheld: s.withheld,
                 };
@@ -772,6 +772,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         self.stop = Box::new(probe);
     }
 
+    #[cfg(feature = "sim")]
     /// Install the sleep used for commit pauses (decision D44). Default: a real
     /// `std::thread::sleep`. The stop probe is not consulted during a pause.
     pub fn set_sleep(&mut self, sleep: impl FnMut(Duration) + 'static) {
@@ -796,14 +797,17 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         &self.status
     }
     /// The filesystem seam (tests mutate sources through it).
+    #[cfg(feature = "sim")]
     pub const fn fs_mut(&mut self) -> &mut F {
         &mut self.fs
     }
     /// The store seam.
+    #[cfg(feature = "sim")]
     pub const fn store_mut(&mut self) -> &mut S {
         &mut self.store
     }
     /// The clock seam.
+    #[cfg(feature = "sim")]
     pub const fn clock_mut(&mut self) -> &mut C {
         &mut self.clock
     }
@@ -1046,7 +1050,7 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             {
                 continue;
             }
-            match self.sources.locate_absent(id, &entry.path) {
+            match self.sources.locate_absent(id, &entry.kind, &entry.path) {
                 Probe::Handle(handle) => found.push(Candidate {
                     handle,
                     id: id.clone(),
@@ -1240,16 +1244,9 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             .count();
         // A source park takes effect whether or not the owner's commit lands.
         for (id, outcome) in &got.outcomes {
-            match outcome {
-                SourceOutcome::Parked(reason) => {
-                    rt.parked_sources.insert(id.clone(), reason.clone());
-                    report.parked += 1;
-                }
-                // Counted under `Local`; no owner retry or park: the source is tried next round.
-                SourceOutcome::BackupFailed => report
-                    .failures
-                    .bump(&ErrorClass::Local(LocalError::BackupFailed)),
-                _ => {}
+            if let SourceOutcome::Parked(reason) = outcome {
+                rt.parked_sources.insert(id.clone(), reason.clone());
+                report.parked += 1;
             }
         }
         if let Some(failure) = failed {
@@ -1346,7 +1343,6 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                         missing: l.missing,
                         snapshot: l.snapshot.clone(),
                         snapshot_pieces: l.snapshot_pieces.clone(),
-                        snapshot_at_ns: l.snapshot_at_ns,
                         deletion_recorded: l.deletion_recorded,
                         withheld: l.withheld.clone(),
                     };
@@ -1396,29 +1392,6 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
                 None => groups.push((owner, vec![source])),
             }
         }
-        // Brief 48: a local record that only holds a withheld judgement (never published, so
-        // never a candidate) is dropped after two consecutive full rounds that did not walk
-        // it. No manifest change is built: the file was never in R2.
-        if self.absence {
-            let seen: HashSet<&SourceId> = groups
-                .iter()
-                .flat_map(|(_, list)| list.iter().map(|s| &s.id))
-                .collect();
-            let mut touched = false;
-            self.locals.retain(|id, l| {
-                if l.withheld.is_none()
-                    || l.snapshot.is_some()
-                    || l.index.is_some()
-                    || seen.contains(id)
-                {
-                    return true;
-                }
-                touched = true;
-                l.missing = l.missing.saturating_add(1);
-                l.missing < 2
-            });
-            self.dirty |= touched;
-        }
         let walked: HashSet<Owner> = groups.iter().map(|(o, _)| o.clone()).collect();
         for owner in &walked {
             if self.known.insert(owner.clone()) {
@@ -1443,10 +1416,12 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         self.status.host_paused = false;
         let started_ns = self.clock.monotonic_ns();
         let mut last_progress_ns = started_ns;
+        let mut finished = true;
         for (done, (owner, sources)) in groups.iter().enumerate() {
             if (self.stop)() {
                 // A round cut short re-probed nothing more: it cannot resume a paused host.
                 self.status.host_paused |= before.0;
+                finished = false;
                 break;
             }
             let mut rt = self
@@ -1474,8 +1449,12 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
             }
             if pause {
                 self.status.host_paused = true;
+                finished = false;
                 break;
             }
+        }
+        if self.absence && finished {
+            self.prune_locals(&groups);
         }
         self.absence = false;
         if self.status.host_paused != before.0 {
@@ -1502,13 +1481,55 @@ impl<F: FileSystem, S: Store, C: Clock, E: Sources> Daemon<F, S, C, E> {
         Ok(report)
     }
 
+    /// Brief 57: after a complete, finished full round, drop each local record whose id was not
+    /// walked and is not a live, non-retired entry of any owner's base. Nothing is pruned
+    /// unless every owner in the owner set has a `Known` or `Absent` base, so a store failure
+    /// (`Unknown`) or a parked owner never loses a record that still guards a deletion.
+    fn prune_locals(&mut self, groups: &[(Owner, Vec<Source>)]) {
+        let loaded = |o: &Owner| {
+            self.owners
+                .get(o)
+                .is_some_and(|rt| !matches!(rt.base, RemoteBase::Unknown))
+        };
+        let ready = self.known.iter().all(loaded)
+            && self
+                .owners
+                .values()
+                .all(|rt| !matches!(rt.base, RemoteBase::Unknown));
+        if !ready {
+            return;
+        }
+        let mut keep: HashSet<&SourceId> = groups
+            .iter()
+            .flat_map(|(_, list)| list.iter().map(|s| &s.id))
+            .collect();
+        for rt in self.owners.values() {
+            if let RemoteBase::Known(base) = &rt.base {
+                keep.extend(
+                    base.state
+                        .sources
+                        .iter()
+                        .filter(|(_, e)| {
+                            e.deleted_at.is_none() && !stored_retired(&e.kind, &e.path)
+                        })
+                        .map(|(id, _)| id),
+                );
+            }
+        }
+        let before = self.locals.len();
+        self.locals.retain(|id, _| keep.contains(id));
+        self.dirty |= self.locals.len() != before;
+    }
+
     /// The owner's recovered state has no live append entry left.
-    /// Brief 54: retired entries (their path now locates to `Ignored`) do not count as live.
+    /// Brief 57: retired entries (kind not captured, [`stored_retired`]) do not count as live.
     fn all_gone(&mut self, rt: &OwnerRt) -> bool {
         match &rt.base {
-            RemoteBase::Known(base) => !base.state.sources.iter().any(|(id, e)| {
-                e.deleted_at.is_none() && self.sources.locate_absent(id, &e.path) != Probe::Retired
-            }),
+            RemoteBase::Known(base) => !base
+                .state
+                .sources
+                .values()
+                .any(|e| e.deleted_at.is_none() && !stored_retired(&e.kind, &e.path)),
             RemoteBase::Absent => true,
             RemoteBase::Unknown => false,
         }

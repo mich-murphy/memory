@@ -1,5 +1,7 @@
 # Replacement capture: dated qualification evidence
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 Current deployment, authority and next action live in the
 [sole delivery handoff](session-capture-handoff.md#current-session-checkpoint).
 The records below are source-bound evidence, not a declaration that memory is working

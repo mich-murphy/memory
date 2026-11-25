@@ -1,5 +1,7 @@
 # Bucket layout
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 > **Status (2026-10-23):** Legacy v3 wire-format reference, not the target architecture. The formats and reader rules below document deployed/retired representations and their test contracts; they do not establish that every historical recovery path works. The agreed canonical [session-capture contract](session-capture-contract.md) defines the greenfield direction: complete source-epoch snapshots as the baseline and one authoritative reader shared by restore and analytics. The opt-in implementation uses [publication/reader v2](session-publication-v1.md), explicit [candidate backends](session-capture-backends.md) and separate analytics; see [offline evidence](session-capture-offline-evidence.md). Defaults remain legacy, and release/native/R2/two-machine acceptance is not complete. No legacy migration or cold-recovery patch stack is required for the controlled rebuild.
 
 The existing archive wire format described here is **v3**, not the agreed replacement

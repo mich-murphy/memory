@@ -1,5 +1,7 @@
 # Session publication and reader v2
 
+> Historical note: the Go reader, `serve.py`, `publication_refresh.py` and `projection_access.py` named below were deleted on 2026-11-25 (brief 57). The wire contract and projection still describe what `publications.py` imports from `memory export`.
+
 The filename is retained for existing documentation links. The repository contract
 requires v2; it does not silently reinterpret v1 archives or reset their binding.
 The new explicit selection semantics support privacy-safe optional-artifact isolation.

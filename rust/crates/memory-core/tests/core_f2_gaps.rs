@@ -17,16 +17,14 @@ fn transition(
 }
 
 use memory_core::domain::{
-    Agent, ArchiveId, Birth, Disposition, ErrorClass, FileId, Fingerprint, LocalError, MachineId,
-    Observed, Offset, Owner, Plan, RulesDigest, SessionId, SessionKey, Sha256, SnapshotFingerprint,
-    SourceClass, SourceId, SourceKind, WalFingerprint,
+    Agent, ArchiveId, Disposition, ErrorClass, LocalError, MachineId, Offset, Owner, RulesDigest,
+    SessionId, SessionKey, Sha256, SourceClass, SourceId, SourceKind,
 };
 use memory_core::locator::{Located, RootLayout, RootNamespace, RootRelativePath, Roots, locate};
 use memory_core::manifest::{
     Change, CheckpointSource, EpochRecord, EpochStamp, EpochWriter, Header, Manifest, OwnerState,
     Piece, Position, SourceWrite, Timestamp, Writer, build, fold,
 };
-use memory_core::planner::{AuditEvidence, Observation, PlanInput, Planning, Strategy, plan};
 use memory_core::privacy::{
     self, Admission, Authorization, AuthorizedBody, PolicyContext, Profile, Reason,
     ResolvedSourceFacts, UnknownReason, sanitize_launch,
@@ -72,18 +70,6 @@ fn body(
         _ => Err("authorization failed".into()),
     }
 }
-/// `Some(reason)` when transform of an admitted source fails.
-fn transform_err(
-    paths: &[&str],
-    profile: Profile,
-    input: &[u8],
-) -> Result<Option<Reason>, &'static str> {
-    let Admission::Allow(source) = privacy::admit(&context(), facts(paths, profile)) else {
-        return Err("admission failed");
-    };
-    Ok(privacy::transform(&source, input).err())
-}
-
 const JSON_ENV: &str = r#"{"env":{"KEY":"CANARY"},"copy":"CANARY"}"#;
 const JSON_MCP: &str = r#"{"mcpServers":{"s":{"env":{"KEY":"CANARY"}}},"copy":"CANARY"}"#;
 const TOML_CODEX: &str = "copy='CANARY'\n[mcp_servers.s]\nbearer_token='CANARY'\n";
@@ -113,7 +99,7 @@ const ELEVEN: [(&str, &str, bool); 11] = [
     ("config.toml", TOML_CODEX, true),
     ("managed_config.toml", TOML_CODEX, true),
 ];
-/// Backup spellings per the suffix normalization (names.rs / Go policy.go:75-123).
+/// Backup spellings per the suffix normalization (names.rs, from the former Go policy).
 const SUFFIXES: [&str; 19] = [
     "",
     ".bak",
@@ -137,55 +123,38 @@ const SUFFIXES: [&str; 19] = [
 ];
 
 #[test]
-fn row1a_backup_aliased_spellings_of_all_eleven_names_select_structural_rules() -> R {
+fn row1a_backup_aliased_spellings_of_all_eleven_names_keep_the_credential_verdict() {
     let mut denied = 0_u32;
-    let mut scrubbed = 0_u32;
+    let mut allowed = 0_u32;
     for agent in ["claude", "codex", "pi"] {
-        for (name, input, toml) in ELEVEN {
+        for (name, _, _) in ELEVEN {
             for suffix in SUFFIXES {
                 for spelled in [
                     format!("{name}{suffix}"),
                     format!("{name}{suffix}").to_uppercase(),
                 ] {
                     let identity = format!("/home/u/.{agent}/{spelled}");
-                    // Independent expectation: any `.claude.json` spelling other than the exact
-                    // primary file is a credential backup; every other alias is scrubbed.
+                    // Any `.claude.json` spelling other than the exact primary file is a
+                    // credential backup.
                     let credential = spelled != ".claude.json" && name == ".claude.json";
-                    for profile in [Profile::Config, Profile::OtherKnown] {
-                        let paths = ["/safe/alias.md", identity.as_str(), "/final/unknown"];
-                        let admission = privacy::admit(&context(), facts(&paths, profile));
-                        if credential {
-                            assert!(
-                                matches!(admission, Admission::Deny(Reason::Credential)),
-                                "{identity} must be denied as credential"
-                            );
-                            denied += 1;
-                            continue;
-                        }
-                        assert!(matches!(admission, Admission::Allow(_)), "{identity} admit");
-                        let out = body(&paths, profile, input.as_bytes())?;
+                    let paths = ["/safe/alias.md", identity.as_str(), "/final/unknown"];
+                    let admission = privacy::admit(&context(), facts(&paths, Profile::OtherKnown));
+                    if credential {
                         assert!(
-                            !String::from_utf8_lossy(out.bytes()).contains("CANARY"),
-                            "{identity} leaked"
+                            matches!(admission, Admission::Deny(Reason::Credential)),
+                            "{identity} must be denied as credential"
                         );
-                        assert_ne!(out.bytes(), input.as_bytes(), "{identity} unchanged");
-                        let malformed: &[u8] = if toml { b"[" } else { b"{" };
-                        assert_eq!(
-                            transform_err(&paths, profile, malformed)?,
-                            Some(Reason::MalformedProtected),
-                            "{identity} malformed must fail closed"
-                        );
-                        scrubbed += 1;
+                        denied += 1;
+                    } else {
+                        assert!(matches!(admission, Admission::Allow(_)), "{identity} admit");
+                        allowed += 1;
                     }
                 }
             }
         }
     }
-    // 3 agents x 19 suffixes x 2 case spellings x 2 profiles x (10 scrubbed + 1 credential name),
-    // except the exact primary spelling of `.claude.json` (1 per agent per profile) is scrubbed.
-    assert_eq!(denied, 3 * (19 * 2 - 1) * 2);
-    assert_eq!(scrubbed, 3 * 2 * (10 * 19 * 2 + 1));
-    Ok(())
+    assert_eq!(denied, 3 * (19 * 2 - 1));
+    assert_eq!(allowed, 3 * (10 * 19 * 2 + 1));
 }
 
 #[test]
@@ -322,135 +291,6 @@ fn row1b_argv_bound_is_thirty_two() {
 
 // ------------------------------------------------------------------ row 5a
 
-fn fp() -> Fingerprint {
-    Fingerprint {
-        id: FileId {
-            dev: 1,
-            ino: 2,
-            birth: Birth::Unavailable,
-        },
-        size: 100,
-        mtime_ns: 1,
-    }
-}
-/// One variant per physical field.
-fn variants() -> Vec<Fingerprint> {
-    let b = fp();
-    vec![
-        Fingerprint {
-            id: FileId {
-                dev: 9,
-                ..b.id.clone()
-            },
-            ..b.clone()
-        },
-        Fingerprint {
-            id: FileId {
-                ino: 9,
-                ..b.id.clone()
-            },
-            ..b.clone()
-        },
-        Fingerprint {
-            id: FileId {
-                birth: Birth::Known(5),
-                ..b.id.clone()
-            },
-            ..b.clone()
-        },
-        Fingerprint {
-            size: 101,
-            ..b.clone()
-        },
-        Fingerprint { mtime_ns: 2, ..b },
-    ]
-}
-fn snapshot_plan(previous: SnapshotFingerprint, current: SnapshotFingerprint) -> Option<Plan> {
-    let observed = Observed {
-        id: FileId {
-            dev: 1,
-            ino: 2,
-            birth: Birth::Unavailable,
-        },
-        size: 100,
-        mtime_ns: 1,
-        observed_at_ns: 9_000_000_000,
-    };
-    let input = PlanInput {
-        withheld: None,
-        observation: Observation::Present(observed),
-        strategy: Strategy::Snapshot {
-            previous: Some(previous),
-            current,
-            previous_rules: None,
-        },
-        rules: None,
-        audit: AuditEvidence::NotDue,
-    };
-    match plan(&input) {
-        Planning::Ready { plan, .. } => Some(plan),
-        _ => None,
-    }
-}
-fn sqlite(db: Fingerprint, wal: WalFingerprint) -> SnapshotFingerprint {
-    SnapshotFingerprint::Sqlite { db, wal }
-}
-
-#[test]
-fn row5a_db_only_wal_only_and_unchanged_fingerprints() {
-    let present = WalFingerprint::Present(fp());
-    for wal in [WalFingerprint::Absent, present.clone()] {
-        assert_eq!(
-            snapshot_plan(sqlite(fp(), wal.clone()), sqlite(fp(), wal.clone())),
-            Some(Plan::Unchanged)
-        );
-        for changed in variants() {
-            // db-only change, WAL unchanged.
-            assert_eq!(
-                snapshot_plan(sqlite(fp(), wal.clone()), sqlite(changed, wal.clone())),
-                Some(Plan::Snapshot)
-            );
-        }
-    }
-    for changed in variants() {
-        // WAL-only change, db unchanged.
-        assert_eq!(
-            snapshot_plan(
-                sqlite(fp(), present.clone()),
-                sqlite(fp(), WalFingerprint::Present(changed.clone()))
-            ),
-            Some(Plan::Snapshot)
-        );
-        // Both changed.
-        assert_eq!(
-            snapshot_plan(
-                sqlite(fp(), present.clone()),
-                sqlite(changed.clone(), WalFingerprint::Present(changed))
-            ),
-            Some(Plan::Snapshot)
-        );
-    }
-    assert_eq!(
-        snapshot_plan(
-            sqlite(fp(), present.clone()),
-            sqlite(fp(), WalFingerprint::Absent)
-        ),
-        Some(Plan::Snapshot)
-    );
-    assert_eq!(
-        snapshot_plan(sqlite(fp(), WalFingerprint::Absent), sqlite(fp(), present)),
-        Some(Plan::Snapshot)
-    );
-    // A plain fingerprint never equals a SQLite one.
-    assert_eq!(
-        snapshot_plan(
-            SnapshotFingerprint::Plain(fp()),
-            sqlite(fp(), WalFingerprint::Absent)
-        ),
-        Some(Plan::Snapshot)
-    );
-}
-
 #[test]
 fn row5a_wal_identity_is_covered_by_admission_when_supplied_as_facts() {
     let kind = |f: ResolvedSourceFacts| privacy::admit(&context(), f);
@@ -494,10 +334,7 @@ fn row5a_wal_identity_is_covered_by_admission_when_supplied_as_facts() {
 
 #[test]
 fn row5b_changed_and_failed_are_closed_local_retries_never_done() -> R {
-    for (err, wire) in [
-        (LocalError::BackupFailed, "\"backup_failed\""),
-        (LocalError::SourceChanged, "\"source_changed\""),
-    ] {
+    for (err, wire) in [(LocalError::SourceChanged, "\"source_changed\"")] {
         assert_eq!(serde_json::to_string(&err)?, wire);
         assert_eq!(serde_json::from_str::<LocalError>(wire)?, err);
         for (retries, secs) in [
@@ -626,26 +463,6 @@ fn row10b_transcript_bytes_with_invalid_utf8_and_lone_surrogates_are_byte_exact(
             let out = body(&["/home/u/.claude/projects/-p/abc.jsonl"], profile, input)?;
             assert_eq!(out.bytes(), input);
             assert_eq!(out.digest(), <[u8; 32]>::from(Hasher::digest(input)));
-        }
-    }
-    Ok(())
-}
-
-#[test]
-fn row10b_protected_config_with_lone_surrogates_or_invalid_utf8_is_malformed() -> R {
-    for (name, _, toml) in ELEVEN {
-        let identity = format!("/home/u/.claude/{name}");
-        let bad: [&[u8]; 2] = if toml {
-            [b"copy='\xff'\n", b"copy=\"\\ud800\"\n"]
-        } else {
-            [b"{\"copy\":\"\xff\"}", b"{\"copy\":\"\\ud800\"}"]
-        };
-        for input in bad {
-            assert_eq!(
-                transform_err(&[identity.as_str()], Profile::Config, input)?,
-                Some(Reason::MalformedProtected),
-                "{name}"
-            );
         }
     }
     Ok(())

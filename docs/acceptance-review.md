@@ -1,5 +1,7 @@
 # Isolated acceptance and adversarial review
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 > **Status (2026-10-23):** Historical v3 prepared-branch review, not a current release checklist or an integrated replacement pass. The exact old test expectations and gaps below remain evidence, not a requirement to repair legacy history. For replacement acceptance use the agreed canonical [session-capture contract](session-capture-contract.md): durable local acceptance, independent retries, complete source-epoch publications, and the actual shared reader plus analytics/report pipeline.
 
 This suite is **not an integrated acceptance pass**. It was prepared independently

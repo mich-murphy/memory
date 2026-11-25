@@ -1,5 +1,7 @@
 # Phase 3: independent capture and autonomous work
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 **Scope:** implemented opt-in candidate reference, not release acceptance.
 Independent capture/coordinator delivery, native evidence, enrichment, explicit
 Local/R2 construction and publication-backed analytics are described below; defaults

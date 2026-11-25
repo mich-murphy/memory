@@ -48,20 +48,17 @@
 //!
 //! # Snapshot sources
 //!
-//! A snapshot is fingerprinted first (a SQLite store: database plus `-wal`); an unchanged
-//! fingerprint and rules end there without opening the content. A changed SQLite store is
-//! deferred until 6 h after its last landed snapshot (`MEMORY_SIM_SNAPSHOT_INTERVAL` under `sim`).
-//! Otherwise the seam makes a stable copy (`begin_snapshot`, released by `end_snapshot` on every
-//! outcome) and the source is replaced from it. A piece whose transformed digest equals one of the
-//! last landed epoch's reuses that descriptor with no PUT (digest only, never offset).
-//! `SourceChanged` is [`SourceOutcome::Raced`]; a failed copy is [`SourceOutcome::BackupFailed`].
+//! A snapshot (a Pi run record) is fingerprinted from its stat; an unchanged fingerprint and
+//! rules end there without opening the content. Otherwise the source is replaced from a read of
+//! the file. A piece whose transformed digest equals one of the last landed epoch's reuses that
+//! descriptor with no PUT (digest only, never offset).
 //!
 //! Limitations: the whole-stream digest resumes from the index's `Sha256State` for
 //! prefix-stable sources (otherwise it is recomputed from a fresh read of `[0, to)`). Snapshot
 //! and missing-source planning never carry audit evidence (`NotDue`).
 use crate::audit::{self, AuditCounts};
 use crate::commit::{Collect, Commit, PieceSink};
-use crate::environment::{Backup, FileSystem, PieceError};
+use crate::environment::{FileSystem, PieceError};
 use memory_core::domain::{
     AuditState, EpochPosition, Fingerprint, Observed, Offset, ParkReason, Plan, ReplayReason,
     RulesDigest, Sha256, Sha256State, SnapshotFingerprint, SourceClass, SourceId, SourceKind,
@@ -114,8 +111,6 @@ pub struct Local {
     pub snapshot: Option<(SnapshotFingerprint, Option<RulesDigest>)>,
     /// Pieces of the last landed snapshot epoch: a new piece with an equal digest reuses one.
     pub snapshot_pieces: Vec<Piece>,
-    /// Wall time of the last landed snapshot (the 6 h interval of SQLite stores).
-    pub snapshot_at_ns: Option<i64>,
     /// A deletion was committed for the current absence.
     pub deletion_recorded: bool,
     /// Last judgement that withheld a scanned file: the fingerprint and rules it was made
@@ -136,13 +131,12 @@ pub enum Update {
     Deleted(SourceId),
     /// New append index.
     Index(SourceId, Box<SourceState>),
-    /// New snapshot fingerprint, rules, the epoch's pieces and the wall time of the capture.
+    /// New snapshot fingerprint, rules and the epoch's pieces.
     Snapshot(
         SourceId,
         SnapshotFingerprint,
         Option<RulesDigest>,
         Vec<Piece>,
-        i64,
     ),
     /// A scanned file was judged and withheld under this fingerprint and rules.
     Withheld(SourceId, Fingerprint, Option<RulesDigest>, WithholdReason),
@@ -163,15 +157,13 @@ impl Update {
                 local.index = None;
                 local.snapshot = None;
                 local.snapshot_pieces.clear();
-                local.snapshot_at_ns = None;
                 local.withheld = None;
             }
             Self::Index(id, state) => locals.entry(id).or_default().index = Some(*state),
-            Self::Snapshot(id, fp, rules, pieces, at) => {
+            Self::Snapshot(id, fp, rules, pieces) => {
                 let local = locals.entry(id).or_default();
                 local.snapshot = Some((fp, rules));
                 local.snapshot_pieces = pieces;
-                local.snapshot_at_ns = Some(at);
                 local.withheld = None;
             }
             Self::Withheld(id, fp, rules, reason) => {
@@ -181,7 +173,7 @@ impl Update {
     }
     /// Record the encodings that won an `If-None-Match` race in the pieces a snapshot keeps.
     pub fn adopt(&mut self, winners: &crate::commit::Winners) {
-        if let Self::Snapshot(_, _, _, pieces, _) = self {
+        if let Self::Snapshot(_, _, _, pieces) = self {
             for piece in pieces.iter_mut() {
                 if let Some(won) = winners.get(piece.object()) {
                     *piece = piece.clone().adopt_stored(won);
@@ -204,12 +196,6 @@ pub enum SourceOutcome {
     Raced,
     /// The seam failed or evidence could not be completed; not an absence.
     Unavailable,
-    /// A SQLite store changed but its last snapshot landed less than the interval ago; it is
-    /// tried again in a later round.
-    Deferred,
-    /// The consistent copy of a snapshot source could not be made (error class `Local`,
-    /// `BackupFailed`); nothing was uploaded and the source is tried again next round.
-    BackupFailed,
     /// A change and its pieces are in the commit.
     Planned,
     /// The audit keeps failing: nothing was uploaded and the index entry is unchanged. The
@@ -407,7 +393,6 @@ fn withhold_of(reason: Reason) -> WithholdReason {
         Reason::CollectorState => WithholdReason::CollectorState,
         Reason::UnknownKind => WithholdReason::UnknownKind,
         Reason::UnknownOwner => WithholdReason::UnknownOwner,
-        Reason::MalformedProtected => WithholdReason::MalformedProtected,
         Reason::SecretInText => WithholdReason::SecretInText,
         Reason::SourceLimit => WithholdReason::SourceLimit,
         Reason::Binary => WithholdReason::Binary,
@@ -603,13 +588,10 @@ fn step<F: FileSystem>(
     // can be stale after a lost reply, so it counts only when the remote has no entry.
     let recorded = entry.map_or(local.deletion_recorded, |e| e.deleted_at.is_some());
     let live = entry.filter(|e| e.deleted_at.is_none());
-    let rules = matches!(
-        src.facts.profile,
-        Profile::Config | Profile::TextAsset | Profile::Scanned
-    )
-    .then_some(env.context.rules)
-    .flatten()
-    .map(|r| RulesDigest::new(Sha256::from_bytes(r)));
+    let rules = (src.facts.profile == Profile::Scanned)
+        .then_some(env.context.rules)
+        .flatten()
+        .map(|r| RulesDigest::new(Sha256::from_bytes(r)));
     let stat = match fs.stat(src.handle) {
         Ok(stat) => stat,
         Err(e) if F::is_undecodable(&e) => {
@@ -718,31 +700,10 @@ fn step<F: FileSystem>(
     }
 }
 
-/// Least time between two landed snapshots of a changing SQLite store (default, unmeasured:
-/// a 615 MB backup per 15-minute round would write about 2.4 GB/h locally). Under `sim`,
-/// `MEMORY_SIM_SNAPSHOT_INTERVAL=<seconds>` replaces it (zero turns the interval off).
-#[cfg(feature = "sim")]
-fn snapshot_interval_ns() -> i64 {
-    std::env::var("MEMORY_SIM_SNAPSHOT_INTERVAL")
-        .ok()
-        .and_then(|text| text.parse::<u32>().ok())
-        .map_or(SNAPSHOT_INTERVAL_NS, |s| i64::from(s) * 1_000_000_000)
-}
-
-/// Without `sim` the variable is never read.
-#[cfg(not(feature = "sim"))]
-const fn snapshot_interval_ns() -> i64 {
-    SNAPSHOT_INTERVAL_NS
-}
-
-const SNAPSHOT_INTERVAL_NS: i64 = 6 * 3600 * 1_000_000_000;
-
 /// A snapshot source: replace the stored object when its fingerprint or the rules changed.
 ///
-/// The fingerprint is taken before anything is opened (the seam gives a SQLite store's database
-/// plus `-wal`, else `plain`); an unchanged one ends here. Otherwise the seam makes the stable
-/// byte stream (`begin_snapshot`), whose length replaces the observed size, and releases it
-/// after the source, landed or not. The fingerprint recorded is the one taken before the copy.
+/// The fingerprint is the stat (`plain`), taken before anything is opened; an unchanged one
+/// ends here. Otherwise the file is read and the object replaced.
 fn snapshot<F: FileSystem>(
     fs: &mut F,
     job: Job<'_>,
@@ -750,12 +711,7 @@ fn snapshot<F: FileSystem>(
     plain: Fingerprint,
     acc: &mut Acc<'_>,
 ) -> SourceOutcome {
-    let handle = job.src.handle;
-    let fp = match fs.snapshot_fingerprint(handle) {
-        Ok(Some(fp)) => fp,
-        Ok(None) => SnapshotFingerprint::Plain(plain),
-        Err(_) => return SourceOutcome::Unavailable,
-    };
+    let fp = SnapshotFingerprint::Plain(plain);
     let planning = plan(&PlanInput {
         withheld: None,
         observation: Observation::Present(job.observed.clone()),
@@ -775,57 +731,18 @@ fn snapshot<F: FileSystem>(
         Planning::Ready { .. } => return SourceOutcome::Unchanged,
         Planning::NeedWindows | Planning::NeedAuditRecheck => return SourceOutcome::Unavailable,
     }
-    let rules_same = local
-        .snapshot
-        .as_ref()
-        .is_some_and(|(_, r)| *r == job.rules);
-    let since = local
-        .snapshot_at_ns
-        .map(|at| job.env.now_ns.saturating_sub(at));
-    if matches!(fp, SnapshotFingerprint::Sqlite { .. })
-        && rules_same
-        && since.is_some_and(|elapsed| (0..snapshot_interval_ns()).contains(&elapsed))
-    {
-        return SourceOutcome::Deferred;
-    }
-    let len = match fs.begin_snapshot(handle) {
-        Ok(len) => len,
-        Err(Backup::Changed) => return SourceOutcome::Raced,
-        Err(Backup::Failed) => return SourceOutcome::BackupFailed,
-    };
-    let backed;
-    let job = match len {
-        Some(size) => {
-            backed = Observed {
-                size,
-                ..job.observed.clone()
-            };
-            Job {
-                observed: &backed,
-                ..job
-            }
-        }
-        None => job,
-    };
-    let outcome = match job.write(fs, Mode::Replace, acc) {
+    match job.write(fs, Mode::Replace, acc) {
         Ok(()) => {
             let pieces = match acc.changes.last() {
                 Some(Change::Replace(w)) => w.pieces.clone(),
                 _ => Vec::new(),
             };
-            acc.updates.push(Update::Snapshot(
-                job.src.id.clone(),
-                fp,
-                job.rules,
-                pieces,
-                job.env.now_ns,
-            ));
+            acc.updates
+                .push(Update::Snapshot(job.src.id.clone(), fp, job.rules, pieces));
             SourceOutcome::Planned
         }
         Err(outcome) => outcome,
-    };
-    fs.end_snapshot(handle);
-    outcome
+    }
 }
 
 /// A fresh stat as an [`Observed`], or `None` when the source is absent or unreadable.

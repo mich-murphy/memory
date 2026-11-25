@@ -1,5 +1,7 @@
 # Production-readiness verification
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 > **Status (reconciled 2026-10-30):** Historical v3 readiness and deployment evidence,
 > not present production health or replacement acceptance. The dated successful runs
 > below do not supersede subsequent degraded operation. The opt-in replacement's source

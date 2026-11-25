@@ -1,24 +1,15 @@
 #!/usr/bin/env python3
-"""Shared record normalization and legacy body-index build/CLI.
+"""Record normalization and Codex mirror pairing for the publication importer.
 
-iter_events and mirror pairing also serve the candidate publication importer;
-that caller owns its source/epoch identities and session transaction. build()/CLI
-still writes the legacy body-index schema as a private, atomically replaced DB.
-See docs/session-capture-contract.md. Existing historical reports remain usable.
-
-Body index paths are interpreted relative to the index folder. Raw JSON is not copied: offsets reference verified body files.
+publications.py owns the source/epoch identities and the session transaction.
+Raw JSON is not copied: offsets reference the verified body files.
 Consumers should filter NOT duplicate and is_human for human-text analyses.
 Timestamps retain source spelling/units; NULL errors mean unknown, not success.
 """
-import argparse
-from collections import Counter
 import hashlib
 import json
-import os
 from pathlib import Path
 import re
-import sys
-import tempfile
 
 import duckdb
 
@@ -269,134 +260,3 @@ def pair_codex_mirrors(db, trace_ids=None):
     )
     UPDATE events SET is_mirror=true,duplicate=true,is_human=false,duplicate_of=m.event_id
         FROM mirrors m WHERE events.trace_id=m.trace_id AND events.line=m.line""", params)
-
-
-def _metadata(path):
-    if not path or not Path(path).exists():
-        return {}
-    result = {}
-    with duckdb.connect(str(path), read_only=True) as db:
-        for machine, agent, session, info, git in db.execute('SELECT machine_id, agent, session_key, info, git FROM sessions').fetchall():
-            info = json.loads(info) if isinstance(info, str) else (info or {})
-            git = json.loads(git) if isinstance(git, str) else (git or {})
-            result[(machine, agent, session)] = dict(cwd=info.get('cwd'), project=git.get('root') or info.get('cwd'),
-                                                   started_at=_string(info.get('started_at')), model=info.get('model'))
-    return result
-
-
-class Batch:
-    """Bounded JSONL batches avoid per-row DuckDB transactions and pandas."""
-    def __init__(self, db, table, columns, folder):
-        self.db, self.table, self.columns = db, table, columns
-        self.path = Path(folder) / (table + '.jsonl')
-        self.rows, self.size = [], 0
-
-    def add(self, row):
-        values = {k: row.get(k) for k in self.columns}
-        for key, typ in self.columns.items():
-            if typ == 'JSON' and values[key] is not None:
-                values[key] = json.loads(values[key])
-        encoded = json.dumps(values, ensure_ascii=False)
-        self.rows.append(encoded)
-        self.size += len(encoded)
-        if len(self.rows) >= 4000 or self.size >= 8 << 20:
-            self.flush()
-
-    def flush(self):
-        if not self.rows:
-            return
-        self.path.write_text('\n'.join(self.rows) + '\n')
-        os.chmod(self.path, 0o600)
-        spec = '{' + ','.join(f"'{k}':'{v}'" for k, v in self.columns.items()) + '}'
-        self.db.execute(f"INSERT INTO {self.table} SELECT * FROM read_json(?, columns={spec}, format='newline_delimited', maximum_object_size=268435456)", [str(self.path)])
-        self.rows, self.size = [], 0
-
-
-def build(index=Path('.analytics/bodies/index.json'), database=Path('.analytics/events.duckdb'), metadata=None):
-    """Build a complete replacement; failures leave the last database untouched.
-
-    Returns counts only, never transcript contents. Index is a list or {entries:list} (legacy {files:list} accepted).
-    """
-    index, database = Path(index), Path(database)
-    entries = json.loads(index.read_text())
-    index_info = entries if isinstance(entries, dict) else {}
-    if isinstance(entries, dict):
-        entries = entries.get('entries', entries.get('files'))
-        if not isinstance(entries, list):
-            raise ValueError('index requires entries list')
-    meta = _metadata(metadata)
-    database.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    counts = Counter()
-    with tempfile.TemporaryDirectory(prefix='.events-', dir=database.parent) as folder:
-        os.chmod(folder, 0o700)
-        temporary = Path(folder) / 'events.duckdb'
-        with duckdb.connect(str(temporary)) as db:
-            batches = {}
-            for table, columns in [('events', EVENT_COLUMNS), ('files', FILE_COLUMNS), ('issues', ISSUE_COLUMNS)]:
-                db.execute(f'CREATE TABLE {table} (' + ','.join(f'"{k}" {v}' for k, v in columns.items()) + ')')
-                batches[table] = Batch(db, table, columns, folder)
-            identities = set()
-            for entry in entries:
-                trace = trace_id(entry['machine_id'], entry['agent'], entry['file_key'])
-                if trace in identities:
-                    raise ValueError('duplicate file identity in body index')
-                identities.add(trace)
-                path = Path(entry['path'])
-                if not path.is_absolute():
-                    path = index.parent / path
-                # Verify whole body before publishing offsets; importer normally did this too.
-                with path.open('rb') as source:
-                    digest = hashlib.file_digest(source, 'sha256').hexdigest()
-                if digest != entry['sha256']:
-                    raise ValueError('body checksum mismatch')
-                file = dict(meta.get((entry['machine_id'], entry['agent'], entry['session_key']), {}))
-                file.update({k: entry[k] for k in FILE_COLUMNS if k in entry})
-                file['project'] = file.get('project') or file.get('cwd')
-                file.update(trace_id=trace, path=str(path.resolve()), source_role=entry.get('role'),
-                            line_count=0, event_count=0, issue_count=0, duplicate_count=0)
-                for event, issue in iter_events(path, entry['agent'], trace):
-                    loc = event or issue
-                    file['line_count'] = max(file['line_count'], loc['line'])
-                    if event:
-                        # Delegated task prompts are agent assignments, not human corrections.
-                        if entry.get('role') == 'subagent' and event['role'] == 'user':
-                            event.update(is_human=False, origin='agent')
-                        batches['events'].add(event)
-                        file['event_count'] += 1
-                        file['duplicate_count'] += int(event['duplicate'])
-                    if issue:
-                        batches['issues'].add(issue)
-                        file['issue_count'] += 1
-                batches['files'].add(file)
-                counts.update(files=1, events=file['event_count'], issues=file['issue_count'])
-            for batch in batches.values():
-                batch.flush()
-            pair_codex_mirrors(db)
-            db.execute('''UPDATE files SET duplicate_count=(SELECT count(*) FROM events e
-                WHERE e.trace_id=files.trace_id AND e.duplicate)''')
-            counts['duplicates'] = db.execute('SELECT count(*) FROM events WHERE duplicate').fetchone()[0]
-            db.execute('CREATE TABLE build_info AS SELECT current_timestamp AS built_at, ?::BIGINT AS files, ?::BIGINT AS events, ?::BIGINT AS issues, ?::BOOLEAN AS index_complete, ?::BOOLEAN AS index_limited, ?::BIGINT AS index_failures',
-                       [counts['files'], counts['events'], counts['issues'], index_info.get('complete'), index_info.get('limited'), len(index_info.get('failures', []))])
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, database)
-    return dict(counts)
-
-
-def main():
-    os.umask(0o077)
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--index', type=Path, default=Path('.analytics/bodies/index.json'))
-    parser.add_argument('--database', type=Path, default=Path('.analytics/events.duckdb'))
-    parser.add_argument('--metadata', type=Path, default=Path('.analytics/sessions.duckdb'))
-    args = parser.parse_args()
-    try:
-        counts = build(args.index, args.database, args.metadata)
-    except Exception as exc:
-        print(f'Normalization failed ({type(exc).__name__}); previous database unchanged.', file=sys.stderr)
-        return 1
-    print('Normalized: ' + ', '.join(f'{k}={v}' for k, v in counts.items()))
-    return 0
-
-
-if __name__ == '__main__':
-    sys.exit(main())

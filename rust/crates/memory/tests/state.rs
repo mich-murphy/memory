@@ -6,15 +6,17 @@ use memory::state::trace::{self, Step};
 use memory::state::{
     DaemonLock, Loaded, MAX_BODY_BYTES, MAX_HEADER_BYTES, MissingReason, Schema, StateDir,
     StateError, StateFile, SyncPolicy, decode, encode, read_durable, root_from, stage,
-    write_durable,
 };
-use memory_core::domain::MachineId;
 use proptest::prelude::*;
 use std::fmt::Debug;
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+fn write_durable(dir: &Path, name: &str, schema: Schema, body: &[u8]) -> Result<(), StateError> {
+    stage(dir, name, schema, body)?.publish()
+}
 
 type R = Result<(), String>;
 const SCHEMA: Schema = Schema {
@@ -98,7 +100,7 @@ fn round_trip_and_modes() -> R {
     assert!(stored.body.is_empty());
     assert_eq!(mode(&dir.path(StateFile::Index))?, 0o600);
     assert_eq!(mode(dir.root())?, 0o700);
-    assert_eq!(mode(&dir.tmp_dir())?, 0o700);
+    assert_eq!(mode(&dir.root().join("tmp"))?, 0o700);
     assert_eq!(mode(&dir.root().join("daemon.lock"))?, 0o600);
     let hints = dir.vet_hints_dir().map_err(e)?;
     assert_eq!(mode(&hints)?, 0o700);
@@ -111,13 +113,10 @@ fn round_trip_and_modes() -> R {
         .filter(|x| x.file_name().to_string_lossy().contains(".tmp-"))
         .count();
     assert_eq!(leftovers, 0);
-    for file in [StateFile::Roots, StateFile::Status, StateFile::MachineId] {
-        assert_eq!(
-            missing(&dir.read(file)),
-            Some(MissingReason::NotFound),
-            "{file:?}"
-        );
-    }
+    assert_eq!(
+        missing(&dir.read(StateFile::Status)),
+        Some(MissingReason::NotFound)
+    );
     Ok(())
 }
 
@@ -326,9 +325,9 @@ fn crash_before_rename_leaves_old_file_readable_and_start_sweeps() -> R {
         drop(staged);
         // A torn temp file: half an envelope.
         fs::write(root.join(".status.json.tmp-1-1"), b"memory-state/1 par").map_err(e)?;
-        fs::write(dir.tmp_dir().join("backup.sqlite"), b"junk").map_err(e)?;
-        fs::create_dir(dir.tmp_dir().join("sub")).map_err(e)?;
-        fs::write(dir.tmp_dir().join("sub/inner"), b"junk").map_err(e)?;
+        fs::write(dir.root().join("tmp").join("backup.sqlite"), b"junk").map_err(e)?;
+        fs::create_dir(dir.root().join("tmp").join("sub")).map_err(e)?;
+        fs::write(dir.root().join("tmp").join("sub/inner"), b"junk").map_err(e)?;
         let Loaded::Present(stored) = dir.read(StateFile::Status) else {
             return Err("old file unreadable".into());
         };
@@ -341,7 +340,7 @@ fn crash_before_rename_leaves_old_file_readable_and_start_sweeps() -> R {
         assert!(temps >= 2);
     }
     let (_lock, dir) = open(&tmp)?;
-    assert_eq!(fs::read_dir(dir.tmp_dir()).map_err(e)?.count(), 0);
+    assert_eq!(fs::read_dir(dir.root().join("tmp")).map_err(e)?.count(), 0);
     let temps = fs::read_dir(&root)
         .map_err(e)?
         .flatten()
@@ -373,17 +372,6 @@ fn publish_failures_are_closed_errors_and_clean_up() -> R {
         .filter(|x| x.file_name().to_string_lossy().contains(".tmp-"))
         .count();
     assert_eq!(temps, 0);
-    // publish_new with the temp file vanished is an Io error, not "exists".
-    let staged = stage(dir.root(), "fresh", SCHEMA, b"x").map_err(e)?;
-    for entry in fs::read_dir(dir.root()).map_err(e)?.flatten() {
-        if entry.file_name().to_string_lossy().contains(".fresh.tmp-") {
-            fs::remove_file(entry.path()).map_err(e)?;
-        }
-    }
-    assert_eq!(
-        staged.publish_new(),
-        Err(StateError::Io(std::io::ErrorKind::NotFound))
-    );
     Ok(())
 }
 
@@ -546,7 +534,6 @@ fn error_text_is_closed() {
         StateError::NotOwned,
         StateError::InvalidName,
         StateError::TooLarge,
-        StateError::MachineIdCorrupt,
     ];
     let mut codes = std::collections::BTreeSet::new();
     for error in all {
@@ -558,63 +545,6 @@ fn error_text_is_closed() {
             error == StateError::LockHeld
         );
     }
-}
-
-// ------------------------------------------------------------------ machine id
-
-#[test]
-fn machine_id_is_created_once_and_never_overwritten() -> R {
-    let tmp = Tmp::new("mid")?;
-    let (_lock, dir) = open(&tmp)?;
-    let a = MachineId::try_from("bc-01".to_owned()).map_err(e)?;
-    let b = MachineId::try_from("other".to_owned()).map_err(e)?;
-    assert_eq!(dir.create_machine_id(&a), Ok(a.clone()));
-    assert_eq!(dir.create_machine_id(&b), Ok(a.clone()));
-    assert_eq!(dir.create_machine_id(&a), Ok(a.clone()));
-    assert_eq!(mode(&dir.path(StateFile::MachineId))?, 0o600);
-    // Damaged file: reported, never replaced.
-    let path = dir.path(StateFile::MachineId);
-    fs::write(&path, b"garbage").map_err(e)?;
-    assert_eq!(dir.create_machine_id(&b), Err(StateError::MachineIdCorrupt));
-    assert_eq!(fs::read(&path).map_err(e)?, b"garbage");
-    // Valid envelope holding an invalid id.
-    fs::write(
-        &path,
-        encode(StateFile::MachineId.schema(), b"a/b").map_err(e)?,
-    )
-    .map_err(e)?;
-    assert_eq!(dir.create_machine_id(&b), Err(StateError::MachineIdCorrupt));
-    fs::write(
-        &path,
-        encode(StateFile::MachineId.schema(), &[0xff]).map_err(e)?,
-    )
-    .map_err(e)?;
-    assert_eq!(dir.create_machine_id(&b), Err(StateError::MachineIdCorrupt));
-    Ok(())
-}
-
-#[test]
-fn machine_id_race_has_one_winner() -> R {
-    let tmp = Tmp::new("midrace")?;
-    let (_lock, dir) = open(&tmp)?;
-    let results: Vec<MachineId> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..8)
-            .map(|i| {
-                let dir = dir.clone();
-                s.spawn(move || {
-                    let id = MachineId::try_from(format!("m{i}")).map_err(e)?;
-                    dir.create_machine_id(&id).map_err(e)
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .filter_map(|h| h.join().ok().and_then(Result::ok))
-            .collect()
-    });
-    assert_eq!(results.len(), 8);
-    assert!(results.windows(2).all(|w| w.first() == w.get(1)));
-    Ok(())
 }
 
 // ------------------------------------------------------------------ config
@@ -1015,10 +945,8 @@ fn sync_policy_default_is_full() -> R {
     assert_eq!(SyncPolicy::default(), SyncPolicy::Full);
     let tmp = Tmp::new("policy")?;
     let (lock, dir) = open(&tmp)?;
-    assert_eq!(dir.sync_policy(), SyncPolicy::Full);
     drop(dir);
     let none = StateDir::prepare_with(&lock, SyncPolicy::None).map_err(e)?;
-    assert_eq!(none.sync_policy(), SyncPolicy::None);
     none.write(StateFile::Status, b"x").map_err(e)?;
     let Loaded::Present(stored) = none.read(StateFile::Status) else {
         return Err("none-policy write unreadable".into());
@@ -1134,30 +1062,6 @@ fn durable_write_flushes_file_then_renames_then_flushes_directory() -> R {
     Ok(())
 }
 
-/// Kills: removing the file flush or the directory flush from `publish_new`, or linking
-/// before the file is flushed.
-#[test]
-fn create_once_flushes_file_then_links_then_flushes_directory() -> R {
-    let tmp = Tmp::new("orderlink")?;
-    let (_lock, dir) = open(&tmp)?;
-    let _ = trace::take();
-    let id = MachineId::try_from("bc-01".to_owned()).map_err(e)?;
-    dir.create_machine_id(&id).map_err(e)?;
-    assert_eq!(
-        trace::take(),
-        [Step::Write, Step::SyncFile, Step::Link, Step::SyncDir],
-        "created"
-    );
-    // The loser of the race flushes its temp file, finds the file, and flushes nothing else.
-    dir.create_machine_id(&id).map_err(e)?;
-    assert_eq!(
-        trace::take(),
-        [Step::Write, Step::SyncFile],
-        "already exists"
-    );
-    Ok(())
-}
-
 /// Kills: dropping the probe flush in `prepare_inner`, or adding unflushed or extra durable
 /// steps to preparation. DESIGN.md 9.1 and 9.2 require no flush for the vetted directories
 /// themselves, so preparation is exactly one probe-file flush.
@@ -1196,11 +1100,6 @@ fn failed_file_flush_keeps_old_target_and_leaves_no_temp() -> R {
         return Err("old file lost".into());
     };
     assert_eq!(stored.body, b"old");
-    // Same for create-once: nothing is published.
-    let id = MachineId::try_from("bc-01".to_owned()).map_err(e)?;
-    assert!(failing.create_machine_id(&id).is_err());
-    assert_eq!(temp_count(&root)?, 0);
-    assert!(!root.join("machine_id").exists());
     Ok(())
 }
 

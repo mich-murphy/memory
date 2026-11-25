@@ -23,10 +23,6 @@ const TICK: Duration = Duration::from_secs(60);
 const STARTUP_MIN_MS: u64 = 5_000;
 const STARTUP_MAX_MS: u64 = 60_000;
 
-/// The shortest startup delay: the minimum before a restarted daemon's first commit.
-pub const STARTUP_MIN: Duration = Duration::from_millis(STARTUP_MIN_MS);
-/// The longest startup delay.
-pub const STARTUP_MAX: Duration = Duration::from_millis(STARTUP_MAX_MS);
 /// The pause between safety reconciles (DESIGN.md 10.3).
 pub const RECONCILE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 

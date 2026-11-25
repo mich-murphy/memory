@@ -35,8 +35,6 @@ use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 
-/// Exit code: something is parked, the host is paused or `status.json` is not loaded.
-pub const EXIT_ATTENTION: u8 = 1;
 /// Exit code: usage error.
 pub const EXIT_USAGE: u8 = 64;
 
@@ -104,9 +102,7 @@ fn snapshot_tier(entry: Option<&SourceIndex>, stat: &Stat) -> Tier {
     let Some((fingerprint, _)) = entry.and_then(|e| e.snapshot.as_ref()) else {
         return Tier::Unindexed;
     };
-    let fp = match fingerprint {
-        SnapshotFingerprint::Plain(fp) | SnapshotFingerprint::Sqlite { db: fp, .. } => fp,
-    };
+    let SnapshotFingerprint::Plain(fp) = fingerprint;
     if fp.id == stat.id && fp.size == stat.size && fp.mtime_ns == stat.mtime_ns {
         Tier::Current
     } else {

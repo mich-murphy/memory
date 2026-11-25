@@ -1,5 +1,7 @@
 # Independent enrichment refinement
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 **Status:** normative refinement of the [capture contract](session-capture-contract.md)
 with an implemented opt-in candidate, not release acceptance. The independent lane,
 native inbox, optional isolation and authorized source reads are described below;

@@ -449,6 +449,18 @@ from `main` alone.
      withheld-only `index.json` record; pruning retired `index.json` records; whether to remove
      the capture code without a production path (Codex SQLite backup, the 6 h interval, config
      scrubbing); the two whole-file reads in `check`; six old, fully merged worktrees.
+  36. 2026-11-25, brief 57 (D69), [evidence 52](rust-rewrite/implementation/evidence/52-dead-code/):
+     everything that does not run in production is deleted: the Codex SQLite backup and 6 h
+     interval, config scrubbing (`document.rs`, `text.rs`, `Profile::Config`/`TextAsset`),
+     unused `pub` items, the Go tree, Go CI, the Go-binary tools and the legacy analytics. CI runs
+     the analytics suite and workflow lint (`lint.yml`). Retirement is by stored kind
+     (`stored_retired`); `index.json` is pruned after a complete, finished round. One release
+     loads old records through `BRIEF57-SHIM`; the shim is removed once both hosts ran it. Local
+     cleanup: the six merged worktrees (42 GB), rebuildable scratch data (59 GB), old binary
+     backups on both hosts (the previous release kept), old dev-01 build dirs (3.6 GB), the
+     acceptance state dirs. Kept for the operator: `~/.local/share/agent-sessions` (9.4 GB here,
+     1.6 GB on dev-01), Go-era archive backups that may hold old session bytes. `memory check`
+     reads are held for discussion (no byte is read twice; the peak is 193 MiB).
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer

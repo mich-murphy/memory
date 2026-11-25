@@ -1,5 +1,7 @@
 # Replacement implementation checkpoints
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 **Scope:** repository implementation reference, not release or runtime-health evidence.
 The opt-in candidate includes independent capture, enrichment, backend selection and
 publication-backed analytics; wire/reader/report contracts are v2 despite the

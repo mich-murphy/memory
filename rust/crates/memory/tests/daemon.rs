@@ -2638,8 +2638,7 @@ fn state_api_failure_table() -> R {
         Some(StateError::TooLarge)
     );
     set_mode(&tmp.root(), 0o500)?;
-    let id = MachineId::try_from("m".to_owned()).map_err(e)?;
-    let got = state.create_machine_id(&id).err();
+    let got = state.write(StateFile::Status, b"x").err();
     set_mode(&tmp.root(), 0o700)?;
     assert_eq!(got, Some(StateError::Io(ErrorKind::PermissionDenied)));
     Ok(())
@@ -4492,8 +4491,14 @@ impl memory::daemon::Sources for Gate {
     fn walk_complete(&self) -> bool {
         self.complete.load(Ordering::SeqCst)
     }
-    fn locate_absent(&mut self, id: &SourceId, _path: &str) -> memory::daemon::Probe {
-        if self.retired.load(Ordering::SeqCst) {
+    fn locate_absent(
+        &mut self,
+        id: &SourceId,
+        _kind: &SourceKind,
+        _path: &str,
+    ) -> memory::daemon::Probe {
+        if self.retired.load(Ordering::SeqCst) || memory_core::locator::stored_retired(_kind, _path)
+        {
             return memory::daemon::Probe::Retired;
         }
         if !self.root.load(Ordering::SeqCst) {
@@ -4651,9 +4656,9 @@ fn a_retired_entry_is_never_probed_nor_deleted() -> R {
 // the owner set like `all_gone`; a kept source that vanishes is still deleted after two misses.
 #[test]
 fn an_owner_with_only_retired_entries_leaves_the_owner_set() -> R {
-    let mut r = rig()?;
-    remove_file(&mut r, 1);
-    remove_file(&mut r, 2);
+    // Brief 57: retirement is the stored kind (file history), not a locator verdict.
+    let mut r = snap_rig_with(retired_snap_of(3)?)?;
+    remove_file(&mut r, 3);
     r.gate.retired.store(true, Ordering::SeqCst);
     assert_eq!(rounds_never_delete(&mut r, 2)?, 0);
     let (tmp, d) = (r.tmp, r.d);
@@ -4778,12 +4783,21 @@ fn an_owner_whose_every_file_is_gone_is_recorded_deleted_then_leaves_the_set() -
 
 // ---------------------------------------------------------------- snapshot absence (brief 48)
 
-/// A Claude file-history snapshot source (handle 3) of owner `s1`.
+/// A retired Claude file-history snapshot source of owner `s1`.
+fn retired_snap_of(handle: u64) -> R<(Owner, Source)> {
+    let (owner, mut s) = snap_of(handle)?;
+    s.kind = SourceKind::ClaudeFileHistory;
+    s.path = format!("file-history/s1/{handle:016x}@v1");
+    s.facts.identities = vec![s.path.clone()];
+    Ok((owner, s))
+}
+
+/// A kept Pi run-record snapshot source of owner `s1` (brief 57: file history is retired).
 fn snap_of(handle: u64) -> R<(Owner, Source)> {
     let (owner, mut s) = src_of("s1", handle)?;
-    s.kind = SourceKind::ClaudeFileHistory;
+    s.kind = SourceKind::PiAux;
     s.class = SourceClass::Snapshot;
-    s.path = format!("file-history/s1/{handle:016x}@v1");
+    s.path = format!("sessions/--c--/subagent-artifacts/run{handle}.json");
     s.facts.profile = Profile::Scanned;
     s.facts.identities = vec![s.path.clone()];
     Ok((owner, s))
@@ -4791,6 +4805,10 @@ fn snap_of(handle: u64) -> R<(Owner, Source)> {
 
 /// Owner `s1` holding only one captured snapshot file (handle 3); the first round has landed.
 fn snap_rig() -> R<Rig> {
+    snap_rig_with(snap_of(3)?)
+}
+
+fn snap_rig_with(first: (Owner, Source)) -> R<Rig> {
     use std::sync::atomic::AtomicBool;
     let tmp = Tmp::new()?;
     let cfg = tmp.config(true)?;
@@ -4801,7 +4819,7 @@ fn snap_rig() -> R<Rig> {
     };
     fs.mem.files.insert(3, SNAP.to_vec());
     let gate = Gate {
-        list: Arc::new(Mutex::new(vec![snap_of(3)?])),
+        list: Arc::new(Mutex::new(vec![first])),
         complete: Arc::new(AtomicBool::new(true)),
         root: Arc::new(AtomicBool::new(true)),
         retired: Arc::new(AtomicBool::new(false)),
@@ -4945,21 +4963,16 @@ fn rig_index_has(r: Rig, id: &str) -> R<bool> {
     Ok(index.sources.keys().any(|k| k.as_str() == id))
 }
 
+// Brief 57 (f): a withheld-only record whose file vanished is dropped by the first complete
+// round that did not walk it (the brief 48 two-miss rule is replaced), with no manifest change.
 #[test]
-fn a_withheld_only_record_is_dropped_after_two_misses_and_builds_no_change() -> R {
+fn a_withheld_only_record_is_dropped_by_one_full_round_and_builds_no_change() -> R {
     let mut r = withheld_rig()?;
     remove_file(&mut r, 4);
     let first = r.d.reconcile_once().map_err(e)?;
-    assert_eq!((first.landed, first.deleted), (0, 0));
-    assert!(rig_index_has(r, "src4")?, "dropped after one miss");
-
-    let mut r = withheld_rig()?;
-    remove_file(&mut r, 4);
-    r.d.reconcile_once().map_err(e)?;
-    let second = r.d.reconcile_once().map_err(e)?;
-    assert_eq!((second.landed, second.deleted), (0, 0), "no change built");
+    assert_eq!((first.landed, first.deleted), (0, 0), "no change built");
     assert!(!deleted_and_epochs(&mut r.d)?.0);
-    assert!(!rig_index_has(r, "src4")?, "kept forever");
+    assert!(!rig_index_has(r, "src4")?, "kept after a complete round");
     Ok(())
 }
 
@@ -4980,7 +4993,7 @@ fn a_walked_withheld_file_with_a_stat_error_keeps_its_record() -> R {
 }
 
 #[test]
-fn a_withheld_file_back_before_the_second_round_keeps_its_record() -> R {
+fn a_withheld_file_that_is_back_is_withheld_again_and_dropped_when_it_vanishes() -> R {
     let mut r = withheld_rig()?;
     let secret: Vec<u8> = r.d.fs_mut().mem.files.get(&4).cloned().unwrap_or_default();
     remove_file(&mut r, 4);
@@ -4989,10 +5002,126 @@ fn a_withheld_file_back_before_the_second_round_keeps_its_record() -> R {
     if let Ok(mut list) = r.gate.list.lock() {
         list.push(snap_of(4)?);
     }
-    r.d.reconcile_once().map_err(e)?;
+    let back = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((back.landed, back.withheld), (0, 1));
     remove_file(&mut r, 4);
     r.d.reconcile_once().map_err(e)?;
-    assert!(rig_index_has(r, "src4")?, "count did not restart");
+    assert!(!rig_index_has(r, "src4")?, "vanished again");
+    Ok(())
+}
+
+fn puts(r: &mut Rig) -> usize {
+    r.d.store_mut().put_log.len()
+}
+
+// Brief 57 (a): a record for a stored retired entry is gone after one full round; no commit.
+#[test]
+fn a_retired_record_is_pruned_by_one_full_round_without_a_commit() -> R {
+    let mut r = snap_rig_with(retired_snap_of(3)?)?;
+    remove_file(&mut r, 3);
+    let before = puts(&mut r);
+    let round = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((round.landed, round.deleted), (0, 0));
+    assert_eq!(puts(&mut r), before, "no store write");
+    assert!(!rig_index_has(r, "src3")?);
+    Ok(())
+}
+
+// Brief 57 (b): an incomplete walk prunes nothing.
+#[test]
+fn an_incomplete_walk_prunes_nothing() -> R {
+    let mut r = snap_rig_with(retired_snap_of(3)?)?;
+    remove_file(&mut r, 3);
+    r.gate.complete.store(false, Ordering::SeqCst);
+    r.d.reconcile_once().map_err(e)?;
+    assert!(rig_index_has(r, "src3")?);
+    Ok(())
+}
+
+// Brief 57 (c): an owner whose base is `Unknown` (store failing) blocks every prune.
+#[test]
+fn an_unknown_base_prunes_nothing() -> R {
+    let r = snap_rig_with(retired_snap_of(3)?)?;
+    let (tmp, cfg, gate, fail) = (r.tmp, r.cfg, r.gate, r.fail);
+    let mut d = r.d;
+    let fs = std::mem::take(d.fs_mut());
+    let mut store = std::mem::take(d.store_mut());
+    d.shutdown().map_err(e)?;
+    store.offline = true;
+    if let Ok(mut list) = gate.list.lock() {
+        list.clear();
+    }
+    let d = start_ad(&tmp, &cfg, fs, store, &gate)?;
+    let mut r = Rig {
+        tmp,
+        cfg,
+        d,
+        gate,
+        fail,
+    };
+    r.d.reconcile_once().map_err(e)?;
+    assert!(rig_index_has(r, "src3")?);
+    Ok(())
+}
+
+// Brief 57 (d): a kept source that vanished is `Deleted` after exactly two misses; its record
+// survives the first miss and is dropped once the deletion has landed.
+#[test]
+fn a_vanished_kept_source_keeps_its_record_until_the_deletion_lands() -> R {
+    let mut r = rig()?;
+    remove_file(&mut r, 1);
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 0);
+    assert!(rig_index_has(r, "src1")?, "kept after one miss");
+    let mut r = rig()?;
+    remove_file(&mut r, 1);
+    r.d.reconcile_once().map_err(e)?;
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 1);
+    assert!(deleted_and_epochs(&mut r.d)?.0);
+    assert!(!rig_index_has(r, "src1")?, "dropped after the deletion");
+    Ok(())
+}
+
+// Brief 57 (e): a present, withheld Pi run record keeps its record and uploads nothing.
+#[test]
+fn a_present_withheld_run_record_keeps_its_record_round_after_round() -> R {
+    let mut r = withheld_rig()?;
+    let before = puts(&mut r);
+    for _ in 0..4 {
+        let round = r.d.reconcile_once().map_err(e)?;
+        assert_eq!((round.landed, round.deleted), (0, 0));
+    }
+    assert_eq!(puts(&mut r), before, "nothing uploaded");
+    assert!(rig_index_has(r, "src4")?);
+    Ok(())
+}
+
+// Brief 57 (g): after pruning, a restart and a full round make no `Deleted` and no write.
+#[test]
+fn after_pruning_a_restart_and_a_round_write_nothing() -> R {
+    let mut r = rig()?;
+    remove_file(&mut r, 1);
+    remove_file(&mut r, 2);
+    r.d.reconcile_once().map_err(e)?;
+    assert_eq!(r.d.reconcile_once().map_err(e)?.deleted, 2);
+    let (tmp, cfg, gate, fail) = (r.tmp, r.cfg, r.gate, r.fail);
+    let mut d = r.d;
+    let fs = std::mem::take(d.fs_mut());
+    let store = std::mem::take(d.store_mut());
+    d.shutdown().map_err(e)?;
+    let index = need(index_of(&tmp)?, "no index")?;
+    assert!(index.sources.is_empty(), "{:?}", index.sources.keys());
+    let d = start_ad(&tmp, &cfg, fs, store, &gate)?;
+    let mut r = Rig {
+        tmp,
+        cfg,
+        d,
+        gate,
+        fail,
+    };
+    let before = puts(&mut r);
+    let round = r.d.reconcile_once().map_err(e)?;
+    assert_eq!((round.landed, round.deleted), (0, 0));
+    assert_eq!(puts(&mut r), before);
     Ok(())
 }
 
@@ -5054,6 +5183,86 @@ fn an_index_without_the_withheld_field_loads() -> Result<(), serde_json::Error> 
     let old = r#"{"sources":{"s":{"index":null,"missing":0,"snapshot":null,"deletion_recorded":false}},"hints":{}}"#;
     let body: memory::daemon::IndexBody = serde_json::from_str(old)?;
     assert!(body.sources.values().all(|s| s.withheld.is_none()));
+    Ok(())
+}
+
+/// BRIEF57-SHIM: an index written before brief 57 loads; the dead key and the `Sqlite`
+/// fingerprint (with its pieces) are dropped, ordinary records survive, other keys are refused.
+#[test]
+fn a_pre_brief_57_index_loads_and_is_rewritten_without_the_dead_forms() -> R {
+    use serde_json::{Value, json};
+    fn at(v: &Value, ptr: &str) -> R<Value> {
+        v.pointer(ptr)
+            .cloned()
+            .ok_or_else(|| format!("missing {ptr}"))
+    }
+    let append = rig()?;
+    let (t1, d1) = (append.tmp, append.d);
+    d1.shutdown().map_err(e)?;
+    let mut body = serde_json::to_value(need(index_of(&t1)?, "no index")?).map_err(e)?;
+    let snap = snap_rig()?;
+    let (t2, d2) = (snap.tmp, snap.d);
+    d2.shutdown().map_err(e)?;
+    let snap_body = serde_json::to_value(need(index_of(&t2)?, "no index")?).map_err(e)?;
+    let plain = at(&snap_body, "/sources/src3")?;
+    let pieces = at(&plain, "/snapshot_pieces")?;
+    assert!(pieces.as_array().is_some_and(|p| !p.is_empty()));
+    let ordinary = at(&body, "/sources/src1")?;
+    let mut with_key = ordinary.clone();
+    need(with_key.as_object_mut(), "obj")?.insert("snapshot_at_ns".to_owned(), json!(5));
+    let mut old = plain.clone();
+    let fp = at(&old, "/snapshot/0/plain")?;
+    *need(old.pointer_mut("/snapshot/0"), "fp")? = json!({"sqlite": {"db": fp, "wal": "absent"}});
+    need(old.as_object_mut(), "obj")?.insert("snapshot_at_ns".to_owned(), json!(7));
+    let sources = need(
+        body.pointer_mut("/sources").and_then(Value::as_object_mut),
+        "sources",
+    )?;
+    sources.insert("src3".to_owned(), plain.clone());
+    sources.insert("withkey".to_owned(), with_key);
+    sources.insert("olddb".to_owned(), old);
+    let text = serde_json::to_string(&body).map_err(e)?;
+
+    let loaded: IndexBody = serde_json::from_str(&text).map_err(e)?;
+    let out = serde_json::to_value(&loaded).map_err(e)?;
+    assert_eq!(
+        at(&out, "/sources/src1")?,
+        ordinary,
+        "ordinary append record"
+    );
+    assert_eq!(at(&out, "/sources/src3")?, plain, "plain snapshot");
+    assert_eq!(at(&out, "/sources/withkey")?, ordinary, "dead key dropped");
+    assert!(at(&out, "/sources/olddb/snapshot")?.is_null());
+    assert_eq!(at(&out, "/sources/olddb/snapshot_pieces")?, json!([]));
+    let written = serde_json::to_string(&out).map_err(e)?;
+    assert!(!written.contains("snapshot_at_ns") && !written.contains("sqlite"));
+    // Any other unknown key is still refused.
+    let mut bad = body.clone();
+    need(
+        bad.pointer_mut("/sources/src1")
+            .and_then(Value::as_object_mut),
+        "src1",
+    )?
+    .insert("surprise".to_owned(), json!(1));
+    assert!(serde_json::from_str::<IndexBody>(&serde_json::to_string(&bad).map_err(e)?).is_err());
+
+    // The daemon loads the file as `Loaded`, not a rebuild.
+    let tmp = Tmp::new()?;
+    let cfg = tmp.config(true)?;
+    {
+        let lock = DaemonLock::acquire(&tmp.root()).map_err(e)?;
+        let state = StateDir::prepare(&lock).map_err(e)?;
+        state.write(StateFile::Index, text.as_bytes()).map_err(e)?;
+    }
+    let gate = Gate {
+        list: Arc::new(Mutex::new(Vec::new())),
+        complete: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        root: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        retired: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+    let d = start_ad(&tmp, &cfg, FlakyFs::default(), FStore::default(), &gate)?;
+    assert_eq!(d.index_load(), StateLoad::Loaded);
+    assert!(!d.rebuilt());
     Ok(())
 }
 

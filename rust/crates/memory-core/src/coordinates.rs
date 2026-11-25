@@ -7,8 +7,8 @@
 //! is ever inferred from spelling, so case is never folded and `/var` is never assumed to be
 //! `/private/var`. Every spelling is kept in the result so deny checks can run over all of them.
 //!
-//! Mirrors `internal/capturecoordinates` (root routes, `validRoutes`, projection, ownership
-//! selected after projection). Differences are listed in
+//! Mirrors the former Go `capturecoordinates` package (root routes, `validRoutes`, projection,
+//! ownership selected after projection). Differences are listed in
 //! `docs/rust-rewrite/implementation/11-coordinates.md`.
 use crate::domain::Agent;
 use sha2::{Digest, Sha256};
@@ -300,14 +300,6 @@ impl Inventory {
             equivalent_paths,
             legacy_roots,
             identities,
-        })
-    }
-
-    /// True when `c` is exactly what this inventory resolves for its agent and path; a request
-    /// supplied root or logical path is never trusted.
-    pub fn verified(&self, c: &Coordinate) -> bool {
-        self.resolve(&c.agent, &c.path, &[]).is_ok_and(|g| {
-            g.root == c.root && g.logical_path == c.logical_path && g.namespace == c.namespace
         })
     }
 }

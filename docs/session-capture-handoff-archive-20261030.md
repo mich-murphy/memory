@@ -1,5 +1,7 @@
 # Session capture handoff archive — October 30
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 > **Historical archive, not current instructions or authority.** The original handoff
 > below is preserved verbatim. Its multiple “current” checkpoints, pre-merge tasks,
 > worker assignments and live-state observations are dated records. Use the
@@ -343,7 +345,7 @@ historical Mac exit, and does not authorize live activation or unrelated restora
   are under `~/.local/state/machines-validation-pilot/memory-perf-20261029/runtime/owner-20261029-linuxprep/`;
   latest `STALL-V5-BLOCKED-RESULTS.json` records driver70/CIDnull/no payload. Preserve
   slots01–07/09 and earlier failed roots; slot08 was never used. See the
-  [dated diagnostic evidence](../tools/performance/DIAGNOSTIC-FAILURE.md) for exact
+  dated diagnostic evidence (`tools/performance/DIAGNOSTIC-FAILURE.md`, deleted; see git history) for exact
   attempts, statuses, profile hashes and the rejected noncanonical analysis.
 - Origin fetched again: both main refs remain ancestors, so no main integration.
   Existing dirty handoff work and frozen research remain preserved. Historical Mac

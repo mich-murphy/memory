@@ -219,16 +219,16 @@ fn removed_source_is_deleted_only_after_two_observations() -> R {
 }
 
 #[test]
-fn snapshot_replaces_and_protected_config_never_stores_the_canary() -> R {
-    let canary = "CANARYSECRET0451";
+fn a_scanned_snapshot_never_stores_a_secret() -> R {
+    let canary = concat!("AKIA", "EXAMPLEEXAMPLE00");
     let mut rig = Rig::new(vec![source(
         1,
-        "settings.json",
+        "sessions/--c--/subagent-artifacts/run.json",
         SourceClass::Snapshot,
-        Profile::Config,
+        Profile::Scanned,
     )?]);
     rig.piece_len = 4096;
-    let config = format!("{{\"env\":{{\"API_TOKEN\":\"{canary}\"}},\"theme\":\"dark\"}}");
+    let config = format!("{{\"env\":{{\"key\":\"{canary}\"}},\"theme\":\"dark\"}}");
     rig.fs.set(1, config.as_bytes());
     let (outcomes, _) = rig.cycle()?;
     assert!(
@@ -583,19 +583,9 @@ fn admission_denials_map_to_literal_withhold_reasons() -> R {
 
 #[test]
 fn transform_denials_map_to_literal_withhold_reasons() -> R {
-    let malformed = withheld_for(
-        source(1, "settings.json", SourceClass::Snapshot, Profile::Config)?,
-        b"{not json",
-        |_| {},
-    )?;
-    assert_eq!(
-        malformed,
-        SourceOutcome::Withheld(WithholdReason::MalformedProtected)
-    );
-
     let secret = withheld_for(
-        source(1, "notes.sh", SourceClass::Snapshot, Profile::TextAsset)?,
-        b"export API_KEY=literalvalue123\n",
+        source(1, "run.json", SourceClass::Snapshot, Profile::Scanned)?,
+        concat!("key = ", "AKIA", "EXAMPLEEXAMPLE00", "\n").as_bytes(),
         |_| {},
     )?;
     assert_eq!(
@@ -603,26 +593,18 @@ fn transform_denials_map_to_literal_withhold_reasons() -> R {
         SourceOutcome::Withheld(WithholdReason::SecretInText)
     );
 
-    let mut big = b"{\"a\":\"".to_vec();
-    big.resize(8 * 1024 * 1024 + 16, b'x');
-    big.extend_from_slice(b"\"}");
+    let big = vec![
+        b'x';
+        usize::try_from(memory_core::privacy::MAX_SCANNED_BYTES)
+            .map_err(|x| x.to_string())?
+            + 1
+    ];
     let limit = withheld_for(
-        source(1, "settings.json", SourceClass::Snapshot, Profile::Config)?,
+        source(1, "run.json", SourceClass::Snapshot, Profile::Scanned)?,
         &big,
         |_| {},
     )?;
     assert_eq!(limit, SourceOutcome::Withheld(WithholdReason::SourceLimit));
-
-    // The same transform denial on the append path.
-    let append = withheld_for(
-        source(1, "settings.json", SourceClass::Append, Profile::Config)?,
-        b"{not json",
-        |_| {},
-    )?;
-    assert_eq!(
-        append,
-        SourceOutcome::Withheld(WithholdReason::MalformedProtected)
-    );
     Ok(())
 }
 
@@ -634,9 +616,9 @@ fn snapshot_read_failures_have_literal_outcomes() -> R {
     ] {
         let mut rig = Rig::new(vec![source(
             1,
-            "settings.json",
+            "run.json",
             SourceClass::Snapshot,
-            Profile::Config,
+            Profile::Scanned,
         )?]);
         rig.fs.set(1, b"{\"a\":1}");
         let mut spy = Spy {
@@ -656,9 +638,9 @@ fn snapshot_read_failures_have_literal_outcomes() -> R {
 fn snapshot_unchanged_then_changed_after_commit() -> R {
     let mut rig = Rig::new(vec![source(
         1,
-        "settings.json",
+        "run.json",
         SourceClass::Snapshot,
-        Profile::Config,
+        Profile::Scanned,
     )?]);
     rig.fs.set(1, b"{\"a\":1}");
     let (o, c) = rig.cycle()?;
@@ -847,14 +829,10 @@ fn extend_from_an_empty_capture_reads_nothing_beyond_the_delta() -> R {
 #[test]
 fn non_prefix_stable_source_with_an_index_is_read_whole_not_as_a_delta() -> R {
     let mut rig = rig()?;
+    rig.sources.first_mut().ok_or("source")?.facts.profile = Profile::Scanned;
     transcript(&mut rig, b"{\"a\":1}\n");
     assert_eq!(kinds(&rig.cycle()?.1), ["epoch"]);
-    assert!(index_of(&rig)?.whole_state.is_some());
-    // The source is now recognized as a protected JSON document: transforming a delta alone
-    // is invalid, so the whole stream must be read and transformed again.
-    rig.sources.first_mut().ok_or("source")?.facts.identities = vec!["settings.json".to_owned()];
-    // Still one valid document (trailing whitespace), so the whole stream transforms fine
-    // while the lone delta "\n" is not a document at all.
+    // A scanned source is never read as a delta alone: the whole stream is read again.
     rig.fs.set(1, b"{\"a\":1}\n\n");
     let mut spy = Spy {
         inner: std::mem::take(&mut rig.fs),
@@ -865,7 +843,6 @@ fn non_prefix_stable_source_with_an_index_is_read_whole_not_as_a_delta() -> R {
         got.outcomes.first().map(|o| &o.1),
         Some(&SourceOutcome::Planned)
     );
-    assert_eq!(kinds_of(&got), ["extend"]);
     assert_eq!(spy.reads.last(), Some(&(0..9)), "whole stream, not 8..9");
     Ok(())
 }
@@ -1032,7 +1009,7 @@ fn a_source_that_is_not_prefix_stable_never_parks_at_the_prefix_site() -> R {
         1,
         "projects/p/settings.json",
         SourceClass::Append,
-        Profile::Transcript,
+        Profile::Scanned,
     )?]);
     rig.piece_len = 1 << 20;
     let doc = |n: i64| {
@@ -1072,7 +1049,7 @@ fn a_non_prefix_stable_prefix_difference_restarts_without_a_failure() -> R {
         1,
         "projects/p/settings.json",
         SourceClass::Append,
-        Profile::Transcript,
+        Profile::Scanned,
     )?]);
     rig.piece_len = 1 << 20;
     let doc = |value: u32| {
@@ -1450,25 +1427,5 @@ fn a_two_mib_pi_aux_file_is_withheld_source_limit_without_a_read() -> R {
     );
     assert!(got.commit.is_none());
     assert!(spy.reads.is_empty(), "no read: {:?}", spy.reads);
-    Ok(())
-}
-
-#[test]
-fn settings_with_a_token_field_land_scrubbed() -> R {
-    let token = concat!("tok-", "not-a-real-value-12345");
-    let mut rig = Rig::new(vec![scanned_kind(
-        1,
-        "settings.json",
-        SourceKind::ClaudeConfig,
-    )?]);
-    let doc = format!("{{\"env\":{{\"API_TOKEN\":\"{token}\"}},\"theme\":\"dark\"}}\n");
-    // One piece holds the whole document, so a plaintext search sees the token if it were stored.
-    rig.piece_len = 1 << 20;
-    rig.fs.set(1, doc.as_bytes());
-    let (outcomes, changes) = rig.cycle()?;
-    assert_eq!(outcomes, [SourceOutcome::Planned]);
-    assert_eq!(kinds(&changes), ["replace"]);
-    assert!(!rig.find(token.as_bytes()), "token stored");
-    assert!(rig.find(b"theme"), "document stored");
     Ok(())
 }

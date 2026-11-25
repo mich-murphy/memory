@@ -1,12 +1,10 @@
 //! Locator acceptance: table-driven matrix rows (separately authored expectations) and
 //! property 7 (total, sibling-stable, every unmapped path countable) on Hegel and proptest.
 use hegel::{TestCase, generators as gs};
-use memory_core::domain::{
-    Agent, ArchiveId, MachineId, Owner, SourceClass, SourceKind, WithholdReason,
-};
+use memory_core::domain::{Agent, ArchiveId, MachineId, Owner, SourceClass, SourceKind};
 use memory_core::locator::{
     ClaudeSessionIndex, ConfigAsset, InputError, Located, Role, RootLayout, RootNamespace,
-    RootRelativePath, Roots, locate, shared_analytics,
+    RootRelativePath, Roots, locate, shared_analytics, stored_retired,
 };
 use proptest::prelude::*;
 use sha2::{Digest, Sha256};
@@ -888,7 +886,7 @@ fn rows() -> Vec<Row> {
         src(K::PiAux, S, R::Artifact, Some(&se), &format!("{se}:x.txt")),
     ));
     // Go (agentDir=false): every non-transcript file is sessionless aux; no owner exists.
-    // Correction 3 (Go Pi.Classify, pi.go:158-168): promotion to agent-dir rules.
+    // Correction 3 (former Go Pi.Classify): promotion to agent-dir rules.
     // (b) topRole(piRoles) names and dirs.
     for (p, kind, a) in [
         ("settings.json", K::PiSettings, C::Settings),
@@ -981,7 +979,7 @@ fn rows() -> Vec<Row> {
         v.push(row(h, p, Exp::Kind));
     }
     // Correction 2: Go keeps multi-part paths under `sessions/` outside any session dir as
-    // sessionless aux (pi.go:192-195).
+    // sessionless aux (former Go Pi.Classify).
     for p in [
         "sessions/foo/tasks/t.jsonl",
         "sessions/foo/x",
@@ -1502,7 +1500,6 @@ fn prop_total(e: &[u8]) -> TestResult {
         Located::Source {
             owner, kind, id, ..
         } => {
-            ensure!(got.withhold_reason().is_none(), "source has no reason");
             ensure!(id.as_str().starts_with("r1:"), "id qualified");
             if let Owner::Session(k) = owner {
                 ensure!(k.session.as_str().starts_with("r1:"), "session qualified");
@@ -1518,18 +1515,7 @@ fn prop_total(e: &[u8]) -> TestResult {
                 "kind belongs to the root's agent"
             );
         }
-        Located::UnknownKind => ensure!(
-            got.withhold_reason() == Some(WithholdReason::UnknownKind),
-            "kind counted"
-        ),
-        Located::UnknownOwner => ensure!(
-            got.withhold_reason() == Some(WithholdReason::UnknownOwner),
-            "owner counted"
-        ),
-        Located::Ignored => ensure!(
-            got.withhold_reason() == Some(WithholdReason::Ignored),
-            "ignored counted"
-        ),
+        Located::UnknownKind | Located::UnknownOwner | Located::Ignored => {}
     }
     Ok(())
 }
@@ -1658,10 +1644,6 @@ fn prop_unmapped(e: &[u8]) -> TestResult {
     let roots = make_roots(Home::Claude, "r1", &p.noise(), false)?;
     let got = locate(&RootRelativePath::parse(&path)?, &roots);
     ensure!(got == Located::Ignored, "{path}: {got:?}");
-    ensure!(
-        got.withhold_reason() == Some(WithholdReason::Ignored),
-        "countable"
-    );
     Ok(())
 }
 
@@ -1768,15 +1750,6 @@ fn malformed_pi_stems_and_cwd_directories_are_not_sessions() -> TestResult {
         "a 4-byte `----` is not a cwd directory"
     );
     Ok(())
-}
-
-#[test]
-fn ignored_verdict_is_withheld_with_its_own_reason() {
-    assert_eq!(
-        Located::Ignored.withhold_reason(),
-        Some(WithholdReason::Ignored)
-    );
-    assert_ne!(Located::Ignored, Located::UnknownKind);
 }
 
 // ---- brief 46 / D54 / D55: the Ignored verdict ----
@@ -2077,10 +2050,6 @@ fn prop_ignored_never_session_owned(e: &[u8]) -> TestResult {
     for home in [Home::Claude, Home::Codex, Home::Pi] {
         let got = locate(&rel, &make_roots(home, "r1", &p.noise(), false)?);
         if got == Located::Ignored {
-            ensure!(
-                got.withhold_reason() == Some(WithholdReason::Ignored),
-                "reason"
-            );
             // Brief 54: dropped kinds (stores, history, config, aux) are ignored now, so the
             // oracle only forbids ignoring a Pi transcript directly under `sessions/`.
             let pi_transcript = home == Home::Pi
@@ -2088,17 +2057,6 @@ fn prop_ignored_never_session_owned(e: &[u8]) -> TestResult {
                 && first == "sessions"
                 && last.strip_suffix(".jsonl").is_some_and(|s| !s.is_empty());
             ensure!(!pi_transcript, "{home:?} {path}: transcript ignored");
-        }
-    }
-    // Brief 54: the allowlist applies in every layout, so these may be `Ignored` as well; the
-    // session-shaped paths below must still be captured under a custom Pi root.
-    for home in [Home::PiCustom, Home::ClaudePrimary] {
-        let got = locate(&rel, &make_roots(home, "r1", &[], false)?);
-        if got == Located::Ignored {
-            ensure!(
-                got.withhold_reason() == Some(WithholdReason::Ignored),
-                "reason"
-            );
         }
     }
     Ok(())
@@ -2207,6 +2165,80 @@ fn shared_analytics_is_the_pi_run_record_shape_only() -> TestResult {
                 _ => ensure!(false, "{p}: {got:?}"),
             }
         }
+    }
+    Ok(())
+}
+
+/// Brief 57: a kept kind is never retired, whatever the path.
+#[test]
+fn stored_retired_never_retires_a_kept_kind() -> TestResult {
+    for kind in [
+        SourceKind::ClaudeTranscript,
+        SourceKind::ClaudeSubagent,
+        SourceKind::ClaudeToolResults,
+        SourceKind::CodexRollout,
+        SourceKind::CodexCompressed,
+        SourceKind::PiSession,
+    ] {
+        for p in ["a.jsonl", "x/y/z", ""] {
+            ensure!(!stored_retired(&kind, p), "{kind:?} {p}");
+        }
+    }
+    Ok(())
+}
+
+/// Brief 57: every dropped kind is retired, also at a run-record path.
+#[test]
+fn stored_retired_retires_every_dropped_kind() -> TestResult {
+    use SourceKind::*;
+    let run = "sessions/--c--/subagent-artifacts/run1.json";
+    for kind in [
+        ClaudeTodos,
+        ClaudeTasks,
+        ClaudeTeams,
+        ClaudeFileHistory,
+        ClaudeDebug,
+        ClaudeHistory,
+        ClaudeConfig,
+        CodexStore,
+        CodexHistory,
+        CodexConfig,
+        PiSettings,
+        PiModels,
+        PiSnapshot,
+        ClaudeSessionEnv,
+        ClaudePlan,
+        ClaudePaste,
+        ClaudeUsage,
+        ClaudeMemory,
+        ClaudeAux,
+        CodexMemory,
+        CodexLog,
+        PiConfig,
+        PiLog,
+    ] {
+        ensure!(stored_retired(&kind, "history.jsonl"), "{kind:?}");
+        ensure!(stored_retired(&kind, run), "{kind:?} at a run record");
+    }
+    Ok(())
+}
+
+/// Brief 57: `PiAux` is kept only at the run-record shape.
+#[test]
+fn stored_retired_keeps_a_pi_run_record_only() -> TestResult {
+    let aux = SourceKind::PiAux;
+    ensure!(
+        !stored_retired(&aux, "sessions/--c--/subagent-artifacts/run1.json"),
+        "run record"
+    );
+    for p in [
+        "sessions/--c--/subagent-artifacts/run1.jsonl",
+        "sessions/--c--/subagent-artifacts/run1.md",
+        "sessions/--c--/subagent-artifacts/x/run1.json",
+        "sessions/--c--/subagent-artifacts/.json",
+        "sessions/--c--/run1.json",
+    ] {
+        ensure!(stored_retired(&aux, p), "{p}");
     }
     Ok(())
 }

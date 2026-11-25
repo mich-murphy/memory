@@ -1,5 +1,7 @@
 # Adversarial review: dependability and unjustified complexity
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 **Reviewed source:** `3ea6752599ca5ea59d1c26d08969e92043b3e04b`, branch
 `delivery/fresh-archive-qualification`, 2026-10-29.
 **Scope:** existing candidate implementation and its production entrypoints against

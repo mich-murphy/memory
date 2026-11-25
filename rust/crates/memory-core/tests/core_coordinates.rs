@@ -43,7 +43,7 @@ fn compile(
     Inventory::compile(r, a, o)
 }
 
-// ---- Go fixtures (coordinates_test.go:29,56,104,128) ----
+// ---- fixtures from the former Go coordinates tests ----
 
 #[test]
 fn default_and_custom_roots_need_no_filesystem() -> Result<(), CoordError> {
@@ -62,7 +62,6 @@ fn default_and_custom_roots_need_no_filesystem() -> Result<(), CoordError> {
         assert_eq!(c.equivalent_paths, set(&[&p]));
         assert_eq!(c.legacy_roots, set(&[&r.path]));
         assert_eq!(c.identities, set(&[&p]));
-        assert!(i.verified(&c));
     }
     for bad in [
         "relative",
@@ -112,14 +111,6 @@ fn nested_projection_keeps_nested_identity_and_ignores_order() -> Result<(), Coo
     for want in ["/logical/nested", "/observed/nested", "/observed"] {
         assert!(c.legacy_roots.contains(want), "{want}");
     }
-    // Forged request claims are never trusted.
-    let mut forged = c.clone();
-    forged.root = "/forged".to_owned();
-    assert!(i.verified(&c));
-    assert!(!i.verified(&forged));
-    let mut moved = c.clone();
-    moved.path = "/outside/file".to_owned();
-    assert!(!i.verified(&moved));
     Ok(())
 }
 
@@ -293,7 +284,7 @@ fn bounds_and_alias_depth() -> Result<(), CoordError> {
     Ok(())
 }
 
-// ---- Go location_test.go:12,70,96 as shell observations ----
+// ---- the former Go location tests as shell observations ----
 
 #[test]
 fn var_alias_resolves_to_one_namespace() -> Result<(), CoordError> {
@@ -574,7 +565,6 @@ fn check(bytes: &[u8], seed: u64, stats: &Shapes<3>) {
             assert!(s.3.iter().all(|e| c.identities.contains(e)));
             assert!(c.identities.contains(p) && c.identities.contains(&c.logical_path));
             assert!(c.equivalent_paths.is_subset(&c.identities));
-            assert!(i.verified(&c));
         }
     }
 }

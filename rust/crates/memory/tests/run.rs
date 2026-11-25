@@ -1,8 +1,5 @@
 //! `memory::run`: exit codes, the startup delay, the simulation timing and the signal source.
-use memory::run::{
-    Outcome, STARTUP_MAX, STARTUP_MIN, SignalSource, Timing, draw_from, parse_sim_timing,
-    startup_delay,
-};
+use memory::run::{Outcome, SignalSource, Timing, draw_from, parse_sim_timing, startup_delay};
 use memory::watch::{FsWatcher, Received};
 use std::time::{Duration, Instant};
 
@@ -54,8 +51,8 @@ fn only_a_stop_gives_exit_zero() {
 
 #[test]
 fn startup_delay_spans_five_to_sixty_seconds_inclusive() {
-    assert_eq!(STARTUP_MIN, Duration::from_secs(5));
-    assert_eq!(STARTUP_MAX, Duration::from_secs(60));
+    const STARTUP_MIN: Duration = Duration::from_secs(5);
+    const STARTUP_MAX: Duration = Duration::from_secs(60);
     assert_eq!(startup_delay(0), STARTUP_MIN);
     assert_eq!(startup_delay(55_000), STARTUP_MAX);
     assert_eq!(startup_delay(55_001), STARTUP_MIN);

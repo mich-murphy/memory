@@ -1,5 +1,7 @@
 # Adversarial resolutions: implementation and acceptance evidence
 
+> Historical: describes the retired Go implementation, deleted on 2026-11-25 (brief 57).
+
 **Status:** all R1–R10 and the two additional integration items I1/I2 are implemented,
 independently reviewed and accepted by the parent for **offline/development scope**.
 There are no outstanding code-review corrections in that scope. This is not installed,

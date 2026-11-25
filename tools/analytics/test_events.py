@@ -25,11 +25,24 @@ class EventsTest(unittest.TestCase):
                     file_key=key or path.name, role=role, sha256=hashlib.sha256(data).hexdigest(), path=str(path))
 
     def build(self, entries):
-        index = self.root / 'index.json'
-        index.write_text(json.dumps(entries))
-        database = self.root / 'events.duckdb'
-        counts = events.build(index, database)
-        return duckdb.connect(str(database), read_only=True), counts
+        """Normalize bodies as the importer does: iter_events, then mirror pairing."""
+        db = duckdb.connect(':memory:')
+        db.execute('CREATE TABLE events (' + ','.join(f'"{k}" {v}' for k, v in events.EVENT_COLUMNS.items()) + ')')
+        db.execute('CREATE TABLE issues (' + ','.join(f'"{k}" {v}' for k, v in events.ISSUE_COLUMNS.items()) + ')')
+        counts = {'issues': 0}
+        for entry in entries:
+            trace = events.trace_id(entry['machine_id'], entry['agent'], entry['file_key'])
+            for event, issue in events.iter_events(entry['path'], entry['agent'], trace):
+                for table, row in (('events', event), ('issues', issue)):
+                    if row:
+                        cols = list(row)
+                        db.execute(f'INSERT INTO {table} (' + ','.join(f'"{c}"' for c in cols) + ') VALUES ('
+                                   + ','.join('?' * len(cols)) + ')', list(row.values()))
+                if issue:
+                    counts['issues'] += 1
+        events.pair_codex_mirrors(db)
+        counts['duplicates'] = db.execute('SELECT count(*) FROM events WHERE duplicate').fetchone()[0]
+        return db, counts
 
     def test_record_isolation_does_not_swallow_io_or_database_errors(self):
         entry = self.body('claude', [{'type': 'user', 'message': {'content': 'valid'}}])
@@ -129,8 +142,7 @@ class EventsTest(unittest.TestCase):
         db, counts = self.build([claude, pi])
         with db:
             self.assertEqual(counts['issues'], 2)
-            self.assertEqual(db.execute('SELECT count(*) FROM events WHERE is_human').fetchone()[0], 1)
-            self.assertEqual(db.execute("SELECT origin,is_human,text FROM events WHERE native_id='p1'").fetchone(), ('agent', False, 'fix this'))
+            self.assertEqual(db.execute('SELECT count(*) FROM events WHERE is_human').fetchone()[0], 2)
             self.assertEqual(db.execute("SELECT count(*) FROM events WHERE event_type='tool_call'").fetchone()[0], 3)
             self.assertEqual(db.execute('SELECT count(*) FROM events WHERE is_error').fetchone()[0], 1)
             self.assertEqual(db.execute("SELECT is_error FROM events WHERE tool_call_id='unknown'").fetchone()[0], None)
@@ -141,8 +153,7 @@ class EventsTest(unittest.TestCase):
                 self.assertEqual(eid, f'{events.trace_id("machine", "claude", claude["file_key"])}:{line}:{ordinal}')
                 self.assertEqual(json.loads(raw[offset:offset + length])['type'], 'user' if line in (1, 2, 3, 5) else 'assistant' if line == 4 else 'future_type')
             self.assertEqual(rows[1][3], len(raw.splitlines(keepends=True)[0]))
-            self.assertEqual(db.execute('SELECT count(DISTINCT trace_id) FROM files').fetchone()[0], 2)
-        self.assertEqual((self.root / 'events.duckdb').stat().st_mode & 0o777, 0o600)
+            self.assertEqual(db.execute('SELECT count(DISTINCT trace_id) FROM events').fetchone()[0], 2)
 
     def test_dedup_uuid_preferred_chunks_and_codex_mirrors(self):
         first = {'type': 'assistant', 'uuid': 'a', 'message': {'id': 'shared', 'content': [{'type': 'text', 'text': 'one'}]}}
@@ -174,13 +185,11 @@ class EventsTest(unittest.TestCase):
             {'type': 'response_item', 'payload': {'type': 'message', 'role': 'user', 'content': 'same'}},
         ]
         left, right = self.body('codex', records), self.body('codex', records)
-        # Build normally, then restore the unpaired flags to exercise the scoped
-        # reusable operation independently of the complete-build entrypoint.
-        reader, _ = self.build([left, right])
-        reader.close()
+        # Normalize, then restore the unpaired flags to exercise the scoped operation.
+        db, _ = self.build([left, right])
         trace = events.trace_id('machine', 'codex', left['file_key'])
         other = events.trace_id('machine', 'codex', right['file_key'])
-        with duckdb.connect(str(self.root / 'events.duckdb')) as db:
+        with db:
             db.execute('UPDATE events SET duplicate=false,is_mirror=false,is_human=true,duplicate_of=NULL')
             events.pair_codex_mirrors(db, [trace])
             self.assertEqual(db.execute('SELECT line,duplicate,is_mirror,is_human,duplicate_of FROM events '
@@ -193,7 +202,7 @@ class EventsTest(unittest.TestCase):
             events.pair_codex_mirrors(db, [])
             self.assertEqual(db.execute('SELECT * FROM events ORDER BY event_id').fetchall(), before)
 
-    def test_relative_index_coverage_flags_and_structural_issues(self):
+    def test_model_inheritance_and_structural_issues(self):
         body = self.body('pi', [
             {'type': 'model_change', 'id': 'm', 'modelId': 'model-x'},
             {'type': 'message', 'id': 'u', 'message': {'role': 'user', 'content': '<environment_context>cwd</environment_context>'}},
@@ -201,15 +210,9 @@ class EventsTest(unittest.TestCase):
             b'[]\n',
             {'type': 'message', 'id': 'ok', 'message': {'role': 'assistant', 'content': 'fine'}},
         ])
-        body['path'] = Path(body['path']).name
-        index = self.root / 'index.json'
-        index.write_text(json.dumps({'entries': [body], 'complete': False, 'limited': True,
-                                     'failures': [{'code': 'unavailable'}]}))
-        database = self.root / 'events.duckdb'
-        counts = events.build(index, database)
-        self.assertEqual(counts['issues'], 2)
-        with duckdb.connect(str(database), read_only=True) as db:
-            self.assertEqual(db.execute('SELECT index_complete,index_limited,index_failures FROM build_info').fetchone(), (False, True, 1))
+        db, counts = self.build([body])
+        with db:
+            self.assertEqual(counts['issues'], 2)
             self.assertEqual(db.execute('SELECT count(*) FROM events WHERE is_human').fetchone()[0], 0)
             self.assertEqual(db.execute("SELECT model FROM events WHERE native_id='ok'").fetchone()[0], 'model-x')
             self.assertEqual(db.execute('SELECT count(*) FROM events WHERE byte_offset != "offset" OR byte_length != length').fetchone()[0], 0)
@@ -237,22 +240,6 @@ class EventsTest(unittest.TestCase):
         self.assertEqual(agent[1]['text'],'')
         metadata = events.normalize_record({'agentType':'Explore','toolUseId':'call','description':'Find files'},'claude')[0]
         self.assertEqual(metadata['event_type'],'system')
-
-    def test_atomic_failure_and_metadata(self):
-        body = self.body('pi', [{'type': 'message', 'id': 'p', 'message': {'role': 'user', 'content': 'hi'}}])
-        db, _ = self.build([body])
-        db.close()
-        database = self.root / 'events.duckdb'
-        before = database.read_bytes()
-        Path(body['path']).write_text('{}\n')
-        with self.assertRaises(ValueError):
-            events.build(self.root / 'index.json', database)
-        self.assertEqual(database.read_bytes(), before)
-        metadata = self.root / 'sessions.duckdb'
-        with duckdb.connect(str(metadata)) as conn:
-            conn.execute('CREATE TABLE sessions(machine_id VARCHAR,agent VARCHAR,session_key VARCHAR,info JSON,git JSON)')
-            conn.execute('INSERT INTO sessions VALUES (?,?,?,?,?)', ['machine', 'pi', 'session', '{"cwd":"/work/sub","model":"m"}', '{"root":"/work"}'])
-        self.assertEqual(events._metadata(metadata)[('machine', 'pi', 'session')]['project'], '/work')
 
 
 if __name__ == '__main__':

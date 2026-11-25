@@ -97,7 +97,7 @@ pub enum AppendBasis {
 pub enum Strategy {
     /// Logical append stream. Physical decompression is a shell concern.
     Append(AppendBasis),
-    /// Full snapshot, including both DB and WAL for SQLite.
+    /// Full snapshot of a plain file.
     Snapshot {
         /// Previously captured physical inputs.
         previous: Option<SnapshotFingerprint>,

@@ -126,7 +126,7 @@ fn build(
 ) -> Result<Parts<SharedFs, S3Store, SystemClock, WalkSources>, AssembleError> {
     let roots = locator_roots(config).map_err(AssembleError::Roots)?;
     let store = build_store(config)?;
-    let fs = SharedFs::with_tmp(root.join("tmp"));
+    let fs = SharedFs::new();
     let sources = WalkSources::new(roots, WalkLimits::default(), fs.clone());
     Ok(Parts {
         fs,

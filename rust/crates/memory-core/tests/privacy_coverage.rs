@@ -38,14 +38,6 @@ fn transformed(path: &str, profile: Profile, bytes: &[u8]) -> Result<Vec<u8>, Re
         Authorization::Unknown(_) => Err(Reason::ContextChanged),
     }
 }
-fn json(
-    path: &str,
-    value: &serde_json::Value,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let output = transformed(path, Profile::Config, &serde_json::to_vec(value)?)?;
-    Ok(serde_json::from_slice(&output)?)
-}
-
 #[test]
 fn missing_observations_have_distinct_closed_outcomes() {
     let base = facts("synthetic/session.jsonl", Profile::Transcript);
@@ -116,20 +108,14 @@ fn collector_ancestor_alias_and_other_known_profile() -> TestResult {
 }
 
 #[test]
-fn absent_rules_only_withhold_protected_profiles() {
+fn absent_rules_only_withhold_the_scanned_profile() {
     for rules in [None, Some([0; 32])] {
         let mut context = policy();
         context.rules = rules;
-        for (path, profile) in [
-            ("synthetic/asset", Profile::TextAsset),
-            ("synthetic/config", Profile::Config),
-            ("synthetic/settings.json", Profile::Transcript),
-        ] {
-            assert!(matches!(
-                privacy::admit(&context, facts(path, profile)),
-                Admission::Unknown(UnknownReason::RulesUnavailable)
-            ));
-        }
+        assert!(matches!(
+            privacy::admit(&context, facts("synthetic/run.json", Profile::Scanned)),
+            Admission::Unknown(UnknownReason::RulesUnavailable)
+        ));
         assert!(matches!(
             privacy::admit(
                 &context,
@@ -179,203 +165,4 @@ fn launch_empty_unknown_missing_and_duplicate_metadata() {
         launch.env().get("MAX_THINKING_TOKENS").map(String::as_str),
         Some("123")
     );
-}
-
-#[test]
-fn fish_nonassignments_preserve_exact_bytes_as_in_go_text_fixtures() -> TestResult {
-    // internal/scrub/text_test.go: TestTextDoesNotTreatUnrelatedSetCommandsAsAssignments.
-    for line in [
-        "set '-gx API_KEY fixture-private-value",
-        "set -q API_KEY fixture-private-value",
-        "set -gx --erase API_KEY fixture-private-value",
-        "set -g API_KEY fixture-private-value",
-        "set -gx 'PASSWORD NAME' fixture-private-value",
-        "set -gx 'API_KEY fixture-private-value",
-        "set --global --export",
-        "set -- API_KEY fixture-private-value",
-        "set -gx PASSWORD",
-    ] {
-        assert_eq!(
-            transformed("synthetic/skill.md", Profile::TextAsset, line.as_bytes())?,
-            line.as_bytes()
-        );
-    }
-    Ok(())
-}
-
-#[test]
-fn fish_unfinished_values_and_non_utf8_text_match_go_boundary() -> TestResult {
-    for line in [
-        "set -gx API_KEY 'fixture-private-value",
-        "set --global --export API_KEY \\",
-        "true;or set -gx -- API_KEY fixture-private-value",
-    ] {
-        assert!(matches!(
-            transformed("synthetic/skill.md", Profile::TextAsset, line.as_bytes()),
-            Err(Reason::SecretInText)
-        ));
-    }
-    let bytes = b"API_KEY=fixture\xff";
-    assert_eq!(
-        transformed("synthetic/skill.md", Profile::TextAsset, bytes)?,
-        bytes
-    );
-    Ok(())
-}
-
-#[test]
-fn malformed_url_forms_never_escape_as_literals() -> TestResult {
-    for url in [
-        " https://host/fixture",
-        "https://host/fixture\n",
-        "fixture-relative",
-        "mailto:fixture@example.test",
-        "https:example.test/fixture",
-        "https:///fixture",
-        "https://host/%",
-        "https://host/#%ZZ",
-        "https://[broken/fixture",
-        "https://host:99999/fixture",
-        "https://host:FixtureCanary/",
-        "https://host/%ZZFixtureCanary",
-    ] {
-        let output = json(
-            "synthetic/mcp.json",
-            &serde_json::json!({"mcpServers":{"s":{"url":url}}, "copy":url}),
-        )?;
-        assert_eq!(
-            output.pointer("/mcpServers/s/url"),
-            Some(&serde_json::json!("[redacted]"))
-        );
-        assert_eq!(output.get("copy"), Some(&serde_json::json!("[redacted]")));
-    }
-    Ok(())
-}
-
-#[test]
-fn url_scrubbing_preserves_safe_spelling_and_reference_query_components() -> TestResult {
-    for (input, expected) in [
-        ("${MCP_URL}", "${MCP_URL}"),
-        (
-            "HTTPS://User:fixture@EXAMPLE.test:443/a/../b%2f?ref=%24TOKEN&bad=%FF&flag#Frag",
-            "HTTPS://User@EXAMPLE.test:443/a/../b%2f?ref=%24TOKEN&bad=[redacted]&flag#Frag",
-        ),
-        (
-            "//User@EXAMPLE.test:80/a?ref=Bearer+%24TOKEN&n=2&empty=",
-            "//User@EXAMPLE.test:80/a?ref=Bearer+%24TOKEN&n=2&empty=",
-        ),
-        (
-            "https://host/a?x=%Q0&y=%&z=%2",
-            "https://host/a?x=[redacted]&y=[redacted]&z=[redacted]",
-        ),
-    ] {
-        let output = json(
-            "synthetic/mcp.json",
-            &serde_json::json!({"mcpServers":{"s":{"url":input}}}),
-        )?;
-        assert_eq!(
-            output.pointer("/mcpServers/s/url"),
-            Some(&serde_json::json!(expected))
-        );
-    }
-    Ok(())
-}
-
-#[test]
-fn selected_nested_shapes_redact_strings_not_json_primitives() -> TestResult {
-    let input = serde_json::json!({"primaryApiKey":{"nested":["fixture-literal",null,true,false,12.5,{"leaf":"other-literal"}]},"safe":[null,true,false,42],"copy":"fixture-literal"});
-    let output = json("synthetic/claude.json", &input)?;
-    assert_eq!(
-        output,
-        serde_json::json!({"primaryApiKey":{"nested":["[redacted]",null,true,false,12.5,{"leaf":"[redacted]"}]},"safe":[null,true,false,42],"copy":"[redacted]"})
-    );
-    let nested_env =
-        serde_json::json!({"env":{"X":["fixture-env", {"leaf":"fixture-leaf"}, false, null]}});
-    assert_eq!(
-        json("synthetic/settings.json", &nested_env)?,
-        serde_json::json!({"env":{"X":["[redacted]", {"leaf":"[redacted]"}, false, null]}})
-    );
-    Ok(())
-}
-
-#[test]
-fn args_odd_shapes_and_header_references_keep_go_known_file_semantics() -> TestResult {
-    // Header reference/literal cases derive from internal/scrub/scrub_test.go.
-    let input = serde_json::json!({"mcpServers":{
-        "array":{"args":[null,true,7,{"safe":"ordinary"},"--header","X-Ref: $TOKEN","-H","X-Key: fixture-literal","--header=NoColon","--api-key=fixture-literal","--token","--other"]},
-        "object":{"args":{"nested":["fixture-object",false]}},
-        "scalar":{"args":"--token=fixture-scalar"},
-        "safeScalar":{"args":"ordinary-positional"},
-        "objectLeaves":{"args":{"safe":"ordinary-leaf", "secret":"--api-key=fixture-leaf", "inline":"{\"env\":{\"API_KEY\":\"fixture-object-inline\"}}"}},
-        "inline":{"args":["{malformed", "{\"env\":{\"API_KEY\":\"fixture-inline\"}}"]}
-    }});
-    let output = json("synthetic/mcp.json", &input)?;
-    assert_eq!(
-        output.pointer("/mcpServers/array/args"),
-        Some(
-            &serde_json::json!([null,true,7,{"safe":"ordinary"},"--header","X-Ref: $TOKEN","-H","X-Key: [redacted]","--header=NoColon","--api-key=[redacted]","--token","--other"])
-        )
-    );
-    assert_eq!(
-        output.pointer("/mcpServers/object/args"),
-        Some(&serde_json::json!({"nested":["fixture-object",false]}))
-    );
-    assert_eq!(
-        output.pointer("/mcpServers/inline/args"),
-        Some(&serde_json::json!([
-            "[redacted]",
-            "{\"env\":{\"API_KEY\":\"[redacted]\"}}"
-        ]))
-    );
-    assert_eq!(
-        output.pointer("/mcpServers/safeScalar/args"),
-        Some(&serde_json::json!("ordinary-positional"))
-    );
-    assert_eq!(
-        output.pointer("/mcpServers/objectLeaves/args"),
-        Some(
-            &serde_json::json!({"safe":"ordinary-leaf", "secret":"--api-key=[redacted]", "inline":"{\"env\":{\"API_KEY\":\"[redacted]\"}}"})
-        )
-    );
-    assert_eq!(
-        output.pointer("/mcpServers/scalar/args"),
-        Some(&serde_json::json!("--token=[redacted]"))
-    );
-    Ok(())
-}
-
-#[test]
-fn protected_depth_and_conservative_expansion_fail_closed() -> TestResult {
-    let nested = format!("{{\"safe\":{}0{}}}", "[".repeat(130), "]".repeat(130));
-    assert!(matches!(
-        transformed(
-            "synthetic/settings.json",
-            Profile::Config,
-            nested.as_bytes()
-        ),
-        Err(Reason::MalformedProtected)
-    ));
-    let input =
-        serde_json::json!({"primaryApiKey":"fixture-literal", "safe":"a".repeat(1_500_000)});
-    let bytes = serde_json::to_vec(&input)?;
-    assert!(bytes.len() < privacy::MAX_PROTECTED_BYTES);
-    assert!(matches!(
-        transformed("synthetic/claude.json", Profile::Config, &bytes),
-        Err(Reason::SourceLimit)
-    ));
-    Ok(())
-}
-
-#[test]
-fn toml_nested_arrays_preserve_native_values_when_strings_change() -> TestResult {
-    let input = b"safe = [[1, 2], [3, 4]]\nwhen = 1979-05-27\nstamp = 1979-05-27T07:32:00Z\n[mcp_servers.demo]\nbearer_token = 'fixture-literal'\nargs = ['--token', 'fixture-arg']\n";
-    let output = transformed("synthetic/config.toml", Profile::Config, input)?;
-    let value: toml::Value = toml::from_str(std::str::from_utf8(&output)?)?;
-    let original: toml::Value = toml::from_str(std::str::from_utf8(input)?)?;
-    assert_eq!(value.get("safe"), original.get("safe"));
-    assert_eq!(value.get("when"), original.get("when"));
-    assert_eq!(value.get("stamp"), original.get("stamp"));
-    assert!(value.get("stamp").is_some_and(toml::Value::is_datetime));
-    assert!(!std::str::from_utf8(&output)?.contains("fixture-"));
-    Ok(())
 }

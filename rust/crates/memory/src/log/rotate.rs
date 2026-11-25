@@ -70,6 +70,7 @@ impl Rotator {
     }
 
     /// Whether rotation has been turned off.
+    #[cfg(test)]
     #[must_use]
     pub const fn is_off(&self) -> bool {
         matches!(self.state, State::Off)

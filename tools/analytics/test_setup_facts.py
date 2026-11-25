@@ -299,9 +299,7 @@ class SetupFactsTest(Base):
         tables = self.sql('SHOW TABLES')
         report = publications.report(self.db, now_ns=10)
         self.assertEqual(len(report['sessions']), 1)
-        import publication_dashboard
-        publication_dashboard.PublicationDashboard(self.db)  # validate() on the old schema
-        publication_dashboard.PublicationDashboard(self.db).report()
+        publications.report(self.db, summary=True)  # validate() on the old schema
         self.assertEqual(self.sql('SHOW TABLES'), tables)
 
 

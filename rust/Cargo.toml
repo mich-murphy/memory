@@ -50,7 +50,6 @@ tracing-subscriber = { version = "=0.3.23", default-features = false, features =
 # Consistent snapshots of Codex's SQLite stores (DESIGN.md 7.3, 13; brief 45). `bundled` compiles SQLite in;
 # `backup` is the online-backup API (its own cargo feature: `bundled` alone does not expose it). No default
 # features (`cache`, wasm). `memory` only: `memory-core` keeps its I/O ban.
-rusqlite = { version = "=0.43.0", default-features = false, features = ["bundled", "backup"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

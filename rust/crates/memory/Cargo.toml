@@ -15,7 +15,6 @@ md-5.workspace = true
 memory-core.workspace = true
 memory-reader.workspace = true
 notify.workspace = true
-rusqlite.workspace = true
 rustix.workspace = true
 rusty-s3.workspace = true
 serde.workspace = true

@@ -11,7 +11,6 @@ import hashlib
 import json
 import os
 import random
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -472,119 +471,6 @@ class A8Strictness(Base):
                 n = mib * 1024 * 1024 // 1003
                 res, _ = self.probe(lambda m: m['manifest']['coverage'].update(missing=['x' * 1000] * n), name)
                 self.assertEqual(res.startswith('rejected'), expect_reject, f'{name} -> {res} (Go MaxMetadata = 8MiB)')
-
-
-@unittest.skipUnless(os.environ.get('CAPTURE_V1_BINARY'), 'needs actual writer binary')
-class WriterBacked(Base):
-    CAP = 48 * 1024
-
-    def setUp(self):
-        super().setUp()
-        self.binary = str(Path(os.environ['CAPTURE_V1_BINARY']).resolve())
-        r = self.root
-        for p in ('home', 'policy/exclusions', 'src'):
-            (r / p).mkdir(parents=True, mode=0o700)
-        self.cfg = r / 'runtime.json'
-        self.cfg.write_text(json.dumps(dict(version='capture-runtime/v1', archive_id='a7', machine_id='M', store=str(r / 'store'),
-            spool=str(r / 'spool'), policy_dir=str(r / 'policy'), home=str(r / 'home'), default_roots=False, roots=[],
-            min_free_bytes=0, capture_workers=2, delivery_workers=2, poll_seconds=1, operation_seconds=30, max_attempts=2,
-            max_spool_bytes=1 << 24, entries_per_root=256,
-            quiet_seconds=0, max_delay_seconds=0)))
-        self.cfg.chmod(0o600)
-        self.writer('init', '--store', str(r / 'store'), '--archive', 'a7')
-        common = ['--archive', 'a7', '--machine', 'M', '--agent', 'claude', '--session', 'root/big', '--spool', str(r / 'spool'), '--policy-dir', str(r / 'policy')]
-        src = r / 'src' / 'main.jsonl'
-        for prefix, n in (('e1', 100), ('e2', 100), ('e3', 1)):  # three disjoint rewrites: two ~30KB sealed epochs, small latest
-            src.write_text(''.join(json.dumps(dict(type='user', uuid=f'{prefix}-{i}', message=dict(role='user',
-                content=f'{prefix} lorem ipsum dolor sit amet ' * 8))) + '\n' for i in range(n)))
-            self.writer('capture', *common, '--source', 'main', '--path', str(src))
-        self.writer('deliver', *common, '--store', str(r / 'store'))
-
-    def writer(self, *args, ok=True):
-        p = subprocess.run([self.binary, 'capture-v1', *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
-        self.assertEqual(p.returncode == 0, ok, f'writer {args[0]} rc={p.returncode}')
-        return p
-
-    def export(self, name, cap=None, ok=True):
-        out = self.root / name
-        args = ['export', '--config', str(self.cfg), '--archive', 'a7', '--machine', 'M', '--agent', 'claude', '--session', 'root/big', '--output', str(out)]
-        if cap is not None:
-            args += ['--max-bytes', str(cap)]
-        self.writer(*args, ok=ok)
-        return out
-
-    def sizes(self):
-        meta = json.loads((self.export('full') / 'metadata.json').read_text())
-        return [b['size'] for b in meta['bodies']], meta
-
-    def test_A7_go_cap_math(self):
-        sizes, meta = self.sizes()
-        total = sum(sizes)
-        print(f'A7 epochs={len(sizes)} sizes={sizes} cumulative={total} latest={sizes[-1]} refresh_cap={self.CAP}', flush=True)
-        self.assertGreaterEqual(len(sizes), 3, 'rewrites must retain sealed epochs')
-        self.assertLess(sizes[-1], self.CAP)
-        self.assertGreater(total, self.CAP)
-        self.export('exact', total)
-        self.export('minus1', total - 1, ok=False)
-        self.export('refresh_cap', self.CAP, ok=False)
-
-    def sweep(self, cap):
-        import publication_refresh as refresh
-        db, status = self.path('db'), self.path('status')
-        endpoints = [dict(name='M', binary=self.binary, config=str(self.cfg))]
-        with contextlib.closing(refresh.open_status(status)) as st:
-            rep = refresh.sweep(endpoints, db, st, timeout=30, max_bytes=cap)
-            targets = st.execute('SELECT sequence,imported_sequence,error FROM targets').fetchall()
-        n = 0
-        if db.exists():
-            with duckdb.connect(str(db), read_only=True) as c:
-                n = c.execute('SELECT count(*) FROM sessions').fetchone()[0]
-        print(f'A7 SWEEP cap={cap} report={ {k: rep[k] for k in ("expected_targets", "unimported", "target_errors", "discovery_errors")} } targets={targets} sessions={n}', flush=True)
-        return rep, targets, n
-
-    def test_A7_control_large_cap_imports(self):
-        rep, targets, n = self.sweep(1 << 30)
-        self.assertEqual((n, rep['target_errors'], rep['unimported']), (1, 0, 0))
-
-    def test_A7_weak_visible_failure_or_import(self):
-        rep, targets, n = self.sweep(self.CAP)
-        self.assertTrue(n == 1 or rep['target_errors'] > 0 or rep['unimported'] > 0 or rep['discovery_errors'] > 0,
-                        'green refresh silently lacks the session')
-
-    def test_A7_over_cap_is_typed_visible_coverage_gap(self):
-        """Cumulative history over the cap never yields a green refresh lacking the session."""
-        rep, targets, n = self.sweep(self.CAP)
-        self.assertEqual(n, 0)
-        self.assertEqual((rep['expected_targets'], rep['unimported'], rep['target_errors']), (1, 1, 1))
-        self.assertEqual(rep['target_error_codes'], {'export_too_large': 1})
-        self.assertEqual([(t[1], t[2]) for t in targets], [(None, 'export_too_large')])
-
-    def test_A7_cap_at_cumulative_size_imports(self):
-        sizes, _ = self.sizes()
-        rep, targets, n = self.sweep(sum(sizes))
-        self.assertEqual((n, rep['target_errors'], rep['unimported'], rep['target_error_codes']), (1, 0, 0, {}))
-
-    def test_A7_exact_cap_boundary_matches_go(self):
-        sizes, _ = self.sizes()
-        total = sum(sizes)
-        rep, _, n = self.sweep(total)
-        self.assertEqual((n, rep['target_error_codes']), (1, {}))
-        rep, targets, n = self.sweep(total - 1)
-        self.assertEqual((n, rep['target_error_codes']), (0, {'export_too_large': 1}))
-
-    def test_A7_default_cap_clears_measured_real_session(self):
-        import publication_refresh as refresh
-        self.assertEqual(refresh.DEFAULT_MAX_BYTES, 1 << 30)
-        self.assertGreater(refresh.DEFAULT_MAX_BYTES, 615_165_952)  # largest measured session
-
-    def test_A8_manifest_digest_is_remote_current_digest(self):
-        _, meta = self.sizes()
-        current = next((self.root / 'store').rglob('current.json'))
-        self.assertEqual(json.loads(current.read_text())['manifest_sha256'], meta['manifest_sha256'])
-        db = self.path('db')
-        publications.import_export(self.root / 'full', db)
-        with duckdb.connect(str(db), read_only=True) as c:
-            self.assertEqual(c.execute('SELECT manifest_sha256 FROM sessions').fetchone(), (meta['manifest_sha256'],))
 
 
 if __name__ == '__main__':
