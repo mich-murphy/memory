@@ -1288,7 +1288,9 @@ fn ignored_files_are_counted_not_yielded_and_never_hints() -> R {
     let mut w = walker(&t.root(), WalkLimits::default())?;
     assert_eq!(w.enumerate().len(), 1);
     let c = w.counts();
-    assert_eq!((c.yielded, c.ignored, c.unknown_kind), (1, 2, 1));
+    // Brief 60: `skills/` and `cache/` are pruned, so their files are never walked.
+    assert_eq!((c.yielded, c.ignored, c.unknown_kind), (1, 0, 1));
+    assert_eq!(c.ignored_dirs, 2);
     assert_eq!(w.note(&skill), None);
     assert_eq!(w.note(&cache), None);
     let (owners, _) = w.read_dir(&t.root().join("skills/a"));

@@ -8,7 +8,9 @@
 use crate::environment::{FileSystem, Stat};
 use crate::zstd_stream::{Failure, Stream};
 use memory_core::domain::{Birth, FileId};
-use memory_core::locator::{ClaudeSessionIndex, Located, RootRelativePath, Roots, locate};
+use memory_core::locator::{
+    ClaudeSessionIndex, Located, RootRelativePath, Roots, dir_ignored, locate,
+};
 use rustix::fs::{Mode, OFlags};
 use rustix::io::Errno;
 use std::fs;
@@ -372,6 +374,9 @@ pub struct Walk {
     pub too_deep: u64,
     /// Names that are not UTF-8 or not valid root-relative components.
     pub invalid_names: u64,
+    /// Directories not entered because every file below is `Ignored` (brief 60); their
+    /// entries are not read and not counted in `entries`.
+    pub ignored_dirs: u64,
     /// Entries examined.
     pub entries: u64,
     /// The entry bound stopped the walk early.
@@ -436,6 +441,10 @@ pub fn walk(roots: &[(PathBuf, Roots)], limits: &WalkLimits) -> Walk {
 /// are returned sorted by relative path.
 pub fn walk_under(root: &Path, rel: &[String], roots: &Roots, limits: &WalkLimits) -> Walk {
     let mut out = Walk::default();
+    // A pruned directory, or one below it, reads nothing (a no-op `DirCreated`).
+    if RootRelativePath::parse(&rel.join("/")).is_ok_and(|p| dir_ignored(&p, roots)) {
+        return out;
+    }
     let mut dir = root.to_path_buf();
     dir.extend(rel);
     walk_dir(&dir, rel.to_vec(), roots, limits, &mut out);
@@ -492,6 +501,10 @@ fn walk_dir(
             } else if ft.is_dir() {
                 if child.len() > limits.max_depth {
                     out.too_deep += 1;
+                } else if RootRelativePath::parse(&child.join("/"))
+                    .is_ok_and(|p| dir_ignored(&p, roots))
+                {
+                    out.ignored_dirs += 1;
                 } else {
                     subdirs.push((e.path(), child));
                 }

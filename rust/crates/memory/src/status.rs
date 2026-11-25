@@ -12,6 +12,10 @@
 //! the last minute may still show as `behind`. Tier 2 is `status.json`: age, rounds, host pause,
 //! failure and audit counts and the parked entries. `status --verify` is a usage error.
 //!
+//! `ignored=` counts walked files the locator ignores; `ignored_dirs=` counts directories the
+//! walk did not enter because every file below is ignored (brief 60), so their files are in
+//! neither `ignored=` nor the walk's entry bound.
+//!
 //! A source with a recorded withhold in `index.json` (a scanned file, D54, brief 47) counts as
 //! `withheld`, as does one that admission denies.
 //!
@@ -121,6 +125,8 @@ pub struct Sources {
     pub unknown_owner: u64,
     /// Walk: known non-session files (brief 46).
     pub ignored: u64,
+    /// Walk: directories not entered because every file below is ignored (brief 60).
+    pub ignored_dirs: u64,
     /// Walk: duplicates of another source id.
     pub duplicate: u64,
     /// Walk entries or stats that failed.
@@ -210,6 +216,7 @@ pub fn status(root: &Path) -> Result<Report, Refusal> {
         unknown_kind: counts.unknown_kind,
         unknown_owner: counts.unknown_owner,
         ignored: counts.ignored,
+        ignored_dirs: counts.ignored_dirs,
         duplicate: counts.duplicate,
         unreadable: counts.unreadable,
         ..Sources::default()
@@ -243,7 +250,7 @@ pub fn status(root: &Path) -> Result<Report, Refusal> {
             body.rounds, body.host_paused
         ),
         format!(
-            "sources total={} current={} behind={} changed={} unindexed={} withheld={} oldest_behind_s={} unknown_kind={} ignored={} unknown_owner={} duplicate={} unreadable={}",
+            "sources total={} current={} behind={} changed={} unindexed={} withheld={} oldest_behind_s={} unknown_kind={} ignored={} ignored_dirs={} unknown_owner={} duplicate={} unreadable={}",
             s.total,
             s.current,
             s.behind,
@@ -253,6 +260,7 @@ pub fn status(root: &Path) -> Result<Report, Refusal> {
             s.oldest_behind_s,
             s.unknown_kind,
             s.ignored,
+            s.ignored_dirs,
             s.unknown_owner,
             s.duplicate,
             s.unreadable

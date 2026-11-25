@@ -654,6 +654,48 @@ fn walk_under_examines_only_entries_of_that_directory() -> Result<(), Box<dyn st
     Ok(())
 }
 
+#[test]
+fn walk_does_not_enter_ignored_dirs_and_walk_under_reads_nothing_there() -> TestResult {
+    use memory::realfs::walk_under;
+    let t = Tmp::new()?;
+    let uuid = "11111111-2222-3333-4444-555555555555";
+    t.write(&format!("projects/-p/{uuid}.jsonl"), b"{}\n")?;
+    for k in 0..25 {
+        t.write(&format!("telemetry/f{k}.json"), b"{}\n")?;
+    }
+    t.write(&format!("telemetry/projects/-p/{uuid}.jsonl"), b"{}\n")?;
+    let r = roots(Agent::Claude, RootLayout::AgentDir)?;
+    let found = walk(
+        &[(t.path().to_path_buf(), r.clone())],
+        &WalkLimits::default(),
+    );
+    // projects, projects/-p, the transcript, and the top-level `telemetry` entry.
+    ensure!(
+        found.ignored_dirs == 1,
+        "ignored_dirs {}",
+        found.ignored_dirs
+    );
+    ensure!(found.entries == 4, "entries {}", found.entries);
+    ensure!(found.files.len() == 1, "files {}", found.files.len());
+    ensure!(
+        found
+            .files
+            .iter()
+            .all(|f| matches!(f.2, Located::Source { .. })),
+        "session source found"
+    );
+    let limits = WalkLimits::default();
+    for rel in [vec!["telemetry"], vec!["telemetry", "projects", "-p"]] {
+        let rel: Vec<String> = rel.into_iter().map(str::to_owned).collect();
+        let under = walk_under(t.path(), &rel, &r, &limits);
+        ensure!(
+            under.entries == 0 && under.files.is_empty() && under.ignored_dirs == 0,
+            "walk_under read a pruned dir"
+        );
+    }
+    Ok(())
+}
+
 // ------------------------------------------------------------------ zstd handles
 
 fn decoded_sample(n: usize) -> Vec<u8> {
