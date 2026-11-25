@@ -2,13 +2,10 @@
 
 This is the sole current deployment/qualification/next-action brief. For Rust,
 [DESIGN.md](../DESIGN.md) is authoritative; read its section 0 first. The
-[capture contract](session-capture-contract.md) retains goals and Go maintenance
-requirements. The [holistic review](holistic-review-20261029.md) records historical
-Go cleanup rationale, not the Rust mechanism.
-The previous handoff is preserved **verbatim** in the
-[October 30 archive](session-capture-handoff-archive-20261030.md). Its pre-merge tasks,
-worker assignments, installation tables and earlier “current” checkpoints are dated
-history, not current execution instructions or renewed operating authority.
+[capture contract](session-capture-contract.md) retains the goals. Dated blocks below name
+Go-era docs (holistic review, October 30 archive, offline evidence, architecture review,
+production gap register) that brief 58 deleted; they are in git history at `e8115b4`. Earlier
+"current" checkpoints are dated history, not execution instructions or operating authority.
 
 ## Current session checkpoint
 
@@ -461,6 +458,14 @@ from `main` alone.
      acceptance state dirs. Kept for the operator: `~/.local/share/agent-sessions` (9.4 GB here,
      1.6 GB on dev-01), Go-era archive backups that may hold old session bytes. `memory check`
      reads are held for discussion (no byte is read twice; the peak is 193 MiB).
+  37. 2026-11-25, brief 58 (D70),
+     [evidence 53](rust-rewrite/implementation/evidence/53-go-references/): the Go probe, 34 Go-only docs and every Go reference in live docs, DESIGN's body, AGENTS.md,
+     analytics comments and the denylist are gone; dated records keep theirs. The watcher test is
+     kept (the only real-backend test of a moved-in directory) and fixed: under file churn a new
+     FSEvents stream stayed silent for up to 30 s, so the tests first prove the stream is live and
+     run alone. Operator-approved cleanup: `~/.local/share/agent-sessions` on both hosts, Docker
+     images but `memory-linux-test`, Go installer backups, dev-01's Go caches, the Go releases and
+     tags, PR #266, merged and Go-era branches. `memory check` reasoning is with the operator.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
@@ -1856,7 +1861,7 @@ on the merged source.** This documentation reconciliation does not deploy or act
 | Area | Accepted state / remaining limit |
 | --- | --- |
 | Source integration | [PR30](https://github.com/mich-murphy/memory/pull/30) **merged** into `main` at `b0f949c6a8de76b4a8cd3f0bdf48ae29d44b1026`. Its tree equals qualified source `ef0f3d31aa76d9ba7c1370431006e1a3c2bb1f62`. All 139 integration commits / 458 changed paths landed, including the 88 previously local-main commits. |
-| Local development qualification | Actual canonical `make check` aggregate **exit 0** on literal `ef0f3d3`, not only a staged prerequisite union. Coverage **87.5% (13,963/15,963)**; maximum CRAP **29.40**, unchanged limit 30. Full analytics **117 tests / no skips**. See [source-bound evidence](session-capture-offline-evidence.md). |
+| Local development qualification | Actual canonical `make check` aggregate **exit 0** on literal `ef0f3d3`, not only a staged prerequisite union. Coverage **87.5% (13,963/15,963)**; maximum CRAP **29.40**, unchanged limit 30. Full analytics **117 tests / no skips**. See source-bound evidence. |
 | Hosted source/platform qualification | All seven jobs passed for both [exact-head PR CI](https://github.com/mich-murphy/memory/actions/runs/41017288817) and [exact merged-main push CI](https://github.com/mich-murphy/memory/actions/runs/41018839999): Linux amd64/arm64, native macOS, static, actual consumer/full analytics, fuzz, workflow security. This is not installed-host or actual-R2 acceptance. |
 | PR cleanup | #23 closed as contract-retired recovery work. #26/#27/#28 closed as superseded **after their exact useful maintenance updates landed through #30**. No open PRs remained at integration completion; none were found during this documentation reconciliation. Historical branches/worktrees remain preserved. |
 | Release artifacts | Private `0.5.0-SNAPSHOT-74c00f4` was verified against **earlier `74c00f4`**, not the merged source. It is unpublished, not a current-source release artifact, and not installable through the normal immutable-release installer. No new tag or release was published. |
@@ -1892,14 +1897,14 @@ https://github.com/mich-murphy/memory/pull/30#issuecomment-6516354560
 ### Historical live evidence is real, but not current acceptance
 
 The replacement was experimentally installed **before** the latest repairs. The
-[archived installed-qualification record](session-capture-handoff-archive-20261030.md#existing-bucket-reset-and-installed-qualification--october-29)
+archived installed-qualification record
 records the controlled existing-bucket binding switch, earlier actual R2 journeys,
 selected installed Mac/BC publications through reader/importer/index/report, and native
 Mac scratch gates. Do not rewrite that history as “never installed”, “no live tests ever
 passed”, or “no binding change ever occurred”. Those selected older-source journeys did
 **not** establish full inventory, sustained operation or acceptance of today's source.
 
-The later [October 29 observation review](session-capture-handoff-archive-20261030.md#operating-measurements-reviewed--october-29)
+The later October 29 observation review
 recorded partial coverage, high Mac CPU after backlog drain, an unexplained Mac exit/
 restart, and no completed BC discovery sweep before containment. Both collectors were
 then confirmed off. No fixed 24-hour wait is required; elapsed time alone is not acceptance.
@@ -1968,7 +1973,7 @@ and improvements. It does **not** activate the separately gated operating sequen
   At that checkpoint the decoded/encoded 1GiB envelope remained unproven; the implementation
   continuation below records its subsequent proof and repair.
 - **Further evidence:** both bounded performance prototypes passed their exact body/work/
-  selection controls (see [review findings](architecture-review-20261030.md)); no performance
+  selection controls (see review findings); no performance
   production change adopted. `lane-combined-v1` proved both old-source wrong-lane windows RED,
   candidate focused tests GREEN at count3, and full sessioncapture/capturedaemon race/shuffle
   packages GREEN. Parent's paused-order correction is implemented/tested. Independent reviewer
@@ -1994,7 +1999,7 @@ and improvements. It does **not** activate the separately gated operating sequen
   6/6, delivery launcher 12 discovered/one explicit SDK-peer-only skip. Separate complete
   actual-binary analytics discovery **122 tests/no skips, exit 0**. Existing dashboard
   HTTPError cleanup warning was retained. Parent inspected exact logs/results and source
-  identities; details/commands/limits live in the [review report](architecture-review-20261030.md).
+  identities; details/commands/limits live in the review report.
   Final Large workers had no memory max/OOM events or swap. No gates were weakened.
   Parent independently reverified all **10,739 sealed evidence files**; seal digest
   `819d57cab989a10fd72866eaefbb068f3f785e1232806a266969be006d7abf7b`.
@@ -2208,7 +2213,7 @@ This is source/offline authority only; it does not grant the operating sequence 
   and against each job's argv, overlay binding (added versus declared-mutant paths),
   exit status, decisive log lines and source post-verify. Analytics jobs exit 0 through a
   `tail` pipe, so their RED results were read from the unittest lines.
-- **Result:** [production gap register](production-gap-register-20261102.md):
+- **Result:** production gap register:
   11 gaps (GAP-01 to GAP-07 RED on baseline), verified-sound areas, proven weak oracles
   (W1/W4/W5/W7 confirmed, W2/W10 refuted), ready-to-adopt test overlays and a resolution
   order. **No production or test code in this repository changed;** the only repository
@@ -3970,4 +3975,4 @@ both hosts, not operationally accepted**. A new artifact, commit, green CI run o
   `ci-runtime/{LEDGER.md,local-evidence.sha256,ci-evidence.sha256}`. Parent verified
   817 local evidence files and a separate 19-file CI seal. Failed/noncanonical attempts
   remain failures/history, not green results. Earlier release/performance evidence and
-  full progress ledgers remain linked from the [October 30 archive](session-capture-handoff-archive-20261030.md).
+  full progress ledgers remain linked from the October 30 archive.

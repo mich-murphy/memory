@@ -413,7 +413,9 @@ class A8Strictness(Base):
                                        ('sequence_true', True, True), ('sequence_1_control', 1, False)):
             with self.subTest(name):
                 res, _ = self.probe(lambda m: m['manifest'].update(sequence=v), name)
-                self.assertEqual(res.startswith('rejected'), expect_reject, f'{name} -> {res} (export contract requires 1..MaxInt64)')
+                self.assertEqual(
+                    res.startswith('rejected'), expect_reject,
+                    f'{name} -> {res} (export contract requires 1..MaxInt64)')
 
     def test_A8_metadata_exact_go_bound(self):
         """Exactly MaxMetadata (8 MiB) is accepted; one byte more is rejected."""
@@ -470,7 +472,9 @@ class A8Strictness(Base):
             with self.subTest(name):
                 n = mib * 1024 * 1024 // 1003
                 res, _ = self.probe(lambda m: m['manifest']['coverage'].update(missing=['x' * 1000] * n), name)
-                self.assertEqual(res.startswith('rejected'), expect_reject, f'{name} -> {res} (export contract caps metadata at 8MiB)')
+                self.assertEqual(
+                    res.startswith('rejected'), expect_reject,
+                    f'{name} -> {res} (export contract caps metadata at 8MiB)')
 
 
 if __name__ == '__main__':

@@ -45,3 +45,5 @@ DOCS owns `docs/` except `docs/rust-rewrite/**` and `docs/session-capture-handof
 ## Ledger
 
 - 2026-11-25: brief written on `ac918a5`.
+- 2026-11-25: increments accepted at `216c3d2`: full gates 14/14 (seed 1136253774, 95.58 %),
+  4 of 4 teeth caught; evidence 53. Host and GitHub cleanup done (evidence 53).
