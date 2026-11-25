@@ -47,3 +47,5 @@ DOCS owns `docs/` except `docs/rust-rewrite/**` and `docs/session-capture-handof
 - 2026-11-25: brief written on `ac918a5`.
 - 2026-11-25: increments accepted at `216c3d2`: full gates 14/14 (seed 1136253774, 95.58 %),
   4 of 4 teeth caught; evidence 53. Host and GitHub cleanup done (evidence 53).
+- 2026-11-25: merged as `befdd0a` (stack #293) and installed on both hosts; `memory check`
+  exit 0 on both, all sources match (evidence 53, Install).
