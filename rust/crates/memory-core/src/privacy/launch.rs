@@ -1,4 +1,4 @@
-use super::{document, names};
+use super::names;
 use std::collections::BTreeMap;
 
 /// Sanitized launch evidence. No raw payload constructor or deserializer.
@@ -164,10 +164,10 @@ fn safe(slot: Slot, value: &str) -> bool {
     names::matches(shape, value) && !names::is_secret_name(value) && !secret_shaped(value)
 }
 
-/// Apply legacy secret-argument scrub then native metadata allowlist before hints.
+/// Native metadata allowlist before hints: every other argument is `[redacted]`.
 pub fn sanitize_launch(argv: &[String], environ: &[String]) -> SanitizedLaunch {
     let bounded: Vec<String> = argv.iter().take(LAUNCH_ARGV_MAX).cloned().collect();
-    let argv = document::args_scrub(&bounded);
+    let argv = bounded;
     let mut out = Vec::new();
     let mut input = argv.iter();
     if let Some(program) = input.next() {

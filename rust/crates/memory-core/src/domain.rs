@@ -601,8 +601,6 @@ pub enum WithholdReason {
     UnknownKind,
     /// UnknownOwner withheld and counted.
     UnknownOwner,
-    /// MalformedProtected withheld and counted.
-    MalformedProtected,
     /// ScrubFailed withheld and counted.
     ScrubFailed,
     /// SecretInText withheld and counted.

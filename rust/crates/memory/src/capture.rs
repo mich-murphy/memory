@@ -393,7 +393,6 @@ fn withhold_of(reason: Reason) -> WithholdReason {
         Reason::CollectorState => WithholdReason::CollectorState,
         Reason::UnknownKind => WithholdReason::UnknownKind,
         Reason::UnknownOwner => WithholdReason::UnknownOwner,
-        Reason::MalformedProtected => WithholdReason::MalformedProtected,
         Reason::SecretInText => WithholdReason::SecretInText,
         Reason::SourceLimit => WithholdReason::SourceLimit,
         Reason::Binary => WithholdReason::Binary,

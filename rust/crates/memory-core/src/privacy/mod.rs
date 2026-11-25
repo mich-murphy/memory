@@ -28,7 +28,6 @@
 //! `ScrubFailed`). It is never prefix-stable and needs the current rules digest, which covers
 //! the scanner table and size cap.
 
-mod document;
 mod gitleaks;
 mod launch;
 mod names;
@@ -59,9 +58,6 @@ pub enum Reason {
     /// No unambiguous owner.
     #[error("unknown_owner")]
     UnknownOwner,
-    /// Invalid protected document.
-    #[error("malformed_protected")]
-    MalformedProtected,
     /// Transform cannot safely complete.
     #[error("scrub_failed")]
     ScrubFailed,
