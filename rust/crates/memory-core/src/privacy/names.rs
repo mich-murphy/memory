@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 fn suffix() -> Option<&'static Regex> {
     static RE: OnceLock<Option<Regex>> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(\.?~[0-9]+~|~|\.bak|\.backup|\.orig|\.old|-[0-9]{8}(-[0-9]{6})?|\.before-[a-z0-9][a-z0-9_.-]*|\.(gz|bz2|xz|zst|zstd|zip|7z|rar|tar|tgz)|\.agent-sessions-backup-[0-9-]+)$").ok()).as_ref()
+    RE.get_or_init(|| Regex::new(r"(\.?~[0-9]+~|~|\.bak|\.backup|\.orig|\.old|-[0-9]{8}(-[0-9]{6})?|\.before-[a-z0-9][a-z0-9_.-]*|\.(gz|bz2|xz|zst|zstd|zip|7z|rar|tar|tgz)|\.memory-backup-[0-9]{8}t[0-9]{6}z(-[0-9]+)?)$").ok()).as_ref()
 }
 
 /// Fold basename case and normalize repeated known backup suffixes.

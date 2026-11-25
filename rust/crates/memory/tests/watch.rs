@@ -603,6 +603,35 @@ impl Drop for Tmp {
     }
 }
 
+/// Write sentinel files in `dir` until the watcher reports one, so its stream has caught up
+/// before the test acts. Under concurrent file churn a new FSEvents stream reported nothing for
+/// 30 s or more, and an action taken in that time was never reported (brief 58). The bound fails
+/// the test with its own message, apart from the 10 s wait for the event under test.
+fn live(w: &FsWatcher, dir: &Path) -> R {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let mut k = 0u32;
+    while Instant::now() < deadline {
+        fs::write(dir.join(format!(".live-{k}")), "x").map_err(e)?;
+        k += 1;
+        let until = Instant::now() + Duration::from_millis(500);
+        while Instant::now() < until {
+            if let Received::Input(Input::PathChanged { path }) =
+                w.recv_timeout(Duration::from_millis(100))
+                && path.parent() == Some(dir)
+                && path
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with(".live-"))
+            {
+                return Ok(());
+            }
+        }
+    }
+    Err(format!(
+        "watcher not live within 60 s for {}",
+        dir.display()
+    ))
+}
+
 /// Poll until `want` accepts an input or 10 s pass (FSEvents latency is host dependent).
 fn wait_for(w: &FsWatcher, mut want: impl FnMut(&Input) -> bool) -> bool {
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -620,6 +649,7 @@ fn wait_for(w: &FsWatcher, mut want: impl FnMut(&Input) -> bool) -> bool {
 fn fs_watcher_reports_file_write() -> R {
     let tmp = Tmp::new()?;
     let w = FsWatcher::new(std::slice::from_ref(&tmp.0)).map_err(e)?;
+    live(&w, &tmp.0)?;
     let file = tmp.0.join("a.jsonl");
     fs::write(&file, "x").map_err(e)?;
     let seen = wait_for(
@@ -634,6 +664,7 @@ fn fs_watcher_reports_file_write() -> R {
 fn fs_watcher_reports_new_directory() -> R {
     let tmp = Tmp::new()?;
     let w = FsWatcher::new(std::slice::from_ref(&tmp.0)).map_err(e)?;
+    live(&w, &tmp.0)?;
     let dir = tmp.0.join("sub");
     fs::create_dir(&dir).map_err(e)?;
     fs::write(dir.join("b.jsonl"), "x").map_err(e)?;
@@ -654,6 +685,7 @@ fn fs_watcher_reports_directory_moved_in_with_children() -> R {
     fs::create_dir_all(stage.join("p")).map_err(e)?;
     fs::write(stage.join("p/k.jsonl"), "x").map_err(e)?;
     let w = FsWatcher::new(std::slice::from_ref(&root)).map_err(e)?;
+    live(&w, &root)?;
     let dir = root.join("p");
     fs::rename(stage.join("p"), &dir).map_err(e)?;
     // The children produce no events (W4 Q3); the directory itself must be reported so
@@ -675,6 +707,7 @@ fn fs_watcher_skips_a_missing_root_and_counts_it() -> R {
     assert_eq!(all_missing.skipped_roots(), 1);
     let w = FsWatcher::new(&[missing, tmp.0.clone()]).map_err(e)?;
     assert_eq!(w.skipped_roots(), 1);
+    live(&w, &tmp.0)?;
     let file = tmp.0.join("a.jsonl");
     fs::write(&file, "x").map_err(e)?;
     assert!(
@@ -698,6 +731,7 @@ fn fs_watcher_watches_an_extra_directory_non_recursively() -> R {
     fs::create_dir_all(&deep).map_err(e)?;
     let w = FsWatcher::with_dir(&[], &hints).map_err(e)?;
     assert_eq!(w.skipped_roots(), 0);
+    live(&w, &hints)?;
     // Written first: a recursive watch would report it no later than the file below.
     fs::write(deep.join("inner.jsonl"), "x").map_err(e)?;
     let file = hints.join("day.jsonl");

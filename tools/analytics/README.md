@@ -20,7 +20,7 @@ idempotent (`unchanged` on a repeat) and bind one archive per database. `--reset
 Modules: `publications.py` (import, report), `events.py` (record normalization and Codex
 mirror pairing), `setup_facts.py`, `usage_facts.py` and `pi_runs.py` (derived tables). Wire
 contracts: [publication](../../docs/session-publication-v1.md) and
-[analytics](../../docs/session-analytics-v1.md) (historical notes on the Go reader).
+[analytics](../../docs/session-analytics-v1.md) (the `memory export` reader).
 
 Tests: `python -m unittest discover -s tools/analytics` (run in CI). The export journey,
 `test_rust_export_journey.py`, runs through the Rust consumer gate (`RUST_EXPORT_JOURNEY`).

@@ -1,114 +1,27 @@
-# Machine identity: explicit creation and recovery
+# Machine identity
 
-> **Scope (2026-10-23):** Identity creation/recovery guidance remains relevant. The agreed [session-capture contract](session-capture-contract.md) keeps stable machine identity through the authorized archive rebuild; a fresh archive-instance identity is separate, not a reason to rotate either machine ID. Preserve effective exclusions and learned roots as well as identities before replacing local state or resetting R2.
+The `machine_id` in `config.toml` selects this host's part of the archive: owner keys are
+`sessions/<archive>/<machine>/<agent>/<session>/` and `shared/<archive>/<machine>/<agent>/`.
+Hostnames are only descriptive: they can collide or change and are never used to guess an
+identity. The id is chosen by the operator once and never generated implicitly.
 
-The machine ID selects this collector's remote archive namespace. Hostnames are
-only descriptive: they can collide or change, and are never used to guess a lost
-identity. The local SQLite upload cache does not establish which machine you are.
-Losing both SQLite and the identity must not silently select a new, apparently
-empty namespace and hide earlier history.
+## Choosing an id
 
-The commands below describe legacy installation/configuration. Candidate runtime
-configuration binds the preserved machine ID separately from its fresh archive ID;
-see [candidate backends](session-capture-backends.md) and
-[phase 3](session-capture-phase3.md). Offline candidate passes do not establish
-installed-path or two-machine acceptance and are not a reason to create new IDs.
+- Set `machine_id` in `~/.local/state/memory/config.toml` (see [install](install.md)). Ids are
+  `[A-Za-z0-9._:-]`, at most 1,024 bytes. An invalid id fails the config load
+  (`config_machine_id`, exit 2).
+- Use an id no other host uses. Hosts that share an `archive_id` land in one archive; two
+  writers with one machine id would collide, so never copy an id onto a second active host.
+- Keep a record of the id. It is not a credential, but it is the key to this host's history.
 
-## A deliberately new machine
+## Lost identity or state
 
-After installing the binary, explicitly choose a new machine identity **once**:
+Losing local state does not lose the identity: it lives in `config.toml`. Restore the original
+`config.toml` (or write the known previous id) rather than choosing a new one, and do not
+rotate an id to work around a recovery problem. A new id is a deliberately separate namespace:
+earlier data stays under the old id and is not selected by the new one.
 
-```sh
-agent-sessions machine-id --new
-agent-sessions install
-$EDITOR ~/.config/agent-sessions/config.env
-agent-sessions doctor
-agent-sessions backfill
-```
-
-`machine-id --new` works without R2 settings or network access. It creates a random
-v4 UUID in `machine-id` beside the selected config file (normally
-`~/.config/agent-sessions/config.env`; `AGENT_SESSIONS_CONFIG` selects another
-path). New directories are private (0700) and the identity file is private (0600).
-Creation publishes a complete file with an exclusive link; concurrent explicit
-requests share the winning ID, never overwrite it, and do not leave a half-written
-identity.
-
-With an existing identity, `--new` simply prints that identity and does not rotate
-it. This includes an explicit `AGENT_SESSIONS_MACHINE_ID` environment/config-file
-override; no identity file is created for an override. An existing empty or
-whitespace-only file is refused, not replaced, even with `--new`. Restore the
-original ID, or deliberately remove that empty file before choosing a new
-identity. Do not remove a valid identity to repair an upload-cache problem.
-
-To print the effective identity without creating anything:
-
-```sh
-agent-sessions machine-id
-```
-
-Keep a backup of the ID. It is not an R2 credential, but it is essential to locate
-this machine's history. A newly created identity means a deliberately separate
-archive namespace; it does not recover or delete an old namespace. Do not copy an
-identity onto another concurrently active collector: one writer per machine ID is
-the normal contract.
-
-## Lost identity or local cache
-
-Normal config loading, sync, backfill, doctor, hook uploads, install and reinstall
-**never generate an identity**. If the identity file is missing or empty and no
-explicit override exists, config loading fails with an actionable
-`MissingMachineIDError`. Hooks still return success without printing or failing
-the agent; uploads cannot proceed until an operator supplies an identity.
-
-If only SQLite was lost, keep the existing machine identity; do not run `--new`
-as a cache-recovery step. Remote-history recovery uses the same machine ID and
-destination. This document addresses identity selection, not reconstruction of
-source bytes that were never uploaded.
-
-If the identity was also lost, stop the collector's uploads and choose explicitly:
-
-1. **Resume the old machine:** restore the original `machine-id` file beside the
-   selected config file, with mode 0600; or set the known previous ID in that
-   config file:
-
-   ```dotenv
-   AGENT_SESSIONS_MACHINE_ID=your-known-previous-uuid
-   ```
-
-   An environment override also works:
-
-   ```sh
-   export AGENT_SESSIONS_MACHINE_ID=your-known-previous-uuid
-   agent-sessions machine-id
-   ```
-
-   Environment values take precedence over config-file values. For hooks, use the
-   config file or original identity file: an export in your interactive shell may
-   not reach the agent. These overrides retain the existing object-key
-   sanitisation for compatibility; use the exact original UUID or effective ID.
-   Confirm the printed ID before resuming sync to the original destination.
-
-2. **Start a deliberately separate machine:** only if that is your intended
-   choice, run `agent-sessions machine-id --new` with no override and no existing
-   identity file. With an empty existing file, deliberately remove it first.
-   Earlier remote data remains in its old namespace and is not selected by this
-   new ID.
-
-There is **no automatic recovery of an unknown machine ID** and no automatic
-choice of an old remote host or machine. If you do not know the original ID,
-inspect the bucket's namespace keys using the R2 dashboard or your usual bucket
-listing tools (for example an authenticated AWS CLI recursive listing, pointed
-at your R2 endpoint). Locate `machine=<ID>` namespaces and verify their provenance
-against your own records before supplying a known ID. Do not choose solely by a
-matching hostname. The identity command does not contact R2 or discover remote
-machines.
-
-## Upgrade impact
-
-Existing nonempty identities and explicit environment/config-file overrides keep
-their previous behaviour; no namespace keys or UUID format change here. Existing
-installs with a lost/empty identity now fail closed instead of silently minting a
-new UUID. Fresh installs require the explicit new-machine step above. Neither
-`agent-sessions install` nor the binary download/update script performs that step
-for you, so ordinary reinstall/update cannot silently change identity.
+If the id is unknown, there is no automatic recovery and no choice by matching hostname. List
+the bucket's `sessions/<archive>/` and `shared/<archive>/` prefixes with your usual bucket
+tooling, find the `<machine>` components and verify their provenance against your own records
+before writing one into `config.toml`. `memory` does not discover remote machines.

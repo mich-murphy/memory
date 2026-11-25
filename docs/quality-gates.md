@@ -3,8 +3,7 @@
 > **Scope:** Passing the gates is not end-to-end acceptance. The agreed
 > [session-capture contract](session-capture-contract.md) also requires actual writer output
 > through the shared reader, importer, event index and report, and live acceptance on both
-> hosts. The Go gates (make, golangci-lint, coverage/CRAP, fuzz, goreleaser) were deleted on
-> 2026-11-25 (brief 57); they are in git history. The rule behind the gates: **a check is a
+> hosts. The rule behind the gates: **a check is a
 > hard gate only if fixing what it flags always makes the code better.** Never relax a gate
 > to make a run pass.
 

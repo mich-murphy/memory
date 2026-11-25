@@ -58,10 +58,11 @@ pub enum Reason {
     /// No unambiguous owner.
     #[error("unknown_owner")]
     UnknownOwner,
-    /// Transform cannot safely complete.
+    /// The content scan cannot complete safely: its rules table failed to load or a rule failed
+    /// to compile, or the rules digest differs (brief 51).
     #[error("scrub_failed")]
     ScrubFailed,
-    /// Literal secret assignment in a guarded text asset.
+    /// The content scan found a secret in a scanned file (gitleaks rules, brief 50).
     #[error("secret_in_text")]
     SecretInText,
     /// Whole protected document exceeds the bound.

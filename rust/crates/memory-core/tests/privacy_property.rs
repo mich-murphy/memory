@@ -52,7 +52,7 @@ fn credential_identities_through_aliases_and_backup_suffixes_are_denied() {
         "auth.json.bak.old~",
         "config.env-20260412-235959.gz",
         ".env.local.before-update.bak",
-        "id_ed25519.agent-sessions-backup-20261014-101010",
+        "id_ed25519.memory-backup-20261014T101010Z",
         ".ssh/aliased-file",
     ] {
         let observed = facts(
