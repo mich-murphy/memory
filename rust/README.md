@@ -11,10 +11,10 @@ work against fakes and temp directories: hook, commit protocol, daemon state, ca
 wiring, real filesystem adapter, source resolver, notify watcher/scheduler, the S3 adapter
 (`rusty-s3` + `ureq`), zstd piece encoding, and a daemon that one function starts from
 `config.toml` and the token file (`assemble::start_from_config`). `memory-reader` decodes
-pieces, restores a source and reads an owner's manifest chain. `run` starts the daemon's event
+pieces, reads an owner's manifest chain and exports an owner. `run` starts the daemon's event
 loop (after a 5 s to 60 s startup delay a reconcile, then per-owner capture after the coalescer
 window, hints, a safety reconcile every 15 minutes, and a stop on SIGTERM or SIGINT honoured
-inside a round) and `restore` is the `memory restore` command
+inside a round)
 ([brief 27](../docs/rust-rewrite/implementation/27-run-loop.md),
 [evidence 18](../docs/rust-rewrite/implementation/evidence/18-run-loop/)). The daemon logs
 `started`, `state_load`, `round`, `parked`, `host_paused`, `host_resumed` and `stopped` to
@@ -60,10 +60,9 @@ gate must never silently lower the floor; raising it is a recorded decision.
 
 `memory hook <agent>` appends one hint line and always exits 0. `memory daemon` runs the loop
 and exits 0 only on a requested stop (2 for a config refusal, 75 for a held lock, 1
-otherwise). `memory restore <owner> --out DIR` exits 0, 64 (usage), 66 (owner absent), 2
-(config or token) or 1. On failure both write one line, `memory: <closed code>`, to stderr;
-restore also writes one summary line there on success. Every other command exits 78, so the
-binary cannot silently simulate a command that does not exist. Tests must never resolve the
+otherwise). On failure each command writes one line, `memory: <closed code>`, to stderr.
+Every other command exits 78, so the binary cannot silently simulate a command that does not
+exist. Tests must never resolve the
 real state root: set `MEMORY_STATE_DIR` to a temp directory and `env_clear()` (only
 `LLVM_PROFILE_FILE` passes through; `MEMORY_SIM_TIMING` shortens the loop's two durations and
 exists only with the `sim` feature, which the release binary does not have).
