@@ -12,14 +12,8 @@ are folded into the text below.
 ## 0. Start here in a fresh session
 
 1. Read this document in full. Then read `AGENTS.md`, then `docs/session-capture-contract.md`
-   for the goals it keeps. Do not take implementation direction from the contract's
-   mechanism sections, the handoff's Go operating steps or the Go candidate code. They
-   describe the legacy and candidate Go paths. The Go capture daemons and the publication-refresh job
-   are stopped (A0). Only the Go hooks remain, writing to a local spool, until cutover (section 18
-   step 2). Two Go
-   areas are deliberate exceptions. The secret protections in section 8 are ported from Go
-   code and its tests, and the edge cases in section 17's slice 1 table come from the Go
-   history.
+   for the goals it keeps. Do not take implementation direction from the contract's mechanism
+   sections: this document defines the mechanism.
 2. Why each part is the way it is: `docs/rust-rewrite/challenge/00-synthesis.md` (verdict,
    blockers, majors, operator answers) and `07-ddia-crosscheck.md` (textbook basis). Section
    20 maps every challenge finding to the section that answers it.
@@ -27,7 +21,7 @@ are folded into the text below.
    (A0 to A14, 2026-11-09 to 2026-11-12) was made. It is folded into this document, which wins.
    Read it for the reasoning and evidence behind a change, not to learn the design. Amendment ids
    in parentheses mark the changed places.
-3. The Rust workspace goes in this repository at `rust/`, beside the Go code. The Nix dev
+3. The Rust workspace is in this repository at `rust/`. The Nix dev
    shell gains a pinned Rust toolchain in slice 0. `rustc` 1.98.0 is on this Mac outside Nix.
 4. The evidence for every number is in `docs/rust-rewrite/`: the nine reviewer reports, the
    six challenge reports, the DDIA cross-check, the experiment scripts and the Hegel probe.
@@ -385,7 +379,7 @@ pub enum Plan {
 pub enum ReplayReason { FirstCapture, IdentityChanged, Truncated, WindowMismatch,
     AdoptMismatch, AuditMismatch, RulesChanged }
 pub enum WithholdReason { Credential, CollectorState, UnknownKind, UnknownOwner,
-    MalformedProtected, ScrubFailed, SecretInText, KeyTooLong, SourceLimit, Undecodable, Ignored }
+    ScrubFailed, SecretInText, KeyTooLong, SourceLimit, Undecodable, Ignored }
 
 // Privacy is a capability (section 8). Only transform::apply constructs Redacted,
 // and only policy::authorize constructs Authorized. The store accepts nothing else.
@@ -447,16 +441,16 @@ Rules applied:
 ### 6.2 Keys
 
 - `objects/<sha256 of the transformed piece bytes>.zst`, where transformed means after the
-  section 8.3 scrub and before compression. Immutable, written with `If-None-Match: *`. A 412
+  section 8.3 transform and before compression. Immutable, written with `If-None-Match: *`. A 412
   means the object is already stored, which is success.
   - Keying by the hash of the transformed bytes means a zstd upgrade changes no keys, and the
     key is known before compression. This is how git and restic key objects. [review, 02 M4]
   - A Codex `.jsonl.zst` rollout is decoded before the transform: capture, audit and `check` see
     only the logical JSONL, so recompression changes no key, digest or source id (D48,
     2026-11-19).
-  - After a scrub-rule fix the same input scrubs differently, so the key and the manifest
+  - After a rule change the same input can transform differently, so the key and the manifest
     change. Hashing the raw bytes would give the old key, a 412, and adoption of the old, less
-    scrubbed object. The previously uploaded object stays in the bucket, unreferenced, until
+    protected object. The previously uploaded object stays in the bucket, unreferenced, until
     the deletion tool of section 19, decision 4 exists. (A10.2)
   - The namespace is global across sessions and hosts. Sessions are never deleted, which
     removes the main argument for per-session keys. [decided 2026-11-07]
@@ -756,8 +750,8 @@ Since D66 the only shared source captured is the Pi run record; the Codex SQLite
 `history.jsonl` and config files below are no longer captured (stored entries are retired, D69).
 Files with no session are owned by
 `Owner::Shared` and committed under `shared/<archive>/<machine>/<agent>/`. Each is captured once
-per change, not once per session. [default, review, 01 M4] Session opt-out is retired, so the Go
-rule "withhold the whole store if any session is excluded" no longer applies. That rule produced
+per change, not once per session. [default, review, 01 M4] Session opt-out is retired, so the
+earlier rule "withhold the whole store if any session is excluded" no longer applies. That rule produced
 7,909 `policy_denied` issues. [decided 2026-11-07; review, 06 F2 item 11]
 
 ### 7.6 Launch evidence
@@ -772,21 +766,21 @@ rule "withhold the whole store if any session is excluded" no longer applies. Th
 
 ## 8. Protected sources and privacy
 
-This section ports Go's secret protections. Go code and tests are the reference, and the
-synthetic test vectors are reused as fixtures. [review, 05 B1] These protections are
-independent of session opt-out, which is retired. [decided 2026-11-07]
+This section states the secret protections. Synthetic test vectors are their fixtures.
+[review, 05 B1] These protections are independent of session opt-out, which is retired.
+[decided 2026-11-07]
 
 ### 8.1 Pipeline
 
 `locate` → `resolve` → `policy::admit` → read → `transform::apply` → `Redacted` →
 `policy::authorize` → `Authorized<Redacted<Bytes>>` → store.
 
-The store's PUT accepts only `Authorized<Redacted<Bytes>>`, so an unscrubbed config reaching R2
-is a compile error. Scrubbing happens before upload, because nothing after upload is reversible
-except deleting objects. [DDIA ch. 12, Limitations of immutability; ch. 14, Legislation and
-Self-Regulation]
+The store's PUT accepts only `Authorized<Redacted<Bytes>>`, so unredacted bytes reaching R2
+are a compile error. Redaction and withholding happen before upload, because nothing after
+upload is reversible except deleting objects. [DDIA ch. 12, Limitations of immutability;
+ch. 14, Legislation and Self-Regulation]
 
-### 8.2 Admission (from `internal/capturepolicy`)
+### 8.2 Admission
 
 Symlinked files are skipped (A4). The directory walk counts symlinks and never yields them, so
 no file is captured through a link, and the watcher never treats a symlink to a directory as a
@@ -800,18 +794,17 @@ The credential denylist is checked against every identity in the chain:
 - Names: `.credentials.json`, `auth.json`, `oauth.json`, `mcp-auth.json`, `config.env`,
   `.git-credentials`, `.netrc`, `.npmrc` and `.pypirc`.
 - Prefixes and suffixes: `.env` and `.env.*`, `*.key`, `*.pem`, and `.claude.json*` other
-  than the primary `.claude.json`, which goes through the scrubber.
+  than the primary `.claude.json`.
 - SSH key names: `id_rsa`, `id_dsa`, `id_ecdsa`, `id_ed25519` and the `_sk` variants.
 - Directories: `.ssh`, `.gnupg`, `.aws`, `.azure`, `.kube` and `.config/gcloud`.
 - Known backup suffixes are normalised first: `~`, numbered tildes, `.bak`, `.backup`,
   `.orig`, `.old`, eight-digit dates, and archive extensions.
-- Sources: `internal/capturepolicy/policy.go:16-21`, `credentials.go:10-20`,
-  `docs/security.md`.
+- Source: `docs/security.md`.
 
 Collector state is excluded by filesystem identity: the config, the token file, and the state
 directory with all its files. A path that `locate` maps to no kind is `UnknownKind`, and one
 with no derivable owner is `UnknownOwner`. Both are withheld and counted, never passed through.
-Go's pass-through of unrecognised names is not ported. [review, 05 m2] A known non-session file
+Unrecognised names are never passed through. [review, 05 m2] A known non-session file
 in an agent directory (vendor code, caches, backups, SQLite sidecars, the D54 and D55 folders) is
 `Ignored`: never captured, counted apart as `ignored=` in `memory status` and `memory check`.
 Since D66 (brief 54) one allowlist decides what is captured, in every layout: `ClaudeTranscript`,
@@ -822,7 +815,7 @@ recorded deleted, counted `retired=` by `memory check` (no exit-code effect), an
 its owner in the daemon's owner set. The rule "only a miss or a config or paste snapshot can
 become `Ignored`" (D57) is replaced.
 
-Claude file-history (`Profile::Scanned`, D58) is judged whole by a content scan before anything
+Pi run records (`Profile::Scanned`, D54, D58) are judged whole by a content scan before anything
 leaves the host: over 1 MiB (from the stat, never read), binary or non-UTF-8, or a secret found by
 the scan withhold the whole file with a closed reason code (`source_limit`, `binary`,
 `secret_in_text`, `scrub_failed` on a scanner error). Since D61 (brief 50) the scan is our own
@@ -838,10 +831,8 @@ compiled only at the first text holding one of its keywords (each is validated a
 compile failure withholds with `scrub_failed`), the keyword prefilter uses `memchr::memmem`, and
 each lazy-DFA cache is capped at 256 KiB. None of this changes a verdict or the digest.
 
-Since D60 (brief 49) every captured snapshot kind except Codex stores has this profile: config
-assets, Claude and Codex memory notes, plans, Claude per-session aux, todos, tasks, teams, Pi aux
-and Pi snapshots. A recognized config document is scrubbed first, then scanned whole. Session-env,
-usage-data and (in a custom root) paste-cache stay deferred. Codex `skills/.system/**` is `Ignored`.
+Since D66 the Pi run record is the only captured snapshot kind, so it is the only kind with
+this profile. Transcripts are never scanned.
 
 Hint paths are untrusted input. A hint's `transcript_path` or `cwd` is used only if `locate`
 maps it under a configured or learned root. It then passes the same admission check. [review,
@@ -853,39 +844,28 @@ not guaranteed canonical (resolution can fall back to the raw path, and legitima
 symlinked parents such as `/var` on macOS). Closing it needs a rule that the source adapter
 reads only canonical paths, carried by a type that only resolution builds (A12.4).
 
-### 8.3 Transform (from `internal/scrub`)
+### 8.3 Transform
 
-> D69 (2026-11-25): the structural scrub, `MalformedProtected` and the small-text guard below were
-> deleted: no captured kind is a config document or a text asset (D66). The transform is the
-> identity for transcripts and the whole-file scan (D58, D61) for Pi run records.
+Since D69 the transform is the identity for transcripts, and the whole-file scan (D58, D61)
+for Pi run records. No captured kind is a config document or a text asset (D66), so nothing is
+redacted inside a file. Launch argv and environment are reduced by the allowlist of 8.4.
 
-- **Structural scrub.** Eleven config basenames are scrubbed, selected by the filename of every
-  identity in the chain, not by the collecting agent: `claude.json`, `.claude.json`,
-  `settings.json`, `settings.local.json`, `managed-settings.json`, `.mcp.json`, `mcp.json`,
-  `managed-mcp.json`, `models.json`, `config.toml` and `managed_config.toml`
-  (`internal/scrub/scrub.go:94-106`).
-- **Malformed protected files are withheld.** Protected JSON or TOML that is malformed is
-  `MalformedProtected`. JSON must be an object, and duplicate decoded keys, invalid Unicode
-  and trailing documents are rejected. `serde_json` accepts duplicate keys silently, so the
-  port needs a duplicate-rejecting deserializer. [review, 05 B1]
-- **Small text assets.** Pi skills, extensions and tools that assign a literal to a
-  secret-named variable are `SecretInText` (`internal/scrub/text.go:44-61`).
-- **Rules digest.** `RulesDigest` covers the rule table. It is stored in `SourceState` and in
-  each protected epoch. A rule change re-captures protected kinds.
+- **Rules digest.** `RulesDigest` covers the scanner table and size cap. It is bound to each
+  scanned snapshot. A rule change re-captures scanned kinds.
 - **Integrity checks compare transformed bytes.** The audit and read-back in section 11.4
   compare `transform(local)` with R2, not the raw local file.
 - **Errors carry a fixed reason and never echo values.**
 
-Transcripts are not scrubbed. Go does not scrub them either. This is a known-file policy, not
-DLP (`docs/security.md:5-8`).
+Transcripts are published as written. This is a known-file policy, not DLP
+(`docs/security.md`).
 
-### 8.4 Launch allowlist (from `internal/launch/native.go`)
+### 8.4 Launch allowlist
 
 The Rust hook records environment facts only and reads no process argv (A3). This is an accepted
-regression from the Go hook. `LaunchRecord.argv` stays in the schema and is empty from the hook,
+limit. `LaunchRecord.argv` stays in the schema and is empty from the hook,
 and the argv rules below stay as a protection for any argv that reaches the allowlist code.
 
-Argv, at most 32 entries after `scrub.Args`:
+Argv, at most 32 entries after the allowlist:
 
 - `argv[0]` is reduced to its basename if it is one of `claude`, `codex`, `pi`, `node`,
   `nodejs` or `bun`. Anything else becomes `[redacted]`.
@@ -990,7 +970,7 @@ Every state file is 0600 and every state directory is 0700. [review, 05 M4] The 
 a hint directory that is not owned by its user, or that is group- or world-writable. One user
 per host is assumed.
 
-Removed from the Go design: the payload spool, four SQLite work tables, the 10 s walker,
+Not part of the design: the payload spool, four SQLite work tables, the 10 s walker,
 retained manifest copies, the unix socket, the inbox directory, the failure log and the
 session opt-out registry.
 
@@ -1281,7 +1261,7 @@ Workspace:
 | `tokio` | Runtime, binary only, only if P2 picks `object_store` | |
 | `zstd` | Compression, level 3 | |
 | `sha2` 0.11.1 | Digests and resumable state | `SerializableState` has an internal format; the index stores the crate version and re-hashes on mismatch |
-| `serde`, `serde_json`, `schemars`, `toml` | Schemas and config | A duplicate-key-rejecting JSON path for scrubbing |
+| `serde`, `serde_json`, `schemars`, `toml` | Schemas and config | Duplicate-key-rejecting JSON where a schema needs it |
 | `tracing`, `tracing-subscriber`, `clap`, `thiserror` | Logs, CLI, errors | `clap` is not used by `memory hook` |
 | `rustix`, direct dependency of `memory`, features `std` and `fs` | Named open flags and errno values in the source read | Pinned to the version in the lockfile (A12.4) |
 | `hegeltest` `=0.52.0`, `static-engine` | Property tests, dev only | 255 releases since 2026-03-16. Pinned exactly [review, 06 F4] |
@@ -1452,10 +1432,10 @@ is the `rust-acceptance/<run-id>/` prefix of the bucket (section 6.1).
    counter-test harness, and the DST traits. Prototypes P1, P3 to P8 can run in parallel.
    Exit: every gate is green on an empty core.
 1. **Core.** Types, locator, planner, coalescer, delta and checkpoint manifests, the policy and
-   transform ports with the Go fixtures, the launch allowlist, and hint parsing. Properties 1,
+   transform with synthetic fixtures, the launch allowlist, and hint parsing. Properties 1,
    2, 3, 5, 6 and 7 with the coverage guard.
 
-   The slice also produces a "Go fix to Rust counterpart" table for every edge case in
+   The slice also produces a table of Rust counterparts for every edge case in
    `challenge/06-strategy-engineering.md` F2. Any row marked "not applicable" needs a reason.
    [review, 06 F2]
 
@@ -1502,29 +1482,24 @@ retention (7.6, 9.1); and `tracing` to stderr as sections 11.5 and 13 specify. A
 source's whole range in memory, measured against the 128 MB target (section 7.4, memory bound).
 
 1. No production bucket is created. Both hosts use the existing `agent-sessions` bucket (A2).
-2. Install `memory` and its hooks on one host. The Go capture daemons and the
-   publication-refresh job are already stopped (A0). Remove the Go hooks' launch paths, then
-   repeat on the other host. One collector runs per host. [review, 04 M4] On macOS `memory
-   install` writes the launchd agent, the Claude and Codex hook entries and the Pi extension,
-   and `memory uninstall` removes them; neither touches the Go entries (brief 36). On Linux it
-   writes `~/.config/systemd/user/memory.service` instead of the launchd agent (brief 44, D53).
-3. Remove the one existing session opt-out record from `~/.local/state/agent-sessions/exclusions`
-   once the Go path is stopped. Before that, the Go path still honors it.
-4. Let the safety reconcile capture every available local source into the fresh archive.
-   Nothing is imported from the old R2 archive. Sessions that exist only in the old archive are
-   not recovered, which the operator accepted.
-5. Verify fresh automatic capture, restart and retry, restore, and analytics on both hosts,
-   against the exit criterion of slice 2b (A13.1).
-6. The old archive was deleted on 2026-11-09 (A2). Before rollout, delete every
-   `rust-acceptance/` prefix and verify that the bucket holds only `delivery-artifacts/` and
-   data written by the accepted Rust writer.
+2. `memory install` and its hooks are installed on every host, one collector per host.
+   [review, 04 M4] On macOS `memory install` writes the launchd agent, the Claude and Codex hook
+   entries and the Pi extension, and `memory uninstall` removes them. On Linux it writes
+   `~/.config/systemd/user/memory.service` instead of the launchd agent (brief 44, D53).
+3. The session opt-out record was removed with the opt-out (retired, 2026-11-07).
+4. The safety reconcile captures every available local source into the fresh archive. Nothing
+   is imported from the old R2 archive. Sessions that exist only in the old archive are not
+   recovered, which the operator accepted.
+5. Fresh automatic capture, restart and retry, restore, and analytics are verified on both
+   hosts against the exit criterion of slice 2b (A13.1).
+6. The old archive was deleted on 2026-11-09 (A2). Before rollout, every `rust-acceptance/`
+   prefix is deleted and the bucket is verified to hold only `delivery-artifacts/` and data
+   written by the accepted Rust writer.
 
-Done on this Mac on 2026-11-19 (evidence 31): steps 1 to 4 and 6, and step 5 except hook
-delivery and the 2-day criterion on the production install. BC-01 is not cut over yet.
-
-BC-01 is replaced by dev-01 (operator, 2026-11-20). Done on dev-01 on 2026-11-20 (evidence 37):
-steps 2 to 4, and step 5 except hook delivery, restore and analytics on its owners, and the 2-day
-criterion. Both hosts write the same archive id.
+Outcome: the cutover is done on this Mac (2026-11-19, evidence 31) and on dev-01, which
+replaced BC-01 (operator, 2026-11-20; evidence 37). Both hosts write the same archive id. The
+dated sequence and what remains open are in `docs/session-capture-handoff.md` and under
+`docs/rust-rewrite/implementation/`.
 
 ## 19. Decisions
 
@@ -1540,7 +1515,7 @@ Operator decisions, 2026-11-07:
 
 Defaults adopted. Each applies unless the operator says otherwise:
 
-1. **No bucket lock.** With plaintext storage, an indefinite lock would make a scrubber bug
+1. **No bucket lock.** With plaintext storage, an indefinite lock would make a privacy-rule bug
    permanent. [`07-ddia-crosscheck.md` blocker 3, callout 6] Revisit with the reader project.
 2. **Credentials.** One Object Read and Write token per host, scoped to the bucket. The
    alternative is short-lived prefix- and action-scoped credentials minted off the host.
