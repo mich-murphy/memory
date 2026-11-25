@@ -4,8 +4,8 @@
 
 Status: research, 2026-11-09. Nothing outside this file and `p11-commit-retry/` was changed.
 Raw data: `p11-commit-retry/r2-raw.json` (real R2), `p11-commit-retry/sim-results.json` (simulation).
-Code: `p11-commit-retry/sim.py` (`python3 -I sim.py 12`), `p11-commit-retry/probe/` (Go R2 probe; deleted
-in brief 58, in git history at `e8115b4`).
+Code: `p11-commit-retry/sim.py` (`python3 -I sim.py 12`), `p11-commit-retry/probe/` (Go R2
+probe; deleted in brief 58, in git history at `e8115b4`).
 
 ## 1. Explanation
 

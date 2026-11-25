@@ -458,14 +458,15 @@ from `main` alone.
      acceptance state dirs. Kept for the operator: `~/.local/share/agent-sessions` (9.4 GB here,
      1.6 GB on dev-01), Go-era archive backups that may hold old session bytes. `memory check`
      reads are held for discussion (no byte is read twice; the peak is 193 MiB).
-  37. 2026-11-25, brief 58 (D70),
-     [evidence 53](rust-rewrite/implementation/evidence/53-go-references/): the Go probe, 34 Go-only docs and every Go reference in live docs, DESIGN's body, AGENTS.md,
-     analytics comments and the denylist are gone; dated records keep theirs. The watcher test is
-     kept (the only real-backend test of a moved-in directory) and fixed: under file churn a new
-     FSEvents stream stayed silent for up to 30 s, so the tests first prove the stream is live and
-     run alone. Operator-approved cleanup: `~/.local/share/agent-sessions` on both hosts, Docker
-     images but `memory-linux-test`, Go installer backups, dev-01's Go caches, the Go releases and
-     tags, PR #266, merged and Go-era branches. `memory check` reasoning is with the operator.
+  37. 2026-11-25, brief 58 (D70), [evidence
+     53](rust-rewrite/implementation/evidence/53-go-references/): the Go probe, 34 Go-only docs and
+     every Go reference in live docs, DESIGN's body, AGENTS.md, analytics comments and the denylist
+     are gone; dated records keep theirs. The watcher test is kept (the only real-backend test of a
+     moved-in directory) and fixed: under file churn a new FSEvents stream stayed silent for up to
+     30 s, so the tests first prove the stream is live and run alone. Operator-approved cleanup:
+     `~/.local/share/agent-sessions` on both hosts, Docker images but `memory-linux-test`, Go
+     installer backups, dev-01's Go caches, the Go releases and tags, PR #266, merged and Go-era
+     branches. `memory check` reasoning is with the operator.
 - Where `main` was when this block was first written: `fdc43c2` (stack #124, brief 29, the
   event loop, merged as `f15f651`, and its close-out record, PR #125).
 - What the binary does: `memory daemon` (event loop: per-owner capture after the coalescer
