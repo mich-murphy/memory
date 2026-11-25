@@ -115,7 +115,7 @@ const SUFFIXES: [&str; 19] = [
     ".gz",
     ".zst",
     ".tar",
-    ".agent-sessions-backup-2026-01-02",
+    ".memory-backup-20260102T030405Z",
     ".bak.old~",
     ".orig.gz",
     ".bak.bak",

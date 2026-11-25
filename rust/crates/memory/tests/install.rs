@@ -350,10 +350,10 @@ fn merge_uninstall_of_an_empty_document_removes_hooks_key() -> R {
 }
 
 #[test]
-fn merge_acceptance_and_go_commands_are_never_touched() -> R {
+fn merge_acceptance_and_foreign_commands_are_never_touched() -> R {
     let doc = r#"{"hooks":{"Stop":[{"hooks":[
         {"type":"command","command":": memory-acceptance; exec env MEMORY_STATE_DIR=/s /x/memory hook claude"},
-        {"type":"command","command":"/usr/local/bin/agent-sessions --x hook claude"},
+        {"type":"command","command":"/usr/local/bin/collector --x hook claude"},
         {"type":"command","command":"/opt/bin/memory hook codex"},
         {"type":"command","command":"/opt/bin/other hook claude"},
         {"type":"command","command":"memory hook claude"}]}]}}"#;
