@@ -12,6 +12,14 @@ slow-timeout = { period = "60s", terminate-after = 3 }
 filter = 'test(/hegel_/) | test(/proptest_/)'
 slow-timeout = { period = "60s", terminate-after = 15 }
 
+# The real-watcher tests run alone. FSEvents delivery is starved by concurrent file churn: under
+# load a moved-in directory or a written file was reported after more than 10 s, or the stream
+# went live only after 30 s (brief 58). Running them without a neighbour removes that load; their
+# waits are unchanged.
+[[profile.default.overrides]]
+filter = 'test(/^fs_watcher_/)'
+threads-required = "num-test-threads"
+
 [profile.ci]
 test-threads = 2
 fail-fast = false
