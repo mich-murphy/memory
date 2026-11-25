@@ -84,3 +84,9 @@ unchanged, peak memory. Then increment 3 and its install.
 ## Ledger
 
 - 2026-11-25: brief written on `81e1f78`.
+- 2026-11-25: LEGACY finished in 5 commits; RUST in 6, then the parent inlined `judge_source`
+  (`1b1726c`). A read-only sweep found unused `pub` items; a sweep worker deleted them (5 commits).
+  The parent found `document.rs` 40 % covered with `args_scrub` its only caller, showed with a
+  20,000-case differential test that the scrub never changes `sanitize_launch` output, and
+  deleted it with `MalformedProtected` (`ca1070e`). LEGACY rebased onto RUST. Teeth 11 of 12 (1
+  equivalent), gates 14/14, Linux passed. Accepted locally at `4bc0a86`. Details in evidence 52.
