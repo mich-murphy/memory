@@ -59,9 +59,8 @@ Entries in `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`), al
   decompresses it again. `memory` keys a rollout without the date folder or `.zst`, decodes a
   `.zst` at capture, prefers a plain file over its `.zst` and verifies a file with a new
   inode against the stored digest instead of uploading it again (DESIGN D48).
-- State databases (`state_<n>.sqlite` and similar) hold thread metadata that exists nowhere
-  else; the rollout is the agent's persisted record, not proof that every transient event was
-  observed.
+- State databases (`state_<n>.sqlite` and similar) are not captured (DESIGN D69); the rollout
+  is the agent's persisted record, not proof that every transient event was observed.
 
 ## Pi
 

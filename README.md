@@ -21,11 +21,11 @@ the [documentation map](docs/README.md) and the
 ### Safety boundaries
 
 - Keep buckets, credentials, logs, transcript bodies, and analytics caches private.
-  Scrubbing known configuration secrets is not universal transcript DLP.
+  The protections are not universal transcript DLP.
 - Preserve machine IDs and learned custom source roots through rebuilding. Do not
   rotate identity or select an old namespace by hostname to work around recovery.
 - Session opt-out is retired by operator decision (2026-11-07). Secret protections
-  (credential denylist, configuration scrubbing, launch argv allowlist, withholding unknown
+  (credential denylist, gitleaks content scan, launch argv allowlist, withholding unknown
   kinds) are not opt-outs and stay.
 - Incomplete discovery must not imply source deletion. FIFOs/devices and unsafe or
   unreadable configuration must not be treated as successfully captured.

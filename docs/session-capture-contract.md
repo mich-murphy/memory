@@ -1,10 +1,8 @@
 # Session capture: implementation direction
 
-> **Status (2026-11-07):** the goals below remain authoritative. The mechanism sections
-> (spool, work queue, per-source job state, whole source-epoch snapshots as the upload
-> unit, walk-driven discovery) are superseded for the Rust rewrite by
+> **Status:** the goals below are authoritative. Mechanism is defined by
 > [DESIGN.md](../DESIGN.md), which was chosen by measurement over this Mac's session
-> history.
+> history; where this page names a mechanism, DESIGN.md wins.
 
 **Status:** authoritative replacement requirements, not implementation or release
 evidence. For current deployment, qualification and next action, see the
@@ -43,13 +41,13 @@ does not authorize additional rollout, reset or deletion.
 - Source deletion records local absence; it is not an implicit instruction to delete
   captured conversation content. Remote deletion/retention needs its own policy.
 - Preserve raw safe source bytes and provenance. Semantic parsing/normalization is
-  downstream and must not gate safe raw transcript capture. Protected configuration
-  still requires successful exclusion/scrubbing checks.
+  downstream and must not gate safe raw transcript capture. Credential identities
+  are excluded and scanned kinds are withheld whole on a finding.
 - Queuing a pathname is not capturing bytes. Polling cannot preserve changes that
   disappear before capture, and staging cannot guarantee an atomic source snapshot
   without producer cooperation. State capture boundaries and limitations honestly.
 - Simplifying storage must not silently drop subagents, tool results, custom roots,
-  launches, harness snapshots, database exports, or other currently captured artifacts.
+  launches, harness snapshots, or other currently captured artifacts.
   Define their ownership and completeness explicitly in the wire contract.
 
 ## 2. Progress and durability
@@ -59,7 +57,7 @@ Track independent facts rather than a run-wide clean/dirty flag:
 | Fact | Meaning |
 | --- | --- |
 | Observed | Discovery found source work; bytes may not yet be owned. |
-| Captured locally | Bytes and identity are durably owned by the spool/work store. |
+| Captured locally | Bytes and identity are durably owned locally. |
 | Published | A complete readable session publication is committed remotely. |
 | Enriched | Declared provenance/snapshot work succeeded, or is explicitly partial. |
 | Imported/normalized/served | Each consumer processed a stated publication; freshness and errors are visible. |
@@ -69,30 +67,29 @@ plus idempotent publication is the delivery model; do not promise exactly-once c
 from arbitrary mutable files. An unsuccessful update leaves the previous successful
 publication readable and its progress intact.
 
-The durable pending store is authoritative for accepted unpublished bytes. It cannot
-also be an unexplained disposable cache. If SQLite is an index over spool records,
-prove index rebuilding; if it is authoritative, document and test durability settings.
-Specify crash reconciliation between filesystem payloads and database work records.
+Local state is small and classified: it is either authoritative or rebuildable, and
+never an unexplained cache. Specify crash reconciliation between local state and
+remote publications (DESIGN.md section 9).
 
 ## 3. Scheduling and error isolation
 
 ```text
 hooks + periodic bounded discovery
     -> per-source capture
-    -> durable spool/work records + local progress
+    -> local progress records
     -> coordinator with bounded fair delivery workers
     -> complete session publication
     -> remote acknowledgement + local reclamation
 ```
 
-Hooks enqueue lightweight discovery hints. Work retries without requiring another
+Hooks supply lightweight discovery hints. Work retries without requiring another
 agent event. One local coordinator may own scheduling, but unrelated sessions must
-not wait behind a machine-wide historical scan. Keep SQLite transactions short;
-do not hold metadata transactions across remote calls or retry sleeps.
+not wait behind a machine-wide historical scan. Do not hold local state locks across
+remote calls or retry sleeps.
 
 Coalesce discovery hints and proven-subsumed append captures, not unique accepted
 bytes. Preserve source ordering and prevent stale work from replacing newer content.
-Set byte-based spool limits, per-session fairness, operation budgets, and visible lag.
+Set byte-based local limits, per-session fairness, operation budgets, and visible lag.
 
 | Failure | Disposition |
 | --- | --- |
@@ -103,8 +100,8 @@ Set byte-based spool limits, per-session fairness, operation budgets, and visibl
 | Rewrite/rotation/truncation | Reconcile that source/epoch, not the machine archive. |
 | Missing current dependency for A | Mark A degraded, retain repair work, allow B to proceed. |
 | Enrichment failure | Expose missing/partial provenance independently of safe transcript capture. |
-| Spool full | Stop accepting/advancing affected capture, alert; no silent oldest-item eviction. |
-| Unknown exclusion state/unsafe scrub | Fail closed for affected capture scope; recover policy first. |
+| Local storage full | Stop advancing affected capture, alert; no silent eviction. |
+| Unknown exclusion state | Fail closed for affected capture scope; recover policy first. |
 
 Quarantine is durable, inspectable, and replayable, with source coordinates, reason,
 attempts, and software/contract version. It is neither success nor silent disposal.
@@ -151,7 +148,7 @@ body hashes, roles, and declared provenance, including partial/error cases.
 
 Required scenarios:
 
-- Crash/restart at spool, job, upload, manifest, current-reference, and local-ack boundaries.
+- Crash/restart at local state, upload, manifest, current-reference, and local-ack boundaries.
 - Lost acknowledgement, duplicate delivery, stale jobs, conditional conflicts, and
   recovery without another hook.
 - Broken A with errors retained while B captures, publishes, restores, and imports.
@@ -161,7 +158,7 @@ Required scenarios:
   silently lose events. Repeated import is idempotent.
 - Unsupported contract and missing dependencies produce visible failures/coverage
   gaps, not green refresh timestamps hiding absent sessions.
-- Spool exhaustion, destination outage, privacy recovery, and exclusion before delivery.
+- Local storage exhaustion, destination outage, privacy recovery, and exclusion before delivery.
 - Current reads and analytics work without retired intermediate representations.
 - Catalog/index rebuild works from current roots and durable pending work.
 - Sandboxed/native hooks, actual R2 semantics, and both machines' installed paths are
